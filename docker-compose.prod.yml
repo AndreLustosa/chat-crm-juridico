@@ -110,9 +110,9 @@ services:
       dockerfile: infra/Dockerfile.web
     restart: always
     ports:
-      - "3000:3000"
+      - "3004:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://crm-api:3001 # Usar URL pública se for por Traefik/Nginx, ou assim internamente
+      - NEXT_PUBLIC_API_URL=http://SEU_IP_AQUI:3003 # Substitua pelo IP da sua VPS para os clientes conseguirem acessar
     depends_on:
       - crm-api
 
