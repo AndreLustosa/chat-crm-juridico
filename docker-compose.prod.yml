@@ -54,6 +54,7 @@ services:
 
   # ------ NestJS Core API ------
   crm-api:
+    image: lexcrm-api:latest
     build: 
       context: ..
       dockerfile: infra/Dockerfile.backend
@@ -76,6 +77,7 @@ services:
 
   # ------ NestJS Worker (Mídias e IA) ------
   crm-worker:
+    image: lexcrm-worker:latest
     build: 
       context: ..
       dockerfile: infra/Dockerfile.backend
@@ -102,6 +104,7 @@ services:
 
   # ------ Next.js Frontend ------
   crm-web:
+    image: lexcrm-web:latest
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
