@@ -12,14 +12,14 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5433:5432"
+      - "45432:5432"
 
   # ------ Redis (Filas e Cache) ------
   redis:
     image: redis:alpine
     restart: always
     ports:
-      - "6380:6379"
+      - "46379:6379"
     volumes:
       - redisdata:/data
 
@@ -28,7 +28,7 @@ services:
     image: chrislusf/seaweedfs
     command: "master -ip=seaweed-master -port=9333"
     ports:
-      - '9334:9333'
+      - '49333:9333'
     volumes:
       - seaweed_master_data:/data
 
@@ -38,7 +38,7 @@ services:
     depends_on:
       - seaweed-master
     ports:
-      - '8081:8080'
+      - '48080:8080'
     volumes:
       - seaweed_volume_data:/data
 
@@ -49,8 +49,8 @@ services:
       - seaweed-master
       - seaweed-volume
     ports:
-      - '8889:8888'
-      - '8334:8333'
+      - '48888:8888'
+      - '48333:8333'
 
   # ------ NestJS Core API ------
   crm-api:
@@ -110,9 +110,9 @@ services:
       dockerfile: infra/Dockerfile.web
     restart: always
     ports:
-      - "3004:3000"
+      - "43000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://SEU_IP_AQUI:3003 # Substitua pelo IP da sua VPS para os clientes conseguirem acessar
+      - NEXT_PUBLIC_API_URL=http://SEU_IP_AQUI:43001 # Substitua pelo IP da sua VPS
     depends_on:
       - crm-api
 
