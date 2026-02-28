@@ -25,7 +25,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       return;
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
+    // Socket.io conecta na mesma URL/porta da API (ele faz upgrade para WS automaticamente)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || apiUrl;
 
     const fetchData = async () => {
        try {
@@ -37,6 +39,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
            setMessages(convo.messages || []);
 
            socketRef.current = io(wsUrl, { transports: ['websocket', 'polling'] });
+           socketRef.current.on('connect', () => {
+             console.log('WebSocket conectado ao chat');
+             socketRef.current?.emit('join_conversation', convo.id);
+           });
            socketRef.current.emit('join_conversation', convo.id);
            socketRef.current.on('newMessage', (msg: any) => {
              setMessages(prev => {

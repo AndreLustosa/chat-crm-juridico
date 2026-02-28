@@ -79,9 +79,15 @@ export default function Dashboard() {
   useEffect(() => {
     fetchConversations();
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
+    // Socket.io conecta na mesma URL/porta da API (ele faz upgrade para WS automaticamente)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || apiUrl;
     const socket = io(wsUrl, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('WebSocket conectado ao inbox');
+    });
 
     socket.on('inboxUpdate', () => {
       fetchConversations();

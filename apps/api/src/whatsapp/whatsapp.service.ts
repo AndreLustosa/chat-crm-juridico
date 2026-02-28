@@ -34,17 +34,55 @@ export class WhatsappService {
         },
         body: body ? JSON.stringify(body) : undefined,
       });
-      return await response.json();
+      const data = await response.json();
+      if (!response.ok) {
+        this.logger.error(`Evolution API error [${response.status}] ${path}: ${JSON.stringify(data)}`);
+        throw new Error(`Evolution API ${response.status}: ${JSON.stringify(data)}`);
+      }
+      return data;
     } catch (e) {
       this.logger.error(`Erro na requisição Evolution API (${path}): ${e}`);
       throw e;
     }
   }
 
+  /**
+   * Encontra o nome da primeira instância conectada.
+   * Usa: 1) settings DB  2) lista de instâncias (primeira 'open')  3) env var  4) fallback
+   */
+  async getActiveInstanceName(): Promise<string> {
+    // 1. Verifica se há uma instância salva nas configurações
+    const saved = await this.settingsService.get('EVOLUTION_INSTANCE_NAME');
+    if (saved) return saved;
+
+    // 2. Busca a primeira instância conectada
+    try {
+      const instances = await this.listInstances();
+      if (Array.isArray(instances)) {
+        const connected = instances.find((i: any) => i.status === 'open');
+        if (connected) {
+          // Salva para futuras chamadas
+          await this.settingsService.set('EVOLUTION_INSTANCE_NAME', connected.instanceName);
+          return connected.instanceName;
+        }
+        // Se nenhuma conectada, usa a primeira existente
+        if (instances.length > 0) {
+          return instances[0].instanceName;
+        }
+      }
+    } catch (e) {
+      this.logger.warn('Não foi possível listar instâncias para auto-detect:', e);
+    }
+
+    // 3. Env var fallback
+    return process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
+  }
+
   // --- MENSAGENS ---
 
   async sendText(number: string, text: string, instanceName?: string) {
-    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
+    const targetInstance = instanceName || await this.getActiveInstanceName();
+    this.logger.log(`Enviando mensagem para ${number} via instância ${targetInstance}`);
     return this.request('POST', `message/sendText/${targetInstance}`, {
       number,
       options: { delay: 1200, presence: 'composing' },
@@ -59,7 +97,7 @@ export class WhatsappService {
     caption?: string,
     instanceName?: string,
   ) {
-    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
+    const targetInstance = instanceName || await this.getActiveInstanceName();
     let endpoint = `message/sendMedia/${targetInstance}`;
     let body: any = {
       number,
