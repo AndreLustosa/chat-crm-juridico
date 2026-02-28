@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-crm_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
       POSTGRES_DB: ${POSTGRES_DB:-lexcrm}
-    volumes:
+    networks:\n  proxy:\n    external: true\n\nvolumes:
       - pgdata_v2:/var/lib/postgresql/data
     ports:
       - "45432:5432"
@@ -26,7 +26,7 @@ services:
     image: redis:alpine
     ports:
       - "46379:6379"
-    volumes:
+    networks:\n  proxy:\n    external: true\n\nvolumes:
       - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -43,7 +43,7 @@ services:
     command: "master -ip=seaweed-master -port=9333"
     ports:
       - '49333:9333'
-    volumes:
+    networks:\n  proxy:\n    external: true\n\nvolumes:
       - seaweed_master_data:/data
     deploy:
       restart_policy:
@@ -54,7 +54,7 @@ services:
     command: "volume -mserver=seaweed-master:9333 -port=8080 -dir=/data"
     ports:
       - '48080:8080'
-    volumes:
+    networks:\n  proxy:\n    external: true\n\nvolumes:
       - seaweed_volume_data:/data
     deploy:
       restart_policy:
@@ -114,6 +114,9 @@ services:
   # ------ Next.js Frontend ------
   crm-web:
     image: ghcr.io/andrelustosa/chat-crm-juridico-web:master
+    networks:
+      - default
+      - proxy
     ports:
       - "${WEB_PORT:-43000}:3000"
     environment:
@@ -122,8 +125,14 @@ services:
     deploy:
       restart_policy:
         condition: any
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.crm-web.rule=Host(`atendimento.andrelustosaadvogados.com.br`)"
+        - "traefik.http.services.crm-web.loadbalancer.server.port=3000"
+        - "traefik.http.routers.crm-web.entrypoints=websecure"
+        - "traefik.http.routers.crm-web.tls.certresolver=letsencrypt" # Mude se o nome do seu resolver for outro
 
-volumes:
+networks:\n  proxy:\n    external: true\n\nvolumes:
   pgdata_v2:
   redisdata:
   seaweed_master_data:
