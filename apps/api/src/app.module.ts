@@ -11,6 +11,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { MessagesModule } from './messages/messages.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { TasksModule } from './tasks/tasks.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -28,7 +30,9 @@ import { TasksModule } from './tasks/tasks.module';
     WebhooksModule,
     MessagesModule,
     GatewayModule,
-    TasksModule
+    TasksModule,
+    WhatsappModule,
+    SettingsModule
   ],
   controllers: [AppController],
   providers: [AppService],

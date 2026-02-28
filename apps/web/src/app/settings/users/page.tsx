@@ -53,7 +53,7 @@ export default function UsersSettingsPage() {
       const res = await api.get('/users');
       setUsers(res.data);
     } catch (e: any) {
-      if (e.response?.status === 401 && process.env.NODE_ENV !== 'development') {
+      if (e.response?.status === 401) {
         localStorage.removeItem('token');
         router.push('/login');
       }

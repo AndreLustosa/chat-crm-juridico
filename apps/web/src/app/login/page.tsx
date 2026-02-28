@@ -12,39 +12,17 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Modo Bypass para testes locais
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Ambiente local detectado: Login ignorará APIs reais.');
-      const autoLogin = async () => {
-        localStorage.setItem('token', 'mock-dev-token');
-        router.push('/');
-      };
-      if (!localStorage.getItem('token') || localStorage.getItem('token') !== 'mock-dev-token') {
-        autoLogin();
-      }
-    }
-  }, [router]);
-
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      if (process.env.NODE_ENV === 'development') {
-        setTimeout(() => {
-          localStorage.setItem('token', 'mock-dev-token');
-          router.push('/');
-        }, 800);
-        return;
-      }
-      
       const res = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', res.data.access_token);
       router.push('/');
     } catch (err: any) {
-      setError(err.message || 'Credenciais inválidas');
+      setError(err.response?.data?.message || 'Credenciais inválidas');
       setLoading(false);
     }
   };
@@ -175,9 +153,21 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <p className="mb-4 text-center rounded-lg bg-red-500/10 p-3 text-[13px] font-medium text-red-500 border border-red-500/20">
-              {error}
-            </p>
+            <div className="space-y-3 mb-4">
+              <p className="text-center rounded-lg bg-red-500/10 p-3 text-[13px] font-medium text-red-500 border border-red-500/20">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.setItem('token', 'mock-dev-token');
+                  router.push('/');
+                }}
+                className="w-full py-2 text-[12px] font-bold text-primary/80 hover:text-primary transition-colors underline decoration-primary/30"
+              >
+                Entrar em Modo de Demonstração (Bypass)
+              </button>
+            </div>
           )}
 
           <button

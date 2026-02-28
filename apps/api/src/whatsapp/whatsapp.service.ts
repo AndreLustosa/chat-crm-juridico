@@ -1,52 +1,100 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
-  private apiBaseUrl = process.env.EVOLUTION_API_URL;
-  private apiKey = process.env.EVOLUTION_GLOBAL_APIKEY;
-  private instanceName = process.env.EVOLUTION_INSTANCE_NAME;
+  
+  constructor(private readonly settingsService: SettingsService) {}
 
-  private async request(endpoint: string, body: any) {
-    const url = `${this.apiBaseUrl}/message/${endpoint}/${this.instanceName}`;
+  private async request(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    body?: any,
+  ) {
+    const config = await this.settingsService.getWhatsAppConfig();
+    const url = `${config.apiUrl}/${path}`;
     try {
       const response = await fetch(url, {
-        method: 'POST',
+        method,
         headers: {
           'Content-Type': 'application/json',
-          'apikey': this.apiKey || ''
+          apikey: config.apiKey || '',
         },
-        body: JSON.stringify(body)
+        body: body ? JSON.stringify(body) : undefined,
       });
-      return response.json();
+      return await response.json();
     } catch (e) {
-      this.logger.error(`Erro ao enviar mensagem para WhatsApp: ${e}`);
+      this.logger.error(`Erro na requisição Evolution API (${path}): ${e}`);
       throw e;
     }
   }
 
-  async sendText(number: string, text: string) {
-    return this.request('sendText', {
+  // --- MENSAGENS ---
+
+  async sendText(number: string, text: string, instanceName?: string) {
+    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
+    return this.request('POST', `message/sendText/${targetInstance}`, {
       number,
-      options: {
-        delay: 1200,
-        presence: 'composing'
-      },
-      textMessage: {
-        text
-      }
+      options: { delay: 1200, presence: 'composing' },
+      textMessage: { text },
     });
   }
 
-  async sendMedia(number: string, mediaType: 'image' | 'audio' | 'document', mediaUrl: string, caption?: string) {
-    let endpoint = 'sendMedia';
-    let body: any = { number, options: { delay: 1200 }, mediaMessage: { mediatype: mediaType, media: mediaUrl, caption } };
+  async sendMedia(
+    number: string,
+    mediaType: 'image' | 'audio' | 'document',
+    mediaUrl: string,
+    caption?: string,
+    instanceName?: string,
+  ) {
+    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
+    let endpoint = `message/sendMedia/${targetInstance}`;
+    let body: any = {
+      number,
+      options: { delay: 1200 },
+      mediaMessage: { mediatype: mediaType, media: mediaUrl, caption },
+    };
 
     if (mediaType === 'audio') {
-      endpoint = 'sendWhatsAppAudio';
-      body = { number, options: { delay: 1200 }, audioMessage: { audio: mediaUrl } };
+      endpoint = `message/sendWhatsAppAudio/${targetInstance}`;
+      body = {
+        number,
+        options: { delay: 1200 },
+        audioMessage: { audio: mediaUrl },
+      };
     }
 
-    return this.request(endpoint, body);
+    return this.request('POST', endpoint, body);
+  }
+
+  // --- GESTÃO DE INSTÂNCIAS ---
+
+  async listInstances() {
+    return this.request('GET', 'instance/fetchInstances');
+  }
+
+  async createInstance(instanceName: string) {
+    return this.request('POST', 'instance/create', {
+      instanceName,
+      token: '', // Evolution gera dinamicamente se vazio
+      qrcode: true,
+    });
+  }
+
+  async deleteInstance(instanceName: string) {
+    return this.request('DELETE', `instance/delete/${instanceName}`);
+  }
+
+  async logoutInstance(instanceName: string) {
+    return this.request('DELETE', `instance/logout/${instanceName}`);
+  }
+
+  async getConnectCode(instanceName: string) {
+    return this.request('GET', `instance/connect/${instanceName}`);
+  }
+
+  async getConnectionStatus(instanceName: string) {
+    return this.request('GET', `instance/connectionStatus/${instanceName}`);
   }
 }

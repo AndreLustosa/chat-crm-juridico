@@ -8,65 +8,61 @@ datasource db {
 }
 
 model Tenant {
-  id            String   @id @default(uuid())
+  id            String         @id @default(uuid())
   name          String
-  // Relations
-  users         User[]
-  leads         Lead[]
   conversations Conversation[]
+  leads         Lead[]
   tasks         Task[]
+  users         User[]
 }
 
 model User {
-  id               String   @id @default(uuid())
-  tenant_id        String?
-  tenant           Tenant?  @relation(fields: [tenant_id], references: [id])
-  name             String
-  email            String   @unique
-  password_hash    String
-  role             String   // ADMIN, ADVOGADO, ESTAGIARIO, COMERCIAL, FINANCEIRO
-  created_at       DateTime @default(now())
-  
-  tasks            Task[]
-  assigned_convos  Conversation[]
-  audit_logs       AuditLog[]
+  id              String         @id @default(uuid())
+  tenant_id       String?
+  name            String
+  email           String         @unique
+  password_hash   String
+  role            String
+  created_at      DateTime       @default(now())
+  audit_logs      AuditLog[]
+  assigned_convos Conversation[]
+  tasks           Task[]
+  tenant          Tenant?        @relation(fields: [tenant_id], references: [id])
 }
 
 model Lead {
-  id         String   @id @default(uuid())
-  tenant_id  String?
-  tenant     Tenant?  @relation(fields: [tenant_id], references: [id])
-  name       String?
-  phone      String   @unique
-  email      String?
-  origin     String?
-  stage      String   @default("NOVO")
-  tags       String[]
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  conversations Conversation[]
-  tasks         Task[]
+  id            String         @id @default(uuid())
+  tenant_id     String?
+  name          String?
+  phone         String         @unique
+  email         String?
+  origin        String?
+  stage         String         @default("NOVO")
+  tags          String[]
+  created_at    DateTime       @default(now())
+  updated_at    DateTime       @updatedAt
   memory        AiMemory?
+  conversations Conversation[]
+  tenant        Tenant?        @relation(fields: [tenant_id], references: [id])
+  tasks         Task[]
 
   @@index([tenant_id, phone])
   @@index([stage])
 }
 
 model Conversation {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   tenant_id        String?
-  tenant           Tenant?  @relation(fields: [tenant_id], references: [id])
   lead_id          String
-  lead             Lead     @relation(fields: [lead_id], references: [id])
-  channel          String   @default("whatsapp")
-  external_id      String?  
-  status           String   @default("ABERTO")
-  ai_mode          Boolean  @default(true)
+  channel          String    @default("whatsapp")
+  external_id      String?
+  status           String    @default("ABERTO")
+  ai_mode          Boolean   @default(true)
   assigned_user_id String?
-  assigned_user    User?    @relation(fields: [assigned_user_id], references: [id])
-  last_message_at  DateTime @default(now())
-  
+  last_message_at  DateTime  @default(now())
+  assigned_user    User?     @relation(fields: [assigned_user_id], references: [id])
+  lead             Lead      @relation(fields: [lead_id], references: [id])
+  tenant           Tenant?   @relation(fields: [tenant_id], references: [id])
   messages         Message[]
   tasks            Task[]
 
@@ -75,17 +71,16 @@ model Conversation {
 }
 
 model Message {
-  id                  String   @id @default(uuid())
+  id                  String       @id @default(uuid())
   conversation_id     String
-  conversation        Conversation @relation(fields: [conversation_id], references: [id])
-  direction           String   // "in" ou "out"
-  type                String   // "text", "image", "audio", "document", "system"
+  direction           String
+  type                String
   text                String?
-  external_message_id String?  @unique
-  status              String   // "enviado", "entregue", "lido", "falhou", "recebido"
-  created_at          DateTime @default(now())
-
+  external_message_id String?      @unique
+  status              String
+  created_at          DateTime     @default(now())
   media               Media?
+  conversation        Conversation @relation(fields: [conversation_id], references: [id])
   tasks               Task[]
 
   @@index([conversation_id, created_at])
@@ -95,7 +90,6 @@ model Message {
 model Media {
   id           String   @id @default(uuid())
   message_id   String   @unique
-  message      Message  @relation(fields: [message_id], references: [id])
   s3_key       String
   mime_type    String
   size         Int?
@@ -103,25 +97,26 @@ model Media {
   checksum     String?
   original_url String?
   created_at   DateTime @default(now())
+  message      Message  @relation(fields: [message_id], references: [id])
 }
 
 model Task {
-  id               String   @id @default(uuid())
+  id               String        @id @default(uuid())
   tenant_id        String?
-  tenant           Tenant?  @relation(fields: [tenant_id], references: [id])
   lead_id          String?
-  lead             Lead?    @relation(fields: [lead_id], references: [id])
   conversation_id  String?
-  conversation     Conversation? @relation(fields: [conversation_id], references: [id])
   message_id       String?
-  message          Message? @relation(fields: [message_id], references: [id])
   title            String
   description      String?
   due_at           DateTime?
-  status           String   @default("A_FAZER")
+  status           String        @default("A_FAZER")
   assigned_user_id String?
-  assigned_user    User?    @relation(fields: [assigned_user_id], references: [id])
-  created_at       DateTime @default(now())
+  created_at       DateTime      @default(now())
+  assigned_user    User?         @relation(fields: [assigned_user_id], references: [id])
+  conversation     Conversation? @relation(fields: [conversation_id], references: [id])
+  lead             Lead?         @relation(fields: [lead_id], references: [id])
+  message          Message?      @relation(fields: [message_id], references: [id])
+  tenant           Tenant?       @relation(fields: [tenant_id], references: [id])
 
   @@index([assigned_user_id, due_at])
   @@index([status])
@@ -130,30 +125,35 @@ model Task {
 model AiMemory {
   id              String   @id @default(uuid())
   lead_id         String   @unique
-  lead            Lead     @relation(fields: [lead_id], references: [id])
-  summary         String   @db.Text
+  summary         String
   facts_json      Json     @default("{}")
   last_updated_at DateTime @default(now())
   version         Int      @default(1)
+  lead            Lead     @relation(fields: [lead_id], references: [id])
 }
 
 model PromptSkill {
-  id                String   @id @default(uuid())
+  id                String  @id @default(uuid())
   name              String
-  area              String   
-  system_prompt     String   @db.Text
-  tools_policy_json Json     @default("[]")
-  version           Int      @default(1)
-  active            Boolean  @default(true)
+  area              String
+  system_prompt     String
+  tools_policy_json Json    @default("[]")
+  version           Int     @default(1)
+  active            Boolean @default(true)
 }
 
 model AuditLog {
   id            String   @id @default(uuid())
   actor_user_id String?
-  actor         User?    @relation(fields: [actor_user_id], references: [id])
   action        String
   entity        String
   entity_id     String
   meta_json     Json?
   created_at    DateTime @default(now())
+  actor         User?    @relation(fields: [actor_user_id], references: [id])
+}
+
+model GlobalSetting {
+  key   String @id
+  value String
 }
