@@ -8,7 +8,9 @@ COPY . .
 RUN npm install
 # Builda apenas o APP informado no build-arg (ex: api)
 ARG APP
-RUN npx turbo run build --filter=${APP}
+RUN npm run db:generate -w @crm/shared
+RUN cd packages/shared && npm run build
+RUN cd apps/${APP} && npm run build
 
 FROM base AS runner
 ARG APP
