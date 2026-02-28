@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import api from '@/lib/api';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -14,7 +14,7 @@ export default function LoginPage() {
     if (process.env.NODE_ENV === 'development') {
       const autoLogin = async () => {
         try {
-          const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/login`, {
+          const res = await api.post('/auth/login', {
             email: 'admin@lexcrm.com.br',
             password: 'admin123',
           });
@@ -34,7 +34,7 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/login`, {
+      const res = await api.post('/auth/login', {
         email,
         password,
       });

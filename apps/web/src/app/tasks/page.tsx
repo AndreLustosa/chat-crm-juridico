@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogOut, Inbox, Users, Briefcase, Settings, Plus, CheckCircle2, Circle } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 export default function TasksPage() {
   const router = useRouter();
@@ -22,10 +22,7 @@ export default function TasksPage() {
 
   const fetchTasks = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tasks`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.get('/tasks');
       setTasks(res.data);
     } catch (e) {
       console.error('Failed to fetch tasks');
@@ -37,11 +34,8 @@ export default function TasksPage() {
     if (!newTaskTitle.trim()) return;
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tasks`, {
+      await api.post('/tasks', {
         title: newTaskTitle
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
       });
       setNewTaskTitle('');
       fetchTasks();
@@ -52,12 +46,9 @@ export default function TasksPage() {
 
   const toggleTask = async (id: string, currentStatus: string) => {
     try {
-      const token = localStorage.getItem('token');
       const newStatus = currentStatus === 'CONCLUIDO' ? 'A_FAZER' : 'CONCLUIDO';
-      await axios.patch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tasks/${id}/status`, {
+      await api.patch(`/tasks/${id}/status`, {
         status: newStatus
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
       });
       fetchTasks();
     } catch (e) {
@@ -84,9 +75,9 @@ export default function TasksPage() {
               <Briefcase className="w-5 h-5 mr-3" />
               Tarefas
             </a>
-            <a href="#" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
+            <a href="/settings" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
               <Settings className="w-5 h-5 mr-3" />
-              Ajustes IA
+              Configurações
             </a>
           </nav>
         </div>

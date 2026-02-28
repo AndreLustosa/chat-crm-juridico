@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Send, Paperclip, Bot, User as UserIcon } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 
 export default function ChatPage({ params }: { params: { id: string } }) {
@@ -21,23 +21,21 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       return;
     }
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
     // 1. Fetch convo info & messages
     const fetchData = async () => {
        try {
-         // Assuming params.id is leadId down from the dashboard, 
+         // Assuming params.id is leadId down from the dashboard,
          // we fetch the conversation for this lead
-         const convoRes = await axios.get(`${apiUrl}/conversations/lead/${params.id}`, {
-           headers: { Authorization: `Bearer ${token}` }
-         });
+         const convoRes = await api.get(`/conversations/lead/${params.id}`);
          if (convoRes.data && convoRes.data.length > 0) {
            const convo = convoRes.data[0];
            setLead(convo.lead);
            setMessages(convo.messages || []);
            
            // 2. Setup Socket.IO
-           socketRef.current = io(apiUrl);
+           socketRef.current = io(wsUrl);
            socketRef.current.emit('join_conversation', convo.id);
            socketRef.current.on('newMessage', (msg: any) => {
              setMessages(prev => [...prev, msg]);
@@ -70,17 +68,14 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     if (!text.trim()) return;
 
     try {
-      const token = localStorage.getItem('token');
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-      
-      const convoRes = await axios.get(`${apiUrl}/conversations/lead/${params.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const convoRes = await api.get(`/conversations/lead/${params.id}`);
       const convoId = convoRes.data[0]?.id;
 
       if (convoId) {
-        await axios.post(`${apiUrl}/messages/send`, {
+        await api.post('/messages/send', {
           conversationId: convoId,
           text
-        }, { headers: { Authorization: `Bearer ${token}` } });
+        });
         
         // Optimistic UI update or rely on socket
         setText('');
