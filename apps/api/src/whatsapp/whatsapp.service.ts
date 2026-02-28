@@ -37,7 +37,6 @@ export class WhatsappService {
       const data = await response.json();
       if (!response.ok) {
         this.logger.error(`Evolution API error [${response.status}] ${path}: ${JSON.stringify(data)}`);
-        throw new Error(`Evolution API ${response.status}: ${JSON.stringify(data)}`);
       }
       return data;
     } catch (e) {
@@ -83,11 +82,17 @@ export class WhatsappService {
   async sendText(number: string, text: string, instanceName?: string) {
     const targetInstance = instanceName || await this.getActiveInstanceName();
     this.logger.log(`Enviando mensagem para ${number} via instância ${targetInstance}`);
-    return this.request('POST', `message/sendText/${targetInstance}`, {
+    const result = await this.request('POST', `message/sendText/${targetInstance}`, {
       number,
       options: { delay: 1200, presence: 'composing' },
       textMessage: { text },
     });
+    // Verifica se a Evolution API retornou erro
+    if (result?.error || result?.status === 404 || result?.status === 400) {
+      this.logger.error(`Falha ao enviar mensagem: ${JSON.stringify(result)}`);
+      throw new Error(`Falha ao enviar: ${result?.message || result?.error || JSON.stringify(result)}`);
+    }
+    return result;
   }
 
   async sendMedia(
