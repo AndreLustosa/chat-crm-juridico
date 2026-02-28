@@ -1,70 +1,129 @@
 @import "tailwindcss";
-@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --color-border: #111111;
-  --color-input: #1a1a1a;
-  --color-ring: #a1773d;
-  --color-background: #000000;
-  --color-foreground: #ffffff;
-
-  --color-primary: #a1773d;
+  
+  /* Variáveis Semânticas do Tailwind v4 herdando os Temas */
+  --color-border: var(--border-default);
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--bg-secondary);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-secondary);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent-primary);
   --color-primary-foreground: #ffffff;
-
-  --color-secondary: #111111;
-  --color-secondary-foreground: #ffffff;
-
+  --color-secondary: var(--bg-tertiary);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--bg-tertiary);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--bg-hover);
+  --color-accent-foreground: var(--text-primary);
   --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
-
-  --color-muted: #111111;
-  --color-muted-foreground: #888888;
-
-  --color-accent: #111111;
-  --color-accent-foreground: #ffffff;
-
-  --color-popover: #000000;
-  --color-popover-foreground: #ffffff;
-
-  --color-card: #000000;
-  --color-card-foreground: #ffffff;
-
+  --color-ring: var(--accent-primary);
   --radius: 0.5rem;
-
-  /* === ANDRE LUSTOSA LOGO DARK THEME (Paridade Exata) === */
-  --color-gray-50: #ffffff;
-  --color-gray-100: #fafafa;
-  --color-gray-200: #e4e4e7;
-  --color-gray-300: #dcdcdc; /* text-secondary original */
-  --color-gray-400: #a1a1aa;
-  --color-gray-500: #888888; /* text-muted original */
-  --color-gray-600: #333333; /* bg-hover original */
-  --color-gray-700: #1a1a1a;  /* bg-tertiary original */
-  --color-gray-800: #111111;  /* bg-secondary original */
-  --color-gray-900: #000000;  /* bg-primary original (Black Absoluto) */
-  
-  --color-slate-50: #000000; 
-
-  /* Brand Primary Gold */
-  --color-blue-50: #fbf8f3;
-  --color-blue-100: #f5eedf;
-  --color-blue-200: #ead8b7;
-  --color-blue-300: #deb884;
-  --color-blue-400: #d29856;
-  --color-blue-500: #c97e34;
-  --color-blue-600: #a1773d; 
-  --color-blue-700: #855b30;
-  --color-blue-800: #6d4b2b;
-  --color-blue-900: #302011;
-
-  /* Gold Gradient End */
-  --color-indigo-500: #eae2a1;
 }
 
 @layer base {
+  :root,
+  [data-theme="modern-dark"] {
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #111118;
+    --bg-tertiary: #1a1a24;
+    --bg-elevated: #22222e;
+    --bg-hover: #2a2a38;
+
+    --accent-primary: #7c5cfc;
+    --accent-secondary: #5b8def;
+    
+    --text-primary: #f0f0f5;
+    --text-secondary: #8b8b9e;
+    --text-muted: #55556a;
+    
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.1);
+  }
+
+  [data-theme="logo-dark"] {
+    --bg-primary: #000000;
+    --bg-secondary: #111111;
+    --bg-tertiary: #1a1a1a;
+    --bg-elevated: #222222;
+    --bg-hover: #333333;
+
+    --accent-primary: #a1773d;
+    --accent-secondary: #eae2a1;
+
+    --text-primary: #ffffff;
+    --text-secondary: #dcdcdc;
+    --text-muted: #888888;
+    
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.1);
+  }
+
+  [data-theme="logo-light"] {
+    --bg-primary: #fafafa;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f4f4f5;
+    --bg-elevated: #ffffff;
+    --bg-hover: #e4e4e7;
+
+    --accent-primary: #a1773d;
+    --accent-secondary: #eae2a1;
+
+    --text-primary: #111111;
+    --text-secondary: #5e5e5e;
+    --text-muted: #888888;
+
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border-default: rgba(0, 0, 0, 0.12);
+  }
+
+  [data-theme="modern-light"] {
+    --bg-primary: #f8fafc;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f1f5f9;
+    --bg-elevated: #ffffff;
+    --bg-hover: #e2e8f0;
+
+    --accent-primary: #4f46e5;
+    --accent-secondary: #6366f1;
+
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+
+    --border-subtle: rgba(0, 0, 0, 0.06);
+    --border-default: rgba(0, 0, 0, 0.12);
+  }
+
+  [data-theme="rose-light"] {
+    --bg-primary: #fff1f2;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #ffe4e6;
+    --bg-elevated: #ffffff;
+    --bg-hover: #fecdd3;
+
+    --accent-primary: #e11d48;
+    --accent-secondary: #f43f5e;
+
+    --text-primary: #4c0519;
+    --text-secondary: #881337;
+    --text-muted: #9f1239;
+
+    --border-subtle: rgba(244, 63, 94, 0.15);
+    --border-default: rgba(244, 63, 94, 0.25);
+  }
+
   *, ::before, ::after {
     border-color: var(--color-border);
+  }
+  
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
   }
   
   /* Scrollbar Customization */

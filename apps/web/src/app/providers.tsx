@@ -6,10 +6,9 @@ import { ReactNode } from 'react';
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <NextThemesProvider 
-      attribute="class" 
-      defaultTheme="dark" 
+      attribute="data-theme" 
+      defaultTheme="logo-dark" 
       enableSystem={false}
-      forcedTheme="dark"
     >
       {children}
     </NextThemesProvider>

@@ -4,15 +4,19 @@ import { Building2 } from 'lucide-react';
 
 export default function OfficeSettingsPage() {
   return (
-    <div className="flex-1 flex flex-col pt-8 px-8 overflow-y-auto">
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Escritório</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">Dados do escritório, áreas de atuação e informações gerais.</p>
+    <div className="flex-1 flex flex-col pt-8 overflow-hidden bg-background">
+      <header className="px-8 mb-6 shrink-0">
+        <h1 className="text-2xl font-bold text-foreground tracking-tight">Escritório</h1>
+        <p className="text-[13px] text-muted-foreground mt-1">Dados do escritório, áreas de atuação e informações gerais.</p>
       </header>
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 flex-1 flex flex-col items-center justify-center">
-        <Building2 className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
-        <p className="text-gray-500 dark:text-gray-400 text-lg">Em breve</p>
-        <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">Configurações do escritório e tenant.</p>
+      <div className="flex-1 overflow-y-auto px-8 pb-8 flex flex-col">
+        <div className="bg-card rounded-2xl border border-border flex-1 flex flex-col items-center justify-center p-12 text-center shadow-sm">
+          <div className="w-20 h-20 rounded-2xl bg-primary/5 flex items-center justify-center mb-6 border border-primary/10">
+            <Building2 className="w-10 h-10 text-primary opacity-60" />
+          </div>
+          <h3 className="text-lg font-bold text-foreground tracking-tight mb-2">Em breve</h3>
+          <p className="text-[13px] text-muted-foreground max-w-[280px]">Configurações dos dados técnicos, endereço e identidade do escritório.</p>
+        </div>
       </div>
     </div>
   );
