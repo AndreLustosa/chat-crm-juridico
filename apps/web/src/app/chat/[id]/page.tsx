@@ -117,7 +117,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             const isOut = msg.direction === 'out';
             return (
                <div key={idx} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
-                 <div className={`max-w-[70%] rounded-2xl px-5 py-3 ${isOut ? 'bg-blue-600 text-white rounded-br-none shadow-md' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-none shadow-sm border dark:border-gray-700'}`}>
+                 <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOut ? 'bg-gradient-to-br from-blue-600 to-indigo-500 text-white rounded-br-sm shadow-md' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-sm shadow-sm border dark:border-white/5'}`}>
                    {msg.type === 'text' || !msg.type ? (
                      <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.text}</p>
                    ) : (
@@ -156,7 +156,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               }}
             />
           </div>
-          <button type="submit" disabled={!text.trim()} className="p-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white rounded-full transition-colors shadow-sm">
+          <button type="submit" disabled={!text.trim()} className="p-3 bg-gradient-to-br from-blue-600 to-indigo-500 hover:from-blue-700 hover:to-indigo-600 disabled:opacity-50 disabled:hover:from-blue-600 text-white rounded-full transition-colors shadow-lg shadow-blue-600/20">
             <Send className="w-6 h-6" />
           </button>
         </form>

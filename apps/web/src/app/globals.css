@@ -30,10 +30,54 @@
   --color-card-foreground: hsl(var(--card-foreground, 222.2 84% 4.9%));
 
   --radius: 0.5rem;
+
+  /* === ANDRE LUSTOSA MODERN DARK THEME === */
+  --color-gray-50: #ffffff;
+  --color-gray-100: #fafafa;
+  --color-gray-200: #e4e4e7;
+  --color-gray-300: #d4d4d8;
+  --color-gray-400: #a1a1aa;
+  --color-gray-500: #8b8b9e;
+  --color-gray-600: #55556a;
+  --color-gray-700: #1a1a24; 
+  --color-gray-800: #111118; 
+  --color-gray-900: #0a0a0f; 
+  
+  --color-slate-50: #0a0a0f; 
+
+  /* Brand Primary Gold */
+  --color-blue-50: #fbf8f3;
+  --color-blue-100: #f5eedf;
+  --color-blue-200: #ead8b7;
+  --color-blue-300: #deb884;
+  --color-blue-400: #d29856;
+  --color-blue-500: #c97e34;
+  --color-blue-600: #a1773d; 
+  --color-blue-700: #855b30;
+  --color-blue-800: #6d4b2b;
+  --color-blue-900: #302011;
+
+  /* Gold Gradient End */
+  --color-indigo-500: #eae2a1;
 }
 
 @layer base {
   *, ::before, ::after {
     border-color: var(--color-border);
+  }
+  
+  /* Scrollbar Customization */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a38;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #55556a;
   }
 }
