@@ -6,10 +6,15 @@ export class SettingsService {
   constructor(private prisma: PrismaService) {}
 
   async get(key: string): Promise<string | null> {
-    const setting = await this.prisma.globalSetting.findUnique({
-      where: { key },
-    });
-    return setting?.value || null;
+    try {
+      const setting = await this.prisma.globalSetting.findUnique({
+        where: { key },
+      });
+      return setting?.value || null;
+    } catch (e) {
+      console.error(`Erro ao buscar configuração [${key}] do banco:`, e.message);
+      return null; // Retorna null para disparar o fallback da Env
+    }
   }
 
   async set(key: string, value: string): Promise<void> {

@@ -57,15 +57,20 @@ export default function WhatsappIntegrationPage() {
       // 1. Carrega as configs primeiro (Sempre deve funcionar se o nosso back estiver online)
       try {
         const configRes = await api.get('/settings/whatsapp-config');
-        setApiUrl(configRes.data.apiUrl || '');
-        setApiKey(configRes.data.apiKey || '');
-        setWebhookUrl(configRes.data.webhookUrl || '');
+        const config = configRes.data;
+        
+        setApiUrl(config.apiUrl || 'api.andrelustosaadvogados.com.br');
+        setApiKey(config.apiKey || '');
+        setWebhookUrl(config.webhookUrl || 'https://atendimento.andrelustosaadvogados.com.br/api/webhooks/evolution');
+        
         // Checa a saúde da API em paralelo
         checkApiHealth();
       } catch (err) {
         console.error('Erro ao carregar configurações de API:', err);
+        // Fallback local se o back estiver incomunicável (improvável mas seguro)
+        if (!apiUrl) setApiUrl('api.andrelustosaadvogados.com.br');
+        if (!webhookUrl) setWebhookUrl('https://atendimento.andrelustosaadvogados.com.br/api/webhooks/evolution');
       }
-
       // 2. Tenta buscar instâncias (Pode falhar se a URL for inválida)
       try {
         const res = await api.get('/whatsapp/instances');
@@ -220,12 +225,15 @@ export default function WhatsappIntegrationPage() {
             {isEditingConfig ? (
               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 animate-in slide-in-from-top-2 duration-300">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-muted-foreground uppercase ml-1">Evolution API URL</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-muted-foreground uppercase ml-1">Evolution API URL</label>
+                    <span className="text-[10px] text-amber-500 font-bold uppercase">(Insira sem o https, ex: api.dominio.com)</span>
+                  </div>
                   <input 
                     type="text" 
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}
-                    placeholder="https://sua-evolution.com"
+                    placeholder="api.sua-evolution.com"
                     className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/50 transition-all font-mono"
                   />
                 </div>
@@ -295,7 +303,7 @@ export default function WhatsappIntegrationPage() {
               </div>
             )}
           </div>
-创新性
+
           {activeTab === 'guide' ? (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

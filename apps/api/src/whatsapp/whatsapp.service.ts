@@ -7,13 +7,23 @@ export class WhatsappService {
   
   constructor(private readonly settingsService: SettingsService) {}
 
+  private normalizeUrl(url: string): string {
+    if (!url) return '';
+    let normalized = url.trim().replace(/\/+$/, ''); // Remove barras no final
+    if (!/^https?:\/\//i.test(normalized)) {
+      normalized = `https://${normalized}`;
+    }
+    return normalized;
+  }
+
   private async request(
     method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body?: any,
   ) {
     const config = await this.settingsService.getWhatsAppConfig();
-    const url = `${config.apiUrl}/${path}`;
+    const baseUrl = this.normalizeUrl(config.apiUrl || '');
+    const url = `${baseUrl}/${path}`;
     try {
       const response = await fetch(url, {
         method,
