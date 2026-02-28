@@ -38,21 +38,21 @@ export default function Dashboard() {
         <div className="p-6">
           <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-500 mb-8">LexCRM</h2>
           <nav className="space-y-2">
-            <a href="#" className="flex items-center px-4 py-3 text-blue-600 bg-blue-50 dark:bg-gray-700/50 rounded-lg font-medium transition-colors">
+            <a href="/" className="flex items-center px-4 py-3 text-blue-600 bg-blue-50 dark:bg-gray-700/50 rounded-lg font-medium transition-colors">
               <Inbox className="w-5 h-5 mr-3" />
               Inbox (WhatsApp)
             </a>
-            <a href="#" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
+            <a href="/crm" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
               <Users className="w-5 h-5 mr-3" />
               Leads & CRM
             </a>
-            <a href="#" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
+            <a href="/tasks" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
               <Briefcase className="w-5 h-5 mr-3" />
               Tarefas
             </a>
-            <a href="#" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
+            <a href="/settings" className="flex items-center px-4 py-3 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg font-medium transition-colors">
               <Settings className="w-5 h-5 mr-3" />
-              Ajustes IA
+              Configurações
             </a>
           </nav>
         </div>
