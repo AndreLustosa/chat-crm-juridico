@@ -18,10 +18,9 @@ ENV NODE_ENV=production
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/shared ./packages/shared
-# Copia app buildado + node_modules do workspace
+# Copia app buildado (node_modules ficam hoisted na raiz em npm workspaces)
 COPY --from=builder /app/apps/${APP}/package*.json ./apps/${APP}/
 COPY --from=builder /app/apps/${APP}/dist ./apps/${APP}/dist
-COPY --from=builder /app/apps/${APP}/node_modules ./apps/${APP}/node_modules
 # Seta dir de inicio
 WORKDIR /app/apps/${APP}
 # Gera Cliente Prisma em PROD
