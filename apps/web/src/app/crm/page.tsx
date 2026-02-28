@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogOut, Inbox, Users, Briefcase, Settings } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 const stages = ['NOVO', 'ATENDIMENTO', 'NEGOCIANDO', 'FECHADO'];
 
@@ -20,9 +20,7 @@ export default function CrmPage() {
 
     const fetchLeads = async () => {
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/leads`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get('/leads');
         setLeads(res.data);
       } catch (e) {
         console.error('Failed to fetch leads');

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogOut, Inbox, Users, Briefcase, Settings, MessageCircle } from 'lucide-react';
-import axios from 'axios';
+import api from '@/lib/api';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -18,9 +18,7 @@ export default function Dashboard() {
 
     const fetchLeads = async () => {
       try {
-        const res = await axios.get(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/leads`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await api.get('/leads');
         setLeads(res.data);
       } catch (e: any) {
         console.error('Failed to fetch leads');
