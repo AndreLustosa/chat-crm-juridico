@@ -423,23 +423,23 @@ export default function WhatsappIntegrationPage() {
                             </div>
 
                             {/* Stats Evolution Style */}
-                            <div className="flex flex-col items-end gap-3 text-muted-foreground/50">
+                            <div className="flex flex-col items-end gap-3 min-w-[80px]">
                                <button 
                                 onClick={() => handleDeleteInstance(instance.instanceName)}
-                                className="p-2 hover:text-red-500 hover:bg-red-500/5 rounded-lg transition-all"
+                                className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
                               >
                                 <Trash2 size={18} />
                               </button>
-                              <div className="flex items-center gap-6 mt-1">
-                                <div className="flex flex-col items-center gap-1">
-                                   <div className="w-8 h-8 rounded-full border border-white/5 flex items-center justify-center bg-white/5">
-                                      <Plus size={14} className="opacity-40" />
+                              <div className="flex items-center gap-4 mt-1">
+                                <div className="flex flex-col items-center gap-1.5">
+                                   <div className="w-9 h-9 rounded-full border border-white/5 flex items-center justify-center bg-white/5">
+                                      <Plus size={16} className="text-white/40" />
                                    </div>
                                    <span className="text-[11px] font-bold text-white/40">{instance._count?.contacts?.toLocaleString() || '1.421'}</span>
                                 </div>
-                                <div className="flex flex-col items-center gap-1">
-                                   <div className="w-8 h-8 rounded-full border border-white/5 flex items-center justify-center bg-white/5">
-                                      <MessageSquare size={14} className="opacity-40" />
+                                <div className="flex flex-col items-center gap-1.5">
+                                   <div className="w-9 h-9 rounded-full border border-white/5 flex items-center justify-center bg-white/5">
+                                      <MessageSquare size={16} className="text-white/40" />
                                    </div>
                                    <span className="text-[11px] font-bold text-white/40">{instance._count?.messages?.toLocaleString() || '4.621'}</span>
                                 </div>
@@ -453,17 +453,17 @@ export default function WhatsappIntegrationPage() {
                              }`}>
                                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
                                <span className="text-[11px] font-black uppercase tracking-widest">
-                                 {isConnected ? 'Connected' : 'Disconnected'}
+                                 {isConnected ? 'CONECTADO' : 'DESCONECTADO'}
                                </span>
                              </div>
 
                              {!isConnected && (
                                <button 
                                  onClick={() => handleOpenConnect(instance.instanceName)}
-                                 className="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-bold text-[11px] uppercase tracking-wider hover:opacity-90 transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
+                                 className="px-5 py-2 rounded-lg bg-primary text-primary-foreground font-bold text-[11px] uppercase tracking-wider hover:opacity-90 transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
                                >
                                  <QrCode size={14} />
-                                 Connect
+                                 CONECTAR
                                </button>
                              )}
                           </div>
@@ -473,7 +473,7 @@ export default function WhatsappIntegrationPage() {
                         {isConnected && (
                           <div className="px-6 py-3 bg-white/5 border-t border-white/5 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-500/60 transition-colors group-hover:bg-emerald-500/5">
                              <CheckCircle2 size={12} />
-                             Synchronized
+                             SINCRONIZADO
                           </div>
                         )}
                       </div>
