@@ -110,6 +110,8 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.crm-api.rule=Host(`atendimento.andrelustosaadvogados.com.br`) && PathPrefix(`/api`)"
+        - "traefik.http.middlewares.strip-api.stripprefix.prefixes=/api"
+        - "traefik.http.routers.crm-api.middlewares=strip-api"
         - "traefik.http.services.crm-api.loadbalancer.server.port=3001"
         - "traefik.http.routers.crm-api.entrypoints=websecure"
         - "traefik.http.routers.crm-api.tls.certresolver=letsencrypt"
