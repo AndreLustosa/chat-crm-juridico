@@ -64,8 +64,8 @@ export default function ContactsPage() {
         name: lead.name || lead.phone,
         phone: lead.phone,
         email: lead.email || '',
-        conversations: lead._count?.conversations || 0,
-        lastMessage: formatDate(lead.conversations?.[0]?.last_message_at),
+        conversations: 0,
+        lastMessage: formatDate(lead.updated_at),
         createdAt: formatDate(lead.created_at),
         origin: 'database' as const,
       }));
