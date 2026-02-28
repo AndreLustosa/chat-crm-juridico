@@ -4,7 +4,6 @@ services:
   # ------ Banco de Dados ------
   postgres:
     image: postgres:15-alpine
-    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
@@ -18,11 +17,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      restart_policy:
+        condition: any
 
   # ------ Redis (Filas e Cache) ------
   redis:
     image: redis:alpine
-    restart: always
     ports:
       - "46379:6379"
     volumes:
@@ -32,43 +33,46 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      restart_policy:
+        condition: any
 
   # ------ SeaweedFS (Mídias) ------
   seaweed-master:
     image: chrislusf/seaweedfs
-    restart: always
     command: "master -ip=seaweed-master -port=9333"
     ports:
       - '49333:9333'
     volumes:
       - seaweed_master_data:/data
+    deploy:
+      restart_policy:
+        condition: any
 
   seaweed-volume:
     image: chrislusf/seaweedfs
-    restart: always
     command: "volume -mserver=seaweed-master:9333 -port=8080 -dir=/data"
-    depends_on:
-      - seaweed-master
     ports:
       - '48080:8080'
     volumes:
       - seaweed_volume_data:/data
+    deploy:
+      restart_policy:
+        condition: any
 
   seaweed-filer:
     image: chrislusf/seaweedfs
-    restart: always
     command: "filer -master=seaweed-master:9333 -s3"
-    depends_on:
-      - seaweed-master
-      - seaweed-volume
     ports:
       - '48888:8888'
       - '48333:8333'
+    deploy:
+      restart_policy:
+        condition: any
 
   # ------ NestJS Core API ------
   crm-api:
     image: ghcr.io/andrelustosa/chat-crm-juridico-api:master
-    restart: always
     ports:
       - "${API_PORT:-3001}:3001"
     environment:
@@ -82,14 +86,13 @@ services:
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
-    depends_on:
-      - postgres
-      - redis
+    deploy:
+      restart_policy:
+        condition: any
 
   # ------ NestJS Worker (Mídias e IA) ------
   crm-worker:
     image: ghcr.io/andrelustosa/chat-crm-juridico-worker:master
-    restart: always
     environment:
       - PORT=3002
       - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@postgres:5432/${POSTGRES_DB:-lexcrm}?schema=public
@@ -104,22 +107,21 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-some_access_key}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-some_secret_key}
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
-    depends_on:
-      - postgres
-      - redis
-      - seaweed-filer
+    deploy:
+      restart_policy:
+        condition: any
 
   # ------ Next.js Frontend ------
   crm-web:
     image: ghcr.io/andrelustosa/chat-crm-juridico-web:master
-    restart: always
     ports:
       - "${WEB_PORT:-3000}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001}
       - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
-    depends_on:
-      - crm-api
+    deploy:
+      restart_policy:
+        condition: any
 
 volumes:
   pgdata:
