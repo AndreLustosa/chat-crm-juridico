@@ -22,8 +22,12 @@ export default function Dashboard() {
           headers: { Authorization: `Bearer ${token}` }
         });
         setLeads(res.data);
-      } catch (e) {
+      } catch (e: any) {
         console.error('Failed to fetch leads');
+        if (e.response?.status === 401) {
+          localStorage.removeItem('token');
+          router.push('/login');
+        }
       }
     };
     fetchLeads();

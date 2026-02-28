@@ -43,8 +43,12 @@ export default function ChatPage({ params }: { params: { id: string } }) {
              setMessages(prev => [...prev, msg]);
            });
          }
-       } catch (e) {
+       } catch (e: any) {
          console.error(e);
+         if (e.response?.status === 401) {
+           localStorage.removeItem('token');
+           router.push('/login');
+         }
        }
     };
     
