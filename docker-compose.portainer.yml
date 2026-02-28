@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
       POSTGRES_DB: ${POSTGRES_DB:-lexcrm}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata_v2:/var/lib/postgresql/data
     ports:
       - "45432:5432"
     healthcheck:
@@ -124,7 +124,7 @@ services:
         condition: any
 
 volumes:
-  pgdata:
+  pgdata_v2:
   redisdata:
   seaweed_master_data:
   seaweed_volume_data:
