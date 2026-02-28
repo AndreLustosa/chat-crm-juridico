@@ -99,16 +99,16 @@ export default function TasksPage() {
           <p className="text-gray-500 dark:text-gray-400 mt-1">Acompanhe seus prazos e pendências.</p>
         </header>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6 flex-1">
+        <div className="rounded-xl shadow-sm border dark:border-gray-800 p-6 flex-1">
           <form onSubmit={handleCreateTask} className="flex gap-4 mb-8">
             <input 
               type="text" 
               placeholder="Adicionar nova tarefa..." 
               value={newTaskTitle}
               onChange={e => setNewTaskTitle(e.target.value)}
-              className="flex-1 px-4 py-3 border dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="flex-1 px-4 py-3 border dark:border-gray-800 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 outline-none"
             />
-            <button type="submit" className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg flex items-center transition-colors">
+            <button type="submit" className="px-6 py-3 btn-primary font-medium rounded-lg flex items-center transition-colors">
               <Plus className="w-5 h-5 mr-2" />
               Criar
             </button>
@@ -116,7 +116,7 @@ export default function TasksPage() {
 
           <div className="space-y-4">
             {tasks.map(task => (
-              <div key={task.id} className="flex items-center p-4 border dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+              <div key={task.id} className="flex items-center p-4 border dark:border-gray-800 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors">
                 <button onClick={() => toggleTask(task.id, task.status)} className="flex-shrink-0 mr-4 text-gray-400 hover:text-blue-500 transition-colors">
                   {task.status === 'CONCLUIDO' ? (
                     <CheckCircle2 className="w-7 h-7 text-green-500" />

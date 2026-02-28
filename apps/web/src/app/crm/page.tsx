@@ -78,7 +78,7 @@ export default function CrmPage() {
           {stages.map(stage => {
             const stageLeads = leads.filter(l => (l.stage || 'NOVO').toUpperCase() === stage);
             return (
-              <div key={stage} className="flex flex-col bg-gray-100 dark:bg-gray-800/50 rounded-xl min-w-[320px] max-w-[320px] p-4 border dark:border-gray-700">
+              <div key={stage} className="flex flex-col rounded-xl min-w-[320px] max-w-[320px] p-4 border dark:border-gray-800">
                 <div className="flex justify-between items-center mb-4 px-2">
                   <h3 className="font-semibold text-gray-700 dark:text-gray-200">{stage}</h3>
                   <span className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 py-1 px-3 rounded-full text-xs font-bold">
@@ -88,7 +88,7 @@ export default function CrmPage() {
                 
                 <div className="flex-1 overflow-y-auto space-y-3 pr-2">
                   {stageLeads.map(lead => (
-                    <div key={lead.id} onClick={() => router.push(`/chat/${lead.id}`)} className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors">
+                    <div key={lead.id} onClick={() => router.push(`/chat/${lead.id}`)} className="p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 cursor-pointer hover:border-blue-500 transition-colors">
                       <h4 className="font-medium text-gray-900 dark:text-white mb-1">{lead.name || lead.phone}</h4>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{lead.phone}</p>
                       

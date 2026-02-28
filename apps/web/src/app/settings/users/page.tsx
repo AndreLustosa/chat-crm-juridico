@@ -123,7 +123,7 @@ export default function UsersSettingsPage() {
         </div>
         <button
           onClick={openCreate}
-          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg flex items-center transition-colors shadow-sm"
+          className="px-5 py-2.5 btn-primary font-medium rounded-lg flex items-center transition-colors shadow-sm"
         >
           <Plus className="w-5 h-5 mr-2" />
           Novo Usuário
@@ -137,7 +137,7 @@ export default function UsersSettingsPage() {
       )}
 
       {/* Tabela de Usuários */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 overflow-hidden flex-1">
+      <div className="rounded-xl shadow-sm border dark:border-gray-800 overflow-hidden flex-1">
         {users.length === 0 && !error ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-400">
             <UserCog className="w-12 h-12 mb-4 opacity-50" />
@@ -275,7 +275,7 @@ export default function UsersSettingsPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+                  className="px-5 py-2.5 btn-primary disabled:opacity-50 font-medium rounded-lg transition-colors"
                 >
                   {loading ? 'Salvando...' : editingId ? 'Salvar' : 'Criar Usuário'}
                 </button>

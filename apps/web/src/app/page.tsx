@@ -74,7 +74,7 @@ export default function Dashboard() {
           <p className="text-gray-500 dark:text-gray-400 mt-1">Gerencie conversas do WhatsApp e interações da IA.</p>
         </header>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 flex-1 overflow-hidden">
+        <div className="rounded-xl shadow-sm border dark:border-gray-800 flex-1 overflow-hidden">
           {leads.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-gray-400">
               <MessageCircle className="w-12 h-12 mb-4 opacity-50" />

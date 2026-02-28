@@ -22,9 +22,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
+    <div className="flex h-screen overflow-hidden">
       {/* Sidebar Principal */}
-      <aside className="w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col justify-between hidden md:flex">
+      <aside className="w-64 border-r dark:border-gray-800 flex flex-col justify-between hidden md:flex">
         <div className="p-6">
           <h2
             className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-500 mb-8 cursor-pointer"
@@ -66,8 +66,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       </aside>
 
       {/* Sidebar Secundária - Submenus de Configurações */}
-      <aside className="w-60 bg-gray-50 dark:bg-gray-850 border-r dark:border-gray-700 hidden md:flex flex-col dark:bg-gray-800/50">
-        <div className="p-5 border-b dark:border-gray-700">
+      <aside className="w-60 border-r dark:border-gray-800 hidden md:flex flex-col">
+        <div className="p-5 border-b dark:border-gray-800">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Configurações</h3>
             <button
