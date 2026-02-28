@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Send, Paperclip, Bot, User as UserIcon } from 'lucide-react';
+import { ArrowLeft, Send, Bot } from 'lucide-react';
+import { Sidebar } from '@/components/Sidebar';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 
@@ -11,8 +12,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   const [lead, setLead] = useState<any>(null);
+  const [convoId, setConvoId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -23,22 +27,22 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
-    // 1. Fetch convo info & messages
     const fetchData = async () => {
        try {
-         // Assuming params.id is leadId down from the dashboard,
-         // we fetch the conversation for this lead
          const convoRes = await api.get(`/conversations/lead/${params.id}`);
          if (convoRes.data && convoRes.data.length > 0) {
            const convo = convoRes.data[0];
            setLead(convo.lead);
+           setConvoId(convo.id);
            setMessages(convo.messages || []);
-           
-           // 2. Setup Socket.IO
-           socketRef.current = io(wsUrl);
+
+           socketRef.current = io(wsUrl, { transports: ['websocket', 'polling'] });
            socketRef.current.emit('join_conversation', convo.id);
            socketRef.current.on('newMessage', (msg: any) => {
-             setMessages(prev => [...prev, msg]);
+             setMessages(prev => {
+               if (prev.find((m: any) => m.id === msg.id)) return prev;
+               return [...prev, msg];
+             });
            });
          }
        } catch (e: any) {
@@ -49,7 +53,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
          }
        }
     };
-    
+
     fetchData();
 
     return () => {
@@ -63,103 +67,121 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     }
   }, [messages]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!text.trim()) return;
-
+  const handleSend = async () => {
+    if (!text.trim() || !convoId || sending) return;
+    setSending(true);
     try {
-      const convoRes = await api.get(`/conversations/lead/${params.id}`);
-      const convoId = convoRes.data[0]?.id;
-
-      if (convoId) {
-        await api.post('/messages/send', {
-          conversationId: convoId,
-          text
-        });
-        
-        // Optimistic UI update or rely on socket
-        setText('');
-      }
+      await api.post('/messages/send', { conversationId: convoId, text });
+      setText('');
+      inputRef.current?.focus();
     } catch (e) {
-      alert('Falha ao enviar mensagem');
+      console.error('Falha ao enviar mensagem', e);
+    } finally {
+      setSending(false);
     }
   };
 
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return '';
+    return new Date(dateStr).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
+
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-gray-900">
-      {/* Header */}
-      <header className="flex items-center px-6 py-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
-        <button onClick={() => router.push('/')} className="mr-4 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors">
-          <ArrowLeft className="w-6 h-6" />
-        </button>
-        <div className="flex items-center flex-1">
-          <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-blue-600 dark:text-blue-200 font-bold mr-4">
-            {lead?.name?.charAt(0) || lead?.phone?.charAt(0) || <UserIcon />}
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{lead?.name || lead?.phone || 'Carregando...'}</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">WhatsApp • Em atendimento</p>
-          </div>
-        </div>
-        <div className="flex space-x-2">
-           <button className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-300 rounded-lg transition-colors flex items-center">
-             <Bot className="w-4 h-4 mr-2" />
-             IA Ativa
-           </button>
-        </div>
-      </header>
+    <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
+      <Sidebar />
 
-      {/* Messages Area */}
-      <main className="flex-1 overflow-y-auto p-6 bg-slate-50 dark:bg-black/20" ref={scrollRef}>
-        <div className="space-y-6 max-w-4xl mx-auto">
-          {messages.map((msg, idx) => {
-            const isOut = msg.direction === 'out';
-            return (
-               <div key={idx} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
-                 <div className={`max-w-[85%] rounded-2xl px-4 py-3 ${isOut ? 'bg-gradient-to-br from-blue-600 to-indigo-500 text-white rounded-br-sm shadow-md' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-sm shadow-sm border dark:border-white/5'}`}>
-                   {msg.type === 'text' || !msg.type ? (
-                     <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.text}</p>
-                   ) : (
-                     <div className="flex flex-col items-center">
-                       <p className="text-sm italic mb-2">Anexo: {msg.type}</p>
-                       <span className="text-xs break-all opacity-80">{msg.media?.original_url || 'URL indisponível'}</span>
-                     </div>
-                   )}
-                   <div className={`text-[11px] mt-2 text-right ${isOut ? 'text-blue-200' : 'text-gray-400'}`}>
-                     {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {msg.status}
-                   </div>
-                 </div>
-               </div>
-            );
-          })}
-        </div>
-      </main>
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="h-[80px] px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
+          <div className="flex items-center gap-4">
+            <button onClick={() => router.push('/')} className="text-muted-foreground hover:text-foreground transition-colors">
+              <ArrowLeft size={22} />
+            </button>
+            <div className="w-12 h-12 rounded-full bg-[#2a2a2a] border border-[#3a3a3a] text-white flex items-center justify-center font-bold text-xl shadow-sm">
+              {getInitial(lead?.name || lead?.phone)}
+            </div>
+            <div>
+              <h3 className="font-bold text-lg leading-tight">{lead?.name || lead?.phone || 'Carregando...'}</h3>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-1">
+                WHATSAPP <span className="mx-1">•</span> {lead?.phone || ''}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button className="px-4 py-2 text-sm font-semibold text-primary bg-primary/10 border border-primary/20 rounded-xl transition-colors flex items-center gap-2 hover:bg-primary/20">
+              <Bot size={16} />
+              IA Ativa
+            </button>
+          </div>
+        </header>
 
-      {/* Input Area */}
-      <footer className="p-4 bg-white dark:bg-gray-900 border-t dark:border-gray-800">
-        <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-end space-x-4">
-          <button type="button" className="p-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
-            <Paperclip className="w-6 h-6" />
-          </button>
-          <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-2xl overflow-hidden border border-transparent focus-within:border-blue-500 focus-within:bg-white dark:focus-within:bg-gray-900 transition-colors">
-            <textarea 
+        {/* Messages */}
+        <div className="flex-1 p-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
+          <div className="flex flex-col gap-4 max-w-4xl mx-auto pb-4">
+            {messages.length === 0 ? (
+              <div className="text-center text-muted-foreground py-20">Nenhuma mensagem nesta conversa.</div>
+            ) : (
+              messages.map((msg, idx) => {
+                const isOut = msg.direction === 'out';
+                return (
+                  <div key={msg.id || idx} className={`w-full flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] p-4 shadow-sm ${
+                      isOut
+                        ? 'bg-gradient-to-tr from-primary/90 to-ring/90 text-primary-foreground rounded-2xl rounded-tr-sm'
+                        : 'bg-card border border-border rounded-2xl rounded-tl-sm'
+                    }`}>
+                      {msg.type === 'text' || !msg.type ? (
+                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                      ) : (
+                        <div>
+                          <p className="text-sm italic mb-1">Anexo: {msg.type}</p>
+                          {msg.media?.original_url && (
+                            <span className="text-xs opacity-80 break-all">{msg.media.original_url}</span>
+                          )}
+                        </div>
+                      )}
+                      <div className={`text-[10px] mt-2 flex justify-end gap-2 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
+                        <span>{formatTime(msg.created_at)}</span>
+                        <span>• {msg.status}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Input */}
+        <footer className="p-6 bg-background shrink-0">
+          <div className="max-w-4xl mx-auto flex gap-3">
+            <input
+              ref={inputRef}
+              type="text"
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Digite sua mensagem para o lead..."
-              className="w-full bg-transparent border-none focus:ring-0 resize-none px-4 py-3 h-14 text-gray-900 dark:text-gray-100"
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend(e as any);
+                  handleSend();
                 }
               }}
+              placeholder="Digite sua mensagem..."
+              disabled={sending}
+              className="flex-1 bg-card border border-border rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground disabled:opacity-50"
             />
+            <button
+              onClick={handleSend}
+              disabled={!text.trim() || sending}
+              className="bg-gradient-to-r from-primary to-ring p-4 rounded-xl shadow-lg disabled:opacity-50 hover:-translate-y-1 transition-transform"
+            >
+              <Send size={20} className="text-primary-foreground" />
+            </button>
           </div>
-          <button type="submit" disabled={!text.trim()} className="p-3 bg-gradient-to-br from-blue-600 to-indigo-500 hover:from-blue-700 hover:to-indigo-600 disabled:opacity-50 disabled:hover:from-blue-600 text-white rounded-full transition-colors shadow-lg shadow-blue-600/20">
-            <Send className="w-6 h-6" />
-          </button>
-        </form>
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 }

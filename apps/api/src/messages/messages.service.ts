@@ -1,12 +1,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { ChatGateway } from '../gateway/chat.gateway';
 
 @Injectable()
 export class MessagesService {
   constructor(
     private prisma: PrismaService,
     private whatsapp: WhatsappService,
+    private chatGateway: ChatGateway,
   ) {}
 
   async getMessages(conversationId: string) {
@@ -53,6 +55,10 @@ export class MessagesService {
       where: { id: convo.id },
       data: { last_message_at: new Date() }
     });
+
+    // 4. Emit real-time events via WebSocket
+    this.chatGateway.emitNewMessage(convo.id, msg);
+    this.chatGateway.emitConversationsUpdate(null);
 
     return msg;
   }

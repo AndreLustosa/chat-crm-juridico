@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Body, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, Post, Query, UseGuards, Request } from '@nestjs/common';
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Prisma } from '@crm/shared';
@@ -7,6 +7,16 @@ import { Prisma } from '@crm/shared';
 @Controller('conversations')
 export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}
+
+  @Get()
+  findAll(@Query('status') status?: string) {
+    return this.conversationsService.findAll(status);
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.conversationsService.findOne(id);
+  }
 
   @Get('lead/:leadId')
   findAllByLead(@Param('leadId') leadId: string) {
@@ -21,5 +31,15 @@ export class ConversationsController {
   @Patch(':id/ai-mode')
   setAiMode(@Param('id') id: string, @Body('ai_mode') ai_mode: boolean) {
     return this.conversationsService.setAiMode(id, ai_mode);
+  }
+
+  @Patch(':id/assign')
+  assign(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.assign(id, req.user.id);
+  }
+
+  @Patch(':id/close')
+  close(@Param('id') id: string) {
+    return this.conversationsService.close(id);
   }
 }
