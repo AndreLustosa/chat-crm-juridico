@@ -32,8 +32,9 @@ export function Sidebar() {
 
   const navItems = [
     { label: 'Inbox (WhatsApp)', href: '/', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/' || p.startsWith('/chat') },
-    { label: 'Leads & CRM', href: '/crm', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/crm') },
-    { label: 'Tarefas', href: '/tasks', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/tasks') },
+    { label: 'Leads & CRM', href: '/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/crm') },
+    { label: 'Contatos', href: '/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/contacts') },
+    { label: 'Tarefas', href: '/tasks', icon: <Check size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/tasks') },
     { label: 'Configurações', href: '/settings', icon: <Settings size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/settings') },
   ];
 
