@@ -44,22 +44,7 @@ export class EvolutionService {
         }
       });
 
-      // 2. Upsert Conversation
-      const conversation = await this.prisma.conversation.upsert({
-        where: { id: 'search-by-lead-channel' }, // Prisma needs unique constraint, let's just findFirst then create
-      }).catch(async () => {
-         let conv = await this.prisma.conversation.findFirst({
-           where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' }
-         });
-         if (!conv) {
-           conv = await this.prisma.conversation.create({
-             data: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO', external_id: remoteJid }
-           });
-         }
-         return conv;
-      });
-
-      // Find first above handles it since Conversation doesn't have a unique constraint on (lead_id, channel)
+      // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
          where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' }
       });

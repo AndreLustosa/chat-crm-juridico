@@ -9,7 +9,7 @@ export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
   @Post()
-  create(@Body() createLeadDto: Prisma.LeadCreateInput, @Request() req) {
+  create(@Body() createLeadDto: Prisma.LeadCreateInput, @Request() req: any) {
     // Associar ao tenant do usuário logado se existir
     if (req.user?.tenant_id) {
        createLeadDto.tenant = { connect: { id: req.user.tenant_id } };
@@ -18,7 +18,7 @@ export class LeadsController {
   }
 
   @Get()
-  findAll(@Request() req) {
+  findAll(@Request() req: any) {
     return this.leadsService.findAll(req.user?.tenant_id);
   }
 
