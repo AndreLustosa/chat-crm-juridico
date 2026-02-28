@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { ChatGateway } from '../gateway/chat.gateway';
 
 @Injectable()
 export class EvolutionService {
@@ -9,6 +10,7 @@ export class EvolutionService {
 
   constructor(
     private prisma: PrismaService,
+    private chatGateway: ChatGateway,
     @InjectQueue('media-jobs') private mediaQueue: Queue,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
   ) {}
@@ -82,6 +84,10 @@ export class EvolutionService {
         where: { id: conv.id },
         data: { last_message_at: new Date() }
       });
+
+      // Emit real-time events via WebSocket
+      this.chatGateway.emitNewMessage(conv.id, msg);
+      this.chatGateway.emitConversationsUpdate(null);
 
       // 4. Se mídia, enfileira download
       if (msgType !== 'text') {
