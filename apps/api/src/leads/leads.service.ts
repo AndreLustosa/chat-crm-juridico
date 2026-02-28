@@ -10,10 +10,18 @@ export class LeadsService {
     return this.prisma.lead.create({ data });
   }
 
-  async findAll(tenant_id?: string): Promise<Lead[]> {
+  async findAll(tenant_id?: string) {
     return this.prisma.lead.findMany({
       where: tenant_id ? { tenant_id } : undefined,
       orderBy: { created_at: 'desc' },
+      include: {
+        _count: { select: { conversations: true } },
+        conversations: {
+          orderBy: { last_message_at: 'desc' },
+          take: 1,
+          select: { last_message_at: true },
+        },
+      },
     });
   }
 

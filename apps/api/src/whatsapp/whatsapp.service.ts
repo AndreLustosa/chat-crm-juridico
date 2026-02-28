@@ -189,6 +189,25 @@ export class WhatsappService {
     return this.request('GET', `instance/connectionStatus/${instanceName}`);
   }
 
+  async fetchContacts(instanceName: string) {
+    const data = await this.request('POST', `chat/findContacts/${instanceName}`, {
+      where: {},
+    });
+
+    if (Array.isArray(data)) {
+      return data
+        .filter((c: any) => c.id && !c.id.endsWith('@g.us')) // Filtrar grupos
+        .map((c: any) => ({
+          id: c.id,
+          name: c.pushName || c.verifiedName || c.name || c.id?.split('@')[0] || '',
+          phone: c.id?.split('@')[0] || '',
+          profilePictureUrl: c.profilePictureUrl || null,
+        }));
+    }
+
+    return [];
+  }
+
   async setWebhook(instanceName: string, url: string) {
     return this.request('POST', `webhook/set/${instanceName}`, {
       url,
