@@ -109,13 +109,19 @@ services:
         condition: any
       labels:
         - "traefik.enable=true"
+        # --- API router ---
         - "traefik.http.routers.crm-api.rule=Host(`atendimento.andrelustosaadvogados.com.br`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.crm-api.service=crm-api"
+        - "traefik.http.routers.crm-api.priority=100"
         - "traefik.http.middlewares.strip-api.stripprefix.prefixes=/api"
         - "traefik.http.routers.crm-api.middlewares=strip-api"
         - "traefik.http.services.crm-api.loadbalancer.server.port=3001"
         - "traefik.http.routers.crm-api.entrypoints=websecure"
         - "traefik.http.routers.crm-api.tls.certresolver=letsencrypt"
+        # --- WebSocket router ---
         - "traefik.http.routers.crm-ws.rule=Host(`atendimento.andrelustosaadvogados.com.br`) && PathPrefix(`/socket.io`)"
+        - "traefik.http.routers.crm-ws.service=crm-ws"
+        - "traefik.http.routers.crm-ws.priority=100"
         - "traefik.http.services.crm-ws.loadbalancer.server.port=3001"
         - "traefik.http.routers.crm-ws.entrypoints=websecure"
         - "traefik.http.routers.crm-ws.tls.certresolver=letsencrypt"
