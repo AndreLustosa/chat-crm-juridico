@@ -54,7 +54,7 @@ services:
 
   # ------ NestJS Core API ------
   crm-api:
-    image: lexcrm-api:latest
+    image: ghcr.io/andrelustosa/chat-crm-juridico-api:master
     build: 
       context: ..
       dockerfile: infra/Dockerfile.backend
@@ -77,7 +77,7 @@ services:
 
   # ------ NestJS Worker (Mídias e IA) ------
   crm-worker:
-    image: lexcrm-worker:latest
+    image: ghcr.io/andrelustosa/chat-crm-juridico-worker:master
     build: 
       context: ..
       dockerfile: infra/Dockerfile.backend
@@ -104,7 +104,7 @@ services:
 
   # ------ Next.js Frontend ------
   crm-web:
-    image: lexcrm-web:latest
+    image: ghcr.io/andrelustosa/chat-crm-juridico-web:master
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
