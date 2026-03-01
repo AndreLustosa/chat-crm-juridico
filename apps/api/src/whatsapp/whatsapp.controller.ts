@@ -58,4 +58,10 @@ export class WhatsappController {
   async fetchContacts(@Param('name') name: string) {
     return this.whatsappService.fetchContacts(name);
   }
+
+  @Post('instances/:name/sync')
+  async syncContacts(@Param('name') name: string, @Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    return this.whatsappService.syncContacts(name, tenantId);
+  }
 }

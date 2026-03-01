@@ -4,6 +4,12 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ChatGateway } from '../gateway/chat.gateway';
 
+interface EvolutionWebhookPayload {
+  event: string;
+  instanceId: string;
+  data: any;
+}
+
 @Injectable()
 export class EvolutionService {
   private readonly logger = new Logger(EvolutionService.name);
@@ -15,24 +21,29 @@ export class EvolutionService {
     @InjectQueue('ai-jobs') private aiQueue: Queue,
   ) {}
 
-  async handleMessagesUpsert(payload: any) {
+  async handleMessagesUpsert(payload: EvolutionWebhookPayload) {
     this.logger.log(`Recebendo webhook: ${JSON.stringify(payload)}`);
-    // Basic array or single object support
-    const messages = Array.isArray(payload?.data?.messages) ? payload.data.messages : [payload?.data];
-    
+    const dataPayload = payload?.data as any;
+    const messages = Array.isArray(dataPayload?.messages)
+      ? (dataPayload.messages as any[])
+      : [dataPayload];
+
     for (const data of messages) {
       if (!data) continue;
-      const key = data.key;
-      if (!key || key.fromMe) continue; // Ignorar mensagens enviadas pelo próprio bot se for receive handler
+      const key = data.key as any;
+      if (!key || key.fromMe) continue;
 
-      const remoteJid = key.remoteJid; // ex: 5511999999999@s.whatsapp.net
-      if (!remoteJid || remoteJid.includes('@g.us')) continue; // Ignora grupos inicial
+      const remoteJid = key.remoteJid as string;
+      if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = remoteJid.split('@')[0];
-      const pushName = data.pushName || 'Desconhecido';
-      const externalMessageId = key.id;
-      const messageContent = data.message?.conversation || data.message?.extendedTextMessage?.text || '';
-      const messageType = data.messageType || 'text';
+      const pushName = (data.pushName as string) || 'Desconhecido';
+      const externalMessageId = key.id as string;
+      const messageContent =
+        (data.message?.conversation as string) ||
+        (data.message?.extendedTextMessage?.text as string) ||
+        '';
+      const messageType = (data.messageType as string) || 'text';
 
       // 1. Upsert Lead
       const lead = await this.prisma.lead.upsert({
@@ -43,28 +54,42 @@ export class EvolutionService {
           name: pushName,
           origin: 'whatsapp',
           stage: 'NOVO',
-        }
+        },
       });
 
       // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
-         where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' }
+        where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' },
       });
       if (!conv) {
-         conv = await this.prisma.conversation.create({
-           data: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO', external_id: remoteJid }
-         });
+        conv = await this.prisma.conversation.create({
+          data: {
+            lead_id: lead.id,
+            channel: 'whatsapp',
+            status: 'ABERTO',
+            external_id: remoteJid,
+          },
+        });
       }
 
       // 3. Insert Message (idempotent)
-      const existingMsg = await this.prisma.message.findUnique({ where: { external_message_id: externalMessageId } });
+      const existingMsg = await this.prisma.message.findUnique({
+        where: { external_message_id: externalMessageId },
+      });
       if (existingMsg) {
         this.logger.log(`Mensagem duplicada ignorada: ${externalMessageId}`);
         continue;
       }
 
       let msgType = 'text';
-      if (['imageMessage', 'audioMessage', 'documentMessage', 'videoMessage'].includes(messageType)) {
+      if (
+        [
+          'imageMessage',
+          'audioMessage',
+          'documentMessage',
+          'videoMessage',
+        ].includes(messageType)
+      ) {
         msgType = messageType.replace('Message', '');
       }
 
@@ -75,14 +100,14 @@ export class EvolutionService {
           type: msgType,
           text: messageContent,
           external_message_id: externalMessageId,
-          status: 'recebido'
-        }
+          status: 'recebido',
+        },
       });
 
       // Update Convo last message
       await this.prisma.conversation.update({
         where: { id: conv.id },
-        data: { last_message_at: new Date() }
+        data: { last_message_at: new Date() },
       });
 
       // Emit real-time events via WebSocket
@@ -91,22 +116,63 @@ export class EvolutionService {
 
       // 4. Se mídia, enfileira download
       if (msgType !== 'text') {
-        const mediaData = data.message?.[messageType];
+        const mediaData = (data.message as any)?.[messageType];
         await this.mediaQueue.add('download_media', {
           message_id: msg.id,
           media_data: mediaData,
           remote_jid: remoteJid,
-          msg_id: externalMessageId
+          msg_id: externalMessageId,
         });
       }
 
       // 5. Se AI_Mode ativo, agenda job para a IA responder
       if (conv.ai_mode && !conv.assigned_user_id) {
         await this.aiQueue.add('process_ai_response', {
-           conversation_id: conv.id,
-           lead_id: lead.id
+          conversation_id: conv.id,
+          lead_id: lead.id,
         });
       }
+    }
+  }
+
+  async handleContactsUpsert(payload: EvolutionWebhookPayload) {
+    this.logger.log(`Recebendo webhook de contatos: ${JSON.stringify(payload)}`);
+    const contacts = Array.isArray(payload?.data)
+      ? (payload.data as any[])
+      : [payload?.data as any];
+
+    for (const data of contacts) {
+      if (!data) continue;
+
+      const remoteJid = (data.id as string) || (data.remoteJid as string);
+      if (!remoteJid || remoteJid.includes('@g.us')) continue;
+
+      const phone = remoteJid.split('@')[0];
+      const name =
+        (data.pushName as string) ||
+        (data.name as string) ||
+        (data.verifiedName as string) ||
+        'Desconhecido';
+
+      const existingLead = await this.prisma.lead.findUnique({
+        where: { phone },
+      });
+
+      await this.prisma.lead.upsert({
+        where: { phone },
+        update: {
+          name: name,
+        },
+        create: {
+          phone,
+          name: name,
+          origin: 'whatsapp',
+          stage: 'NOVO',
+          tenant_id: existingLead?.tenant_id || payload.instanceId || null,
+        },
+      });
+
+      this.logger.log(`Contato sincronizado via webhook: ${phone} (${name})`);
     }
   }
 }

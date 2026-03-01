@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
+import { LeadsService } from '../leads/leads.service';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
   
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(
+    private readonly settingsService: SettingsService,
+    private readonly leadsService: LeadsService,
+  ) {}
 
   private normalizeUrl(url: string): string {
     if (!url) return '';
@@ -34,9 +38,18 @@ export class WhatsappService {
         },
         body: body ? JSON.stringify(body) : undefined,
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(
+          `Erro Evolution API (${path}) - Status: ${response.status} - Resposta: ${errorText}`,
+        );
+        return { statusCode: response.status, error: errorText };
+      }
+
       return await response.json();
     } catch (e) {
-      this.logger.error(`Erro na requisição Evolution API (${path}): ${e}`);
+      this.logger.error(`Exceção na requisição Evolution API (${path}): ${e}`);
       throw e;
     }
   }
@@ -204,20 +217,99 @@ export class WhatsappService {
         'CHATS_UPSERT',
         'CHATS_UPDATE',
         'CHATS_DELETE',
+        'CONTACTS_UPSERT',
+        'CONTACTS_UPDATE',
+        'CONTACTS_SET',
       ],
     });
   }
 
   async fetchContacts(instanceName: string) {
-    const data = await this.request('GET', `chat/fetchContacts/${instanceName}`);
-    this.logger.log(`Evolution API Contacts Response (Instance: ${instanceName}): ${JSON.stringify(data).substring(0, 500)}...`);
+    try {
+      // 1. Tenta o endpoint principal da v2 (Chat)
+      let data = await this.request('GET', `chat/fetchContacts/${instanceName}`);
+
+      // 2. Se falhar, tenta o fallback (Contact)
+      if (
+        !data ||
+        (data as any).statusCode === 404 ||
+        (data as any).error ||
+        !((data as any).data || (Array.isArray(data) && data.length > 0))
+      ) {
+        this.logger.log(
+          `chat/fetchContacts indisponível para ${instanceName}, tentando contact/find...`,
+        );
+        data = await this.request('GET', `contact/find/${instanceName}`);
+      }
+
+      // 3. Terceira tentativa (v2 específica às vezes usa contact/fetchContacts)
+      if (
+        !data ||
+        (data as any).statusCode === 404 ||
+        (data as any).error ||
+        !((data as any).data || (Array.isArray(data) && data.length > 0))
+      ) {
+        this.logger.log(
+          `contact/find indisponível para ${instanceName}, tentando contact/fetchContacts...`,
+        );
+        data = await this.request(
+          'GET',
+          `contact/fetchContacts/${instanceName}`,
+        );
+      }
+
+      this.logger.log(
+        `Evolution API Contacts Response (Instance: ${instanceName}): ${JSON.stringify(
+          data,
+        ).substring(0, 500)}...`,
+      );
+
+      if (!data || (data as any).statusCode >= 400 || (data as any).error) {
+        this.logger.error(
+          `Falha definitiva ao buscar contatos para ${instanceName}: ${JSON.stringify(
+            data,
+          )}`,
+        );
+        return { data: [] };
+      }
+
+      return data;
+    } catch (e) {
+      this.logger.error(`Erro ao buscar contatos para ${instanceName}: ${e}`);
+      return { data: [] };
+    }
+  }
+
+  async syncContacts(instanceName: string, tenantId?: string) {
+    const rawData = await this.fetchContacts(instanceName);
+    const contacts = (rawData as any).data || (rawData as any).instances || (Array.isArray(rawData) ? rawData : []);
     
-    // Se a Evolution retornar erro ou não houver dados, retorna array vazio para evitar quebra
-    if (!data || (data as any).statusCode === 401 || (data as any).error) {
-       this.logger.error(`Falha ao buscar contatos para ${instanceName}: ${JSON.stringify(data)}`);
-       return { data: [] };
+    if (!Array.isArray(contacts)) {
+      return { total: 0, updated: 0, error: 'Resposta inválida da Evolution API' };
     }
 
-    return data;
+    let updatedCount = 0;
+    for (const contact of contacts) {
+      try {
+        const fullId = contact.id || contact.jid || '';
+        const phone = fullId.split('@')[0] || contact.number || contact.phone || '';
+        
+        if (!phone) continue;
+
+        await this.leadsService.upsert({
+          name: (contact.name || contact.pushName || contact.verifiedName || 'Sem Nome') as string,
+          phone: phone as string,
+          origin: 'whatsapp',
+          tenant: tenantId ? { connect: { id: tenantId } } : undefined,
+          stage: 'NOVO', // Valor padrão para novos contatos sincronizados
+        });
+        
+        updatedCount++;
+      } catch (e) {
+        this.logger.error(`Erro ao sincronizar contato ${contact.id}: ${e.message}`);
+      }
+    }
+
+    return { total: contacts.length, synced: updatedCount };
   }
 }

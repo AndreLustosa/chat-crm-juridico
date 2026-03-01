@@ -7,12 +7,14 @@ export class EvolutionController {
 
   @Post()
   @HttpCode(200)
-  async handleWebhook(@Body() payload: any, @Headers() headers: any) {
+  async handleWebhook(@Body() payload: any) {
     // Basic support for different event types
-    const eventType = payload.event;
+    const eventType = payload.event as string;
     
     if (eventType === 'messages.upsert') {
       await this.evolutionService.handleMessagesUpsert(payload);
+    } else if (eventType === 'contacts.upsert') {
+      await this.evolutionService.handleContactsUpsert(payload);
     }
     // Ack the webhook quickly
     return { received: true };

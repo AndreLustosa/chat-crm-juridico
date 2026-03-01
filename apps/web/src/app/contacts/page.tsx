@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, User, MessageSquare, Phone, Loader2 } from 'lucide-react';
+import { Search, User, MessageSquare, Phone, Loader2, RefreshCw } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import api from '@/lib/api';
 
@@ -20,65 +20,67 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchAllContacts = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/leads');
+      const leads = response.data;
+      
+      const mappedContacts: Contact[] = leads.map((lead: any) => ({
+        id: lead.id,
+        name: lead.name || 'Sem Nome',
+        phone: lead.phone,
+        email: lead.email || '-',
+        conversations: lead._count?.conversations || 0,
+        lastMessage: lead.conversations?.[0]?.messages?.[0]?.text || '-',
+        origin: lead.origin || 'crm',
+      }));
+
+      setContacts(mappedContacts);
+    } catch (error) {
+      console.error('Erro ao carregar contatos:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchAllContacts = async () => {
-      try {
-        setLoading(true);
-        // 1. Busca instâncias ativas
-        const instancesResponse = await api.get('/whatsapp/instances');
-        const activeInstances = instancesResponse.data.filter((inst: any) => inst.status === 'open');
-
-        // 2. Busca contatos de cada instância ativa
-        const allContacts: Contact[] = [];
-        
-        await Promise.all(activeInstances.map(async (inst: any) => {
-          try {
-            const contactsResponse = await api.get(`/whatsapp/instances/${inst.instanceName}/contacts`);
-            
-            // Extração extra-robusta para Evolution v2
-            // Pode vir como: { data: [...] }, { instances: [...] }, ou o próprio array
-            const responseData = contactsResponse.data;
-            const rawContacts = responseData?.data || responseData?.instances || (Array.isArray(responseData) ? responseData : []);
-            
-            if (Array.isArray(rawContacts)) {
-              rawContacts.forEach((rc: any) => {
-                // Tenta extrair o telefone de várias formas (v1 vs v2)
-                const fullId = rc.id || rc.jid || '';
-                const phone = fullId.split('@')[0] || rc.number || rc.phone || '';
-                
-                if (!phone) return;
-
-                // Evita duplicatas baseadas no telefone se vierem da mesma instância
-                allContacts.push({
-                  id: fullId || `${inst.instanceName}-${phone}`,
-                  name: rc.name || rc.pushName || rc.verifiedName || 'Sem Nome',
-                  phone: phone,
-                  email: rc.email || '-',
-                  conversations: 0,
-                  lastMessage: '-',
-                  origin: 'whatsapp',
-                  instanceName: inst.instanceName
-                });
-              });
-            } else {
-              console.warn(`Resposta de contatos da instância ${inst.instanceName} não é um array:`, responseData);
-            }
-          } catch (e) {
-            console.error(`Erro ao buscar contatos da instância ${inst.instanceName}:`, e);
-          }
-        }));
-
-        setContacts(allContacts);
-      } catch (error) {
-        console.error('Erro ao carregar contatos:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchAllContacts();
   }, []);
+
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      // 1. Busca instâncias ativas para sincronizar
+      const instancesResponse = await api.get('/whatsapp/instances');
+      const activeInstances = instancesResponse.data.filter((inst: any) => inst.status === 'open');
+
+      if (activeInstances.length === 0) {
+        alert('Nenhuma instância do WhatsApp conectada para sincronizar.');
+        return;
+      }
+
+      // 2. Dispara sincronização para cada instância
+      await Promise.all(activeInstances.map(async (inst: any) => {
+        try {
+          await api.post(`/whatsapp/instances/${inst.instanceName}/sync`);
+        } catch (e) {
+          console.error(`Erro ao sincronizar instância ${inst.instanceName}:`, e);
+        }
+      }));
+
+      // 3. Recarrega a lista
+      await fetchAllContacts();
+      alert('Sincronização concluída!');
+    } catch (error) {
+      console.error('Erro na sincronização:', error);
+      alert('Erro ao sincronizar contatos.');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const filteredContacts = contacts.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -106,15 +108,30 @@ export default function ContactsPage() {
             </p>
           </div>
 
-          <div className="relative w-80 group">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-            <input 
-              type="text" 
-              placeholder="Buscar por nome ou telefone..." 
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-[13px] focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-            />
+          <div className="flex items-center gap-4">
+            <div className="relative w-80 group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Buscar por nome ou telefone..." 
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-[13px] focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+              />
+            </div>
+
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground rounded-xl text-[13px] font-semibold hover:bg-primary/90 transition-all disabled:opacity-50 shadow-sm shadow-primary/20"
+            >
+              {syncing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              {syncing ? 'Sincronizando...' : 'Sincronizar com WhatsApp'}
+            </button>
           </div>
         </header>
 
