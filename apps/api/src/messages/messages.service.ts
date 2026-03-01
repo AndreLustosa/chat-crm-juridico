@@ -159,6 +159,87 @@ export class MessagesService {
     return msgWithMedia;
   }
 
+  async sendFile(
+    conversationId: string,
+    file: Express.Multer.File,
+    publicApiUrl: string,
+    caption?: string,
+  ) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: { lead: true },
+    });
+    if (!convo || !convo.lead) throw new BadRequestException('Conversa inválida');
+
+    const mime = file.mimetype;
+    let mediaType: 'image' | 'document' | 'video';
+    if (mime.startsWith('image/')) mediaType = 'image';
+    else if (mime.startsWith('video/')) mediaType = 'video';
+    else mediaType = 'document';
+
+    const tempExtId = `out_file_${Date.now()}`;
+    const msg = await this.prisma.message.create({
+      data: {
+        conversation_id: convo.id,
+        direction: 'out',
+        type: mediaType,
+        text: caption || null,
+        external_message_id: tempExtId,
+        status: 'enviado',
+      },
+    });
+
+    const ext = mime.split('/')[1]?.split(';')[0] || 'bin';
+    const s3Key = `media/${msg.id}.${ext}`;
+    await this.s3.uploadBuffer(s3Key, file.buffer, mime);
+
+    await this.prisma.media.create({
+      data: {
+        message_id: msg.id,
+        s3_key: s3Key,
+        mime_type: mime,
+        size: file.size,
+        original_name: file.originalname || null,
+      },
+    });
+
+    const mediaUrl = `${publicApiUrl}/media/${msg.id}`;
+    this.logger.log(`[FILE] Enviando ${mediaType} via Evolution: ${mediaUrl}`);
+    try {
+      const result = await this.whatsapp.sendMedia(
+        convo.lead.phone,
+        mediaType,
+        mediaUrl,
+        caption,
+        convo.instance_name || undefined,
+      );
+      const extId = result?.key?.id;
+      if (extId) {
+        await this.prisma.message.update({
+          where: { id: msg.id },
+          data: { external_message_id: extId },
+        });
+      }
+    } catch (e) {
+      this.logger.warn(`Falha ao enviar arquivo via WhatsApp: ${e.message}`);
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: convo.id },
+      data: { last_message_at: new Date() },
+    });
+
+    const msgWithMedia = await this.prisma.message.findUnique({
+      where: { id: msg.id },
+      include: { media: true },
+    });
+
+    this.chatGateway.emitNewMessage(convo.id, msgWithMedia);
+    this.chatGateway.emitConversationsUpdate(null);
+
+    return msgWithMedia;
+  }
+
   async transcribeAudio(messageId: string): Promise<{ transcription: string }> {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },

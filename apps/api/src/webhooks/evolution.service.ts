@@ -46,7 +46,7 @@ export class EvolutionService {
     for (const data of messages) {
       if (!data) continue;
       const key = data.key as any;
-      if (!key || key.fromMe) continue;
+      if (!key) continue;
 
       const remoteJid = key.remoteJid as string;
       const remoteJidAlt = key.remoteJidAlt as string;
@@ -120,14 +120,15 @@ export class EvolutionService {
         msgType = messageType.replace('Message', '');
       }
 
+      const isOutgoing = key.fromMe === true;
       const msg = await this.prisma.message.create({
         data: {
           conversation_id: conv.id,
-          direction: 'in',
+          direction: isOutgoing ? 'out' : 'in',
           type: msgType,
           text: messageContent,
           external_message_id: externalMessageId,
-          status: 'recebido',
+          status: isOutgoing ? 'enviado' : 'recebido',
         },
       });
 
@@ -154,8 +155,8 @@ export class EvolutionService {
         });
       }
 
-      // 5. Se AI_Mode ativo, agenda job para a IA responder
-      if (conv.ai_mode && !conv.assigned_user_id) {
+      // 5. Se AI_Mode ativo e mensagem recebida (não enviada), agenda job para a IA responder
+      if (!isOutgoing && conv.ai_mode && !conv.assigned_user_id) {
         await this.aiQueue.add('process_ai_response', {
           conversation_id: conv.id,
           lead_id: lead.id,
@@ -258,6 +259,45 @@ export class EvolutionService {
             data: { last_message_at: lm.messageTimestamp ? new Date(lm.messageTimestamp * 1000) : new Date() }
           });
         }
+      }
+    }
+  }
+
+  async handleMessagesUpdate(payload: EvolutionWebhookPayload) {
+    this.logger.log(`[WEBHOOK] messages.update received`);
+    const updates = Array.isArray(payload?.data) ? payload.data : [payload?.data];
+
+    for (const update of updates) {
+      if (!update) continue;
+      const externalMessageId: string = update.key?.id || update.id;
+      if (!externalMessageId) continue;
+
+      // Map Evolution status codes to internal status
+      // 0=ERROR, 1=PENDING, 2=SERVER_ACK(enviado), 3=DELIVERY_ACK(entregue), 4=READ(lido), 5=PLAYED(ouvido)
+      const statusCode: number = update.update?.status ?? update.status ?? -1;
+      let newStatus: string | null = null;
+      if (statusCode === 2) newStatus = 'enviado';
+      else if (statusCode === 3) newStatus = 'entregue';
+      else if (statusCode === 4 || statusCode === 5) newStatus = 'lido';
+
+      if (!newStatus) continue;
+
+      try {
+        const msg = await this.prisma.message.findUnique({
+          where: { external_message_id: externalMessageId },
+        });
+        if (!msg) continue;
+
+        const updated = await this.prisma.message.update({
+          where: { id: msg.id },
+          data: { status: newStatus },
+          include: { media: true },
+        });
+
+        this.chatGateway.emitMessageUpdate(msg.conversation_id, updated);
+        this.logger.log(`[WEBHOOK] msg ${externalMessageId} status → ${newStatus}`);
+      } catch (e) {
+        this.logger.warn(`[WEBHOOK] Falha ao atualizar status de ${externalMessageId}: ${e.message}`);
       }
     }
   }

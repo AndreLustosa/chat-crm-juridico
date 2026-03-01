@@ -2,13 +2,12 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Send, Bot, Download, Mic, FileText } from 'lucide-react';
+import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
-
 import { formatPhone } from '@/lib/utils';
 
 function getWsUrl(): string {
@@ -20,16 +19,34 @@ function getWsUrl(): string {
   return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
+function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
+  if (!isOut) return null;
+  const cls = 'text-primary-foreground/60';
+  if (status === 'lido') return <Eye size={12} className={cls} />;
+  if (status === 'entregue') return <CheckCheck size={12} className={cls} />;
+  return <Check size={12} className={cls} />;
+}
+
 export default function ChatPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
   const [lead, setLead] = useState<any>(null);
   const [convoId, setConvoId] = useState<string | null>(null);
+  const [convoStatus, setConvoStatus] = useState<string>('ABERTO');
+  const [aiMode, setAiMode] = useState(false);
   const [sending, setSending] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [docPreview, setDocPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({});
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
   const getDocLabel = (mime: string, name?: string) => {
     if (name) { const p = name.split('.'); if (p.length > 1) return p.pop()!.toUpperCase(); }
@@ -41,6 +58,12 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
     };
     return map[mime] || 'FILE';
+  };
+
+  const isEmojiOnly = (text: string): boolean => {
+    const t = text.trim();
+    if (!t) return false;
+    return /^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\s)+$/u.test(t);
   };
 
   const handleDocDownload = async (url: string, name: string) => {
@@ -61,126 +84,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       }
     } catch (e: any) {
       if (e.name !== 'AbortError') console.error('Erro ao baixar documento', e);
-    }
-  };
-
-  const handleTranscribe = async (msgId: string) => {
-    setTranscribing(prev => ({ ...prev, [msgId]: true }));
-    try {
-      const res = await api.post(`/messages/${msgId}/transcribe`);
-      setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, text: res.data.transcription } : m));
-    } catch (e) {
-      console.error('Erro ao transcrever áudio', e);
-    } finally {
-      setTranscribing(prev => ({ ...prev, [msgId]: false }));
-    }
-  };
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
-
-    const wsUrl = getWsUrl();
-
-    const fetchData = async () => {
-       try {
-         const convoRes = await api.get(`/conversations/lead/${params.id}`);
-         if (convoRes.data && convoRes.data.length > 0) {
-           const convo = convoRes.data[0];
-           setLead(convo.lead);
-           setConvoId(convo.id);
-           setMessages(convo.messages || []);
-
-           console.log('[SOCKET] Connecting to ChatRoom:', convo.id, 'at', wsUrl);
-           socketRef.current = io(wsUrl, {
-             path: '/api/socket.io/',
-             transports: ['polling', 'websocket'],
-             reconnection: true,
-             reconnectionAttempts: Infinity,
-             reconnectionDelay: 1000,
-             timeout: 10000,
-           });
-
-           socketRef.current.on('connect', () => {
-             console.log('[SOCKET] ChatRoom Connected ID:', socketRef.current?.id);
-             socketRef.current?.emit('join_conversation', convo.id);
-           });
-
-           socketRef.current.on('disconnect', () => {
-             console.log('[SOCKET] ChatRoom Disconnected');
-           });
-
-           socketRef.current.on('connect_error', (err) => {
-             console.error('[SOCKET] ChatRoom error:', err);
-           });
-
-            socketRef.current.on('newMessage', (msg: any) => {
-              console.log('[SOCKET] New message received:', msg);
-              // Use functional update to always have the latest messages state
-              setMessages(prev => {
-                const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
-                if (exists) return prev;
-                return [...prev, msg];
-              });
-            });
-
-            socketRef.current.on('mediaReady', (updatedMsg: any) => {
-              console.log('[SOCKET] mediaReady received:', updatedMsg.id);
-              setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? updatedMsg : m));
-            });
-
-            socketRef.current.on('joined_room', (data: any) => {
-              console.log('[SOCKET] Confirmed joined room:', data);
-            });
-         }
-       } catch (e: any) {
-         console.error(e);
-         if (e.response?.status === 401) {
-           localStorage.removeItem('token');
-           router.push('/login');
-         }
-       }
-    };
-
-    fetchData();
-
-    return () => {
-      socketRef.current?.disconnect();
-    };
-  }, [params.id, router]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  const handleSend = async () => {
-    if (!text.trim() || !convoId || sending) return;
-    const msgText = text;
-    setSending(true);
-    setText('');
-    try {
-      const res = await api.post('/messages/send', { conversationId: convoId, text: msgText });
-      // Exibição imediata: adiciona a mensagem retornada pelo backend
-      if (res.data?.id) {
-        setMessages(prev => {
-          if (prev.some((m: any) => m.id === res.data.id)) return prev;
-          return [...prev, res.data];
-        });
-      }
-      inputRef.current?.focus();
-    } catch (e) {
-      console.error('Falha ao enviar mensagem', e);
-      setText(msgText); // Restaura o texto em caso de erro
-    } finally {
-      setSending(false);
     }
   };
 
@@ -211,18 +114,165 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     }
   };
 
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const handleTranscribe = async (msgId: string) => {
+    setTranscribing(prev => ({ ...prev, [msgId]: true }));
+    try {
+      const res = await api.post(`/messages/${msgId}/transcribe`);
+      setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, text: res.data.transcription } : m));
+    } catch (e) {
+      console.error('Erro ao transcrever áudio', e);
+    } finally {
+      setTranscribing(prev => ({ ...prev, [msgId]: false }));
+    }
+  };
+
+  const handleToggleAiMode = async () => {
+    if (!convoId) return;
+    const newMode = !aiMode;
+    try {
+      await api.patch(`/conversations/${convoId}/ai-mode`, { ai_mode: newMode });
+      setAiMode(newMode);
+    } catch (e) {
+      console.error('Erro ao alterar modo IA', e);
+    }
+  };
+
+  const handleCloseConvo = async () => {
+    if (!convoId || convoStatus === 'FECHADO') return;
+    if (!confirm('Fechar esta conversa?')) return;
+    try {
+      await api.patch(`/conversations/${convoId}/close`);
+      setConvoStatus('FECHADO');
+    } catch (e) {
+      console.error('Erro ao fechar conversa', e);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !convoId) return;
+    e.target.value = '';
+    setUploadingFile(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('conversationId', convoId);
+      const res = await api.post('/messages/send-file', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (res.data?.id) {
+        setMessages(prev => {
+          if (prev.some((m: any) => m.id === res.data.id)) return prev;
+          return [...prev, res.data];
+        });
+      }
+    } catch (e) {
+      console.error('Falha ao enviar arquivo', e);
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!text.trim() || !convoId || sending) return;
+    const msgText = text;
+    setSending(true);
+    setText('');
+    try {
+      const res = await api.post('/messages/send', { conversationId: convoId, text: msgText });
+      if (res.data?.id) {
+        setMessages(prev => {
+          if (prev.some((m: any) => m.id === res.data.id)) return prev;
+          return [...prev, res.data];
+        });
+      }
+      inputRef.current?.focus();
+    } catch (e) {
+      console.error('Falha ao enviar mensagem', e);
+      setText(msgText);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Socket + data fetch ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) { router.push('/login'); return; }
+
+    const wsUrl = getWsUrl();
+
+    const fetchData = async () => {
+      try {
+        const convoRes = await api.get(`/conversations/lead/${params.id}`);
+        if (convoRes.data && convoRes.data.length > 0) {
+          const convo = convoRes.data[0];
+          setLead(convo.lead);
+          setConvoId(convo.id);
+          setConvoStatus(convo.status || 'ABERTO');
+          setAiMode(!!convo.ai_mode);
+          setMessages(convo.messages || []);
+
+          socketRef.current = io(wsUrl, {
+            path: '/api/socket.io/',
+            transports: ['polling', 'websocket'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            timeout: 10000,
+          });
+
+          socketRef.current.on('connect', () => {
+            socketRef.current?.emit('join_conversation', convo.id);
+          });
+
+          socketRef.current.on('newMessage', (msg: any) => {
+            setMessages(prev => {
+              const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
+              if (exists) return prev;
+              return [...prev, msg];
+            });
+          });
+
+          socketRef.current.on('messageUpdate', (updatedMsg: any) => {
+            setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? { ...m, status: updatedMsg.status } : m));
+          });
+
+          socketRef.current.on('mediaReady', (updatedMsg: any) => {
+            setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? updatedMsg : m));
+          });
+        }
+      } catch (e: any) {
+        console.error(e);
+        if (e.response?.status === 401) {
+          localStorage.removeItem('token');
+          router.push('/login');
+        }
+      }
+    };
+
+    fetchData();
+    return () => { socketRef.current?.disconnect(); };
+  }, [params.id, router]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   const formatTime = (dateStr?: string) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   };
 
   const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
-
-  const isEmojiOnly = (text: string): boolean => {
-    const t = text.trim();
-    if (!t) return false;
-    return /^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\s)+$/u.test(t);
-  };
+  const isClosed = convoStatus === 'FECHADO';
 
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
@@ -242,14 +292,33 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               <h3 className="font-bold text-lg leading-tight">{lead?.name || formatPhone(lead?.phone) || 'Carregando...'}</h3>
               <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-1">
                 WHATSAPP <span className="mx-1">•</span> {formatPhone(lead?.phone) || ''}
+                {isClosed && <span className="ml-2 text-red-400">• FECHADA</span>}
               </div>
             </div>
           </div>
-          <div className="flex gap-3 items-center">
-            <button className="px-4 py-2 text-sm font-semibold text-primary bg-primary/10 border border-primary/20 rounded-xl transition-colors flex items-center gap-2 hover:bg-primary/20">
-              <Bot size={16} />
-              IA Ativa
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={handleToggleAiMode}
+              title={aiMode ? 'Desativar IA' : 'Ativar IA'}
+              className={`px-4 py-2 text-sm font-semibold border rounded-xl transition-colors flex items-center gap-2 ${
+                aiMode
+                  ? 'text-primary bg-primary/10 border-primary/20 hover:bg-primary/20'
+                  : 'text-muted-foreground bg-muted/30 border-border hover:bg-muted/60'
+              }`}
+            >
+              {aiMode ? <Bot size={16} /> : <BotOff size={16} />}
+              {aiMode ? 'IA Ativa' : 'IA Inativa'}
             </button>
+            {!isClosed && (
+              <button
+                onClick={handleCloseConvo}
+                title="Fechar conversa"
+                className="px-3 py-2 text-sm font-semibold text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl hover:bg-red-500/20 transition-colors flex items-center gap-2"
+              >
+                <XCircle size={16} />
+                Fechar
+              </button>
+            )}
           </div>
         </header>
 
@@ -373,9 +442,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                       ) : (
                         <p className="text-sm italic opacity-70">📎 Anexo: {msg.type}</p>
                       )}
-                      <div className={`text-[10px] mt-2 flex justify-end gap-2 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
+                      <div className={`text-[10px] mt-2 flex justify-end items-center gap-1.5 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
                         <span>{formatTime(msg.created_at)}</span>
-                        <span>• {msg.status}</span>
+                        <StatusIcon status={msg.status} isOut={isOut} />
                       </div>
                     </div>
                   </div>
@@ -387,45 +456,73 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
         {/* Input */}
         <footer className="p-6 bg-background shrink-0">
-          <div className="max-w-4xl mx-auto flex gap-3 items-center">
-            <input
-              ref={inputRef}
-              type="text"
-              value={text}
-              onChange={e => setText(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Digite sua mensagem..."
-              disabled={sending}
-              className="flex-1 bg-card border border-border rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground disabled:opacity-50"
-            />
-            {convoId && !text.trim() && (
-              <AudioRecorder
-                conversationId={convoId}
-                onSent={(msg) => {
-                  setMessages((prev) => {
-                    if (prev.some((m: any) => m.id === msg.id)) return prev;
-                    return [...prev, msg];
-                  });
-                }}
+          {isClosed ? (
+            <div className="max-w-4xl mx-auto text-center text-sm text-muted-foreground py-3 border border-border rounded-xl bg-card/50">
+              Conversa encerrada. Não é possível enviar mensagens.
+            </div>
+          ) : (
+            <div className="max-w-4xl mx-auto flex gap-3 items-center">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingFile}
+                title="Enviar arquivo"
+                className="p-3 rounded-xl bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50 shrink-0"
+              >
+                {uploadingFile ? (
+                  <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Paperclip size={20} />
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                className="hidden"
+                onChange={handleFileSelect}
               />
-            )}
-            <button
-              onClick={handleSend}
-              disabled={!text.trim() || sending}
-              className="bg-gradient-to-r from-primary to-ring p-4 rounded-xl shadow-lg disabled:opacity-50 hover:-translate-y-1 transition-transform"
-            >
-              <Send size={20} className="text-primary-foreground" />
-            </button>
-          </div>
+
+              <input
+                ref={inputRef}
+                type="text"
+                value={text}
+                onChange={e => setText(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Digite sua mensagem..."
+                disabled={sending}
+                className="flex-1 bg-card border border-border rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground disabled:opacity-50"
+              />
+
+              {convoId && !text.trim() && (
+                <AudioRecorder
+                  conversationId={convoId}
+                  onSent={(msg) => {
+                    setMessages((prev) => {
+                      if (prev.some((m: any) => m.id === msg.id)) return prev;
+                      return [...prev, msg];
+                    });
+                  }}
+                />
+              )}
+
+              <button
+                onClick={handleSend}
+                disabled={!text.trim() || sending}
+                className="bg-gradient-to-r from-primary to-ring p-4 rounded-xl shadow-lg disabled:opacity-50 hover:-translate-y-1 transition-transform shrink-0"
+              >
+                <Send size={20} className="text-primary-foreground" />
+              </button>
+            </div>
+          )}
         </footer>
       </div>
 
-      {/* Lightbox */}
+      {/* Image Lightbox */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -447,10 +544,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               </button>
               <button
                 onClick={() => setLightbox(null)}
-                className="bg-black/60 hover:bg-black/80 text-white rounded-lg p-2 transition-colors text-lg leading-none"
+                className="bg-black/60 hover:bg-black/80 text-white rounded-lg p-2 transition-colors"
                 title="Fechar"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
           </div>
@@ -467,7 +564,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             className="relative w-[92vw] h-[90vh] bg-card rounded-2xl overflow-hidden flex flex-col shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <FileText size={18} className="text-primary shrink-0" />
@@ -484,20 +580,15 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 </button>
                 <button
                   onClick={() => setDocPreview(null)}
-                  className="bg-muted hover:bg-muted/80 text-foreground rounded-lg p-2 transition-colors text-base leading-none"
+                  className="bg-muted hover:bg-muted/80 text-foreground rounded-lg p-2 transition-colors"
                   title="Fechar"
                 >
-                  ✕
+                  <X size={16} />
                 </button>
               </div>
             </div>
-            {/* Content */}
             {docPreview.mime.includes('pdf') ? (
-              <iframe
-                src={docPreview.url}
-                className="flex-1 w-full"
-                title={docPreview.name}
-              />
+              <iframe src={docPreview.url} className="flex-1 w-full" title={docPreview.name} />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-8">
                 <FileText size={64} className="text-muted-foreground/30" />

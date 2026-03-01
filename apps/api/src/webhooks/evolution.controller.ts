@@ -13,6 +13,8 @@ export class EvolutionController {
     
     if (eventType === 'messages.upsert') {
       await this.evolutionService.handleMessagesUpsert(payload);
+    } else if (eventType === 'messages.update') {
+      await this.evolutionService.handleMessagesUpdate(payload);
     } else if (eventType === 'contacts.upsert') {
       await this.evolutionService.handleContactsUpsert(payload);
     } else if (eventType === 'chats.upsert' || eventType === 'chats.set') {

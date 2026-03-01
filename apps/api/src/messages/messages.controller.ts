@@ -46,6 +46,20 @@ export class MessagesController {
     return this.messagesService.sendAudio(conversationId, file, publicApiUrl);
   }
 
+  @Post('send-file')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }))
+  sendFile(
+    @Body('conversationId') conversationId: string,
+    @Body('caption') caption: string | undefined,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ) {
+    const publicApiUrl =
+      process.env.PUBLIC_API_URL ||
+      `${(req.headers['x-forwarded-proto'] as string) || req.protocol}://${(req.headers['x-forwarded-host'] as string) || req.headers['host']}/api`;
+    return this.messagesService.sendFile(conversationId, file, publicApiUrl, caption);
+  }
+
   @Post(':id/transcribe')
   transcribeAudio(@Param('id') messageId: string) {
     return this.messagesService.transcribeAudio(messageId);

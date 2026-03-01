@@ -31,6 +31,11 @@ export class ChatGateway {
     this.server.to(conversationId).emit('newMessage', message);
   }
 
+  emitMessageUpdate(conversationId: string, message: any) {
+    this.logger.log(`[SOCKET] Emitting messageUpdate to room ${conversationId}`);
+    this.server.to(conversationId).emit('messageUpdate', message);
+  }
+
   emitConversationsUpdate(tenantId: string | null) {
     this.logger.log(`[SOCKET] Emitting inboxUpdate to all clients`);
     this.server.emit('inboxUpdate');

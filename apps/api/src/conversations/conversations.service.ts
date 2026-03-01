@@ -73,7 +73,8 @@ export class ConversationsService {
       where: { lead_id },
       orderBy: { last_message_at: 'desc' },
       include: {
-        messages: { orderBy: { created_at: 'asc' }, take: 50 }
+        lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
+        messages: { orderBy: { created_at: 'asc' }, take: 100, include: { media: true } },
       }
     });
   }
