@@ -15,6 +15,8 @@ export class EvolutionController {
       await this.evolutionService.handleMessagesUpsert(payload);
     } else if (eventType === 'contacts.upsert') {
       await this.evolutionService.handleContactsUpsert(payload);
+    } else if (eventType === 'chats.upsert' || eventType === 'chats.set') {
+      await this.evolutionService.handleChatsUpsert(payload);
     }
     // Ack the webhook quickly
     return { received: true };

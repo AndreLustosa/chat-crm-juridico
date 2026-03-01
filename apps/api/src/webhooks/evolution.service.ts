@@ -152,6 +152,65 @@ export class EvolutionService {
     }
   }
 
+  async handleChatsUpsert(payload: EvolutionWebhookPayload) {
+    this.logger.log(`Recebendo webhook de chats: ${JSON.stringify(payload)}`);
+    const dataPayload = payload?.data as any;
+    const instanceName = payload?.instanceId;
+    const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    const inboxId = inbox?.inbox_id || null;
+
+    const chats = Array.isArray(dataPayload)
+      ? (dataPayload as any[])
+      : [dataPayload];
+
+    for (const data of chats) {
+      if (!data) continue;
+
+      const remoteJid = data.remoteJid as string;
+      if (!remoteJid || remoteJid.includes('@g.us')) continue;
+
+      const phone = remoteJid.split('@')[0];
+      const pushName = (data.pushName as string) || (data.name as string) || 'Desconhecido';
+
+      // 1. Upsert Lead
+      const lead = await this.leadsService.upsert({
+        phone,
+        name: pushName,
+        origin: 'whatsapp',
+        stage: 'NOVO',
+      });
+
+      // 2. Find or Create Conversation
+      let conv = await this.prisma.conversation.findFirst({
+        where: { 
+          lead_id: lead.id, 
+          channel: 'whatsapp', 
+          status: 'ABERTO',
+          instance_name: instanceName
+        },
+      });
+
+      if (!conv) {
+        await this.prisma.conversation.create({
+          data: {
+            lead_id: lead.id,
+            channel: 'whatsapp',
+            status: 'ABERTO',
+            external_id: remoteJid,
+            inbox_id: inboxId,
+            instance_name: instanceName,
+          },
+        });
+        this.logger.log(`Nova conversa criada via chat webhook: ${phone} no setor ${inbox?.inbox?.name || 'Nenhum'}`);
+      } else if (!conv.inbox_id && inboxId) {
+        await this.prisma.conversation.update({
+          where: { id: conv.id },
+          data: { inbox_id: inboxId, instance_name: instanceName }
+        });
+      }
+    }
+  }
+
   async handleContactsUpsert(payload: EvolutionWebhookPayload) {
     this.logger.log(`Recebendo webhook de contatos: ${JSON.stringify(payload)}`);
     const contacts = Array.isArray(payload?.data)

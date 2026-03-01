@@ -330,11 +330,18 @@ export class WhatsappService {
   }
 
   async syncContacts(instanceName: string, tenantId?: string) {
+    // 0. Buscar o inbox vinculado a esta instância para marcar as conversas corretamente
+    const inbox = await (this.prisma as any).instance.findUnique({
+      where: { name: instanceName },
+      include: { inbox: true }
+    });
+    const inboxId = inbox?.inbox_id || null;
+
     // fetchContacts e fetchChats agora retornam arrays diretamente
     const contactsList = await this.fetchContacts(instanceName);
     const chatsList = await this.fetchChats(instanceName);
 
-    this.logger.log(`Sync ${instanceName}: ${contactsList.length} contatos, ${chatsList.length} chats`);
+    this.logger.log(`Sync ${instanceName}: ${contactsList.length} contatos, ${chatsList.length} chats para o setor ${inbox?.inbox?.name || 'Nenhum'}`);
 
     // Log amostra da estrutura para debug
     if (chatsList.length > 0) {
@@ -411,12 +418,14 @@ export class WhatsappService {
           stage: 'NOVO',
         });
 
-        // Cria conversa se não existir
+        // Cria conversa se não existir ou atualiza metadados se faltarem
         const existingConv = await this.prisma.conversation.findFirst({
           where: {
             lead_id: lead.id,
             channel: 'whatsapp',
             status: 'ABERTO',
+            // Se já tiver uma com o mesmo instance_name, OK. 
+            // Se não tiver instance_name, tentamos achar pelo lead_id + canal
           },
         });
 
@@ -427,6 +436,18 @@ export class WhatsappService {
               channel: 'whatsapp',
               status: 'ABERTO',
               external_id: jid,
+              instance_name: instanceName,
+              inbox_id: inboxId,
+            },
+          });
+        } else if (!existingConv.instance_name || !existingConv.inbox_id) {
+          // Garante que conversas antigas ganhem os metadados corretos durante o sync
+          await this.prisma.conversation.update({
+            where: { id: existingConv.id },
+            data: {
+              instance_name: instanceName,
+              inbox_id: inboxId,
+              external_id: jid // Garante que o JID esteja correto
             },
           });
         }
