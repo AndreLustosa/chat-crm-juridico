@@ -218,6 +218,12 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
   const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
 
+  const isEmojiOnly = (text: string): boolean => {
+    const t = text.trim();
+    if (!t) return false;
+    return /^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\s)+$/u.test(t);
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
       <Sidebar />
@@ -263,7 +269,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                         : 'bg-card border border-border rounded-2xl rounded-tl-sm'
                     }`}>
                       {msg.type === 'text' || !msg.type ? (
-                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                        isEmojiOnly(msg.text || '') ? (
+                          <p className="text-4xl leading-tight">{msg.text}</p>
+                        ) : (
+                          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                        )
                       ) : msg.type === 'audio' ? (
                         msg.media ? (
                           <div>
@@ -349,6 +359,16 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                           </div>
                         ) : (
                           <p className="text-sm italic opacity-70">📄 Documento processando...</p>
+                        )
+                      ) : msg.type === 'sticker' ? (
+                        msg.media ? (
+                          <img
+                            src={`/api/media/${msg.id}`}
+                            alt="Figurinha"
+                            className="max-w-[140px] max-h-[140px] object-contain"
+                          />
+                        ) : (
+                          <p className="text-sm italic opacity-70">🎭 Figurinha processando...</p>
                         )
                       ) : (
                         <p className="text-sm italic opacity-70">📎 Anexo: {msg.type}</p>
