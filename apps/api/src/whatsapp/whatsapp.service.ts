@@ -296,7 +296,34 @@ export class WhatsappService {
 
   async fetchChats(instanceName: string) {
     try {
-      const data = await this.request('GET', `chat/fetchChats/${instanceName}`);
+      // 1. Tenta POST /chat/findChats (v2.1.0+ com fix PR#1384: inclui contatos NÃO salvos)
+      let data = await this.request(
+        'POST',
+        `chat/findChats/${instanceName}`,
+        {},
+      );
+
+      // 2. Fallback: GET /chat/fetchChats (versões mais antigas, pode não incluir não salvos)
+      if (!data || (data as any).statusCode === 404 || (data as any).error) {
+        this.logger.log(
+          `chat/findChats (POST) indisponível para ${instanceName}, tentando chat/fetchChats (GET)...`,
+        );
+        data = await this.request('GET', `chat/fetchChats/${instanceName}`);
+      }
+
+      this.logger.log(
+        `Evolution API Chats Response (Instance: ${instanceName}): ${JSON.stringify(
+          data,
+        ).substring(0, 500)}...`,
+      );
+
+      if (!data || (data as any).statusCode >= 400 || (data as any).error) {
+        this.logger.error(
+          `Falha ao buscar chats para ${instanceName}: ${JSON.stringify(data)}`,
+        );
+        return { data: [] };
+      }
+
       return data;
     } catch (e) {
       this.logger.error(`Erro ao buscar chats para ${instanceName}: ${e}`);
@@ -316,6 +343,8 @@ export class WhatsappService {
       ? rawChats
       : (rawChats as any).data || (rawChats as any).chats || [];
 
+    this.logger.log(`Sync ${instanceName}: ${contactsList.length} contatos, ${chatsList.length} chats encontrados`);
+
     // Combinar ambos para garantir que pegamos contatos salvos e conversas ativas
     const allEntries = [...contactsList, ...chatsList];
 
@@ -323,16 +352,23 @@ export class WhatsappService {
       return { total: 0, synced: 0, error: 'Nenhum contato ou chat encontrado' };
     }
 
+    // Deduplicar por phone para evitar processar o mesmo contato 2x (pode estar em contacts E chats)
+    const seenPhones = new Set<string>();
+
     let updatedCount = 0;
     for (const contact of allEntries) {
       try {
-        // Evolution v2: remoteJid costuma ser '55829...@s.whatsapp.net'
-        // O campo 'id' na v2 é um hash interno (ex: cmm...) e NÃO deve ser usado como telefone.
+        // Extrair jid de múltiplas fontes:
+        // - Contatos: remoteJid = '55829...@s.whatsapp.net', id = hash interno (cmm...)
+        // - Chats (findChats): id = '55829...@s.whatsapp.net', remoteJid pode não existir
         const rawJid = contact.remoteJid || '';
         let phone = '';
 
-        if (rawJid && rawJid.includes('@')) {
+        if (rawJid && rawJid.includes('@s.whatsapp.net')) {
           phone = rawJid.split('@')[0];
+        } else if (contact.id && typeof contact.id === 'string' && contact.id.includes('@s.whatsapp.net')) {
+          // Para chats: o campo 'id' é o jid (não um hash interno)
+          phone = contact.id.split('@')[0];
         } else if (contact.number) {
           phone = contact.number;
         }
@@ -343,14 +379,24 @@ export class WhatsappService {
         // Normalização Especial Brasil: Nono Dígito (Remoção)
         phone = normalizeBrazilianPhone(phone);
 
-        // Se o número for inválido ou for um ID interno da Evolution (cmm...)
-        if (!phone || 
-            phone.startsWith('cmm') || 
-            phone.includes('broadcast') || 
+        // Se o número for inválido, grupo, broadcast ou ID interno da Evolution
+        if (!phone ||
+            phone.startsWith('cmm') ||
+            phone.includes('broadcast') ||
             phone.includes('status') ||
+            phone.length < 8 ||
             phone.length > 20) {
           continue;
         }
+
+        // Evitar processar o mesmo phone 2x (contato + chat podem ter o mesmo número)
+        if (seenPhones.has(phone)) continue;
+        seenPhones.add(phone);
+
+        // Determinar o jid completo para usar como external_id
+        const jid = rawJid ||
+          (contact.id && typeof contact.id === 'string' && contact.id.includes('@') ? contact.id : '') ||
+          `${phone}@s.whatsapp.net`;
 
         // Busca foto de perfil se não tiver
         const profilePictureUrl = await this.fetchProfilePicture(instanceName, phone);
@@ -382,7 +428,7 @@ export class WhatsappService {
               lead_id: lead.id,
               channel: 'whatsapp',
               status: 'ABERTO',
-              external_id: rawJid || `${phone}@s.whatsapp.net`,
+              external_id: jid,
             },
           });
           this.logger.log(`Conversa inicial criada para ${phone}`);
@@ -398,7 +444,8 @@ export class WhatsappService {
       }
     }
 
-    return { total: allEntries.length, synced: updatedCount };
+    this.logger.log(`Sync ${instanceName} concluído: ${updatedCount} sincronizados de ${allEntries.length} entradas (${seenPhones.size} phones únicos)`);
+    return { total: allEntries.length, synced: updatedCount, uniquePhones: seenPhones.size };
   }
 
 }
