@@ -82,6 +82,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               });
             });
 
+            socketRef.current.on('mediaReady', (updatedMsg: any) => {
+              console.log('[SOCKET] mediaReady received:', updatedMsg.id);
+              setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? updatedMsg : m));
+            });
+
             socketRef.current.on('joined_room', (data: any) => {
               console.log('[SOCKET] Confirmed joined room:', data);
             });

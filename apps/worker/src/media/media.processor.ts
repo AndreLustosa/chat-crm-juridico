@@ -22,7 +22,7 @@ export class MediaProcessor extends WorkerHost {
   async process(job: Job<any, any, string>): Promise<any> {
     this.logger.log(`Iniciando job de mídia: ${job.id}`);
 
-    const { message_id, remote_jid, msg_id, media_data, instance_name } = job.data;
+    const { message_id, conversation_id, remote_jid, msg_id, media_data, instance_name } = job.data;
 
     try {
       // 1. Ler config da Evolution do banco de dados
@@ -79,6 +79,9 @@ export class MediaProcessor extends WorkerHost {
       });
 
       this.logger.log(`Mídia processada e salva com sucesso: ${s3Key}`);
+
+      // Retorna IDs para a API ouvir via QueueEvents e emitir WebSocket
+      return { messageId: message_id, conversationId: conversation_id };
     } catch (e: any) {
       this.logger.error(`Erro ao processar mídia: ${e.message}`);
       throw e;

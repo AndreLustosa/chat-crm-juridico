@@ -171,6 +171,11 @@ export default function Dashboard() {
               return [...prev, msg];
             });
           });
+          socketRef.current.off('mediaReady');
+          socketRef.current.on('mediaReady', (updatedMsg: MessageItem) => {
+            console.log('[SOCKET] mediaReady received:', updatedMsg.id);
+            setMessages(prev => prev.map(m => m.id === updatedMsg.id ? updatedMsg : m));
+          });
         }
       } catch (e) {
         console.error('Failed to fetch conversation', e);
