@@ -6,7 +6,6 @@ import { S3Service } from '../s3/s3.service';
 import { SettingsService } from '../settings/settings.service';
 import axios from 'axios';
 import * as crypto from 'crypto';
-import OpenAI, { toFile } from 'openai';
 
 @Processor('media-jobs')
 export class MediaProcessor extends WorkerHost {
@@ -85,35 +84,6 @@ export class MediaProcessor extends WorkerHost {
       });
 
       this.logger.log(`Mídia processada e salva com sucesso: ${s3Key}`);
-
-      // 6. Transcrição de áudio via Whisper (somente para mensagens recebidas de áudio)
-      if (mimeBase.startsWith('audio/')) {
-        try {
-          const openAiKey = await this.settings.getOpenAiKey();
-          if (openAiKey) {
-            const openai = new OpenAI({ apiKey: openAiKey });
-            const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
-            const result = await openai.audio.transcriptions.create({
-              file,
-              model: 'whisper-1',
-              language: 'pt',
-            });
-            const transcription = result.text?.trim();
-            if (transcription) {
-              await this.prisma.message.update({
-                where: { id: message_id },
-                data: { text: transcription },
-              });
-              this.logger.log(`[Whisper] Transcrição salva para msg ${message_id}`);
-            }
-          } else {
-            this.logger.warn('[Whisper] OPENAI_API_KEY não configurada — transcrição ignorada');
-          }
-        } catch (transcriptionError: any) {
-          // Não falha o job por erro de transcrição
-          this.logger.error(`[Whisper] Erro ao transcrever: ${transcriptionError.message}`);
-        }
-      }
 
       // Retorna IDs para a API ouvir via QueueEvents e emitir WebSocket
       return { messageId: message_id, conversationId: conversation_id };

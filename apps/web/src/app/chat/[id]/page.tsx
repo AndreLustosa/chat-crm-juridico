@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Send, Bot, Download } from 'lucide-react';
+import { ArrowLeft, Send, Bot, Download, Mic } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -28,6 +28,19 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [convoId, setConvoId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [transcribing, setTranscribing] = useState<Record<string, boolean>>({});
+
+  const handleTranscribe = async (msgId: string) => {
+    setTranscribing(prev => ({ ...prev, [msgId]: true }));
+    try {
+      const res = await api.post(`/messages/${msgId}/transcribe`);
+      setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, text: res.data.transcription } : m));
+    } catch (e) {
+      console.error('Erro ao transcrever áudio', e);
+    } finally {
+      setTranscribing(prev => ({ ...prev, [msgId]: false }));
+    }
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -225,10 +238,19 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                               duration={msg.media.duration}
                               isOutgoing={isOut}
                             />
-                            {msg.text && (
+                            {msg.text ? (
                               <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                                 {msg.text}
                               </p>
+                            ) : (
+                              <button
+                                onClick={() => handleTranscribe(msg.id)}
+                                disabled={transcribing[msg.id]}
+                                className={`mt-2 flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg transition-colors disabled:opacity-50 ${isOut ? 'bg-white/15 hover:bg-white/25 text-white/80' : 'bg-primary/10 hover:bg-primary/20 text-primary'}`}
+                              >
+                                <Mic size={11} />
+                                {transcribing[msg.id] ? 'Transcrevendo...' : 'Transcrever'}
+                              </button>
                             )}
                           </div>
                         ) : (

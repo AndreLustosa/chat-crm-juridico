@@ -1,8 +1,11 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { MediaS3Service } from '../media/s3.service';
+import { SettingsService } from '../settings/settings.service';
+import { Readable } from 'stream';
+import OpenAI, { toFile } from 'openai';
 
 @Injectable()
 export class MessagesService {
@@ -13,6 +16,7 @@ export class MessagesService {
     private whatsapp: WhatsappService,
     private chatGateway: ChatGateway,
     private s3: MediaS3Service,
+    private settings: SettingsService,
   ) {}
 
   async getMessages(conversationId: string) {
@@ -153,5 +157,55 @@ export class MessagesService {
     this.chatGateway.emitConversationsUpdate(null);
 
     return msgWithMedia;
+  }
+
+  async transcribeAudio(messageId: string): Promise<{ transcription: string }> {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: { media: true },
+    });
+
+    if (!message) throw new NotFoundException('Mensagem não encontrada');
+    if (message.type !== 'audio') throw new BadRequestException('Mensagem não é um áudio');
+    if (!message.media) throw new BadRequestException('Mídia ainda não processada');
+
+    const openAiKey = await this.settings.getOpenAiKey();
+    if (!openAiKey) throw new BadRequestException('OPENAI_API_KEY não configurada');
+
+    // Download do S3
+    const { stream, contentType } = await this.s3.getObjectStream(message.media.s3_key);
+    const buffer = await this.streamToBuffer(stream);
+
+    const mimeBase = (contentType || message.media.mime_type).split(';')[0].trim();
+    const ext = mimeBase.split('/')[1] || 'ogg';
+
+    // Transcrição via Whisper
+    const openai = new OpenAI({ apiKey: openAiKey });
+    const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
+    const result = await openai.audio.transcriptions.create({
+      file,
+      model: 'whisper-1',
+      language: 'pt',
+    });
+
+    const transcription = result.text?.trim() || '';
+
+    // Salvar no banco
+    await this.prisma.message.update({
+      where: { id: messageId },
+      data: { text: transcription },
+    });
+
+    this.logger.log(`[Whisper] Transcrição salva para msg ${messageId}`);
+    return { transcription };
+  }
+
+  private streamToBuffer(stream: Readable): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+      stream.on('error', reject);
+    });
   }
 }

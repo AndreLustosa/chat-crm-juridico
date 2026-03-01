@@ -45,4 +45,9 @@ export class MessagesController {
 
     return this.messagesService.sendAudio(conversationId, file, publicApiUrl);
   }
+
+  @Post(':id/transcribe')
+  transcribeAudio(@Param('id') messageId: string) {
+    return this.messagesService.transcribeAudio(messageId);
+  }
 }
