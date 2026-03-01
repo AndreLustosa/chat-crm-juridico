@@ -32,7 +32,7 @@ interface MessageItem {
   text: string | null;
   status: string;
   created_at: string;
-  media?: { original_url?: string; mime_type?: string } | null;
+  media?: { original_url?: string; mime_type?: string; duration?: number | null } | null;
 }
 
 function getWsUrl(): string {
