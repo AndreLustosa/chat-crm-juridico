@@ -1,7 +1,7 @@
 import { Controller, Post, Body, Headers, HttpCode } from '@nestjs/common';
 import { EvolutionService } from './evolution.service';
 
-@Controller(['webhooks/evolution', 'api/webhooks/evolution'])
+@Controller('webhooks/evolution')
 export class EvolutionController {
   constructor(private readonly evolutionService: EvolutionService) {}
 
