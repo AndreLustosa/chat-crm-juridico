@@ -10,9 +10,26 @@ export class ConversationsService {
     return this.prisma.conversation.create({ data });
   }
 
-  async findAll(status?: string) {
+  async findAll(status?: string, userId?: string, inboxId?: string) {
     const where: any = {};
     if (status) where.status = status;
+
+    // Se um inboxId específico foi solicitado, filtramos por ele
+    if (inboxId) {
+      where.inbox_id = inboxId;
+    } 
+    // Caso contrário, se o userId estiver presente, filtramos pelos inboxes que o usuário tem acesso
+    else if (userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { inboxes: { select: { id: true } } }
+      });
+      
+      // Se o usuário não for ADMIN e tiver inboxes vinculados, filtramos por eles
+      if (user?.role !== 'ADMIN' && user?.inboxes && user.inboxes.length > 0) {
+        where.inbox_id = { in: user.inboxes.map((i: any) => i.id) };
+      }
+    }
 
     const conversations = await this.prisma.conversation.findMany({
       where,

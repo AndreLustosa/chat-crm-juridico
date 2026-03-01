@@ -44,6 +44,8 @@ export default function Dashboard() {
   const router = useRouter();
   const [filter, setFilter] = useState('');
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [userInboxes, setUserInboxes] = useState<any[]>([]);
+  const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [text, setText] = useState('');
@@ -53,11 +55,13 @@ export default function Dashboard() {
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const fetchConversations = useCallback(async () => {
+  const fetchConversations = useCallback(async (inboxId?: string | null) => {
     try {
       const token = localStorage.getItem('token');
       if (!token) { router.push('/login'); return; }
-      const res = await api.get('/conversations');
+      const res = await api.get('/conversations', {
+        params: { inboxId: inboxId || undefined }
+      });
       const data = res.data;
       if (data && data.length > 0) {
         setConversations(data);
@@ -76,23 +80,33 @@ export default function Dashboard() {
     }
   }, [router]);
 
+  const fetchInboxes = async () => {
+    try {
+      const res = await api.get('/inboxes');
+      setUserInboxes(res.data);
+    } catch (error) {
+      console.error('Failed to fetch inboxes', error);
+    }
+  };
+
   // Initial load + WebSocket
   useEffect(() => {
-    fetchConversations();
+    fetchInboxes();
+    fetchConversations(selectedInboxId);
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
     const socket = io(wsUrl, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
     socket.on('inboxUpdate', () => {
-      fetchConversations();
+      fetchConversations(selectedInboxId);
     });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [fetchConversations]);
+  }, [fetchConversations, selectedInboxId]);
 
   // Fetch messages when conversation selected
   useEffect(() => {
@@ -200,19 +214,43 @@ export default function Dashboard() {
 
       {/* INBOX */}
       <section className="w-[380px] flex flex-col bg-card border-r border-border shrink-0 z-40">
-        <div className="p-5 border-b border-border">
-          <h2 className="text-xl font-bold mb-4">Inbox</h2>
+        <div className="p-5 border-b border-border space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold">Inbox</h2>
+          </div>
+
+          {/* Seletor de Setores (Inboxes) */}
+          {userInboxes.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
+              <button
+                onClick={() => setSelectedInboxId(null)}
+                className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${!selectedInboxId ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-transparent hover:bg-muted/80'}`}
+              >
+                Todos Setores
+              </button>
+              {userInboxes.map((inbox) => (
+                <button
+                  key={inbox.id}
+                  onClick={() => setSelectedInboxId(inbox.id)}
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${selectedInboxId === inbox.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-transparent hover:bg-muted/80'}`}
+                >
+                  {inbox.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex bg-muted rounded-xl p-1 w-full relative">
             {[
-              { value: '', label: 'Todas' },
+              { value: '', label: 'Tudo' },
               { value: 'BOT', label: 'Bot' },
-              { value: 'WAITING', label: 'Aguardando' },
+              { value: 'WAITING', label: 'Espera' },
               { value: 'ACTIVE', label: 'Ativas' },
             ].map((tab) => (
               <button
                 key={tab.value}
                 onClick={() => setFilter(tab.value)}
-                className={`flex-1 py-1.5 text-[12px] font-semibold rounded-lg transition-all ${filter === tab.value ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
+                className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${filter === tab.value ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
               >
                 {tab.label}
               </button>

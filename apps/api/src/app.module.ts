@@ -13,6 +13,7 @@ import { GatewayModule } from './gateway/gateway.module';
 import { TasksModule } from './tasks/tasks.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { SettingsModule } from './settings/settings.module';
+import { InboxesModule } from './inboxes/inboxes.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -44,7 +45,8 @@ import { APP_FILTER } from '@nestjs/core';
     GatewayModule,
     TasksModule,
     WhatsappModule,
-    SettingsModule
+    SettingsModule,
+    InboxesModule
   ],
   controllers: [AppController, HealthController],
   providers: [

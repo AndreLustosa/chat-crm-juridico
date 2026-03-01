@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { LeadsService } from '../leads/leads.service';
+import { InboxesService } from '../inboxes/inboxes.service';
 
 interface EvolutionWebhookPayload {
   event: string;
@@ -19,6 +20,7 @@ export class EvolutionService {
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
     private leadsService: LeadsService,
+    private inboxesService: InboxesService,
     @InjectQueue('media-jobs') private mediaQueue: Queue,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
   ) {}
@@ -26,6 +28,10 @@ export class EvolutionService {
   async handleMessagesUpsert(payload: EvolutionWebhookPayload) {
     this.logger.log(`Recebendo webhook: ${JSON.stringify(payload)}`);
     const dataPayload = payload?.data as any;
+    const instanceName = payload?.instanceId; // Na Evolution API v2, instanceId é o nome da instância
+    const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    const inboxId = inbox?.inbox_id || null;
+
     const messages = Array.isArray(dataPayload?.messages)
       ? (dataPayload.messages as any[])
       : [dataPayload];
@@ -57,7 +63,12 @@ export class EvolutionService {
 
       // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
-        where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' },
+        where: { 
+          lead_id: lead.id, 
+          channel: 'whatsapp', 
+          status: 'ABERTO',
+          inbox_id: inboxId 
+        },
       });
       if (!conv) {
         conv = await this.prisma.conversation.create({
@@ -66,6 +77,7 @@ export class EvolutionService {
             channel: 'whatsapp',
             status: 'ABERTO',
             external_id: remoteJid,
+            inbox_id: inboxId,
           },
         });
       }

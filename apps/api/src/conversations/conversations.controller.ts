@@ -9,8 +9,13 @@ export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}
 
   @Get()
-  findAll(@Query('status') status?: string) {
-    return this.conversationsService.findAll(status);
+  findAll(
+    @Query('status') status?: string, 
+    @Query('inboxId') inboxId?: string,
+    @Request() req?: any
+  ) {
+    const userId = req.user?.id;
+    return this.conversationsService.findAll(status, userId, inboxId);
   }
 
   @Get(':id')

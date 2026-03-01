@@ -14,6 +14,8 @@ model Tenant {
   leads         Lead[]
   tasks         Task[]
   users         User[]
+  inboxes       Inbox[]
+  instances     Instance[]
 }
 
 model User {
@@ -26,6 +28,7 @@ model User {
   created_at      DateTime       @default(now())
   audit_logs      AuditLog[]
   assigned_convos Conversation[]
+  inboxes         Inbox[]
   tasks           Task[]
   tenant          Tenant?        @relation(fields: [tenant_id], references: [id])
 }
@@ -60,10 +63,12 @@ model Conversation {
   status           String    @default("ABERTO")
   ai_mode          Boolean   @default(true)
   assigned_user_id String?
+  inbox_id         String?
   last_message_at  DateTime  @default(now())
   assigned_user    User?     @relation(fields: [assigned_user_id], references: [id])
   lead             Lead      @relation(fields: [lead_id], references: [id])
   tenant           Tenant?   @relation(fields: [tenant_id], references: [id])
+  inbox            Inbox?    @relation(fields: [inbox_id], references: [id])
   messages         Message[]
   tasks            Task[]
 
@@ -157,4 +162,34 @@ model AuditLog {
 model GlobalSetting {
   key   String @id
   value String
+}
+
+model Inbox {
+  id            String         @id @default(uuid())
+  tenant_id     String?
+  name          String
+  created_at    DateTime       @default(now())
+  updated_at    DateTime       @updatedAt
+  tenant        Tenant?        @relation(fields: [tenant_id], references: [id])
+  users         User[]
+  conversations Conversation[]
+  instances     Instance[]
+
+  @@index([tenant_id])
+}
+
+model Instance {
+  id            String   @id @default(uuid())
+  tenant_id     String?
+  inbox_id      String?
+  name          String   @unique
+  type          String   @default("whatsapp")
+  connection    String   @default("evolution")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  tenant        Tenant?  @relation(fields: [tenant_id], references: [id])
+  inbox         Inbox?   @relation(fields: [inbox_id], references: [id])
+
+  @@index([tenant_id])
+  @@index([inbox_id])
 }
