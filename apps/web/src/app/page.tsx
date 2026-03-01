@@ -416,13 +416,42 @@ export default function Dashboard() {
                             ) : (
                               <p className="text-sm italic opacity-70">🎙️ Áudio processando...</p>
                             )
+                          ) : msg.type === 'image' ? (
+                            msg.media ? (
+                              <img
+                                src={`/api/media/${msg.id}`}
+                                alt="Imagem"
+                                className="max-w-full rounded-lg cursor-pointer"
+                                onClick={() => window.open(`/api/media/${msg.id}`, '_blank')}
+                              />
+                            ) : (
+                              <p className="text-sm italic opacity-70">🖼️ Imagem processando...</p>
+                            )
+                          ) : msg.type === 'video' ? (
+                            msg.media ? (
+                              <video
+                                src={`/api/media/${msg.id}`}
+                                controls
+                                className="max-w-full rounded-lg"
+                              />
+                            ) : (
+                              <p className="text-sm italic opacity-70">🎬 Vídeo processando...</p>
+                            )
+                          ) : msg.type === 'document' ? (
+                            msg.media ? (
+                              <a
+                                href={`/api/media/${msg.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm underline opacity-80 hover:opacity-100"
+                              >
+                                📄 Abrir documento
+                              </a>
+                            ) : (
+                              <p className="text-sm italic opacity-70">📄 Documento processando...</p>
+                            )
                           ) : (
-                            <div>
-                              <p className="text-sm italic mb-1">Anexo: {msg.type}</p>
-                              {msg.media?.original_url && (
-                                <span className="text-xs opacity-80 break-all">{msg.media.original_url}</span>
-                              )}
-                            </div>
+                            <p className="text-sm italic opacity-70">📎 Anexo: {msg.type}</p>
                           )}
                           <div className={`text-[10px] mt-2 flex justify-end gap-2 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
                             <span>{formatTime(msg.created_at)}</span>
