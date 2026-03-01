@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Play, Pause } from 'lucide-react';
+import { Play, Pause, Download } from 'lucide-react';
 
 const SPEEDS = [1, 1.5, 2];
 
@@ -98,13 +98,23 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
           <span className={`text-[10px] ${timeClass}`}>
             {fmt(current)} / {fmt(total)}
           </span>
-          <button
-            onClick={cycleSpeed}
-            className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${speedClass}`}
-            title="Velocidade de reprodução"
-          >
-            {speed === 1 ? '1×' : `${speed}×`}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={cycleSpeed}
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${speedClass}`}
+              title="Velocidade de reprodução"
+            >
+              {speed === 1 ? '1×' : `${speed}×`}
+            </button>
+            <a
+              href={src}
+              download
+              className={`p-0.5 rounded transition-colors ${speedClass}`}
+              title="Baixar áudio"
+            >
+              <Download size={11} />
+            </a>
+          </div>
         </div>
       </div>
     </div>
