@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Send, Bot } from 'lucide-react';
+import { ArrowLeft, Send, Bot, Download } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -27,6 +27,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [lead, setLead] = useState<any>(null);
   const [convoId, setConvoId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +137,33 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     }
   };
 
+  const handleImageDownload = async (src: string) => {
+    try {
+      const res = await fetch(src);
+      const blob = await res.blob();
+      const ext = (blob.type.split('/')[1] || 'jpg').split(';')[0];
+      const filename = `imagem.${ext}`;
+      if ('showSaveFilePicker' in window) {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'Imagem', accept: { [blob.type]: [`.${ext}`] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e: any) {
+      if (e.name !== 'AbortError') console.error('Erro ao baixar imagem', e);
+    }
+  };
+
   const formatTime = (dateStr?: string) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -207,12 +235,21 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                         )
                       ) : msg.type === 'image' ? (
                         msg.media ? (
-                          <img
-                            src={`/api/media/${msg.id}`}
-                            alt="Imagem"
-                            className="max-w-[160px] max-h-[160px] object-cover rounded-lg cursor-pointer"
-                            onClick={() => window.open(`/api/media/${msg.id}`, '_blank')}
-                          />
+                          <div className="relative group inline-block">
+                            <img
+                              src={`/api/media/${msg.id}`}
+                              alt="Imagem"
+                              className="max-w-[180px] max-h-[180px] object-cover rounded-lg cursor-pointer"
+                              onClick={() => setLightbox(`/api/media/${msg.id}`)}
+                            />
+                            <button
+                              onClick={() => handleImageDownload(`/api/media/${msg.id}`)}
+                              className="absolute bottom-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-md p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Baixar imagem"
+                            >
+                              <Download size={13} />
+                            </button>
+                          </div>
                         ) : (
                           <p className="text-sm italic opacity-70">🖼️ Imagem processando...</p>
                         )
@@ -293,6 +330,38 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           </div>
         </footer>
       </div>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={() => setLightbox(null)}
+        >
+          <div className="relative max-w-[90vw] max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <img
+              src={lightbox}
+              alt="Imagem"
+              className="max-w-[90vw] max-h-[90vh] rounded-xl object-contain shadow-2xl"
+            />
+            <div className="absolute top-2 right-2 flex gap-2">
+              <button
+                onClick={() => handleImageDownload(lightbox)}
+                className="bg-black/60 hover:bg-black/80 text-white rounded-lg p-2 transition-colors"
+                title="Baixar imagem"
+              >
+                <Download size={16} />
+              </button>
+              <button
+                onClick={() => setLightbox(null)}
+                className="bg-black/60 hover:bg-black/80 text-white rounded-lg p-2 transition-colors text-lg leading-none"
+                title="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
