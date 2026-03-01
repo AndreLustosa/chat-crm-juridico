@@ -209,6 +209,15 @@ export class WhatsappService {
   }
 
   async fetchContacts(instanceName: string) {
-    return this.request('GET', `chat/fetchContacts/${instanceName}`);
+    const data = await this.request('GET', `chat/fetchContacts/${instanceName}`);
+    this.logger.log(`Evolution API Contacts Response (Instance: ${instanceName}): ${JSON.stringify(data).substring(0, 500)}...`);
+    
+    // Se a Evolution retornar erro ou não houver dados, retorna array vazio para evitar quebra
+    if (!data || (data as any).statusCode === 401 || (data as any).error) {
+       this.logger.error(`Falha ao buscar contatos para ${instanceName}: ${JSON.stringify(data)}`);
+       return { data: [] };
+    }
+
+    return data;
   }
 }

@@ -35,24 +35,35 @@ export default function ContactsPage() {
         await Promise.all(activeInstances.map(async (inst: any) => {
           try {
             const contactsResponse = await api.get(`/whatsapp/instances/${inst.instanceName}/contacts`);
-            // Estrutura Evolution v2: { data: [ { id: string, name: string, pushName: string, ... } ] }
-            const rawContacts = contactsResponse.data?.data || contactsResponse.data || [];
             
-            rawContacts.forEach((rc: any) => {
-              const phone = rc.id?.split('@')[0] || rc.number || '';
-              if (!phone) return;
+            // Extração extra-robusta para Evolution v2
+            // Pode vir como: { data: [...] }, { instances: [...] }, ou o próprio array
+            const responseData = contactsResponse.data;
+            const rawContacts = responseData?.data || responseData?.instances || (Array.isArray(responseData) ? responseData : []);
+            
+            if (Array.isArray(rawContacts)) {
+              rawContacts.forEach((rc: any) => {
+                // Tenta extrair o telefone de várias formas (v1 vs v2)
+                const fullId = rc.id || rc.jid || '';
+                const phone = fullId.split('@')[0] || rc.number || rc.phone || '';
+                
+                if (!phone) return;
 
-              allContacts.push({
-                id: rc.id || phone,
-                name: rc.name || rc.pushName || 'Sem Nome',
-                phone: phone,
-                email: '-',
-                conversations: 0,
-                lastMessage: '-',
-                origin: 'whatsapp',
-                instanceName: inst.instanceName
+                // Evita duplicatas baseadas no telefone se vierem da mesma instância
+                allContacts.push({
+                  id: fullId || `${inst.instanceName}-${phone}`,
+                  name: rc.name || rc.pushName || rc.verifiedName || 'Sem Nome',
+                  phone: phone,
+                  email: rc.email || '-',
+                  conversations: 0,
+                  lastMessage: '-',
+                  origin: 'whatsapp',
+                  instanceName: inst.instanceName
+                });
               });
-            });
+            } else {
+              console.warn(`Resposta de contatos da instância ${inst.instanceName} não é um array:`, responseData);
+            }
           } catch (e) {
             console.error(`Erro ao buscar contatos da instância ${inst.instanceName}:`, e);
           }
