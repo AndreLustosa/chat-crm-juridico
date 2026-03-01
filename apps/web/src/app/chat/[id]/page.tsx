@@ -28,7 +28,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       return;
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || window.location.origin;
 
     const fetchData = async () => {
        try {

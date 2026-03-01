@@ -83,7 +83,7 @@ export default function Dashboard() {
     fetchInboxes();
     fetchConversations(selectedInboxId);
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || window.location.origin;
     console.log('[SOCKET] Connecting to:', wsUrl);
     const socket = io(wsUrl, {
       transports: ['websocket', 'polling'],
