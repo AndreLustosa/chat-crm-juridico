@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, Request } from '@nestjs/common';
 import { InboxesService } from './inboxes.service';
 
 @Controller('inboxes')
@@ -6,7 +6,7 @@ export class InboxesController {
   constructor(private readonly inboxesService: InboxesService) {}
 
   @Get()
-  async findAll(@Request() req) {
+  async findAll(@Request() req: any) {
     const userId = req.user?.id;
     return this.inboxesService.findAll(undefined, userId);
   }

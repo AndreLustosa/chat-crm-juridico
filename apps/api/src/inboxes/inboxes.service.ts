@@ -5,8 +5,16 @@ import { PrismaService } from '../prisma/prisma.service';
 export class InboxesService {
   constructor(private prisma: PrismaService) {}
 
+  private get inbox() {
+    return (this.prisma as any).inbox;
+  }
+
+  private get instance() {
+    return (this.prisma as any).instance;
+  }
+
   async findAll(tenantId?: string, userId?: string) {
-    return this.prisma.inbox.findMany({
+    return this.inbox.findMany({
       where: { 
         tenant_id: tenantId,
         users: userId ? { some: { id: userId } } : undefined
@@ -22,7 +30,7 @@ export class InboxesService {
   }
 
   async findOne(id: string) {
-    const inbox = await this.prisma.inbox.findUnique({
+    const inbox = await this.inbox.findUnique({
       where: { id },
       include: {
         instances: true,
@@ -35,7 +43,7 @@ export class InboxesService {
   }
 
   async create(data: { name: string; tenant_id?: string }) {
-    return this.prisma.inbox.create({
+    return this.inbox.create({
       data,
       include: {
         instances: true,
@@ -48,20 +56,20 @@ export class InboxesService {
   }
 
   async update(id: string, data: { name?: string }) {
-    return this.prisma.inbox.update({
+    return this.inbox.update({
       where: { id },
       data
     });
   }
 
   async remove(id: string) {
-    return this.prisma.inbox.delete({ where: { id } });
+    return this.inbox.delete({ where: { id } });
   }
 
   // --- Gestão de Usuários no Setor ---
 
   async addUser(inboxId: string, userId: string) {
-    return this.prisma.inbox.update({
+    return this.inbox.update({
       where: { id: inboxId },
       data: {
         users: { connect: { id: userId } }
@@ -70,7 +78,7 @@ export class InboxesService {
   }
 
   async removeUser(inboxId: string, userId: string) {
-    return this.prisma.inbox.update({
+    return this.inbox.update({
       where: { id: inboxId },
       data: {
         users: { disconnect: { id: userId } }
@@ -81,7 +89,7 @@ export class InboxesService {
   // --- Gestão de Instâncias ---
 
   async addInstance(inboxId: string, instanceName: string, type: 'whatsapp' | 'instagram') {
-    return this.prisma.instance.upsert({
+    return this.instance.upsert({
       where: { name: instanceName },
       update: { inbox_id: inboxId, type },
       create: {
@@ -93,7 +101,7 @@ export class InboxesService {
   }
 
   async findByInstanceName(instanceName: string) {
-    return this.prisma.instance.findUnique({
+    return this.instance.findUnique({
       where: { name: instanceName },
       include: { inbox: true }
     });
