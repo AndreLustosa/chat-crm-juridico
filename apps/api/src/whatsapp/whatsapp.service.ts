@@ -282,11 +282,12 @@ export class WhatsappService {
   async fetchProfilePicture(instanceName: string, number: string) {
     try {
       const data = await this.request(
-        'GET',
-        `chat/fetchProfilePicture/${instanceName}?number=${number}`,
+        'POST',
+        `chat/fetchProfilePicture/${instanceName}`,
+        { number },
       );
       this.logger.log(`Profile picture for ${number}: ${JSON.stringify(data)}`);
-      return data?.profile_picture || data?.data?.profile_picture || data?.url || null;
+      return data?.profilePictureUrl || data?.profile_picture || data?.data?.profile_picture || data?.url || null;
     } catch (e) {
       this.logger.error(`Erro ao buscar foto de perfil para ${number}: ${e}`);
       return null;
