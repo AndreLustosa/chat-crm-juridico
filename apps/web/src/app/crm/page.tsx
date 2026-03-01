@@ -112,7 +112,7 @@ export default function CrmPage() {
                         <div className="flex items-center gap-3 mb-2.5">
                           <div className="w-8 h-8 rounded-full bg-foreground/[0.05] border border-foreground/[0.1] flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                             {lead.profile_picture_url ? (
-                              <img src={lead.profile_picture_url} alt={lead.name} className="w-full h-full object-cover" />
+                              <img src={lead.profile_picture_url} alt={lead.name} className="w-full h-full object-cover" loading="lazy" />
                             ) : (
                               <User size={14} className="text-muted-foreground opacity-50" />
                             )}

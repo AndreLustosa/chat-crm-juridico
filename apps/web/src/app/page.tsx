@@ -237,7 +237,7 @@ export default function Dashboard() {
                 {selectedId === conv.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />}
                 <div className="w-11 h-11 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                   {conv.profile_picture_url ? (
-                    <img src={conv.profile_picture_url} alt={conv.contactName} className="w-full h-full object-cover" />
+                    <img src={conv.profile_picture_url} alt={conv.contactName} className="w-full h-full object-cover" loading="lazy" />
                   ) : (
                     <span className="text-foreground font-bold text-lg">{getInitial(conv.contactName)}</span>
                   )}
@@ -266,7 +266,7 @@ export default function Dashboard() {
                <div className="flex items-center gap-4">
                  <div className="w-12 h-12 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm">
                    {selected.profile_picture_url ? (
-                     <img src={selected.profile_picture_url} alt={selected.contactName} className="w-full h-full object-cover" />
+                     <img src={selected.profile_picture_url} alt={selected.contactName} className="w-full h-full object-cover" loading="lazy" />
                    ) : (
                      <span className="text-foreground font-bold text-xl">{getInitial(selected.contactName)}</span>
                    )}

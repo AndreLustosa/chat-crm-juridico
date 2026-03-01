@@ -159,7 +159,7 @@ export default function ContactsPage() {
                         <div className="flex items-center gap-4">
                           <div className="w-9 h-9 rounded-full bg-primary/10 border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                             {contact.profile_picture_url ? (
-                              <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" />
+                              <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
                             ) : (
                               <span className="text-primary font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
                             )}
