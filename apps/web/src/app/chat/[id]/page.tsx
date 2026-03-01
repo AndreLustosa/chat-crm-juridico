@@ -67,7 +67,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               console.log('[SOCKET] New message received:', msg);
               // Use functional update to always have the latest messages state
               setMessages(prev => {
-                const exists = prev.some((m: any) => m.id === msg.id || m.external_message_id === msg.external_message_id);
+                const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
                 if (exists) return prev;
                 return [...prev, msg];
               });

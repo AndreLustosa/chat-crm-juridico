@@ -24,6 +24,7 @@ interface ConversationSummary {
 interface MessageItem {
   id: string;
   conversation_id: string;
+  external_message_id?: string | null;
   direction: 'in' | 'out';
   type: string;
   text: string | null;
@@ -47,6 +48,12 @@ export default function Dashboard() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedInboxIdRef = useRef<string | null>(selectedInboxId);
+  const selectedIdRef = useRef<string | null>(selectedId);
+
+  // Keep refs in sync
+  useEffect(() => { selectedInboxIdRef.current = selectedInboxId; }, [selectedInboxId]);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
 
   const fetchConversations = useCallback(async (inboxId?: string | null) => {
     try {
@@ -78,11 +85,8 @@ export default function Dashboard() {
     }
   };
 
-  // Initial load + WebSocket
+  // WebSocket connection (once, does not reconnect on filter changes)
   useEffect(() => {
-    fetchInboxes();
-    fetchConversations(selectedInboxId);
-
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || window.location.origin;
     console.log('[SOCKET] Connecting to:', wsUrl);
     const socket = io(wsUrl, {
@@ -95,6 +99,11 @@ export default function Dashboard() {
     socket.on('connect', () => {
       console.log('[SOCKET] Connected to dashboard ID:', socket.id);
       setSocketConnected(true);
+      // Re-join current conversation room on reconnect
+      const currentConvoId = selectedIdRef.current;
+      if (currentConvoId && !currentConvoId.startsWith('demo-')) {
+        socket.emit('join_conversation', currentConvoId);
+      }
     });
 
     socket.on('disconnect', () => {
@@ -106,17 +115,24 @@ export default function Dashboard() {
       console.error('[SOCKET] Connection error:', err);
       setSocketConnected(false);
     });
-    socketRef.current = socket;
 
     socket.on('inboxUpdate', () => {
       console.log('[SOCKET] inboxUpdate received, fetching conversations...');
-      fetchConversations(selectedInboxId);
+      fetchConversations(selectedInboxIdRef.current);
     });
+
+    socketRef.current = socket;
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
+  }, [fetchConversations]);
+
+  // Initial data load + refetch on inbox filter change
+  useEffect(() => {
+    fetchInboxes();
+    fetchConversations(selectedInboxId);
   }, [fetchConversations, selectedInboxId]);
 
   // Fetch messages when conversation selected
@@ -126,17 +142,23 @@ export default function Dashboard() {
       return;
     }
 
+    const prevId = selectedIdRef.current;
+
     const fetchDetail = async () => {
       try {
         const res = await api.get(`/conversations/${selectedId}`);
         setMessages(res.data?.messages || []);
 
         if (socketRef.current) {
+          // Leave previous room before joining new one
+          if (prevId && prevId !== selectedId) {
+            socketRef.current.emit('leave_conversation', prevId);
+          }
           socketRef.current.emit('join_conversation', selectedId);
           socketRef.current.off('newMessage');
           socketRef.current.on('newMessage', (msg: MessageItem) => {
             setMessages(prev => {
-              if (prev.find(m => m.id === msg.id)) return prev;
+              if (prev.find(m => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id))) return prev;
               return [...prev, msg];
             });
           });
