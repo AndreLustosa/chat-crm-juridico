@@ -165,9 +165,9 @@ export default function Dashboard() {
     }
   };
 
-  const filteredConversations = filter
+  const filteredConversations = (filter
     ? conversations.filter(c => c.status === filter)
-    : conversations;
+    : conversations).sort((a, b) => (a.contactName || '').localeCompare(b.contactName || ''));
 
   const selected = conversations.find((c) => c.id === selectedId);
   const isDemo = selectedId?.startsWith('demo-');

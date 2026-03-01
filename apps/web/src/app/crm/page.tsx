@@ -77,10 +77,16 @@ export default function CrmPage() {
           <div className="flex h-full gap-5">
             {STAGES.map(stage => {
               // Map real leads to stages, or map by ID
-              const stageLeads = leads.filter(l => {
-                const leadStage = (l.stage || 'NEW').toUpperCase();
-                return leadStage === stage.id || leadStage === stage.label; 
-              });
+              const stageLeads = leads
+                .filter(l => {
+                  const leadStage = (l.stage || 'NEW').toUpperCase();
+                  return leadStage === stage.id || leadStage === stage.label; 
+                })
+                .sort((a, b) => {
+                  const nameA = a.contactName || a.title || a.name || '';
+                  const nameB = b.contactName || b.title || b.name || '';
+                  return nameA.localeCompare(nameB);
+                });
               
               return (
                 <div key={stage.id} className="flex flex-col min-w-[280px] w-[280px] bg-card border border-border rounded-xl max-h-full shadow-sm">

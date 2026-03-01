@@ -39,6 +39,7 @@ export default function ContactsPage() {
         origin: lead.origin || 'crm',
       }));
 
+      mappedContacts.sort((a, b) => a.name.localeCompare(b.name));
       setContacts(mappedContacts);
     } catch (error) {
       console.error('Erro ao carregar contatos:', error);
