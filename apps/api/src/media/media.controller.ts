@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   Res,
   NotFoundException,
   Logger,
@@ -22,6 +23,7 @@ export class MediaController {
   @Get(':messageId')
   async getMedia(
     @Param('messageId') messageId: string,
+    @Query('dl') dl: string,
     @Res() res: any,
   ) {
     const media = await this.prisma.media.findUnique({
@@ -34,7 +36,13 @@ export class MediaController {
       const { stream, contentType, contentLength } =
         await this.s3.getObjectStream(media.s3_key);
 
+      // Extrai extensão da s3_key (ex: media/abc.ogg → ogg)
+      const ext = media.s3_key.split('.').pop() || 'bin';
+      const filename = `audio.${ext}`;
+
+      const disposition = dl === '1' ? 'attachment' : 'inline';
       res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
       res.setHeader('Cache-Control', 'private, max-age=3600');
       res.setHeader('Accept-Ranges', 'bytes');
       if (contentLength) res.setHeader('Content-Length', String(contentLength));

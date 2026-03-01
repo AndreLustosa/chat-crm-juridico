@@ -107,8 +107,8 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
               {speed === 1 ? '1×' : `${speed}×`}
             </button>
             <a
-              href={src}
-              download
+              href={`${src}?dl=1`}
+              download="audio.ogg"
               className={`p-0.5 rounded transition-colors ${speedClass}`}
               title="Baixar áudio"
             >
