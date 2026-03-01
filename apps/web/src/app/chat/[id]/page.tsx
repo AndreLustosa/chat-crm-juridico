@@ -210,7 +210,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                           <img
                             src={`/api/media/${msg.id}`}
                             alt="Imagem"
-                            className="max-w-full rounded-lg cursor-pointer"
+                            className="max-w-[220px] max-h-[220px] object-cover rounded-lg cursor-pointer"
                             onClick={() => window.open(`/api/media/${msg.id}`, '_blank')}
                           />
                         ) : (
