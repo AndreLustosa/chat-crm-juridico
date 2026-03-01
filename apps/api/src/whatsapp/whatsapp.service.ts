@@ -207,4 +207,8 @@ export class WhatsappService {
       ],
     });
   }
+
+  async fetchContacts(instanceName: string) {
+    return this.request('GET', `chat/fetchContacts/${instanceName}`);
+  }
 }

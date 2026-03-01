@@ -53,4 +53,9 @@ export class WhatsappController {
   async getConnectionStatus(@Param('name') name: string) {
     return this.whatsappService.getConnectionStatus(name);
   }
+
+  @Get('instances/:name/contacts')
+  async fetchContacts(@Param('name') name: string) {
+    return this.whatsappService.fetchContacts(name);
+  }
 }
