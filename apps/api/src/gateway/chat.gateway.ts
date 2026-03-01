@@ -3,6 +3,7 @@ import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
 @WebSocketGateway({
+  path: '/api/socket.io',
   cors: {
     origin: '*',
   },
@@ -14,7 +15,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private logger: Logger = new Logger('ChatGateway');
 
   handleConnection(client: Socket) {
-    this.logger.log(`Client connected: ${client.id}`);
+    this.logger.log(`[SOCKET] Client connected: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {

@@ -38,7 +38,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
            setConvoId(convo.id);
            setMessages(convo.messages || []);
 
-           socketRef.current = io(wsUrl, { transports: ['websocket', 'polling'] });
+           socketRef.current = io(wsUrl, { 
+             transports: ['websocket', 'polling'],
+             path: '/api/socket.io'
+           });
            socketRef.current.emit('join_conversation', convo.id);
            socketRef.current.on('newMessage', (msg: any) => {
              setMessages(prev => {

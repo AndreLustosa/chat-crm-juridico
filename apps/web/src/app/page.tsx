@@ -83,7 +83,10 @@ export default function Dashboard() {
     fetchConversations(selectedInboxId);
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
-    const socket = io(wsUrl, { transports: ['websocket', 'polling'] });
+    const socket = io(wsUrl, { 
+      transports: ['websocket', 'polling'],
+      path: '/api/socket.io'
+    });
     socketRef.current = socket;
 
     socket.on('inboxUpdate', () => {
