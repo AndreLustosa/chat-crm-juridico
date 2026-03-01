@@ -69,7 +69,7 @@ export class WhatsappService {
 
   async sendMedia(
     number: string,
-    mediaType: 'image' | 'audio' | 'document',
+    mediaType: 'image' | 'audio' | 'document' | 'video',
     mediaUrl: string,
     caption?: string,
     instanceName?: string,
