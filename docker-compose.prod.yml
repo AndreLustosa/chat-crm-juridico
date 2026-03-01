@@ -31,39 +31,20 @@ services:
       timeout: 3s
       retries: 10
 
-  # ------ SeaweedFS (Mídias) ------
-  seaweed-master:
-    image: chrislusf/seaweedfs
+  # ------ MinIO (Mídias S3) ------
+  minio:
+    image: minio/minio:latest
+    command: server /data
     restart: always
-    command: "master -ip=seaweed-master -port=9333"
     ports:
-      - '49333:9333'
+      - "49000:9000"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
     volumes:
-      - seaweed_master_data:/data
+      - minio_data:/data
 
-  seaweed-volume:
-    image: chrislusf/seaweedfs
-    restart: always
-    command: "volume -mserver=seaweed-master:9333 -port=8080 -dir=/data"
-    depends_on:
-      - seaweed-master
-    ports:
-      - '48080:8080'
-    volumes:
-      - seaweed_volume_data:/data
-
-  seaweed-filer:
-    image: chrislusf/seaweedfs
-    restart: always
-    command: "filer -master=seaweed-master:9333 -s3"
-    depends_on:
-      - seaweed-master
-      - seaweed-volume
-    ports:
-      - '48888:8888'
-      - '48333:8333'
-
-  # ------ NestJS Core API ------
+  # ------ NestJS Core API (build local) ------
   crm-api:
     build:
       context: .
@@ -72,7 +53,7 @@ services:
         APP: api
     restart: always
     ports:
-      - "${API_PORT:-3001}:3001"
+      - "${API_PORT:-43001}:3001"
     environment:
       - PORT=3001
       - RUN_MIGRATIONS=true
@@ -84,13 +65,19 @@ services:
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://localhost:43001/api}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_REGION=us-east-1
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
+      - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-  # ------ NestJS Worker (Mídias e IA) ------
+  # ------ NestJS Worker (build local) ------
   crm-worker:
     build:
       context: .
@@ -103,39 +90,32 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@postgres:5432/${POSTGRES_DB:-lexcrm}?schema=public
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - EVOLUTION_API_URL=${EVOLUTION_API_URL}
-      - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
-      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
-      - S3_ENDPOINT=http://seaweed-filer:8333
+      - S3_ENDPOINT=http://minio:9000
       - S3_REGION=us-east-1
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-some_access_key}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-some_secret_key}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      seaweed-filer:
-        condition: service_started
 
-  # ------ Next.js Frontend ------
+  # ------ Next.js Frontend (build local) ------
   crm-web:
     build:
       context: .
       dockerfile: infra/Dockerfile.web
       args:
-        NEXT_PUBLIC_API_URL: /api
-        NEXT_PUBLIC_WS_URL: ""
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:43001/api}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:43001}
     restart: always
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-43000}:3000"
     depends_on:
       - crm-api
 
 volumes:
   pgdata:
   redisdata:
-  seaweed_master_data:
-  seaweed_volume_data:
+  minio_data:
