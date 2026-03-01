@@ -197,7 +197,13 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                             isOutgoing={isOut}
                           />
                         ) : (
-                          <p className="text-sm italic opacity-70">🎙️ Áudio processando...</p>
+                          <div className="flex items-center gap-3 w-48 animate-pulse">
+                            <div className="w-8 h-8 rounded-full bg-current opacity-20 shrink-0" />
+                            <div className="flex-1 space-y-1.5">
+                              <div className="h-1 rounded bg-current opacity-20" />
+                              <div className="h-1 rounded bg-current opacity-10 w-3/4" />
+                            </div>
+                          </div>
                         )
                       ) : msg.type === 'image' ? (
                         msg.media ? (
