@@ -6,7 +6,6 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from './s3.service';
 
@@ -23,7 +22,7 @@ export class MediaController {
   @Get(':messageId')
   async getMedia(
     @Param('messageId') messageId: string,
-    @Res() res: Response,
+    @Res() res: any,
   ) {
     const media = await this.prisma.media.findUnique({
       where: { message_id: messageId },

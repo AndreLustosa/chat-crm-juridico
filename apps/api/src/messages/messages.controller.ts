@@ -10,7 +10,6 @@ import {
   Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Request } from 'express';
 import { MessagesService } from './messages.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -37,7 +36,7 @@ export class MessagesController {
   sendAudio(
     @Body('conversationId') conversationId: string,
     @UploadedFile() file: Express.Multer.File,
-    @Req() req: Request,
+    @Req() req: any,
   ) {
     // Construir URL pública: usa env var ou deriva dos headers do Traefik
     const publicApiUrl =
