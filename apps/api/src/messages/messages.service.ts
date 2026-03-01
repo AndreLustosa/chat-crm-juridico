@@ -169,7 +169,7 @@ export class MessagesService {
     if (message.type !== 'audio') throw new BadRequestException('Mensagem não é um áudio');
     if (!message.media) throw new BadRequestException('Mídia ainda não processada');
 
-    const openAiKey = await this.settings.getOpenAiKey();
+    const { apiKey: openAiKey } = await this.settings.getAiConfig();
     if (!openAiKey) throw new BadRequestException('OPENAI_API_KEY não configurada');
 
     // Download do S3
