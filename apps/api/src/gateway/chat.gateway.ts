@@ -1,4 +1,4 @@
-import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket, OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
+import { WebSocketGateway, WebSocketServer, SubscribeMessage, MessageBody, ConnectedSocket, OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 
@@ -8,14 +8,18 @@ import { Logger } from '@nestjs/common';
   },
   // path: '/socket.io' is default
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
   private logger: Logger = new Logger('ChatGateway');
 
+  afterInit(server: Server) {
+    this.logger.log(`[SOCKET] WebSocket Gateway initialized on path: ${(server as any)?.opts?.path || '/socket.io'}`);
+  }
+
   handleConnection(client: Socket) {
-    this.logger.log(`[SOCKET] Client connected: ${client.id}`);
+    this.logger.log(`[SOCKET] Client connected: ${client.id} (transport: ${client.conn?.transport?.name})`);
   }
 
   handleDisconnect(client: Socket) {

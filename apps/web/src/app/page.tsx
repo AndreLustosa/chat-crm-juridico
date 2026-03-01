@@ -98,7 +98,7 @@ export default function Dashboard() {
     const wsUrl = getWsUrl();
     console.log('[SOCKET] Connecting to:', wsUrl);
     const socket = io(wsUrl, {
-      path: '/socket.io/',
+      path: '/api/socket.io/',
       transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
