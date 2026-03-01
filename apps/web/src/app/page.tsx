@@ -33,10 +33,18 @@ interface MessageItem {
   media?: { original_url?: string; mime_type?: string } | null;
 }
 
+function getWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+  if (apiUrl.startsWith('http')) {
+    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
+  }
+  return typeof window !== 'undefined' ? window.location.origin : '';
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [leadFilter, setLeadFilter] = useState('');
-  const [socketConnected, setSocketConnected] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [userInboxes, setUserInboxes] = useState<any[]>([]);
   const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
@@ -87,7 +95,7 @@ export default function Dashboard() {
 
   // WebSocket connection (once, does not reconnect on filter changes)
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || window.location.origin;
+    const wsUrl = getWsUrl();
     console.log('[SOCKET] Connecting to:', wsUrl);
     const socket = io(wsUrl, {
       transports: ['websocket', 'polling'],
@@ -98,7 +106,6 @@ export default function Dashboard() {
 
     socket.on('connect', () => {
       console.log('[SOCKET] Connected to dashboard ID:', socket.id);
-      setSocketConnected(true);
       // Re-join current conversation room on reconnect
       const currentConvoId = selectedIdRef.current;
       if (currentConvoId && !currentConvoId.startsWith('demo-')) {
@@ -108,12 +115,10 @@ export default function Dashboard() {
 
     socket.on('disconnect', () => {
       console.log('[SOCKET] Disconnected from dashboard');
-      setSocketConnected(false);
     });
 
     socket.on('connect_error', (err) => {
       console.error('[SOCKET] Connection error:', err);
-      setSocketConnected(false);
     });
 
     socket.on('inboxUpdate', () => {
@@ -343,14 +348,7 @@ export default function Dashboard() {
         {selected ? (
           <>
             <header className="h-[80px] px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
-               <div className="flex items-center gap-3">
-             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-card border border-border">
-               <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 animate-pulse'}`} />
-               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                 {socketConnected ? 'Real-time On' : 'Connecting...'}
-               </span>
-             </div>
-             <div className="flex items-center gap-4">
+               <div className="flex items-center gap-4">
                  <div className="w-12 h-12 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm">
                    {selected.profile_picture_url ? (
                      <img src={selected.profile_picture_url} alt={selected.contactName} className="w-full h-full object-cover" loading="lazy" />
@@ -364,7 +362,6 @@ export default function Dashboard() {
                      {selected.channel} <span className="mx-1">•</span> {selected.contactPhone}
                    </div>
                  </div>
-               </div>
                </div>
                <div className="flex gap-3">
                  {selected.status === 'WAITING' && isRealConvo && (

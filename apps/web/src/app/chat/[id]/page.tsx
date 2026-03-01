@@ -9,6 +9,15 @@ import { io, Socket } from 'socket.io-client';
 
 import { formatPhone } from '@/lib/utils';
 
+function getWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+  if (apiUrl.startsWith('http')) {
+    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
+  }
+  return typeof window !== 'undefined' ? window.location.origin : '';
+}
+
 export default function ChatPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [messages, setMessages] = useState<any[]>([]);
@@ -16,7 +25,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [lead, setLead] = useState<any>(null);
   const [convoId, setConvoId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [socketConnected, setSocketConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,7 +36,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       return;
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || window.location.origin;
+    const wsUrl = getWsUrl();
 
     const fetchData = async () => {
        try {
@@ -49,18 +57,15 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
            socketRef.current.on('connect', () => {
              console.log('[SOCKET] ChatRoom Connected ID:', socketRef.current?.id);
-             setSocketConnected(true);
              socketRef.current?.emit('join_conversation', convo.id);
            });
 
            socketRef.current.on('disconnect', () => {
              console.log('[SOCKET] ChatRoom Disconnected');
-             setSocketConnected(false);
            });
 
            socketRef.current.on('connect_error', (err) => {
              console.error('[SOCKET] ChatRoom error:', err);
-             setSocketConnected(false);
            });
 
             socketRef.current.on('newMessage', (msg: any) => {
@@ -151,12 +156,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             </div>
           </div>
           <div className="flex gap-3 items-center">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-card border border-border">
-              <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 animate-pulse'}`} />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                {socketConnected ? 'Real-time On' : 'Connecting...'}
-              </span>
-            </div>
             <button className="px-4 py-2 text-sm font-semibold text-primary bg-primary/10 border border-primary/20 rounded-xl transition-colors flex items-center gap-2 hover:bg-primary/20">
               <Bot size={16} />
               IA Ativa
