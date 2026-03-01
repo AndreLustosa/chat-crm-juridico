@@ -148,6 +148,7 @@ export class EvolutionService {
           media_data: mediaData,
           remote_jid: remoteJid,
           msg_id: externalMessageId,
+          instance_name: instanceName,
         });
       }
 

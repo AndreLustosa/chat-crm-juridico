@@ -2,6 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import OpenAI from 'openai';
 import axios from 'axios';
 
@@ -10,7 +11,10 @@ export class AiProcessor extends WorkerHost {
   private readonly logger = new Logger(AiProcessor.name);
   private ai: OpenAI | null = null;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private settings: SettingsService,
+  ) {
     super();
     const key = process.env.OPENAI_API_KEY;
     if (key) {
@@ -26,7 +30,7 @@ export class AiProcessor extends WorkerHost {
       this.logger.warn('IA desativada (sem OPENAI_API_KEY), ignorando job');
       return;
     }
-    const { message_id, conversation_id } = job.data;
+    const { conversation_id } = job.data;
 
     try {
       // 1. Fetch conversation details and recent history
@@ -61,21 +65,27 @@ Responda de forma empática e curta (adequado para WhatsApp).`;
 
       const aiText = completion.choices[0]?.message?.content || 'Desculpe, estou com instabilidade no momento.';
 
-      // 4. Send back via Evolution API
-      const apiBaseUrl = process.env.EVOLUTION_API_URL;
-      const apiKey = process.env.EVOLUTION_GLOBAL_APIKEY;
-      const instanceName = process.env.EVOLUTION_INSTANCE_NAME;
+      // 4. Ler config da Evolution do banco de dados
+      const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
 
-      const url = `${apiBaseUrl}/message/sendText/${instanceName}`;
-      await axios.post(url, {
+      if (!apiUrl) {
+        this.logger.warn('EVOLUTION_API_URL não configurada no banco — resposta da IA não enviada');
+        return;
+      }
+
+      // Instância: vem da conversa (associada à instância WhatsApp usada)
+      const instanceName = convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
+
+      // 5. Send back via Evolution API
+      await axios.post(`${apiUrl}/message/sendText/${instanceName}`, {
         number: convo.lead.phone,
         textMessage: { text: aiText },
         options: { delay: 1500, presence: 'composing' }
       }, {
-        headers: { 'Content-Type': 'application/json', apikey: apiKey || '' }
+        headers: { 'Content-Type': 'application/json', apikey: apiKey }
       });
 
-      // 5. Save generated message to DB
+      // 6. Save generated message to DB
       await this.prisma.message.create({
         data: {
           conversation_id: convo.id,
