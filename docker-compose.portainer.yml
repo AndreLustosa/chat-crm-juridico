@@ -43,25 +43,6 @@ services:
       restart_policy:
         condition: any
 
-  # ------ MinIO (Mídias S3) ------
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    ports:
-      - '49000:9000'
-      - '49001:9001'
-    environment:
-      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
-    networks:
-      - default
-      - OrionNet
-    volumes:
-      - minio_data:/data
-    deploy:
-      restart_policy:
-        condition: any
-
   # ------ NestJS Core API ------
   crm-api:
     image: ghcr.io/andrelustosa/chat-crm-juridico-api:master
@@ -79,14 +60,12 @@ services:
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
       - PUBLIC_API_URL=${PUBLIC_API_URL:-https://atendimento.andrelustosaadvogados.com.br/api}
-      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
-      - S3_REGION=${S3_REGION:-us-east-1}
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
-      - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
+      - MEDIA_PATH=/app/uploads
     networks:
       - default
       - OrionNet
+    volumes:
+      - media_data:/app/uploads
     deploy:
       restart_policy:
         condition: any
@@ -122,14 +101,12 @@ services:
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
-      - S3_ENDPOINT=http://minio:9000
-      - S3_REGION=us-east-1
-      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
-      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
-      - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
+      - MEDIA_PATH=/app/uploads
     networks:
       - default
       - OrionNet
+    volumes:
+      - media_data:/app/uploads
     deploy:
       restart_policy:
         condition: any
@@ -163,4 +140,4 @@ networks:
 volumes:
   pgdata_v2:
   redisdata:
-  minio_data:
+  media_data:
