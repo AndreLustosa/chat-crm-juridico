@@ -278,29 +278,37 @@ export class WhatsappService {
     }
   }
 
+  async fetchChats(instanceName: string) {
+    try {
+      const data = await this.request('GET', `chat/fetchChats/${instanceName}`);
+      return data;
+    } catch (e) {
+      this.logger.error(`Erro ao buscar chats para ${instanceName}: ${e}`);
+      return { data: [] };
+    }
+  }
+
   async syncContacts(instanceName: string, tenantId?: string) {
-    const rawData = await this.fetchContacts(instanceName);
+    const rawContacts = await this.fetchContacts(instanceName);
+    const rawChats = await this.fetchChats(instanceName);
 
-    // O retorno do chat/findContacts (POST) parece ser um array direto
-    // enquanto outros podem vir em { data: [] }
-    const contacts = Array.isArray(rawData)
-      ? rawData
-      : (rawData as any).data ||
-        (rawData as any).instances ||
-        (rawData as any).contacts ||
-        [];
+    const contactsList = Array.isArray(rawContacts)
+      ? rawContacts
+      : (rawContacts as any).data || (rawContacts as any).contacts || [];
+    
+    const chatsList = Array.isArray(rawChats)
+      ? rawChats
+      : (rawChats as any).data || (rawChats as any).chats || [];
 
-    if (!Array.isArray(contacts)) {
-      this.logger.error(`Formato de contatos inválido: ${JSON.stringify(rawData).substring(0, 200)}`);
-      return {
-        total: 0,
-        synced: 0,
-        error: 'Resposta inválida da Evolution API',
-      };
+    // Combinar ambos para garantir que pegamos contatos salvos e conversas ativas
+    const allEntries = [...contactsList, ...chatsList];
+
+    if (allEntries.length === 0) {
+      return { total: 0, synced: 0, error: 'Nenhum contato ou chat encontrado' };
     }
 
     let updatedCount = 0;
-    for (const contact of contacts) {
+    for (const contact of allEntries) {
       try {
         // Evolution v2: remoteJid costuma ser '55829...@s.whatsapp.net'
         // O campo 'id' na v2 é um hash interno (ex: cmm...) e NÃO deve ser usado como telefone.
@@ -312,6 +320,12 @@ export class WhatsappService {
         } else if (contact.number) {
           phone = contact.number;
         }
+
+        // Normalização: remover qualquer caractere que não seja dígito
+        phone = phone.replace(/\D/g, '');
+
+        // Normalização Especial Brasil: Nono Dígito
+        phone = this.normalizeBrazilianPhone(phone);
 
         // Se o número for inválido ou for um ID interno da Evolution (cmm...)
         if (!phone || 
@@ -326,7 +340,7 @@ export class WhatsappService {
           name: (contact.name ||
             contact.pushName ||
             contact.verifiedName ||
-            'Sem Nome') as string,
+            `Contato ${phone}`) as string,
           phone: phone as string,
           origin: 'whatsapp',
           tenant: tenantId ? { connect: { id: tenantId } } : undefined,
@@ -364,6 +378,27 @@ export class WhatsappService {
       }
     }
 
-    return { total: contacts.length, synced: updatedCount };
+    return { total: allEntries.length, synced: updatedCount };
+  }
+
+  private normalizeBrazilianPhone(phone: string): string {
+    // Se não é Brasil (55), não mexe
+    if (!phone.startsWith('55')) return phone;
+
+    // Formato esperado Br: 55 + DDD (2 digitos) + Numero
+    // Mobile com 9 digitos: 55 + DD + 9 + 8 digitos = 13 digitos
+    // Mobile com 8 digitos (legado): 55 + DD + 8 digitos = 12 digitos
+
+    if (phone.length === 12) {
+      const ddd = phone.substring(2, 4);
+      const number = phone.substring(4);
+
+      // Se o numero começa com [6, 7, 8, 9], é um celular que precisa de nono dígito
+      if (['6', '7', '8', '9'].includes(number[0])) {
+        return `55${ddd}9${number}`;
+      }
+    }
+
+    return phone;
   }
 }

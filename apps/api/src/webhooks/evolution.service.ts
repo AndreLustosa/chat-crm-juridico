@@ -36,7 +36,10 @@ export class EvolutionService {
       const remoteJid = key.remoteJid as string;
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
-      const phone = remoteJid.split('@')[0];
+      let phone = remoteJid.split('@')[0];
+      // Normalização Especial Brasil: Nono Dígito
+      phone = this.normalizeBrazilianPhone(phone);
+
       const pushName = (data.pushName as string) || 'Desconhecido';
       const externalMessageId = key.id as string;
       const messageContent =
@@ -147,7 +150,10 @@ export class EvolutionService {
       const remoteJid = (data.id as string) || (data.remoteJid as string);
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
-      const phone = remoteJid.split('@')[0];
+      let phone = remoteJid.split('@')[0];
+      // Normalização Especial Brasil: Nono Dígito
+      phone = this.normalizeBrazilianPhone(phone);
+
       const name =
         (data.pushName as string) ||
         (data.name as string) ||
@@ -174,5 +180,21 @@ export class EvolutionService {
 
       this.logger.log(`Contato sincronizado via webhook: ${phone} (${name})`);
     }
+  }
+
+  private normalizeBrazilianPhone(phone: string): string {
+    // Se não é Brasil (55), não mexe
+    if (!phone.startsWith('55')) return phone;
+
+    // Mobile com 8 digitos (legado): 55 + DD + 8 digitos = 12 digitos
+    if (phone.length === 12) {
+      const ddd = phone.substring(2, 4);
+      const number = phone.substring(4);
+      // Se o numero começa com [6, 7, 8, 9], é um celular que precisa de nono dígito
+      if (['6', '7', '8', '9'].includes(number[0])) {
+        return `55${ddd}9${number}`;
+      }
+    }
+    return phone;
   }
 }

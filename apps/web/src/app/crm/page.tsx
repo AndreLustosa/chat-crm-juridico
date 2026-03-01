@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { User } from 'lucide-react';
 import api from '@/lib/api';
+import { formatPhone } from '@/lib/utils';
 
 const STAGES = [
   { id: 'NEW', label: 'NOVO', color: '#5b8def' },
@@ -106,10 +107,7 @@ export default function CrmPage() {
                           {lead.title || lead.name || 'Negócio sem título'}
                         </h4>
                         
-                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground flex-wrap">
-                          <User size={12} className="opacity-70" />
-                          <span>{lead.contactName || lead.phone || 'Sem contato'}</span>
-                        </div>
+                          <span>{lead.contactName || formatPhone(lead.phone) || 'Sem contato'}</span>
 
                         {lead.value && (
                            <div className="text-[13px] font-bold text-[#34d399] mt-2.5 tracking-tight">

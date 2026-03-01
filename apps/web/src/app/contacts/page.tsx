@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Search, User, MessageSquare, Phone, Loader2, RefreshCw } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import api from '@/lib/api';
+import { cn, formatPhone } from '@/lib/utils';
 
 interface Contact {
   id: string;
@@ -86,13 +87,6 @@ export default function ContactsPage() {
     c.name.toLowerCase().includes(search.toLowerCase()) || 
     c.phone.includes(search)
   );
-
-  const formatPhone = (phone: string) => {
-    if (phone.length === 13) {
-      return `+${phone.slice(0, 2)} (${phone.slice(2, 4)}) ${phone.slice(4, 5)} ${phone.slice(5, 9)}-${phone.slice(9)}`;
-    }
-    return phone;
-  };
 
   return (
     <div className="flex h-screen bg-background overflow-hidden text-foreground">

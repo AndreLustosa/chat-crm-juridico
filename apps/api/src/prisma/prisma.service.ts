@@ -5,17 +5,31 @@ import { PrismaClient } from '@crm/shared';
 export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name);
 
+  constructor() {
+    super({
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL,
+        },
+      },
+    });
+  }
+
   async onModuleInit() {
-    this.logger.log('Iniciando serviço de Banco de Dados. Aguardando conexão com VPS...');
+    this.logger.log('Iniciando serviço de Banco de Dados. Aguardando conexão em background...');
+    // Inicia conexão sem await para não travar o bootstrap
+    void this.connectWithRetry();
+  }
+
+  private async connectWithRetry() {
     let connected = false;
     let attempts = 0;
 
     while (!connected) {
       try {
         attempts++;
-        this.logger.log(`Tentativa ${attempts} de conectar ao Banco de Dados (69.62.93.186:45432)...`);
+        this.logger.log(`Tentativa ${attempts} de conectar ao Banco de Dados (VPS)...`);
         
-        // Timeout de conexão curto para falhar rápido e tentar de novo
         await this.$connect();
         
         connected = true;
@@ -24,7 +38,6 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
         this.logger.error(
           `❌ Erro na tentativa ${attempts}: ${err.message}. Nova tentativa em 5 segundos...`,
         );
-        // Espera 5 segundos antes da próxima tentativa
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     }

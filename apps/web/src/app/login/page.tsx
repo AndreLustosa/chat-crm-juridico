@@ -11,7 +11,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+
+  // Carregar email salvo se existir
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('remembered_email');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   useEffect(() => {
     const checkDb = async () => {
@@ -37,6 +47,13 @@ export default function LoginPage() {
     try {
       const res = await api.post('/auth/login', { email, password });
       localStorage.setItem('token', res.data.access_token);
+      
+      if (rememberMe) {
+        localStorage.setItem('remembered_email', email);
+      } else {
+        localStorage.removeItem('remembered_email');
+      }
+
       router.push('/');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Credenciais inválidas');
@@ -103,6 +120,7 @@ export default function LoginPage() {
               />
               <input
                 id="email"
+                name="email"
                 type="email"
                 required
                 className="w-full rounded-xl border bg-[#1a1a1a] text-white outline-none transition-all"
@@ -144,6 +162,7 @@ export default function LoginPage() {
               />
               <input
                 id="password"
+                name="password"
                 type="password"
                 required
                 className="w-full rounded-xl border bg-[#1a1a1a] text-white outline-none transition-all"
@@ -167,6 +186,39 @@ export default function LoginPage() {
                 }}
               />
             </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-6">
+            <label className="flex items-center cursor-pointer group">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                />
+                <div className={`w-5 h-5 rounded-md border transition-all flex items-center justify-center ${
+                  rememberMe 
+                    ? 'bg-[#a1773d] border-[#a1773d]' 
+                    : 'bg-[#1a1a1a] border-white/10 group-hover:border-[#a1773d]/50'
+                }`}>
+                  {rememberMe && (
+                    <svg className="w-3.5 h-3.5 text-black font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <span className="ml-2.5 text-[13px] text-[#dcdcdc] font-medium select-none">Lembrar-me</span>
+            </label>
+            
+            <button 
+              type="button"
+              className="text-[12px] text-[#a1773d] hover:text-[#eae2a1] font-medium transition-colors"
+              onClick={() => setError('Funcionalidade em breve')}
+            >
+              Esqueceu a senha?
+            </button>
           </div>
 
           {error && (

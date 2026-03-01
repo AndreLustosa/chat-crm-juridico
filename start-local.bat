@@ -5,24 +5,26 @@ echo =========================================================
 echo  INICIANDO AMBIENTE LOCAL FRONTAL E API - LEXCRM
 echo =========================================================
 
-:: Mata processos node anteriores de forma mais agressiva
+:: Mata processos node anteriores
 echo [0/3] Limpando processos antigos...
-taskkill /F /IM node.exe /T /FI "WINDOWTITLE eq LexCRM*" 2>nul
 taskkill /F /IM node.exe /T 2>nul
 timeout /t 2 /nobreak >nul
 
-echo [1/3] Verificando dependencias e preparando...
-:: Verifica se o dist existe, se nao existir builda
-if not exist "apps\api\dist\main.js" (
-    echo [!] Build da API nao encontrado. Gerando...
-    cmd /c "npm run build --workspace=apps/api"
-)
+echo [1/3] Garantindo dependencias e Build...
+:: Forçar geração do prisma e build da API
+cmd /c "npm install"
+cmd /c "npm run db:generate --workspace=@crm/shared"
+cmd /c "npm run build --workspace=apps/api"
 
 echo.
 
-:: Tenta iniciar a API em uma nova janela
-echo [2/3] Iniciando API (Porta 3005) em segundo plano...
-start "LexCRM - API" cmd /c "echo === LOG DA API LEXCRM === & :loop & node apps/api/dist/main.js & echo. & echo [!] API caiu em %time%. Reiniciando em 5 segundos... & timeout /t 5 & goto loop"
+:: Inicia a API
+echo [2/3] Iniciando API em nova janela...
+start "LexCRM - API" cmd /c "title LexCRM - API && echo Aguardando inicializacao... && node apps/api/dist/main.js || pause"
+
+:: Espera a API subir
+echo Aguardando 5 segundos para a API inicializar...
+timeout /t 5 /nobreak >nul
 
 :: Espera um pouco para a API subir antes do Web
 timeout /t 5 /nobreak >nul

@@ -7,6 +7,8 @@ import { Sidebar } from '@/components/Sidebar';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 
+import { formatPhone } from '@/lib/utils';
+
 export default function ChatPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [messages, setMessages] = useState<any[]>([]);
@@ -103,9 +105,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               {getInitial(lead?.name || lead?.phone)}
             </div>
             <div>
-              <h3 className="font-bold text-lg leading-tight">{lead?.name || lead?.phone || 'Carregando...'}</h3>
+              <h3 className="font-bold text-lg leading-tight">{lead?.name || formatPhone(lead?.phone) || 'Carregando...'}</h3>
               <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-1">
-                WHATSAPP <span className="mx-1">•</span> {lead?.phone || ''}
+                WHATSAPP <span className="mx-1">•</span> {formatPhone(lead?.phone) || ''}
               </div>
             </div>
           </div>
