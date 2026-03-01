@@ -10,11 +10,28 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push-images:
+  build-and-push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - name: api
+            dockerfile: infra/Dockerfile.backend
+            suffix: api
+            build-args: APP=api
+          - name: worker
+            dockerfile: infra/Dockerfile.backend
+            suffix: worker
+            build-args: APP=worker
+          - name: web
+            dockerfile: infra/Dockerfile.web
+            suffix: web
+            build-args: |
+              NEXT_PUBLIC_API_URL=https://atendimento.andrelustosaadvogados.com.br/api
+              NEXT_PUBLIC_WS_URL=wss://atendimento.andrelustosaadvogados.com.br
 
     steps:
       - name: Checkout repository
@@ -30,66 +47,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for API
-        id: meta-api
+      - name: Extract metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-api
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.suffix }}
 
-      - name: Build and push API image
+      - name: Build and push ${{ matrix.name }} image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: infra/Dockerfile.backend
-          build-args: |
-            APP=api
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
           push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,mode=max,scope=api
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.suffix }}
 
-      - name: Extract metadata for Worker
-        id: meta-worker
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
-
-      - name: Build and push Worker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/Dockerfile.backend
-          build-args: |
-            APP=worker
-          push: true
-          tags: ${{ steps.meta-worker.outputs.tags }}
-          labels: ${{ steps.meta-worker.outputs.labels }}
-          cache-from: type=gha,scope=worker
-          cache-to: type=gha,mode=max,scope=worker
-
-      - name: Extract metadata for Web
-        id: meta-web
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-web
-
-      - name: Build and push Web image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: infra/Dockerfile.web
-          build-args: |
-            NEXT_PUBLIC_API_URL=https://atendimento.andrelustosaadvogados.com.br/api
-            NEXT_PUBLIC_WS_URL=wss://atendimento.andrelustosaadvogados.com.br
-          push: true
-          tags: ${{ steps.meta-web.outputs.tags }}
-          labels: ${{ steps.meta-web.outputs.labels }}
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
-
-      # Dispara redeploy automatico no Portainer (se webhook configurado)
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: ${{ vars.PORTAINER_WEBHOOK_URL != '' }}
+    steps:
       - name: Trigger Portainer stack redeploy
-        if: ${{ vars.PORTAINER_WEBHOOK_URL != '' }}
         run: |
           curl -s -X POST "${{ vars.PORTAINER_WEBHOOK_URL }}" || echo "Portainer webhook falhou (stack sera atualizada manualmente)"
