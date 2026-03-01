@@ -20,4 +20,9 @@ export class SettingsService {
       apiKey: apiKeyRow?.value || process.env.EVOLUTION_GLOBAL_APIKEY || '',
     };
   }
+
+  async getOpenAiKey(): Promise<string | null> {
+    const row = await this.prisma.globalSetting.findUnique({ where: { key: 'OPENAI_API_KEY' } });
+    return row?.value || process.env.OPENAI_API_KEY || null;
+  }
 }

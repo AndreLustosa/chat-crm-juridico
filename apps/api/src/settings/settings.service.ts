@@ -46,4 +46,16 @@ export class SettingsService {
       await this.set('WEBHOOK_URL', webhookUrl);
     }
   }
+
+  async getAiConfig() {
+    const apiKey = await this.get('OPENAI_API_KEY');
+    return {
+      apiKey: apiKey || process.env.OPENAI_API_KEY || null,
+      isConfigured: !!(apiKey || process.env.OPENAI_API_KEY),
+    };
+  }
+
+  async setAiConfig(apiKey: string) {
+    await this.set('OPENAI_API_KEY', apiKey);
+  }
 }

@@ -42,9 +42,29 @@ export class SettingsController {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem alterar configurações de API');
     }
-    
+
     console.log('Salvando configurações:', data);
     await this.settingsService.setWhatsAppConfig(data.apiUrl, data.apiKey, data.webhookUrl);
     return { message: 'Configurações atualizadas com sucesso' };
+  }
+
+  @Get('ai-config')
+  async getAiConfig(@Request() req: any) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Apenas administradores podem ver configurações de IA');
+    }
+    return this.settingsService.getAiConfig();
+  }
+
+  @Post('ai-config')
+  async setAiConfig(
+    @Request() req: any,
+    @Body() data: { apiKey: string }
+  ) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Apenas administradores podem alterar configurações de IA');
+    }
+    await this.settingsService.setAiConfig(data.apiKey);
+    return { message: 'Chave OpenAI salva com sucesso' };
   }
 }
