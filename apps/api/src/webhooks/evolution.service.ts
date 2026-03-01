@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { LeadsService } from '../leads/leads.service';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
 
 interface EvolutionWebhookPayload {
@@ -18,6 +19,7 @@ export class EvolutionService {
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
+    private leadsService: LeadsService,
     @InjectQueue('media-jobs') private mediaQueue: Queue,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
   ) {}
@@ -38,7 +40,6 @@ export class EvolutionService {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       let phone = remoteJid.split('@')[0];
-      // Normalização Especial Brasil: Nono Dígito
       phone = normalizeBrazilianPhone(phone);
 
       const pushName = (data.pushName as string) || 'Desconhecido';
@@ -49,26 +50,13 @@ export class EvolutionService {
         '';
       const messageType = (data.messageType as string) || 'text';
 
-      // 1. Upsert Lead
-      const lead = await this.prisma.lead.upsert({
-        where: { phone },
-        update: {},
-        create: {
-          phone,
-          name: pushName,
-          origin: 'whatsapp',
-          stage: 'NOVO',
-        },
+      // 1. Upsert Lead (via LeadsService para garantir normalização)
+      const lead = await this.leadsService.upsert({
+        phone,
+        name: pushName,
+        origin: 'whatsapp',
+        stage: 'NOVO',
       });
-
-      // Tenta buscar a foto em background se ainda não tiver (opcional: a Evolution às vezes manda no payload agora)
-      if (!lead.profile_picture_url) {
-        // Como o EvolutionService não tem acesso direto ao WhatsappService (evitar circular dependency), 
-        // poderíamos emitir um job ou apenas deixar o sync principal resolver.
-        // Mas para agilizar, vamos tentar injetar o WhatsappService se não houver circularidade 
-        // OU fazer a requisição manual se soubermos a URL.
-        // Por ora, vamos focar no Sync principal solicitado pelo usuário.
-      }
 
       // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
@@ -161,7 +149,6 @@ export class EvolutionService {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       let phone = remoteJid.split('@')[0];
-      // Normalização Especial Brasil: Nono Dígito
       phone = normalizeBrazilianPhone(phone);
 
       const name =
@@ -170,26 +157,14 @@ export class EvolutionService {
         (data.verifiedName as string) ||
         'Desconhecido';
 
-      const existingLead = await this.prisma.lead.findUnique({
-        where: { phone },
-      });
-
-      await this.prisma.lead.upsert({
-        where: { phone },
-        update: {
-          name: name,
-        },
-        create: {
-          phone,
-          name: name,
-          origin: 'whatsapp',
-          stage: 'NOVO',
-          tenant_id: existingLead?.tenant_id || payload.instanceId || null,
-        },
+      await this.leadsService.upsert({
+        phone,
+        name,
+        origin: 'whatsapp',
+        stage: 'NOVO',
       });
 
       this.logger.log(`Contato sincronizado via webhook: ${phone} (${name})`);
     }
   }
-
 }

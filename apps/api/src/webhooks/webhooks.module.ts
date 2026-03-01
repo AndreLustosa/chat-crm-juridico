@@ -3,10 +3,12 @@ import { BullModule } from '@nestjs/bullmq';
 import { EvolutionService } from './evolution.service';
 import { EvolutionController } from './evolution.controller';
 import { PrismaModule } from '../prisma/prisma.module';
+import { LeadsModule } from '../leads/leads.module';
 
 @Module({
   imports: [
     PrismaModule,
+    LeadsModule,
     BullModule.registerQueue({
       name: 'media-jobs',
     }),
