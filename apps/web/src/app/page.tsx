@@ -46,10 +46,9 @@ function getWsUrl(): string {
 
 function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   if (!isOut) return null;
-  const cls = 'text-primary-foreground/60';
-  if (status === 'lido') return <Eye size={12} className={cls} />;
-  if (status === 'entregue') return <CheckCheck size={12} className={cls} />;
-  return <Check size={12} className={cls} />;
+  if (status === 'lido') return <CheckCheck size={12} className="text-blue-400" />;
+  if (status === 'entregue') return <CheckCheck size={12} className="text-primary-foreground/60" />;
+  return <Check size={12} className="text-primary-foreground/60" />;
 }
 
 export default function Dashboard() {
