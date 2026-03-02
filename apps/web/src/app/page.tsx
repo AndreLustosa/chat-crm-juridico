@@ -7,6 +7,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
+import { SophIAButton } from '@/components/SophIAButton';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 
@@ -351,6 +352,11 @@ export default function Dashboard() {
       input.focus();
       input.setSelectionRange(start + emoji.length, start + emoji.length);
     });
+  };
+
+  const handleSophIAResult = (result: string) => {
+    setText(result);
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const handleDeleteMessage = async (msgId: string) => {
@@ -873,6 +879,7 @@ export default function Dashboard() {
                     onChange={handleFileSelect}
                   />
                   {isRealConvo && <EmojiPickerButton onEmojiSelect={handleEmojiSelect} />}
+                  {isRealConvo && <SophIAButton text={text} onResult={handleSophIAResult} />}
                   <input
                     ref={inputRef}
                     type="text"

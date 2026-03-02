@@ -7,6 +7,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
+import { SophIAButton } from '@/components/SophIAButton';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { formatPhone } from '@/lib/utils';
@@ -216,6 +217,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     } catch (e) {
       console.error('Erro ao apagar mensagem', e);
     }
+  };
+
+  const handleSophIAResult = (result: string) => {
+    setText(result);
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -622,6 +628,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               />
 
               <EmojiPickerButton onEmojiSelect={handleEmojiSelect} />
+
+              <SophIAButton text={text} onResult={handleSophIAResult} />
 
               <input
                 ref={inputRef}

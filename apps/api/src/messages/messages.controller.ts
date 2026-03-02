@@ -62,6 +62,14 @@ export class MessagesController {
     return this.messagesService.sendFile(conversationId, file, publicApiUrl, caption);
   }
 
+  @Post('ai-correct')
+  correctText(
+    @Body('text') text: string,
+    @Body('action') action: string,
+  ) {
+    return this.messagesService.correctText(text, action);
+  }
+
   @Post(':id/transcribe')
   transcribeAudio(@Param('id') messageId: string) {
     return this.messagesService.transcribeAudio(messageId);

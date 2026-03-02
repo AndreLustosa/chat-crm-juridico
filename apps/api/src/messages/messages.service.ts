@@ -367,6 +367,33 @@ export class MessagesService {
     return { transcription };
   }
 
+  async correctText(text: string, action: string): Promise<{ result: string }> {
+    const { apiKey } = await this.settings.getAiConfig();
+    if (!apiKey) throw new BadRequestException('OPENAI_API_KEY não configurada');
+
+    const prompts: Record<string, string> = {
+      corrigir: 'Corrija a ortografia e gramática do texto a seguir. Retorne apenas o texto corrigido, sem nenhuma explicação.',
+      formalizar: 'Reescreva o texto a seguir de forma mais formal e profissional. Retorne apenas o texto reescrito, sem nenhuma explicação.',
+      profissional: 'Reescreva o texto a seguir de forma profissional, adequada para comunicação jurídica. Retorne apenas o texto reescrito, sem nenhuma explicação.',
+      resumir: 'Resuma o texto a seguir de forma concisa. Retorne apenas o resumo, sem nenhuma explicação.',
+      simplificar: 'Simplifique o texto a seguir, tornando-o mais claro e direto ao ponto. Retorne apenas o texto simplificado, sem nenhuma explicação.',
+    };
+
+    const systemPrompt = prompts[action] ?? prompts['corrigir'];
+
+    const openai = new OpenAI({ apiKey });
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
+    });
+
+    const result = completion.choices[0]?.message?.content?.trim() || text;
+    return { result };
+  }
+
   private streamToBuffer(stream: Readable): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
