@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { Prisma, Conversation } from '@crm/shared';
@@ -131,6 +131,15 @@ export class ConversationsService {
   }
 
   async requestTransfer(id: string, toUserId: string, fromUserId: string, reason: string | null) {
+    // Verifica se a conversa está atribuída ao operador que está solicitando a transferência
+    const existing = await (this.prisma as any).conversation.findUnique({
+      where: { id },
+      select: { assigned_user_id: true },
+    });
+    if (!existing || existing.assigned_user_id !== fromUserId) {
+      throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
+    }
+
     const [fromUser, conv] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: fromUserId }, select: { name: true } }),
       (this.prisma as any).conversation.update({
