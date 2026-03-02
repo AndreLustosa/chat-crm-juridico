@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -972,8 +973,12 @@ export default function Dashboard() {
                </div>
             </header>
 
-            <div className="flex-1 p-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
-              <div className="flex flex-col gap-4 max-w-4xl mx-auto pb-4">
+            <div className="flex-1 p-8 overflow-y-auto custom-scrollbar relative" ref={scrollRef}>
+              {/* Logo watermark */}
+              <div className="pointer-events-none select-none absolute inset-0 flex items-center justify-center opacity-[0.04]">
+                <Image src="/landing/LOGO SEM FUNDO.png" alt="" width={480} height={300} className="invert" aria-hidden />
+              </div>
+              <div className="flex flex-col gap-4 max-w-4xl mx-auto pb-4 relative z-10">
                 {isRealConvo && messages.length > 0 ? (
                   messages.map((msg) => {
                     const isOut = msg.direction === 'out';
@@ -1263,11 +1268,14 @@ export default function Dashboard() {
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center">
-            <div className="w-20 h-20 bg-accent rounded-full flex items-center justify-center mb-6 border border-border">
-              <MessageSquare size={32} className="text-muted-foreground opacity-50" />
-            </div>
-            <h3 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-ring mb-2">LexCRM Inbox</h3>
-            <p className="text-muted-foreground font-medium">Selecione uma conversa na lista lateral para iniciar.</p>
+            <Image
+              src="/landing/LOGO SEM FUNDO.png"
+              alt="André Lustosa Advogados"
+              width={320}
+              height={200}
+              className="opacity-80 select-none pointer-events-none"
+              priority
+            />
           </div>
         )}
       </main>
