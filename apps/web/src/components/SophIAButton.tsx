@@ -16,9 +16,10 @@ interface Props {
   text: string;
   onResult: (result: string) => void;
   disabled?: boolean;
+  compact?: boolean;
 }
 
-export function SophIAButton({ text, onResult, disabled }: Props) {
+export function SophIAButton({ text, onResult, disabled, compact }: Props) {
   const [open, setOpen] = useState(false);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -58,18 +59,23 @@ export function SophIAButton({ text, onResult, disabled }: Props) {
         onClick={() => setOpen(v => !v)}
         disabled={disabled || !hasText}
         title="SophIA — Assistente de Escrita"
-        className={`px-3 py-3 rounded-xl border transition-colors flex items-center gap-1.5 text-xs font-semibold ${
-          open
-            ? 'text-violet-400 border-violet-500/40 bg-violet-500/10'
-            : 'text-muted-foreground border-border bg-card hover:text-violet-400 hover:border-violet-500/40 hover:bg-violet-500/10'
-        } disabled:opacity-40 disabled:cursor-not-allowed`}
+        className={compact
+          ? `p-1.5 rounded-lg transition-colors flex items-center ${
+              open ? 'text-violet-400' : 'text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10'
+            } disabled:opacity-40 disabled:cursor-not-allowed`
+          : `px-3 py-3 rounded-xl border transition-colors flex items-center gap-1.5 text-xs font-semibold ${
+              open
+                ? 'text-violet-400 border-violet-500/40 bg-violet-500/10'
+                : 'text-muted-foreground border-border bg-card hover:text-violet-400 hover:border-violet-500/40 hover:bg-violet-500/10'
+            } disabled:opacity-40 disabled:cursor-not-allowed`
+        }
       >
         {isLoading ? (
-          <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+          <div className={`border-2 border-violet-400 border-t-transparent rounded-full animate-spin ${compact ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
         ) : (
-          <Sparkles size={15} />
+          <Sparkles size={compact ? 16 : 15} />
         )}
-        <span>SophIA</span>
+        {!compact && <span>SophIA</span>}
       </button>
 
       {open && (

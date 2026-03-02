@@ -12,9 +12,10 @@ const Picker = dynamic(
 
 interface Props {
   onEmojiSelect: (emoji: string) => void;
+  compact?: boolean;
 }
 
-export function EmojiPickerButton({ onEmojiSelect }: Props) {
+export function EmojiPickerButton({ onEmojiSelect, compact }: Props) {
   const [open, setOpen] = useState(false);
   const [emojiData, setEmojiData] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,16 +41,15 @@ export function EmojiPickerButton({ onEmojiSelect }: Props) {
         type="button"
         onClick={() => setOpen(v => !v)}
         title="Emojis"
-        className={`p-3 rounded-xl bg-card border border-border transition-colors ${
-          open
-            ? 'text-primary border-primary/40 bg-primary/10'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-        }`}
+        className={compact
+          ? `p-1.5 rounded-lg transition-colors ${open ? 'text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`
+          : `p-3 rounded-xl bg-card border border-border transition-colors ${open ? 'text-primary border-primary/40 bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}`
+        }
       >
-        <Smile size={20} />
+        <Smile size={compact ? 18 : 20} />
       </button>
       {open && emojiData && (
-        <div className="absolute bottom-14 left-0 z-50 shadow-2xl rounded-2xl overflow-hidden">
+        <div className="absolute bottom-12 left-0 z-50 shadow-2xl rounded-2xl overflow-hidden">
           <Picker
             data={emojiData}
             onEmojiSelect={(e: any) => {

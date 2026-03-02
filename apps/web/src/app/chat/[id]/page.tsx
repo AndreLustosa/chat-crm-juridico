@@ -627,25 +627,27 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 onChange={handleFileSelect}
               />
 
-              <EmojiPickerButton onEmojiSelect={handleEmojiSelect} />
-
-              <SophIAButton text={text} onResult={handleSophIAResult} />
-
-              <input
-                ref={inputRef}
-                type="text"
-                value={text}
-                onChange={e => setText(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="Digite sua mensagem..."
-                disabled={sending}
-                className="flex-1 bg-card border border-border rounded-xl px-5 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground disabled:opacity-50"
-              />
+              <div className="relative flex-1">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={text}
+                  onChange={e => setText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Digite sua mensagem..."
+                  disabled={sending}
+                  className="w-full bg-card border border-border rounded-xl pl-5 pr-24 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground disabled:opacity-50"
+                />
+                <div className="absolute inset-y-0 right-3 flex items-center gap-1">
+                  <EmojiPickerButton onEmojiSelect={handleEmojiSelect} compact />
+                  <SophIAButton text={text} onResult={handleSophIAResult} compact />
+                </div>
+              </div>
 
               {convoId && !text.trim() && (
                 <AudioRecorder
