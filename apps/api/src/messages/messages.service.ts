@@ -266,6 +266,44 @@ export class MessagesService {
     return msgWithMedia;
   }
 
+  async deleteMessage(messageId: string) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: { conversation: { include: { lead: true } } },
+    });
+
+    if (!message) throw new NotFoundException('Mensagem não encontrada');
+
+    // Tentar apagar no WhatsApp (best-effort)
+    if (message.external_message_id) {
+      const fromMe = message.direction === 'out';
+      const remoteJid = message.conversation.lead?.phone
+        ? `${message.conversation.lead.phone}@s.whatsapp.net`
+        : '';
+      try {
+        await this.whatsapp.deleteForEveryone(
+          message.conversation.instance_name || '',
+          remoteJid,
+          message.external_message_id,
+          fromMe,
+        );
+      } catch (e) {
+        this.logger.warn(`Falha ao apagar no WhatsApp: ${e.message}`);
+      }
+    }
+
+    // Marcar como apagada no banco
+    const deleted = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { type: 'deleted', text: null },
+    });
+
+    // Emitir atualização via WebSocket
+    this.chatGateway.emitMessageUpdate(message.conversation_id, deleted);
+
+    return deleted;
+  }
+
   async transcribeAudio(messageId: string): Promise<{ transcription: string }> {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },

@@ -3,6 +3,7 @@ import {
   Get,
   Param,
   Post,
+  Delete,
   Body,
   UseGuards,
   UseInterceptors,
@@ -63,5 +64,10 @@ export class MessagesController {
   @Post(':id/transcribe')
   transcribeAudio(@Param('id') messageId: string) {
     return this.messagesService.transcribeAudio(messageId);
+  }
+
+  @Delete(':id')
+  deleteMessage(@Param('id') messageId: string) {
+    return this.messagesService.deleteMessage(messageId);
   }
 }

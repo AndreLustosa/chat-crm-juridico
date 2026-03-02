@@ -66,6 +66,14 @@ export class WhatsappService {
     });
   }
 
+  async deleteForEveryone(instanceName: string, remoteJid: string, externalMessageId: string, fromMe: boolean) {
+    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
+    return this.request('DELETE', `message/delete/${targetInstance}`, {
+      id: externalMessageId,
+      fromMe,
+    });
+  }
+
   async sendMedia(
     number: string,
     mediaType: 'image' | 'audio' | 'document' | 'video',

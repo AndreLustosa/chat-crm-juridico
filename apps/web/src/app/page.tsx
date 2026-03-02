@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2 } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -197,6 +197,10 @@ export default function Dashboard() {
             console.log('[SOCKET] mediaReady received:', updatedMsg.id);
             setMessages(prev => prev.map(m => m.id === updatedMsg.id ? updatedMsg : m));
           });
+          socketRef.current.off('messageUpdate');
+          socketRef.current.on('messageUpdate', (updatedMsg: MessageItem) => {
+            setMessages(prev => prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
+          });
         }
       } catch (e) {
         console.error('Failed to fetch conversation', e);
@@ -323,6 +327,16 @@ export default function Dashboard() {
     if (!isRealConvo || isClosed) return;
     const file = e.dataTransfer.files?.[0];
     if (file) await uploadFile(file);
+  };
+
+  const handleDeleteMessage = async (msgId: string) => {
+    if (!confirm('Apagar esta mensagem para todos?')) return;
+    try {
+      const res = await api.delete(`/messages/${msgId}`);
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, ...res.data } : m));
+    } catch (e) {
+      console.error('Erro ao apagar mensagem', e);
+    }
   };
 
   const filteredConversations = (leadFilter
@@ -597,13 +611,24 @@ export default function Dashboard() {
                   messages.map((msg) => {
                     const isOut = msg.direction === 'out';
                     return (
-                      <div key={msg.id} className={`w-full flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                      <div key={msg.id} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group`}>
+                        {!isOut && (
+                          <button
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0 mb-1"
+                            title="Apagar mensagem"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                         <div className={`max-w-[80%] p-4 shadow-sm ${
                           isOut
                             ? 'bg-gradient-to-tr from-primary/90 to-ring/90 text-primary-foreground rounded-2xl rounded-tr-sm'
                             : 'bg-card border border-border rounded-2xl rounded-tl-sm'
                         }`}>
-                          {msg.type === 'text' || !msg.type ? (
+                          {msg.type === 'deleted' ? (
+                            <p className="text-sm italic opacity-50">🚫 Mensagem apagada</p>
+                          ) : msg.type === 'text' || !msg.type ? (
                             isEmojiOnly(msg.text || '') ? (
                               <p className="text-4xl leading-tight">{msg.text}</p>
                             ) : (
@@ -708,11 +733,22 @@ export default function Dashboard() {
                           ) : (
                             <p className="text-sm italic opacity-70">📎 Anexo: {msg.type}</p>
                           )}
-                          <div className={`text-[10px] mt-2 flex justify-end items-center gap-1.5 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
-                            <span>{formatTime(msg.created_at)}</span>
-                            <StatusIcon status={msg.status} isOut={isOut} />
-                          </div>
+                          {msg.type !== 'deleted' && (
+                            <div className={`text-[10px] mt-2 flex justify-end items-center gap-1.5 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
+                              <span>{formatTime(msg.created_at)}</span>
+                              <StatusIcon status={msg.status} isOut={isOut} />
+                            </div>
+                          )}
                         </div>
+                        {isOut && (
+                          <button
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0 mb-1"
+                            title="Apagar mensagem"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     );
                   })
