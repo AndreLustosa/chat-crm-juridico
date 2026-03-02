@@ -5,10 +5,11 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Instala todas as deps usando cache
+COPY .npmrc* ./
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Agora copia fontes
 COPY . .
