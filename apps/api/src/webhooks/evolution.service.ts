@@ -74,25 +74,42 @@ export class EvolutionService {
 
       // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
-        where: { 
-          lead_id: lead.id, 
-          channel: 'whatsapp', 
+        where: {
+          lead_id: lead.id,
+          channel: 'whatsapp',
           status: 'ABERTO',
           instance_name: instanceName // Prioriza pelo nome da instância
         },
       });
       if (!conv) {
-        conv = await this.prisma.conversation.create({
-          data: {
-            lead_id: lead.id,
-            channel: 'whatsapp',
-            status: 'ABERTO',
-            external_id: remoteJid,
-            inbox_id: inboxId,
-            instance_name: instanceName,
-            tenant_id: inbox?.tenant_id || lead.tenant_id,
-          },
+        // Antes de criar nova conversa, verifica se existe uma fechada para reabrir
+        const closedConv = await this.prisma.conversation.findFirst({
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
+          orderBy: { last_message_at: 'desc' },
         });
+        if (closedConv) {
+          conv = await this.prisma.conversation.update({
+            where: { id: closedConv.id },
+            data: {
+              status: 'ABERTO',
+              last_message_at: new Date(),
+              ...(inboxId && !closedConv.inbox_id ? { inbox_id: inboxId } : {}),
+            },
+          });
+          this.logger.log(`[REOPEN] Conversa ${conv.id} reaberta para lead ${lead.id}`);
+        } else {
+          conv = await this.prisma.conversation.create({
+            data: {
+              lead_id: lead.id,
+              channel: 'whatsapp',
+              status: 'ABERTO',
+              external_id: remoteJid,
+              inbox_id: inboxId,
+              instance_name: instanceName,
+              tenant_id: inbox?.tenant_id || lead.tenant_id,
+            },
+          });
+        }
       } else if (!conv.inbox_id && inboxId) {
         // Se a conversa existe mas não tem setor, vincula ao setor da instância
         conv = await this.prisma.conversation.update({
@@ -252,32 +269,51 @@ export class EvolutionService {
 
       // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
-        where: { 
-          lead_id: lead.id, 
-          channel: 'whatsapp', 
+        where: {
+          lead_id: lead.id,
+          channel: 'whatsapp',
           status: 'ABERTO',
           instance_name: instanceName
         },
       });
 
       if (!conv) {
-        conv = await this.prisma.conversation.create({
-          data: {
-            lead_id: lead.id,
-            channel: 'whatsapp',
-            status: 'ABERTO',
-            external_id: remoteJid,
-            inbox_id: inboxId,
-            instance_name: instanceName,
-            tenant_id: inbox?.tenant_id || lead.tenant_id,
-          },
+        // Antes de criar nova conversa, verifica se existe uma fechada para reabrir
+        const closedConv = await this.prisma.conversation.findFirst({
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
+          orderBy: { last_message_at: 'desc' },
         });
-        this.logger.log(`Nova conversa criada via chat webhook: ${phone} no setor ${inbox?.inbox?.name || 'Nenhum'}`);
+        if (closedConv) {
+          conv = await this.prisma.conversation.update({
+            where: { id: closedConv.id },
+            data: {
+              status: 'ABERTO',
+              last_message_at: new Date(),
+              inbox_id: inboxId || closedConv.inbox_id,
+              instance_name: instanceName,
+              tenant_id: inbox?.tenant_id || closedConv.tenant_id || lead.tenant_id,
+            },
+          });
+          this.logger.log(`[REOPEN] Conversa ${conv.id} reaberta via chat webhook: ${phone}`);
+        } else {
+          conv = await this.prisma.conversation.create({
+            data: {
+              lead_id: lead.id,
+              channel: 'whatsapp',
+              status: 'ABERTO',
+              external_id: remoteJid,
+              inbox_id: inboxId,
+              instance_name: instanceName,
+              tenant_id: inbox?.tenant_id || lead.tenant_id,
+            },
+          });
+          this.logger.log(`Nova conversa criada via chat webhook: ${phone} no setor ${inbox?.inbox?.name || 'Nenhum'}`);
+        }
       } else {
         conv = await this.prisma.conversation.update({
           where: { id: conv.id },
-          data: { 
-            inbox_id: inboxId, 
+          data: {
+            inbox_id: inboxId,
             instance_name: instanceName,
             tenant_id: inbox?.tenant_id || conv.tenant_id || lead.tenant_id
           }
