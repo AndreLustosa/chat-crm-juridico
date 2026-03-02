@@ -586,7 +586,11 @@ export default function Dashboard() {
     } else {
       result = conversations;
     }
-    return result.sort((a, b) => (a.contactName || '').localeCompare(b.contactName || ''));
+    return result.sort((a, b) => {
+      const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return tb - ta;
+    });
   })();
 
   const selected = conversations.find((c) => c.id === selectedId);
