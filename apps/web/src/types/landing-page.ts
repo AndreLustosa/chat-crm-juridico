@@ -19,6 +19,7 @@ export interface LPFaqItem {
 }
 
 export interface LPFooter {
+  address?: string;
   phones?: string[];
   email?: string;
   social?: {
