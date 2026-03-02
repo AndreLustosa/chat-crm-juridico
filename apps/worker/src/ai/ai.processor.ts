@@ -61,6 +61,20 @@ export class AiProcessor extends WorkerHost {
     super();
   }
 
+  // ─── Retorna o parâmetro correto de tokens conforme o modelo ───
+  // GPT-4.1, GPT-5.x e modelos o1/o3 usam max_completion_tokens (max_tokens foi removido)
+  private tokenParam(
+    model: string,
+    value: number,
+  ): { max_tokens?: number; max_completion_tokens?: number } {
+    const usesCompletionTokens = ['gpt-4.1', 'gpt-5', 'o1', 'o3'].some(
+      (prefix) => model.startsWith(prefix),
+    );
+    return usesCompletionTokens
+      ? { max_completion_tokens: value }
+      : { max_tokens: value };
+  }
+
   // ─── Seleciona a skill baseado na área jurídica ───
   private selectSkill(skills: any[], legalArea: string | null): any | null {
     if (!skills.length) return null;
@@ -258,7 +272,7 @@ export class AiProcessor extends WorkerHost {
           }),
         },
       ],
-      max_tokens: 800,
+      ...this.tokenParam(memoryModel, 800),
       temperature: 0.3,
       response_format: { type: 'json_object' },
     });
@@ -422,7 +436,7 @@ export class AiProcessor extends WorkerHost {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        max_tokens: maxTokens,
+        ...this.tokenParam(model, maxTokens),
         temperature,
         response_format: { type: 'json_object' },
       });
