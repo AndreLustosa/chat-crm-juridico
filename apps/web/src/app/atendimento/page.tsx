@@ -537,17 +537,20 @@ export default function Dashboard() {
 
           <div className="flex bg-muted rounded-xl p-1 w-full relative">
             {[
-              { value: '', label: 'Tudo' },
-              { value: 'BOT', label: 'Bot' },
-              { value: 'WAITING', label: 'Espera' },
-              { value: 'ACTIVE', label: 'Ativas' },
+              { value: '', label: 'Tudo', count: conversations.length },
+              { value: 'BOT', label: 'Bot', count: conversations.filter(c => c.status === 'BOT').length },
+              { value: 'WAITING', label: 'Espera', count: conversations.filter(c => c.status === 'WAITING').length },
+              { value: 'ACTIVE', label: 'Ativas', count: conversations.filter(c => c.status === 'ACTIVE' || c.status === 'MONITORING').length },
             ].map((tab) => (
               <button
                 key={tab.value}
                 onClick={() => setLeadFilter(tab.value)}
-                className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${leadFilter === tab.value ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
+                className={`flex-1 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all flex flex-col items-center gap-0.5 ${leadFilter === tab.value ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-background/50'}`}
               >
                 {tab.label}
+                <span className={`text-[10px] font-bold leading-none ${leadFilter === tab.value ? 'text-primary' : 'text-muted-foreground/60'}`}>
+                  {tab.count}
+                </span>
               </button>
             ))}
           </div>
