@@ -153,7 +153,23 @@ export class AiProcessor extends WorkerHost {
       // Só áudios recebidos do cliente sem transcrição
       if (msg.direction !== 'in' || msg.type !== 'audio' || msg.text) continue;
 
-      const media = msg.media ?? null;
+      // Retry: o media-job pode estar rodando em paralelo e ainda não ter salvo o registro
+      let media = msg.media ?? null;
+      if (!media?.s3_key) {
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          await new Promise((r) => setTimeout(r, 800));
+          const found = await this.prisma.media.findFirst({
+            where: { message_id: msg.id },
+          });
+          if (found?.s3_key) {
+            media = found;
+            break;
+          }
+          this.logger.log(
+            `[AI] Aguardando mídia para msg ${msg.id} (tentativa ${attempt}/5)...`,
+          );
+        }
+      }
       if (!media?.s3_key) continue;
 
       try {
@@ -636,7 +652,9 @@ export class AiProcessor extends WorkerHost {
       // Assinatura "Sophia:" em negrito no WhatsApp (salva sem assinatura no DB)
       const textToSend = `*Sophia:* ${finalText}`;
 
-      await axios.post(
+      // Captura o ID real da mensagem retornado pela Evolution API
+      // para que o webhook echo seja corretamente deduplicado e não gere registro duplicado
+      const sendResult = await axios.post(
         `${apiUrl}/message/sendText/${instanceName}`,
         {
           number: convo.lead.phone,
@@ -646,15 +664,18 @@ export class AiProcessor extends WorkerHost {
           headers: { 'Content-Type': 'application/json', apikey: apiKey },
         },
       );
+      const evolutionMsgId: string =
+        sendResult.data?.key?.id || `sys_ai_${Date.now()}`;
 
       // 17. Salvar mensagem no banco com skill_id (texto limpo, sem assinatura)
-      await this.prisma.message.create({
+      // Usa o ID real da Evolution para que o echo do webhook seja deduplicado
+      const savedMsg = await this.prisma.message.create({
         data: {
           conversation_id: convo.id,
           direction: 'out',
           type: 'text',
           text: finalText,
-          external_message_id: `sys_${Date.now()}`,
+          external_message_id: evolutionMsgId,
           status: 'enviado',
           skill_id: skill?.id || null,
         },
@@ -688,6 +709,9 @@ export class AiProcessor extends WorkerHost {
           );
         }
       }
+
+      // 20. Retorna IDs para o AiEventsService da API emitir WebSocket em tempo real
+      return { conversationId: convo.id, messageId: savedMsg.id };
     } catch (e: any) {
       this.logger.error(`Erro no processamento da IA: ${e.message}`);
       throw e;
