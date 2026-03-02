@@ -28,6 +28,7 @@ export class InboxesService {
       id: inbox.id,
       name: inbox.name,
       type: 'INBOX' as const,
+      auto_route: false,
       users: inbox.users as { id: string; name: string }[],
     }));
 
@@ -35,6 +36,7 @@ export class InboxesService {
       id: sector.id,
       name: sector.name,
       type: 'SECTOR' as const,
+      auto_route: sector.auto_route ?? false,
       users: sector.users as { id: string; name: string }[],
     }));
 

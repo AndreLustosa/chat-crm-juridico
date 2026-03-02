@@ -15,6 +15,7 @@ import api from '@/lib/api';
 interface Sector {
   id: string;
   name: string;
+  auto_route: boolean;
   users: Array<{ id: string; name: string; email: string }>;
 }
 
@@ -92,6 +93,17 @@ export default function SectorsSettingsPage() {
       fetchData();
     } catch (error) {
       alert('Erro ao remover usuário do departamento');
+    }
+  };
+
+  const handleToggleAutoRoute = async (id: string, value: boolean) => {
+    const sector = sectors.find(s => s.id === id);
+    if (!sector) return;
+    try {
+      await api.patch(`/sectors/${id}`, { name: sector.name, autoRoute: value });
+      fetchData();
+    } catch (error) {
+      alert('Erro ao atualizar roteamento automático');
     }
   };
 
@@ -237,6 +249,26 @@ export default function SectorsSettingsPage() {
                             ))}
                         </select>
                       </div>
+                    </div>
+
+                    {/* Toggle Roteamento Automático */}
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <label
+                        className="flex items-center gap-3 cursor-pointer"
+                        onClick={() => handleToggleAutoRoute(sector.id, !sector.auto_route)}
+                      >
+                        <div className={`relative w-10 h-5 rounded-full transition-colors ${sector.auto_route ? 'bg-violet-500' : 'bg-muted'}`}>
+                          <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${sector.auto_route ? 'translate-x-5' : 'translate-x-0'}`} />
+                        </div>
+                        <div>
+                          <span className="text-sm font-bold">🤖 Roteamento automático por IA</span>
+                          <p className="text-[11px] text-muted-foreground">
+                            {sector.auto_route
+                              ? 'A IA vincula automaticamente um especialista deste departamento ao lead'
+                              : 'Transferências manuais — atendente escolhe o destinatário'}
+                          </p>
+                        </div>
+                      </label>
                     </div>
                   </div>
                 </div>

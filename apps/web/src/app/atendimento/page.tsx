@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
@@ -24,6 +24,9 @@ interface ConversationSummary {
   aiMode: boolean;
   profile_picture_url?: string | null;
   inboxId?: string | null;
+  legalArea?: string | null;
+  assignedLawyerId?: string | null;
+  originAssignedUserId?: string | null;
 }
 
 interface MessageItem {
@@ -94,7 +97,7 @@ export default function Dashboard() {
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [transferModal, setTransferModal] = useState(false);
-  const [transferGroups, setTransferGroups] = useState<{ id: string; name: string; type: 'INBOX' | 'SECTOR'; users: { id: string; name: string }[] }[]>([]);
+  const [transferGroups, setTransferGroups] = useState<{ id: string; name: string; type: 'INBOX' | 'SECTOR'; auto_route: boolean; users: { id: string; name: string }[] }[]>([]);
   const [transferring, setTransferring] = useState(false);
   const [loadingOperators, setLoadingOperators] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
@@ -401,6 +404,42 @@ export default function Dashboard() {
       console.error('Failed to transfer', e);
     } finally {
       setTransferring(false);
+    }
+  };
+
+  const handleTransferToLawyer = async () => {
+    if (!selectedId) return;
+    setTransferring(true);
+    setTransferError(null);
+    try {
+      await api.post(`/conversations/${selectedId}/transfer-to-lawyer`);
+      setTransferModal(false);
+      setTransferSentMsg(`⚖️ Solicitação enviada para o advogado especialista. Aguardando resposta...`);
+      setTimeout(() => setTransferSentMsg(null), 6000);
+    } catch (e: any) {
+      setTransferError(e?.response?.data?.message || 'Erro ao transferir para advogado.');
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const handleReturnToOrigin = async () => {
+    if (!selectedId) return;
+    try {
+      await api.patch(`/conversations/${selectedId}/return-to-origin`);
+      fetchConversations(selectedInboxIdRef.current);
+    } catch (e: any) {
+      console.error('Failed to return to origin', e);
+    }
+  };
+
+  const handleKeepInInbox = async () => {
+    if (!selectedId) return;
+    try {
+      await api.patch(`/conversations/${selectedId}/keep-in-inbox`);
+      fetchConversations(selectedInboxIdRef.current);
+    } catch (e: any) {
+      console.error('Failed to keep in inbox', e);
     }
   };
 
@@ -789,6 +828,11 @@ export default function Dashboard() {
                         {conv.assignedAgentName}
                       </span>
                     )}
+                    {conv.legalArea && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-violet-400 font-bold border border-violet-500/20 bg-violet-500/10 rounded-md px-1.5 py-0.5">
+                        ⚖️ {conv.legalArea}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground truncate">{conv.lastMessage}</p>
                 </div>
@@ -876,6 +920,26 @@ export default function Dashboard() {
                      <UserCheck size={16} />
                      Transferir
                    </button>
+                 )}
+                 {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
+                   <>
+                     <button
+                       onClick={handleReturnToOrigin}
+                       title="Devolver conversa ao atendente de origem"
+                       className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+                     >
+                       <CornerDownLeft size={16} />
+                       Devolver
+                     </button>
+                     <button
+                       onClick={handleKeepInInbox}
+                       title="Manter conversa no meu inbox"
+                       className="px-3 py-2 text-sm font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-colors flex items-center gap-2"
+                     >
+                       <Inbox size={16} />
+                       Manter Aqui
+                     </button>
+                   </>
                  )}
                  {!isClosed && isRealConvo && (
                    <button
@@ -1302,49 +1366,90 @@ export default function Dashboard() {
               <p className="text-muted-foreground text-sm py-2">Nenhum operador cadastrado.</p>
             ) : (
               <>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-1 shrink-0">Selecione o operador</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-1 shrink-0">Selecione o destino</p>
                 <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
-                  {transferGroups.filter(g => g.users.length > 0).map(group => (
+                  {transferGroups.filter(g => g.users.length > 0 || (g.type === 'SECTOR' && g.auto_route)).map(group => (
                     <div key={group.id}>
                       <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5 px-1">
-                        {group.type === 'SECTOR' ? '🏢' : '📥'} {group.name}
+                        {group.type === 'SECTOR' ? (group.auto_route ? '⚖️' : '🏢') : '📥'} {group.name}
+                        {group.auto_route && <span className="ml-1 text-violet-400">(auto)</span>}
                       </p>
-                      <div className="flex flex-col gap-1">
-                        {group.users.map(user => (
-                          <button
-                            key={user.id}
-                            onClick={() => setSelectedTransferUserId(user.id)}
-                            className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
-                              selectedTransferUserId === user.id
-                                ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
-                                : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
-                            }`}
-                          >
-                            {selectedTransferUserId === user.id && <span className="mr-2">✓</span>}
-                            {user.name}
-                          </button>
-                        ))}
-                      </div>
+                      {group.type === 'SECTOR' && group.auto_route ? (
+                        <div className="space-y-2">
+                          {selected?.assignedLawyerId ? (
+                            <button
+                              onClick={handleTransferToLawyer}
+                              disabled={transferring}
+                              className="w-full py-3 bg-violet-500/10 border border-violet-500/30 text-violet-300 rounded-xl font-bold text-sm hover:bg-violet-500/20 transition-colors flex items-center justify-center gap-2 disabled:opacity-40"
+                            >
+                              {transferring ? '⏳ Enviando...' : `⚖️ Enviar para advogado vinculado${selected.legalArea ? ` (${selected.legalArea})` : ''}`}
+                            </button>
+                          ) : (
+                            <p className="text-sm text-muted-foreground text-center py-2 px-1">
+                              ⏳ Aguardando IA classificar a área... Ou escolha manualmente:
+                            </p>
+                          )}
+                          {group.users.length > 0 && (
+                            <div className="flex flex-col gap-1">
+                              {group.users.map(user => (
+                                <button
+                                  key={user.id}
+                                  onClick={() => setSelectedTransferUserId(user.id)}
+                                  className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
+                                    selectedTransferUserId === user.id
+                                      ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
+                                      : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
+                                  }`}
+                                >
+                                  {selectedTransferUserId === user.id && <span className="mr-2">✓</span>}
+                                  {user.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          {group.users.map(user => (
+                            <button
+                              key={user.id}
+                              onClick={() => setSelectedTransferUserId(user.id)}
+                              className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
+                                selectedTransferUserId === user.id
+                                  ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
+                                  : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
+                              }`}
+                            >
+                              {selectedTransferUserId === user.id && <span className="mr-2">✓</span>}
+                              {user.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
-                <div className="mt-3 shrink-0">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5 px-1">Motivo (obrigatório)</p>
-                  <textarea
-                    value={transferReason}
-                    onChange={e => setTransferReason(e.target.value)}
-                    placeholder="Explique o motivo da transferência..."
-                    className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm resize-none outline-none focus:border-sky-500/50"
-                    rows={2}
-                  />
-                </div>
-                <button
-                  onClick={handleTransfer}
-                  disabled={transferring || !selectedTransferUserId || !transferReason.trim()}
-                  className="mt-3 shrink-0 w-full py-2.5 bg-sky-500 text-white rounded-xl font-bold text-sm hover:bg-sky-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {transferring ? 'Enviando...' : 'Solicitar Transferência'}
-                </button>
+                {selectedTransferUserId && (
+                  <>
+                    <div className="mt-3 shrink-0">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5 px-1">Motivo (obrigatório)</p>
+                      <textarea
+                        value={transferReason}
+                        onChange={e => setTransferReason(e.target.value)}
+                        placeholder="Explique o motivo da transferência..."
+                        className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm resize-none outline-none focus:border-sky-500/50"
+                        rows={2}
+                      />
+                    </div>
+                    <button
+                      onClick={handleTransfer}
+                      disabled={transferring || !selectedTransferUserId || !transferReason.trim()}
+                      className="mt-3 shrink-0 w-full py-2.5 bg-sky-500 text-white rounded-xl font-bold text-sm hover:bg-sky-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {transferring ? 'Enviando...' : 'Solicitar Transferência'}
+                    </button>
+                  </>
+                )}
               </>
             )}
             <button

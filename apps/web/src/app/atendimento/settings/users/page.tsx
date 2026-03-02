@@ -21,15 +21,18 @@ const roleBadgeColors: Record<string, string> = {
   FINANCEIRO: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
 };
 
+const SPECIALTY_SUGGESTIONS = ['Trabalhista', 'Civil', 'Criminal', 'Tributário', 'Família', 'Empresarial', 'Previdenciário', 'Imobiliário'];
+
 interface UserForm {
   name: string;
   email: string;
   password: string;
   role: string;
   inboxIds: string[];
+  specialties: string[];
 }
 
-const emptyForm: UserForm = { name: '', email: '', password: '', role: 'ADVOGADO', inboxIds: [] };
+const emptyForm: UserForm = { name: '', email: '', password: '', role: 'ADVOGADO', inboxIds: [], specialties: [] };
 
 export default function UsersSettingsPage() {
   const router = useRouter();
@@ -40,6 +43,7 @@ export default function UsersSettingsPage() {
   const [form, setForm] = useState<UserForm>(emptyForm);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [specialtyInput, setSpecialtyInput] = useState('');
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -85,21 +89,35 @@ export default function UsersSettingsPage() {
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);
+    setSpecialtyInput('');
     setError('');
     setShowModal(true);
   };
 
   const openEdit = (user: any) => {
     setEditingId(user.id);
-    setForm({ 
-      name: user.name, 
-      email: user.email, 
-      password: '', 
+    setForm({
+      name: user.name,
+      email: user.email,
+      password: '',
       role: user.role,
-      inboxIds: user.inboxes?.map((i: any) => i.id) || []
+      inboxIds: user.inboxes?.map((i: any) => i.id) || [],
+      specialties: user.specialties || [],
     });
+    setSpecialtyInput('');
     setError('');
     setShowModal(true);
+  };
+
+  const addSpecialty = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || form.specialties.includes(trimmed)) return;
+    setForm(f => ({ ...f, specialties: [...f.specialties, trimmed] }));
+    setSpecialtyInput('');
+  };
+
+  const removeSpecialty = (s: string) => {
+    setForm(f => ({ ...f, specialties: f.specialties.filter(x => x !== s) }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -109,11 +127,12 @@ export default function UsersSettingsPage() {
 
     try {
       if (editingId) {
-        const payload: any = { 
-          name: form.name, 
-          email: form.email, 
+        const payload: any = {
+          name: form.name,
+          email: form.email,
           role: form.role,
-          inboxIds: form.inboxIds
+          inboxIds: form.inboxIds,
+          specialties: form.specialties,
         };
         if (form.password) payload.password = form.password;
         await api.patch(`/users/${editingId}`, payload);
@@ -182,6 +201,7 @@ export default function UsersSettingsPage() {
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Nome</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Email</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Setores</th>
+                    <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Especialidades</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Criado em</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider text-right">Ações</th>
                   </tr>
@@ -206,6 +226,16 @@ export default function UsersSettingsPage() {
                             </span>
                           ))}
                           {!user.inboxes?.length && <span className="text-[10px] text-muted-foreground opacity-50">Nenhum</span>}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-wrap gap-1">
+                          {user.specialties?.map((s: string) => (
+                            <span key={s} className="px-2 py-0.5 bg-violet-500/10 text-violet-400 text-[10px] font-bold rounded-lg border border-violet-500/20">
+                              {s}
+                            </span>
+                          ))}
+                          {!user.specialties?.length && <span className="text-[10px] text-muted-foreground opacity-50">—</span>}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-[13px] text-muted-foreground opacity-70">
@@ -331,6 +361,52 @@ export default function UsersSettingsPage() {
                   )}
                 </div>
               </div>
+              {(form.role === 'ADVOGADO' || form.role === 'ESTAGIARIO') && (
+                <div className="space-y-1.5">
+                  <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">
+                    ⚖️ Especialidades Jurídicas
+                  </label>
+                  {form.specialties.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {form.specialties.map(s => (
+                        <span key={s} className="inline-flex items-center gap-1 px-2.5 py-1 bg-violet-500/10 border border-violet-500/20 text-violet-300 text-[11px] font-bold rounded-lg">
+                          {s}
+                          <button type="button" onClick={() => removeSpecialty(s)} className="hover:text-red-400 transition-colors ml-0.5">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={specialtyInput}
+                      onChange={e => setSpecialtyInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSpecialty(specialtyInput); } }}
+                      placeholder="Digite e pressione Enter..."
+                      className="flex-1 px-3 py-2 border border-border rounded-xl bg-background text-foreground text-sm focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500/50 outline-none transition-all placeholder:text-muted-foreground/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addSpecialty(specialtyInput)}
+                      className="px-3 py-2 bg-violet-500/10 border border-violet-500/20 text-violet-300 rounded-xl text-sm font-bold hover:bg-violet-500/20 transition-colors"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {SPECIALTY_SUGGESTIONS.filter(s => !form.specialties.includes(s)).map(s => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => addSpecialty(s)}
+                        className="px-2 py-0.5 bg-muted/50 border border-border text-muted-foreground text-[10px] rounded-lg hover:bg-violet-500/10 hover:border-violet-500/20 hover:text-violet-300 transition-colors"
+                      >
+                        + {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"

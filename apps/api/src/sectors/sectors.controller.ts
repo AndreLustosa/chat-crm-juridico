@@ -13,13 +13,13 @@ export class SectorsController {
   }
 
   @Post()
-  create(@Body('name') name: string) {
-    return this.svc.create(name);
+  create(@Body() body: { name: string; autoRoute?: boolean }) {
+    return this.svc.create(body.name, body.autoRoute);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body('name') name: string) {
-    return this.svc.update(id, name);
+  update(@Param('id') id: string, @Body() body: { name: string; autoRoute?: boolean }) {
+    return this.svc.update(id, body.name, body.autoRoute);
   }
 
   @Delete(':id')

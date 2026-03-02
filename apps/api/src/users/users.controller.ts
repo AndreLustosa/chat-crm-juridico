@@ -32,7 +32,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; password?: string }) {
+  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[] }) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem editar usuários');
     }

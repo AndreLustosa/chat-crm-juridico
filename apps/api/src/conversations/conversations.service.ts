@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { Prisma, Conversation } from '@crm/shared';
@@ -64,6 +64,9 @@ export class ConversationsService {
       assignedAgentName: c.assigned_user?.name || null,
       aiMode: c.ai_mode,
       profile_picture_url: c.lead?.profile_picture_url || null,
+      legalArea: (c as any).legal_area || null,
+      assignedLawyerId: (c as any).assigned_lawyer_id || null,
+      originAssignedUserId: (c as any).origin_assigned_user_id || null,
     }));
   }
 
@@ -218,6 +221,77 @@ export class ConversationsService {
       });
     }
 
+    return { success: true };
+  }
+
+  async transferToAssignedLawyer(id: string, fromUserId: string) {
+    const conv = await (this.prisma as any).conversation.findUnique({
+      where: { id },
+      select: { assigned_user_id: true, assigned_lawyer_id: true, legal_area: true },
+    });
+
+    if (!conv || conv.assigned_user_id !== fromUserId) {
+      throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
+    }
+    if (!conv.assigned_lawyer_id) {
+      throw new BadRequestException(
+        'Nenhum advogado foi vinculado a esta conversa pela IA. Aguarde a IA processar as mensagens ou faça transferência manual.',
+      );
+    }
+
+    await (this.prisma as any).conversation.update({
+      where: { id },
+      data: { origin_assigned_user_id: fromUserId },
+    });
+
+    return this.requestTransfer(
+      id,
+      conv.assigned_lawyer_id,
+      fromUserId,
+      `Área detectada pela IA: ${conv.legal_area || 'Jurídica'}`,
+    );
+  }
+
+  async returnToOrigin(id: string) {
+    const conv = await (this.prisma as any).conversation.findUnique({
+      where: { id },
+      select: { origin_assigned_user_id: true, assigned_user_id: true },
+    });
+    if (!conv?.origin_assigned_user_id) {
+      throw new BadRequestException('Sem atendente de origem para devolver.');
+    }
+
+    const linkedIds = [...new Set([conv.assigned_user_id, conv.origin_assigned_user_id].filter(Boolean) as string[])];
+    await (this.prisma as any).conversation.update({
+      where: { id },
+      data: {
+        assigned_user_id: conv.origin_assigned_user_id,
+        origin_assigned_user_id: null,
+        ai_mode: false,
+        linked_agent_ids: { push: linkedIds },
+      },
+    });
+
+    this.chatGateway.emitConversationsUpdate(null);
+    return { success: true };
+  }
+
+  async keepInInbox(id: string) {
+    const conv = await (this.prisma as any).conversation.findUnique({
+      where: { id },
+      select: { origin_assigned_user_id: true, assigned_user_id: true },
+    });
+
+    const linkedIds = [...new Set([conv?.assigned_user_id, conv?.origin_assigned_user_id].filter(Boolean) as string[])];
+    await (this.prisma as any).conversation.update({
+      where: { id },
+      data: {
+        origin_assigned_user_id: null,
+        linked_agent_ids: { push: linkedIds },
+      },
+    });
+
+    this.chatGateway.emitConversationsUpdate(null);
     return { success: true };
   }
 }

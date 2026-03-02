@@ -46,13 +46,14 @@ export class UsersService {
     return result as any;
   }
 
-  async update(id: string, data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[] }): Promise<Omit<User, 'password_hash'>> {
+  async update(id: string, data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[] }): Promise<Omit<User, 'password_hash'>> {
     const updateData: Prisma.UserUpdateInput = {};
     if (data.name) updateData.name = data.name;
     if (data.email) updateData.email = data.email;
     if (data.role) updateData.role = data.role;
     if (data.password) updateData.password_hash = await argon2.hash(data.password);
-    
+    if (data.specialties !== undefined) (updateData as any).specialties = { set: data.specialties };
+
     if (data.inboxIds) {
       updateData.inboxes = {
         set: data.inboxIds.map(id => ({ id }))

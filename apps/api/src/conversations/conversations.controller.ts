@@ -75,4 +75,19 @@ export class ConversationsController {
   close(@Param('id') id: string) {
     return this.conversationsService.close(id);
   }
+
+  @Post(':id/transfer-to-lawyer')
+  transferToLawyer(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.transferToAssignedLawyer(id, req.user.id);
+  }
+
+  @Patch(':id/return-to-origin')
+  returnToOrigin(@Param('id') id: string) {
+    return this.conversationsService.returnToOrigin(id);
+  }
+
+  @Patch(':id/keep-in-inbox')
+  keepInInbox(@Param('id') id: string) {
+    return this.conversationsService.keepInInbox(id);
+  }
 }

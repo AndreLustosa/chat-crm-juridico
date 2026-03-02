@@ -25,6 +25,7 @@ model User {
   email           String         @unique
   password_hash   String
   role            String
+  specialties     String[]       @default([])
   created_at      DateTime       @default(now())
   audit_logs      AuditLog[]
   assigned_convos Conversation[]
@@ -69,6 +70,10 @@ model Conversation {
   pending_transfer_to_id       String?
   pending_transfer_from_id     String?
   pending_transfer_reason      String?
+  legal_area                   String?   // Área do direito detectada pela IA
+  assigned_lawyer_id           String?   // Advogado pré-designado pela IA
+  origin_assigned_user_id      String?   // Quem transferiu (para devolução)
+  linked_agent_ids             String[]  @default([])  // Todos os agentes que atenderam
   last_message_at              DateTime  @default(now())
   assigned_user    User?     @relation(fields: [assigned_user_id], references: [id])
   lead             Lead      @relation(fields: [lead_id], references: [id])
@@ -226,6 +231,7 @@ model LpEvent {
 model Sector {
   id         String   @id @default(uuid())
   name       String
+  auto_route Boolean  @default(false)
   created_at DateTime @default(now())
   users      User[]   @relation("SectorUsers")
 }

@@ -12,12 +12,14 @@ export class SectorsService {
     });
   }
 
-  async create(name: string) {
-    return (this.prisma as any).sector.create({ data: { name } });
+  async create(name: string, autoRoute = false) {
+    return (this.prisma as any).sector.create({ data: { name, auto_route: autoRoute } });
   }
 
-  async update(id: string, name: string) {
-    return (this.prisma as any).sector.update({ where: { id }, data: { name } });
+  async update(id: string, name: string, autoRoute?: boolean) {
+    const data: any = { name };
+    if (autoRoute !== undefined) data.auto_route = autoRoute;
+    return (this.prisma as any).sector.update({ where: { id }, data });
   }
 
   async remove(id: string) {

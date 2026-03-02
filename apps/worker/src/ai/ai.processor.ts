@@ -94,6 +94,58 @@ Responda de forma empática e curta (adequado para WhatsApp).`;
       });
 
       this.logger.log(`Resposta da IA enviada com sucesso para ${convo.lead.phone}`);
+
+      // 7. Classificar área jurídica e vincular advogado (apenas se ainda não classificado)
+      const currentConv = await (this.prisma as any).conversation.findUnique({
+        where: { id: conversation_id },
+        select: { legal_area: true, assigned_lawyer_id: true },
+      });
+
+      if (!currentConv?.legal_area) {
+        try {
+          const areaResult = await ai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: 'Analise esta conversa jurídica e responda APENAS com a área do direito em 1-3 palavras em português. Ex: "Trabalhista", "Civil", "Criminal", "Tributário", "Família", "Empresarial", "Previdenciário", "Imobiliário". Sem explicação adicional.',
+              },
+              { role: 'user', content: historyText },
+            ],
+            max_tokens: 20,
+          });
+          const legalArea = areaResult.choices[0]?.message?.content?.trim() || null;
+
+          if (legalArea) {
+            // Buscar setores com auto_route=true e encontrar especialista
+            const allAutoSectors = await (this.prisma as any).sector.findMany({
+              where: { auto_route: true },
+              include: { users: { select: { id: true, specialties: true } } },
+            });
+
+            let assignedLawyerId: string | null = null;
+            for (const sector of allAutoSectors) {
+              const match = (sector.users as any[]).find((u: any) =>
+                u.specialties.some((s: string) =>
+                  s.toLowerCase().includes(legalArea.toLowerCase()) ||
+                  legalArea.toLowerCase().includes(s.toLowerCase())
+                )
+              );
+              if (match) { assignedLawyerId = match.id; break; }
+            }
+
+            await (this.prisma as any).conversation.update({
+              where: { id: conversation_id },
+              data: { legal_area: legalArea, assigned_lawyer_id: assignedLawyerId },
+            });
+
+            this.logger.log(`[AI] Área detectada: "${legalArea}" | Advogado vinculado: ${assignedLawyerId || 'nenhum'}`);
+          }
+        } catch (classifyErr: any) {
+          this.logger.warn(`[AI] Falha na classificação de área jurídica: ${classifyErr.message}`);
+          // Não propaga — classificação é secundária ao fluxo principal
+        }
+      }
     } catch (e: any) {
       this.logger.error(`Erro no processamento da IA: ${e.message}`);
       throw e;
