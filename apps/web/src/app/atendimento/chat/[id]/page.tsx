@@ -338,6 +338,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               if (exists) return prev;
               return [...prev, msg];
             });
+            if (msg.direction === 'in') playNotificationSound();
           });
 
           socketRef.current.on('messageUpdate', (updatedMsg: any) => {

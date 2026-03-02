@@ -280,6 +280,7 @@ export default function Dashboard() {
               if (prev.find(m => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id))) return prev;
               return [...prev, msg];
             });
+            if (msg.direction === 'in') playNotificationSound();
           });
           socketRef.current.off('mediaReady');
           socketRef.current.on('mediaReady', (updatedMsg: MessageItem) => {
