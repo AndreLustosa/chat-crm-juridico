@@ -6,6 +6,7 @@ import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, Ch
 import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
+import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { formatPhone } from '@/lib/utils';
@@ -215,6 +216,19 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     } catch (e) {
       console.error('Erro ao apagar mensagem', e);
     }
+  };
+
+  const handleEmojiSelect = (emoji: string) => {
+    if (!inputRef.current) { setText(t => t + emoji); return; }
+    const input = inputRef.current;
+    const start = input.selectionStart ?? text.length;
+    const end = input.selectionEnd ?? text.length;
+    const newText = text.slice(0, start) + emoji + text.slice(end);
+    setText(newText);
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
   };
 
   const handleSend = async () => {
@@ -606,6 +620,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 className="hidden"
                 onChange={handleFileSelect}
               />
+
+              <EmojiPickerButton onEmojiSelect={handleEmojiSelect} />
 
               <input
                 ref={inputRef}
