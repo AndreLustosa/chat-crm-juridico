@@ -54,8 +54,7 @@ export class ConversationsService {
       contactEmail: c.lead?.email || '',
       channel: c.channel?.toUpperCase() || 'WHATSAPP',
       status: c.status === 'FECHADO' ? 'CLOSED'
-        : c.ai_mode && c.assigned_user_id  ? 'MONITORING'  // IA ativa + operador monitorando
-        : c.ai_mode && !c.assigned_user_id ? 'BOT'         // IA sem operador (inbox vazio)
+        : c.ai_mode                        ? 'BOT'         // IA ativa (com ou sem operador)
         : c.assigned_user_id               ? 'ACTIVE'      // operador assumiu (ai_mode=false)
         : 'WAITING',                                       // sem IA, sem operador
       lastMessage: c.messages[0]?.text || '',
