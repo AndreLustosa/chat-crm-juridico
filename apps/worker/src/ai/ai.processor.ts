@@ -115,6 +115,13 @@ export class AiProcessor extends WorkerHost {
         this.logger.warn('[AI] Nenhuma skill ativa encontrada — usando prompt fallback');
       }
 
+      // 5b. Quando lead sem nome nas primeiras mensagens, instruir a IA a pedir o nome
+      const inboundCount = convo.messages.filter((m) => m.direction === 'in').length;
+      if (!convo.lead.name && inboundCount <= 2) {
+        systemPrompt +=
+          '\n\nO cliente ainda não informou o nome. Cumprimente-o de forma acolhedora e peça o nome antes de continuar.';
+      }
+
       const userPrompt = `Histórico recente:\n${historyText}\n\nResponda à última mensagem do cliente.`;
 
       // 6. Chamar OpenAI com parâmetros da skill
@@ -186,7 +193,66 @@ export class AiProcessor extends WorkerHost {
         `Resposta da IA enviada com sucesso para ${convo.lead.phone} (model=${model})`,
       );
 
-      // 11. Classificar área jurídica e vincular advogado (apenas se ainda não classificado)
+      // 11. Extrair e salvar nome do lead se ainda não identificado
+      if (!convo.lead.name) {
+        try {
+          const lastInbound = [...convo.messages].reverse().find((m) => m.direction === 'in');
+          if (lastInbound?.text) {
+            const nameResult = await ai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content:
+                    'A pessoa enviou uma mensagem. Extraia o nome próprio dela caso ela tenha se apresentado. Responda SOMENTE com o nome (ex: "Maria" ou "João Silva") ou "null" se não há apresentação de nome na mensagem.',
+                },
+                { role: 'user', content: lastInbound.text },
+              ],
+              max_tokens: 20,
+            });
+
+            const extractedName = nameResult.choices[0]?.message?.content?.trim();
+            if (
+              extractedName &&
+              extractedName.toLowerCase() !== 'null' &&
+              extractedName.length >= 2 &&
+              extractedName.length <= 60
+            ) {
+              // 11a. Salvar nome no CRM
+              await this.prisma.lead.update({
+                where: { id: convo.lead.id },
+                data: { name: extractedName },
+              });
+
+              // 11b. Salvar na agenda da Evolution API (agenda do WhatsApp)
+              if (apiUrl && instanceName) {
+                try {
+                  await axios.post(
+                    `${apiUrl}/contact/upsert/${instanceName}`,
+                    { contacts: [{ phone: convo.lead.phone, fullName: extractedName }] },
+                    { headers: { 'Content-Type': 'application/json', apikey: apiKey } },
+                  );
+                  this.logger.log(
+                    `[AI] Contato salvo na Evolution: ${convo.lead.phone} → "${extractedName}"`,
+                  );
+                } catch (evErr: any) {
+                  this.logger.warn(
+                    `[AI] Falha ao salvar contato na Evolution: ${evErr.message}`,
+                  );
+                }
+              }
+
+              this.logger.log(
+                `[AI] Nome extraído e salvo: "${extractedName}" → lead ${convo.lead.id}`,
+              );
+            }
+          }
+        } catch (nameErr: any) {
+          this.logger.warn(`[AI] Falha ao extrair nome: ${nameErr.message}`);
+        }
+      }
+
+      // 12. Classificar área jurídica e vincular advogado (apenas se ainda não classificado)
       const currentConv = await (this.prisma as any).conversation.findUnique({
         where: { id: conversation_id },
         select: { legal_area: true, assigned_lawyer_id: true },
