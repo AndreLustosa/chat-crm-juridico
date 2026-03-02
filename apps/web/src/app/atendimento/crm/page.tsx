@@ -33,7 +33,7 @@ export default function CrmPage() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token && process.env.NODE_ENV !== 'development') {
-      router.push('/login');
+      router.push('/atendimento/login');
       return;
     }
 
@@ -47,7 +47,7 @@ export default function CrmPage() {
         setLeads(DEMO_LEADS);
         if (e.response?.status === 401 && process.env.NODE_ENV !== 'development') {
            localStorage.removeItem('token');
-           router.push('/login');
+           router.push('/atendimento/login');
         }
       }
     };

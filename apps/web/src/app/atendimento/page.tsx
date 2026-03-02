@@ -93,7 +93,7 @@ export default function Dashboard() {
   const fetchConversations = useCallback(async (inboxId?: string | null) => {
     try {
       const token = localStorage.getItem('token');
-      if (!token) { router.push('/login'); return; }
+      if (!token) { router.push('/atendimento/login'); return; }
       const res = await api.get('/conversations', {
         params: { inboxId: inboxId || undefined }
       });
@@ -102,7 +102,7 @@ export default function Dashboard() {
     } catch (e: any) {
       if (e.response?.status === 401) {
         localStorage.removeItem('token');
-        router.push('/login');
+        router.push('/atendimento/login');
         return;
       }
       setConversations([]);

@@ -44,7 +44,7 @@ export default function UsersSettingsPage() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
-      router.push('/login');
+      router.push('/atendimento/login');
       return;
     }
     fetchData();
@@ -71,7 +71,7 @@ export default function UsersSettingsPage() {
     } catch (e: any) {
       if (e.response?.status === 401) {
         localStorage.removeItem('token');
-        router.push('/login');
+        router.push('/atendimento/login');
       }
       if (e.response?.status === 403) {
         setError('Você não tem permissão para acessar esta página.');

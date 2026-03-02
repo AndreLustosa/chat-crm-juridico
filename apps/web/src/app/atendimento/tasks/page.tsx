@@ -13,7 +13,7 @@ export default function TasksPage() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
-      router.push('/login');
+      router.push('/atendimento/login');
       return;
     }
 
@@ -28,7 +28,7 @@ export default function TasksPage() {
       console.warn('Backend offline - Mock Mode ativado (sem tarefas reais)');
       if (e.response?.status === 401 && process.env.NODE_ENV !== 'development') {
         localStorage.removeItem('token');
-        router.push('/login');
+        router.push('/atendimento/login');
       }
     }
   };

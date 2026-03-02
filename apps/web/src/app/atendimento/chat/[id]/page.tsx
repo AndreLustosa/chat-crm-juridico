@@ -268,7 +268,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token) { router.push('/login'); return; }
+    if (!token) { router.push('/atendimento/login'); return; }
 
     const wsUrl = getWsUrl();
 
@@ -316,7 +316,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         console.error(e);
         if (e.response?.status === 401) {
           localStorage.removeItem('token');
-          router.push('/login');
+          router.push('/atendimento/login');
         }
       }
     };
