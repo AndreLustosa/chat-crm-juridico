@@ -683,11 +683,11 @@ export default function Dashboard() {
   const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
 
   const statusBadge = (status: string) => {
+    if (status === 'MONITORING') return null;
     const map: Record<string, { class: string; label: string }> = {
       BOT: { class: 'bg-slate-500/15 text-slate-400 border border-slate-500/20', label: '🤖 SophIA' },
-      MONITORING: { class: 'bg-purple-500/15 text-purple-400 border border-purple-500/20', label: '👁 Monitorando' },
       WAITING: { class: 'bg-amber-500/15 text-amber-500 border border-amber-500/20 shadow-[0_0_10px_rgba(251,191,36,0.15)]', label: '⏳ Aguardando' },
-      ACTIVE: { class: 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/20', label: '🟢 Ativo' },
+      ACTIVE: { class: 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/20', label: '🟢 Atribuído' },
       CLOSED: { class: 'bg-gray-500/15 text-gray-400 border border-gray-500/20', label: '⬛ Fechado' },
     };
     const badge = map[status] || map.CLOSED;
