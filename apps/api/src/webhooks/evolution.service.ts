@@ -120,6 +120,27 @@ export class EvolutionService {
         msgType = messageType.replace('Message', '');
       }
 
+      // Extract quoted/reply context from contextInfo (works for both conversation and extendedTextMessage)
+      const contextInfo =
+        (data.message?.extendedTextMessage?.contextInfo as any) ||
+        (data.message?.conversation ? undefined : undefined) ||
+        (data.message?.[messageType]?.contextInfo as any);
+      const quotedStanzaId: string | undefined = contextInfo?.stanzaId;
+      const quotedText: string | undefined =
+        contextInfo?.quotedMessage?.conversation ||
+        contextInfo?.quotedMessage?.extendedTextMessage?.text ||
+        contextInfo?.quotedMessage?.imageMessage?.caption;
+
+      let replyToId: string | null = null;
+      let replyToText: string | null = quotedText || null;
+      if (quotedStanzaId) {
+        const quotedMsg = await this.prisma.message.findUnique({
+          where: { external_message_id: quotedStanzaId },
+        });
+        replyToId = quotedMsg?.id || null;
+        if (!replyToText && quotedMsg?.text) replyToText = quotedMsg.text;
+      }
+
       const isOutgoing = key.fromMe === true;
       const msg = await this.prisma.message.create({
         data: {
@@ -129,6 +150,8 @@ export class EvolutionService {
           text: messageContent,
           external_message_id: externalMessageId,
           status: isOutgoing ? 'enviado' : 'recebido',
+          reply_to_id: replyToId,
+          reply_to_text: replyToText,
         },
       });
 

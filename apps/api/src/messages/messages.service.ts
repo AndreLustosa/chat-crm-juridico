@@ -27,7 +27,7 @@ export class MessagesService {
     });
   }
 
-  async sendMessage(conversationId: string, text: string) {
+  async sendMessage(conversationId: string, text: string, replyToId?: string) {
     const convo = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       include: { lead: true }
@@ -37,6 +37,25 @@ export class MessagesService {
       throw new BadRequestException('Conversa inválida');
     }
 
+    // Look up the quoted message if replying
+    let quotedPayload: any = undefined;
+    let replyToText: string | null = null;
+    if (replyToId) {
+      const quoted = await this.prisma.message.findUnique({ where: { id: replyToId } });
+      if (quoted?.external_message_id) {
+        const remoteJid = `${convo.lead.phone}@s.whatsapp.net`;
+        replyToText = quoted.text || null;
+        quotedPayload = {
+          key: {
+            remoteJid,
+            fromMe: quoted.direction === 'out',
+            id: quoted.external_message_id,
+          },
+          message: { conversation: quoted.text || '' },
+        };
+      }
+    }
+
     // 1. Send via Evolution API
     let externalMsg: any;
     let sendStatus = 'enviado';
@@ -44,7 +63,8 @@ export class MessagesService {
       externalMsg = await this.whatsapp.sendText(
         convo.lead.phone,
         text,
-        convo.instance_name || undefined
+        convo.instance_name || undefined,
+        quotedPayload,
       );
       if (externalMsg?.statusCode >= 400 || externalMsg?.error) {
         this.logger.error(`Evolution API erro ao enviar texto: ${JSON.stringify(externalMsg)}`);
@@ -65,6 +85,8 @@ export class MessagesService {
         text,
         external_message_id: externalId,
         status: sendStatus,
+        reply_to_id: replyToId || null,
+        reply_to_text: replyToText,
       }
     });
 

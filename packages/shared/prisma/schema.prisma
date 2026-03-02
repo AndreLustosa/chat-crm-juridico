@@ -87,6 +87,8 @@ model Message {
   external_message_id String?      @unique
   status              String
   created_at          DateTime     @default(now())
+  reply_to_id         String?
+  reply_to_text       String?
   media               Media?
   conversation        Conversation @relation(fields: [conversation_id], references: [id])
   tasks               Task[]

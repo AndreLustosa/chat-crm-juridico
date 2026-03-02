@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -37,6 +37,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [sending, setSending] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<any>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [docPreview, setDocPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({});
@@ -219,10 +220,16 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const handleSend = async () => {
     if (!text.trim() || !convoId || sending) return;
     const msgText = text;
+    const replyId = replyingTo?.id;
     setSending(true);
     setText('');
+    setReplyingTo(null);
     try {
-      const res = await api.post('/messages/send', { conversationId: convoId, text: msgText });
+      const res = await api.post('/messages/send', {
+        conversationId: convoId,
+        text: msgText,
+        ...(replyId ? { replyToId: replyId } : {}),
+      });
       if (res.data?.id) {
         setMessages(prev => {
           if (prev.some((m: any) => m.id === res.data.id)) return prev;
@@ -387,21 +394,43 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               messages.map((msg, idx) => {
                 const isOut = msg.direction === 'out';
                 return (
-                  <div key={msg.id || idx} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group`}>
+                  <div id={`msg-${msg.id}`} key={msg.id || idx} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group rounded-xl transition-all duration-300`}>
                     {!isOut && (
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0 mb-1"
-                        title="Apagar mensagem"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
+                        <button
+                          onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
+                          className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
+                          title="Responder"
+                        >
+                          <Reply size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMessage(msg.id)}
+                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                          title="Apagar mensagem"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     )}
                     <div className={`max-w-[80%] p-4 shadow-sm ${
                       isOut
                         ? 'bg-gradient-to-tr from-primary/90 to-ring/90 text-primary-foreground rounded-2xl rounded-tr-sm'
                         : 'bg-card border border-border rounded-2xl rounded-tl-sm'
                     }`}>
+                      {msg.reply_to_text && msg.type !== 'deleted' && (
+                        <div
+                          className={`mb-2 pl-3 border-l-2 rounded-sm cursor-pointer ${isOut ? 'border-white/40 bg-white/10' : 'border-primary/50 bg-primary/5'}`}
+                          onClick={() => {
+                            const el = document.getElementById(`msg-${msg.reply_to_id}`);
+                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el?.classList.add('ring-2', 'ring-primary/50');
+                            setTimeout(() => el?.classList.remove('ring-2', 'ring-primary/50'), 1500);
+                          }}
+                        >
+                          <p className={`text-[11px] py-1 pr-2 line-clamp-2 ${isOut ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.reply_to_text}</p>
+                        </div>
+                      )}
                       {msg.type === 'deleted' ? (
                         <p className="text-sm italic opacity-50">🚫 Mensagem apagada</p>
                       ) : msg.type === 'text' || !msg.type ? (
@@ -517,13 +546,22 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                       )}
                     </div>
                     {isOut && (
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive shrink-0 mb-1"
-                        title="Apagar mensagem"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
+                        <button
+                          onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
+                          className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
+                          title="Responder"
+                        >
+                          <Reply size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMessage(msg.id)}
+                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                          title="Apagar mensagem"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -533,7 +571,16 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         </div>
 
         {/* Input */}
-        <footer className="p-6 bg-background shrink-0">
+        <footer className="px-6 pt-3 pb-6 bg-background shrink-0">
+          {replyingTo && !isClosed && (
+            <div className="max-w-4xl mx-auto mb-2 flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-xl">
+              <Reply size={13} className="text-primary shrink-0" />
+              <p className="text-xs text-muted-foreground line-clamp-1 flex-1">{replyingTo.text || '[mídia]'}</p>
+              <button onClick={() => setReplyingTo(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+                <X size={13} />
+              </button>
+            </div>
+          )}
           {isClosed ? (
             <div className="max-w-4xl mx-auto text-center text-sm text-muted-foreground py-3 border border-border rounded-xl bg-card/50">
               Conversa encerrada. Não é possível enviar mensagens.

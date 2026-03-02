@@ -58,12 +58,11 @@ export class WhatsappService {
 
   // --- MENSAGENS ---
 
-  async sendText(number: string, text: string, instanceName?: string) {
+  async sendText(number: string, text: string, instanceName?: string, quoted?: { key: { remoteJid: string; fromMe: boolean; id: string }; message: { conversation: string } }) {
     const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
-    return this.request('POST', `message/sendText/${targetInstance}`, {
-      number,
-      text,
-    });
+    const payload: any = { number, text };
+    if (quoted) payload.quoted = quoted;
+    return this.request('POST', `message/sendText/${targetInstance}`, payload);
   }
 
   async deleteForEveryone(instanceName: string, remoteJid: string, externalMessageId: string, fromMe: boolean) {

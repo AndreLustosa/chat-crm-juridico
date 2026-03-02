@@ -27,9 +27,10 @@ export class MessagesController {
   @Post('send')
   sendMessage(
     @Body('conversationId') conversationId: string,
-    @Body('text') text: string
+    @Body('text') text: string,
+    @Body('replyToId') replyToId?: string,
   ) {
-    return this.messagesService.sendMessage(conversationId, text);
+    return this.messagesService.sendMessage(conversationId, text, replyToId);
   }
 
   @Post('send-audio')
