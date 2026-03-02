@@ -123,9 +123,8 @@ export default function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <LPTracker pageId="home-static" />
+      <LPTracker />
       <HomeTemplate
-        pageId="home-static"
         content={staticContent}
         whatsappNumber="+5582996390799"
       />

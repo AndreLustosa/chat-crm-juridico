@@ -43,7 +43,6 @@ import { LPTemplateContent } from "@/types/landing-page";
 import { trackWhatsappClick } from "../LPTracker";
 
 interface HomeTemplateProps {
-  pageId: string;
   content: LPTemplateContent;
   whatsappNumber?: string;
 }
@@ -51,7 +50,6 @@ interface HomeTemplateProps {
 export function HomeTemplate({
   content,
   whatsappNumber,
-  pageId,
 }: HomeTemplateProps) {
   const { hero, steps = [], faq = [], footer } = content;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -152,7 +150,7 @@ export function HomeTemplate({
     : hero.ctaLink || "#";
 
   const handleCtaClick = () => {
-    trackWhatsappClick(pageId);
+    trackWhatsappClick();
     if (typeof window !== "undefined" && waLink) {
       window.open(waLink, "_blank", "noopener,noreferrer");
     }

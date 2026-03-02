@@ -43,14 +43,12 @@ import { LPTemplateContent } from "@/types/landing-page";
 import { trackWhatsappClick } from "../LPTracker";
 
 interface HighConversionTemplateProps {
-  pageId: string;
   content: LPTemplateContent;
   whatsappNumber?: string;
   onWhatsAppClick?: () => void;
 }
 
 export function HighConversionTemplate({
-  pageId,
   content,
   whatsappNumber,
   onWhatsAppClick,
@@ -219,7 +217,7 @@ export function HighConversionTemplate({
     : hero.ctaLink || "#";
 
   const handleCtaClick = () => {
-    trackWhatsappClick(pageId);
+    trackWhatsappClick();
     if (onWhatsAppClick) onWhatsAppClick();
     window.open(waLink, "_blank");
   };
