@@ -225,17 +225,18 @@ export class EvolutionService {
       const phone = remoteJid.split('@')[0];
       const pushName = (data.pushName as string) || (data.name as string) || null;
 
-      // 1. Upsert Lead — skip creation when there's no name and lead doesn't exist yet.
-      // chats.upsert fires for every open chat on connection; creating leads without names
-      // produces phantom "unknown number" contacts in the CRM.
-      if (!pushName) {
-        const existing = await this.leadsService.findByPhone(phone);
-        if (!existing) continue; // No name, no existing lead → skip
-      }
+      // 1. Upsert Lead — two guards:
+      //   a) Skip creation when there's no name and lead doesn't exist yet (prevents phantom leads).
+      //   b) Never overwrite an existing name: chats.upsert fires after outgoing messages and can
+      //      carry the business account's profile name ("André Lustosa Advogados") instead of the
+      //      client's name.  Only set name when lead has none.
+      const existingLead = await this.leadsService.findByPhone(phone);
+      if (!pushName && !existingLead) continue; // No name, no existing lead → skip
+      const nameToSet = existingLead?.name ? null : pushName;
 
       const lead = await this.leadsService.upsert({
         phone,
-        name: pushName,
+        name: nameToSet,
         origin: 'whatsapp',
         stage: 'NOVO',
         tenant: inbox?.tenant_id ? { connect: { id: inbox.tenant_id } } : undefined,
@@ -368,14 +369,20 @@ export class EvolutionService {
         (data.verifiedName as string) ||
         null;
 
+      // contacts.upsert can fire with the business account's profile name after outgoing messages.
+      // Only set the name if the lead doesn't already have one — never overwrite the client's name.
+      const existingContact = await this.leadsService.findByPhone(phone);
+      if (!existingContact && !name) continue; // No name, no existing lead → skip
+      const contactNameToSet = existingContact?.name ? null : name;
+
       await this.leadsService.upsert({
         phone,
-        name,
+        name: contactNameToSet,
         origin: 'whatsapp',
         stage: 'NOVO',
       });
 
-      this.logger.log(`Contato sincronizado via webhook: ${phone} (${name})`);
+      this.logger.log(`Contato sincronizado via webhook: ${phone} (${contactNameToSet ?? 'nome preservado'})`);
     }
   }
 }
