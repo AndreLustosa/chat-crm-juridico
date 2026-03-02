@@ -66,7 +66,7 @@ export default function WhatsappIntegrationPage() {
         
         setApiUrl(config.apiUrl || 'api.andrelustosaadvogados.com.br');
         setApiKey(config.apiKey || '');
-        setWebhookUrl(config.webhookUrl || 'https://atendimento.andrelustosaadvogados.com.br/api/webhooks/evolution');
+        setWebhookUrl(config.webhookUrl || `${process.env.NEXT_PUBLIC_API_URL || 'https://andrelustosaadvogados.com.br/api'}/webhooks/evolution`);
         
         // Checa a saúde da API em paralelo
         checkApiHealth();
@@ -74,7 +74,7 @@ export default function WhatsappIntegrationPage() {
         console.error('Erro ao carregar configurações de API:', err);
         // Fallback local se o back estiver incomunicável (improvável mas seguro)
         if (!apiUrl) setApiUrl('api.andrelustosaadvogados.com.br');
-        if (!webhookUrl) setWebhookUrl('https://atendimento.andrelustosaadvogados.com.br/api/webhooks/evolution');
+        if (!webhookUrl) setWebhookUrl(`${process.env.NEXT_PUBLIC_API_URL || 'https://andrelustosaadvogados.com.br/api'}/webhooks/evolution`);
       }
       // 2. Tenta buscar instâncias (Pode falhar se a URL for inválida)
       try {
