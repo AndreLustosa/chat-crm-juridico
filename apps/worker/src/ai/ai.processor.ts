@@ -321,16 +321,27 @@ export class AiProcessor extends WorkerHost {
 
     try {
       // 2. Buscar conversa + lead + últimas 20 mensagens (IA + operador + lead)
+      // orderBy desc para pegar as mais RECENTES; invertemos logo abaixo para ordem cronológica
       const convo = await this.prisma.conversation.findUnique({
         where: { id: conversation_id },
         include: {
           lead: true,
-          messages: { orderBy: { created_at: 'asc' }, take: 20 },
+          messages: { orderBy: { created_at: 'desc' }, take: 20 },
         },
       });
 
       // 3. Verificar ai_mode ativo
       if (!convo || !convo.ai_mode) return;
+
+      // Guard: cooldown de 8s — evita resposta duplicada quando o lead manda
+      // várias mensagens em sequência rápida (cada uma dispara um job)
+      const lastOutMsg = convo.messages.find((m) => m.direction === 'out');
+      if (lastOutMsg && Date.now() - lastOutMsg.created_at.getTime() < 8000) {
+        this.logger.log(
+          `[AI] Cooldown ativo (${Date.now() - lastOutMsg.created_at.getTime()}ms desde última resposta) — job ignorado`,
+        );
+        return;
+      }
 
       // 4. Carregar AiMemory (Long Memory) do lead
       const memory = await this.prisma.aiMemory.findUnique({
@@ -370,7 +381,8 @@ export class AiProcessor extends WorkerHost {
       }
 
       // 5. Montar histórico com rótulos (Cliente / Sophia / Operador)
-      const historyText = convo.messages
+      // Invertemos o array (que veio desc) para ordem cronológica correta
+      const historyText = [...convo.messages].reverse()
         .map((m) => {
           const sender =
             m.direction === 'in'
