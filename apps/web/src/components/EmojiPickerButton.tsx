@@ -4,10 +4,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Smile } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const Picker = dynamic(
   () => import('@emoji-mart/react').then((m: any) => m.default || m.Picker),
   { ssr: false },
-);
+) as any;
 
 interface Props {
   onEmojiSelect: (emoji: string) => void;
