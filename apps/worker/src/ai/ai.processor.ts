@@ -641,10 +641,11 @@ export class AiProcessor extends WorkerHost {
       // Assinatura "Sophia:" em negrito no WhatsApp (salva sem assinatura no DB)
       const textToSend = `*Sophia:* ${finalText}`;
 
-      // Exibe "digitando..." por 5s via endpoint dedicado da Evolution API,
-      // depois aguarda o mesmo intervalo para enviar a mensagem.
+      // Exibe "digitando..." por 5s via endpoint dedicado da Evolution API.
+      // Fire-and-forget (sem await): dispara o indicador e imediatamente começa
+      // a contar os 5s em paralelo — evita dupla espera (API delay + setTimeout).
       const TYPING_DELAY_MS = 5000;
-      await axios
+      axios
         .post(
           `${apiUrl}/chat/sendPresence/${instanceName}`,
           {

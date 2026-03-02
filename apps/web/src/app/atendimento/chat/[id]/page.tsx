@@ -646,7 +646,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                         >
                           <Reply size={13} />
                         </button>
-                        {msg.type === 'text' && msg.type !== 'deleted' && (
+                        {(msg.type === 'text' || !msg.type) && msg.type !== 'deleted' && (
                           <button
                             onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
                             className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
