@@ -3,8 +3,12 @@ import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-import OpenAI from 'openai';
+import { S3Service } from '../s3/s3.service';
+import OpenAI, { toFile } from 'openai';
 import axios from 'axios';
+
+// Modelos com suporte a visão (imagens)
+const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5'];
 
 // ─── Long Memory System Prompt (infraestrutura interna, não é skill) ───
 const LONG_MEMORY_SYSTEM_PROMPT = `Você é uma IA especializada em gerenciamento de memória de longo prazo (LONG MEMORY) de leads e casos jurídicos, multiárea.
@@ -57,12 +61,12 @@ export class AiProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private settings: SettingsService,
+    private s3: S3Service,
   ) {
     super();
   }
 
   // ─── Retorna o parâmetro correto de tokens conforme o modelo ───
-  // GPT-4.1, GPT-5.x e modelos o1/o3 usam max_completion_tokens (max_tokens foi removido)
   private tokenParam(
     model: string,
     value: number,
@@ -73,6 +77,11 @@ export class AiProcessor extends WorkerHost {
     return usesCompletionTokens
       ? { max_completion_tokens: value }
       : { max_tokens: value };
+  }
+
+  // ─── Verifica se o modelo suporta visão ───
+  private modelSupportsVision(model: string): boolean {
+    return VISION_MODELS.some((prefix) => model.startsWith(prefix));
   }
 
   // ─── Seleciona a skill baseado na área jurídica ───
@@ -86,7 +95,6 @@ export class AiProcessor extends WorkerHost {
       );
       if (specialist) return specialist;
     }
-    // Fallback: skill de triagem/geral ou primeira ativa
     return (
       skills.find((s) =>
         ['geral', '*', 'triagem'].includes(s.area.toLowerCase()),
@@ -107,7 +115,6 @@ export class AiProcessor extends WorkerHost {
 
   // ─── Parseia resposta JSON da IA com fallbacks robustos ───
   private parseAiResponse(raw: string): { reply: string; updates: any } {
-    // Tentar parse direto
     try {
       const parsed = JSON.parse(raw);
       if (parsed.reply) {
@@ -118,7 +125,6 @@ export class AiProcessor extends WorkerHost {
       }
     } catch {}
 
-    // Fallback: extrair JSON de dentro de markdown ```json ... ```
     const jsonMatch = raw.match(/```json?\s*([\s\S]*?)```/);
     if (jsonMatch) {
       try {
@@ -132,11 +138,92 @@ export class AiProcessor extends WorkerHost {
       } catch {}
     }
 
-    // Fallback final: tratar como texto puro (compatibilidade com skills antigas)
     this.logger.warn(
       '[AI] Resposta não é JSON válido — usando como texto puro',
     );
     return { reply: raw, updates: {} };
+  }
+
+  // ─── Auto-transcreve mensagens de áudio sem texto (Whisper) ───
+  private async autoTranscribeAudios(
+    messages: any[],
+    ai: OpenAI,
+  ): Promise<void> {
+    for (const msg of messages) {
+      // Só áudios recebidos do cliente sem transcrição
+      if (msg.direction !== 'in' || msg.type !== 'audio' || msg.text) continue;
+
+      const media = msg.media ?? null;
+      if (!media?.s3_key) continue;
+
+      try {
+        const { buffer, contentType } = await this.s3.getObjectBuffer(
+          media.s3_key,
+        );
+        const mimeBase = contentType.split(';')[0].trim();
+        const ext = mimeBase.split('/')[1] || 'ogg';
+
+        const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
+        const result = await ai.audio.transcriptions.create({
+          file,
+          model: 'whisper-1',
+          language: 'pt',
+        });
+
+        const transcription = result.text?.trim() || '';
+        if (transcription) {
+          // Salva no banco para que próximos jobs não precisem retranscrever
+          await this.prisma.message.update({
+            where: { id: msg.id },
+            data: { text: transcription },
+          });
+          msg.text = transcription; // atualiza in-memory
+          this.logger.log(
+            `[AI] Áudio transcrito (msg ${msg.id}): "${transcription.slice(0, 80)}"`,
+          );
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `[AI] Falha ao transcrever áudio ${msg.id}: ${e.message}`,
+        );
+        msg.text = '[áudio não transcrito]';
+      }
+    }
+  }
+
+  // ─── Coleta imagens para visão (base64 inline) ───
+  private async collectVisionImages(messages: any[]): Promise<
+    { type: 'image_url'; image_url: { url: string } }[]
+  > {
+    const attachments: { type: 'image_url'; image_url: { url: string } }[] =
+      [];
+
+    for (const msg of messages) {
+      if (msg.direction !== 'in' || msg.type !== 'image') continue;
+      const media = msg.media ?? null;
+      if (!media?.s3_key) continue;
+
+      try {
+        const { buffer, contentType } = await this.s3.getObjectBuffer(
+          media.s3_key,
+        );
+        const mimeBase = contentType.split(';')[0].trim();
+        const base64 = buffer.toString('base64');
+        attachments.push({
+          type: 'image_url',
+          image_url: { url: `data:${mimeBase};base64,${base64}` },
+        });
+        this.logger.log(
+          `[AI] Imagem carregada para visão (msg ${msg.id}, ${(buffer.length / 1024).toFixed(0)}KB)`,
+        );
+      } catch (e: any) {
+        this.logger.warn(
+          `[AI] Falha ao carregar imagem ${msg.id}: ${e.message}`,
+        );
+      }
+    }
+
+    return attachments;
   }
 
   // ─── Aplica updates do JSON da IA no banco ───
@@ -163,7 +250,6 @@ export class AiProcessor extends WorkerHost {
           `[AI] Nome salvo: "${updates.name}" → lead ${leadId}`,
         );
 
-        // Salvar na agenda do WhatsApp
         const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
         if (apiUrl && instanceName) {
           try {
@@ -320,31 +406,45 @@ export class AiProcessor extends WorkerHost {
     const { conversation_id } = job.data;
 
     try {
-      // 2. Buscar conversa + lead + últimas 20 mensagens (IA + operador + lead)
-      // orderBy desc para pegar as mais RECENTES; invertemos logo abaixo para ordem cronológica
+      // 2. Buscar conversa + lead + últimas 20 mensagens com mídia incluída
+      // orderBy desc para pegar as mais RECENTES; invertemos abaixo para ordem cronológica
       const convo = await this.prisma.conversation.findUnique({
         where: { id: conversation_id },
         include: {
           lead: true,
-          messages: { orderBy: { created_at: 'desc' }, take: 20 },
+          messages: {
+            orderBy: { created_at: 'desc' },
+            take: 20,
+            include: { media: true },
+          },
         },
       });
 
       // 3. Verificar ai_mode ativo
       if (!convo || !convo.ai_mode) return;
 
-      // Guard: cooldown configurável — evita resposta duplicada quando o lead manda
-      // várias mensagens em sequência rápida (cada uma dispara um job)
+      // 4. Guard: cooldown configurável
+      // Procura a última mensagem SAÍDA na lista (já está em desc, então é a primeira outgoing)
       const cooldownMs = await this.settings.getCooldownMs();
-      const lastOutMsg = convo.messages.find((m) => m.direction === 'out');
-      if (cooldownMs > 0 && lastOutMsg && Date.now() - lastOutMsg.created_at.getTime() < cooldownMs) {
-        this.logger.log(
-          `[AI] Cooldown ativo (${Date.now() - lastOutMsg.created_at.getTime()}ms < ${cooldownMs}ms) — job ignorado`,
-        );
-        return;
+      if (cooldownMs > 0) {
+        const lastOutMsg = convo.messages.find((m) => m.direction === 'out');
+        if (lastOutMsg) {
+          const elapsed = Date.now() - lastOutMsg.created_at.getTime();
+          if (elapsed < cooldownMs) {
+            this.logger.log(
+              `[AI] Cooldown ativo (${elapsed}ms < ${cooldownMs}ms) — job ignorado`,
+            );
+            return;
+          }
+        }
       }
 
-      // 4. Carregar AiMemory (Long Memory) do lead
+      const ai = new OpenAI({ apiKey: openAiKey });
+
+      // 5. Auto-transcrever áudios sem texto (Whisper) — salva no banco
+      await this.autoTranscribeAudios(convo.messages as any[], ai);
+
+      // 6. Carregar AiMemory (Long Memory) do lead
       const memory = await this.prisma.aiMemory.findUnique({
         where: { lead_id: convo.lead_id },
       });
@@ -381,34 +481,44 @@ export class AiProcessor extends WorkerHost {
         if (parts.length) leadMemory = parts.join('\n');
       }
 
-      // 5. Montar histórico com rótulos (Cliente / Sophia / Operador)
+      // 7. Montar histórico com rótulos (Cliente / Sophia / Operador)
       // Invertemos o array (que veio desc) para ordem cronológica correta
-      const historyText = [...convo.messages].reverse()
-        .map((m) => {
+      const chronological = [...convo.messages].reverse();
+      const historyText = chronological
+        .map((m: any) => {
           const sender =
             m.direction === 'in'
               ? 'Cliente'
               : m.external_message_id?.startsWith('sys_')
                 ? 'Sophia'
                 : 'Operador';
-          return `${sender}: ${m.text || '[Mídia]'}`;
+          // Indica tipo de mídia quando não há texto
+          const content =
+            m.text ||
+            (m.type === 'audio'
+              ? '[áudio sem transcrição]'
+              : m.type === 'image'
+                ? `[imagem${m.media?.original_name ? ': ' + m.media.original_name : ''}]`
+                : m.type === 'document'
+                  ? `[documento${m.media?.original_name ? ': ' + m.media.original_name : ''}]`
+                  : '[mídia]');
+          return `${sender}: ${content}`;
         })
         .join('\n');
 
-      // 6. Carregar skills ativas
+      // 8. Carregar skills ativas
       const activeSkills = await this.settings.getActiveSkills();
 
-      // 7. Selecionar skill baseada na área jurídica detectada
+      // 9. Selecionar skill baseada na área jurídica detectada
       const legalArea = (convo as any).legal_area || null;
       const skill = this.selectSkill(activeSkills, legalArea);
 
-      // 8. Preparar prompt e parâmetros
+      // 10. Preparar prompt e parâmetros
       let systemPrompt: string;
       let model: string;
       let maxTokens: number;
       let temperature: number;
 
-      // Variáveis disponíveis para injeção nos prompts
       const vars: Record<string, string> = {
         lead_name: convo.lead.name || 'Desconhecido',
         lead_phone: convo.lead.phone || '',
@@ -429,7 +539,6 @@ export class AiProcessor extends WorkerHost {
           `[AI] Usando skill: "${skill.name}" (area=${skill.area}, model=${model})`,
         );
       } else {
-        // Fallback quando não há skills configuradas
         systemPrompt = `Você é Sophia, agente de pré-atendimento do escritório André Lustosa Advogados.\nSeu objetivo é acolher o cliente, entender o problema e coletar informações para o advogado.\nResponda de forma empática e curta (adequado para WhatsApp).\nRetorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"Contato Inicial","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":""}}`;
         model = await this.settings.getDefaultModel();
         maxTokens = 500;
@@ -439,15 +548,29 @@ export class AiProcessor extends WorkerHost {
         );
       }
 
-      const userPrompt = `Histórico recente:\n${historyText}\n\nResponda à última mensagem do cliente.`;
+      // 11. Montar conteúdo do usuário (texto + imagens para modelos com visão)
+      const baseText = `Histórico recente:\n${historyText}\n\nResponda à última mensagem do cliente.`;
 
-      // 9. Chamar OpenAI com JSON mode
-      const ai = new OpenAI({ apiKey: openAiKey });
+      let userContent: string | any[] = baseText;
+
+      if (this.modelSupportsVision(model)) {
+        const visionImages = await this.collectVisionImages(
+          convo.messages as any[],
+        );
+        if (visionImages.length > 0) {
+          userContent = [{ type: 'text', text: baseText }, ...visionImages];
+          this.logger.log(
+            `[AI] Visão ativa: ${visionImages.length} imagem(ns) incluída(s)`,
+          );
+        }
+      }
+
+      // 12. Chamar OpenAI com JSON mode
       const completion = await ai.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+          { role: 'user', content: userContent as any },
         ],
         ...this.tokenParam(model, maxTokens),
         temperature,
@@ -458,13 +581,13 @@ export class AiProcessor extends WorkerHost {
         completion.choices[0]?.message?.content ||
         '{"reply":"Desculpe, estou com instabilidade no momento."}';
 
-      // 10. Parsear resposta JSON
+      // 13. Parsear resposta JSON
       const { reply: aiText, updates } = this.parseAiResponse(rawResponse);
       this.logger.log(
         `[AI] JSON parseado — reply: ${aiText.slice(0, 80)}... | updates: ${JSON.stringify(updates).slice(0, 200)}`,
       );
 
-      // 11. Verificar sinal de escalada (handoff para humano)
+      // 14. Verificar sinal de escalada (handoff para humano)
       let finalText = aiText;
       const handoffSignal = skill?.handoff_signal || null;
       if (handoffSignal && finalText.includes(handoffSignal)) {
@@ -480,7 +603,7 @@ export class AiProcessor extends WorkerHost {
         );
       }
 
-      // 12. Aplicar updates automaticamente (name, status, area, lead_summary, next_step, notes)
+      // 15. Aplicar updates automaticamente
       await this.applyAiUpdates(
         updates,
         convo.id,
@@ -489,7 +612,7 @@ export class AiProcessor extends WorkerHost {
         convo.instance_name || null,
       );
 
-      // 13. Ler config da Evolution e enviar via WhatsApp
+      // 16. Ler config da Evolution e enviar via WhatsApp
       const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
       if (!apiUrl) {
         this.logger.warn(
@@ -515,7 +638,7 @@ export class AiProcessor extends WorkerHost {
         },
       );
 
-      // 14. Salvar mensagem no banco com skill_id (texto limpo, sem assinatura)
+      // 17. Salvar mensagem no banco com skill_id (texto limpo, sem assinatura)
       await this.prisma.message.create({
         data: {
           conversation_id: convo.id,
@@ -528,7 +651,7 @@ export class AiProcessor extends WorkerHost {
         },
       });
 
-      // 15. Atualizar last_message_at
+      // 18. Atualizar last_message_at
       await this.prisma.conversation.update({
         where: { id: convo.id },
         data: { last_message_at: new Date() },
@@ -538,7 +661,7 @@ export class AiProcessor extends WorkerHost {
         `[AI] Resposta enviada para ${convo.lead.phone} (model=${model}, skill=${skill?.name || 'fallback'})`,
       );
 
-      // 16. Atualizar Long Memory (a cada 3 mensagens recebidas)
+      // 19. Atualizar Long Memory (a cada 3 mensagens recebidas)
       const inboundTotal = convo.messages.filter(
         (m) => m.direction === 'in',
       ).length;

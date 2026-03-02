@@ -1,5 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { S3Client, PutObjectCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  CreateBucketCommand,
+} from '@aws-sdk/client-s3';
+import { Readable } from 'stream';
 
 @Injectable()
 export class S3Service implements OnModuleInit {
@@ -41,5 +47,22 @@ export class S3Service implements OnModuleInit {
     await this.client.send(command);
     this.logger.log(`Uploaded: ${key}`);
     return key;
+  }
+
+  /** Baixa um objeto do S3/MinIO e retorna o buffer + contentType */
+  async getObjectBuffer(
+    key: string,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    const response = await this.client.send(command);
+    const stream = response.Body as Readable;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return {
+      buffer: Buffer.concat(chunks),
+      contentType: response.ContentType || 'application/octet-stream',
+    };
   }
 }
