@@ -15,7 +15,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { SettingsModule } from './settings/settings.module';
 import { InboxesModule } from './inboxes/inboxes.module';
 import { MediaModule } from './media/media.module';
-import { LandingPagesModule } from './landing-pages/landing-pages.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -50,7 +50,7 @@ import { APP_FILTER } from '@nestjs/core';
     SettingsModule,
     InboxesModule,
     MediaModule,
-    LandingPagesModule,
+    AnalyticsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

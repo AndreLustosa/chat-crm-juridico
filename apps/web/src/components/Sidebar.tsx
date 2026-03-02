@@ -52,7 +52,7 @@ export function Sidebar() {
     { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm') },
     { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts') },
     { label: 'Tarefas', href: '/atendimento/tasks', icon: <Check size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/tasks') },
-    { label: 'Marketing', href: '/atendimento/marketing/landing-pages', icon: <Megaphone size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/marketing') },
+    { label: 'Analytics', href: '/atendimento/marketing/analytics', icon: <Megaphone size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/marketing') },
     { label: 'Configurações', href: '/atendimento/settings', icon: <Settings size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/settings') },
   ];
 

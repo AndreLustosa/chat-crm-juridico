@@ -8,7 +8,16 @@ declare global {
   }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+function getVisitorId(): string {
+  let id = localStorage.getItem('lp_visitor_id');
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem('lp_visitor_id', id);
+  }
+  return id;
+}
 
 function getUtmParams() {
   if (typeof window === 'undefined') return {};
@@ -23,55 +32,46 @@ function getUtmParams() {
   };
 }
 
-function getOrCreateVisitorId(): string {
-  const key = 'lp_visitor_id';
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(key, id);
-  }
-  return id;
-}
-
-async function sendEvent(
-  pageId: string,
-  event_type: 'view' | 'whatsapp_click',
-) {
+async function sendEvent(event_type: 'view' | 'whatsapp_click') {
   try {
-    const visitor_id = getOrCreateVisitorId();
     const utms = getUtmParams();
-    const referrer = document.referrer || undefined;
-
-    await fetch(`${API_URL}/landing-pages/${pageId}/track`, {
+    await fetch(`${API_URL}/analytics/track`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event_type, visitor_id, referrer, ...utms }),
+      body: JSON.stringify({
+        page_path: window.location.pathname,
+        event_type,
+        visitor_id: getVisitorId(),
+        referrer: document.referrer || undefined,
+        ...utms,
+      }),
     });
-
-    // GTM dataLayer push
-    if (window.dataLayer) {
+    // GTM dataLayer
+    if (typeof window !== 'undefined' && window.dataLayer) {
       window.dataLayer.push({
         event: event_type === 'view' ? 'lp_page_view' : 'lp_whatsapp_click',
-        pageId,
+        page_path: window.location.pathname,
         ...utms,
       });
     }
-  } catch (err) {
-    console.error('[LPTracker] falha ao registrar evento', err);
+  } catch {
+    // silencioso — não quebra a página
   }
 }
 
-export function LPTracker({ pageId }: { pageId: string }) {
+/** Coloque nas páginas de LP para rastrear views automaticamente */
+export function LPTracker() {
   useEffect(() => {
-    const key = `lp_viewed_${pageId}`;
-    if (sessionStorage.getItem(key)) return;
-    sessionStorage.setItem(key, '1');
-    sendEvent(pageId, 'view');
-  }, [pageId]);
+    const sessionKey = `lp_viewed_${window.location.pathname}`;
+    if (sessionStorage.getItem(sessionKey)) return;
+    sessionStorage.setItem(sessionKey, '1');
+    sendEvent('view');
+  }, []);
 
   return null;
 }
 
-export function trackWhatsappClick(pageId: string) {
-  sendEvent(pageId, 'whatsapp_click');
+/** Chame ao clicar no botão de WhatsApp */
+export function trackWhatsappClick() {
+  sendEvent('whatsapp_click');
 }
