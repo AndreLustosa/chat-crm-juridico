@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -89,6 +89,15 @@ export class InboxesService {
   // --- Gestão de Instâncias ---
 
   async addInstance(inboxId: string, instanceName: string, type: 'whatsapp' | 'instagram') {
+    // Verifica se a instância já está vinculada a outro inbox
+    const existing = await this.instance.findUnique({ where: { name: instanceName } });
+    if (existing?.inbox_id && existing.inbox_id !== inboxId) {
+      const otherInbox = await this.inbox.findUnique({ where: { id: existing.inbox_id }, select: { name: true } });
+      throw new ConflictException(
+        `A instância "${instanceName}" já está vinculada ao setor "${otherInbox?.name ?? existing.inbox_id}". Remova-a de lá primeiro.`
+      );
+    }
+
     // 1. Vincula a instância ao setor
     const instance = await this.instance.upsert({
       where: { name: instanceName },

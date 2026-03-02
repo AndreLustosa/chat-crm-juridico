@@ -26,16 +26,26 @@ export class LeadsService {
     return this.prisma.lead.create({ data });
   }
 
-  async findAll(tenant_id?: string): Promise<Lead[]> {
+  async findAll(tenant_id?: string, inbox_id?: string): Promise<Lead[]> {
+    const baseWhere = tenant_id
+      ? { OR: [{ tenant_id }, { tenant_id: null }] }
+      : undefined;
+
+    const where = inbox_id
+      ? {
+          ...baseWhere,
+          conversations: { some: { inbox_id } },
+        }
+      : baseWhere;
+
     return (await this.prisma.lead.findMany({
-      where: tenant_id
-        ? { OR: [{ tenant_id }, { tenant_id: null }] }
-        : undefined,
+      where,
       include: {
         _count: {
           select: { conversations: true },
         },
         conversations: {
+          where: inbox_id ? { inbox_id } : undefined,
           orderBy: { last_message_at: 'desc' },
           take: 1,
           include: {
