@@ -3,8 +3,8 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'CRM Jurídico Hub',
-  description: 'Gestor de Atendimentos e Leads',
+  title: 'André Lustosa Advogados | Advocacia Especializada',
+  description: 'Escritório de advocacia especializado em direito previdenciário, trabalhista e cível em Alagoas.',
 };
 
 export default function RootLayout({
