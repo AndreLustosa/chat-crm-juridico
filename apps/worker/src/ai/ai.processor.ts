@@ -439,18 +439,26 @@ export class AiProcessor extends WorkerHost {
       // 3. Verificar ai_mode ativo
       if (!convo || !convo.ai_mode) return;
 
-      // 4. Guard: cooldown configurável
-      // Procura a última mensagem SAÍDA na lista (já está em desc, então é a primeira outgoing)
+      // 4. Guard: cooldown inteligente
+      // Só bloqueia quando a IA JÁ RESPONDEU à última mensagem do cliente (lastOut > lastIn)
+      // E esse job chegou dentro do window de cooldown — ou seja, é provável duplicata.
+      // Se lastIn > lastOut → nova mensagem ainda sem resposta → SEMPRE processa.
       const cooldownMs = await this.settings.getCooldownMs();
       if (cooldownMs > 0) {
+        const lastInMsg = convo.messages.find((m) => m.direction === 'in');
         const lastOutMsg = convo.messages.find((m) => m.direction === 'out');
-        if (lastOutMsg) {
-          const elapsed = Date.now() - lastOutMsg.created_at.getTime();
-          if (elapsed < cooldownMs) {
-            this.logger.log(
-              `[AI] Cooldown ativo (${elapsed}ms < ${cooldownMs}ms) — job ignorado`,
-            );
-            return;
+        if (lastInMsg && lastOutMsg) {
+          const lastInTime = lastInMsg.created_at.getTime();
+          const lastOutTime = lastOutMsg.created_at.getTime();
+          // AI já respondeu à última mensagem do cliente?
+          if (lastOutTime > lastInTime) {
+            const elapsed = Date.now() - lastOutTime;
+            if (elapsed < cooldownMs) {
+              this.logger.log(
+                `[AI] Cooldown ativo — IA já respondeu à última mensagem (${elapsed}ms < ${cooldownMs}ms) — job ignorado`,
+              );
+              return;
+            }
           }
         }
       }
