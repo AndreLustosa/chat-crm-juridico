@@ -272,13 +272,22 @@ export class WhatsappService {
     }
   }
 
-  async fetchMessages(instanceName: string, remoteJid: string, limit = 200): Promise<any[]> {
+  async fetchMessages(instanceName: string, remoteJid: string): Promise<any[]> {
     try {
+      // Evolution Query<Message>: { where, sort, page, offset } — no "limit" field.
+      // The where clause maps directly to Prisma conditions on the stored message model.
       const data = await this.request(
         'POST',
         `chat/findMessages/${instanceName}`,
-        { where: { key: { remoteJid } }, limit },
+        { where: { key: { remoteJid } }, sort: 'asc' },
       );
+
+      // API returns error object on failure (e.g. instance not found)
+      if ((data as any)?.error || (data as any)?.statusCode >= 400) {
+        this.logger.warn(`fetchMessages error for ${remoteJid}: ${JSON.stringify(data)}`);
+        return [];
+      }
+
       const list = Array.isArray(data)
         ? data
         : (data as any)?.messages || (data as any)?.data || [];

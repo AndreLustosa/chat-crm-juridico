@@ -43,7 +43,7 @@ export class MessagesService {
     }
 
     const remoteJid = `${convo.lead.phone}@s.whatsapp.net`;
-    const rawMessages = await this.whatsapp.fetchMessages(convo.instance_name, remoteJid, 200);
+    const rawMessages = await this.whatsapp.fetchMessages(convo.instance_name, remoteJid);
 
     if (!rawMessages.length) return { imported: 0, total: 0 };
 
