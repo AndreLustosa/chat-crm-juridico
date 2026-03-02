@@ -53,7 +53,7 @@ export class EvolutionService {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = (remoteJidAlt || remoteJid).split('@')[0];
-      const pushName = (data.pushName as string) || 'Desconhecido';
+      const pushName = (data.pushName as string) || null;
       const externalMessageId = key.id as string;
       const messageContent =
         (data.message?.conversation as string) ||
@@ -220,7 +220,7 @@ export class EvolutionService {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = remoteJid.split('@')[0];
-      const pushName = (data.pushName as string) || (data.name as string) || 'Desconhecido';
+      const pushName = (data.pushName as string) || (data.name as string) || null;
 
       // 1. Upsert Lead
       const lead = await this.leadsService.upsert({
@@ -356,7 +356,7 @@ export class EvolutionService {
         (data.pushName as string) ||
         (data.name as string) ||
         (data.verifiedName as string) ||
-        'Desconhecido';
+        null;
 
       await this.leadsService.upsert({
         phone,

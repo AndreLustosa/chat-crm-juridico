@@ -66,13 +66,20 @@ export class LeadsService {
 
   async upsert(data: Prisma.LeadCreateInput): Promise<Lead> {
     const phone = to12Digits(data.phone);
-    const { phone: _phone, ...rest } = data;
+    const { phone: _phone, name, ...rest } = data;
 
     this.logger.debug(`Upsert lead: raw=${data.phone} → stored=${phone}`);
 
+    // On update, only overwrite name if we have a real value.
+    // Never replace a real name with null or the 'Desconhecido' fallback.
+    const updateData: any = { ...rest };
+    if (name && name !== 'Desconhecido') {
+      updateData.name = name;
+    }
+
     return this.prisma.lead.upsert({
       where: { phone },
-      update: { ...rest },
+      update: updateData,
       create: { ...data, phone },
     });
   }
