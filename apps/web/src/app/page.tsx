@@ -67,10 +67,12 @@ export default function Dashboard() {
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({});
   const [aiMode, setAiMode] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dragCounterRef = useRef(0);
   const selectedInboxIdRef = useRef<string | null>(selectedInboxId);
   const selectedIdRef = useRef<string | null>(selectedId);
 
@@ -268,10 +270,8 @@ export default function Dashboard() {
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedId || selectedId.startsWith('demo-')) return;
-    e.target.value = '';
+  const uploadFile = async (file: File) => {
+    if (!selectedId || selectedId.startsWith('demo-')) return;
     setUploadingFile(true);
     try {
       const formData = new FormData();
@@ -291,6 +291,38 @@ export default function Dashboard() {
     } finally {
       setUploadingFile(false);
     }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    await uploadFile(file);
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!isRealConvo || isClosed) return;
+    dragCounterRef.current++;
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDragging(false);
+    if (!isRealConvo || isClosed) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) await uploadFile(file);
   };
 
   const filteredConversations = (leadFilter
@@ -489,7 +521,22 @@ export default function Dashboard() {
       </section>
 
       {/* MAIN CHAT PANEL */}
-      <main className="flex-1 flex flex-col bg-background relative">
+      <main
+        className="flex-1 flex flex-col bg-background relative"
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {isDragging && isRealConvo && !isClosed && (
+          <div className="absolute inset-0 z-40 m-3 rounded-2xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
+            <div className="text-center">
+              <Paperclip size={48} className="text-primary mx-auto mb-3 opacity-80" />
+              <p className="text-primary font-bold text-lg">Solte o arquivo aqui</p>
+              <p className="text-primary/60 text-sm mt-1">imagem, vídeo ou documento</p>
+            </div>
+          </div>
+        )}
         {selected ? (
           <>
             <header className="h-[80px] px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
