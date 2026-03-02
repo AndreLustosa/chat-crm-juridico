@@ -8,6 +8,7 @@ import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
 import { LinkPreview } from '@/components/LinkPreview';
+import { playNotificationSound } from '@/lib/notificationSounds';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { formatPhone } from '@/lib/utils';
@@ -320,6 +321,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               if (exists) return prev;
               return [...prev, msg];
             });
+            if (msg.direction === 'in') playNotificationSound();
           });
 
           socketRef.current.on('messageUpdate', (updatedMsg: any) => {

@@ -181,6 +181,14 @@ export class EvolutionService {
       this.chatGateway.emitNewMessage(conv.id, msg);
       this.chatGateway.emitConversationsUpdate(null);
 
+      // Notify the assigned operator about incoming message (sound notification)
+      if (!isOutgoing && conv.assigned_user_id) {
+        this.chatGateway.emitIncomingMessageNotification(conv.assigned_user_id, {
+          conversationId: conv.id,
+          contactName: lead.name || lead.phone,
+        });
+      }
+
       // 4. Se mídia, enfileira download
       if (msgType !== 'text') {
         const mediaData = (data.message as any)?.[messageType];

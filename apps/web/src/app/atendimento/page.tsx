@@ -7,6 +7,7 @@ import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
+import { playNotificationSound } from '@/lib/notificationSounds';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 
@@ -59,24 +60,6 @@ function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   return <Check size={12} className="text-primary-foreground/60" />;
 }
 
-function playNotificationSound() {
-  try {
-    const AC = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = new AC();
-    [880, 1100].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.connect(g); g.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      const t = ctx.currentTime + i * 0.18;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.25, t + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
-      osc.start(t); osc.stop(t + 0.15);
-    });
-  } catch { /* audio not supported */ }
-}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -221,6 +204,11 @@ export default function Dashboard() {
       fetchConversations(selectedInboxIdRef.current);
     });
 
+    // Incoming message notification for the assigned operator (background conversations)
+    socket.on('incoming_message_notification', () => {
+      playNotificationSound();
+    });
+
     // Transfer request: incoming popup + sound for target operator
     socket.on('transfer_request', (data: { conversationId: string; fromUserName: string; contactName: string; reason: string | null }) => {
       playNotificationSound();
@@ -283,6 +271,8 @@ export default function Dashboard() {
               if (prev.find(m => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id))) return prev;
               return [...prev, msg];
             });
+            // Play sound for incoming messages in the currently viewed conversation
+            if (msg.direction === 'in') playNotificationSound();
           });
           socketRef.current.off('mediaReady');
           socketRef.current.on('mediaReady', (updatedMsg: MessageItem) => {

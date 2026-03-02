@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase } from 'lucide-react';
+import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell } from 'lucide-react';
 
 const settingsMenu = [
   { label: 'Setores (Inboxes)', href: '/atendimento/settings/inboxes', icon: Layout },
@@ -11,6 +11,7 @@ const settingsMenu = [
   { label: 'Integração WhatsApp', href: '/atendimento/settings/whatsapp', icon: MessageSquare },
   { label: 'Escritório', href: '/atendimento/settings/office', icon: Building2 },
   { label: 'Permissões', href: '/atendimento/settings/permissions', icon: Shield },
+  { label: 'Notificações', href: '/atendimento/settings/notifications', icon: Bell },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

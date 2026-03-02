@@ -55,4 +55,10 @@ export class ChatGateway {
     this.logger.log(`[SOCKET] Emitting inboxUpdate to all clients`);
     this.server.emit('inboxUpdate');
   }
+
+  /** Emit a targeted notification to the operator assigned to a conversation */
+  emitIncomingMessageNotification(assignedUserId: string, data: { conversationId: string; contactName?: string }) {
+    this.logger.log(`[SOCKET] Emitting incoming_message_notification to user:${assignedUserId}`);
+    this.server.to(`user:${assignedUserId}`).emit('incoming_message_notification', data);
+  }
 }
