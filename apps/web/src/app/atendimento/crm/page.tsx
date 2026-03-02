@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sidebar } from '@/components/Sidebar';
 import { User } from 'lucide-react';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
@@ -65,8 +64,6 @@ export default function CrmPage() {
 
   return (
     <div className="flex h-screen bg-background font-sans antialiased text-foreground overflow-hidden">
-      <Sidebar />
-
       <main className="flex-1 flex flex-col pt-8 overflow-hidden bg-background">
         <header className="px-8 mb-6 shrink-0">
           <h1 className="text-2xl font-bold text-foreground tracking-tight">CRM Pipeline</h1>

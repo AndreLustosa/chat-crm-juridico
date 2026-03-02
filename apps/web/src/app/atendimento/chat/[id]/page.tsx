@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply } from 'lucide-react';
-import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
@@ -344,8 +343,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
-      <Sidebar />
-
       <div
         className="flex-1 flex flex-col relative"
         onDragEnter={handleDragEnter}

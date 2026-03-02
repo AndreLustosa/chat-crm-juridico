@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply } from 'lucide-react';
-import { Sidebar } from '@/components/Sidebar';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
@@ -477,8 +476,6 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
-
-      <Sidebar />
 
       {/* INBOX */}
       <section className="w-[380px] flex flex-col bg-card border-r border-border shrink-0 z-40">

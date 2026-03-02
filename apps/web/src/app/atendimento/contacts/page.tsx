@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Search, User, MessageSquare, Phone, Loader2, RefreshCw } from 'lucide-react';
-import { Sidebar } from '@/components/Sidebar';
 import api from '@/lib/api';
 import { cn, formatPhone } from '@/lib/utils';
 
@@ -93,8 +92,6 @@ export default function ContactsPage() {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden text-foreground">
-      <Sidebar />
-
       <main className="flex-1 flex flex-col bg-background overflow-hidden relative">
         {/* Header Section */}
         <header className="px-8 py-6 shrink-0 flex items-center justify-between border-b border-border bg-card/30 backdrop-blur-md z-10">
