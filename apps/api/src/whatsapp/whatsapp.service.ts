@@ -341,27 +341,22 @@ export class WhatsappService {
     });
     const inboxId = inbox?.inbox_id || null;
 
-    // fetchContacts e fetchChats agora retornam arrays diretamente
-    const contactsList = await this.fetchContacts(instanceName);
+    // Busca apenas chats — inclui contatos não salvos na agenda (via pushName do WhatsApp)
+    // findContacts só retorna quem está salvo na agenda e foi removido propositalmente
     const chatsList = await this.fetchChats(instanceName);
 
-    this.logger.log(`Sync ${instanceName}: ${contactsList.length} contatos, ${chatsList.length} chats para o setor ${inbox?.inbox?.name || 'Nenhum'}`);
+    this.logger.log(`Sync ${instanceName}: ${chatsList.length} chats para o setor ${inbox?.inbox?.name || 'Nenhum'}`);
 
     // Log amostra da estrutura para debug
     if (chatsList.length > 0) {
       this.logger.log(`Amostra chat[0] keys: ${Object.keys(chatsList[0]).join(', ')}`);
       this.logger.log(`Amostra chat[0]: ${JSON.stringify(chatsList[0]).substring(0, 300)}`);
     }
-    if (contactsList.length > 0) {
-      this.logger.log(`Amostra contact[0] keys: ${Object.keys(contactsList[0]).join(', ')}`);
-      this.logger.log(`Amostra contact[0]: ${JSON.stringify(contactsList[0]).substring(0, 300)}`);
-    }
 
-    // Combinar contacts + chats (chats inclui contatos não salvos na agenda)
-    const allEntries = [...contactsList, ...chatsList];
+    const allEntries = chatsList;
 
     if (allEntries.length === 0) {
-      return { total: 0, synced: 0, error: 'Nenhum contato ou chat encontrado' };
+      return { total: 0, synced: 0, error: 'Nenhum chat encontrado' };
     }
 
     const seenPhones = new Set<string>();
@@ -413,10 +408,7 @@ export class WhatsappService {
           await this.fetchProfilePicture(instanceName, phone);
 
         const lead = await this.leadsService.upsert({
-          name: (entry.pushName ||
-            entry.name ||
-            entry.verifiedName ||
-            `Contato ${phone}`) as string,
+          name: (entry.pushName || entry.name || entry.verifiedName || null) as string | null,
           phone: phone as string,
           profile_picture_url: profilePictureUrl || null,
           origin: 'whatsapp',
@@ -505,8 +497,8 @@ export class WhatsappService {
 
     this.logger.log(
       `Sync ${instanceName} concluído: ${updatedCount} sincronizados, ` +
-      `${skippedGroups} grupos ignorados, ${skippedInvalid} inválidos, ` +
-      `${seenPhones.size} phones únicos de ${allEntries.length} entradas`,
+      `${skippedGroups} grupos/broadcasts ignorados, ${skippedInvalid} inválidos, ` +
+      `${seenPhones.size} phones únicos de ${allEntries.length} chats`,
     );
     return { total: allEntries.length, synced: updatedCount, skippedGroups, skippedInvalid, uniquePhones: seenPhones.size };
   }
