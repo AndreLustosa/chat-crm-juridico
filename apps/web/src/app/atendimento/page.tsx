@@ -815,10 +815,13 @@ export default function Dashboard() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="font-semibold text-foreground truncate pl-0.5">{conv.contactName || 'Visitante'}</span>
+                  <div className="flex justify-between items-start mb-0.5">
+                    <span className="font-semibold text-foreground truncate pl-0.5">{conv.contactName || conv.contactPhone}</span>
                     <span className="text-[11px] text-muted-foreground shrink-0">{formatTime(conv.lastMessageAt)}</span>
                   </div>
+                  {conv.contactPhone && conv.contactName !== conv.contactPhone && (
+                    <p className="text-[11px] text-muted-foreground truncate pl-0.5 mb-0.5">{conv.contactPhone}</p>
+                  )}
                   <div className="mb-1.5 flex items-center gap-2 flex-wrap">
                     {statusBadge(conv.status)}
                     {conv.assignedAgentName && (
@@ -881,7 +884,7 @@ export default function Dashboard() {
                    )}
                  </div>
                  <div>
-                   <h3 className="font-bold text-lg leading-tight">{selected.contactName}</h3>
+                   <h3 className="font-bold text-lg leading-tight">{selected.contactName || selected.contactPhone}</h3>
                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-1">
                      {selected.channel} <span className="mx-1">•</span> {selected.contactPhone}
                    </div>
