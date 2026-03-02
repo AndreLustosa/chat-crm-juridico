@@ -220,12 +220,38 @@ export class EvolutionService {
       }
 
       // 5. Se AI_Mode ativo e mensagem recebida (não enviada), agenda job para a IA responder
-      // Nota: assigned_user_id pode estar preenchido (monitorando) mas ai_mode ainda ativo
+      // Debounce: cancela job pendente e cria novo com timer resetado, acumulando mensagens
+      // rápidas. Quando o lead para de digitar, o job dispara e a IA responde tudo de uma vez.
       if (!isOutgoing && conv.ai_mode) {
-        await this.aiQueue.add('process_ai_response', {
-          conversation_id: conv.id,
-          lead_id: lead.id,
+        const cooldownRaw = await this.prisma.globalSetting.findUnique({
+          where: { key: 'AI_COOLDOWN_SECONDS' },
         });
+        const cooldownSeconds = cooldownRaw?.value ? parseInt(cooldownRaw.value, 10) : 8;
+        const debounceMs = (isNaN(cooldownSeconds) ? 8 : Math.max(0, cooldownSeconds)) * 1000;
+        const jobId = `ai-debounce-${conv.id}`;
+
+        if (debounceMs > 0) {
+          // Cancela job pendente (delayed/waiting) para resetar o timer (debounce)
+          const existing = await this.aiQueue.getJob(jobId);
+          if (existing) {
+            const state = await existing.getState();
+            if (state === 'delayed' || state === 'waiting') {
+              await existing.remove();
+              this.logger.log(`[AI] Debounce: job ${jobId} removido, timer resetado`);
+            }
+          }
+          await this.aiQueue.add(
+            'process_ai_response',
+            { conversation_id: conv.id, lead_id: lead.id },
+            { jobId, delay: debounceMs, removeOnComplete: { count: 100 } },
+          );
+        } else {
+          // Sem debounce: processa imediatamente
+          await this.aiQueue.add('process_ai_response', {
+            conversation_id: conv.id,
+            lead_id: lead.id,
+          });
+        }
       }
     }
   }
