@@ -57,8 +57,8 @@ export class ChatGateway {
   }
 
   /** Broadcast incoming message notification to all clients; each client filters by assignedUserId */
-  emitIncomingMessageNotification(assignedUserId: string, data: { conversationId: string; contactName?: string }) {
-    this.logger.log(`[SOCKET] Emitting incoming_message_notification (assignedUserId: ${assignedUserId})`);
+  emitIncomingMessageNotification(assignedUserId: string | null, data: { conversationId: string; contactName?: string }) {
+    this.logger.log(`[SOCKET] Emitting incoming_message_notification (assignedUserId: ${assignedUserId ?? 'none'})`);
     this.server.emit('incoming_message_notification', { ...data, assignedUserId });
   }
 }

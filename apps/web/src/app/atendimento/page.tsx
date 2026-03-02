@@ -210,9 +210,10 @@ export default function Dashboard() {
     });
 
     // Incoming message notification — broadcast to all; each client filters by assignedUserId
-    socket.on('incoming_message_notification', (data: { conversationId: string; assignedUserId?: string }) => {
-      // Only act if this notification is meant for the current user (or unassigned)
-      if (data?.assignedUserId && data.assignedUserId !== currentUserIdRef.current) return;
+    socket.on('incoming_message_notification', (data: { conversationId: string; assignedUserId?: string | null }) => {
+      const myId = currentUserIdRef.current;
+      // Skip if assigned to someone else. Play if: assigned to me, unassigned, or can't determine current user
+      if (myId && data?.assignedUserId && data.assignedUserId !== myId) return;
       playNotificationSound();
       // Only mark unread when the user is NOT currently viewing that conversation
       if (data?.conversationId && data.conversationId !== selectedIdRef.current) {
@@ -281,6 +282,8 @@ export default function Dashboard() {
           socketRef.current.emit('join_conversation', selectedId);
           socketRef.current.off('newMessage');
           socketRef.current.on('newMessage', (msg: MessageItem) => {
+            // Guard: ignore messages that belong to a different conversation
+            if (msg.conversation_id && msg.conversation_id !== selectedIdRef.current) return;
             setMessages(prev => {
               if (prev.find(m => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id))) return prev;
               return [...prev, msg];

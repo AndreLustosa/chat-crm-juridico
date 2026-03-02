@@ -198,9 +198,9 @@ export class EvolutionService {
       this.chatGateway.emitNewMessage(conv.id, msg);
       this.chatGateway.emitConversationsUpdate(null);
 
-      // Notify the assigned operator about incoming message (sound notification)
-      if (!isOutgoing && conv.assigned_user_id) {
-        this.chatGateway.emitIncomingMessageNotification(conv.assigned_user_id, {
+      // Notify operator(s) about incoming message (sound + unread badge)
+      if (!isOutgoing) {
+        this.chatGateway.emitIncomingMessageNotification(conv.assigned_user_id || null, {
           conversationId: conv.id,
           contactName: lead.name || lead.phone,
         });
