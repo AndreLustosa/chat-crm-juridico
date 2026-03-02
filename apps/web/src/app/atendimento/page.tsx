@@ -19,6 +19,7 @@ interface ConversationSummary {
   status: string;
   lastMessage: string;
   lastMessageAt: string;
+  assignedAgentId?: string | null;
   assignedAgentName: string | null;
   aiMode: boolean;
   profile_picture_url?: string | null;
@@ -113,6 +114,15 @@ export default function Dashboard() {
   // Pending transfers waiting for current user to accept/decline
   const [pendingTransfers, setPendingTransfers] = useState<{ conversationId: string; contactName: string; fromUserName: string; reason: string | null }[]>([]);
   const [inboxOpen, setInboxOpen] = useState(true);
+  // Current user ID decoded from JWT (lazy init, never changes)
+  const [currentUserId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    try {
+      return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub || null;
+    } catch { return null; }
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -530,9 +540,20 @@ export default function Dashboard() {
     }
   };
 
-  const filteredConversations = (leadFilter
-    ? conversations.filter(c => c.status === leadFilter)
-    : conversations).sort((a, b) => (a.contactName || '').localeCompare(b.contactName || ''));
+  const myActiveConvs = (c: ConversationSummary) =>
+    (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
+
+  const filteredConversations = (() => {
+    let result: ConversationSummary[];
+    if (leadFilter === 'ACTIVE') {
+      result = conversations.filter(myActiveConvs);
+    } else if (leadFilter) {
+      result = conversations.filter(c => c.status === leadFilter);
+    } else {
+      result = conversations;
+    }
+    return result.sort((a, b) => (a.contactName || '').localeCompare(b.contactName || ''));
+  })();
 
   const selected = conversations.find((c) => c.id === selectedId);
   const isDemo = selectedId?.startsWith('demo-');
@@ -715,7 +736,7 @@ export default function Dashboard() {
               { value: '', label: 'Tudo', count: conversations.length },
               { value: 'BOT', label: 'SophIA', count: conversations.filter(c => c.status === 'BOT').length },
               { value: 'WAITING', label: 'Espera', count: conversations.filter(c => c.status === 'WAITING').length },
-              { value: 'ACTIVE', label: 'Ativas', count: conversations.filter(c => c.status === 'ACTIVE' || c.status === 'MONITORING').length },
+              { value: 'ACTIVE', label: 'Ativas', count: conversations.filter(myActiveConvs).length },
             ].map((tab) => (
               <button
                 key={tab.value}

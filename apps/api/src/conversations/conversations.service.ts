@@ -60,6 +60,7 @@ export class ConversationsService {
         : 'WAITING',                                       // sem IA, sem operador
       lastMessage: c.messages[0]?.text || '',
       lastMessageAt: c.last_message_at?.toISOString() || '',
+      assignedAgentId: c.assigned_user_id || null,
       assignedAgentName: c.assigned_user?.name || null,
       aiMode: c.ai_mode,
       profile_picture_url: c.lead?.profile_picture_url || null,
