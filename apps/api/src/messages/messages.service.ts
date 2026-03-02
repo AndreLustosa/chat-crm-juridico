@@ -125,6 +125,16 @@ export class MessagesService {
 
     await this.autoReassignIfNeeded(convo, senderId);
 
+    // Buscar nome do atendente para assinatura (ex: "*Dr. André:*\n")
+    let senderName: string | null = null;
+    if (senderId) {
+      const sender = await this.prisma.user.findUnique({
+        where: { id: senderId },
+        select: { name: true },
+      });
+      senderName = sender?.name || null;
+    }
+
     // Look up the quoted message if replying
     let quotedPayload: any = undefined;
     let replyToText: string | null = null;
@@ -144,13 +154,16 @@ export class MessagesService {
       }
     }
 
-    // 1. Send via Evolution API
+    // 1. Send via Evolution API (com assinatura em negrito se houver atendente)
+    // O DB salva o texto limpo; o WhatsApp recebe com assinatura
+    const textToSend = senderName ? `*${senderName}:*\n${text}` : text;
+
     let externalMsg: any;
     let sendStatus = 'enviado';
     try {
       externalMsg = await this.whatsapp.sendText(
         convo.lead.phone,
-        text,
+        textToSend,
         convo.instance_name || undefined,
         quotedPayload,
       );

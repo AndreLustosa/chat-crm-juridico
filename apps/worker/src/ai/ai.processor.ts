@@ -488,11 +488,14 @@ export class AiProcessor extends WorkerHost {
       const instanceName =
         convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
 
+      // Assinatura "Sophia:" em negrito no WhatsApp (salva sem assinatura no DB)
+      const textToSend = `*Sophia:*\n${finalText}`;
+
       await axios.post(
         `${apiUrl}/message/sendText/${instanceName}`,
         {
           number: convo.lead.phone,
-          textMessage: { text: finalText },
+          textMessage: { text: textToSend },
           options: { delay: 1500, presence: 'composing' },
         },
         {
@@ -500,7 +503,7 @@ export class AiProcessor extends WorkerHost {
         },
       );
 
-      // 14. Salvar mensagem no banco com skill_id
+      // 14. Salvar mensagem no banco com skill_id (texto limpo, sem assinatura)
       await this.prisma.message.create({
         data: {
           conversation_id: convo.id,
