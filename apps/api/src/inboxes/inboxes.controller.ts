@@ -11,6 +11,11 @@ export class InboxesController {
     return this.inboxesService.findAll(undefined, userId);
   }
 
+  @Get('operators')
+  async getAllOperators() {
+    return this.inboxesService.findAllOperators();
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.inboxesService.findOne(id);

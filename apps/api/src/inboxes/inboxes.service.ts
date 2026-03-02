@@ -13,6 +13,19 @@ export class InboxesService {
     return (this.prisma as any).instance;
   }
 
+  async findAllOperators() {
+    const inboxes = await this.inbox.findMany({
+      include: {
+        users: { select: { id: true, name: true } },
+      },
+    });
+    return inboxes.map((inbox: any) => ({
+      inboxId: inbox.id,
+      inboxName: inbox.name,
+      users: inbox.users as { id: string; name: string }[],
+    }));
+  }
+
   async findAll(tenantId?: string, userId?: string) {
     return this.inbox.findMany({
       where: { 

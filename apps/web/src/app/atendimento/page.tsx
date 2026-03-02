@@ -74,7 +74,7 @@ export default function Dashboard() {
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [transferModal, setTransferModal] = useState(false);
-  const [transferUsers, setTransferUsers] = useState<{ id: string; name: string }[]>([]);
+  const [transferGroups, setTransferGroups] = useState<{ inboxId: string; inboxName: string; users: { id: string; name: string }[] }[]>([]);
   const [transferring, setTransferring] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -278,10 +278,10 @@ export default function Dashboard() {
   };
 
   const handleOpenTransferModal = async () => {
-    if (!selected?.inboxId) return;
+    if (!selectedId || selectedId.startsWith('demo-')) return;
     try {
-      const res = await api.get(`/inboxes/${selected.inboxId}`);
-      setTransferUsers(res.data?.users || []);
+      const res = await api.get('/inboxes/operators');
+      setTransferGroups(res.data || []);
       setTransferModal(true);
     } catch (e) {
       console.error('Failed to load operators', e);
@@ -538,7 +538,6 @@ export default function Dashboard() {
           <div className="flex bg-muted rounded-xl p-1 w-full relative">
             {[
               { value: '', label: 'Tudo' },
-              { value: 'MONITORING', label: 'Monitorando' },
               { value: 'ACTIVE', label: 'Ativas' },
               { value: 'WAITING', label: 'Espera' },
               { value: 'BOT', label: 'Bot' },
@@ -650,7 +649,7 @@ export default function Dashboard() {
                      Aceitar Atendimento
                    </button>
                  )}
-                 {!isClosed && isRealConvo && selected?.inboxId && (
+                 {!isClosed && isRealConvo && (
                    <button
                      onClick={handleOpenTransferModal}
                      title="Transferir conversa para outro operador"
@@ -1069,32 +1068,39 @@ export default function Dashboard() {
           onClick={() => setTransferModal(false)}
         >
           <div
-            className="bg-card border border-border rounded-2xl p-6 w-80 shadow-2xl"
+            className="bg-card border border-border rounded-2xl p-6 w-80 shadow-2xl max-h-[80vh] flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-4 shrink-0">
               <UserCheck size={18} className="text-sky-400" />
               <h3 className="font-bold text-base">Transferir Conversa</h3>
             </div>
-            {transferUsers.length === 0 ? (
-              <p className="text-muted-foreground text-sm py-2">Nenhum operador disponível neste setor.</p>
+            {transferGroups.every(g => g.users.length === 0) || transferGroups.length === 0 ? (
+              <p className="text-muted-foreground text-sm py-2">Nenhum operador cadastrado.</p>
             ) : (
-              <div className="flex flex-col gap-2">
-                {transferUsers.map(user => (
-                  <button
-                    key={user.id}
-                    onClick={() => handleTransfer(user.id)}
-                    disabled={transferring}
-                    className="w-full text-left px-4 py-3 rounded-xl bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border border-border hover:border-sky-500/30 transition-colors font-medium text-sm disabled:opacity-50"
-                  >
-                    {user.name}
-                  </button>
+              <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+                {transferGroups.filter(g => g.users.length > 0).map(group => (
+                  <div key={group.inboxId}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5 px-1">{group.inboxName}</p>
+                    <div className="flex flex-col gap-1">
+                      {group.users.map(user => (
+                        <button
+                          key={user.id}
+                          onClick={() => handleTransfer(user.id)}
+                          disabled={transferring}
+                          className="w-full text-left px-4 py-2.5 rounded-xl bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border border-border hover:border-sky-500/30 transition-colors font-medium text-sm disabled:opacity-50"
+                        >
+                          {user.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
             <button
               onClick={() => setTransferModal(false)}
-              className="mt-4 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="mt-4 shrink-0 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Cancelar
             </button>
