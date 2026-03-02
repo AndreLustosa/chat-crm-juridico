@@ -25,4 +25,16 @@ export class SettingsService {
     const row = await this.prisma.globalSetting.findUnique({ where: { key: 'OPENAI_API_KEY' } });
     return row?.value || process.env.OPENAI_API_KEY || null;
   }
+
+  async getDefaultModel(): Promise<string> {
+    const row = await this.prisma.globalSetting.findUnique({ where: { key: 'OPENAI_DEFAULT_MODEL' } });
+    return row?.value || 'gpt-4o-mini';
+  }
+
+  async getActiveSkills(): Promise<any[]> {
+    return (this.prisma as any).promptSkill.findMany({
+      where: { active: true },
+      orderBy: [{ order: 'asc' }, { id: 'asc' }],
+    });
+  }
 }

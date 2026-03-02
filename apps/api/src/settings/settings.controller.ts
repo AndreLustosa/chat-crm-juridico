@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, UseGuards, Request, ForbiddenException, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, UseGuards, Request, ForbiddenException, Param } from '@nestjs/common';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -74,13 +74,14 @@ export class SettingsController {
   @Post('ai-config')
   async setAiConfig(
     @Request() req: any,
-    @Body() data: { apiKey: string }
+    @Body() data: { apiKey?: string; defaultModel?: string }
   ) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem alterar configurações de IA');
     }
-    await this.settingsService.setAiConfig(data.apiKey);
-    return { message: 'Chave OpenAI salva com sucesso' };
+    if (data.apiKey) await this.settingsService.setAiConfig(data.apiKey);
+    if (data.defaultModel) await this.settingsService.setDefaultModel(data.defaultModel);
+    return { message: 'Configurações de IA salvas com sucesso' };
   }
 
   @Get('skills')
@@ -99,5 +100,29 @@ export class SettingsController {
     }
     await this.settingsService.toggleSkill(id, data.isActive);
     return { message: 'Skill atualizada com sucesso' };
+  }
+
+  @Post('skills')
+  async createSkill(@Request() req: any, @Body() data: any) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Apenas administradores podem criar skills');
+    }
+    return this.settingsService.createSkill(data);
+  }
+
+  @Patch('skills/:id')
+  async updateSkill(@Request() req: any, @Param('id') id: string, @Body() data: any) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Apenas administradores podem editar skills');
+    }
+    return this.settingsService.updateSkill(id, data);
+  }
+
+  @Delete('skills/:id')
+  async deleteSkill(@Request() req: any, @Param('id') id: string) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Apenas administradores podem excluir skills');
+    }
+    return this.settingsService.deleteSkill(id);
   }
 }

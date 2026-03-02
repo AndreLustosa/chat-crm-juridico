@@ -160,6 +160,11 @@ model PromptSkill {
   tools_policy_json Json    @default("[]")
   version           Int     @default(1)
   active            Boolean @default(true)
+  model             String  @default("gpt-4o-mini")
+  max_tokens        Int     @default(300)
+  temperature       Float   @default(0.7)
+  handoff_signal    String? // Palavra que a IA usa para sinalizar escalada ao humano (ex: "ESCALAR_HUMANO")
+  order             Int     @default(0)
 }
 
 model AuditLog {
