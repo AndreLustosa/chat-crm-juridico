@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
@@ -76,6 +76,7 @@ export default function Dashboard() {
   const [transferModal, setTransferModal] = useState(false);
   const [transferGroups, setTransferGroups] = useState<{ inboxId: string; inboxName: string; users: { id: string; name: string }[] }[]>([]);
   const [transferring, setTransferring] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -508,10 +509,17 @@ export default function Dashboard() {
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
 
       {/* INBOX */}
-      <section className="w-[380px] flex flex-col bg-card border-r border-border shrink-0 z-40">
+      <section className={`flex flex-col bg-card border-r border-border shrink-0 z-40 transition-all duration-300 ${inboxOpen ? 'w-[380px]' : 'w-0 overflow-hidden'}`}>
         <div className="p-5 border-b border-border space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold">Inbox</h2>
+            <button
+              onClick={() => setInboxOpen(false)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+              title="Fechar painel"
+            >
+              <PanelLeftClose size={18} />
+            </button>
           </div>
 
           {/* Seletor de Setores (Inboxes) */}
@@ -549,7 +557,7 @@ export default function Dashboard() {
               >
                 {tab.label}
                 {tab.count > 0 && (
-                  <span className="absolute -top-1 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold leading-4 text-center shadow-sm">
+                  <span className="absolute -top-2.5 -right-2 min-w-[26px] h-[26px] px-1.5 rounded-full bg-red-500 text-white text-[12px] font-bold leading-[26px] text-center shadow-md">
                     {tab.count > 99 ? '99+' : tab.count}
                   </span>
                 )}
@@ -601,6 +609,17 @@ export default function Dashboard() {
           )}
         </div>
       </section>
+
+      {/* INBOX OPEN BUTTON (when collapsed) */}
+      {!inboxOpen && (
+        <button
+          onClick={() => setInboxOpen(true)}
+          className="shrink-0 w-10 flex flex-col items-center justify-start gap-2 pt-4 bg-card border-r border-border z-40 hover:bg-accent/50 transition-all"
+          title="Abrir painel de inbox"
+        >
+          <PanelLeftOpen size={18} className="text-muted-foreground" />
+        </button>
+      )}
 
       {/* MAIN CHAT PANEL */}
       <main
