@@ -580,8 +580,14 @@ export default function Dashboard() {
                     <span className="font-semibold text-foreground truncate pl-0.5">{conv.contactName || 'Visitante'}</span>
                     <span className="text-[11px] text-muted-foreground shrink-0">{formatTime(conv.lastMessageAt)}</span>
                   </div>
-                  <div className="mb-2">
+                  <div className="mb-1.5 flex items-center gap-2 flex-wrap">
                     {statusBadge(conv.status)}
+                    {conv.assignedAgentName && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 inline-block" />
+                        {conv.assignedAgentName}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground truncate">{conv.lastMessage}</p>
                 </div>
