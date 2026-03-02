@@ -53,7 +53,10 @@ export class EvolutionService {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = (remoteJidAlt || remoteJid).split('@')[0];
-      const pushName = (data.pushName as string) || null;
+      // pushName from outgoing messages (fromMe=true) is the business account name, not the client.
+      // Only use it as the contact name for incoming messages.
+      const isFromMe = key.fromMe === true;
+      const pushName = !isFromMe ? ((data.pushName as string) || null) : null;
       const externalMessageId = key.id as string;
       const messageContent =
         (data.message?.conversation as string) ||
@@ -154,7 +157,7 @@ export class EvolutionService {
         if (!replyToText && quotedMsg?.text) replyToText = quotedMsg.text;
       }
 
-      const isOutgoing = key.fromMe === true;
+      const isOutgoing = isFromMe;
       const msg = await this.prisma.message.create({
         data: {
           conversation_id: conv.id,
@@ -222,7 +225,14 @@ export class EvolutionService {
       const phone = remoteJid.split('@')[0];
       const pushName = (data.pushName as string) || (data.name as string) || null;
 
-      // 1. Upsert Lead
+      // 1. Upsert Lead — skip creation when there's no name and lead doesn't exist yet.
+      // chats.upsert fires for every open chat on connection; creating leads without names
+      // produces phantom "unknown number" contacts in the CRM.
+      if (!pushName) {
+        const existing = await this.leadsService.findByPhone(phone);
+        if (!existing) continue; // No name, no existing lead → skip
+      }
+
       const lead = await this.leadsService.upsert({
         phone,
         name: pushName,

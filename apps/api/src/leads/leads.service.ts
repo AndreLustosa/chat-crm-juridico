@@ -84,6 +84,13 @@ export class LeadsService {
     });
   }
 
+  async findByPhone(phone: string): Promise<Lead | null> {
+    const normalized = to12Digits(phone);
+    return this.prisma.lead.findFirst({
+      where: { OR: [{ phone: normalized }, { phone }] },
+    });
+  }
+
   async updateStatus(id: string, stage: string): Promise<Lead> {
     return this.prisma.lead.update({
       where: { id },
