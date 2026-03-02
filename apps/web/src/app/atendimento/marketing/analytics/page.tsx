@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BarChart2, Globe, MousePointerClick, TrendingUp, ChevronRight, ChevronLeft, ArrowUpRight } from 'lucide-react';
+import { BarChart2, Globe, MousePointerClick, TrendingUp, ChevronLeft, ArrowUpRight } from 'lucide-react';
 import api from '@/lib/api';
 
 interface PageStat {
@@ -10,6 +10,20 @@ interface PageStat {
   clicks: number;
   conversion_rate: string;
   top_source: string;
+}
+
+// Mapeamento de paths → nomes amigáveis
+const PAGE_NAMES: Record<string, string> = {
+  '/': 'Home — Página Principal',
+  '/geral/arapiraca': 'Arapiraca — AL',
+};
+
+function getPageName(path: string): string {
+  if (PAGE_NAMES[path]) return PAGE_NAMES[path];
+  // /lp/slug → usa o slug formatado
+  const lpMatch = path.match(/^\/lp\/(.+)$/);
+  if (lpMatch) return `LP: ${lpMatch[1].replace(/-/g, ' ')}`;
+  return path;
 }
 
 interface PageDetail {
@@ -150,9 +164,19 @@ export default function AnalyticsDashboard() {
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs text-foreground truncate max-w-[160px]">{p.page_path}</span>
-                        <ArrowUpRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+                        <span className="text-xs font-semibold text-foreground truncate max-w-[160px]">{getPageName(p.page_path)}</span>
+                        <a
+                          href={p.page_path}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="opacity-0 group-hover:opacity-100 shrink-0 text-primary hover:text-primary/80 transition-colors"
+                          title="Abrir landing page"
+                        >
+                          <ArrowUpRight size={12} />
+                        </a>
                       </div>
+                      <span className="font-mono text-[10px] text-muted-foreground block">{p.page_path}</span>
                       <div className="mt-1.5">
                         <MiniBar value={p.views} max={maxViews} />
                       </div>
@@ -181,7 +205,19 @@ export default function AnalyticsDashboard() {
             >
               <ChevronLeft size={18} />
             </button>
-            <code className="text-sm font-bold text-foreground bg-muted px-3 py-1 rounded-lg">{selected.page_path}</code>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground truncate">{getPageName(selected.page_path)}</p>
+              <code className="text-[11px] text-muted-foreground">{selected.page_path}</code>
+            </div>
+            <a
+              href={selected.page_path}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-1.5 rounded-lg hover:bg-muted transition-colors text-primary shrink-0"
+              title="Abrir landing page"
+            >
+              <ArrowUpRight size={16} />
+            </a>
           </div>
 
           {loadingDetail ? (
