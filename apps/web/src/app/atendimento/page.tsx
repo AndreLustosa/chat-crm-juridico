@@ -90,6 +90,8 @@ export default function Dashboard() {
   const [transferError, setTransferError] = useState<string | null>(null);
   const [selectedTransferUserId, setSelectedTransferUserId] = useState<string | null>(null);
   const [transferReason, setTransferReason] = useState('');
+  const [allSpecialists, setAllSpecialists] = useState<{ id: string; name: string; specialties: string[] }[]>([]);
+  const [showLawyerDropdown, setShowLawyerDropdown] = useState(false);
   // Incoming transfer popup (for receiving operator)
   const [incomingTransfer, setIncomingTransfer] = useState<{
     conversationId: string; fromUserName: string; contactName: string; reason: string | null;
@@ -143,6 +145,7 @@ export default function Dashboard() {
   useEffect(() => {
     const conv = conversations.find(c => c.id === selectedId);
     if (conv) setAiMode(!!conv.aiMode);
+    setShowLawyerDropdown(false);
   }, [selectedId, conversations]);
 
   const fetchConversations = useCallback(async (inboxId?: string | null, silent = false) => {
@@ -170,6 +173,15 @@ export default function Dashboard() {
       setUserInboxes(res.data);
     } catch (error) {
       console.error('Failed to fetch inboxes', error);
+    }
+  };
+
+  const fetchSpecialists = async () => {
+    try {
+      const res = await api.get('/users');
+      setAllSpecialists((res.data || []).filter((u: any) => u.specialties?.length > 0));
+    } catch (e) {
+      console.error('Failed to fetch specialists', e);
     }
   };
 
@@ -274,6 +286,7 @@ export default function Dashboard() {
     fetchInboxes();
     fetchConversations(selectedInboxId);
     fetchPendingTransfers();
+    fetchSpecialists();
   }, [fetchConversations, fetchPendingTransfers, selectedInboxId]);
 
   // Fetch messages when conversation selected
@@ -458,6 +471,17 @@ export default function Dashboard() {
       fetchConversations(selectedInboxIdRef.current);
     } catch (e: any) {
       console.error('Failed to keep in inbox', e);
+    }
+  };
+
+  const handleAssignLawyerInbox = async (lawyerId: string | null) => {
+    if (!selectedId) return;
+    try {
+      await api.patch(`/conversations/${selectedId}/assign-lawyer`, { lawyerId });
+      setShowLawyerDropdown(false);
+      fetchConversations(selectedInboxIdRef.current);
+    } catch (e: any) {
+      console.error('Failed to assign lawyer', e);
     }
   };
 
@@ -936,10 +960,10 @@ export default function Dashboard() {
         )}
         {selected ? (
           <>
-            <header className="h-[80px] px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
+            <header className="min-h-[80px] py-3 px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
                <div className="flex items-center gap-4">
                  <div
-                   className={`w-12 h-12 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm ${selected.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                   className={`w-12 h-12 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm shrink-0 ${selected.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
                    onClick={() => selected.profile_picture_url && setLightbox(selected.profile_picture_url)}
                    title={selected.profile_picture_url ? 'Ver foto ampliada' : undefined}
                  >
@@ -954,6 +978,64 @@ export default function Dashboard() {
                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-1">
                      {selected.channel} <span className="mx-1">•</span> {selected.contactPhone}
                    </div>
+                   {/* Área jurídica + especialista pré-atribuído */}
+                   {(selected.legalArea || selected.assignedLawyerId) && (
+                     <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                       {selected.legalArea && (
+                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20">
+                           ⚖️ {selected.legalArea}
+                         </span>
+                       )}
+                       {selected.legalArea && (
+                         <div className="relative">
+                           <button
+                             onClick={() => setShowLawyerDropdown(v => !v)}
+                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${selected.assignedLawyerName ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20' : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'}`}
+                             title="Clique para atribuir ou trocar o especialista"
+                           >
+                             <UserCheck size={10} />
+                             {selected.assignedLawyerName || 'Atribuir especialista'}
+                           </button>
+                           {showLawyerDropdown && (
+                             <>
+                               <div className="fixed inset-0 z-40" onClick={() => setShowLawyerDropdown(false)} />
+                               <div className="absolute top-full left-0 mt-1 z-50 bg-card border border-border rounded-xl shadow-xl w-56 py-1 text-[12px]">
+                                 <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                                   {selected.assignedLawyerName ? 'Trocar especialista' : 'Escolher especialista'}
+                                 </p>
+                                 {allSpecialists.length === 0 && (
+                                   <p className="px-3 py-2 text-[11px] text-muted-foreground">Nenhum especialista cadastrado</p>
+                                 )}
+                                 {allSpecialists.map(u => (
+                                   <button
+                                     key={u.id}
+                                     onClick={() => handleAssignLawyerInbox(u.id)}
+                                     className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${u.id === selected.assignedLawyerId ? 'text-primary font-semibold' : 'text-foreground'}`}
+                                   >
+                                     <span className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary shrink-0">
+                                       {u.name.charAt(0)}
+                                     </span>
+                                     <div>
+                                       <p className="leading-tight">{u.name}</p>
+                                       <p className="text-[9px] text-muted-foreground">{u.specialties.join(', ')}</p>
+                                     </div>
+                                   </button>
+                                 ))}
+                                 {selected.assignedLawyerId && (
+                                   <button
+                                     onClick={() => handleAssignLawyerInbox(null)}
+                                     className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
+                                   >
+                                     Remover especialista
+                                   </button>
+                                 )}
+                               </div>
+                             </>
+                           )}
+                         </div>
+                       )}
+                     </div>
+                   )}
                  </div>
                </div>
                <div className="flex gap-2 items-center">
