@@ -193,30 +193,38 @@ export default function Dashboard() {
     }
   }, []);
 
-  const fetchInboxes = async () => {
+  const fetchInboxes = async (silent = false) => {
     try {
-      const res = await api.get('/inboxes');
+      const res = await api.get('/inboxes', {
+        ...(silent ? { _silent401: true } as any : {}),
+      });
       setUserInboxes(res.data);
     } catch (error) {
       console.error('Failed to fetch inboxes', error);
     }
   };
 
-  const fetchSpecialists = async () => {
+  const fetchSpecialists = async (silent = false) => {
     try {
-      const res = await api.get('/users');
+      const res = await api.get('/users', {
+        ...(silent ? { _silent401: true } as any : {}),
+      });
       setAllSpecialists((res.data || []).filter((u: any) => u.specialties?.length > 0));
     } catch (e) {
       console.error('Failed to fetch specialists', e);
     }
   };
 
-  const fetchPendingTransfers = useCallback(async () => {
+  const fetchPendingTransfers = useCallback(async (silent = false) => {
     try {
-      const res = await api.get('/conversations/pending-transfers');
+      const res = await api.get('/conversations/pending-transfers', {
+        ...(silent ? { _silent401: true } as any : {}),
+      });
       setPendingTransfers(res.data || []);
-    } catch (e) {
-      console.error('Failed to fetch pending transfers', e);
+    } catch (e: any) {
+      if (e.response?.status !== 401 || !silent) {
+        console.error('Failed to fetch pending transfers', e);
+      }
     }
   }, []);
 
@@ -260,11 +268,9 @@ export default function Dashboard() {
 
     socket.on('inboxUpdate', () => {
       console.log('[SOCKET] inboxUpdate received, fetching conversations...');
-      // silent=true: 401 nesta chamada de background não redireciona todos os usuários
+      // silent=true: 401 nestas chamadas de background não redireciona todos os usuários
       fetchConversations(selectedInboxIdRef.current, true);
-      // Também atualiza transferências pendentes — garante que "Aguardando você" apareça
-      // mesmo se o evento transfer_request direto for perdido
-      fetchPendingTransfers();
+      fetchPendingTransfers(true);
     });
 
     // Incoming message notification — broadcast to all; each client filters by assignedUserId
@@ -289,7 +295,7 @@ export default function Dashboard() {
       setIncomingTransfer(data);
       setShowDeclineInput(false);
       setDeclineReason('');
-      fetchPendingTransfers();
+      fetchPendingTransfers(true);
     });
 
     // Transfer response: notification for the sender
@@ -320,10 +326,11 @@ export default function Dashboard() {
   }, [fetchConversations, fetchPendingTransfers, selectedInboxId]);
 
   // Polling de transferências pendentes: fallback quando o evento socket direto é perdido
+  // silent=true: nunca causa logout — se o token expirar, só o load inicial ou ação do usuário redireciona
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchPendingTransfers();
-    }, 12000); // a cada 12 segundos
+      fetchPendingTransfers(true);
+    }, 12000);
     return () => clearInterval(interval);
   }, [fetchPendingTransfers]);
 
