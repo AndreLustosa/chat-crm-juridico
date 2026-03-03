@@ -127,6 +127,12 @@ export default function Dashboard() {
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
 
+  // Broadcast total unread count to Sidebar via CustomEvent
+  useEffect(() => {
+    const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+    window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
+  }, [unreadCounts]);
+
   // Sync aiMode when conversation changes
   useEffect(() => {
     const conv = conversations.find(c => c.id === selectedId);

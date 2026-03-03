@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import api from '@/lib/api';
 
 const THEMES = [
   { id: 'logo-dark', name: 'Dark (Logo)', color: '#000000' },
@@ -21,7 +20,7 @@ export function Sidebar() {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
-  const [openCount, setOpenCount] = useState<number>(0);
+  const [unreadTotal, setUnreadTotal] = useState<number>(0);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -50,19 +49,15 @@ export function Sidebar() {
   }, []);
 
   useEffect(() => {
-    const fetchOpenCount = async () => {
-      try {
-        const res = await api.get('/conversations/open-count');
-        setOpenCount(res.data?.count || 0);
-      } catch {}
+    const handler = (e: Event) => {
+      setUnreadTotal((e as CustomEvent).detail?.total ?? 0);
     };
-    fetchOpenCount();
-    const interval = setInterval(fetchOpenCount, 30000);
-    return () => clearInterval(interval);
+    window.addEventListener('unread_count_update', handler);
+    return () => window.removeEventListener('unread_count_update', handler);
   }, []);
 
   const navItems = [
-    { label: 'Inbox (WhatsApp)', href: '/atendimento', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/atendimento' || p.startsWith('/atendimento/chat'), badge: openCount },
+    { label: 'Inbox (WhatsApp)', href: '/atendimento', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/atendimento' || p.startsWith('/atendimento/chat'), badge: unreadTotal },
     { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm') },
     { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts') },
     { label: 'Tarefas', href: '/atendimento/tasks', icon: <Check size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/tasks') },
