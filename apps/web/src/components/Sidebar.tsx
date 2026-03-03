@@ -79,7 +79,7 @@ export function Sidebar() {
           {navItems.map((item) => {
             const isActive = item.match(pathname);
             return (
-              <button key={item.href} onClick={() => router.push(item.href)} className={`w-full aspect-square rounded-xl flex items-center justify-center relative shadow-sm group transition-colors ${isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'}`}>
+              <button key={item.href} onClick={() => { if (!isActive) router.push(item.href); }} className={`w-full aspect-square rounded-xl flex items-center justify-center relative shadow-sm group transition-colors ${isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'}`}>
                 {item.icon}
                 {(item as any).badge > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center shadow-md">

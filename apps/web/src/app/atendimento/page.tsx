@@ -102,8 +102,11 @@ export default function Dashboard() {
   // Pending transfers waiting for current user to accept/decline
   const [pendingTransfers, setPendingTransfers] = useState<{ conversationId: string; contactName: string; fromUserName: string; reason: string | null }[]>([]);
   const [inboxOpen, setInboxOpen] = useState(true);
-  // Unread message counts per conversation (reset when conversation is opened)
-  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  // Unread message counts per conversation (persisted in sessionStorage to survive same-page navigation)
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(sessionStorage.getItem('unreadCounts') || '{}'); } catch { return {}; }
+  });
   // Current user ID decoded from JWT (lazy init, never changes)
   const [currentUserId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -127,8 +130,9 @@ export default function Dashboard() {
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
 
-  // Broadcast total unread count to Sidebar via CustomEvent
+  // Persist unreadCounts + broadcast total to Sidebar
   useEffect(() => {
+    try { sessionStorage.setItem('unreadCounts', JSON.stringify(unreadCounts)); } catch {}
     const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
     window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
   }, [unreadCounts]);
