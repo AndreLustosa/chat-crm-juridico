@@ -9,6 +9,7 @@ interface AudioEntry {
   blob?: Blob;      // blob local (antes do upload ou para playback)
   uploading?: boolean;
   error?: boolean;
+  errorMsg?: string; // mensagem de erro do servidor
   duration?: number; // segundos
 }
 
@@ -78,10 +79,13 @@ export function TransferAudioRecorder({ conversationId, onAudioIdsChange }: Prop
             onAudioIdsChange(next.filter(a => !a.uploading && !a.error).map(a => a.id));
             return next;
           });
-        } catch (e) {
+        } catch (e: any) {
           console.error('[TransferAudio] Upload error', e);
+          const serverMsg: string =
+            e?.response?.data?.message ||
+            (e?.response?.status === 507 ? 'Armazenamento cheio. Contate o administrador.' : 'Falha no upload — remova e tente novamente');
           setAudios(prev => {
-            const next = prev.map(a => a.id === tempId ? { ...a, uploading: false, error: true } : a);
+            const next = prev.map(a => a.id === tempId ? { ...a, uploading: false, error: true, errorMsg: serverMsg } : a);
             return next;
           });
         }
@@ -183,7 +187,7 @@ export function TransferAudioRecorder({ conversationId, onAudioIdsChange }: Prop
                   <p className="text-[10px] text-muted-foreground">{formatDur(entry.duration)}</p>
                 )}
                 {entry.uploading && <p className="text-[10px] text-muted-foreground">Enviando...</p>}
-                {entry.error && <p className="text-[10px] text-destructive">Falha no upload — remova e tente novamente</p>}
+                {entry.error && <p className="text-[10px] text-destructive">{entry.errorMsg || 'Falha no upload — remova e tente novamente'}</p>}
               </div>
 
               <button

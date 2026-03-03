@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, HttpException, HttpStatus } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
@@ -24,7 +24,19 @@ export class TransferAudioService {
     const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'webm';
     const s3Key = `transfer-audios/${conversationId}/${id}.${ext}`;
 
-    await this.s3.uploadBuffer(s3Key, buffer, mimeType);
+    try {
+      await this.s3.uploadBuffer(s3Key, buffer, mimeType);
+    } catch (err: any) {
+      const code = err?.Code || err?.name || '';
+      if (code === 'XMinioStorageFull' || err?.$metadata?.httpStatusCode === 507) {
+        this.logger.error(`[TransferAudio] MinIO storage full! Key: ${s3Key}`);
+        throw new HttpException(
+          'Armazenamento do servidor está cheio. Contate o administrador para liberar espaço.',
+          HttpStatus.INSUFFICIENT_STORAGE, // 507
+        );
+      }
+      throw err;
+    }
 
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 dias
 
