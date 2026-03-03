@@ -91,8 +91,12 @@ export class ConversationsController {
   }
 
   @Patch(':id/return-to-origin')
-  returnToOrigin(@Param('id') id: string) {
-    return this.conversationsService.returnToOrigin(id);
+  returnToOrigin(
+    @Param('id') id: string,
+    @Body() body: { reason?: string; audioIds?: string[] },
+    @Request() req: any,
+  ) {
+    return this.conversationsService.returnToOrigin(id, body.reason, body.audioIds, req.user?.id);
   }
 
   @Patch(':id/keep-in-inbox')

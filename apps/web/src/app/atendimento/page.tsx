@@ -93,10 +93,12 @@ export default function Dashboard() {
   const [selectedTransferUserId, setSelectedTransferUserId] = useState<string | null>(null);
   const [transferReason, setTransferReason] = useState('');
   const [transferAudioIds, setTransferAudioIds] = useState<string[]>([]);
-  // Popup de motivo (lawyer ou operator)
+  // Popup de motivo (lawyer, operator ou return)
   const [showReasonPopup, setShowReasonPopup] = useState(false);
-  const [reasonPopupContext, setReasonPopupContext] = useState<'lawyer' | 'operator' | null>(null);
+  const [reasonPopupContext, setReasonPopupContext] = useState<'lawyer' | 'operator' | 'return' | null>(null);
   const [reasonPopupTargetName, setReasonPopupTargetName] = useState('');
+  // Contexto de transferência salvo por conversa (persiste após aceitar / ao receber devolução)
+  const [transferContextMap, setTransferContextMap] = useState<Record<string, { fromUserName: string; reason: string | null; audioIds: string[] }>>({});
   const [allSpecialists, setAllSpecialists] = useState<{ id: string; name: string; specialties: string[] }[]>([]);
   const [showLawyerDropdown, setShowLawyerDropdown] = useState(false);
   // Incoming transfer popup (for receiving operator)
@@ -310,6 +312,23 @@ export default function Dashboard() {
       setTimeout(() => setTransferResponseMsg(null), 6000);
     });
 
+    socket.on('transfer_returned', (data: { conversationId: string; fromUserName: string; contactName: string; reason: string | null; audioIds?: string[] }) => {
+      setTransferResponseMsg(`↩ ${data.fromUserName} devolveu "${data.contactName}"${data.reason ? ': ' + data.reason : ''}`);
+      // Guardar contexto de retorno para exibir no chat
+      if (data.reason || (data.audioIds && data.audioIds.length > 0)) {
+        setTransferContextMap(prev => ({
+          ...prev,
+          [data.conversationId]: {
+            fromUserName: data.fromUserName,
+            reason: data.reason,
+            audioIds: data.audioIds || [],
+          },
+        }));
+      }
+      fetchConversations(selectedInboxIdRef.current, true);
+      setTimeout(() => setTransferResponseMsg(null), 8000);
+    });
+
     socketRef.current = socket;
 
     return () => {
@@ -461,7 +480,7 @@ export default function Dashboard() {
     }
   };
 
-  const openReasonPopup = (context: 'lawyer' | 'operator', targetName: string) => {
+  const openReasonPopup = (context: 'lawyer' | 'operator' | 'return', targetName: string) => {
     setTransferReason('');
     setTransferAudioIds([]);
     setTransferError(null);
@@ -584,6 +603,17 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${incomingTransfer.conversationId}/transfer-accept`);
       shownTransferIdsRef.current.delete(incomingTransfer.conversationId);
+      // Salvar contexto (motivo + áudios) para exibir no chat após aceitar
+      if (incomingTransfer.reason || incomingTransfer.audioIds?.length) {
+        setTransferContextMap(prev => ({
+          ...prev,
+          [incomingTransfer.conversationId]: {
+            fromUserName: incomingTransfer.fromUserName,
+            reason: incomingTransfer.reason,
+            audioIds: incomingTransfer.audioIds || [],
+          },
+        }));
+      }
       setIncomingTransfer(null);
       fetchPendingTransfers();
       fetchConversations(selectedInboxIdRef.current);
@@ -591,6 +621,29 @@ export default function Dashboard() {
       console.error('Failed to accept transfer', e);
     } finally {
       setProcessingTransfer(false);
+    }
+  };
+
+  const handleReturnWithReason = async () => {
+    if (!selectedId) return;
+    setTransferring(true);
+    try {
+      await api.patch(`/conversations/${selectedId}/return-to-origin`, {
+        reason: transferReason.trim() || undefined,
+        audioIds: transferAudioIds.length > 0 ? transferAudioIds : undefined,
+      });
+      closeReasonPopup();
+      // Limpar contexto desta conversa pois está sendo devolvida
+      setTransferContextMap(prev => {
+        const next = { ...prev };
+        delete next[selectedId];
+        return next;
+      });
+      fetchConversations(selectedInboxIdRef.current);
+    } catch (e: any) {
+      console.error('Failed to return to origin', e);
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -1170,7 +1223,7 @@ export default function Dashboard() {
                  {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
                    <>
                      <button
-                       onClick={handleReturnToOrigin}
+                       onClick={() => openReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem')}
                        title="Devolver conversa ao atendente de origem"
                        className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
                      >
@@ -1199,6 +1252,49 @@ export default function Dashboard() {
                  )}
                </div>
             </header>
+
+            {/* Banner de contexto da transferência (motivo + áudios — persiste após aceitar) */}
+            {selectedId && transferContextMap[selectedId] && (() => {
+              const ctx = transferContextMap[selectedId];
+              return (
+                <div className="border-b border-amber-500/20 bg-amber-500/5 px-5 py-3 shrink-0">
+                  <div className="flex items-start gap-3 max-w-4xl mx-auto">
+                    <span className="text-amber-400 text-base shrink-0 mt-0.5">📋</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-bold text-amber-400 mb-1">
+                        Contexto da transferência — de {ctx.fromUserName}
+                      </p>
+                      {ctx.reason && (
+                        <p className="text-xs text-foreground/90 whitespace-pre-wrap break-words leading-relaxed">
+                          {ctx.reason}
+                        </p>
+                      )}
+                      {ctx.audioIds.length > 0 && (
+                        <div className="mt-2 space-y-1.5">
+                          {ctx.audioIds.map((aid, i) => (
+                            <div key={aid} className="flex items-center gap-2">
+                              <span className="text-[10px] text-muted-foreground shrink-0">#{i + 1}</span>
+                              <AuthAudioPlayer audioId={aid} className="h-7 flex-1" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setTransferContextMap(prev => {
+                        const next = { ...prev };
+                        delete next[selectedId];
+                        return next;
+                      })}
+                      className="text-muted-foreground hover:text-foreground shrink-0 mt-0.5"
+                      title="Dispensar"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Wrapper: watermark fixo + scroll area sobre ele */}
             <div className="flex-1 relative overflow-hidden">
@@ -1754,20 +1850,35 @@ export default function Dashboard() {
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
-            <div className={`px-5 pt-5 pb-3 border-b border-border/60 ${reasonPopupContext === 'lawyer' ? 'bg-violet-500/5' : 'bg-sky-500/5'}`}>
+            <div className={`px-5 pt-5 pb-3 border-b border-border/60 ${
+              reasonPopupContext === 'lawyer' ? 'bg-violet-500/5' :
+              reasonPopupContext === 'return' ? 'bg-amber-500/5' :
+              'bg-sky-500/5'
+            }`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">
-                {reasonPopupContext === 'lawyer' ? '⚖️ Transferência para especialista' : '📨 Solicitar transferência'}
+                {reasonPopupContext === 'lawyer' ? '⚖️ Transferência para especialista' :
+                 reasonPopupContext === 'return' ? '↩ Devolver contato' :
+                 '📨 Solicitar transferência'}
               </p>
-              <h3 className="font-bold text-sm text-foreground">{reasonPopupTargetName}</h3>
+              <h3 className="font-bold text-sm text-foreground">
+                {reasonPopupContext === 'return' ? `Para: ${reasonPopupTargetName}` : reasonPopupTargetName}
+              </h3>
             </div>
 
             {/* Caixa unificada: textarea + gravador de áudio */}
-            <div className="m-4 rounded-xl border border-border bg-muted/40 overflow-hidden focus-within:border-violet-500/50 transition-colors">
+            <div className={`m-4 rounded-xl border bg-muted/40 overflow-hidden transition-colors ${
+              reasonPopupContext === 'return' ? 'border-amber-500/30 focus-within:border-amber-500/60' :
+              'border-border focus-within:border-violet-500/50'
+            }`}>
               <textarea
                 autoFocus
                 value={transferReason}
                 onChange={e => setTransferReason(e.target.value)}
-                placeholder={`Explique o motivo para ${reasonPopupTargetName}...`}
+                placeholder={
+                  reasonPopupContext === 'return'
+                    ? `Observações para ${reasonPopupTargetName} (opcional)...`
+                    : `Explique o motivo para ${reasonPopupTargetName}...`
+                }
                 className="w-full bg-transparent px-4 pt-3 pb-2 text-sm resize-none outline-none min-h-[80px]"
                 rows={3}
               />
@@ -1794,15 +1905,27 @@ export default function Dashboard() {
                 Cancelar
               </button>
               <button
-                onClick={reasonPopupContext === 'lawyer' ? handleTransferToLawyer : handleTransfer}
-                disabled={transferring || (!transferReason.trim() && transferAudioIds.length === 0)}
+                onClick={
+                  reasonPopupContext === 'lawyer' ? handleTransferToLawyer :
+                  reasonPopupContext === 'return' ? handleReturnWithReason :
+                  handleTransfer
+                }
+                disabled={
+                  transferring ||
+                  (reasonPopupContext !== 'return' && !transferReason.trim() && transferAudioIds.length === 0)
+                }
                 className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   reasonPopupContext === 'lawyer'
                     ? 'bg-violet-500/15 border border-violet-500/40 text-violet-300 hover:bg-violet-500/25'
+                    : reasonPopupContext === 'return'
+                    ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
                     : 'bg-sky-500 text-white hover:bg-sky-600'
                 }`}
               >
-                {transferring ? '⏳ Enviando...' : reasonPopupContext === 'lawyer' ? '⚖️ Confirmar' : 'Enviar'}
+                {transferring ? '⏳ Enviando...' :
+                 reasonPopupContext === 'lawyer' ? '⚖️ Confirmar' :
+                 reasonPopupContext === 'return' ? '↩ Devolver' :
+                 'Enviar'}
               </button>
             </div>
           </div>
@@ -1811,83 +1934,96 @@ export default function Dashboard() {
 
       {/* Incoming Transfer Popup */}
       {incomingTransfer && (
-        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-card border-2 border-amber-500/40 rounded-2xl p-6 w-96 shadow-2xl">
-            <div className="flex items-center gap-3 mb-4">
+        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-card border-2 border-amber-500/40 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]">
+            {/* Header fixo */}
+            <div className="flex items-center gap-3 px-6 pt-6 pb-4 shrink-0">
               <span className="text-2xl">📨</span>
               <div>
                 <h3 className="font-bold text-base">Pedido de Transferência</h3>
                 <p className="text-xs text-muted-foreground">De: <strong className="text-foreground">{incomingTransfer.fromUserName}</strong></p>
               </div>
             </div>
-            <div className="bg-muted/50 rounded-xl p-4 mb-4 space-y-2 text-sm">
-              <p><span className="text-muted-foreground">Contato:</span> <strong>{incomingTransfer.contactName}</strong></p>
-              {incomingTransfer.reason && (
-                <p><span className="text-muted-foreground">Motivo:</span> {incomingTransfer.reason}</p>
-              )}
-              {incomingTransfer.audioIds && incomingTransfer.audioIds.length > 0 && (
-                <div>
-                  <p className="text-muted-foreground mb-1">Áudios explicativos ({incomingTransfer.audioIds.length}):</p>
-                  <div className="space-y-1">
-                    {incomingTransfer.audioIds.map((aid, i) => (
-                      <div key={aid} className="flex items-center gap-2">
-                        <span className="text-[10px] text-muted-foreground shrink-0">#{i + 1}</span>
-                        <AuthAudioPlayer
-                          audioId={aid}
-                          className="h-7 w-full"
-                          style={{ filter: 'hue-rotate(240deg) brightness(0.9)' }}
-                        />
-                      </div>
-                    ))}
+
+            {/* Corpo rolável */}
+            <div className="overflow-y-auto px-6 flex-1 min-h-0">
+              <div className="bg-muted/50 rounded-xl p-4 mb-4 space-y-3 text-sm">
+                <p><span className="text-muted-foreground">Contato:</span> <strong>{incomingTransfer.contactName}</strong></p>
+                {incomingTransfer.reason && (
+                  <div>
+                    <p className="text-muted-foreground text-xs mb-1">Motivo:</p>
+                    <p className="whitespace-pre-wrap break-words leading-relaxed">{incomingTransfer.reason}</p>
                   </div>
-                </div>
+                )}
+                {incomingTransfer.audioIds && incomingTransfer.audioIds.length > 0 && (
+                  <div>
+                    <p className="text-muted-foreground text-xs mb-1.5">Áudios explicativos ({incomingTransfer.audioIds.length}):</p>
+                    <div className="space-y-1.5">
+                      {incomingTransfer.audioIds.map((aid, i) => (
+                        <div key={aid} className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground shrink-0">#{i + 1}</span>
+                          <AuthAudioPlayer
+                            audioId={aid}
+                            className="h-7 w-full"
+                            style={{ filter: 'hue-rotate(240deg) brightness(0.9)' }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {showDeclineInput && (
+                <textarea
+                  value={declineReason}
+                  onChange={e => setDeclineReason(e.target.value)}
+                  placeholder="Justificativa para recusa (opcional)..."
+                  className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm mb-3 resize-none outline-none focus:border-red-500/50"
+                  rows={2}
+                  autoFocus
+                />
               )}
             </div>
-            {showDeclineInput && (
-              <textarea
-                value={declineReason}
-                onChange={e => setDeclineReason(e.target.value)}
-                placeholder="Justificativa para recusa (opcional)..."
-                className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm mb-3 resize-none outline-none focus:border-red-500/50"
-                rows={2}
-                autoFocus
-              />
-            )}
-            <div className="flex gap-2">
-              {!showDeclineInput ? (
-                <>
-                  <button
-                    onClick={handleAcceptTransfer}
-                    disabled={processingTransfer}
-                    className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors disabled:opacity-50"
-                  >
-                    ✓ Aceitar
-                  </button>
-                  <button
-                    onClick={() => setShowDeclineInput(true)}
-                    disabled={processingTransfer}
-                    className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-colors"
-                  >
-                    ✗ Recusar
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setShowDeclineInput(false)}
-                    className="py-2.5 px-4 text-muted-foreground text-sm rounded-xl hover:bg-accent transition-colors"
-                  >
-                    Voltar
-                  </button>
-                  <button
-                    onClick={handleDeclineTransfer}
-                    disabled={processingTransfer}
-                    className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-colors disabled:opacity-50"
-                  >
-                    {processingTransfer ? 'Enviando...' : 'Confirmar Recusa'}
-                  </button>
-                </>
-              )}
+
+            {/* Botões fixos no rodapé */}
+            <div className="px-6 pb-6 pt-2 shrink-0">
+              <div className="flex gap-2">
+                {!showDeclineInput ? (
+                  <>
+                    <button
+                      onClick={handleAcceptTransfer}
+                      disabled={processingTransfer}
+                      className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                    >
+                      ✓ Aceitar
+                    </button>
+                    <button
+                      onClick={() => setShowDeclineInput(true)}
+                      disabled={processingTransfer}
+                      className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-colors"
+                    >
+                      ✗ Recusar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setShowDeclineInput(false)}
+                      className="py-2.5 px-4 text-muted-foreground text-sm rounded-xl hover:bg-accent transition-colors"
+                    >
+                      Voltar
+                    </button>
+                    <button
+                      onClick={handleDeclineTransfer}
+                      disabled={processingTransfer}
+                      className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-colors disabled:opacity-50"
+                    >
+                      {processingTransfer ? 'Enviando...' : 'Confirmar Recusa'}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

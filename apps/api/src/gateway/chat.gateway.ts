@@ -41,6 +41,11 @@ export class ChatGateway {
     this.server.to(`user:${fromUserId}`).emit('transfer_response', data);
   }
 
+  emitTransferReturned(toUserId: string, data: any) {
+    this.logger.log(`[SOCKET] Emitting transfer_returned to user:${toUserId}`);
+    this.server.to(`user:${toUserId}`).emit('transfer_returned', data);
+  }
+
   emitNewMessage(conversationId: string, message: any) {
     this.logger.log(`[SOCKET] Emitting newMessage to room ${conversationId}`);
     this.server.to(conversationId).emit('newMessage', message);

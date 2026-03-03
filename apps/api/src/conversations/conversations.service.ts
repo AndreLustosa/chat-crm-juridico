@@ -298,14 +298,22 @@ export class ConversationsService {
     );
   }
 
-  async returnToOrigin(id: string) {
+  async returnToOrigin(id: string, reason?: string, audioIds?: string[], returningUserId?: string) {
     const conv = await (this.prisma as any).conversation.findUnique({
       where: { id },
-      select: { origin_assigned_user_id: true, assigned_user_id: true },
+      select: {
+        origin_assigned_user_id: true,
+        assigned_user_id: true,
+        lead: { select: { name: true, phone: true } },
+      },
     });
     if (!conv?.origin_assigned_user_id) {
       throw new BadRequestException('Sem atendente de origem para devolver.');
     }
+
+    const returningUser = returningUserId
+      ? await this.prisma.user.findUnique({ where: { id: returningUserId }, select: { name: true } })
+      : null;
 
     const linkedIds = [...new Set([conv.assigned_user_id, conv.origin_assigned_user_id].filter(Boolean) as string[])];
     await (this.prisma as any).conversation.update({
@@ -316,6 +324,15 @@ export class ConversationsService {
         ai_mode: false,
         linked_agent_ids: { push: linkedIds },
       },
+    });
+
+    // Notificar o atendente de origem sobre a devolução com o contexto do advogado
+    this.chatGateway.emitTransferReturned(conv.origin_assigned_user_id, {
+      conversationId: id,
+      fromUserName: returningUser?.name || 'Advogado',
+      contactName: conv.lead?.name || conv.lead?.phone || 'Contato',
+      reason: reason?.trim() || null,
+      audioIds: audioIds?.length ? audioIds : undefined,
     });
 
     this.chatGateway.emitConversationsUpdate(null);
