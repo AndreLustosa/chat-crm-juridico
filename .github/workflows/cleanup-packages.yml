@@ -1,0 +1,28 @@
+name: Limpar imagens antigas do ghcr.io
+
+on:
+  # Permite acionar manualmente pela aba Actions do GitHub
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 'Quantas versões manter de cada imagem'
+        required: false
+        default: '2'
+
+jobs:
+  cleanup:
+    # Usa runner do GitHub (rápido, poucos segundos, gasto mínimo de minutos)
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        suffix: [api, worker, web]
+    steps:
+      - name: Deletar versões antigas de ${{ matrix.suffix }}
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ github.event.repository.name }}-${{ matrix.suffix }}
+          package-type: container
+          min-versions-to-keep: ${{ github.event.inputs.keep || 2 }}
+          ignore-versions: '^master$'
