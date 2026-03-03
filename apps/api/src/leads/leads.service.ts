@@ -113,6 +113,13 @@ export class LeadsService {
     });
   }
 
+  async update(id: string, data: { name?: string; email?: string; tags?: string[] }): Promise<Lead> {
+    return this.prisma.lead.update({
+      where: { id },
+      data,
+    });
+  }
+
   async updateStatus(id: string, stage: string): Promise<Lead> {
     return this.prisma.lead.update({
       where: { id },

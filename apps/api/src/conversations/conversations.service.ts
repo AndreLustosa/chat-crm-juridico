@@ -87,6 +87,7 @@ export class ConversationsService {
       include: {
         lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
         messages: { orderBy: { created_at: 'asc' }, take: 100, include: { media: true } },
+        assigned_user: { select: { id: true, name: true } },
       }
     });
   }

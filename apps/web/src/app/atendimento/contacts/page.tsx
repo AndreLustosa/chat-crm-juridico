@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Search, User, Phone, Loader2, RefreshCw, X, MessageSquare, Calendar, Tag, Brain, ChevronDown, ChevronUp, ExternalLink, Mail } from 'lucide-react';
+import { useState, useEffect, useRef, KeyboardEvent } from 'react';
+import { Search, User, Phone, Loader2, RefreshCw, X, MessageSquare, Calendar, Tag, Brain, ChevronDown, ChevronUp, ExternalLink, Mail, Pencil, Check, Plus, UserCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
@@ -72,16 +72,110 @@ function formatDateShort(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
+const STAGES = ['NOVO', 'Contato Inicial', 'Em Qualificação', 'Aguardando Formulário', 'Reunião Agendada', 'Desqualificado', 'Finalizado'];
+
+function InlineInput({ value, onSave, onCancel, placeholder }: { value: string; onSave: (v: string) => void; onCancel: () => void; placeholder?: string }) {
+  const [val, setVal] = useState(value);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') onSave(val.trim());
+    if (e.key === 'Escape') onCancel();
+  };
+  return (
+    <div className="flex items-center gap-1.5 flex-1">
+      <input
+        ref={ref}
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={handleKey}
+        placeholder={placeholder}
+        className="flex-1 bg-background border border-primary/40 rounded-lg px-2.5 py-1 text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20"
+      />
+      <button onClick={() => onSave(val.trim())} className="w-6 h-6 flex items-center justify-center rounded-md bg-primary/15 text-primary hover:bg-primary/25 transition-colors">
+        <Check size={12} />
+      </button>
+      <button onClick={onCancel} className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground transition-colors">
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
 function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose: () => void; onLightbox: (url: string) => void }) {
   const router = useRouter();
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [editing, setEditing] = useState<'name' | 'email' | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [stageOpen, setStageOpen] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const [addingTag, setAddingTag] = useState(false);
+  const [resolvedAgent, setResolvedAgent] = useState<{ id: string; name: string } | null>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/leads/${leadId}`).then(r => { setLead(r.data); setLoading(false); }).catch(() => setLoading(false));
+    setResolvedAgent(null);
+    api.get(`/leads/${leadId}`).then(r => {
+      setLead(r.data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [leadId]);
+
+  // Buscar atendente das conversas (fonte mais confiável)
+  useEffect(() => {
+    if (!leadId) return;
+    api.get(`/conversations/lead/${leadId}`).then(r => {
+      const convs = r.data as any[];
+      const agent = convs?.[0]?.assigned_user;
+      if (agent) setResolvedAgent(agent);
+    }).catch(() => {});
+  }, [leadId]);
+
+  const saveField = async (field: 'name' | 'email', value: string) => {
+    if (!lead) return;
+    setSaving(true);
+    try {
+      await api.patch(`/leads/${leadId}`, { [field]: value });
+      setLead(prev => prev ? { ...prev, [field]: value } : prev);
+    } catch (e) { console.error(e); } finally { setSaving(false); setEditing(null); }
+  };
+
+  const saveStage = async (stage: string) => {
+    if (!lead) return;
+    setSaving(true);
+    try {
+      await api.patch(`/leads/${leadId}/stage`, { stage });
+      setLead(prev => prev ? { ...prev, stage } : prev);
+    } catch (e) { console.error(e); } finally { setSaving(false); setStageOpen(false); }
+  };
+
+  const addTag = async () => {
+    if (!lead || !newTag.trim()) return;
+    const tag = newTag.trim();
+    if (lead.tags?.includes(tag)) { setNewTag(''); return; }
+    const tags = [...(lead.tags || []), tag];
+    setSaving(true);
+    try {
+      await api.patch(`/leads/${leadId}`, { tags });
+      setLead(prev => prev ? { ...prev, tags } : prev);
+    } catch (e) { console.error(e); } finally { setSaving(false); setNewTag(''); setAddingTag(false); }
+  };
+
+  const removeTag = async (tag: string) => {
+    if (!lead) return;
+    const tags = (lead.tags || []).filter(t => t !== tag);
+    setSaving(true);
+    try {
+      await api.patch(`/leads/${leadId}`, { tags });
+      setLead(prev => prev ? { ...prev, tags } : prev);
+    } catch (e) { console.error(e); } finally { setSaving(false); }
+  };
+
+  // Atendente: resolvedAgent (via /conversations/lead/:id) tem prioridade, fallback para lead.conversations
+  const currentAgent = resolvedAgent ?? lead?.conversations?.[0]?.assigned_user ?? null;
 
   const factsJson = lead?.memory?.facts_json as any;
 
@@ -95,9 +189,12 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
         {/* Header do painel */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
           <h2 className="text-[15px] font-bold text-foreground">Painel do Cliente</h2>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            {saving && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -126,25 +223,94 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
 
                 {/* Info principal */}
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[18px] font-bold text-foreground leading-tight truncate">{lead.name || 'Sem Nome'}</h3>
+                  {/* Nome editável */}
+                  <div className="group flex items-center gap-2 min-w-0">
+                    {editing === 'name' ? (
+                      <InlineInput
+                        value={lead.name || ''}
+                        placeholder="Nome do contato"
+                        onSave={v => saveField('name', v)}
+                        onCancel={() => setEditing(null)}
+                      />
+                    ) : (
+                      <>
+                        <h3 className="text-[18px] font-bold text-foreground leading-tight truncate">{lead.name || 'Sem Nome'}</h3>
+                        <button onClick={() => setEditing('name')} className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0">
+                          <Pencil size={13} />
+                        </button>
+                      </>
+                    )}
+                  </div>
 
-                  {/* Stage */}
-                  <span className={`inline-flex items-center mt-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider border ${STAGE_COLORS[lead.stage] || STAGE_COLORS['NOVO']}`}>
-                    {lead.stage}
-                  </span>
+                  {/* Stage editável */}
+                  <div className="relative mt-1.5">
+                    <button
+                      onClick={() => setStageOpen(!stageOpen)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider border transition-opacity hover:opacity-80 ${STAGE_COLORS[lead.stage] || STAGE_COLORS['NOVO']}`}
+                    >
+                      {lead.stage}
+                      <ChevronDown size={10} />
+                    </button>
+                    {stageOpen && (
+                      <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-xl shadow-xl z-10 py-1 min-w-[200px]">
+                        {STAGES.map(s => (
+                          <button
+                            key={s}
+                            onClick={() => saveStage(s)}
+                            className={`w-full text-left px-3 py-2 text-[12px] font-semibold hover:bg-accent transition-colors flex items-center gap-2 ${lead.stage === s ? 'text-primary' : 'text-foreground'}`}
+                          >
+                            <span className={`w-2 h-2 rounded-full border ${STAGE_COLORS[s] || STAGE_COLORS['NOVO']}`} />
+                            {s}
+                            {lead.stage === s && <Check size={11} className="ml-auto text-primary" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Dados de contato */}
                   <div className="mt-3 flex flex-col gap-1.5">
+                    {/* Telefone — não editável */}
                     <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                       <Phone size={13} className="shrink-0" />
                       <span className="font-mono">{formatPhone(lead.phone)}</span>
                     </div>
-                    {lead.email && (
-                      <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                        <Mail size={13} className="shrink-0" />
-                        <span className="truncate">{lead.email}</span>
-                      </div>
-                    )}
+
+                    {/* Email editável */}
+                    <div className="group flex items-center gap-2 text-[13px] text-muted-foreground min-w-0">
+                      <Mail size={13} className="shrink-0" />
+                      {editing === 'email' ? (
+                        <InlineInput
+                          value={lead.email || ''}
+                          placeholder="email@exemplo.com"
+                          onSave={v => saveField('email', v)}
+                          onCancel={() => setEditing(null)}
+                        />
+                      ) : (
+                        <>
+                          <span className="truncate">{lead.email || <span className="italic opacity-50">Sem e-mail</span>}</span>
+                          <button onClick={() => setEditing('email')} className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0">
+                            <Pencil size={11} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Atendente responsável */}
+                    <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                      <UserCheck size={13} className="shrink-0" />
+                      {currentAgent ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-bold border border-primary/20">
+                          <span className="w-4 h-4 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold">
+                            {currentAgent.name.charAt(0).toUpperCase()}
+                          </span>
+                          {currentAgent.name}
+                        </span>
+                      ) : (
+                        <span className="italic opacity-40">Sem atendente</span>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                       <Calendar size={13} className="shrink-0" />
                       <span>Desde {formatDateShort(lead.created_at)}</span>
@@ -153,17 +319,45 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
                 </div>
               </div>
 
-              {/* Tags */}
-              {lead.tags && lead.tags.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {lead.tags.map((tag) => (
-                    <span key={tag} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-semibold border border-primary/20">
-                      <Tag size={10} />
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* Tags editáveis */}
+              <div className="mt-4 flex flex-wrap gap-2 items-center">
+                {(lead.tags || []).map((tag) => (
+                  <span key={tag} className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full bg-primary/10 text-primary text-[11px] font-semibold border border-primary/20">
+                    <Tag size={10} />
+                    {tag}
+                    <button onClick={() => removeTag(tag)} className="ml-0.5 hover:text-red-400 transition-colors">
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+                {addingTag ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      ref={tagInputRef}
+                      autoFocus
+                      value={newTag}
+                      onChange={e => setNewTag(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') addTag(); if (e.key === 'Escape') { setAddingTag(false); setNewTag(''); } }}
+                      placeholder="nova tag"
+                      className="w-24 bg-background border border-primary/40 rounded-full px-2.5 py-0.5 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-primary/30"
+                    />
+                    <button onClick={addTag} className="w-5 h-5 flex items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25 transition-colors">
+                      <Check size={10} />
+                    </button>
+                    <button onClick={() => { setAddingTag(false); setNewTag(''); }} className="w-5 h-5 flex items-center justify-center rounded-full hover:bg-accent text-muted-foreground transition-colors">
+                      <X size={10} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddingTag(true)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-dashed border-border text-muted-foreground text-[11px] hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    <Plus size={10} />
+                    Tag
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Seção: Memória IA */}
@@ -257,11 +451,11 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
                 <div className="flex items-center gap-2">
                   <MessageSquare size={15} className="text-primary" />
                   <span className="text-[13px] font-bold text-foreground">Conversas</span>
-                  <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{lead.conversations.length}</span>
+                  <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{lead.conversations?.length ?? 0}</span>
                 </div>
               </div>
 
-              {lead.conversations.length === 0 ? (
+              {!lead.conversations?.length ? (
                 <p className="text-[13px] text-muted-foreground text-center py-8 opacity-50">Nenhuma conversa</p>
               ) : (
                 <div className="flex flex-col gap-3">
@@ -330,7 +524,7 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
             <button
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-[13px] font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors shadow-sm"
               onClick={() => {
-                if (lead.conversations.length > 0) {
+                if (lead.conversations?.length > 0) {
                   router.push(`/atendimento/chat/${lead.conversations[0].id}`);
                 } else {
                   router.push('/atendimento');

@@ -7,6 +7,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Get('agents')
+  findAgents() {
+    return this.usersService.findAgents();
+  }
+
   @Get()
   findAll(@Request() req: any) {
     if (req.user.role !== 'ADMIN') {

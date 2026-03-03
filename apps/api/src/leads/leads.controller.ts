@@ -31,6 +31,14 @@ export class LeadsController {
     return this.leadsService.findOne(id);
   }
 
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body() body: { name?: string; email?: string; tags?: string[] },
+  ) {
+    return this.leadsService.update(id, body);
+  }
+
   @Patch(':id/stage')
   updateStage(@Param('id') id: string, @Body('stage') stage: string) {
     return this.leadsService.updateStatus(id, stage);

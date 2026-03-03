@@ -7,6 +7,13 @@ import * as argon2 from 'argon2';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
+  async findAgents(): Promise<{ id: string; name: string }[]> {
+    return (this.prisma as any).user.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async findAll(): Promise<Omit<User, 'password_hash'>[]> {
     const users = await (this.prisma as any).user.findMany({
       orderBy: { created_at: 'desc' },
