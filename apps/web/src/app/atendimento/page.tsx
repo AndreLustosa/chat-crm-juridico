@@ -834,7 +834,7 @@ export default function Dashboard() {
                     </span>
                     <div className="flex items-center gap-1.5 shrink-0 ml-1">
                       {(unreadCounts[conv.id] || 0) > 0 && (
-                        <span className="bg-primary text-primary-foreground text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none">
+                        <span className="bg-red-500 text-white text-[12px] font-bold rounded-full min-w-[26px] h-[26px] flex items-center justify-center px-1.5 leading-none shadow-md">
                           {unreadCounts[conv.id] > 99 ? '99+' : unreadCounts[conv.id]}
                         </span>
                       )}
