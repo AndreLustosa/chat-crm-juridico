@@ -28,6 +28,7 @@ interface ConversationSummary {
   inboxId?: string | null;
   legalArea?: string | null;
   assignedLawyerId?: string | null;
+  assignedLawyerName?: string | null;
   originAssignedUserId?: string | null;
 }
 
@@ -871,20 +872,27 @@ export default function Dashboard() {
                   {conv.contactPhone && conv.contactName !== conv.contactPhone && (
                     <p className="text-[11px] text-muted-foreground truncate pl-0.5 mb-0.5">{conv.contactPhone}</p>
                   )}
-                  <div className="mb-1.5 flex items-center gap-2 flex-wrap">
+                  <div className="mb-1 flex items-center gap-2 flex-wrap">
                     {statusBadge(conv.status)}
                     {conv.assignedAgentName && (
                       <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
                         <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 inline-block" />
-                        {conv.assignedAgentName}
-                      </span>
-                    )}
-                    {conv.legalArea && (
-                      <span className="inline-flex items-center gap-1 text-[10px] text-violet-400 font-bold border border-violet-500/20 bg-violet-500/10 rounded-md px-1.5 py-0.5">
-                        ⚖️ {conv.legalArea}
+                        Aten. {conv.assignedAgentName}
                       </span>
                     )}
                   </div>
+                  {conv.legalArea && (
+                    <div className="mb-1.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-[10px] text-violet-400 font-bold border border-violet-500/20 bg-violet-500/10 rounded-md px-1.5 py-0.5">
+                        ⚖️ {conv.legalArea}
+                      </span>
+                      {conv.assignedLawyerName && (
+                        <span className="text-[10px] text-violet-300 font-medium truncate">
+                          Adv. {conv.assignedLawyerName}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <p className={`text-sm truncate ${(unreadCounts[conv.id] || 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
                     {conv.lastMessage}
                   </p>

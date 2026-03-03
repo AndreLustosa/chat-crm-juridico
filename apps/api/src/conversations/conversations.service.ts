@@ -45,6 +45,16 @@ export class ConversationsService {
       },
     });
 
+    // Enrich with assigned lawyer names
+    const lawyerIds = [...new Set(conversations.map((c: any) => c.assigned_lawyer_id).filter(Boolean))] as string[];
+    const lawyers = lawyerIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: lawyerIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const lawyerMap: Record<string, string> = Object.fromEntries(lawyers.map((l) => [l.id, l.name]));
+
     return conversations.map((c) => ({
       id: c.id,
       leadId: c.lead_id,
@@ -65,6 +75,7 @@ export class ConversationsService {
       profile_picture_url: c.lead?.profile_picture_url || null,
       legalArea: (c as any).legal_area || null,
       assignedLawyerId: (c as any).assigned_lawyer_id || null,
+      assignedLawyerName: (c as any).assigned_lawyer_id ? (lawyerMap[(c as any).assigned_lawyer_id] || null) : null,
       originAssignedUserId: (c as any).origin_assigned_user_id || null,
     }));
   }
