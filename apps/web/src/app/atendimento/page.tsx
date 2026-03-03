@@ -30,6 +30,7 @@ interface ConversationSummary {
   assignedLawyerId?: string | null;
   assignedLawyerName?: string | null;
   originAssignedUserId?: string | null;
+  originAssignedUserName?: string | null;
 }
 
 interface MessageItem {
@@ -874,10 +875,11 @@ export default function Dashboard() {
                   )}
                   <div className="mb-1 flex items-center gap-2 flex-wrap">
                     {statusBadge(conv.status)}
-                    {conv.assignedAgentName && (
+                    {/* Aten. = atendente comercial original (ou atual se não transferido ao adv.) */}
+                    {(conv.originAssignedUserId ? conv.originAssignedUserName : conv.assignedAgentName) && (
                       <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
                         <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 inline-block" />
-                        Aten. {conv.assignedAgentName}
+                        Aten. {conv.originAssignedUserId ? conv.originAssignedUserName : conv.assignedAgentName}
                       </span>
                     )}
                   </div>
@@ -886,9 +888,10 @@ export default function Dashboard() {
                       <span className="inline-flex items-center gap-1 text-[10px] text-violet-400 font-bold border border-violet-500/20 bg-violet-500/10 rounded-md px-1.5 py-0.5">
                         ⚖️ {conv.legalArea}
                       </span>
-                      {conv.assignedLawyerName && (
+                      {/* Adv. = advogado atual (assignedAgentName quando transferido) ou pré-atribuído */}
+                      {(conv.originAssignedUserId ? conv.assignedAgentName : conv.assignedLawyerName) && (
                         <span className="text-[10px] text-violet-300 font-medium truncate">
-                          Adv. {conv.assignedLawyerName}
+                          Adv. {conv.originAssignedUserId ? conv.assignedAgentName : conv.assignedLawyerName}
                         </span>
                       )}
                     </div>

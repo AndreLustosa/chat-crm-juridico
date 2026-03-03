@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, Pencil, UserCheck, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, Pencil, UserCheck, ChevronDown, CornerUpLeft } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
@@ -49,6 +49,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [assignedLawyer, setAssignedLawyer] = useState<{ id: string; name: string } | null>(null);
   const [allSpecialists, setAllSpecialists] = useState<{ id: string; name: string; specialties: string[] }[]>([]);
   const [showLawyerDropdown, setShowLawyerDropdown] = useState(false);
+  const [originAssignedUserId, setOriginAssignedUserId] = useState<string | null>(null);
 
   // Decode current user ID once from JWT (never changes during session)
   const [currentUserId] = useState<string | null>(() => {
@@ -269,6 +270,17 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     });
   };
 
+  const handleReturnToOrigin = async () => {
+    if (!convoId) return;
+    if (!confirm('Devolver esta conversa ao atendente comercial de origem?')) return;
+    try {
+      await api.patch(`/conversations/${convoId}/return-to-origin`);
+      router.push('/');
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Erro ao devolver conversa.');
+    }
+  };
+
   const handleAssignLawyer = async (lawyerId: string | null) => {
     if (!convoId) return;
     try {
@@ -332,6 +344,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           setMessages(convo.messages || []);
           setLegalArea(convo.legal_area || null);
           setAssignedLawyer(convo.assigned_lawyer || null);
+          setOriginAssignedUserId(convo.origin_assigned_user_id || null);
 
           // Carregar lista de especialistas para o dropdown
           api.get('/users').then((r) => {
@@ -519,6 +532,16 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               {aiMode ? <Bot size={16} /> : <BotOff size={16} />}
               {aiMode ? 'IA Ativa' : 'IA Inativa'}
             </button>
+            {originAssignedUserId && !isClosed && (
+              <button
+                onClick={handleReturnToOrigin}
+                title="Devolver ao atendente comercial de origem"
+                className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+              >
+                <CornerUpLeft size={16} />
+                Devolver
+              </button>
+            )}
             {!isClosed && (
               <button
                 onClick={handleCloseConvo}

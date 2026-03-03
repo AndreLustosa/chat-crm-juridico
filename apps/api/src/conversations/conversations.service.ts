@@ -45,15 +45,17 @@ export class ConversationsService {
       },
     });
 
-    // Enrich with assigned lawyer names
+    // Enrich with lawyer and origin-attendant names in a single query
     const lawyerIds = [...new Set(conversations.map((c: any) => c.assigned_lawyer_id).filter(Boolean))] as string[];
-    const lawyers = lawyerIds.length
+    const originIds = [...new Set(conversations.map((c: any) => c.origin_assigned_user_id).filter(Boolean))] as string[];
+    const allEnrichIds = [...new Set([...lawyerIds, ...originIds])];
+    const enrichUsers = allEnrichIds.length
       ? await this.prisma.user.findMany({
-          where: { id: { in: lawyerIds } },
+          where: { id: { in: allEnrichIds } },
           select: { id: true, name: true },
         })
       : [];
-    const lawyerMap: Record<string, string> = Object.fromEntries(lawyers.map((l) => [l.id, l.name]));
+    const userNameMap: Record<string, string> = Object.fromEntries(enrichUsers.map((u) => [u.id, u.name]));
 
     return conversations.map((c) => ({
       id: c.id,
@@ -75,8 +77,9 @@ export class ConversationsService {
       profile_picture_url: c.lead?.profile_picture_url || null,
       legalArea: (c as any).legal_area || null,
       assignedLawyerId: (c as any).assigned_lawyer_id || null,
-      assignedLawyerName: (c as any).assigned_lawyer_id ? (lawyerMap[(c as any).assigned_lawyer_id] || null) : null,
+      assignedLawyerName: (c as any).assigned_lawyer_id ? (userNameMap[(c as any).assigned_lawyer_id] || null) : null,
       originAssignedUserId: (c as any).origin_assigned_user_id || null,
+      originAssignedUserName: (c as any).origin_assigned_user_id ? (userNameMap[(c as any).origin_assigned_user_id] || null) : null,
     }));
   }
 
