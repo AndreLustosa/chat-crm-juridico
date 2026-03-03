@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
@@ -80,6 +80,7 @@ export default function Dashboard() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  const [editingMsg, setEditingMsg] = useState<{ id: string; text: string } | null>(null);
   const [transferModal, setTransferModal] = useState(false);
   const [transferGroups, setTransferGroups] = useState<{ id: string; name: string; type: 'INBOX' | 'SECTOR'; auto_route: boolean; users: { id: string; name: string }[] }[]>([]);
   const [transferring, setTransferring] = useState(false);
@@ -686,6 +687,15 @@ export default function Dashboard() {
     }
   };
 
+  const handleEditMessage = async (msgId: string, newText: string) => {
+    if (!newText.trim()) return;
+    try {
+      const res = await api.patch(`/messages/${msgId}`, { text: newText.trim() });
+      setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, ...res.data } : m));
+      setEditingMsg(null);
+    } catch (e) { console.error('Erro ao editar mensagem', e); }
+  };
+
   const formatTime = (dateStr?: string) => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
@@ -1032,7 +1042,25 @@ export default function Dashboard() {
                           {msg.type === 'deleted' ? (
                             <p className="text-sm italic opacity-50">🚫 Mensagem apagada</p>
                           ) : msg.type === 'text' || !msg.type ? (
-                            isEmojiOnly(msg.text || '') ? (
+                            editingMsg?.id === msg.id ? (
+                              <div className="flex flex-col gap-2 min-w-[200px]">
+                                <textarea
+                                  autoFocus
+                                  rows={3}
+                                  value={editingMsg.text}
+                                  onChange={e => setEditingMsg(prev => prev ? { ...prev, text: e.target.value } : null)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditMessage(editingMsg.id, editingMsg.text); }
+                                    if (e.key === 'Escape') setEditingMsg(null);
+                                  }}
+                                  className="w-full bg-white/10 text-primary-foreground rounded-lg p-2 text-[14px] resize-none outline-none border border-white/30 focus:border-white/60"
+                                />
+                                <div className="flex justify-end gap-2">
+                                  <button onClick={() => setEditingMsg(null)} className="text-[11px] px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-primary-foreground/70">Cancelar</button>
+                                  <button onClick={() => handleEditMessage(editingMsg.id, editingMsg.text)} className="text-[11px] px-2 py-1 rounded bg-white/25 hover:bg-white/35 text-primary-foreground font-medium">Salvar</button>
+                                </div>
+                              </div>
+                            ) : isEmojiOnly(msg.text || '') ? (
                               <p className="text-4xl leading-tight">{msg.text}</p>
                             ) : (
                               <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
@@ -1138,6 +1166,15 @@ export default function Dashboard() {
                           )}
                           {msg.type !== 'deleted' && (
                             <div className={`text-[10px] mt-2 flex justify-end items-center gap-1.5 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
+                              {isOut && (msg.type === 'text' || !msg.type) && !editingMsg && (
+                                <button
+                                  onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
+                                  className="p-0.5 rounded hover:bg-white/20 transition-colors"
+                                  title="Editar mensagem"
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                              )}
                               <span>{formatTime(msg.created_at)}</span>
                               <StatusIcon status={msg.status} isOut={isOut} />
                             </div>
@@ -1152,6 +1189,15 @@ export default function Dashboard() {
                             >
                               <Reply size={13} />
                             </button>
+                            {(msg.type === 'text' || !msg.type) && msg.type !== 'deleted' && (
+                              <button
+                                onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
+                                className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
+                                title="Editar mensagem"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDeleteMessage(msg.id)}
                               className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
