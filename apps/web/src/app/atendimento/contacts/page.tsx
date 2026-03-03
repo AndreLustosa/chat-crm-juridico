@@ -117,12 +117,16 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
   const [editing, setEditing] = useState<'name' | 'email' | null>(null);
   const [saving, setSaving] = useState(false);
   const [resolvedAgent, setResolvedAgent] = useState<{ id: string; name: string } | null>(null);
+  const [resolvedConvId, setResolvedConvId] = useState<string | null>(null);
   const [documents, setDocuments] = useState<DocItem[]>([]);
   const [docsOpen, setDocsOpen] = useState(false);
+  const [docViewer, setDocViewer] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
   useEffect(() => {
     setLoading(true);
     setResolvedAgent(null);
+    setResolvedConvId(null);
     setDocuments([]);
     api.get(`/leads/${leadId}`).then(r => {
       setLead(r.data);
@@ -136,13 +140,20 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
     api.get(`/conversations/lead/${leadId}`).then(r => {
       const convs = r.data as any[];
 
-      // Atendente
-      const agent = convs?.[0]?.assigned_user;
+      // Ordenar pela mensagem mais recente para pegar a conversa certa
+      const sortedConvs = [...convs].sort((a: any, b: any) =>
+        new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime()
+      );
+
+      // ID da conversa mais recente
+      if (sortedConvs?.[0]?.id) setResolvedConvId(sortedConvs[0].id);
+
+      // Atendente da conversa mais recente
+      const agent = sortedConvs?.[0]?.assigned_user;
       if (agent) setResolvedAgent(agent);
 
       // Documentos enviados pelo contato (direction: 'in' com media)
       const docs: DocItem[] = [];
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
       convs.forEach((conv: any) => {
         conv.messages?.forEach((msg: any) => {
           if (msg.direction === 'in' && msg.media) {
@@ -421,7 +432,6 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
                       acc[cat].push(doc);
                       return acc;
                     }, {});
-                    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
                     return (
                       <div className="flex flex-col gap-5">
                         {categoryOrder.filter(cat => grouped[cat]?.length).map(cat => (
@@ -470,50 +480,54 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
                               </div>
                             )}
 
-                            {/* Vídeos — grade com ícone grande */}
+                            {/* Vídeos — lista com player */}
                             {cat === 'Vídeos' && (
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="flex flex-col gap-2">
                                 {grouped[cat].map(doc => (
-                                  <div key={doc.messageId} className="relative group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-foreground/[0.02] hover:bg-accent/40 transition-colors">
-                                    <a
-                                      href={`${API_URL}/media/${doc.messageId}?dl=1`}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      title={doc.filename}
-                                      className="flex flex-col items-center gap-1.5 w-full"
-                                    >
-                                      <div className="w-14 h-14 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                                        <Video size={28} className="text-emerald-400" />
+                                  <div key={doc.messageId} className="rounded-xl border border-border bg-foreground/[0.02] overflow-hidden group">
+                                    <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+                                      <div className="w-8 h-8 rounded-lg bg-foreground/[0.06] flex items-center justify-center shrink-0">
+                                        <Video size={15} className="text-emerald-400" />
                                       </div>
-                                      <p className="text-[10px] text-muted-foreground truncate w-full text-center">{doc.filename}</p>
-                                      <p className="text-[9px] text-muted-foreground/60">{formatDateShort(doc.createdAt)}</p>
-                                    </a>
-                                    <button
-                                      onClick={() => deleteDoc(doc.messageId)}
-                                      title="Excluir vídeo"
-                                      className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-lg bg-red-600/80 text-white hover:bg-red-700 transition-colors opacity-0 group-hover:opacity-100"
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[13px] font-medium text-foreground truncate leading-tight">{doc.filename}</p>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                          {formatBytes(doc.size)}{doc.size ? ' · ' : ''}{formatDateShort(doc.createdAt)}
+                                        </p>
+                                      </div>
+                                      <a href={`${API_URL}/media/${doc.messageId}?dl=1`} target="_blank" rel="noopener noreferrer" title="Baixar" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+                                        <Download size={13} />
+                                      </a>
+                                      <button onClick={() => deleteDoc(doc.messageId)} title="Remover do banco" className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                    <div className="px-3 pb-3">
+                                      <video
+                                        controls
+                                        preload="none"
+                                        src={`${API_URL}/media/${doc.messageId}`}
+                                        className="w-full rounded-lg"
+                                        style={{ maxHeight: '220px' }}
+                                      />
+                                    </div>
                                   </div>
                                 ))}
                               </div>
                             )}
 
-                            {/* Arquivos — card com prévia acima + info abaixo */}
+                            {/* Arquivos — card com prévia + abre viewer inline */}
                             {cat === 'Arquivos' && (
                               <div className="flex flex-col gap-3">
                                 {grouped[cat].map(doc => {
                                   const isPdf = doc.mimeType === 'application/pdf';
                                   return (
                                     <div key={doc.messageId} className="rounded-xl border border-border bg-foreground/[0.02] overflow-hidden group">
-                                      {/* Prévia */}
-                                      <a
-                                        href={`${API_URL}/media/${doc.messageId}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        title="Clique para abrir"
-                                        className="block relative"
+                                      {/* Prévia clicável — abre viewer */}
+                                      <button
+                                        onClick={() => setDocViewer({ url: `${API_URL}/media/${doc.messageId}`, mimeType: doc.mimeType, filename: doc.filename })}
+                                        title="Clique para visualizar"
+                                        className="block w-full text-left relative"
                                       >
                                         {isPdf ? (
                                           <div className="relative w-full h-[180px] bg-foreground/[0.04] overflow-hidden">
@@ -523,7 +537,9 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
                                               className="absolute inset-0 w-full h-full pointer-events-none border-0"
                                               loading="lazy"
                                             />
-                                            <div className="absolute inset-0 hover:bg-black/10 transition-colors" />
+                                            <div className="absolute inset-0 hover:bg-black/10 transition-colors flex items-end pb-2 justify-center">
+                                              <span className="text-[10px] text-white/70 bg-black/40 px-2 py-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">Clique para abrir</span>
+                                            </div>
                                           </div>
                                         ) : (
                                           <div className="w-full h-[80px] bg-foreground/[0.04] flex items-center justify-center gap-2 hover:bg-foreground/[0.07] transition-colors">
@@ -531,7 +547,7 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
                                             <span className="text-[11px] text-muted-foreground">Clique para visualizar</span>
                                           </div>
                                         )}
-                                      </a>
+                                      </button>
 
                                       {/* Info do arquivo */}
                                       <div className="flex items-center gap-3 px-3 py-2.5 border-t border-border">
@@ -621,8 +637,9 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
             <button
               className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-[13px] font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors shadow-sm"
               onClick={() => {
-                if (lead.conversations?.length > 0) {
-                  router.push(`/atendimento/chat/${lead.conversations[0].id}`);
+                const convId = resolvedConvId || lead.conversations?.[0]?.id;
+                if (convId) {
+                  router.push(`/atendimento/chat/${convId}`);
                 } else {
                   router.push('/atendimento');
                 }
@@ -634,6 +651,40 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
           </div>
         )}
       </div>
+
+      {/* Viewer de documentos (PDF / arquivo) — fullscreen sobre o painel */}
+      {docViewer && (
+        <div className="fixed inset-0 z-[150] bg-black/95 flex flex-col">
+          {/* Barra superior */}
+          <div className="flex items-center justify-between px-4 py-3 bg-card/95 border-b border-border shrink-0">
+            <span className="text-[13px] font-medium text-foreground truncate max-w-[55%]">{docViewer.filename}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={`${docViewer.url}?dl=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Baixar"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.08] text-muted-foreground hover:text-foreground text-[12px] transition-colors"
+              >
+                <Download size={13} />
+                Baixar
+              </a>
+              <button
+                onClick={() => setDocViewer(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+          {/* Conteúdo */}
+          <iframe
+            src={docViewer.url}
+            title={docViewer.filename}
+            className="flex-1 border-0 w-full"
+          />
+        </div>
+      )}
     </>
   );
 }
