@@ -11,7 +11,8 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    # Runner instalado no próprio VPS → zero minutos cobrados pelo GitHub
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -37,9 +38,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -62,12 +60,37 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.suffix }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.suffix }}
+          # Cache local no VPS — muito mais rápido que GHA cache e sem custo
+          cache-from: type=local,src=/tmp/.buildx-cache-${{ matrix.suffix }}
+          cache-to: type=local,dest=/tmp/.buildx-cache-${{ matrix.suffix }}-new,mode=max
+
+      # Rotação do cache local (evita crescimento infinito)
+      - name: Rotate local build cache
+        run: |
+          rm -rf /tmp/.buildx-cache-${{ matrix.suffix }}
+          mv /tmp/.buildx-cache-${{ matrix.suffix }}-new /tmp/.buildx-cache-${{ matrix.suffix }} 2>/dev/null || true
+
+  cleanup-old-images:
+    needs: build-and-push
+    runs-on: self-hosted
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        suffix: [api, worker, web]
+    steps:
+      - name: Delete old image versions (keep last 5)
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ github.event.repository.name }}-${{ matrix.suffix }}
+          package-type: container
+          min-versions-to-keep: 5
+          ignore-versions: '^master$'
+        continue-on-error: true
 
   deploy:
     needs: build-and-push
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: ${{ vars.PORTAINER_WEBHOOK_URL != '' }}
     steps:
       - name: Trigger Portainer stack redeploy
