@@ -1172,15 +1172,6 @@ export default function Dashboard() {
                           )}
                           {msg.type !== 'deleted' && (
                             <div className={`text-[10px] mt-2 flex justify-end items-center gap-1.5 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
-                              {isOut && (msg.type === 'text' || !msg.type) && !editingMsg && (
-                                <button
-                                  onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
-                                  className="p-0.5 rounded hover:bg-white/20 transition-colors"
-                                  title="Editar mensagem"
-                                >
-                                  <Pencil size={12} />
-                                </button>
-                              )}
                               <span>{formatTime(msg.created_at)}</span>
                               <StatusIcon status={msg.status} isOut={isOut} />
                             </div>
@@ -1190,26 +1181,26 @@ export default function Dashboard() {
                           <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
                             <button
                               onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
-                              className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
+                              className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
                               title="Responder"
                             >
-                              <Reply size={13} />
+                              <Reply size={16} />
                             </button>
                             {(msg.type === 'text' || !msg.type) && msg.type !== 'deleted' && (
                               <button
                                 onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
-                                className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
+                                className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
                                 title="Editar mensagem"
                               >
-                                <Pencil size={13} />
+                                <Pencil size={16} />
                               </button>
                             )}
                             <button
                               onClick={() => handleDeleteMessage(msg.id)}
-                              className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                              className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                               title="Apagar mensagem"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={16} />
                             </button>
                           </div>
                         )}
