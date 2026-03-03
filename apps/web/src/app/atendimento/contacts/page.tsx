@@ -656,38 +656,46 @@ function ClientPanel({ leadId, onClose, onLightbox }: { leadId: string; onClose:
         )}
       </div>
 
-      {/* Viewer de documentos (PDF / arquivo) — fullscreen sobre o painel */}
+      {/* Viewer de documentos (PDF / arquivo) — popup modal */}
       {docViewer && (
-        <div className="fixed inset-0 z-[150] bg-black/95 flex flex-col">
-          {/* Barra superior */}
-          <div className="flex items-center justify-between px-4 py-3 bg-card/95 border-b border-border shrink-0">
-            <span className="text-[13px] font-medium text-foreground truncate max-w-[55%]">{docViewer.filename}</span>
-            <div className="flex items-center gap-2 shrink-0">
-              <a
-                href={`${docViewer.url}?dl=1`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Baixar"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.08] text-muted-foreground hover:text-foreground text-[12px] transition-colors"
-              >
-                <Download size={13} />
-                Baixar
-              </a>
-              <button
-                onClick={() => setDocViewer(null)}
-                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </div>
-          {/* Conteúdo */}
-          <iframe
-            src={docViewer.url}
-            title={docViewer.filename}
-            className="flex-1 border-0 w-full"
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-[140] bg-black/60 backdrop-blur-sm"
+            onClick={() => setDocViewer(null)}
           />
-        </div>
+          {/* Modal centralizado */}
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[150] w-[900px] max-w-[95vw] h-[85vh] bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            {/* Barra superior */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+              <span className="text-[13px] font-medium text-foreground truncate max-w-[55%]">{docViewer.filename}</span>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={`${docViewer.url}?dl=1`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Baixar"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.08] text-muted-foreground hover:text-foreground text-[12px] transition-colors"
+                >
+                  <Download size={13} />
+                  Baixar
+                </a>
+                <button
+                  onClick={() => setDocViewer(null)}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            {/* Conteúdo */}
+            <iframe
+              src={docViewer.url}
+              title={docViewer.filename}
+              className="flex-1 border-0 w-full"
+            />
+          </div>
+        </>
       )}
     </>
   );
