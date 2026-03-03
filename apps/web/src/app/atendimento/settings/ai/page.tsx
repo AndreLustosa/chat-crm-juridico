@@ -427,7 +427,7 @@ export default function AiSettingsPage() {
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-xl">
-                        {skill.systemPrompt.slice(0, 80)}…
+                        {(skill.systemPrompt || '').slice(0, 80)}{skill.systemPrompt?.length > 80 ? '…' : ''}
                       </p>
                     </div>
 
