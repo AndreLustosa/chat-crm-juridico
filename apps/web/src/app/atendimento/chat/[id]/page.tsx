@@ -635,10 +635,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                           {isOut && (msg.type === 'text' || !msg.type) && !editingMsg && (
                             <button
                               onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
-                              className="opacity-40 hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/20"
+                              className="p-0.5 rounded hover:bg-white/20 transition-colors"
                               title="Editar mensagem"
                             >
-                              <Pencil size={10} />
+                              <Pencil size={12} />
                             </button>
                           )}
                           <span>{formatTime(msg.created_at)}</span>
