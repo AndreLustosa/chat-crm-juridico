@@ -468,6 +468,21 @@ Você prepara o caso. O advogado decide.
    * GET /v1/organization/costs — retorna custo real em USD por dia.
    * Documentação: https://platform.openai.com/docs/api-reference/usage/costs
    */
+  /** Busca cotação USD→BRL da API pública AwesomeAPI (Banco Central BR). Fallback 5,80. */
+  private async fetchUsdToBrl(): Promise<number> {
+    try {
+      const res = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL', {
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) return 5.80;
+      const data = (await res.json()) as { USDBRL: { bid: string } };
+      const rate = parseFloat(data?.USDBRL?.bid);
+      return Number.isFinite(rate) && rate > 0 ? rate : 5.80;
+    } catch {
+      return 5.80;
+    }
+  }
+
   /**
    * GET /v1/organization/usage/completions — tokens por modelo.
    * Retorna uso agrupado por modelo e dia; os custos são calculados via tabela OPENAI_PRICE.
@@ -570,6 +585,9 @@ Você prepara o caso. O advogado decide.
         dailyMap[key].calls        += row._count?.id         || 0;
       }
     }
+
+    // ── Cotação USD→BRL (paralelo) ────────────────────────────────────────────
+    const usdToBrl = await this.fetchUsdToBrl();
 
     // ── Dados reais da OpenAI (Admin Key) ────────────────────────────────────
     const adminKey = await this.get('OPENAI_ADMIN_KEY');
@@ -682,6 +700,7 @@ Você prepara o caso. O advogado decide.
     }
 
     return {
+      usd_to_brl: usdToBrl,
       openai,
       today: {
         cost_usd:          todayAgg._sum.cost_usd          || 0,

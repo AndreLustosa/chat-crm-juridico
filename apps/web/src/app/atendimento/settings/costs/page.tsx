@@ -31,6 +31,7 @@ interface TypeLocal   { call_type: string; cost_usd: number; total_tokens: numbe
 interface DayLocal    { date: string; cost_usd: number; total_tokens: number; calls: number; }
 
 interface AiCosts {
+  usd_to_brl: number;
   openai:    OpenAiData;
   today:     LocalSummary;
   month:     LocalSummary;
@@ -54,6 +55,13 @@ function fmtTokens(val: number | null | undefined): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+function fmtBrl(usd: number | null | undefined, rate: number): string {
+  const n = Number(usd);
+  if (!Number.isFinite(n) || n === 0) return 'R$\u00A00,00';
+  const brl = n * rate;
+  return brl.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 function typeLabel(callType: string): { label: string; icon: React.ElementType; color: string } {
@@ -119,6 +127,7 @@ export default function AiCostsPage() {
     );
   }
 
+  const rate       = data.usd_to_brl ?? 5.80;
   const openai     = data.openai   ?? { configured: false, today_usd: null, month_usd: null, byModel: null, last7Days: null, error: null };
   const today      = data.today    ?? { cost_usd: 0, total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, calls: 0 };
   const month      = data.month    ?? { cost_usd: 0, total_tokens: 0, prompt_tokens: 0, completion_tokens: 0, calls: 0 };
@@ -212,6 +221,9 @@ export default function AiCostsPage() {
                 <p className="text-2xl font-black text-foreground tabular-nums">
                   {hasOpenAi ? fmtUsd(openai.today_usd) : fmtUsd(today.cost_usd)}
                 </p>
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  {hasOpenAi ? fmtBrl(openai.today_usd, rate) : fmtBrl(today.cost_usd, rate)}
+                </p>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
@@ -252,6 +264,9 @@ export default function AiCostsPage() {
               <div className="text-right">
                 <p className="text-2xl font-black text-foreground tabular-nums">
                   {hasOpenAi ? fmtUsd(openai.month_usd) : fmtUsd(month.cost_usd)}
+                </p>
+                <p className="text-[11px] text-muted-foreground tabular-nums">
+                  {hasOpenAi ? fmtBrl(openai.month_usd, rate) : fmtBrl(month.cost_usd, rate)}
                 </p>
               </div>
             </div>
@@ -308,7 +323,7 @@ export default function AiCostsPage() {
                     <div className="relative w-full flex justify-center">
                       <div className="absolute bottom-full mb-1.5 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
                         <div className="bg-popover border border-border text-foreground text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl whitespace-nowrap">
-                          <p className="font-black">{fmtUsd(cost, 5)}</p>
+                          <p className="font-black">{fmtUsd(cost, 5)} <span className="text-muted-foreground font-normal">/ {fmtBrl(cost, rate)}</span></p>
                           {localDay && (
                             <p className="text-muted-foreground">
                               {fmtTokens(localDay.total_tokens)} tokens · {localDay.calls} calls
@@ -367,7 +382,10 @@ export default function AiCostsPage() {
                               )}
                             </span>
                             {(m.cost_usd ?? 0) > 0 && (
-                              <span className="text-xs font-bold text-foreground tabular-nums">{fmtUsd(m.cost_usd)}</span>
+                              <span className="text-right">
+                                <span className="text-xs font-bold text-foreground tabular-nums block">{fmtUsd(m.cost_usd)}</span>
+                                <span className="text-[10px] text-muted-foreground tabular-nums block">{fmtBrl(m.cost_usd, rate)}</span>
+                              </span>
                             )}
                           </div>
                         </div>
@@ -432,6 +450,7 @@ export default function AiCostsPage() {
                       </span>
                       <div className="flex-1 text-right">
                         <p className="text-xs font-bold text-foreground tabular-nums">{fmtUsd(t.cost_usd)}</p>
+                        <p className="text-[10px] text-muted-foreground tabular-nums">{fmtBrl(t.cost_usd, rate)}</p>
                         <p className="text-[10px] text-muted-foreground">{t.calls} calls · {fmtTokens(t.total_tokens)} tk</p>
                       </div>
                     </div>
@@ -461,7 +480,8 @@ export default function AiCostsPage() {
             </p>
           )}
           <p>
-            Fatura oficial:{' '}
+            Cotação USD/BRL: <span className="font-mono text-foreground">R$\u00A0{rate.toFixed(2)}</span>{' '}
+            · Fatura oficial:{' '}
             <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer"
               className="font-mono text-primary hover:underline">
               platform.openai.com/usage
