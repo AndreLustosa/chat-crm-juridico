@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, Fragment } from 'react';
+import { useEffect, useState, useRef, useMemo, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, Pencil, UserCheck, ChevronDown, CornerUpLeft } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -440,6 +440,20 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
   const isClosed = convoStatus === 'FECHADO';
 
+  // Pré-computa quais mensagens precisam de separador de data (mais robusto que IIFE no JSX)
+  const dateSeparators = useMemo(() => {
+    const result = new Set<string | number>();
+    let lastDateKey = '';
+    messages.forEach((msg, idx) => {
+      const dateKey = getDateKey(msg.created_at);
+      if (dateKey !== lastDateKey) {
+        result.add(msg.id ?? idx);
+        lastDateKey = dateKey;
+      }
+    });
+    return result;
+  }, [messages]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
       <div
@@ -574,13 +588,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           <div className="flex flex-col gap-4 max-w-4xl mx-auto pb-4">
             {messages.length === 0 ? (
               <div className="text-center text-muted-foreground py-20">Nenhuma mensagem nesta conversa.</div>
-            ) : (() => {
-              let lastDateKey = '';
-              return messages.map((msg, idx) => {
+            ) : messages.map((msg, idx) => {
                 const isOut = msg.direction === 'out';
-                const dateKey = getDateKey(msg.created_at);
-                const showSeparator = dateKey !== lastDateKey;
-                if (showSeparator) lastDateKey = dateKey;
+                const showSeparator = dateSeparators.has(msg.id ?? idx);
                 return (
                   <Fragment key={msg.id || idx}>
                     {showSeparator && (
@@ -811,8 +821,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                   </div>
                   </Fragment>
                 );
-              });
-            })()}
+            })}
           </div>
         </div>
 
