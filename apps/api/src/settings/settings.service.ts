@@ -435,32 +435,6 @@ Você prepara o caso. O advogado decide.
     return (this.prisma as any).promptSkill.delete({ where: { id } });
   }
 
-  // ── Busca billing real da OpenAI ────────────────────────────────────────────
-
-  /** Chama GET /v1/dashboard/billing/usage da OpenAI. Retorna total_usage em centavos de USD. */
-  private async fetchOpenAiBilling(startDate: string, endDate: string, apiKey: string) {
-    const url = `https://api.openai.com/v1/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
-    if (!res.ok) throw new Error(`OpenAI billing HTTP ${res.status}`);
-    return res.json() as Promise<{
-      total_usage: number; // cents
-      daily_costs: Array<{ timestamp: number; line_items: Array<{ name: string; cost: number }> }>;
-    }>;
-  }
-
-  /** Chama GET /v1/dashboard/billing/subscription da OpenAI para obter o limite mensal. */
-  private async fetchOpenAiSubscription(apiKey: string) {
-    const res = await fetch('https://api.openai.com/v1/dashboard/billing/subscription', {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!res.ok) throw new Error(`OpenAI subscription HTTP ${res.status}`);
-    return res.json() as Promise<{
-      hard_limit_usd: number;
-      soft_limit_usd: number;
-      system_hard_limit_usd: number;
-    }>;
-  }
-
   async getAiCosts() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -470,8 +444,7 @@ Você prepara o caso. O advogado decide.
 
     const prismaAny = this.prisma as any;
 
-    // ── Dados locais (tokens contados no worker) ──────────────────────────────
-    const [todayLocal, monthLocal, byModel, byType, daily] = await Promise.all([
+    const [todayAgg, monthAgg, byModel, byType, daily] = await Promise.all([
       prismaAny.aiUsage.aggregate({
         _sum: { cost_usd: true, total_tokens: true, prompt_tokens: true, completion_tokens: true },
         _count: { id: true },
@@ -498,12 +471,13 @@ Você prepara o caso. O advogado decide.
       prismaAny.aiUsage.groupBy({
         by: ['created_at'],
         _sum: { cost_usd: true, total_tokens: true },
+        _count: { id: true },
         where: { created_at: { gte: start7Days } },
         orderBy: { created_at: 'asc' },
       }),
     ]);
 
-    // Agrega últimos 7 dias por data
+    // Agrega últimos 7 dias por data (yyyy-mm-dd)
     const dailyMap: Record<string, { cost_usd: number; total_tokens: number; calls: number }> = {};
     for (let i = 0; i < 7; i++) {
       const d = new Date(start7Days);
@@ -513,89 +487,26 @@ Você prepara o caso. O advogado decide.
     for (const row of daily) {
       const key = new Date(row.created_at).toISOString().slice(0, 10);
       if (dailyMap[key]) {
-        dailyMap[key].cost_usd     += row._sum.cost_usd     || 0;
-        dailyMap[key].total_tokens += row._sum.total_tokens || 0;
-        dailyMap[key].calls        += row._count?.id        || 0;
+        dailyMap[key].cost_usd     += row._sum?.cost_usd     || 0;
+        dailyMap[key].total_tokens += row._sum?.total_tokens || 0;
+        dailyMap[key].calls        += row._count?.id         || 0;
       }
-    }
-
-    // ── Dados reais da API de billing da OpenAI ───────────────────────────────
-    const todayStr    = startOfToday.toISOString().slice(0, 10);
-    const tomorrowStr = new Date(startOfToday.getTime() + 86_400_000).toISOString().slice(0, 10);
-    const monthStr    = startOfMonth.toISOString().slice(0, 10);
-
-    let openai: {
-      today_usd:         number | null;
-      month_usd:         number | null;
-      hard_limit_usd:    number | null;
-      byModel:           Array<{ name: string; cost_usd: number }>;
-      last7Days:         Array<{ date: string; cost_usd: number }>;
-      error:             string | null;
-    } = {
-      today_usd: null, month_usd: null, hard_limit_usd: null,
-      byModel: [], last7Days: [], error: null,
-    };
-
-    const apiKey = await this.get('OPENAI_API_KEY');
-    if (apiKey) {
-      try {
-        const [todayBill, monthBill, subscription] = await Promise.all([
-          this.fetchOpenAiBilling(todayStr, tomorrowStr, apiKey),
-          this.fetchOpenAiBilling(monthStr, tomorrowStr, apiKey),
-          this.fetchOpenAiSubscription(apiKey).catch(() => null),
-        ]);
-
-        // Agrupa byModel consolidando todos os dias do mês
-        const modelMap: Record<string, number> = {};
-        for (const day of monthBill.daily_costs || []) {
-          for (const item of day.line_items || []) {
-            modelMap[item.name] = (modelMap[item.name] || 0) + (item.cost || 0);
-          }
-        }
-
-        // Agrupa last7Days a partir do billing da OpenAI
-        const dayMap7: Record<string, number> = {};
-        for (const key of Object.keys(dailyMap)) dayMap7[key] = 0;
-        for (const day of monthBill.daily_costs || []) {
-          const dateStr = new Date(day.timestamp * 1000).toISOString().slice(0, 10);
-          if (dayMap7[dateStr] !== undefined) {
-            dayMap7[dateStr] += day.line_items?.reduce((s: number, i: any) => s + (i.cost || 0), 0) || 0;
-          }
-        }
-
-        openai = {
-          today_usd:      (todayBill.total_usage  || 0) / 100,
-          month_usd:      (monthBill.total_usage  || 0) / 100,
-          hard_limit_usd: subscription?.hard_limit_usd ?? null,
-          byModel: Object.entries(modelMap)
-            .map(([name, cost]) => ({ name, cost_usd: cost / 100 }))
-            .sort((a, b) => b.cost_usd - a.cost_usd),
-          last7Days: Object.entries(dayMap7).map(([date, cents]) => ({
-            date,
-            cost_usd: cents / 100,
-          })),
-          error: null,
-        };
-      } catch (e: any) {
-        openai.error = e?.message || 'Erro ao consultar OpenAI';
-      }
-    } else {
-      openai.error = 'API Key não configurada';
     }
 
     return {
-      openai,
       today: {
-        cost_usd:          todayLocal._sum.cost_usd          || 0,
-        total_tokens:      todayLocal._sum.total_tokens      || 0,
-        prompt_tokens:     todayLocal._sum.prompt_tokens     || 0,
-        completion_tokens: todayLocal._sum.completion_tokens || 0,
-        calls:             todayLocal._count.id              || 0,
+        cost_usd:          todayAgg._sum.cost_usd          || 0,
+        total_tokens:      todayAgg._sum.total_tokens      || 0,
+        prompt_tokens:     todayAgg._sum.prompt_tokens     || 0,
+        completion_tokens: todayAgg._sum.completion_tokens || 0,
+        calls:             todayAgg._count.id              || 0,
       },
       month: {
-        cost_usd:     monthLocal._sum.cost_usd     || 0,
-        total_tokens: monthLocal._sum.total_tokens || 0,
-        calls:        monthLocal._count.id         || 0,
+        cost_usd:          monthAgg._sum.cost_usd          || 0,
+        total_tokens:      monthAgg._sum.total_tokens      || 0,
+        prompt_tokens:     monthAgg._sum.prompt_tokens     || 0,
+        completion_tokens: monthAgg._sum.completion_tokens || 0,
+        calls:             monthAgg._count.id              || 0,
       },
       byModel: byModel.map((r: any) => ({
         model:        r.model,
