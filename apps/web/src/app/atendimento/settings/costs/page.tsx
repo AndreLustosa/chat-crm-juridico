@@ -1,17 +1,23 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { DollarSign, Zap, RefreshCw, TrendingUp, Bot, MessageSquare, Brain, CheckCircle2, AlertTriangle, ExternalLink, Settings } from 'lucide-react';
+import { DollarSign, Zap, RefreshCw, TrendingUp, Bot, MessageSquare, Brain, AlertTriangle, ExternalLink, Settings } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
 interface OpenAiData {
-  configured: boolean;
-  today_usd:  number | null;
-  month_usd:  number | null;
-  byModel:    Array<{ model: string; input_tokens: number; output_tokens: number; total_tokens: number; calls: number; cached_tokens: number }> | null;
+  configured:          boolean;
+  today_usd:           number | null;
+  month_usd:           number | null;
+  today_calls:         number | null;
+  today_input_tokens:  number | null;
+  today_output_tokens: number | null;
+  month_calls:         number | null;
+  month_input_tokens:  number | null;
+  month_output_tokens: number | null;
+  byModel:    Array<{ model: string; input_tokens: number; output_tokens: number; total_tokens: number; calls: number; cached_tokens: number; cost_usd: number }> | null;
   last7Days:  Array<{ date: string; cost_usd: number }> | null;
   error:      string | null;
 }
@@ -197,32 +203,35 @@ export default function AiCostsPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Hoje</p>
-                  <p className="text-[11px] text-muted-foreground">{today.calls} chamadas</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {hasOpenAi ? (openai.today_calls ?? 0) : today.calls} chamadas
+                  </p>
                 </div>
               </div>
               <div className="text-right">
                 <p className="text-2xl font-black text-foreground tabular-nums">
                   {hasOpenAi ? fmtUsd(openai.today_usd) : fmtUsd(today.cost_usd)}
                 </p>
-                {hasOpenAi && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
-                    <CheckCircle2 size={9} /> REAL
-                  </span>
-                )}
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
               <div className="text-center">
                 <p className="text-[10px] text-muted-foreground">Total tk</p>
-                <p className="text-sm font-bold">{fmtTokens(today.total_tokens)}</p>
+                <p className="text-sm font-bold">
+                  {fmtTokens(hasOpenAi ? ((openai.today_input_tokens ?? 0) + (openai.today_output_tokens ?? 0)) : today.total_tokens)}
+                </p>
               </div>
               <div className="text-center">
                 <p className="text-[10px] text-muted-foreground">Entrada</p>
-                <p className="text-sm font-bold">{fmtTokens(today.prompt_tokens)}</p>
+                <p className="text-sm font-bold">
+                  {fmtTokens(hasOpenAi ? (openai.today_input_tokens ?? 0) : today.prompt_tokens)}
+                </p>
               </div>
               <div className="text-center">
                 <p className="text-[10px] text-muted-foreground">Saída</p>
-                <p className="text-sm font-bold">{fmtTokens(today.completion_tokens)}</p>
+                <p className="text-sm font-bold">
+                  {fmtTokens(hasOpenAi ? (openai.today_output_tokens ?? 0) : today.completion_tokens)}
+                </p>
               </div>
             </div>
           </div>
@@ -235,32 +244,35 @@ export default function AiCostsPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Este mês</p>
-                  <p className="text-[11px] text-muted-foreground">{month.calls} chamadas</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {hasOpenAi ? (openai.month_calls ?? 0) : month.calls} chamadas
+                  </p>
                 </div>
               </div>
               <div className="text-right">
                 <p className="text-2xl font-black text-foreground tabular-nums">
                   {hasOpenAi ? fmtUsd(openai.month_usd) : fmtUsd(month.cost_usd)}
                 </p>
-                {hasOpenAi && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
-                    <CheckCircle2 size={9} /> REAL
-                  </span>
-                )}
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
               <div className="text-center">
                 <p className="text-[10px] text-muted-foreground">Total tk</p>
-                <p className="text-sm font-bold">{fmtTokens(month.total_tokens)}</p>
+                <p className="text-sm font-bold">
+                  {fmtTokens(hasOpenAi ? ((openai.month_input_tokens ?? 0) + (openai.month_output_tokens ?? 0)) : month.total_tokens)}
+                </p>
               </div>
               <div className="text-center">
                 <p className="text-[10px] text-muted-foreground">Entrada</p>
-                <p className="text-sm font-bold">{fmtTokens(month.prompt_tokens)}</p>
+                <p className="text-sm font-bold">
+                  {fmtTokens(hasOpenAi ? (openai.month_input_tokens ?? 0) : month.prompt_tokens)}
+                </p>
               </div>
               <div className="text-center">
                 <p className="text-[10px] text-muted-foreground">Saída</p>
-                <p className="text-sm font-bold">{fmtTokens(month.completion_tokens)}</p>
+                <p className="text-sm font-bold">
+                  {fmtTokens(hasOpenAi ? (openai.month_output_tokens ?? 0) : month.completion_tokens)}
+                </p>
               </div>
             </div>
           </div>
@@ -276,15 +288,10 @@ export default function AiCostsPage() {
               <div>
                 <h4 className="text-sm font-bold text-foreground">Últimos 7 dias</h4>
                 <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
-                  {hasOpenAi ? 'Custo real cobrado (OpenAI)' : 'Estimativa local'}
+                  {hasOpenAi ? 'Custo via OpenAI (Admin Key)' : 'Estimativa local'}
                 </p>
               </div>
             </div>
-            {hasOpenAi && (
-              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <CheckCircle2 size={9} /> REAL
-              </span>
-            )}
           </div>
           <div className="p-5">
             <div className="flex items-end gap-2 h-32">
@@ -338,15 +345,10 @@ export default function AiCostsPage() {
                   <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Este mês</p>
                 </div>
               </div>
-              {openaiModels && (
-                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <CheckCircle2 size={9} /> REAL
-                </span>
-              )}
             </div>
 
             {openaiModels ? (
-              /* OpenAI real — tokens por modelo */
+              /* OpenAI — tokens + custo estimado por modelo */
               <div className="divide-y divide-border/40">
                 {(() => {
                   const maxTk = safeMax(...openaiModels.map((x) => x.total_tokens ?? 0), 1);
@@ -356,13 +358,18 @@ export default function AiCostsPage() {
                     return (
                       <div key={m.model ?? 'unknown'} className="px-4 py-3 space-y-1.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-foreground font-mono">{m.model}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {m.calls} calls · {fmtTokens(m.input_tokens)}↑ {fmtTokens(m.output_tokens)}↓
-                            {(m.cached_tokens ?? 0) > 0 && (
-                              <span className="text-emerald-500"> · {fmtTokens(m.cached_tokens)} cached</span>
+                          <span className="text-xs font-bold text-foreground font-mono truncate max-w-[55%]">{m.model}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[10px] text-muted-foreground">
+                              {m.calls} calls · {fmtTokens(m.input_tokens)}↑ {fmtTokens(m.output_tokens)}↓
+                              {(m.cached_tokens ?? 0) > 0 && (
+                                <span className="text-emerald-500"> · {fmtTokens(m.cached_tokens)} cached</span>
+                              )}
+                            </span>
+                            {(m.cost_usd ?? 0) > 0 && (
+                              <span className="text-xs font-bold text-foreground tabular-nums">{fmtUsd(m.cost_usd)}</span>
                             )}
-                          </span>
+                          </div>
                         </div>
                         <div className="h-1 bg-muted/50 rounded-full overflow-hidden">
                           <div className="h-full bg-emerald-500/60 rounded-full" style={{ width: `${pct}%` }} />
@@ -440,9 +447,8 @@ export default function AiCostsPage() {
           <p className="font-bold text-foreground text-xs">ℹ️ Fontes de dados</p>
           {hasOpenAi ? (
             <p>
-              <span className="text-emerald-400 font-semibold">Hoje</span> e{' '}
-              <span className="text-emerald-400 font-semibold">Este mês</span> vêm da API real da OpenAI
-              (<code className="font-mono text-primary">/v1/organization/costs</code>).
+              Tokens via <code className="font-mono text-primary">/v1/organization/usage/completions</code> (Admin Key).
+              Custos calculados pela tabela de preços oficial da OpenAI por modelo.
               O breakdown por tipo de chamada vem do rastreamento local.
             </p>
           ) : (
@@ -451,7 +457,7 @@ export default function AiCostsPage() {
               <button onClick={() => router.push('/atendimento/settings/ai')} className="text-primary hover:underline font-semibold">
                 Ajustes IA
               </button>{' '}
-              para ver os valores reais cobrados pela OpenAI.
+              para ver os tokens e custos da organização OpenAI.
             </p>
           )}
           <p>
