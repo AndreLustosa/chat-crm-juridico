@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, Pencil, UserCheck, ChevronDown, CornerUpLeft } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -27,6 +27,20 @@ function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   if (status === 'lido') return <CheckCheck size={12} className="text-blue-400" />;
   if (status === 'entregue') return <CheckCheck size={12} className="text-primary-foreground/60" />;
   return <Check size={12} className="text-primary-foreground/60" />;
+}
+
+function getDateKey(dateStr: string): string {
+  return new Date(dateStr).toDateString();
+}
+
+function formatDateLabel(dateStr: string): string {
+  const date = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Hoje';
+  if (date.toDateString() === yesterday.toDateString()) return 'Ontem';
+  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 export default function ChatPage({ params }: { params: { id: string } }) {
@@ -560,11 +574,25 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           <div className="flex flex-col gap-4 max-w-4xl mx-auto pb-4">
             {messages.length === 0 ? (
               <div className="text-center text-muted-foreground py-20">Nenhuma mensagem nesta conversa.</div>
-            ) : (
-              messages.map((msg, idx) => {
+            ) : (() => {
+              let lastDateKey = '';
+              return messages.map((msg, idx) => {
                 const isOut = msg.direction === 'out';
+                const dateKey = getDateKey(msg.created_at);
+                const showSeparator = dateKey !== lastDateKey;
+                if (showSeparator) lastDateKey = dateKey;
                 return (
-                  <div id={`msg-${msg.id}`} key={msg.id || idx} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group rounded-xl transition-all duration-300`}>
+                  <Fragment key={msg.id || idx}>
+                    {showSeparator && (
+                      <div className="flex items-center gap-3 my-1 select-none">
+                        <div className="flex-1 h-px bg-border/60" />
+                        <span className="text-[11px] font-semibold text-muted-foreground px-3 py-1 rounded-full border border-border bg-card capitalize">
+                          {formatDateLabel(msg.created_at)}
+                        </span>
+                        <div className="flex-1 h-px bg-border/60" />
+                      </div>
+                    )}
+                  <div id={`msg-${msg.id}`} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group rounded-xl transition-all duration-300`}>
                     {!isOut && (
                       <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
                         <button
@@ -781,9 +809,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                       </div>
                     )}
                   </div>
+                  </Fragment>
                 );
-              })
-            )}
+              });
+            })()}
           </div>
         </div>
 
