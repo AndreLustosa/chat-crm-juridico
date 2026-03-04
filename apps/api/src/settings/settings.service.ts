@@ -49,12 +49,14 @@ export class SettingsService {
 
   async getAiConfig() {
     const apiKey = await this.get('OPENAI_API_KEY');
+    const adminKey = await this.get('OPENAI_ADMIN_KEY');
     const defaultModel = (await this.get('OPENAI_DEFAULT_MODEL')) || 'gpt-4o-mini';
     const cooldownRaw = await this.get('AI_COOLDOWN_SECONDS');
     const cooldownSeconds = cooldownRaw ? parseInt(cooldownRaw, 10) : 8;
     return {
       apiKey: apiKey || process.env.OPENAI_API_KEY || null,
       isConfigured: !!(apiKey || process.env.OPENAI_API_KEY),
+      isAdminKeyConfigured: !!adminKey,
       defaultModel,
       cooldownSeconds: isNaN(cooldownSeconds) ? 8 : cooldownSeconds,
     };
@@ -65,7 +67,11 @@ export class SettingsService {
   }
 
   async setAiConfig(apiKey: string) {
-    await this.set('OPENAI_API_KEY', apiKey); // BUG CORRIGIDO: era 'OPENAI_KEY'
+    await this.set('OPENAI_API_KEY', apiKey);
+  }
+
+  async setAdminKey(adminKey: string) {
+    await this.set('OPENAI_ADMIN_KEY', adminKey);
   }
 
   async getDefaultModel(): Promise<string> {
@@ -435,6 +441,71 @@ Você prepara o caso. O advogado decide.
     return (this.prisma as any).promptSkill.delete({ where: { id } });
   }
 
+  // ── OpenAI Organization API (requer Admin Key) ────────────────────────────
+
+  /**
+   * GET /v1/organization/costs — retorna custo real em USD por dia.
+   * Documentação: https://platform.openai.com/docs/api-reference/usage/costs
+   */
+  private async fetchOpenAiCosts(startTs: number, endTs: number, adminKey: string) {
+    const params = new URLSearchParams({
+      start_time: String(startTs),
+      end_time:   String(endTs),
+      bucket_width: '1d',
+      limit: '31',
+    });
+    const res = await fetch(`https://api.openai.com/v1/organization/costs?${params}`, {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    });
+    if (!res.ok) throw new Error(`OpenAI Costs API: HTTP ${res.status}`);
+    return res.json() as Promise<{
+      data: Array<{
+        start_time: number;
+        end_time: number;
+        results: Array<{
+          amount: { value: number; currency: string };
+          line_item: string | null;
+          project_id: string | null;
+        }>;
+      }>;
+      has_more: boolean;
+      next_page: string | null;
+    }>;
+  }
+
+  /**
+   * GET /v1/organization/usage/completions — tokens por modelo.
+   * Documentação: https://platform.openai.com/docs/api-reference/usage/completions
+   */
+  private async fetchOpenAiUsageByModel(startTs: number, endTs: number, adminKey: string) {
+    const params = new URLSearchParams({
+      start_time: String(startTs),
+      end_time:   String(endTs),
+      bucket_width: '1d',
+      limit: '31',
+    });
+    params.append('group_by[]', 'model');
+    const res = await fetch(`https://api.openai.com/v1/organization/usage/completions?${params}`, {
+      headers: { Authorization: `Bearer ${adminKey}` },
+    });
+    if (!res.ok) throw new Error(`OpenAI Usage API: HTTP ${res.status}`);
+    return res.json() as Promise<{
+      data: Array<{
+        start_time: number;
+        end_time: number;
+        results: Array<{
+          input_tokens: number;
+          output_tokens: number;
+          num_model_requests: number;
+          model: string | null;
+          input_cached_tokens: number;
+        }>;
+      }>;
+      has_more: boolean;
+      next_page: string | null;
+    }>;
+  }
+
   async getAiCosts() {
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -493,7 +564,79 @@ Você prepara o caso. O advogado decide.
       }
     }
 
+    // ── Dados reais da OpenAI (Admin Key) ────────────────────────────────────
+    const adminKey = await this.get('OPENAI_ADMIN_KEY');
+
+    let openai: {
+      configured: boolean;
+      today_usd:  number | null;
+      month_usd:  number | null;
+      byModel:    Array<{ model: string; input_tokens: number; output_tokens: number; total_tokens: number; calls: number; cached_tokens: number }>;
+      last7Days:  Array<{ date: string; cost_usd: number }>;
+      error:      string | null;
+    } = { configured: false, today_usd: null, month_usd: null, byModel: [], last7Days: [], error: null };
+
+    if (adminKey) {
+      openai.configured = true;
+      try {
+        const startOfTodayTs = Math.floor(startOfToday.getTime() / 1000);
+        const startOfMonthTs = Math.floor(startOfMonth.getTime() / 1000);
+        const nowTs          = Math.floor(now.getTime() / 1000);
+
+        const [costsResp, usageResp] = await Promise.all([
+          this.fetchOpenAiCosts(startOfMonthTs, nowTs, adminKey),
+          this.fetchOpenAiUsageByModel(startOfMonthTs, nowTs, adminKey),
+        ]);
+
+        // ── Custo por dia (costs API) ──────────────────────────────────────
+        let monthTotal = 0;
+        let todayTotal = 0;
+        const dayMap: Record<string, number> = {};
+
+        for (const bucket of costsResp.data || []) {
+          const dayStr = new Date(bucket.start_time * 1000).toISOString().slice(0, 10);
+          const bucketCost = (bucket.results || []).reduce((s, r) => s + (r.amount?.value || 0), 0);
+          monthTotal              += bucketCost;
+          dayMap[dayStr]           = (dayMap[dayStr] || 0) + bucketCost;
+          if (bucket.start_time >= startOfTodayTs) todayTotal += bucketCost;
+        }
+
+        // ── Tokens por modelo (usage API) ──────────────────────────────────
+        const modelMap: Record<string, { input: number; output: number; requests: number; cached: number }> = {};
+        for (const bucket of usageResp.data || []) {
+          for (const r of bucket.results || []) {
+            if (!r.model) continue;
+            if (!modelMap[r.model]) modelMap[r.model] = { input: 0, output: 0, requests: 0, cached: 0 };
+            modelMap[r.model].input    += r.input_tokens        || 0;
+            modelMap[r.model].output   += r.output_tokens       || 0;
+            modelMap[r.model].requests += r.num_model_requests  || 0;
+            modelMap[r.model].cached   += r.input_cached_tokens || 0;
+          }
+        }
+
+        openai.today_usd = todayTotal;
+        openai.month_usd = monthTotal;
+        openai.byModel   = Object.entries(modelMap)
+          .map(([model, v]) => ({
+            model,
+            input_tokens:  v.input,
+            output_tokens: v.output,
+            total_tokens:  v.input + v.output,
+            calls:         v.requests,
+            cached_tokens: v.cached,
+          }))
+          .sort((a, b) => b.total_tokens - a.total_tokens);
+        openai.last7Days = Object.keys(dailyMap).map((date) => ({
+          date,
+          cost_usd: dayMap[date] || 0,
+        }));
+      } catch (e: any) {
+        openai.error = e?.message || 'Erro ao consultar OpenAI';
+      }
+    }
+
     return {
+      openai,
       today: {
         cost_usd:          todayAgg._sum.cost_usd          || 0,
         total_tokens:      todayAgg._sum.total_tokens      || 0,

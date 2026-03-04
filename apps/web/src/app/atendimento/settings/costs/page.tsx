@@ -1,34 +1,45 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { DollarSign, Zap, RefreshCw, TrendingUp, Bot, MessageSquare, Brain, ExternalLink } from 'lucide-react';
+import { DollarSign, Zap, RefreshCw, TrendingUp, Bot, MessageSquare, Brain, CheckCircle2, AlertTriangle, ExternalLink, Settings } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 
-interface CostSummary {
-  cost_usd: number;
-  total_tokens: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  calls: number;
+// ── Tipos ────────────────────────────────────────────────────────────────────
+
+interface OpenAiData {
+  configured: boolean;
+  today_usd:  number | null;
+  month_usd:  number | null;
+  byModel:    Array<{ model: string; input_tokens: number; output_tokens: number; total_tokens: number; calls: number; cached_tokens: number }>;
+  last7Days:  Array<{ date: string; cost_usd: number }>;
+  error:      string | null;
 }
 
-interface ModelBreakdown { model: string; cost_usd: number; total_tokens: number; calls: number; }
-interface TypeBreakdown  { call_type: string; cost_usd: number; total_tokens: number; calls: number; }
-interface DayData        { date: string; cost_usd: number; total_tokens: number; calls: number; }
+interface LocalSummary {
+  cost_usd: number; total_tokens: number;
+  prompt_tokens: number; completion_tokens: number; calls: number;
+}
+interface ModelLocal  { model: string; cost_usd: number; total_tokens: number; calls: number; }
+interface TypeLocal   { call_type: string; cost_usd: number; total_tokens: number; calls: number; }
+interface DayLocal    { date: string; cost_usd: number; total_tokens: number; calls: number; }
 
 interface AiCosts {
-  today:     CostSummary;
-  month:     CostSummary;
-  byModel:   ModelBreakdown[];
-  byType:    TypeBreakdown[];
-  last7Days: DayData[];
+  openai:    OpenAiData;
+  today:     LocalSummary;
+  month:     LocalSummary;
+  byModel:   ModelLocal[];
+  byType:    TypeLocal[];
+  last7Days: DayLocal[];
 }
 
-function fmtUsd(val: number) {
-  if (val === 0) return '$0.0000';
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtUsd(val: number, d = 4) {
+  if (val === 0)    return '$0.0000';
   if (val < 0.0001) return `$${val.toFixed(7)}`;
   if (val < 0.01)   return `$${val.toFixed(5)}`;
-  return `$${val.toFixed(4)}`;
+  return `$${val.toFixed(d)}`;
 }
 
 function fmtTokens(val: number) {
@@ -43,16 +54,10 @@ const TYPE_LABELS: Record<string, { label: string; icon: React.ReactNode; color:
   whisper: { label: 'Transcrição (voz)', icon: <Zap size={13} />,           color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
 };
 
-const MODEL_COLORS: Record<string, string> = {
-  'gpt-4o-mini':  'bg-sky-500/60',
-  'gpt-4o':       'bg-violet-500/60',
-  'gpt-4.1':      'bg-purple-500/60',
-  'gpt-4.1-mini': 'bg-indigo-500/60',
-  'gpt-5':        'bg-rose-500/60',
-  'gpt-5.1':      'bg-pink-500/60',
-};
+// ── Componente ───────────────────────────────────────────────────────────────
 
 export default function AiCostsPage() {
+  const router = useRouter();
   const [data, setData] = useState<AiCosts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +81,7 @@ export default function AiCostsPage() {
     return (
       <div className="flex-1 flex flex-col pt-8 overflow-hidden bg-background">
         <header className="px-8 mb-6 shrink-0">
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Custos de IA</h1>
+          <h1 className="text-2xl font-bold">Custos de IA</h1>
         </header>
         <div className="flex-1 flex items-center justify-center">
           <RefreshCw className="animate-spin text-muted-foreground" size={24} />
@@ -96,10 +101,20 @@ export default function AiCostsPage() {
     );
   }
 
-  const { today, month, byModel, byType, last7Days } = data;
-  const hasData = month.calls > 0;
-  const maxDayCost    = Math.max(...last7Days.map((d) => d.cost_usd), 0.000001);
-  const maxModelCost  = Math.max(...byModel.map((m) => m.cost_usd), 0.000001);
+  const { openai, today, month, byType, last7Days } = data;
+  const hasOpenAi  = openai.configured && !openai.error && openai.month_usd !== null;
+  const hasLocalData = month.calls > 0;
+
+  // Gráfico usa dados reais da OpenAI (por custo) quando disponível, senão dados locais
+  const chartDays = hasOpenAi && openai.last7Days?.length
+    ? openai.last7Days
+    : last7Days;
+  const maxBar = Math.max(...chartDays.map((d) => d.cost_usd), 0.000001);
+
+  // Breakdown por modelo usa dados da OpenAI (tokens) quando disponível
+  const modelRows = hasOpenAi && openai.byModel?.length ? openai.byModel : null;
+  const localModelRows = data.byModel;
+  const maxLocalModel = Math.max(...localModelRows.map((m) => m.cost_usd), 0.000001);
 
   return (
     <div className="flex-1 flex flex-col pt-8 overflow-hidden bg-background">
@@ -107,23 +122,17 @@ export default function AiCostsPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground tracking-tight">Custos de IA</h1>
           <p className="text-[13px] text-muted-foreground mt-1">
-            Tokens exatos capturados da OpenAI + custo calculado pela tabela oficial de preços.
+            {hasOpenAi
+              ? 'Valores reais cobrados pela OpenAI (Admin Key ativa).'
+              : 'Configure a Admin Key em Ajustes IA para ver valores exatos da OpenAI.'}
           </p>
         </div>
         <div className="flex items-center gap-2 mt-1">
-          <a
-            href="https://platform.openai.com/usage"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors px-2 py-1.5 rounded-lg hover:bg-muted/50"
-          >
+          <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors px-2 py-1.5 rounded-lg hover:bg-muted/50">
             Ver na OpenAI <ExternalLink size={11} />
           </a>
-          <button
-            onClick={fetchData}
-            className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
-            title="Atualizar"
-          >
+          <button onClick={fetchData} className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all" title="Atualizar">
             <RefreshCw size={16} />
           </button>
         </div>
@@ -131,24 +140,40 @@ export default function AiCostsPage() {
 
       <div className="flex-1 overflow-y-auto px-8 pb-8 flex flex-col gap-6">
 
-        {/* ── Aviso quando não há dados ───────────────────────────────────── */}
-        {!hasData && (
-          <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4 text-[13px]">
-            <p className="font-bold text-amber-400 mb-1">Aguardando dados</p>
-            <p className="text-muted-foreground">
-              Ainda não há registros de uso. Para começar a ver os dados, execute no container da API ou Worker em produção:
-            </p>
-            <code className="block mt-2 bg-muted/60 rounded-lg px-3 py-2 font-mono text-xs text-foreground">
-              npx prisma db push
-            </code>
-            <p className="text-muted-foreground mt-2">
-              Após isso, o rastreamento começa automaticamente nas próximas conversas com a IA.
-            </p>
+        {/* ── Banner Admin Key não configurada ─────────────────────────── */}
+        {!openai.configured && (
+          <div className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-4 flex items-start gap-3">
+            <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-xs font-bold text-amber-400">Admin Key não configurada</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">
+                Para ver os valores exatos cobrados pela OpenAI, configure a Admin Key em Ajustes IA.
+                Crie em <span className="font-mono text-primary text-[11px]">platform.openai.com/settings/organization/admin-keys</span>
+              </p>
+            </div>
+            <button
+              onClick={() => router.push('/atendimento/settings/ai')}
+              className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-all shrink-0"
+            >
+              <Settings size={12} /> Ajustes IA
+            </button>
           </div>
         )}
 
-        {/* ── Cards resumo: Hoje / Mês ────────────────────────────────────── */}
+        {/* ── Banner erro na Admin Key ──────────────────────────────────── */}
+        {openai.configured && openai.error && (
+          <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-4 flex items-start gap-3">
+            <AlertTriangle size={16} className="text-red-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-red-400">Erro ao consultar a OpenAI</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">{openai.error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Cards de custo: Hoje / Mês ────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-4">
+
           {/* Hoje */}
           <div className="bg-card rounded-2xl border border-border shadow-sm p-5 space-y-3">
             <div className="flex items-center justify-between">
@@ -158,14 +183,23 @@ export default function AiCostsPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Hoje</p>
-                  <p className="text-[11px] text-muted-foreground">{today.calls} chamada{today.calls !== 1 ? 's' : ''}</p>
+                  <p className="text-[11px] text-muted-foreground">{today.calls} chamadas</p>
                 </div>
               </div>
-              <span className="text-2xl font-black text-foreground tabular-nums">{fmtUsd(today.cost_usd)}</span>
+              <div className="text-right">
+                <p className="text-2xl font-black text-foreground tabular-nums">
+                  {hasOpenAi ? fmtUsd(openai.today_usd ?? 0) : fmtUsd(today.cost_usd)}
+                </p>
+                {hasOpenAi && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+                    <CheckCircle2 size={9} /> REAL
+                  </span>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
               <div className="text-center">
-                <p className="text-[10px] text-muted-foreground">Total</p>
+                <p className="text-[10px] text-muted-foreground">Total tk</p>
                 <p className="text-sm font-bold text-foreground">{fmtTokens(today.total_tokens)}</p>
               </div>
               <div className="text-center">
@@ -188,14 +222,23 @@ export default function AiCostsPage() {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Este mês</p>
-                  <p className="text-[11px] text-muted-foreground">{month.calls} chamada{month.calls !== 1 ? 's' : ''}</p>
+                  <p className="text-[11px] text-muted-foreground">{month.calls} chamadas</p>
                 </div>
               </div>
-              <span className="text-2xl font-black text-foreground tabular-nums">{fmtUsd(month.cost_usd)}</span>
+              <div className="text-right">
+                <p className="text-2xl font-black text-foreground tabular-nums">
+                  {hasOpenAi ? fmtUsd(openai.month_usd ?? 0) : fmtUsd(month.cost_usd)}
+                </p>
+                {hasOpenAi && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+                    <CheckCircle2 size={9} /> REAL
+                  </span>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
               <div className="text-center">
-                <p className="text-[10px] text-muted-foreground">Total</p>
+                <p className="text-[10px] text-muted-foreground">Total tk</p>
                 <p className="text-sm font-bold text-foreground">{fmtTokens(month.total_tokens)}</p>
               </div>
               <div className="text-center">
@@ -210,41 +253,45 @@ export default function AiCostsPage() {
           </div>
         </div>
 
-        {/* ── Gráfico últimos 7 dias ──────────────────────────────────────── */}
+        {/* ── Gráfico 7 dias ───────────────────────────────────────────── */}
         <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center gap-3 bg-primary/5">
-            <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <TrendingUp size={16} />
+          <div className="p-4 border-b border-border flex items-center justify-between bg-primary/5">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <TrendingUp size={16} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-foreground">Últimos 7 dias</h4>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+                  {hasOpenAi ? 'Custo real cobrado (OpenAI)' : 'Estimativa local'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-foreground">Últimos 7 dias</h4>
-              <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Custo por dia (USD)</p>
-            </div>
+            {hasOpenAi && (
+              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <CheckCircle2 size={9} /> REAL
+              </span>
+            )}
           </div>
           <div className="p-5">
             <div className="flex items-end gap-2 h-32">
-              {last7Days.map((day) => {
-                const pct = (day.cost_usd / maxDayCost) * 100;
+              {chartDays.map((day) => {
+                const pct = (day.cost_usd / maxBar) * 100;
                 const shortDate = new Date(day.date + 'T12:00:00Z').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                const localDay = last7Days.find((d) => d.date === day.date);
                 return (
                   <div key={day.date} className="flex-1 flex flex-col items-center gap-1 group">
                     <div className="relative w-full flex justify-center">
-                      {/* Tooltip */}
                       <div className="absolute bottom-full mb-1.5 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
                         <div className="bg-popover border border-border text-foreground text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl whitespace-nowrap">
-                          <p className="font-black">{fmtUsd(day.cost_usd)}</p>
-                          <p className="text-muted-foreground">{fmtTokens(day.total_tokens)} tokens</p>
-                          <p className="text-muted-foreground">{day.calls} chamadas</p>
+                          <p className="font-black">{fmtUsd(day.cost_usd, 5)}</p>
+                          {localDay && <p className="text-muted-foreground">{fmtTokens(localDay.total_tokens)} tokens · {localDay.calls} calls</p>}
                         </div>
                         <div className="w-2 h-2 bg-popover border-r border-b border-border rotate-45 -mt-1.5" />
                       </div>
-                      {/* Barra */}
                       <div
                         className="w-full rounded-t-lg bg-primary/60 hover:bg-primary transition-colors"
-                        style={{
-                          height: `${Math.max(pct, day.cost_usd > 0 ? 4 : 0)}%`,
-                          minHeight: day.cost_usd > 0 ? '4px' : '0',
-                        }}
+                        style={{ height: `${Math.max(pct, day.cost_usd > 0 ? 4 : 0)}%`, minHeight: day.cost_usd > 0 ? '4px' : '0' }}
                       />
                     </div>
                     <span className="text-[10px] text-muted-foreground">{shortDate}</span>
@@ -255,44 +302,76 @@ export default function AiCostsPage() {
           </div>
         </div>
 
-        {/* ── Por modelo + Por tipo ──────────────────────────────────────── */}
+        {/* ── Por modelo ───────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-4">
-
-          {/* Por modelo */}
           <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center gap-3 bg-primary/5">
-              <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                <Bot size={16} />
+            <div className="p-4 border-b border-border flex items-center justify-between bg-primary/5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <Bot size={16} />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-foreground">Por modelo</h4>
+                  <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Este mês</p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-foreground">Por modelo</h4>
-                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Este mês</p>
-              </div>
+              {hasOpenAi && modelRows?.length ? (
+                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <CheckCircle2 size={9} /> REAL
+                </span>
+              ) : null}
             </div>
-            <div className="divide-y divide-border/40">
-              {byModel.length === 0 ? (
-                <p className="p-4 text-center text-sm text-muted-foreground">Nenhum dado ainda.</p>
-              ) : (
-                byModel.map((m) => {
-                  const pct = (m.cost_usd / maxModelCost) * 100;
-                  const barColor = MODEL_COLORS[m.model] || 'bg-primary/60';
+
+            {/* OpenAI real: tokens por modelo */}
+            {hasOpenAi && modelRows?.length ? (
+              <div className="divide-y divide-border/40">
+                {modelRows.map((m) => {
+                  const maxTk = Math.max(...modelRows.map((x) => x.total_tokens), 1);
+                  const pct = (m.total_tokens / maxTk) * 100;
                   return (
                     <div key={m.model} className="px-4 py-3 space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-foreground font-mono">{m.model}</span>
                         <div className="flex items-center gap-2 text-right">
-                          <span className="text-[10px] text-muted-foreground">{m.calls} calls · {fmtTokens(m.total_tokens)} tk</span>
-                          <span className="text-xs font-bold text-foreground tabular-nums">{fmtUsd(m.cost_usd)}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {m.calls} calls · {fmtTokens(m.input_tokens)}↑ {fmtTokens(m.output_tokens)}↓
+                            {m.cached_tokens > 0 && <span className="text-emerald-500"> · {fmtTokens(m.cached_tokens)} cached</span>}
+                          </span>
                         </div>
                       </div>
                       <div className="h-1 bg-muted/50 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                        <div className="h-full bg-emerald-500/60 rounded-full" style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   );
-                })
-              )}
-            </div>
+                })}
+              </div>
+            ) : (
+              /* Fallback local: estimativa */
+              <div className="divide-y divide-border/40">
+                {localModelRows.length === 0 ? (
+                  <p className="p-4 text-center text-sm text-muted-foreground">Nenhum dado ainda.</p>
+                ) : (
+                  localModelRows.map((m) => {
+                    const pct = (m.cost_usd / maxLocalModel) * 100;
+                    return (
+                      <div key={m.model} className="px-4 py-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-foreground font-mono">{m.model}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground">{m.calls} calls · {fmtTokens(m.total_tokens)} tk</span>
+                            <span className="text-xs font-bold text-foreground tabular-nums">{fmtUsd(m.cost_usd)}</span>
+                          </div>
+                        </div>
+                        <div className="h-1 bg-muted/50 rounded-full overflow-hidden">
+                          <div className="h-full bg-primary/60 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
 
           {/* Por tipo de chamada */}
@@ -311,10 +390,7 @@ export default function AiCostsPage() {
                 <p className="p-4 text-center text-sm text-muted-foreground">Nenhum dado ainda.</p>
               ) : (
                 byType.map((t) => {
-                  const meta = TYPE_LABELS[t.call_type] ?? {
-                    label: t.call_type, icon: <Zap size={13} />,
-                    color: 'text-muted-foreground bg-muted border-border',
-                  };
+                  const meta = TYPE_LABELS[t.call_type] ?? { label: t.call_type, icon: <Zap size={13} />, color: 'text-muted-foreground bg-muted border-border' };
                   return (
                     <div key={t.call_type} className="px-4 py-3 flex items-center gap-3">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-bold shrink-0 ${meta.color}`}>
@@ -332,19 +408,15 @@ export default function AiCostsPage() {
           </div>
         </div>
 
-        {/* ── Nota informativa ─────────────────────────────────────────────── */}
+        {/* ── Nota ─────────────────────────────────────────────────────── */}
         <div className="bg-card/50 rounded-2xl border border-border p-4 text-[12px] text-muted-foreground space-y-1.5">
-          <p className="font-bold text-foreground text-xs">ℹ️ Como os valores são calculados</p>
-          <p>
-            Cada chamada à OpenAI retorna o número exato de tokens usados (<code className="font-mono text-primary">completion.usage</code>).
-            O sistema registra esses valores e calcula o custo usando a tabela oficial de preços da OpenAI por modelo.
-          </p>
-          <p>
-            Os valores são precisos para contas com preços padrão. Para conferir a fatura oficial:{' '}
-            <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer" className="font-mono text-primary hover:underline">
-              platform.openai.com/usage
-            </a>
-          </p>
+          <p className="font-bold text-foreground text-xs">ℹ️ Fontes de dados</p>
+          {hasOpenAi ? (
+            <p><span className="text-emerald-400 font-semibold">Hoje</span> e <span className="text-emerald-400 font-semibold">Este mês</span> vêm da API real da OpenAI (<code className="font-mono text-primary">/v1/organization/costs</code>). O breakdown por tipo de chamada (chat / memória) vem do rastreamento local.</p>
+          ) : (
+            <p>Configure a <strong>Admin Key</strong> em <button onClick={() => router.push('/atendimento/settings/ai')} className="text-primary hover:underline">Ajustes IA</button> para ver os valores reais cobrados pela OpenAI. Sem ela, os dados são estimativas calculadas com base nos tokens exatos capturados em cada chamada.</p>
+          )}
+          <p>Fatura oficial: <a href="https://platform.openai.com/usage" target="_blank" rel="noopener noreferrer" className="font-mono text-primary hover:underline">platform.openai.com/usage</a></p>
         </div>
 
       </div>

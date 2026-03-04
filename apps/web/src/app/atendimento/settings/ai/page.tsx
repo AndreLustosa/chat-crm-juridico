@@ -64,11 +64,15 @@ const BLANK_FORM: SkillForm = {
 export default function AiSettingsPage() {
   // Config global
   const [apiKey, setApiKey] = useState('');
+  const [adminKey, setAdminKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
   const [cooldownSeconds, setCooldownSeconds] = useState(8);
   const [isConfigured, setIsConfigured] = useState(false);
+  const [isAdminKeyConfigured, setIsAdminKeyConfigured] = useState(false);
   const [isEditingKey, setIsEditingKey] = useState(false);
+  const [isEditingAdminKey, setIsEditingAdminKey] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [showAdminKey, setShowAdminKey] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savedConfig, setSavedConfig] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -89,6 +93,7 @@ export default function AiSettingsPage() {
         api.get('/settings/skills'),
       ]);
       setIsConfigured(configRes.data.isConfigured);
+      setIsAdminKeyConfigured(configRes.data.isAdminKeyConfigured ?? false);
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
       setSkills(skillsRes.data);
@@ -103,15 +108,18 @@ export default function AiSettingsPage() {
 
   // ---------- Config Global ----------
   const handleSaveConfig = async () => {
-    if (!apiKey.trim() && !defaultModel) return;
     setSavingConfig(true);
     try {
       const payload: any = { defaultModel, cooldownSeconds };
-      if (apiKey.trim()) payload.apiKey = apiKey.trim();
+      if (apiKey.trim())   payload.apiKey   = apiKey.trim();
+      if (adminKey.trim()) payload.adminKey = adminKey.trim();
       await api.post('/settings/ai-config', payload);
-      if (apiKey.trim()) setIsConfigured(true);
+      if (apiKey.trim())   setIsConfigured(true);
+      if (adminKey.trim()) setIsAdminKeyConfigured(true);
       setIsEditingKey(false);
+      setIsEditingAdminKey(false);
       setApiKey('');
+      setAdminKey('');
       setSavedConfig(true);
       setTimeout(() => setSavedConfig(false), 3000);
     } catch (e) {
@@ -249,14 +257,6 @@ export default function AiSettingsPage() {
                 <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">API Key + Modelo padrão</p>
               </div>
             </div>
-            {!loading && (
-              <button
-                onClick={() => { setIsEditingKey(!isEditingKey); setApiKey(''); setShowKey(false); }}
-                className="text-xs font-bold text-primary hover:underline"
-              >
-                {isEditingKey ? 'Cancelar' : 'Editar'}
-              </button>
-            )}
           </div>
 
           {loading ? (
@@ -302,52 +302,90 @@ export default function AiSettingsPage() {
                 </p>
               </div>
 
-              {/* API Key (só editável quando aberto) */}
-              {isEditingKey && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Nova API Key OpenAI</label>
-                  <div className="relative">
-                    <input
-                      type={showKey ? 'text' : 'password'}
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="sk-proj-..."
-                      className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 pr-10 text-sm outline-none focus:border-primary/50 transition-all font-mono"
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowKey(!showKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
+              {/* ── API Key (regular) ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">API Key OpenAI</label>
+                  <button
+                    onClick={() => { setIsEditingKey(!isEditingKey); setApiKey(''); setShowKey(false); }}
+                    className="text-xs font-bold text-primary hover:underline"
+                  >
+                    {isEditingKey ? 'Cancelar' : isConfigured ? 'Trocar' : 'Configurar'}
+                  </button>
+                </div>
+                {isEditingKey ? (
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <input
+                        type={showKey ? 'text' : 'password'}
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="sk-proj-..."
+                        className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 pr-10 text-sm outline-none focus:border-primary/50 transition-all font-mono"
+                        autoFocus
+                      />
+                      <button type="button" onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                        {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Obtenha em <span className="font-mono text-primary">platform.openai.com/api-keys</span></p>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Obtenha em <span className="font-mono text-primary">platform.openai.com/api-keys</span>
-                  </p>
-                </div>
-              )}
+                ) : (
+                  <div className="flex items-center justify-between text-xs bg-muted/30 rounded-xl px-4 py-2.5">
+                    <span className="text-muted-foreground">Usada pelo worker para chamadas à IA</span>
+                    {isConfigured ? (
+                      <span className="flex items-center gap-1.5 text-emerald-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> CONFIGURADO</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-amber-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> NÃO CONFIGURADO</span>
+                    )}
+                  </div>
+                )}
+              </div>
 
-              {/* Status da chave */}
-              {!isEditingKey && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">API Key OpenAI</span>
-                  {savedConfig ? (
-                    <span className="flex items-center gap-1.5 text-emerald-500 font-bold bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-                      <CheckCircle2 size={11} /> SALVO
-                    </span>
-                  ) : isConfigured ? (
-                    <span className="flex items-center gap-1.5 text-emerald-500 font-bold bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> CONFIGURADO
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-amber-500 font-bold bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> NÃO CONFIGURADO
-                    </span>
-                  )}
+              {/* ── Admin Key (para Custos de IA) ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Admin Key OpenAI</label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Necessária para acompanhar custos reais em <strong>Custos IA</strong>.</p>
+                  </div>
+                  <button
+                    onClick={() => { setIsEditingAdminKey(!isEditingAdminKey); setAdminKey(''); setShowAdminKey(false); }}
+                    className="text-xs font-bold text-primary hover:underline shrink-0 ml-4"
+                  >
+                    {isEditingAdminKey ? 'Cancelar' : isAdminKeyConfigured ? 'Trocar' : 'Configurar'}
+                  </button>
                 </div>
-              )}
+                {isEditingAdminKey ? (
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <input
+                        type={showAdminKey ? 'text' : 'password'}
+                        value={adminKey}
+                        onChange={(e) => setAdminKey(e.target.value)}
+                        placeholder="sk-admin-..."
+                        className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 pr-10 text-sm outline-none focus:border-primary/50 transition-all font-mono"
+                        autoFocus
+                      />
+                      <button type="button" onClick={() => setShowAdminKey(!showAdminKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                        {showAdminKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Crie em <span className="font-mono text-primary">platform.openai.com/settings/organization/admin-keys</span>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-xs bg-muted/30 rounded-xl px-4 py-2.5">
+                    <span className="text-muted-foreground">Acessa a API de custos da organização</span>
+                    {isAdminKeyConfigured ? (
+                      <span className="flex items-center gap-1.5 text-emerald-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> CONFIGURADO</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-amber-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> NÃO CONFIGURADO</span>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end pt-1">
                 <button
