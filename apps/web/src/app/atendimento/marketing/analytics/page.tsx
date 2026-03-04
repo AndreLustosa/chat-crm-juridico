@@ -84,11 +84,19 @@ function fmtChannel(ch: string): string {
 
 function fmtSource(src: string): string {
   const map: Record<string, string> = {
-    organico: 'Orgânico',
-    google_ads: 'Google Ads',
-    facebook: 'Facebook',
-    instagram: 'Instagram',
-    google: 'Google',
+    direto:          'Direto',
+    organico:        'Orgânico',       // legado
+    google_organico: '🔍 Google Orgânico',
+    google_ads:      '📢 Google Ads',
+    busca_organica:  '🔍 Busca Orgânica',
+    facebook:        '📘 Facebook',
+    instagram:       '📸 Instagram',
+    linkedin:        '💼 LinkedIn',
+    twitter:         '𝕏 Twitter/X',
+    youtube:         '▶️ YouTube',
+    whatsapp:        '💬 WhatsApp',
+    referencia:      '🔗 Referência',
+    google:          '🔍 Google',       // legado
   };
   return map[src] || src;
 }
@@ -687,11 +695,7 @@ export default function AnalyticsDashboard() {
                       .map((s, i) => {
                         const total = selected.by_source.reduce((acc, x) => acc + x.views, 0);
                         const pct = total > 0 ? Math.round((s.views / total) * 100) : 0;
-                        const label = s.source === 'google_ads'
-                          ? 'Google Ads'
-                          : s.source === 'organico'
-                          ? 'Orgânico'
-                          : `${s.source}${s.medium ? ' / ' + s.medium : ''}`;
+                        const label = fmtSource(s.source) + (s.medium && !s.source.startsWith('google') ? ` / ${s.medium}` : '');
                         return (
                           <div key={i} className="space-y-1">
                             <div className="flex items-center justify-between text-xs">

@@ -62,6 +62,25 @@ export class AnalyticsService {
     return { ok: true };
   }
 
+  /** Detecta a fonte de tráfego com fallback para referrer */
+  private detectSource(e: { gclid?: string | null; utm_source?: string | null; referrer?: string | null }): string {
+    if (e.gclid) return 'google_ads';
+    if (e.utm_source) return e.utm_source.toLowerCase();
+    if (e.referrer) {
+      const ref = e.referrer.toLowerCase();
+      if (ref.includes('google.'))      return 'google_organico';
+      if (ref.includes('bing.')  || ref.includes('yahoo.') || ref.includes('duckduckgo.')) return 'busca_organica';
+      if (ref.includes('facebook.') || ref.includes('fb.com')) return 'facebook';
+      if (ref.includes('instagram.')) return 'instagram';
+      if (ref.includes('linkedin.'))  return 'linkedin';
+      if (ref.includes('twitter.')  || ref.includes('x.com')) return 'twitter';
+      if (ref.includes('youtube.'))   return 'youtube';
+      if (ref.includes('whatsapp.'))  return 'whatsapp';
+      return 'referencia'; // outro site externo
+    }
+    return 'direto'; // URL digitada diretamente ou sem referrer
+  }
+
   async getPages() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -73,7 +92,7 @@ export class AnalyticsService {
     // Query única — agrega tudo em memória (muito mais eficiente que N+1)
     const events = await this.prisma.lpEvent.findMany({
       where: { created_at: { gte: thirtyDaysAgo } },
-      select: { page_path: true, event_type: true, utm_source: true, gclid: true, created_at: true },
+      select: { page_path: true, event_type: true, utm_source: true, gclid: true, referrer: true, created_at: true },
       orderBy: { created_at: 'asc' },
     });
 
@@ -104,7 +123,7 @@ export class AnalyticsService {
       if (isView) { p.views30++; if (inLast7) p.views7++; if (inPrev7) p.viewsPrev7++; }
       if (isClick) { p.clicks30++; if (inLast7) p.clicks7++; }
 
-      const source = e.gclid ? 'google_ads' : e.utm_source || 'organico';
+      const source = this.detectSource(e);
       p.sourceMap[source] = (p.sourceMap[source] || 0) + 1;
 
       if (inLast7) {
@@ -142,7 +161,7 @@ export class AnalyticsService {
 
     const events = await this.prisma.lpEvent.findMany({
       where: { page_path, created_at: { gte: thirtyDaysAgo } },
-      select: { event_type: true, utm_source: true, utm_medium: true, utm_campaign: true, gclid: true, created_at: true },
+      select: { event_type: true, utm_source: true, utm_medium: true, utm_campaign: true, gclid: true, referrer: true, created_at: true },
       orderBy: { created_at: 'asc' },
     });
 
@@ -151,7 +170,7 @@ export class AnalyticsService {
 
     const sourceMap: Record<string, { views: number; clicks: number }> = {};
     for (const e of events) {
-      const source = e.gclid ? 'google_ads' : e.utm_source || 'organico';
+      const source = this.detectSource(e);
       const medium = e.utm_medium || (e.gclid ? 'cpc' : null);
       const key = `${source}|${medium || ''}|${e.utm_campaign || ''}`;
       if (!sourceMap[key]) sourceMap[key] = { views: 0, clicks: 0 };

@@ -43,6 +43,11 @@ function formatDateLabel(dateStr: string): string {
   return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+// Tipo declarado fora do componente para evitar problemas com Turbopack
+type ChatRenderItem =
+  | { kind: 'sep'; label: string; key: string }
+  | { kind: 'msg'; msg: any; idx: number };
+
 export default function ChatPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const [messages, setMessages] = useState<any[]>([]);
@@ -440,24 +445,25 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
   const isClosed = convoStatus === 'FECHADO';
 
-  // Lista plana: separa mensagens e separadores de data antes do JSX
-  type RenderItem =
-    | { kind: 'sep'; label: string; key: string }
-    | { kind: 'msg'; msg: any; idx: number };
-
-  const renderItems: RenderItem[] = [];
-  {
+  // Lista plana: separa mensagens e separadores de data (type declarado fora do componente)
+  const renderItems = useMemo<ChatRenderItem[]>(() => {
+    const items: ChatRenderItem[] = [];
     let lastDateKey = '';
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
       const dateKey = msg.created_at ? getDateKey(msg.created_at) : `__nodate__${i}`;
       if (dateKey !== lastDateKey) {
-        renderItems.push({ kind: 'sep', label: msg.created_at ? formatDateLabel(msg.created_at) : '', key: `sep-${i}-${dateKey}` });
+        items.push({
+          kind: 'sep',
+          label: msg.created_at ? formatDateLabel(msg.created_at) : '',
+          key: `sep-${dateKey}-${i}`,
+        });
         lastDateKey = dateKey;
       }
-      renderItems.push({ kind: 'msg', msg, idx: i });
+      items.push({ kind: 'msg', msg, idx: i });
     }
-  }
+    return items;
+  }, [messages]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
