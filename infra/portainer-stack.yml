@@ -54,6 +54,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       JWT_SECRET: troque_esta_chave_jwt_secreta_por_algo_seguro
+      JWT_EXPIRES_IN: "365d"
       PORT: "3005"
       RUN_MIGRATIONS: "true"
       S3_ENDPOINT: http://minio:9000

@@ -16,12 +16,23 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [sessionMsg, setSessionMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const savedEmail = localStorage.getItem('remembered_email');
     if (savedEmail) {
       setEmail(savedEmail);
       setRememberMe(true);
+    }
+    // Verifica se foi redirecionado por logout automático
+    const reason = localStorage.getItem('auth_logout_reason');
+    if (reason) {
+      localStorage.removeItem('auth_logout_reason');
+      setSessionMsg(
+        reason === 'expired'
+          ? 'Sua sessão expirou. Faça login novamente.'
+          : 'Acesso não autorizado. Faça login novamente.'
+      );
     }
   }, []);
 
@@ -136,6 +147,20 @@ export default function LoginPage() {
                     <div className="w-12 h-1 bg-[#A89048] mt-3 mb-4 rounded-full mx-auto lg:mx-0 shadow-[0_0_10px_rgba(168,144,72,0.5)]" />
                     <p className="text-slate-400 font-medium">Acesse seu painel com segurança</p>
                   </div>
+
+                  {/* Session expired banner */}
+                  {sessionMsg && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="mb-6"
+                    >
+                      <div className="flex items-center gap-3 rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 text-sm text-amber-400 font-medium">
+                        <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                        {sessionMsg}
+                      </div>
+                    </motion.div>
+                  )}
 
                   {/* Error banner */}
                   {error && (

@@ -20,11 +20,15 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   }, [pathname, router]);
 
   // Escuta o evento auth:logout disparado pelo interceptor axios (api.ts)
-  // Usa router.replace (sem full page reload) para evitar cascata de logouts entre abas
   useEffect(() => {
-    const handleAuthLogout = () => {
+    const handleAuthLogout = (e: Event) => {
       const isLoginPage = pathname === '/atendimento/login';
-      if (!isLoginPage) router.replace('/atendimento/login');
+      if (!isLoginPage) {
+        // Salva motivo para a tela de login exibir aviso adequado
+        const reason = (e as CustomEvent<{ reason?: string }>).detail?.reason;
+        if (reason) localStorage.setItem('auth_logout_reason', reason);
+        router.replace('/atendimento/login');
+      }
     };
     window.addEventListener('auth:logout', handleAuthLogout);
     return () => window.removeEventListener('auth:logout', handleAuthLogout);
