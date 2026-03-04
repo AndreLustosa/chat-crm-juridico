@@ -515,38 +515,50 @@ Você prepara o caso. O advogado decide.
 
     const prismaAny = this.prisma as any;
 
-    const [todayAgg, monthAgg, byModel, byType, daily] = await Promise.all([
-      prismaAny.aiUsage.aggregate({
-        _sum: { cost_usd: true, total_tokens: true, prompt_tokens: true, completion_tokens: true },
-        _count: { id: true },
-        where: { created_at: { gte: startOfToday } },
-      }),
-      prismaAny.aiUsage.aggregate({
-        _sum: { cost_usd: true, total_tokens: true },
-        _count: { id: true },
-        where: { created_at: { gte: startOfMonth } },
-      }),
-      prismaAny.aiUsage.groupBy({
-        by: ['model'],
-        _sum: { cost_usd: true, total_tokens: true },
-        _count: { id: true },
-        where: { created_at: { gte: startOfMonth } },
-        orderBy: { _sum: { cost_usd: 'desc' } },
-      }),
-      prismaAny.aiUsage.groupBy({
-        by: ['call_type'],
-        _sum: { cost_usd: true, total_tokens: true },
-        _count: { id: true },
-        where: { created_at: { gte: startOfMonth } },
-      }),
-      prismaAny.aiUsage.groupBy({
-        by: ['created_at'],
-        _sum: { cost_usd: true, total_tokens: true },
-        _count: { id: true },
-        where: { created_at: { gte: start7Days } },
-        orderBy: { created_at: 'asc' },
-      }),
-    ]);
+    // ── Dados locais (AiUsage) — tabela pode não existir ainda se migration não rodou ──
+    let todayAgg: any = { _sum: { cost_usd: 0, total_tokens: 0, prompt_tokens: 0, completion_tokens: 0 }, _count: { id: 0 } };
+    let monthAgg: any = { _sum: { cost_usd: 0, total_tokens: 0, prompt_tokens: 0, completion_tokens: 0 }, _count: { id: 0 } };
+    let byModel:  any[] = [];
+    let byType:   any[] = [];
+    let daily:    any[] = [];
+
+    try {
+      [todayAgg, monthAgg, byModel, byType, daily] = await Promise.all([
+        prismaAny.aiUsage.aggregate({
+          _sum: { cost_usd: true, total_tokens: true, prompt_tokens: true, completion_tokens: true },
+          _count: { id: true },
+          where: { created_at: { gte: startOfToday } },
+        }),
+        prismaAny.aiUsage.aggregate({
+          _sum: { cost_usd: true, total_tokens: true, prompt_tokens: true, completion_tokens: true },
+          _count: { id: true },
+          where: { created_at: { gte: startOfMonth } },
+        }),
+        prismaAny.aiUsage.groupBy({
+          by: ['model'],
+          _sum: { cost_usd: true, total_tokens: true },
+          _count: { id: true },
+          where: { created_at: { gte: startOfMonth } },
+          orderBy: { _sum: { cost_usd: 'desc' } },
+        }),
+        prismaAny.aiUsage.groupBy({
+          by: ['call_type'],
+          _sum: { cost_usd: true, total_tokens: true },
+          _count: { id: true },
+          where: { created_at: { gte: startOfMonth } },
+        }),
+        prismaAny.aiUsage.groupBy({
+          by: ['created_at'],
+          _sum: { cost_usd: true, total_tokens: true },
+          _count: { id: true },
+          where: { created_at: { gte: start7Days } },
+          orderBy: { created_at: 'asc' },
+        }),
+      ]);
+    } catch (e: any) {
+      // Tabela AiUsage ainda não existe — retorna zerados
+      console.warn('[getAiCosts] Prisma falhou (tabela pode não existir):', e?.message);
+    }
 
     // Agrega últimos 7 dias por data (yyyy-mm-dd)
     const dailyMap: Record<string, { cost_usd: number; total_tokens: number; calls: number }> = {};
