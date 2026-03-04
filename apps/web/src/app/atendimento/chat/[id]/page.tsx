@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo, Fragment } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, Pencil, UserCheck, ChevronDown, CornerUpLeft } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -440,19 +440,24 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
   const isClosed = convoStatus === 'FECHADO';
 
-  // Pré-computa quais mensagens precisam de separador de data (mais robusto que IIFE no JSX)
-  const dateSeparators = useMemo(() => {
-    const result = new Set<string | number>();
+  // Lista plana: separa mensagens e separadores de data antes do JSX
+  type RenderItem =
+    | { kind: 'sep'; label: string; key: string }
+    | { kind: 'msg'; msg: any; idx: number };
+
+  const renderItems: RenderItem[] = [];
+  {
     let lastDateKey = '';
-    messages.forEach((msg, idx) => {
-      const dateKey = getDateKey(msg.created_at);
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const dateKey = msg.created_at ? getDateKey(msg.created_at) : `__nodate__${i}`;
       if (dateKey !== lastDateKey) {
-        result.add(msg.id ?? idx);
+        renderItems.push({ kind: 'sep', label: msg.created_at ? formatDateLabel(msg.created_at) : '', key: `sep-${i}-${dateKey}` });
         lastDateKey = dateKey;
       }
-    });
-    return result;
-  }, [messages]);
+      renderItems.push({ kind: 'msg', msg, idx: i });
+    }
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-background font-sans antialiased text-foreground">
@@ -586,23 +591,24 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         {/* Messages */}
         <div className="flex-1 p-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
           <div className="flex flex-col gap-4 max-w-4xl mx-auto pb-4">
-            {messages.length === 0 ? (
+            {renderItems.length === 0 ? (
               <div className="text-center text-muted-foreground py-20">Nenhuma mensagem nesta conversa.</div>
-            ) : messages.map((msg, idx) => {
+            ) : renderItems.map((item) => {
+                if (item.kind === 'sep') {
+                  return (
+                    <div key={item.key} className="flex items-center gap-3 my-1 select-none">
+                      <div className="flex-1 h-px bg-border/60" />
+                      <span className="text-[11px] font-semibold text-muted-foreground px-3 py-1 rounded-full border border-border bg-card capitalize">
+                        {item.label}
+                      </span>
+                      <div className="flex-1 h-px bg-border/60" />
+                    </div>
+                  );
+                }
+                const { msg, idx } = item;
                 const isOut = msg.direction === 'out';
-                const showSeparator = dateSeparators.has(msg.id ?? idx);
                 return (
-                  <Fragment key={msg.id || idx}>
-                    {showSeparator && (
-                      <div className="flex items-center gap-3 my-1 select-none">
-                        <div className="flex-1 h-px bg-border/60" />
-                        <span className="text-[11px] font-semibold text-muted-foreground px-3 py-1 rounded-full border border-border bg-card capitalize">
-                          {formatDateLabel(msg.created_at)}
-                        </span>
-                        <div className="flex-1 h-px bg-border/60" />
-                      </div>
-                    )}
-                  <div id={`msg-${msg.id}`} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group rounded-xl transition-all duration-300`}>
+                  <div key={msg.id || idx} id={`msg-${msg.id}`} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group rounded-xl transition-all duration-300`}>
                     {!isOut && (
                       <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
                         <button
@@ -819,7 +825,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                       </div>
                     )}
                   </div>
-                  </Fragment>
                 );
             })}
           </div>
