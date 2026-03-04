@@ -109,6 +109,13 @@ export default function Home() {
     image: `${baseUrl}/logo_andre_lustosa.png`,
     url,
     telephone: '+5582996390799',
+    priceRange: '$$$',
+    openingHoursSpecification: {
+      '@type': 'OpeningHoursSpecification',
+      dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+      opens: '08:00',
+      closes: '18:00',
+    },
     address: {
       '@type': 'PostalAddress',
       streetAddress: 'Rua Francisco Rodrigues Viana, 244',
@@ -117,9 +124,66 @@ export default function Home() {
       postalCode: '57300-000',
       addressCountry: 'BR',
     },
+    geo: {
+      '@type': 'GeoCoordinates',
+      latitude: -9.751,
+      longitude: -36.660,
+    },
+    areaServed: {
+      '@type': 'Country',
+      name: 'Brasil',
+    },
+    serviceType: ['Direito Trabalhista', 'Direito Previdenciário', 'Direito do Consumidor', 'Direito Civil'],
     sameAs: [
       'https://www.instagram.com/andrelustosaadvogados/',
       'https://www.facebook.com/andrelustosa',
+    ],
+  };
+
+  const faqJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: 'Qual o horário de atendimento do escritório André Lustosa Advogados?',
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: 'O escritório André Lustosa Advogados oferece atendimento 24 horas via WhatsApp para urgências e atendimento presencial em horário comercial (segunda a sexta, 8h–18h) na sede em Arapiraca/AL.',
+        },
+      },
+      {
+        '@type': 'Question',
+        name: 'O André Lustosa Advogados atende fora de Arapiraca?',
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: 'Sim. O escritório André Lustosa Advogados atua digitalmente em todo o Brasil. Documentos são enviados digitalmente e consultas são realizadas por videoconferência ou WhatsApp, sem necessidade de deslocamento.',
+        },
+      },
+      {
+        '@type': 'Question',
+        name: 'Quais áreas do direito o André Lustosa Advogados atende?',
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: 'O escritório André Lustosa Advogados é especializado em Direito Trabalhista (rescisão, horas extras, assédio moral), Direito Previdenciário (aposentadoria, BPC/LOAS, pensão por morte), Direito do Consumidor (cobranças indevidas, negativação no SPC/Serasa) e Direito Civil (contratos, família, imobiliário).',
+        },
+      },
+      {
+        '@type': 'Question',
+        name: 'Como funciona o primeiro atendimento no André Lustosa Advogados?',
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: 'O primeiro atendimento começa pelo WhatsApp (+55 82 99639-0799). A equipe faz uma análise preliminar do caso, os especialistas estudam a situação em profundidade e a atuação inicia com agilidade e transparência.',
+        },
+      },
+      {
+        '@type': 'Question',
+        name: 'Onde fica o escritório André Lustosa Advogados?',
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: 'A sede física do escritório André Lustosa Advogados fica na Rua Francisco Rodrigues Viana, 244, bairro Baixa Grande, Arapiraca – AL, CEP 57300-000. O atendimento digital cobre todo o Brasil.',
+        },
+      },
     ],
   };
 
@@ -129,6 +193,11 @@ export default function Home() {
         id="json-ld"
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <Script
+        id="json-ld-faq"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
       <LPTracker />
       <HomeTemplate
