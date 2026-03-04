@@ -65,36 +65,75 @@ export class AnalyticsService {
   async getPages() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
 
-    const rows = await this.prisma.lpEvent.groupBy({
-      by: ['page_path'],
-      _count: { id: true },
+    // Query única — agrega tudo em memória (muito mais eficiente que N+1)
+    const events = await this.prisma.lpEvent.findMany({
       where: { created_at: { gte: thirtyDaysAgo } },
-      orderBy: { _count: { id: 'desc' } },
+      select: { page_path: true, event_type: true, utm_source: true, gclid: true, created_at: true },
+      orderBy: { created_at: 'asc' },
     });
 
-    const result = await Promise.all(
-      rows.map(async (row) => {
-        const views = await this.prisma.lpEvent.count({
-          where: { page_path: row.page_path, event_type: 'view', created_at: { gte: thirtyDaysAgo } },
-        });
-        const clicks = await this.prisma.lpEvent.count({
-          where: { page_path: row.page_path, event_type: 'whatsapp_click', created_at: { gte: thirtyDaysAgo } },
-        });
-        const topSourceRow = await this.prisma.lpEvent.groupBy({
-          by: ['utm_source'],
-          where: { page_path: row.page_path, event_type: 'view', created_at: { gte: thirtyDaysAgo } },
-          _count: { id: true },
-          orderBy: { _count: { id: 'desc' } },
-          take: 1,
-        });
-        const top_source = topSourceRow[0]?.utm_source || 'organico';
-        const conversion_rate = views > 0 ? ((clicks / views) * 100).toFixed(1) + '%' : '0%';
-        return { page_path: row.page_path, views, clicks, conversion_rate, top_source };
-      }),
-    );
+    type PageAgg = {
+      views30: number; clicks30: number;
+      views7: number; clicks7: number; viewsPrev7: number;
+      sourceMap: Record<string, number>;
+      dayMap: Record<string, { views: number; clicks: number }>;
+    };
+    const pageMap: Record<string, PageAgg> = {};
 
-    return result;
+    for (const e of events) {
+      if (!pageMap[e.page_path]) {
+        const dayMap: Record<string, { views: number; clicks: number }> = {};
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          dayMap[d.toISOString().slice(0, 10)] = { views: 0, clicks: 0 };
+        }
+        pageMap[e.page_path] = { views30: 0, clicks30: 0, views7: 0, clicks7: 0, viewsPrev7: 0, sourceMap: {}, dayMap };
+      }
+      const p = pageMap[e.page_path];
+      const isView = e.event_type === 'view';
+      const isClick = e.event_type === 'whatsapp_click';
+      const inLast7 = e.created_at >= sevenDaysAgo;
+      const inPrev7 = e.created_at >= fourteenDaysAgo && e.created_at < sevenDaysAgo;
+
+      if (isView) { p.views30++; if (inLast7) p.views7++; if (inPrev7) p.viewsPrev7++; }
+      if (isClick) { p.clicks30++; if (inLast7) p.clicks7++; }
+
+      const source = e.gclid ? 'google_ads' : e.utm_source || 'organico';
+      p.sourceMap[source] = (p.sourceMap[source] || 0) + 1;
+
+      if (inLast7) {
+        const day = e.created_at.toISOString().slice(0, 10);
+        if (p.dayMap[day]) {
+          if (isView) p.dayMap[day].views++;
+          if (isClick) p.dayMap[day].clicks++;
+        }
+      }
+    }
+
+    return Object.entries(pageMap)
+      .map(([page_path, data]) => {
+        const top_source = Object.entries(data.sourceMap).sort((a, b) => b[1] - a[1])[0]?.[0] || 'organico';
+        const by_day = Object.entries(data.dayMap).map(([date, counts]) => ({ date, ...counts }));
+        const trend = data.viewsPrev7 > 0
+          ? Math.round(((data.views7 - data.viewsPrev7) / data.viewsPrev7) * 100)
+          : data.views7 > 0 ? 100 : 0;
+        return {
+          page_path,
+          views: data.views30,
+          clicks: data.clicks30,
+          conversion_rate: data.views30 > 0 ? ((data.clicks30 / data.views30) * 100).toFixed(1) + '%' : '0%',
+          top_source,
+          by_day,
+          trend,
+        };
+      })
+      .sort((a, b) => b.views - a.views);
   }
 
   async getPageDetail(page_path: string) {
