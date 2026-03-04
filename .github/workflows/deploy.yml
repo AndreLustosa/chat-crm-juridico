@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-and-push:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -54,7 +54,7 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: ${{ vars.PORTAINER_WEBHOOK_URL != '' }}
     steps:
       - name: Trigger Portainer stack redeploy
