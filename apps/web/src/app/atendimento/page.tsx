@@ -58,6 +58,15 @@ function getWsUrl(): string {
   return typeof window !== 'undefined' ? window.location.origin : '';
 }
 
+/** Em dev o socket.io está diretamente em /socket.io/ (sem proxy).
+ *  Em produção o Nginx proxia /api/ → API, então o path é /api/socket.io/ */
+function getSocketPath(): string {
+  if (process.env.NEXT_PUBLIC_SOCKET_PATH) return process.env.NEXT_PUBLIC_SOCKET_PATH;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+  const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
+  return isDev ? '/socket.io/' : '/api/socket.io/';
+}
+
 function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   if (!isOut) return null;
   if (status === 'lido') return <CheckCheck size={12} className="text-blue-400" />;
@@ -237,7 +246,7 @@ export default function Dashboard() {
     const wsUrl = getWsUrl();
     console.log('[SOCKET] Connecting to:', wsUrl);
     const socket = io(wsUrl, {
-      path: '/api/socket.io/',
+      path: getSocketPath(),
       transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
