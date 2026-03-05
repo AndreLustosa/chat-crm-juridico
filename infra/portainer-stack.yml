@@ -19,6 +19,12 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - crm-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chat_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -49,6 +55,9 @@ services:
     image: andreflustosa/chat-crm-juridico-api:latest
     container_name: crm-api
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/chat_crm
       REDIS_HOST: redis
@@ -70,6 +79,9 @@ services:
     image: andreflustosa/chat-crm-juridico-worker:latest
     container_name: crm-worker
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/chat_crm
       REDIS_HOST: redis
