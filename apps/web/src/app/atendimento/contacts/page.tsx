@@ -16,6 +16,7 @@ interface Contact {
   origin: string;
   instanceName?: string;
   profile_picture_url?: string;
+  stage: string;
 }
 
 interface LeadDetail {
@@ -708,6 +709,7 @@ export default function ContactsPage() {
   const [syncing, setSyncing] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   const fetchAllContacts = async () => {
     try {
@@ -724,6 +726,7 @@ export default function ContactsPage() {
         lastMessage: lead.conversations?.[0]?.messages?.[0]?.text || '-',
         origin: lead.origin || 'crm',
         profile_picture_url: lead.profile_picture_url,
+        stage: lead.stage || 'INICIAL',
       }));
 
       mappedContacts.sort((a, b) => a.name.localeCompare(b.name));
@@ -768,10 +771,11 @@ export default function ContactsPage() {
     }
   };
 
-  const filteredContacts = contacts.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone.includes(search)
-  );
+  const searchMatch = (c: Contact) =>
+    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search);
+
+  const activeContacts = contacts.filter(c => c.stage !== 'PERDIDO' && searchMatch(c));
+  const archivedContacts = contacts.filter(c => c.stage === 'PERDIDO' && searchMatch(c));
 
   return (
     <div className="flex h-screen bg-background overflow-hidden text-foreground">
@@ -781,7 +785,11 @@ export default function ContactsPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground tracking-tight">Contatos</h1>
             <p className="text-[13px] text-muted-foreground mt-0.5">
-              {loading ? 'Carregando...' : `${contacts.length} contatos sincronizados`}
+              {loading ? 'Carregando...' : (() => {
+                const active = contacts.filter(c => c.stage !== 'PERDIDO').length;
+                const archived = contacts.filter(c => c.stage === 'PERDIDO').length;
+                return `${active} contatos ativos${archived > 0 ? ` · ${archived} arquivados` : ''}`;
+              })()}
             </p>
           </div>
 
@@ -820,73 +828,154 @@ export default function ContactsPage() {
               <p className="text-sm font-medium">Carregando contatos...</p>
             </div>
           ) : (
-            <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-              <table className="w-full text-left table-auto">
-                <thead>
-                  <tr className="bg-foreground/[0.02] border-b border-border">
-                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Nome</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Telefone</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
-                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Origem</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-foreground/[0.04]">
-                  {filteredContacts.map((contact) => (
-                    <tr key={contact.id} className="hover:bg-foreground/[0.02] transition-colors group">
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-4">
-                          <div
-                            className={`w-9 h-9 rounded-full bg-primary/10 border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                            onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
-                          >
-                            {contact.profile_picture_url ? (
-                              <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
-                            ) : (
-                              <span className="text-primary font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
+            <>
+              {/* ── Tabela de contatos ativos ── */}
+              <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+                <table className="w-full text-left table-auto">
+                  <thead>
+                    <tr className="bg-foreground/[0.02] border-b border-border">
+                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Nome</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Telefone</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Origem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-foreground/[0.04]">
+                    {activeContacts.map((contact) => (
+                      <tr key={contact.id} className="hover:bg-foreground/[0.02] transition-colors group">
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-4">
+                            <div
+                              className={`w-9 h-9 rounded-full bg-primary/10 border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                              onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
+                            >
+                              {contact.profile_picture_url ? (
+                                <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <span className="text-primary font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
+                              )}
+                            </div>
+                            <span
+                              className="text-[14px] font-semibold text-foreground tracking-tight cursor-pointer hover:text-primary transition-colors"
+                              onClick={() => setSelectedLeadId(contact.id)}
+                            >
+                              {contact.name}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">
+                          {formatPhone(contact.phone)}
+                        </td>
+                        <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">{contact.email || '-'}</td>
+                        <td className="px-6 py-5">
+                          <div className="flex flex-col gap-1">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold uppercase tracking-wider border border-green-500/20">
+                              <Phone className="w-3 h-3" />
+                              WhatsApp
+                            </span>
+                            {contact.instanceName && (
+                              <span className="text-[10px] text-muted-foreground font-mono ml-2">
+                                via {contact.instanceName}
+                              </span>
                             )}
                           </div>
-                          {/* Nome clicável abre o painel */}
-                          <span
-                            className="text-[14px] font-semibold text-foreground tracking-tight cursor-pointer hover:text-primary transition-colors"
-                            onClick={() => setSelectedLeadId(contact.id)}
-                          >
-                            {contact.name}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">
-                        {formatPhone(contact.phone)}
-                      </td>
-                      <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">{contact.email || '-'}</td>
-                      <td className="px-6 py-5">
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold uppercase tracking-wider border border-green-500/20">
-                            <Phone className="w-3 h-3" />
-                            WhatsApp
-                          </span>
-                          {contact.instanceName && (
-                            <span className="text-[10px] text-muted-foreground font-mono ml-2">
-                              via {contact.instanceName}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    ))}
 
-                  {filteredContacts.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="py-20 text-center">
-                        <div className="flex flex-col items-center opacity-30">
-                          <User className="w-12 h-12 mb-3 stroke-[1.2]" />
-                          <p className="text-sm font-medium">Nenhum contato encontrado</p>
-                        </div>
-                      </td>
-                    </tr>
+                    {activeContacts.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-20 text-center">
+                          <div className="flex flex-col items-center opacity-30">
+                            <User className="w-12 h-12 mb-3 stroke-[1.2]" />
+                            <p className="text-sm font-medium">Nenhum contato encontrado</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── Seção Arquivados (PERDIDO) ── */}
+              {(archivedContacts.length > 0 || contacts.some(c => c.stage === 'PERDIDO')) && (
+                <div className="mt-6">
+                  <button
+                    onClick={() => setShowArchived(v => !v)}
+                    className="flex items-center gap-2.5 px-1 py-2 text-[13px] font-semibold text-muted-foreground hover:text-foreground transition-colors group"
+                  >
+                    <FolderOpen size={16} className="text-red-400 group-hover:text-red-500 transition-colors" />
+                    <span>Arquivados</span>
+                    {contacts.filter(c => c.stage === 'PERDIDO').length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 text-[11px] font-bold border border-red-500/20">
+                        {contacts.filter(c => c.stage === 'PERDIDO').length}
+                      </span>
+                    )}
+                    {showArchived
+                      ? <ChevronUp size={14} className="ml-1" />
+                      : <ChevronDown size={14} className="ml-1" />
+                    }
+                  </button>
+
+                  {showArchived && (
+                    <div className="mt-2 rounded-2xl border border-red-500/20 bg-card shadow-sm overflow-hidden opacity-80">
+                      <table className="w-full text-left table-auto">
+                        <thead>
+                          <tr className="bg-red-500/[0.04] border-b border-red-500/20">
+                            <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Nome</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Telefone</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Email</th>
+                            <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-red-500/[0.06]">
+                          {archivedContacts.map((contact) => (
+                            <tr key={contact.id} className="hover:bg-red-500/[0.03] transition-colors group">
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-4">
+                                  <div
+                                    className={`w-9 h-9 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center overflow-hidden shrink-0 shadow-sm grayscale ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                                    onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
+                                  >
+                                    {contact.profile_picture_url ? (
+                                      <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
+                                    ) : (
+                                      <span className="text-red-400 font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
+                                    )}
+                                  </div>
+                                  <span
+                                    className="text-[14px] font-semibold text-muted-foreground tracking-tight cursor-pointer hover:text-foreground transition-colors"
+                                    onClick={() => setSelectedLeadId(contact.id)}
+                                  >
+                                    {contact.name}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-[13px] text-muted-foreground/70 font-medium">
+                                {formatPhone(contact.phone)}
+                              </td>
+                              <td className="px-6 py-4 text-[13px] text-muted-foreground/70 font-medium">{contact.email || '-'}</td>
+                              <td className="px-6 py-4">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 text-[10px] font-bold uppercase tracking-wider border border-red-500/20">
+                                  ❌ Perdido
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          {archivedContacts.length === 0 && search && (
+                            <tr>
+                              <td colSpan={4} className="py-10 text-center text-[13px] text-muted-foreground/50">
+                                Nenhum arquivado encontrado para esta busca
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>
