@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, RefreshCw, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw } from 'lucide-react';
+import { Search, User, Phone, Loader2, RefreshCw, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, ArrowLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
@@ -709,7 +709,8 @@ export default function ContactsPage() {
   const [syncing, setSyncing] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
+  // 'active' = tela principal | 'archived' = tela de arquivados
+  const [view, setView] = useState<'active' | 'archived'>('active');
 
   const fetchAllContacts = async () => {
     try {
@@ -771,23 +772,155 @@ export default function ContactsPage() {
     }
   };
 
-  const searchMatch = (c: Contact) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search);
-
-  const activeContacts = contacts.filter(c => c.stage !== 'PERDIDO' && searchMatch(c));
-  const archivedContacts = contacts.filter(c => c.stage === 'PERDIDO' && searchMatch(c));
-
   const handleUnarchive = async (contactId: string) => {
-    // Otimista: move para ativos imediatamente
     setContacts(prev => prev.map(c => c.id === contactId ? { ...c, stage: 'INICIAL' } : c));
     try {
       await api.patch(`/leads/${contactId}/stage`, { stage: 'INICIAL' });
     } catch {
-      // Rollback em caso de erro
       fetchAllContacts();
     }
   };
 
+  const searchMatch = (c: Contact) =>
+    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search);
+
+  const activeContacts  = contacts.filter(c => c.stage !== 'PERDIDO' && searchMatch(c));
+  const archivedContacts = contacts.filter(c => c.stage === 'PERDIDO' && searchMatch(c));
+  const archivedCount   = contacts.filter(c => c.stage === 'PERDIDO').length;
+
+  // ─── Tela de Arquivados ───────────────────────────────────────────────────
+  if (view === 'archived') {
+    return (
+      <div className="flex h-screen bg-background overflow-hidden text-foreground">
+        <main className="flex-1 flex flex-col bg-background overflow-hidden relative">
+          {/* Header */}
+          <header className="px-8 py-6 shrink-0 flex items-center justify-between border-b border-border bg-card/30 backdrop-blur-md z-10">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => { setView('active'); setSearch(''); }}
+                className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium"
+              >
+                <ArrowLeft size={16} />
+                Contatos
+              </button>
+              <span className="text-muted-foreground/30 text-lg">|</span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <FolderOpen size={18} className="text-red-400" />
+                  <h1 className="text-2xl font-bold text-foreground tracking-tight">Arquivados</h1>
+                  {archivedCount > 0 && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-500 text-[12px] font-bold border border-red-500/20">
+                      {archivedCount}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[13px] text-muted-foreground mt-0.5">
+                  Leads marcados como Perdido no CRM
+                </p>
+              </div>
+            </div>
+
+            <div className="relative w-80 group">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+              <input
+                type="text"
+                placeholder="Buscar por nome ou telefone..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-[13px] focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+              />
+            </div>
+          </header>
+
+          {/* Table */}
+          <div className="flex-1 overflow-y-auto p-8 bg-foreground/[0.01]">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20 opacity-50">
+                <Loader2 className="w-10 h-10 animate-spin mb-4" />
+                <p className="text-sm font-medium">Carregando...</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-red-500/20 bg-card shadow-sm overflow-hidden">
+                <table className="w-full text-left table-auto">
+                  <thead>
+                    <tr className="bg-red-500/[0.04] border-b border-red-500/20">
+                      <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Nome</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Telefone</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Email</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-500/[0.06]">
+                    {archivedContacts.map((contact) => (
+                      <tr key={contact.id} className="hover:bg-red-500/[0.03] transition-colors group">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-4">
+                            <div
+                              className={`w-9 h-9 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center overflow-hidden shrink-0 shadow-sm grayscale ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                              onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
+                            >
+                              {contact.profile_picture_url ? (
+                                <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <span className="text-red-400 font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
+                              )}
+                            </div>
+                            <span
+                              className="text-[14px] font-semibold text-muted-foreground tracking-tight cursor-pointer hover:text-foreground transition-colors"
+                              onClick={() => setSelectedLeadId(contact.id)}
+                            >
+                              {contact.name}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-[13px] text-muted-foreground/70 font-medium">
+                          {formatPhone(contact.phone)}
+                        </td>
+                        <td className="px-6 py-4 text-[13px] text-muted-foreground/70 font-medium">{contact.email || '-'}</td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => handleUnarchive(contact.id)}
+                            title="Desarquivar lead (mover para Inicial)"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.05] text-muted-foreground hover:bg-primary/10 hover:text-primary text-[11px] font-semibold border border-transparent hover:border-primary/20 transition-all"
+                          >
+                            <RotateCcw size={12} />
+                            Desarquivar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {archivedContacts.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-20 text-center">
+                          <div className="flex flex-col items-center opacity-30">
+                            <FolderOpen className="w-12 h-12 mb-3 stroke-[1.2]" />
+                            <p className="text-sm font-medium">
+                              {search ? 'Nenhum arquivado encontrado para esta busca' : 'Nenhum lead arquivado'}
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </main>
+
+        {selectedLeadId && (
+          <ClientPanel leadId={selectedLeadId} onClose={() => setSelectedLeadId(null)} onLightbox={setLightbox} />
+        )}
+        {lightbox && (
+          <div className="fixed inset-0 z-[999] bg-black/80 backdrop-blur-sm flex items-center justify-center cursor-pointer" onClick={() => setLightbox(null)}>
+            <img src={lightbox} alt="Foto do contato" className="max-w-[80vw] max-h-[80vh] rounded-2xl shadow-2xl object-contain" onClick={e => e.stopPropagation()} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Tela Principal (Contatos Ativos) ────────────────────────────────────
   return (
     <div className="flex h-screen bg-background overflow-hidden text-foreground">
       <main className="flex-1 flex flex-col bg-background overflow-hidden relative">
@@ -798,13 +931,26 @@ export default function ContactsPage() {
             <p className="text-[13px] text-muted-foreground mt-0.5">
               {loading ? 'Carregando...' : (() => {
                 const active = contacts.filter(c => c.stage !== 'PERDIDO').length;
-                const archived = contacts.filter(c => c.stage === 'PERDIDO').length;
-                return `${active} contatos ativos${archived > 0 ? ` · ${archived} arquivados` : ''}`;
+                return `${active} contatos ativos`;
               })()}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Botão Arquivados */}
+            <button
+              onClick={() => { setView('archived'); setSearch(''); }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-semibold border border-border bg-card hover:bg-accent transition-all text-muted-foreground hover:text-foreground"
+            >
+              <FolderOpen size={15} className="text-red-400" />
+              Arquivados
+              {archivedCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-500 text-[10px] font-bold">
+                  {archivedCount}
+                </span>
+              )}
+            </button>
+
             <div className="relative w-80 group">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
               <input
@@ -839,167 +985,72 @@ export default function ContactsPage() {
               <p className="text-sm font-medium">Carregando contatos...</p>
             </div>
           ) : (
-            <>
-              {/* ── Tabela de contatos ativos ── */}
-              <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-                <table className="w-full text-left table-auto">
-                  <thead>
-                    <tr className="bg-foreground/[0.02] border-b border-border">
-                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Nome</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Telefone</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Origem</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-foreground/[0.04]">
-                    {activeContacts.map((contact) => (
-                      <tr key={contact.id} className="hover:bg-foreground/[0.02] transition-colors group">
-                        <td className="px-6 py-5">
-                          <div className="flex items-center gap-4">
-                            <div
-                              className={`w-9 h-9 rounded-full bg-primary/10 border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                              onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
-                            >
-                              {contact.profile_picture_url ? (
-                                <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
-                              ) : (
-                                <span className="text-primary font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
-                              )}
-                            </div>
-                            <span
-                              className="text-[14px] font-semibold text-foreground tracking-tight cursor-pointer hover:text-primary transition-colors"
-                              onClick={() => setSelectedLeadId(contact.id)}
-                            >
-                              {contact.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">
-                          {formatPhone(contact.phone)}
-                        </td>
-                        <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">{contact.email || '-'}</td>
-                        <td className="px-6 py-5">
-                          <div className="flex flex-col gap-1">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold uppercase tracking-wider border border-green-500/20">
-                              <Phone className="w-3 h-3" />
-                              WhatsApp
-                            </span>
-                            {contact.instanceName && (
-                              <span className="text-[10px] text-muted-foreground font-mono ml-2">
-                                via {contact.instanceName}
-                              </span>
+            <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+              <table className="w-full text-left table-auto">
+                <thead>
+                  <tr className="bg-foreground/[0.02] border-b border-border">
+                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Nome</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Telefone</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Origem</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-foreground/[0.04]">
+                  {activeContacts.map((contact) => (
+                    <tr key={contact.id} className="hover:bg-foreground/[0.02] transition-colors group">
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-4">
+                          <div
+                            className={`w-9 h-9 rounded-full bg-primary/10 border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                            onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
+                          >
+                            {contact.profile_picture_url ? (
+                              <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
+                            ) : (
+                              <span className="text-primary font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
                             )}
                           </div>
-                        </td>
-                      </tr>
-                    ))}
+                          <span
+                            className="text-[14px] font-semibold text-foreground tracking-tight cursor-pointer hover:text-primary transition-colors"
+                            onClick={() => setSelectedLeadId(contact.id)}
+                          >
+                            {contact.name}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">
+                        {formatPhone(contact.phone)}
+                      </td>
+                      <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">{contact.email || '-'}</td>
+                      <td className="px-6 py-5">
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold uppercase tracking-wider border border-green-500/20">
+                            <Phone className="w-3 h-3" />
+                            WhatsApp
+                          </span>
+                          {contact.instanceName && (
+                            <span className="text-[10px] text-muted-foreground font-mono ml-2">
+                              via {contact.instanceName}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
 
-                    {activeContacts.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="py-20 text-center">
-                          <div className="flex flex-col items-center opacity-30">
-                            <User className="w-12 h-12 mb-3 stroke-[1.2]" />
-                            <p className="text-sm font-medium">Nenhum contato encontrado</p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* ── Seção Arquivados (PERDIDO) — sempre visível ── */}
-              <div className="mt-6">
-                <button
-                  onClick={() => setShowArchived(v => !v)}
-                  className="flex items-center gap-2.5 px-1 py-2 text-[13px] font-semibold text-muted-foreground hover:text-foreground transition-colors group"
-                >
-                  <FolderOpen size={16} className="text-red-400 group-hover:text-red-500 transition-colors" />
-                  <span>Arquivados</span>
-                  {contacts.filter(c => c.stage === 'PERDIDO').length > 0 ? (
-                    <span className="px-2 py-0.5 rounded-full bg-red-500/10 text-red-500 text-[11px] font-bold border border-red-500/20">
-                      {contacts.filter(c => c.stage === 'PERDIDO').length}
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full bg-foreground/[0.06] text-muted-foreground text-[11px] font-bold">
-                      0
-                    </span>
+                  {activeContacts.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-20 text-center">
+                        <div className="flex flex-col items-center opacity-30">
+                          <User className="w-12 h-12 mb-3 stroke-[1.2]" />
+                          <p className="text-sm font-medium">Nenhum contato encontrado</p>
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                  {showArchived
-                    ? <ChevronUp size={14} className="ml-1" />
-                    : <ChevronDown size={14} className="ml-1" />
-                  }
-                </button>
-
-                {showArchived && (
-                  <div className="mt-2 rounded-2xl border border-red-500/20 bg-card shadow-sm overflow-hidden opacity-80">
-                    <table className="w-full text-left table-auto">
-                      <thead>
-                        <tr className="bg-red-500/[0.04] border-b border-red-500/20">
-                          <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Nome</th>
-                          <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Telefone</th>
-                          <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Email</th>
-                          <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Status</th>
-                          <th className="px-6 py-4 text-[10px] font-bold text-red-400 uppercase tracking-widest">Ação</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-red-500/[0.06]">
-                        {archivedContacts.map((contact) => (
-                          <tr key={contact.id} className="hover:bg-red-500/[0.03] transition-colors group">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-4">
-                                <div
-                                  className={`w-9 h-9 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center overflow-hidden shrink-0 shadow-sm grayscale ${contact.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                                  onClick={contact.profile_picture_url ? (e) => { e.stopPropagation(); setLightbox(contact.profile_picture_url!); } : undefined}
-                                >
-                                  {contact.profile_picture_url ? (
-                                    <img src={contact.profile_picture_url} alt={contact.name} className="w-full h-full object-cover" loading="lazy" />
-                                  ) : (
-                                    <span className="text-red-400 font-bold text-xs">{contact.name.charAt(0).toUpperCase()}</span>
-                                  )}
-                                </div>
-                                <span
-                                  className="text-[14px] font-semibold text-muted-foreground tracking-tight cursor-pointer hover:text-foreground transition-colors"
-                                  onClick={() => setSelectedLeadId(contact.id)}
-                                >
-                                  {contact.name}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-[13px] text-muted-foreground/70 font-medium">
-                              {formatPhone(contact.phone)}
-                            </td>
-                            <td className="px-6 py-4 text-[13px] text-muted-foreground/70 font-medium">{contact.email || '-'}</td>
-                            <td className="px-6 py-4">
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 text-red-500 text-[10px] font-bold uppercase tracking-wider border border-red-500/20">
-                                ❌ Perdido
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <button
-                                onClick={() => handleUnarchive(contact.id)}
-                                title="Desarquivar lead (mover para Inicial)"
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.05] text-muted-foreground hover:bg-primary/10 hover:text-primary text-[11px] font-semibold border border-transparent hover:border-primary/20 transition-all"
-                              >
-                                <RotateCcw size={12} />
-                                Desarquivar
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {archivedContacts.length === 0 && (
-                          <tr>
-                            <td colSpan={5} className="py-10 text-center text-[13px] text-muted-foreground/50 italic">
-                              {search ? 'Nenhum arquivado encontrado para esta busca' : 'Nenhum lead arquivado'}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </>
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </main>
