@@ -67,4 +67,4 @@ jobs:
             exit 0
           fi
           echo "Disparando webhook do Portainer..."
-          curl -s -X POST "$PORTAINER_WEBHOOK_URL" && echo "Webhook disparado com sucesso" || echo "Portainer webhook falhou"
+          curl -s --max-time 30 -X POST "$PORTAINER_WEBHOOK_URL" && echo "Webhook disparado com sucesso" || echo "Portainer webhook falhou (timeout ou erro — verifique o Portainer manualmente)"
