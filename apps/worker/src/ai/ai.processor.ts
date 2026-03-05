@@ -298,43 +298,40 @@ export class AiProcessor extends WorkerHost {
   ) {
     if (!updates || typeof updates !== 'object') return;
 
-    // a. Nome do lead (só se não existir)
+    // a. Nome do lead — sempre atualiza quando a IA extrai o nome real do contato.
+    //    O pushName do WhatsApp (display name) é apenas um placeholder inicial;
+    //    quando o usuário informa o próprio nome a IA o captura e substitui.
     if (updates.name && updates.name !== 'null' && updates.name.length >= 2) {
-      const lead = await this.prisma.lead.findUnique({
+      await this.prisma.lead.update({
         where: { id: leadId },
+        data: { name: updates.name },
       });
-      if (!lead?.name) {
-        await this.prisma.lead.update({
-          where: { id: leadId },
-          data: { name: updates.name },
-        });
-        this.logger.log(
-          `[AI] Nome salvo: "${updates.name}" → lead ${leadId}`,
-        );
+      this.logger.log(
+        `[AI] Nome atualizado: "${updates.name}" → lead ${leadId}`,
+      );
 
-        const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
-        if (apiUrl && instanceName) {
-          try {
-            await axios.post(
-              `${apiUrl}/contact/upsert/${instanceName}`,
-              {
-                contacts: [{ phone: leadPhone, fullName: updates.name }],
+      const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
+      if (apiUrl && instanceName) {
+        try {
+          await axios.post(
+            `${apiUrl}/contact/upsert/${instanceName}`,
+            {
+              contacts: [{ phone: leadPhone, fullName: updates.name }],
+            },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: apiKey,
               },
-              {
-                headers: {
-                  'Content-Type': 'application/json',
-                  apikey: apiKey,
-                },
-              },
-            );
-            this.logger.log(
-              `[AI] Contato salvo na Evolution: ${leadPhone} → "${updates.name}"`,
-            );
-          } catch (e: any) {
-            this.logger.warn(
-              `[AI] Falha ao salvar contato na Evolution: ${e.message}`,
-            );
-          }
+            },
+          );
+          this.logger.log(
+            `[AI] Contato atualizado na Evolution: ${leadPhone} → "${updates.name}"`,
+          );
+        } catch (e: any) {
+          this.logger.warn(
+            `[AI] Falha ao atualizar contato na Evolution: ${e.message}`,
+          );
         }
       }
     }
