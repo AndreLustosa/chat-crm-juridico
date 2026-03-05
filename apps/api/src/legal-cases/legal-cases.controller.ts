@@ -23,6 +23,11 @@ export class LegalCasesController {
     return this.service.getStages();
   }
 
+  @Get('tracking-stages')
+  getTrackingStages() {
+    return this.service.getTrackingStages();
+  }
+
   @Get('incoming')
   findIncoming(@Request() req: any) {
     return this.service.findIncoming(req.user.id);
@@ -33,11 +38,13 @@ export class LegalCasesController {
     @Request() req: any,
     @Query('stage') stage?: string,
     @Query('archived') archived?: string,
+    @Query('inTracking') inTracking?: string,
   ) {
     const isAdmin = req.user.role === 'ADMIN';
     const lawyerId = isAdmin ? undefined : req.user.id;
     const archivedBool = archived === 'true' ? true : archived === 'false' ? false : undefined;
-    return this.service.findAll(lawyerId, stage, archivedBool);
+    const inTrackingBool = inTracking === 'true' ? true : inTracking === 'false' ? false : undefined;
+    return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool);
   }
 
   @Get(':id')
@@ -79,9 +86,24 @@ export class LegalCasesController {
     return this.service.setCaseNumber(id, body.caseNumber, body.court);
   }
 
+  @Patch(':id/send-to-tracking')
+  sendToTracking(@Param('id') id: string, @Body() body: { caseNumber: string; court?: string }) {
+    return this.service.sendToTracking(id, body.caseNumber, body.court);
+  }
+
+  @Patch(':id/tracking-stage')
+  updateTrackingStage(@Param('id') id: string, @Body('trackingStage') trackingStage: string) {
+    return this.service.updateTrackingStage(id, trackingStage);
+  }
+
   @Patch(':id/notes')
   updateNotes(@Param('id') id: string, @Body('notes') notes: string) {
     return this.service.updateNotes(id, notes);
+  }
+
+  @Patch(':id/court')
+  updateCourt(@Param('id') id: string, @Body('court') court: string) {
+    return this.service.updateCourt(id, court);
   }
 
   @Post(':id/events')

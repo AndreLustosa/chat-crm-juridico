@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef 
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
-import { LEGAL_STAGES } from './legal-stages';
+import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 
 @Injectable()
 export class LegalCasesService {
@@ -34,11 +34,12 @@ export class LegalCasesService {
     });
   }
 
-  async findAll(lawyerId?: string, stage?: string, archived?: boolean) {
+  async findAll(lawyerId?: string, stage?: string, archived?: boolean, inTracking?: boolean) {
     const where: any = {};
     if (lawyerId) where.lawyer_id = lawyerId;
     if (stage) where.stage = stage;
     if (archived !== undefined) where.archived = archived;
+    if (inTracking !== undefined) where.in_tracking = inTracking;
 
     return this.prisma.legalCase.findMany({
       where,
@@ -57,6 +58,7 @@ export class LegalCasesService {
           select: {
             tasks: true,
             events: true,
+            djen_publications: true,
           },
         },
       },
@@ -215,6 +217,13 @@ export class LegalCasesService {
     });
   }
 
+  async updateCourt(id: string, court: string) {
+    return this.prisma.legalCase.update({
+      where: { id },
+      data: { court },
+    });
+  }
+
   // ─── EVENTS (Publicações / Movimentações) ──────────────────────
 
   async addEvent(caseId: string, data: {
@@ -284,9 +293,53 @@ export class LegalCasesService {
     return created;
   }
 
+  // ─── PROTOCOLO → PROCESSOS ─────────────────────────────────────
+
+  async sendToTracking(id: string, caseNumber: string, court?: string) {
+    const lc = await this.prisma.legalCase.findUnique({ where: { id } });
+    if (!lc) throw new NotFoundException('Caso não encontrado');
+    if (lc.stage !== 'PROTOCOLO') throw new BadRequestException('Caso deve estar no stage PROTOCOLO para ser protocolado');
+
+    const updated = await this.prisma.legalCase.update({
+      where: { id },
+      data: {
+        case_number: caseNumber,
+        court: court ?? lc.court,
+        in_tracking: true,
+        tracking_stage: 'DISTRIBUIDO',
+        filed_at: new Date(),
+      },
+      include: { lead: { select: { name: true } } },
+    });
+
+    try {
+      this.chatGateway.emitLegalCaseUpdate(updated.lawyer_id, {
+        caseId: id,
+        action: 'sent_to_tracking',
+        caseNumber,
+      });
+    } catch {}
+
+    return updated;
+  }
+
+  async updateTrackingStage(id: string, trackingStage: string) {
+    const valid = TRACKING_STAGES.find(s => s.id === trackingStage);
+    if (!valid) throw new BadRequestException(`Stage inválido: ${trackingStage}`);
+
+    return this.prisma.legalCase.update({
+      where: { id },
+      data: { tracking_stage: trackingStage },
+    });
+  }
+
   // ─── STAGES LIST ────────────────────────────────────────────────
 
   getStages() {
     return LEGAL_STAGES;
+  }
+
+  getTrackingStages() {
+    return TRACKING_STAGES;
   }
 }

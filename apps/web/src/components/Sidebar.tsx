@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, Scale } from 'lucide-react';
+import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, Scale, BookOpen } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
 const THEMES = [
@@ -62,6 +62,7 @@ export function Sidebar() {
     { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts') },
     { label: 'Tarefas', href: '/atendimento/tasks', icon: <Check size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/tasks') },
     { label: 'Advogado', href: '/atendimento/advogado', icon: <Scale size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/advogado') },
+    { label: 'Processos', href: '/atendimento/processos', icon: <BookOpen size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/processos') },
     { label: 'Analytics', href: '/atendimento/marketing/analytics', icon: <Megaphone size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/marketing') },
     { label: 'Configurações', href: '/atendimento/settings', icon: <Settings size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/settings') },
   ];

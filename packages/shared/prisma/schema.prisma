@@ -296,6 +296,9 @@ model LegalCase {
   case_number     String?
   legal_area      String?
   stage           String         @default("VIABILIDADE")
+  in_tracking     Boolean        @default(false)   // true = passou para menu Processos
+  tracking_stage  String?                          // stage dentro do menu Processos
+  filed_at        DateTime?                        // quando foi protocolado/ajuizado
   archived        Boolean        @default(false)
   archive_reason  String?
   notes           String?
@@ -303,16 +306,18 @@ model LegalCase {
   created_at      DateTime       @default(now())
   updated_at      DateTime       @updatedAt
 
-  lead            Lead           @relation(fields: [lead_id], references: [id])
-  conversation    Conversation?  @relation(fields: [conversation_id], references: [id])
-  lawyer          User           @relation("LawyerCases", fields: [lawyer_id], references: [id])
-  tenant          Tenant?        @relation(fields: [tenant_id], references: [id])
-  tasks           Task[]
-  events          CaseEvent[]
+  lead              Lead              @relation(fields: [lead_id], references: [id])
+  conversation      Conversation?     @relation(fields: [conversation_id], references: [id])
+  lawyer            User              @relation("LawyerCases", fields: [lawyer_id], references: [id])
+  tenant            Tenant?           @relation(fields: [tenant_id], references: [id])
+  tasks             Task[]
+  events            CaseEvent[]
+  djen_publications DjenPublication[]
 
   @@index([lawyer_id, stage])
   @@index([lead_id])
   @@index([stage])
+  @@index([in_tracking])
 }
 
 model CaseEvent {
@@ -342,4 +347,24 @@ model TaskComment {
   user       User     @relation(fields: [user_id], references: [id])
 
   @@index([task_id, created_at])
+}
+
+model DjenPublication {
+  id                    String     @id @default(uuid())
+  comunicacao_id        Int        @unique
+  data_disponibilizacao DateTime
+  numero_processo       String
+  classe_processual     String?
+  assunto               String?
+  tipo_comunicacao      String?
+  conteudo              String
+  nome_advogado         String?
+  raw_json              Json
+  legal_case_id         String?
+  legal_case            LegalCase? @relation(fields: [legal_case_id], references: [id])
+  created_at            DateTime   @default(now())
+
+  @@index([data_disponibilizacao])
+  @@index([numero_processo])
+  @@index([legal_case_id])
 }
