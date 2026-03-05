@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { TransferAudioRecorder } from '@/components/TransferAudioRecorder';
@@ -148,6 +148,7 @@ export default function Dashboard() {
   // Pending transfers waiting for current user to accept/decline
   const [pendingTransfers, setPendingTransfers] = useState<{ conversationId: string; contactName: string; fromUserName: string; reason: string | null; audioIds?: string[] }[]>([]);
   const [inboxOpen, setInboxOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   // Unread message counts per conversation (persisted in sessionStorage to survive same-page navigation)
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return {};
@@ -819,6 +820,15 @@ export default function Dashboard() {
     } else {
       result = conversations;
     }
+    // Filtro de busca: nome do contato, telefone ou conteúdo da última mensagem
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(c =>
+        c.contactName?.toLowerCase().includes(q) ||
+        c.contactPhone?.toLowerCase().includes(q) ||
+        c.lastMessage?.toLowerCase().includes(q)
+      );
+    }
     return result.sort((a, b) => {
       const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
       const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
@@ -954,6 +964,27 @@ export default function Dashboard() {
             </button>
           </div>
 
+          {/* Barra de pesquisa */}
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Buscar contato ou mensagem…"
+              className="w-full pl-8 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                title="Limpar busca"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
           {/* Transferências aguardando resposta */}
           {pendingTransfers.length > 0 && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
@@ -1040,7 +1071,9 @@ export default function Dashboard() {
           {loading ? (
             <div className="p-10 text-center text-muted-foreground text-sm">Carregando conversas...</div>
           ) : filteredConversations.length === 0 ? (
-            <div className="p-10 text-center text-muted-foreground text-sm">Nenhuma conversa encontrada.</div>
+            <div className="p-10 text-center text-muted-foreground text-sm">
+              {searchQuery.trim() ? `Nenhum resultado para "${searchQuery}".` : 'Nenhuma conversa encontrada.'}
+            </div>
           ) : (
             (() => {
               let lastConvDateKey = '';
