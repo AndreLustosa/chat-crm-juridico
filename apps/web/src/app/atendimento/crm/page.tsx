@@ -187,6 +187,37 @@ export default function CrmPage() {
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
 
+  // Pan horizontal do board com clique+arraste do mouse
+  const boardRef = useRef<HTMLDivElement>(null);
+  const isPanning = useRef(false);
+  const panStartX = useRef(0);
+  const panScrollLeft = useRef(0);
+
+  const handleBoardMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Não iniciar pan se clicou em cima de um card (elemento draggable)
+    if ((e.target as HTMLElement).closest('[draggable="true"]')) return;
+    // Não iniciar pan se clicou em botão, select, input
+    if ((e.target as HTMLElement).closest('button, select, input')) return;
+    if (e.button !== 0) return;
+    isPanning.current = true;
+    panStartX.current = e.pageX - (boardRef.current?.offsetLeft ?? 0);
+    panScrollLeft.current = boardRef.current?.scrollLeft ?? 0;
+    if (boardRef.current) boardRef.current.style.cursor = 'grabbing';
+  };
+
+  const handleBoardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPanning.current || !boardRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - boardRef.current.offsetLeft;
+    const walk = (x - panStartX.current) * 1.5;
+    boardRef.current.scrollLeft = panScrollLeft.current - walk;
+  };
+
+  const handleBoardMouseUp = () => {
+    isPanning.current = false;
+    if (boardRef.current) boardRef.current.style.cursor = 'grab';
+  };
+
   const fetchLeads = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -319,7 +350,14 @@ export default function CrmPage() {
             <div className="text-muted-foreground text-sm animate-pulse">Carregando leads…</div>
           </div>
         ) : (
-          <div className="flex-1 overflow-x-auto overflow-y-hidden px-6 py-5">
+          <div
+            ref={boardRef}
+            className="flex-1 overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none"
+            onMouseDown={handleBoardMouseDown}
+            onMouseMove={handleBoardMouseMove}
+            onMouseUp={handleBoardMouseUp}
+            onMouseLeave={handleBoardMouseUp}
+          >
             <div className="flex h-full gap-4" style={{ minWidth: `${CRM_STAGES.length * 272}px` }}>
               {CRM_STAGES.map(stage => {
                 const stageLeads = getStageLeads(stage.id);
