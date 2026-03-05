@@ -7,9 +7,9 @@ import * as argon2 from 'argon2';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  async findAgents(): Promise<{ id: string; name: string }[]> {
+  async findAgents(): Promise<{ id: string; name: string; specialties: string[] }[]> {
     return (this.prisma as any).user.findMany({
-      select: { id: true, name: true },
+      select: { id: true, name: true, specialties: true },
       orderBy: { name: 'asc' },
     });
   }

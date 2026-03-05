@@ -209,7 +209,8 @@ export default function Dashboard() {
 
   const fetchSpecialists = async (silent = false) => {
     try {
-      const res = await api.get('/users', {
+      // /users/agents não exige role ADMIN (diferente de /users)
+      const res = await api.get('/users/agents', {
         ...(silent ? { _silent401: true } as any : {}),
       });
       setAllSpecialists((res.data || []).filter((u: any) => u.specialties?.length > 0));

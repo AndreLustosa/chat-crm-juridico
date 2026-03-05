@@ -365,8 +365,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           setAssignedLawyer(convo.assigned_lawyer || null);
           setOriginAssignedUserId(convo.origin_assigned_user_id || null);
 
-          // Carregar lista de especialistas para o dropdown
-          api.get('/users').then((r) => {
+          // Carregar lista de especialistas para o dropdown (agents = sem restrição de role)
+          api.get('/users/agents').then((r) => {
             setAllSpecialists(
               (r.data as any[]).filter((u) => u.specialties?.length > 0),
             );
