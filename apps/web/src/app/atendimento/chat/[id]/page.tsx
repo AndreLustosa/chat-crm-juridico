@@ -501,8 +501,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 WHATSAPP <span className="mx-1">•</span> {formatPhone(lead?.phone) || ''}
                 {isClosed && <span className="ml-2 text-red-400">• FECHADA</span>}
               </div>
-              {(legalArea || assignedLawyer) && (
-                <div className="flex items-center gap-2 flex-wrap mt-1.5">
+              <div className="flex items-center gap-2 flex-wrap mt-1.5">
                   {legalArea && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20">
                       ⚖️ {legalArea}
@@ -558,7 +557,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                     )}
                   </div>
                 </div>
-              )}
             </div>
           </div>
           <div className="flex gap-2 items-center">
