@@ -657,7 +657,6 @@ export class AiProcessor extends WorkerHost {
       };
 
       // Cabeçalho fixo de capacidades — injetado antes de qualquer skill prompt
-      // para sobrescrever instruções antigas de "não consigo ouvir/ver mídia"
       const MEDIA_CAPABILITIES_HEADER = `CAPACIDADES DE MÍDIA DISPONÍVEIS:
 - Áudios são transcritos automaticamente por IA (Whisper). O texto transcrito já aparece no histórico como texto normal. NUNCA diga que não consegue ouvir — você lê a transcrição.
 - Imagens e documentos enviados pelo cliente são analisados visualmente quando o modelo suporta visão. Responda ao conteúdo deles normalmente.
@@ -665,8 +664,20 @@ export class AiProcessor extends WorkerHost {
 
 `;
 
+      // Regras comportamentais injetadas em TODOS os prompts (skill ou fallback).
+      // Garantem conversa natural e não revelam que a IA está respondendo.
+      const BEHAVIOR_RULES = `REGRAS DE ATENDIMENTO — OBRIGATÓRIAS, ACIMA DE TUDO:
+1. FAÇA SOMENTE UMA PERGUNTA POR MENSAGEM. Nunca envie duas ou mais perguntas juntas.
+2. Quando o cliente responder uma pergunta sua, RECONHEÇA BREVEMENTE a resposta ("Entendi.", "Anotado.", "Ok, obrigado.") e só então faça a próxima pergunta.
+3. NUNCA explique leis, artigos, jurisprudências ou dê parecer jurídico A NÃO SER que o cliente pergunte EXPLICITAMENTE ("tenho direito?", "o que a lei diz?", "pode me explicar?"). Se o cliente apenas relatar um fato, registre e continue coletando.
+4. Aja como um atendente humano. Não mencione que é IA, robô ou assistente virtual. Linguagem simples, direta e natural — como em um WhatsApp entre pessoas.
+5. Mensagens curtas: máximo 4 linhas por resposta. WhatsApp não é e-mail.
+6. Se o cliente fizer uma pergunta jurídica diretamente, responda em no máximo 2 linhas e volte imediatamente à coleta de informações.
+
+`;
+
       if (skill) {
-        systemPrompt = MEDIA_CAPABILITIES_HEADER + this.injectVariables(skill.system_prompt, vars);
+        systemPrompt = MEDIA_CAPABILITIES_HEADER + BEHAVIOR_RULES + this.injectVariables(skill.system_prompt, vars);
         model = skill.model || (await this.settings.getDefaultModel());
         maxTokens = skill.max_tokens || 500;
         temperature = skill.temperature ?? 0.7;
@@ -674,7 +685,23 @@ export class AiProcessor extends WorkerHost {
           `[AI] Usando skill: "${skill.name}" (area=${skill.area}, model=${model})`,
         );
       } else {
-        systemPrompt = MEDIA_CAPABILITIES_HEADER + `Você é Sophia, agente de pré-atendimento do escritório André Lustosa Advogados.\nSeu objetivo é acolher o cliente, entender o problema e coletar informações para o advogado.\nResponda de forma empática e curta (adequado para WhatsApp).\nRetorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":""}}\n\nValores válidos para updates.status (etapa do lead no CRM):\nINICIAL | QUALIFICANDO | AGUARDANDO_FORM | REUNIAO_AGENDADA | AGUARDANDO_DOCS | AGUARDANDO_PROC | FINALIZADO | PERDIDO\n\nValores válidos para updates.next_step:\nduvidas | triagem_concluida | formulario | reuniao | documentos | procuracao | encerrado`;
+        systemPrompt =
+          MEDIA_CAPABILITIES_HEADER +
+          BEHAVIOR_RULES +
+          `Você é Sophia, assistente de pré-atendimento do escritório André Lustosa Advogados.
+Seu objetivo é coletar informações sobre o caso do cliente para o advogado conseguir avaliar.
+
+ROTEIRO (siga na ordem, UMA pergunta por vez):
+1. Cumprimente e pergunte o nome do cliente.
+2. Pergunte qual é o problema principal (deixe o cliente descrever com as próprias palavras).
+3. Colete detalhes: quando ocorreu, quem é a outra parte (empresa ou pessoa), se há valores envolvidos.
+4. Pergunte se possui documentos ou provas (contrato, mensagens, fotos, etc.).
+5. Quando tiver informações suficientes, informe que o advogado vai analisar e oriente o próximo passo.
+
+Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":""}}
+
+Valores válidos para updates.status: INICIAL | QUALIFICANDO | AGUARDANDO_FORM | REUNIAO_AGENDADA | AGUARDANDO_DOCS | AGUARDANDO_PROC | FINALIZADO | PERDIDO
+Valores válidos para updates.next_step: duvidas | triagem_concluida | formulario | reuniao | documentos | procuracao | encerrado`;
         model = await this.settings.getDefaultModel();
         maxTokens = 500;
         temperature = 0.7;
@@ -684,7 +711,7 @@ export class AiProcessor extends WorkerHost {
       }
 
       // 11. Montar conteúdo do usuário (texto + imagens para modelos com visão)
-      const baseText = `Histórico recente:\n${historyText}\n\nResponda à última mensagem do cliente.`;
+      const baseText = `Histórico recente:\n${historyText}\n\nResponda SOMENTE à última mensagem do cliente. Se o cliente respondeu uma pergunta sua, reconheça brevemente e faça a próxima pergunta do roteiro. Não explique leis nem dê pareceres jurídicos a não ser que o cliente pergunte diretamente.`;
 
       let userContent: string | any[] = baseText;
 
