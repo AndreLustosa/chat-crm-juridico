@@ -179,7 +179,7 @@ export class LegalCasesService {
         await this.whatsappService.sendText(
           legalCase.lead.phone,
           msg,
-          legalCase.conversation?.instance_name,
+          legalCase.conversation?.instance_name ?? undefined,
         );
       } catch (e) {
         console.error('Erro ao enviar notificação de arquivamento:', e);
