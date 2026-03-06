@@ -91,6 +91,7 @@ export default function FichaTrabalhista({
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     pessoal: true,
   });
+  const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
   const [loadingCep, setLoadingCep] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
 
@@ -121,6 +122,27 @@ export default function FichaTrabalhista({
           if (merged.cep) merged.cep = formatCEP(merged.cep);
           if (merged.telefone) merged.telefone = formatPhone(merged.telefone);
           setFormData(merged);
+
+          // Auto-open sections that have filled data + track AI-filled fields
+          const filledSections: Record<string, boolean> = { pessoal: true };
+          const aiFields = new Set<string>();
+          for (const section of FICHA_SECTIONS) {
+            const hasFilled = section.fields.some((f) => {
+              const v = (fichaData.data as Record<string, string>)[f.key];
+              return v !== undefined && v !== null && v !== '';
+            });
+            if (hasFilled) {
+              filledSections[section.id] = true;
+              if (fichaData.filled_by === 'ai') {
+                section.fields.forEach((f) => {
+                  const v = (fichaData.data as Record<string, string>)[f.key];
+                  if (v) aiFields.add(f.key);
+                });
+              }
+            }
+          }
+          setOpenSections(filledSections);
+          setAiFilledFields(aiFields);
         }
         setFinalizado(fichaData?.finalizado || false);
         setCompletionPct(fichaData?.completion_pct || 0);
@@ -265,7 +287,7 @@ export default function FichaTrabalhista({
 
   const renderField = (field: FichaField) => {
     const value = formData[field.key] || '';
-    const isAiFilled = filledBy === 'ai' && value !== '';
+    const isAiFilled = aiFilledFields.has(field.key) && value !== '';
     const disabled = readOnly || finalizado;
 
     const baseClasses =
@@ -471,7 +493,12 @@ export default function FichaTrabalhista({
       )}
 
       {/* Sections */}
-      {FICHA_SECTIONS.map((section) => (
+      {FICHA_SECTIONS.map((section) => {
+        const sectionFilled = section.fields.filter((f) => formData[f.key]).length;
+        const sectionTotal = section.fields.length;
+        const hasAiData = section.fields.some((f) => aiFilledFields.has(f.key));
+
+        return (
         <div
           key={section.id}
           className="border border-border rounded-xl overflow-hidden"
@@ -487,6 +514,16 @@ export default function FichaTrabalhista({
               <span className="text-[13px] font-bold text-foreground">
                 {section.label}
               </span>
+              {sectionFilled > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold">
+                  {sectionFilled}/{sectionTotal}
+                </span>
+              )}
+              {hasAiData && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-bold">
+                  <Bot size={8} /> IA
+                </span>
+              )}
             </div>
             {openSections[section.id] ? (
               <ChevronUp size={15} className="text-muted-foreground" />
@@ -501,7 +538,8 @@ export default function FichaTrabalhista({
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
 
       {/* Finalize button */}
       {!readOnly && !finalizado && (

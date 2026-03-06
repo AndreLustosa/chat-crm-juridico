@@ -785,14 +785,46 @@ export class AiProcessor extends WorkerHost {
 6. Se o cliente fizer uma pergunta jurídica diretamente, responda em no máximo 2 linhas e volte imediatamente à coleta de informações.
 
 FICHA TRABALHISTA (apenas quando area = Trabalhista):
-Quando a área jurídica for TRABALHISTA, extraia dados do caso para o campo "form_data" do JSON de resposta.
-Inclua APENAS campos que o cliente mencionou EXPLICITAMENTE na mensagem atual. Use null para campos não mencionados.
-Campos válidos: nome_empregador, cnpjcpf_empregador, data_admissao, data_saida, situacao_atual, motivo_saida,
-funcao, salario, periodicidade_pagamento, horario_entrada, horario_saida, tempo_intervalo, dias_trabalhados,
-fazia_horas_extras, qtd_horas_extras_dia, recebia_por_fora, outro_valor_por_fora, recebia_vale_transporte,
-ctps_assinada_corretamente, periodo_sem_carteira, ambiente_insalubre_perigoso, sofreu_acidente, sofreu_assedio_moral,
-fgts_depositado, tem_ferias_pendentes, tem_decimo_terceiro_pendente, motivos_reclamacao, nome_completo, cpf.
-Se a área NÃO for trabalhista, NÃO inclua form_data no JSON.
+Quando a área jurídica for TRABALHISTA, preencha o campo "form_data" com TODOS os dados que você conseguir
+extrair ou inferir razoavelmente de TODA A CONVERSA (não apenas desta mensagem). Omita apenas campos que
+absolutamente nada na conversa permite inferir. Use strings para todos os valores.
+
+CAMPOS DISPONÍVEIS POR SEÇÃO — preencha todos que a conversa permitir:
+
+Dados Pessoais: nome_completo (NOME COMPLETO, nunca apenas o primeiro nome), cpf, rg, orgao_emissor,
+data_nascimento (YYYY-MM-DD), nome_mae, estado_civil, nacionalidade, profissao, telefone, email.
+
+Endereço: cep, logradouro, numero, bairro, cidade, estado_uf.
+
+Contrato de Trabalho: nome_empregador, cnpjcpf_empregador, funcao, data_admissao (YYYY-MM-DD),
+data_saida (YYYY-MM-DD), situacao_atual (ex: "Demitido(a) sem justa causa"), motivo_saida,
+salario (apenas o número, ex: "3500"), periodicidade_pagamento (ex: "Mensal"), ctps_numero,
+pis_pasep, ctps_assinada_corretamente (ex: "Sim"/"Não"/"Parcialmente"), periodo_sem_carteira,
+atividades_realizadas.
+
+Jornada: horario_entrada (ex: "08:00"), horario_saida (ex: "18:00"), tempo_intervalo,
+dias_trabalhados (ex: "Seg a Sex"), fazia_horas_extras (ex: "Sim"/"Não"/"Às vezes"),
+qtd_horas_extras_dia, tipo_controle_ponto, horas_extras_pagas_corretamente,
+possui_copia_ponto, ponto_refletia_realidade, horario_real_trabalhado.
+
+Pagamentos e Benefícios: recebia_por_fora, outro_valor_por_fora, recebia_vale_transporte,
+precisava_vt, valor_gasto_vt, premio_comissao, natureza_premio, valor_premio,
+periodicidade_premio, tem_prova_premio, natureza_comissao, valor_comissao,
+periodicidade_comissao, tem_prova_comissao.
+
+Saúde e Segurança: ambiente_insalubre_perigoso, ambiente_insalubre, forneciam_epis,
+sofreu_acidente, detalhes_acidente, recebeu_auxilio_b91, tempo_cessacao_beneficio,
+sofreu_assedio_moral, detalhes_assedio_moral.
+
+FGTS e Verbas: fgts_depositado, fgts_sacado, tem_ferias_pendentes,
+tem_decimo_terceiro_pendente, detalhes_verbas_pendentes.
+
+Testemunhas e Provas: possui_testemunhas, detalhes_testemunhas,
+possui_provas_documentais, detalhes_provas_documentais.
+
+Resumo: motivos_reclamacao (resumo completo do problema trabalhista).
+
+Se a área NÃO for trabalhista, envie form_data: null.
 
 `;
 
@@ -801,9 +833,12 @@ Se a área NÃO for trabalhista, NÃO inclua form_data no JSON.
 
 IMPORTANTE — CAMPO form_data NO JSON:
 O JSON de resposta DEVE incluir o campo "form_data" dentro de "updates".
-Quando a área for TRABALHISTA, preencha form_data com os dados trabalhistas que o cliente mencionou nesta mensagem.
+Quando a área for TRABALHISTA, preencha form_data com TODOS os dados que você conseguir extrair de TODA A CONVERSA.
+Não limite apenas ao que foi dito nesta mensagem — use tudo que o cliente já informou anteriormente também.
+Para nome_completo, use o NOME COMPLETO (nunca apenas o primeiro nome). Se só tem o primeiro nome, preencha assim mesmo mas tente obter o nome completo na próxima pergunta.
 Quando NÃO for trabalhista, envie form_data: null.
-Exemplo: {"reply":"...","updates":{"name":"...","status":"...","area":"Trabalhista","lead_summary":"...","next_step":"...","notes":"","form_data":{"nome_empregador":"Empresa X","salario":"3500","data_admissao":"2020-01-15"}}}
+Exemplo completo:
+{"reply":"...","updates":{"name":"João Silva","status":"QUALIFICANDO","area":"Trabalhista","lead_summary":"...","next_step":"duvidas","notes":"","form_data":{"nome_completo":"João Silva","nome_empregador":"Supermercado Extra","funcao":"Repositor","salario":"2000","data_admissao":"2021-03-01","data_saida":"2024-09-30","situacao_atual":"Demitido(a) sem justa causa","fazia_horas_extras":"Sim","tem_ferias_pendentes":"Sim","fgts_depositado":"Não","motivos_reclamacao":"Demissão sem justa causa, horas extras não pagas, FGTS não depositado"}}}
 
 LINK DO FORMULÁRIO CORRETO:
 Quando precisar enviar o formulário ao lead, use EXATAMENTE este link: {{form_url}}
