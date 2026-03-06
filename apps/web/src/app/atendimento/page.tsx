@@ -117,6 +117,7 @@ export default function Dashboard() {
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({});
   const [aiMode, setAiMode] = useState(false);
   const [fichaInboxVisible, setFichaInboxVisible] = useState(false);
+  const [fichaFinalizada, setFichaFinalizada] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
@@ -425,6 +426,16 @@ export default function Dashboard() {
       setLeadStage(null);
     }
   }, [selectedId]);
+
+  // Buscar status da ficha trabalhista ao selecionar conversa com área Trabalhista
+  useEffect(() => {
+    setFichaFinalizada(false);
+    const conv = conversations.find(c => c.id === selectedId);
+    if (!conv?.leadId || !conv?.legalArea?.toLowerCase().includes('trabalhist')) return;
+    api.get(`/ficha-trabalhista/${conv.leadId}`, { _silent401: true } as any)
+      .then(r => setFichaFinalizada(r.data?.finalizado === true))
+      .catch(() => {});
+  }, [selectedId, conversations]);
 
   // Polling de transferências pendentes: fallback quando o evento socket direto é perdido
   // silent=true: nunca causa logout — se o token expirar, só o load inicial ou ação do usuário redireciona
@@ -1288,6 +1299,11 @@ export default function Dashboard() {
                            ⚖️ {selected.legalArea}
                          </span>
                        )}
+                       {fichaFinalizada && (
+                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                           ✅ Ficha Finalizada
+                         </span>
+                       )}
                        {selected.legalArea && (
                          <div className="relative" ref={lawyerDropdownRef}>
                            <button
@@ -1346,18 +1362,18 @@ export default function Dashboard() {
                          <button
                            onClick={handleSendFormLink}
                            title="Enviar link do formulário trabalhista ao lead"
-                           className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold border border-amber-500/20 hover:bg-amber-500/25 transition-colors"
                          >
-                           <ClipboardList size={16} />
+                           <ClipboardList size={10} />
                            Enviar Formulário
                          </button>
                        )}
                        <button
                          onClick={() => setFichaInboxVisible(true)}
                          title="Visualizar ficha trabalhista"
-                         className="px-3 py-2 text-sm font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-xl hover:bg-violet-500/20 transition-colors flex items-center gap-2"
+                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20 hover:bg-violet-500/25 transition-colors"
                        >
-                         <Eye size={16} />
+                         <Eye size={10} />
                          Visualizar Ficha
                        </button>
                      </>
@@ -2302,7 +2318,7 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
-              <FichaTrabalhista leadId={selected.leadId} />
+              <FichaTrabalhista leadId={selected.leadId} onFinalize={() => { setFichaFinalizada(true); setFichaInboxVisible(false); }} />
             </div>
           </div>
         </div>

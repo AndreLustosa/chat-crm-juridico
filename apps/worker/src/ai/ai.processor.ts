@@ -803,11 +803,11 @@ A lista completa dos campos está no final do prompt. Se a área NÃO for trabal
 
 CAMPO form_data — OBRIGATÓRIO NO JSON:
 O JSON DEVE ter "form_data" em "updates". Quando area=Trabalhista, preencha com dados extraídos de TODA A CONVERSA.
-nome_completo: NOME COMPLETO (nunca só o primeiro nome). Quando não Trabalhista: form_data: null.
+nome_completo: nome completo DO CLIENTE/LEAD (NÃO é o empregador; nunca só o primeiro nome; use o nome que o próprio cliente informou). Quando não Trabalhista: form_data: null.
 
 CAMPOS DISPONÍVEIS (inclua só os que a conversa permite inferir):
-Pessoal: nome_completo, cpf, rg, data_nascimento(YYYY-MM-DD), nome_mae, estado_civil, profissao, telefone, email.
-Contrato: nome_empregador, funcao, data_admissao(YYYY-MM-DD), data_saida(YYYY-MM-DD), situacao_atual, motivo_saida, salario(use EXATAMENTE o que o cliente informou: "salário mínimo" se não disse valor exato, "2000" se disse dois mil; NUNCA assuma o valor atual do salário mínimo), ctps_assinada_corretamente, atividades_realizadas.
+Pessoal: nome_completo(DO CLIENTE), cpf, rg, data_nascimento(YYYY-MM-DD), nome_mae, estado_civil, profissao, telefone, email.
+Contrato: nome_empregador(nome da empresa/empregador — DIFERENTE de nome_completo do cliente), funcao, data_admissao(YYYY-MM-DD), data_saida(YYYY-MM-DD), situacao_atual, motivo_saida, salario(use EXATAMENTE o que o cliente informou: "salário mínimo" se não disse valor exato, "2000" se disse dois mil; NUNCA assuma o valor atual do salário mínimo), ctps_assinada_corretamente, atividades_realizadas.
 Jornada: horario_entrada, horario_saida, tempo_intervalo, dias_trabalhados, fazia_horas_extras, qtd_horas_extras_dia, horas_extras_pagas_corretamente, tipo_controle_ponto.
 Pagamentos: recebia_por_fora, outro_valor_por_fora, recebia_vale_transporte, premio_comissao, valor_comissao, valor_premio.
 Segurança: ambiente_insalubre_perigoso, forneciam_epis, sofreu_acidente, detalhes_acidente, sofreu_assedio_moral, detalhes_assedio_moral.
@@ -818,11 +818,13 @@ Resumo: motivos_reclamacao.
 Exemplo (inclua apenas campos com dados reais):
 {"reply":"Entendido...","updates":{"name":"João Silva","status":"QUALIFICANDO","area":"Trabalhista","lead_summary":"...","next_step":"duvidas","notes":"","form_data":{"nome_empregador":"Empresa X","salario":"3500","fazia_horas_extras":"Sim","fgts_depositado":"Não","motivos_reclamacao":"Salário atrasado 6 meses"}}}
 
-LINK DO FORMULÁRIO: {{form_url}} — NUNCA use sistema.andrelustosaadvogados.com.br.
+LINK DO FORMULÁRIO TRABALHISTA: {{form_url}}
+Quando next_step = "formulario", INCLUA OBRIGATORIAMENTE o link acima no campo "reply" da resposta.
+Exemplo de reply com link: "Ótimo! Para agilizar seu atendimento, preencha a ficha com os dados do seu caso: {{form_url}} — Se tiver dúvidas, é só me chamar aqui!"
 `;
 
       if (skill) {
-        systemPrompt = MEDIA_CAPABILITIES_HEADER + BEHAVIOR_RULES + this.injectVariables(skill.system_prompt, vars) + this.injectVariables(FORM_DATA_INJECTION, vars);
+        systemPrompt = MEDIA_CAPABILITIES_HEADER + this.injectVariables(BEHAVIOR_RULES, vars) + this.injectVariables(skill.system_prompt, vars) + this.injectVariables(FORM_DATA_INJECTION, vars);
         model = skill.model || (await this.settings.getDefaultModel());
         // Mínimo de 1500 tokens para acomodar JSON com form_data (trabalhista)
         maxTokens = Math.max(skill.max_tokens || 500, 1500);
@@ -833,7 +835,7 @@ LINK DO FORMULÁRIO: {{form_url}} — NUNCA use sistema.andrelustosaadvogados.co
       } else {
         systemPrompt =
           MEDIA_CAPABILITIES_HEADER +
-          BEHAVIOR_RULES +
+          this.injectVariables(BEHAVIOR_RULES, vars) +
           `Você é Sophia, assistente de pré-atendimento do escritório André Lustosa Advogados.
 Seu objetivo é coletar informações sobre o caso do cliente para o advogado conseguir avaliar.
 
