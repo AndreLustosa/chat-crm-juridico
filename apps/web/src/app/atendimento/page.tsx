@@ -1607,7 +1607,7 @@ export default function Dashboard() {
                 <Image src="/landing/LOGO SEM FUNDO 01.png" alt="" width={883} height={453}
                   style={{ width: '620px', height: 'auto', opacity: 0.13 }} aria-hidden />
               </div>
-            <div className="absolute inset-0 px-[5%] sm:px-6 md:px-8 py-3 sm:py-5 md:py-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
+            <div className="absolute inset-0 px-1 sm:px-6 md:px-8 py-3 sm:py-5 md:py-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
               <div className="flex flex-col gap-3 md:gap-4 max-w-4xl mx-auto pb-4 relative z-10">
                 {isRealConvo && messages.length > 0 ? (
                   (() => {
