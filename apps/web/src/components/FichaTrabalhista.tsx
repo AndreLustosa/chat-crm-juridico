@@ -308,7 +308,7 @@ export default function FichaTrabalhista({
     const disabled = readOnly || finalizado;
 
     const baseClasses =
-      'w-full bg-background border border-border rounded-lg px-3 text-foreground focus:border-amber-500 outline-none transition-colors placeholder-muted-foreground text-[13px]';
+      'w-full bg-background border border-border rounded-lg px-3 text-foreground focus:border-amber-500 outline-none transition-colors placeholder-muted-foreground text-sm';
 
     const onBlur = () => handleAutoSave(field.key, value);
 
@@ -324,7 +324,7 @@ export default function FichaTrabalhista({
               handleAutoSave(field.key, e.target.value);
             }}
             disabled={disabled}
-            className={`${baseClasses} h-10 appearance-none bg-no-repeat bg-[length:16px] bg-[right_8px_center]`}
+            className={`${baseClasses} h-12 sm:h-10 appearance-none bg-no-repeat bg-[length:16px] bg-[right_8px_center]`}
             style={{
               backgroundImage:
                 "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
@@ -364,7 +364,7 @@ export default function FichaTrabalhista({
             disabled={disabled}
             placeholder={field.placeholder}
             maxLength={14}
-            className={`${baseClasses} h-10`}
+            className={`${baseClasses} h-12 sm:h-10`}
           />
         );
         break;
@@ -380,7 +380,7 @@ export default function FichaTrabalhista({
               disabled={disabled}
               placeholder={field.placeholder}
               maxLength={9}
-              className={`${baseClasses} h-10 pr-10`}
+              className={`${baseClasses} h-12 sm:h-10 pr-10`}
             />
             {loadingCep ? (
               <Loader2 size={14} className="absolute right-3 top-3 animate-spin text-amber-500" />
@@ -408,7 +408,7 @@ export default function FichaTrabalhista({
             disabled={disabled}
             placeholder={field.placeholder}
             maxLength={15}
-            className={`${baseClasses} h-10`}
+            className={`${baseClasses} h-12 sm:h-10`}
           />
         );
         break;
@@ -423,7 +423,7 @@ export default function FichaTrabalhista({
               handleAutoSave(field.key, e.target.value);
             }}
             disabled={disabled}
-            className={`${baseClasses} h-10`}
+            className={`${baseClasses} h-12 sm:h-10`}
           />
         );
         break;
@@ -441,7 +441,7 @@ export default function FichaTrabalhista({
             }}
             disabled={disabled}
             placeholder={field.placeholder}
-            className={`${baseClasses} h-10`}
+            className={`${baseClasses} h-12 sm:h-10`}
           />
         );
         break;
@@ -455,7 +455,7 @@ export default function FichaTrabalhista({
             onBlur={onBlur}
             disabled={disabled}
             placeholder={field.placeholder}
-            className={`${baseClasses} h-10`}
+            className={`${baseClasses} h-12 sm:h-10`}
           />
         );
     }
@@ -465,7 +465,7 @@ export default function FichaTrabalhista({
         key={field.key}
         className={field.colSpan === 2 ? 'col-span-1 sm:col-span-2' : ''}
       >
-        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+        <label className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {field.label}
           {field.required && <span className="text-red-400">*</span>}
           {isAiFilled && (
@@ -502,17 +502,17 @@ export default function FichaTrabalhista({
             style={{ width: `${completionPct}%` }}
           />
         </div>
-        <span className="text-[11px] font-mono text-muted-foreground shrink-0">
+        <span className="text-xs font-mono text-muted-foreground shrink-0">
           {completionPct}%
         </span>
         {saving && (
-          <span className="flex items-center gap-1 text-[10px] text-amber-500">
-            <Loader2 size={10} className="animate-spin" /> Salvando...
+          <span className="flex items-center gap-1 text-xs text-amber-500">
+            <Loader2 size={12} className="animate-spin" /> Salvando...
           </span>
         )}
         {!saving && lastSaved && (
-          <span className="flex items-center gap-1 text-[10px] text-emerald-500">
-            <CheckCircle2 size={10} /> Salvo
+          <span className="flex items-center gap-1 text-xs text-emerald-500">
+            <CheckCircle2 size={12} /> Salvo
           </span>
         )}
       </div>
@@ -540,35 +540,35 @@ export default function FichaTrabalhista({
         >
           <button
             onClick={() => toggleSection(section.id)}
-            className="w-full px-4 py-3 flex items-center justify-between hover:bg-accent/30 transition-colors"
+            className="w-full px-4 py-4 sm:py-3 flex items-center justify-between hover:bg-accent/30 transition-colors"
           >
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-500">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-500 shrink-0">
                 {ICON_MAP[section.icon] || <FileText size={18} />}
               </div>
-              <span className="text-[13px] font-bold text-foreground">
+              <span className="text-sm font-bold text-foreground">
                 {section.label}
               </span>
               {sectionFilled > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold">
+                <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold shrink-0">
                   {sectionFilled}/{sectionTotal}
                 </span>
               )}
               {hasAiData && (
-                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-bold">
-                  <Bot size={8} /> SophIA
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold shrink-0">
+                  <Bot size={9} /> SophIA
                 </span>
               )}
             </div>
             {openSections[section.id] ? (
-              <ChevronUp size={15} className="text-muted-foreground" />
+              <ChevronUp size={16} className="text-muted-foreground shrink-0 ml-2" />
             ) : (
-              <ChevronDown size={15} className="text-muted-foreground" />
+              <ChevronDown size={16} className="text-muted-foreground shrink-0 ml-2" />
             )}
           </button>
 
           {openSections[section.id] && (
-            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="px-4 pb-5 sm:pb-4 grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-3">
               {section.fields.map((field) => renderField(field))}
             </div>
           )}
@@ -581,7 +581,7 @@ export default function FichaTrabalhista({
         <button
           onClick={handleFinalize}
           disabled={finalizing || completionPct < 10}
-          className="w-full py-3 rounded-xl font-bold text-[14px] transition-colors flex items-center justify-center gap-2
+          className="w-full py-4 sm:py-3 rounded-xl font-bold text-base sm:text-[14px] transition-colors flex items-center justify-center gap-2
             bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {finalizing ? (
