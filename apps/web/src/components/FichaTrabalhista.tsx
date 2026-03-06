@@ -463,7 +463,7 @@ export default function FichaTrabalhista({
     return (
       <div
         key={field.key}
-        className={field.colSpan === 2 ? 'col-span-2' : ''}
+        className={field.colSpan === 2 ? 'col-span-1 sm:col-span-2' : ''}
       >
         <label className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {field.label}
@@ -568,7 +568,7 @@ export default function FichaTrabalhista({
           </button>
 
           {openSections[section.id] && (
-            <div className="px-4 pb-4 grid grid-cols-2 gap-3">
+            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               {section.fields.map((field) => renderField(field))}
             </div>
           )}
