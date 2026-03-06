@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList } from 'lucide-react';
+import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { TransferAudioRecorder } from '@/components/TransferAudioRecorder';
@@ -115,6 +116,7 @@ export default function Dashboard() {
   const [docPreview, setDocPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({});
   const [aiMode, setAiMode] = useState(false);
+  const [fichaInboxVisible, setFichaInboxVisible] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
@@ -766,6 +768,18 @@ export default function Dashboard() {
     }
   };
 
+  const handleSendFormLink = async () => {
+    if (!selectedId || !selected?.leadId) return;
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const formUrl = `${baseUrl}/formulario/trabalhista/${selected.leadId}`;
+    const formText = `Olá! Para agilizar o seu atendimento, por favor preencha a ficha abaixo com as informações do seu caso trabalhista:\n\n${formUrl}\n\nSe tiver dúvidas durante o preenchimento, é só me chamar aqui!`;
+    try {
+      await api.post('/messages/send', { conversationId: selectedId, text: formText });
+    } catch (e) {
+      console.error('Erro ao enviar link do formulário', e);
+    }
+  };
+
   const handleToggleAiMode = async () => {
     if (!selectedId || selectedId.startsWith('demo-')) return;
     const newMode = !aiMode;
@@ -1325,7 +1339,29 @@ export default function Dashboard() {
                </div>
                <div className="flex flex-col items-end gap-2 shrink-0">
                  {/* Linha de botões de ação */}
-                 <div className="flex gap-2 items-center">
+                 <div className="flex gap-2 items-center flex-wrap justify-end">
+                   {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
+                     <>
+                       {!isClosed && (
+                         <button
+                           onClick={handleSendFormLink}
+                           title="Enviar link do formulário trabalhista ao lead"
+                           className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+                         >
+                           <ClipboardList size={16} />
+                           Enviar Formulário
+                         </button>
+                       )}
+                       <button
+                         onClick={() => setFichaInboxVisible(true)}
+                         title="Visualizar ficha trabalhista"
+                         className="px-3 py-2 text-sm font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded-xl hover:bg-violet-500/20 transition-colors flex items-center gap-2"
+                       >
+                         <Eye size={16} />
+                         Visualizar Ficha
+                       </button>
+                     </>
+                   )}
                    {isRealConvo && (
                      <button
                        onClick={handleToggleAiMode}
@@ -2237,6 +2273,38 @@ export default function Dashboard() {
           <button onClick={() => setTransferResponseMsg(null)} className="text-muted-foreground hover:text-foreground ml-2">
             <X size={14} />
           </button>
+        </div>
+      )}
+
+      {/* Ficha Trabalhista Slide-over */}
+      {fichaInboxVisible && selected?.leadId && (
+        <div className="fixed inset-0 z-[100] flex justify-end">
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setFichaInboxVisible(false)}
+          />
+          <div className="relative w-full max-w-2xl h-full bg-background border-l border-border flex flex-col shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0 bg-card/80 backdrop-blur-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                  <ClipboardList size={16} className="text-amber-500" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-foreground text-sm">Ficha Trabalhista</h2>
+                  <p className="text-[11px] text-muted-foreground">{selected?.contactName}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setFichaInboxVisible(false)}
+                className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <FichaTrabalhista leadId={selected.leadId} />
+            </div>
+          </div>
         </div>
       )}
     </div>

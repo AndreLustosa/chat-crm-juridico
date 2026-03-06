@@ -764,6 +764,11 @@ export class AiProcessor extends WorkerHost {
         // URL base do site — use no prompt: "{{site_url}}/geral/arapiraca"
         site_url: siteUrl,
         form_url: `${siteUrl}/formulario/trabalhista/${convo.lead_id || convo.lead?.id || ''}`,
+        data_hoje: new Date().toLocaleString('pt-BR', {
+          timeZone: 'America/Maceio',
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        }),
       };
 
       // Cabeçalho fixo de capacidades — injetado antes de qualquer skill prompt
@@ -776,7 +781,10 @@ export class AiProcessor extends WorkerHost {
 
       // Regras comportamentais injetadas em TODOS os prompts (skill ou fallback).
       // Garantem conversa natural e não revelam que a IA está respondendo.
-      const BEHAVIOR_RULES = `REGRAS DE ATENDIMENTO — OBRIGATÓRIAS, ACIMA DE TUDO:
+      const BEHAVIOR_RULES = `DATA E HORA ATUAL: {{data_hoje}} (fuso horário de Maceió/AL).
+Use essa data para referências temporais e para saber os valores vigentes (ex: salário mínimo atual).
+
+REGRAS DE ATENDIMENTO — OBRIGATÓRIAS, ACIMA DE TUDO:
 1. FAÇA SOMENTE UMA PERGUNTA POR MENSAGEM. Nunca envie duas ou mais perguntas juntas.
 2. Quando o cliente responder uma pergunta sua, RECONHEÇA BREVEMENTE a resposta ("Entendi.", "Anotado.", "Ok, obrigado.") e só então faça a próxima pergunta.
 3. NUNCA explique leis, artigos, jurisprudências ou dê parecer jurídico A NÃO SER que o cliente pergunte EXPLICITAMENTE ("tenho direito?", "o que a lei diz?", "pode me explicar?"). Se o cliente apenas relatar um fato, registre e continue coletando.
