@@ -435,7 +435,7 @@ export default function FichaTrabalhista({
           {field.required && <span className="text-red-400">*</span>}
           {isAiFilled && (
             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-bold normal-case tracking-normal">
-              <Bot size={8} /> IA
+              <Bot size={8} /> SophIA
             </span>
           )}
         </label>
@@ -521,7 +521,7 @@ export default function FichaTrabalhista({
               )}
               {hasAiData && (
                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-bold">
-                  <Bot size={8} /> IA
+                  <Bot size={8} /> SophIA
                 </span>
               )}
             </div>
