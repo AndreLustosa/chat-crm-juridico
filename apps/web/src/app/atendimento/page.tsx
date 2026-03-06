@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical, ChevronRight } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
@@ -158,6 +158,9 @@ export default function Dashboard() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const mobileMoreRef = useRef<HTMLDivElement>(null);
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false);
+  const touchStartXRef = useRef<number>(0);
+  const touchStartYRef = useRef<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
   // Unread message counts per conversation (persisted in sessionStorage to survive same-page navigation)
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>(() => {
@@ -239,6 +242,7 @@ export default function Dashboard() {
   // Fechar dropdown ao trocar de conversa
   useEffect(() => {
     setShowLawyerDropdown(false);
+    setShowDetailsPanel(false);
   }, [selectedId]);
 
   // Fechar dropdown de especialista ao clicar fora
@@ -1586,12 +1590,24 @@ export default function Dashboard() {
             })()}
 
             {/* Wrapper: watermark fixo + scroll area sobre ele */}
-            <div className="flex-1 relative overflow-hidden">
+            <div
+              className="flex-1 relative overflow-hidden"
+              onTouchStart={(e) => {
+                touchStartXRef.current = e.touches[0].clientX;
+                touchStartYRef.current = e.touches[0].clientY;
+              }}
+              onTouchEnd={(e) => {
+                const diffX = touchStartXRef.current - e.changedTouches[0].clientX;
+                const diffY = Math.abs(touchStartYRef.current - e.changedTouches[0].clientY);
+                if (diffY < 60 && diffX > 60) setShowDetailsPanel(true);
+                else if (diffY < 60 && diffX < -60) setShowDetailsPanel(false);
+              }}
+            >
               <div className="pointer-events-none select-none absolute inset-0 flex items-center justify-center z-0">
                 <Image src="/landing/LOGO SEM FUNDO 01.png" alt="" width={883} height={453}
                   style={{ width: '620px', height: 'auto', opacity: 0.13 }} aria-hidden />
               </div>
-            <div className="absolute inset-0 p-3 sm:p-5 md:p-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
+            <div className="absolute inset-0 px-[5%] sm:px-6 md:px-8 py-3 sm:py-5 md:py-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
               <div className="flex flex-col gap-3 md:gap-4 max-w-4xl mx-auto pb-4 relative z-10">
                 {isRealConvo && messages.length > 0 ? (
                   (() => {
@@ -1844,122 +1860,228 @@ export default function Dashboard() {
             </div>
             </div>{/* end watermark wrapper */}
 
-            {/* ═══ BOTTOM ACTION BAR — mobile scrollável ═══ */}
+            {/* ═══ MINIMAL MOBILE ACTION BAR ═══ */}
             {isMobile && selectedId && selected && isRealConvo && (
-              <div className="relative shrink-0 bg-card/95 backdrop-blur-md border-t border-border" ref={mobileMoreRef}>
-                {/* Stage dropdown popup */}
-                {showStageDropdown && (
-                  <div ref={stageDropdownRef} className="absolute bottom-full left-2 right-2 bg-card border border-border rounded-2xl shadow-2xl z-50 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2 px-1">Etapa do Funil</p>
+              <div className="shrink-0 bg-card/95 backdrop-blur-md border-t border-border flex items-center justify-between px-3 py-2">
+                {/* IA pill */}
+                <button
+                  onClick={handleToggleAiMode}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    aiMode
+                      ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
+                      : 'text-muted-foreground bg-muted/30 border-border'
+                  }`}
+                >
+                  {aiMode ? <Bot size={14} /> : <BotOff size={14} />}
+                  {aiMode ? 'IA On' : 'IA Off'}
+                </button>
+
+                {/* Aceitar — só WAITING */}
+                {selected.status === 'WAITING' && (
+                  <button
+                    onClick={handleAccept}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-primary bg-primary/10 border border-primary/20 active:bg-primary/20"
+                  >
+                    <Check size={14} />
+                    Aceitar
+                  </button>
+                )}
+
+                {/* Ações → abre painel */}
+                <button
+                  onClick={() => setShowDetailsPanel(true)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-muted-foreground bg-muted/30 border border-border active:bg-accent transition-colors"
+                >
+                  Ações
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
+
+            {/* ═══ DETAILS PANEL — deslize ← para abrir ═══ */}
+            {isMobile && selectedId && selected && (
+              <div
+                className={`absolute inset-0 z-50 bg-background flex flex-col transition-transform duration-300 ease-in-out ${
+                  showDetailsPanel ? 'translate-x-0' : 'translate-x-full'
+                }`}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-border shrink-0">
+                  <button
+                    onClick={() => setShowDetailsPanel(false)}
+                    className="p-2 rounded-xl hover:bg-accent text-muted-foreground active:bg-accent"
+                  >
+                    <ArrowLeft size={20} />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-foreground text-sm truncate">{selected.contactName}</p>
+                    <p className="text-[10px] text-muted-foreground">Detalhes &amp; Ações</p>
+                  </div>
+                </div>
+
+                {/* Scrollable content */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+
+                  {/* Contato */}
+                  <section>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Contato</p>
+                    <div className="bg-card border border-border rounded-xl p-3 space-y-2.5">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Telefone</span>
+                        <span className="font-medium">{selected.contactPhone}</span>
+                      </div>
+                      {selected.legalArea && (
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-muted-foreground">Área</span>
+                          <span className="font-medium text-violet-400">⚖️ {selected.legalArea}</span>
+                        </div>
+                      )}
+                      {selected.assignedAgentName && (
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-muted-foreground">Atendente</span>
+                          <span className="font-medium">{selected.assignedAgentName}</span>
+                        </div>
+                      )}
+                      {selected.assignedLawyerName && (
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-muted-foreground">Especialista</span>
+                          <span className="font-medium text-amber-400">{selected.assignedLawyerName}</span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* IA Toggle */}
+                  {isRealConvo && (
+                    <section>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Assistente IA</p>
+                      <button
+                        onClick={handleToggleAiMode}
+                        className={`w-full flex items-center justify-between p-3 rounded-xl border transition-colors ${
+                          aiMode ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-card border-border'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {aiMode
+                            ? <Bot size={20} className="text-emerald-400" />
+                            : <BotOff size={20} className="text-muted-foreground" />
+                          }
+                          <div className="text-left">
+                            <p className="text-sm font-semibold">{aiMode ? 'IA Ativada' : 'IA Desativada'}</p>
+                            <p className="text-[10px] text-muted-foreground">Toque para alternar</p>
+                          </div>
+                        </div>
+                        {/* Toggle switch */}
+                        <div className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${aiMode ? 'bg-emerald-500' : 'bg-muted'}`}>
+                          <div className={`w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${aiMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                        </div>
+                      </button>
+                    </section>
+                  )}
+
+                  {/* Etapa do Funil */}
+                  <section>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Etapa do Funil</p>
                     <div className="flex flex-wrap gap-1.5">
                       {CRM_STAGES.map(s => (
                         <button
                           key={s.id}
-                          onClick={() => { handleChangeLeadStage(s.id); setShowStageDropdown(false); }}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all active:scale-95 ${normalizeStage(leadStage) === s.id ? 'ring-2 ring-offset-1 ring-offset-card' : 'opacity-60'}`}
+                          onClick={() => handleChangeLeadStage(s.id)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all active:scale-95 ${
+                            normalizeStage(leadStage) === s.id ? 'ring-2 ring-offset-1 ring-offset-background' : 'opacity-60'
+                          }`}
                           style={{ background: `${s.color}18`, color: s.color, borderColor: `${s.color}35` }}
                         >
                           {s.emoji} {s.label}
                         </button>
                       ))}
                     </div>
-                  </div>
-                )}
+                  </section>
 
-                {/* ── Scrollable action row (deslize ← para mais) ── */}
-                <div className="flex items-center gap-1 px-2 py-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-
-                  {/* IA Toggle */}
-                  <button
-                    onClick={handleToggleAiMode}
-                    className={`flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[54px] ${aiMode ? 'text-emerald-400' : 'text-muted-foreground'}`}
-                  >
-                    {aiMode ? <Bot size={20} /> : <BotOff size={20} />}
-                    <span className="text-[9px] font-medium">{aiMode ? 'IA On' : 'IA Off'}</span>
-                  </button>
-
-                  {/* Aceitar — só WAITING */}
-                  {selected.status === 'WAITING' && (
-                    <button onClick={handleAccept} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[54px] text-primary">
-                      <Check size={20} />
-                      <span className="text-[9px] font-medium">Aceitar</span>
-                    </button>
-                  )}
-
-                  {/* Ficha — trabalhista */}
+                  {/* Ficha Trabalhista */}
                   {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
-                    <button onClick={() => setFichaInboxVisible(true)} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[54px] text-amber-400 relative">
-                      <ClipboardList size={20} />
-                      <span className="text-[9px] font-medium">Ficha</span>
-                      {fichaFinalizada && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400" />}
+                    <section>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                        Ficha Trabalhista
+                        {fichaFinalizada && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[9px]">✅ Finalizada</span>
+                        )}
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setFichaInboxVisible(true)}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400 text-sm font-semibold active:bg-violet-500/20 transition-colors"
+                        >
+                          <Eye size={17} />
+                          Ver Ficha
+                        </button>
+                        {!isClosed && (
+                          <button
+                            onClick={handleSendFormLink}
+                            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-semibold active:bg-amber-500/20 transition-colors"
+                          >
+                            <ClipboardList size={17} />
+                            Enviar Form.
+                          </button>
+                        )}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Aceitar */}
+                  {selected.status === 'WAITING' && isRealConvo && (
+                    <button
+                      onClick={handleAccept}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-primary to-ring text-primary-foreground font-bold text-sm shadow-lg active:scale-95 transition-transform"
+                    >
+                      <Check size={18} />
+                      Aceitar Conversa
                     </button>
                   )}
 
-                  {/* Transferir */}
-                  {!isClosed && (
-                    <button onClick={handleOpenTransferModal} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[54px] text-sky-400">
-                      <UserCheck size={20} />
-                      <span className="text-[9px] font-medium">Transferir</span>
-                    </button>
-                  )}
+                  {/* Ações da conversa */}
+                  <section>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Ações</p>
+                    <div className="flex flex-col gap-2">
+                      {!isClosed && (
+                        <button
+                          onClick={() => { handleOpenTransferModal(); setShowDetailsPanel(false); }}
+                          className="flex items-center gap-3 p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 text-sm font-semibold active:bg-sky-500/20 transition-colors"
+                        >
+                          <UserCheck size={18} />
+                          Transferir Conversa
+                        </button>
+                      )}
+                      {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
+                        <>
+                          <button
+                            onClick={() => { openReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem'); setShowDetailsPanel(false); }}
+                            className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-semibold active:bg-amber-500/20 transition-colors"
+                          >
+                            <CornerDownLeft size={18} />
+                            Devolver ao SDR
+                          </button>
+                          <button
+                            onClick={() => { handleKeepInInbox(); setShowDetailsPanel(false); }}
+                            className="flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-semibold active:bg-emerald-500/20 transition-colors"
+                          >
+                            <Inbox size={18} />
+                            Manter Aqui
+                          </button>
+                        </>
+                      )}
+                      {!isClosed && (
+                        <button
+                          onClick={() => { handleClose(); setShowDetailsPanel(false); }}
+                          className="flex items-center gap-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-semibold active:bg-red-500/20 transition-colors"
+                        >
+                          <XCircle size={18} />
+                          Fechar Conversa
+                        </button>
+                      )}
+                    </div>
+                  </section>
 
-                  {/* Separador visual */}
-                  <div className="w-px h-8 bg-border/60 shrink-0 mx-1" />
-
-                  {/* Etapa CRM */}
-                  {(() => {
-                    const stage = findStage(normalizeStage(leadStage));
-                    return (
-                      <button
-                        onClick={() => setShowStageDropdown(v => !v)}
-                        className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[60px]"
-                        style={{ color: stage?.color || 'currentColor' }}
-                      >
-                        <ChevronDown size={20} />
-                        <span className="text-[9px] font-medium max-w-[60px] truncate">{stage ? `${stage.emoji} ${stage.label}` : 'Etapa'}</span>
-                      </button>
-                    );
-                  })()}
-
-                  {/* Enviar Formulário — trabalhista */}
-                  {selected?.legalArea?.toLowerCase().includes('trabalhist') && !isClosed && (
-                    <button onClick={handleSendFormLink} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[62px] text-amber-400">
-                      <ClipboardList size={20} />
-                      <span className="text-[9px] font-medium">Formulário</span>
-                    </button>
-                  )}
-
-                  {/* Visualizar Ficha — trabalhista */}
-                  {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
-                    <button onClick={() => { setFichaInboxVisible(true); }} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[60px] text-violet-400">
-                      <Eye size={20} />
-                      <span className="text-[9px] font-medium">Ver Ficha</span>
-                    </button>
-                  )}
-
-                  {/* Devolver ao SDR */}
-                  {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
-                    <button onClick={() => openReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem')} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[58px] text-amber-400">
-                      <CornerDownLeft size={20} />
-                      <span className="text-[9px] font-medium">Devolver</span>
-                    </button>
-                  )}
-
-                  {/* Manter Aqui */}
-                  {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
-                    <button onClick={handleKeepInInbox} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[54px] text-emerald-400">
-                      <Inbox size={20} />
-                      <span className="text-[9px] font-medium">Manter</span>
-                    </button>
-                  )}
-
-                  {/* Fechar Conversa */}
-                  {!isClosed && (
-                    <button onClick={handleClose} className="flex flex-col items-center gap-0.5 py-2 px-3 rounded-xl active:bg-accent transition-colors shrink-0 min-w-[54px] text-red-400">
-                      <XCircle size={20} />
-                      <span className="text-[9px] font-medium">Fechar</span>
-                    </button>
-                  )}
                 </div>
               </div>
             )}
