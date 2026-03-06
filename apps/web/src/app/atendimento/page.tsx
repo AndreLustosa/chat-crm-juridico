@@ -156,8 +156,8 @@ export default function Dashboard() {
   const [pendingTransfers, setPendingTransfers] = useState<{ conversationId: string; contactName: string; fromUserName: string; reason: string | null; audioIds?: string[] }[]>([]);
   const [inboxOpen, setInboxOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const mobileMoreRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   // Unread message counts per conversation (persisted in sessionStorage to survive same-page navigation)
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>(() => {
@@ -202,13 +202,13 @@ export default function Dashboard() {
 
   // Close mobile menu on click outside
   useEffect(() => {
-    if (!mobileMenuOpen) return;
+    if (!mobileMoreOpen) return;
     const handler = (e: MouseEvent) => {
-      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) setMobileMenuOpen(false);
+      if (mobileMoreRef.current && !mobileMoreRef.current.contains(e.target as Node)) setMobileMoreOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [mobileMenuOpen]);
+  }, [mobileMoreOpen]);
 
   // Persist unreadCounts + broadcast total to Sidebar
   useEffect(() => {
@@ -1300,7 +1300,7 @@ export default function Dashboard() {
                  {/* Botão Voltar - mobile only */}
                  {isMobile && (
                    <button
-                     onClick={() => { setSelectedId(null); setMobileMenuOpen(false); }}
+                     onClick={() => { setSelectedId(null); setMobileMoreOpen(false); }}
                      className="p-2 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
                    >
                      <ArrowLeft size={20} />
@@ -1385,91 +1385,21 @@ export default function Dashboard() {
                  </div>
                </div>
                <div className="flex flex-col items-end gap-2 shrink-0">
-                 {/* Menu ⋮ mobile */}
+                 {/* Badges informativos inline — mobile */}
                  {isMobile && (
-                   <div className="relative" ref={mobileMenuRef}>
-                     <button
-                       onClick={() => setMobileMenuOpen(v => !v)}
-                       className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                     >
-                       <MoreVertical size={20} />
-                     </button>
-                     {mobileMenuOpen && (
-                       <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-2xl py-2 w-56 z-[999]">
-                         {/* IA toggle */}
-                         {isRealConvo && (
-                           <button
-                             onClick={() => { handleToggleAiMode(); setMobileMenuOpen(false); }}
-                             className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm"
-                           >
-                             {aiMode ? <Bot size={16} className="text-primary" /> : <BotOff size={16} className="text-muted-foreground" />}
-                             {aiMode ? 'IA Ativa' : 'IA Inativa'}
-                           </button>
-                         )}
-                         {/* Ficha trabalhista */}
-                         {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
-                           <>
-                             {!isClosed && (
-                               <button
-                                 onClick={() => { handleSendFormLink(); setMobileMenuOpen(false); }}
-                                 className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-amber-400"
-                               >
-                                 <ClipboardList size={16} /> Enviar Formulário
-                               </button>
-                             )}
-                             <button
-                               onClick={() => { setFichaInboxVisible(true); setMobileMenuOpen(false); }}
-                               className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-violet-400"
-                             >
-                               <Eye size={16} /> Visualizar Ficha
-                             </button>
-                           </>
-                         )}
-                         {/* Aceitar */}
-                         {selected.status === 'WAITING' && isRealConvo && (
-                           <button
-                             onClick={() => { handleAccept(); setMobileMenuOpen(false); }}
-                             className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-primary"
-                           >
-                             <Check size={16} /> Aceitar Atendimento
-                           </button>
-                         )}
-                         {/* Transferir */}
-                         {!isClosed && isRealConvo && (
-                           <button
-                             onClick={() => { handleOpenTransferModal(); setMobileMenuOpen(false); }}
-                             className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-sky-400"
-                           >
-                             <UserCheck size={16} /> Transferir
-                           </button>
-                         )}
-                         {/* Devolver + Manter */}
-                         {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
-                           <>
-                             <button
-                               onClick={() => { openReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem'); setMobileMenuOpen(false); }}
-                               className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-amber-400"
-                             >
-                               <CornerDownLeft size={16} /> Devolver
-                             </button>
-                             <button
-                               onClick={() => { handleKeepInInbox(); setMobileMenuOpen(false); }}
-                               className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-emerald-400"
-                             >
-                               <Inbox size={16} /> Manter Aqui
-                             </button>
-                           </>
-                         )}
-                         {/* Fechar */}
-                         {!isClosed && isRealConvo && (
-                           <button
-                             onClick={() => { handleClose(); setMobileMenuOpen(false); }}
-                             className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-accent transition-colors text-sm text-red-400 border-t border-border mt-1 pt-2.5"
-                           >
-                             <XCircle size={16} /> Fechar Conversa
-                           </button>
-                         )}
-                       </div>
+                   <div className="flex items-center gap-1.5">
+                     {isRealConvo && (
+                       <span className={`w-2 h-2 rounded-full shrink-0 ${aiMode ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]' : 'bg-muted-foreground/40'}`} title={aiMode ? 'IA Ativa' : 'IA Inativa'} />
+                     )}
+                     {selected?.legalArea && (
+                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[9px] font-bold border border-violet-500/20">
+                         ⚖️ {selected.legalArea}
+                       </span>
+                     )}
+                     {fichaFinalizada && (
+                       <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[9px] font-bold border border-emerald-500/20">
+                         ✅
+                       </span>
                      )}
                    </div>
                  )}
@@ -1901,6 +1831,153 @@ export default function Dashboard() {
               </div>
             </div>
             </div>{/* end watermark wrapper */}
+
+            {/* ═══ BOTTOM ACTION BAR — mobile only ═══ */}
+            {isMobile && selectedId && selected && isRealConvo && (
+              <div className="relative shrink-0" ref={mobileMoreRef}>
+                {/* Painel "Mais Ações" — sobe da bottom bar */}
+                {mobileMoreOpen && (
+                  <div className="absolute bottom-full left-0 right-0 bg-card border-t border-x border-border rounded-t-2xl shadow-2xl z-50 max-h-[60vh] overflow-y-auto">
+                    {/* Info: Área jurídica */}
+                    {selected.legalArea && (
+                      <div className="px-4 py-3 flex items-center gap-3 border-b border-border/50">
+                        <span className="text-violet-400">⚖️</span>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Área Jurídica</p>
+                          <p className="text-sm font-semibold text-foreground">{selected.legalArea}</p>
+                        </div>
+                      </div>
+                    )}
+                    {/* Info: CRM Stage */}
+                    {(() => {
+                      const stage = findStage(normalizeStage(leadStage));
+                      return (
+                        <div className="px-4 py-3 border-b border-border/50">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Etapa do Funil</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {CRM_STAGES.map(s => (
+                              <button
+                                key={s.id}
+                                onClick={() => { handleChangeLeadStage(s.id); setMobileMoreOpen(false); }}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all active:scale-95 ${normalizeStage(leadStage) === s.id ? 'ring-2 ring-offset-1 ring-offset-card' : 'opacity-60 hover:opacity-100'}`}
+                                style={{ background: `${s.color}18`, color: s.color, borderColor: `${s.color}35`, ...(normalizeStage(leadStage) === s.id ? { ringColor: s.color } : {}) }}
+                              >
+                                {s.emoji} {s.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {/* Ações: Ficha trabalhista */}
+                    {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
+                      <div className="border-b border-border/50">
+                        {!isClosed && (
+                          <button
+                            onClick={() => { handleSendFormLink(); setMobileMoreOpen(false); }}
+                            className="w-full px-4 py-3.5 flex items-center gap-3 active:bg-accent transition-colors text-sm"
+                          >
+                            <ClipboardList size={18} className="text-amber-400" />
+                            <span className="text-foreground">Enviar Formulário</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setFichaInboxVisible(true); setMobileMoreOpen(false); }}
+                          className="w-full px-4 py-3.5 flex items-center gap-3 active:bg-accent transition-colors text-sm"
+                        >
+                          <Eye size={18} className="text-violet-400" />
+                          <span className="text-foreground">Visualizar Ficha</span>
+                          {fichaFinalizada && <span className="ml-auto text-[10px] text-emerald-400 font-bold">✅ Finalizada</span>}
+                        </button>
+                      </div>
+                    )}
+                    {/* Ações: Devolver + Manter */}
+                    {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (
+                      <div className="border-b border-border/50">
+                        <button
+                          onClick={() => { openReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem'); setMobileMoreOpen(false); }}
+                          className="w-full px-4 py-3.5 flex items-center gap-3 active:bg-accent transition-colors text-sm"
+                        >
+                          <CornerDownLeft size={18} className="text-amber-400" />
+                          <span className="text-foreground">Devolver ao SDR</span>
+                        </button>
+                        <button
+                          onClick={() => { handleKeepInInbox(); setMobileMoreOpen(false); }}
+                          className="w-full px-4 py-3.5 flex items-center gap-3 active:bg-accent transition-colors text-sm"
+                        >
+                          <Inbox size={18} className="text-emerald-400" />
+                          <span className="text-foreground">Manter Aqui</span>
+                        </button>
+                      </div>
+                    )}
+                    {/* Ação: Fechar */}
+                    {!isClosed && (
+                      <button
+                        onClick={() => { handleClose(); setMobileMoreOpen(false); }}
+                        className="w-full px-4 py-3.5 flex items-center gap-3 active:bg-accent transition-colors text-sm"
+                      >
+                        <XCircle size={18} className="text-red-400" />
+                        <span className="text-red-400">Fechar Conversa</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Bottom bar com botões principais */}
+                <div className="flex items-center justify-around bg-card/95 backdrop-blur-md border-t border-border">
+                  {/* IA Toggle */}
+                  <button
+                    onClick={handleToggleAiMode}
+                    className={`flex flex-col items-center gap-0.5 py-2.5 px-3 rounded-lg active:bg-accent transition-colors min-w-[56px] ${aiMode ? 'text-emerald-400' : 'text-muted-foreground'}`}
+                  >
+                    {aiMode ? <Bot size={22} /> : <BotOff size={22} />}
+                    <span className="text-[10px] font-medium">{aiMode ? 'IA On' : 'IA Off'}</span>
+                  </button>
+
+                  {/* Ficha — só trabalhista */}
+                  {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
+                    <button
+                      onClick={() => setFichaInboxVisible(true)}
+                      className="flex flex-col items-center gap-0.5 py-2.5 px-3 rounded-lg active:bg-accent transition-colors min-w-[56px] text-amber-400"
+                    >
+                      <ClipboardList size={22} />
+                      <span className="text-[10px] font-medium">Ficha</span>
+                    </button>
+                  )}
+
+                  {/* Aceitar — só WAITING */}
+                  {selected.status === 'WAITING' && (
+                    <button
+                      onClick={handleAccept}
+                      className="flex flex-col items-center gap-0.5 py-2.5 px-3 rounded-lg active:bg-accent transition-colors min-w-[56px] text-primary"
+                    >
+                      <Check size={22} />
+                      <span className="text-[10px] font-medium">Aceitar</span>
+                    </button>
+                  )}
+
+                  {/* Transferir */}
+                  {!isClosed && (
+                    <button
+                      onClick={handleOpenTransferModal}
+                      className="flex flex-col items-center gap-0.5 py-2.5 px-3 rounded-lg active:bg-accent transition-colors min-w-[56px] text-sky-400"
+                    >
+                      <UserCheck size={22} />
+                      <span className="text-[10px] font-medium">Transferir</span>
+                    </button>
+                  )}
+
+                  {/* Mais — abre painel */}
+                  <button
+                    onClick={() => setMobileMoreOpen(v => !v)}
+                    className={`flex flex-col items-center gap-0.5 py-2.5 px-3 rounded-lg active:bg-accent transition-colors min-w-[56px] ${mobileMoreOpen ? 'text-primary' : 'text-muted-foreground'}`}
+                  >
+                    <MoreVertical size={22} />
+                    <span className="text-[10px] font-medium">Mais</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             <footer className="px-3 md:px-6 pt-2 pb-3 md:pt-3 md:pb-6 bg-background shrink-0">
               {replyingTo && !isClosed && (
