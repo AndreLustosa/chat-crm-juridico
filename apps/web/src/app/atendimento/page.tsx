@@ -1333,8 +1333,14 @@ export default function Dashboard() {
                      <span className="text-foreground font-bold text-lg md:text-xl">{getInitial(selected.contactName)}</span>
                    )}
                  </div>
-                 <div className="min-w-0 flex-1">
-                   <h3 className="font-bold text-base md:text-lg leading-tight truncate">{selected.contactName || selected.contactPhone}</h3>
+                 <div
+                   className={`min-w-0 flex-1 ${isMobile ? 'cursor-pointer active:opacity-70 transition-opacity' : ''}`}
+                   onClick={() => isMobile && setShowDetailsPanel(true)}
+                 >
+                   <div className="flex items-center gap-1">
+                     <h3 className="font-bold text-base md:text-lg leading-tight truncate">{selected.contactName || selected.contactPhone}</h3>
+                     {isMobile && <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+                   </div>
                    <div className="text-[11px] md:text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-0.5 md:mt-1 truncate">
                      {selected.channel} <span className="mx-1">•</span> {selected.contactPhone}
                    </div>
