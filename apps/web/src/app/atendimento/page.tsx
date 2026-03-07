@@ -103,8 +103,9 @@ function DateSeparator({ label }: { label: string }) {
 
 function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   if (!isOut) return null;
-  if (status === 'lido') return <CheckCheck size={12} className="text-blue-400" />;
-  if (status === 'entregue') return <CheckCheck size={12} className="text-primary-foreground/60" />;
+  if (status === 'enviando') return <div className="w-3 h-3 border border-primary-foreground/60 border-t-transparent rounded-full animate-spin" />;
+  if (status === 'lido' || status === 'read') return <CheckCheck size={12} className="text-blue-400" />;
+  if (status === 'entregue' || status === 'delivered') return <CheckCheck size={12} className="text-primary-foreground/60" />;
   return <Check size={12} className="text-primary-foreground/60" />;
 }
 
@@ -120,6 +121,7 @@ export default function Dashboard() {
   const [msgTotalPages, setMsgTotalPages] = useState(1);
   const [msgCurrentPage, setMsgCurrentPage] = useState(1);
   const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [socketConnected, setSocketConnected] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -177,6 +179,7 @@ export default function Dashboard() {
   const touchStartXRef = useRef<number>(0);
   const touchStartYRef = useRef<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   // Unread message counts per conversation (persisted in sessionStorage to survive same-page navigation)
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return {};
@@ -246,6 +249,12 @@ export default function Dashboard() {
     const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
     window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
   }, [unreadCounts]);
+
+  // Debounce do filtro de busca (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Sync aiMode when conversation changes
   useEffect(() => {
@@ -549,6 +558,7 @@ export default function Dashboard() {
     const prevId = selectedIdRef.current;
 
     const fetchDetail = async () => {
+      setLoadingMessages(true);
       try {
         // Buscar mensagens via endpoint paginado (pagina mais recente primeiro)
         const msgRes = await api.get(`/messages/conversation/${selectedId}`, {
@@ -587,10 +597,21 @@ export default function Dashboard() {
         }
       } catch (e) {
         console.error('Failed to fetch conversation', e);
+      } finally {
+        setLoadingMessages(false);
       }
     };
 
     fetchDetail();
+
+    return () => {
+      // Cleanup listeners ao trocar de conversa (evita race condition)
+      if (socketRef.current) {
+        socketRef.current.off('newMessage');
+        socketRef.current.off('mediaReady');
+        socketRef.current.off('messageUpdate');
+      }
+    };
   }, [selectedId]);
 
   // Auto-scroll (only when NOT loading older messages)
@@ -607,24 +628,39 @@ export default function Dashboard() {
     setSending(true);
     setText('');
     setReplyingTo(null);
+
+    // Optimistic UI: adicionar msg na lista imediatamente
+    const optimisticId = `optimistic_${Date.now()}`;
+    const optimisticMsg: any = {
+      id: optimisticId,
+      conversation_id: selectedId,
+      direction: 'out',
+      type: 'text',
+      text: msgText,
+      created_at: new Date().toISOString(),
+      status: 'enviando',
+      reply_to_id: replyId || null,
+      media: [],
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
     try {
       const res = await api.post('/messages/send', {
         conversationId: selectedId,
         text: msgText,
         ...(replyId ? { replyToId: replyId } : {}),
       });
-      // Exibição imediata: adiciona a mensagem retornada pelo backend
+      // Substituir msg otimista pela real do servidor
       if (res.data?.id) {
-        setMessages(prev => {
-          if (prev.find(m => m.id === res.data.id)) return prev;
-          return [...prev, res.data];
-        });
+        setMessages(prev => prev.map(m => m.id === optimisticId ? res.data : m));
       }
       inputRef.current?.focus();
     } catch (e: any) {
       console.error('Failed to send message', e);
       showError(e.response?.data?.message || 'Falha ao enviar mensagem');
-      setText(msgText); // Restaura o texto em caso de erro
+      // Remover msg otimista e restaurar texto
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
+      setText(msgText);
     } finally {
       setSending(false);
     }
@@ -635,6 +671,7 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${selectedId}/assign`);
       fetchConversations();
+      showSuccess('Conversa aceita');
     } catch (e) {
       console.error('Failed to accept', e);
       showError('Falha ao aceitar conversa');
@@ -648,6 +685,7 @@ export default function Dashboard() {
       await api.patch(`/conversations/${selectedId}/close`);
       setSelectedId(null);
       fetchConversations();
+      showSuccess('Conversa encerrada');
     } catch (e) {
       console.error('Failed to close', e);
       showError('Falha ao fechar conversa');
@@ -743,6 +781,7 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${selectedId}/return-to-origin`);
       fetchConversations(selectedInboxIdRef.current);
+      showSuccess('Conversa devolvida');
     } catch (e: any) {
       console.error('Failed to return to origin', e);
       showError('Falha ao devolver conversa');
@@ -754,6 +793,7 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${selectedId}/keep-in-inbox`);
       fetchConversations(selectedInboxIdRef.current);
+      showSuccess('Conversa mantida no inbox');
     } catch (e: any) {
       console.error('Failed to keep in inbox', e);
       showError('Falha ao manter no inbox');
@@ -909,8 +949,10 @@ export default function Dashboard() {
       await api.patch(`/conversations/${selectedId}/ai-mode`, { ai_mode: newMode });
       setAiMode(newMode);
       fetchConversations();
+      showSuccess(newMode ? 'IA ativada' : 'IA desativada');
     } catch (e) {
       console.error('Erro ao alterar modo IA', e);
+      showError('Falha ao alterar modo IA');
     }
   };
 
@@ -1016,8 +1058,8 @@ export default function Dashboard() {
     // Ocultar contatos arquivados (marcados como Perdido no CRM)
     result = result.filter(c => normalizeStage(c.leadStage) !== 'PERDIDO');
     // Filtro de busca: nome do contato, telefone ou conteúdo da última mensagem
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase().trim();
       result = result.filter(c =>
         c.contactName?.toLowerCase().includes(q) ||
         c.contactPhone?.toLowerCase().includes(q) ||
@@ -1155,6 +1197,7 @@ export default function Dashboard() {
               onClick={() => setInboxOpen(false)}
               className="hidden md:block p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
               title="Fechar painel"
+              aria-label="Fechar painel de inbox"
             >
               <PanelLeftClose size={18} />
             </button>
@@ -1175,6 +1218,7 @@ export default function Dashboard() {
                 onClick={() => setSearchQuery('')}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 title="Limpar busca"
+                aria-label="Limpar busca"
               >
                 <X size={12} />
               </button>
@@ -1364,6 +1408,7 @@ export default function Dashboard() {
           onClick={() => setInboxOpen(true)}
           className="shrink-0 w-10 flex flex-col items-center justify-start gap-2 pt-4 bg-card border-r border-border z-40 hover:bg-accent/50 transition-all"
           title="Abrir painel de inbox"
+          aria-label="Abrir painel de inbox"
         >
           <PanelLeftOpen size={18} className="text-muted-foreground" />
         </button>
@@ -1401,6 +1446,7 @@ export default function Dashboard() {
                  {isMobile && (
                    <button
                      onClick={() => { setSelectedId(null); setMobileMoreOpen(false); }}
+                     aria-label="Voltar"
                      className="p-2 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
                    >
                      <ArrowLeft size={20} />
@@ -1731,6 +1777,16 @@ export default function Dashboard() {
               </div>
             <div className="absolute inset-0 px-1 sm:px-6 md:px-8 py-3 sm:py-5 md:py-8 overflow-y-auto custom-scrollbar" ref={scrollRef}>
               <div className="flex flex-col gap-3 md:gap-4 max-w-4xl mx-auto pb-4 relative z-10">
+                {/* Skeleton de carregamento de mensagens */}
+                {loadingMessages && (
+                  <div className="flex flex-col gap-4 py-8">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`animate-pulse bg-muted rounded-2xl ${i % 2 === 0 ? 'w-2/3' : 'w-1/2'}`} style={{ height: `${32 + (i % 3) * 16}px` }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {/* Botao carregar mensagens anteriores */}
                 {isRealConvo && msgTotalPages > 1 && msgCurrentPage < msgTotalPages && (
                   <div className="flex justify-center py-2">
@@ -1797,6 +1853,7 @@ export default function Dashboard() {
                               onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
                               className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
                               title="Responder"
+                              aria-label="Responder mensagem"
                             >
                               <Reply size={13} />
                             </button>
@@ -1804,6 +1861,7 @@ export default function Dashboard() {
                               onClick={() => handleDeleteMessage(msg.id)}
                               className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                               title="Apagar mensagem"
+                              aria-label="Apagar mensagem"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -1898,6 +1956,7 @@ export default function Dashboard() {
                                   onClick={() => handleImageDownload(`/api/media/${msg.id}`)}
                                   className="absolute bottom-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-md p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                                   title="Baixar imagem"
+                                  aria-label="Baixar imagem"
                                 >
                                   <Download size={13} />
                                 </button>
@@ -1932,6 +1991,7 @@ export default function Dashboard() {
                                   onClick={e => { e.stopPropagation(); handleDocDownload(`/api/media/${msg.id}`, msg.media!.original_name || 'documento'); }}
                                   className={`p-1.5 rounded-lg transition-colors shrink-0 ${isOut ? 'hover:bg-white/20 text-white/70' : 'hover:bg-primary/10 text-muted-foreground'}`}
                                   title="Baixar"
+                                  aria-label="Baixar documento"
                                 >
                                   <Download size={14} />
                                 </button>
@@ -1965,6 +2025,7 @@ export default function Dashboard() {
                               onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
                               className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
                               title="Responder"
+                              aria-label="Responder mensagem"
                             >
                               <Reply size={16} />
                             </button>
@@ -1973,6 +2034,7 @@ export default function Dashboard() {
                                 onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
                                 className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
                                 title="Editar mensagem"
+                                aria-label="Editar mensagem"
                               >
                                 <Pencil size={16} />
                               </button>
@@ -1981,6 +2043,7 @@ export default function Dashboard() {
                               onClick={() => handleDeleteMessage(msg.id)}
                               className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                               title="Apagar mensagem"
+                              aria-label="Apagar mensagem"
                             >
                               <Trash2 size={16} />
                             </button>
@@ -2097,6 +2160,7 @@ export default function Dashboard() {
                   <button
                     onClick={() => setShowDetailsPanel(false)}
                     className="p-2 rounded-xl hover:bg-accent text-muted-foreground active:bg-accent"
+                    aria-label="Fechar painel de detalhes"
                   >
                     <ArrowLeft size={20} />
                   </button>
@@ -2324,7 +2388,7 @@ export default function Dashboard() {
                 <div className="max-w-4xl mx-auto mb-2 flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-xl">
                   <Reply size={13} className="text-primary shrink-0" />
                   <p className="text-xs text-muted-foreground line-clamp-1 flex-1">{replyingTo.text || '[mídia]'}</p>
-                  <button onClick={() => setReplyingTo(null)} className="text-muted-foreground hover:text-foreground shrink-0">
+                  <button onClick={() => setReplyingTo(null)} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Cancelar resposta">
                     <X size={13} />
                   </button>
                 </div>
@@ -2343,6 +2407,7 @@ export default function Dashboard() {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={!isRealConvo || uploadingFile}
                       title="Enviar arquivo"
+                      aria-label="Anexar arquivo"
                       className="p-2.5 md:p-3 rounded-xl bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50 shrink-0 mb-0.5"
                     >
                       {uploadingFile
@@ -2398,6 +2463,7 @@ export default function Dashboard() {
                             onClick={() => fileInputRef.current?.click()}
                             disabled={uploadingFile}
                             title="Arquivo"
+                            aria-label="Anexar arquivo"
                             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                           >
                             {uploadingFile
@@ -2451,6 +2517,7 @@ export default function Dashboard() {
                   <button
                     onClick={handleSend}
                     disabled={!isRealConvo || !text.trim() || sending || text.length > 5000}
+                    aria-label="Enviar mensagem"
                     className="bg-gradient-to-r from-primary to-ring p-3 md:p-4 rounded-xl shadow-lg disabled:opacity-50 hover:-translate-y-1 transition-transform shrink-0 mb-0.5"
                   >
                     <Send size={18} className="text-primary-foreground md:w-5 md:h-5" />
@@ -2499,6 +2566,7 @@ export default function Dashboard() {
                 onClick={() => handleImageDownload(lightbox!)}
                 className="bg-black/60 hover:bg-black/80 text-white rounded-lg p-2 transition-colors"
                 title="Baixar imagem"
+                aria-label="Baixar imagem"
               >
                 <Download size={16} />
               </button>
@@ -2506,6 +2574,7 @@ export default function Dashboard() {
                 onClick={() => setLightbox(null)}
                 className="bg-black/60 hover:bg-black/80 text-white rounded-lg p-2 transition-colors text-lg leading-none"
                 title="Fechar"
+                aria-label="Fechar visualizacao"
               >
                 ✕
               </button>
@@ -2536,6 +2605,7 @@ export default function Dashboard() {
                   onClick={() => handleDocDownload(docPreview.url, docPreview.name)}
                   className="bg-muted hover:bg-muted/80 text-foreground rounded-lg p-2 transition-colors"
                   title="Baixar"
+                  aria-label="Baixar documento"
                 >
                   <Download size={16} />
                 </button>
@@ -2543,6 +2613,7 @@ export default function Dashboard() {
                   onClick={() => setDocPreview(null)}
                   className="bg-muted hover:bg-muted/80 text-foreground rounded-lg p-2 transition-colors text-base leading-none"
                   title="Fechar"
+                  aria-label="Fechar pre-visualizacao"
                 >
                   ✕
                 </button>
@@ -2589,7 +2660,10 @@ export default function Dashboard() {
               <p className="text-red-400 text-sm mb-3 px-1">{transferError}</p>
             )}
             {loadingOperators ? (
-              <p className="text-muted-foreground text-sm py-4 text-center">Carregando operadores...</p>
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-muted-foreground text-sm">Carregando operadores...</p>
+              </div>
             ) : transferGroups.every(g => g.users.length === 0) || transferGroups.length === 0 ? (
               <p className="text-muted-foreground text-sm py-2">Nenhum operador cadastrado.</p>
             ) : (
@@ -2882,7 +2956,7 @@ export default function Dashboard() {
       {transferSentMsg && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-card border border-sky-500/30 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium flex items-center gap-3">
           {transferSentMsg}
-          <button onClick={() => setTransferSentMsg(null)} className="text-muted-foreground hover:text-foreground ml-2"><X size={14} /></button>
+          <button onClick={() => setTransferSentMsg(null)} className="text-muted-foreground hover:text-foreground ml-2" aria-label="Fechar aviso"><X size={14} /></button>
         </div>
       )}
 
@@ -2890,7 +2964,7 @@ export default function Dashboard() {
       {transferResponseMsg && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] bg-card border border-border rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium flex items-center gap-3">
           {transferResponseMsg}
-          <button onClick={() => setTransferResponseMsg(null)} className="text-muted-foreground hover:text-foreground ml-2">
+          <button onClick={() => setTransferResponseMsg(null)} className="text-muted-foreground hover:text-foreground ml-2" aria-label="Fechar aviso">
             <X size={14} />
           </button>
         </div>
@@ -2917,6 +2991,7 @@ export default function Dashboard() {
               <button
                 onClick={() => setFichaInboxVisible(false)}
                 className="p-2 rounded-lg hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Fechar ficha trabalhista"
               >
                 <X size={18} />
               </button>
