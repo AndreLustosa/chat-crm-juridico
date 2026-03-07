@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 declare global {
   interface Window {
     dataLayer: Record<string, unknown>[];
+    gtag?: (...args: unknown[]) => void;
   }
 }
 
@@ -46,14 +47,27 @@ async function sendEvent(event_type: 'view' | 'whatsapp_click') {
         ...utms,
       }),
     });
-    // GTM dataLayer — inicializa se GTM ainda não carregou
     if (typeof window !== 'undefined') {
+      const eventName = event_type === 'view' ? 'lp_page_view' : 'lp_whatsapp_click';
+
+      // 1. GTM dataLayer — GTM processa e dispara tags configuradas
       window.dataLayer = window.dataLayer || [];
       window.dataLayer.push({
-        event: event_type === 'view' ? 'lp_page_view' : 'lp_whatsapp_click',
+        event: eventName,
         page_path: window.location.pathname,
         ...utms,
       });
+
+      // 2. gtag direto — fallback caso GTM não tenha carregado (ex.: CSP residual)
+      //    Garante que Google Analytics e Google Ads recebam o evento
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', eventName, {
+          event_category: 'engagement',
+          event_label: window.location.pathname,
+          page_path: window.location.pathname,
+          ...utms,
+        });
+      }
     }
   } catch {
     // silencioso — não quebra a página
