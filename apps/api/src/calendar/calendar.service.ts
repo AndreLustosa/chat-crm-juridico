@@ -27,6 +27,7 @@ export class CalendarService {
     leadId?: string;
     legalCaseId?: string;
     tenantId?: string;
+    search?: string;
   }) {
     const where: any = {};
 
@@ -35,6 +36,13 @@ export class CalendarService {
     if (query.userId) where.assigned_user_id = query.userId;
     if (query.leadId) where.lead_id = query.leadId;
     if (query.legalCaseId) where.legal_case_id = query.legalCaseId;
+
+    if (query.search) {
+      where.OR = [
+        { title: { contains: query.search, mode: 'insensitive' } },
+        { description: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
 
     if (query.start || query.end) {
       where.start_at = {};
@@ -91,6 +99,9 @@ export class CalendarService {
     appointment_type_id?: string;
     tenant_id?: string;
     reminders?: { minutes_before: number; channel?: string }[];
+    recurrence_rule?: string;
+    recurrence_end?: string;
+    recurrence_days?: number[];
   }) {
     if (!EVENT_TYPES.includes(data.type as any)) {
       throw new BadRequestException(`Tipo invalido: ${data.type}. Use: ${EVENT_TYPES.join(', ')}`);
@@ -115,6 +126,9 @@ export class CalendarService {
         created_by_id: data.created_by_id,
         appointment_type_id: data.appointment_type_id,
         tenant_id: data.tenant_id,
+        recurrence_rule: data.recurrence_rule,
+        recurrence_end: data.recurrence_end ? new Date(data.recurrence_end) : null,
+        recurrence_days: data.recurrence_days ?? [],
         reminders: data.reminders?.length
           ? {
               create: data.reminders.map((r) => ({
@@ -144,15 +158,20 @@ export class CalendarService {
       } catch {}
     }
 
-    // Enqueue WhatsApp reminders
+    // Enqueue WhatsApp + Email reminders
     await this.enqueueReminders(event.id, event.start_at, event.reminders || []);
+
+    // Expand recurrence if rule set
+    if (data.recurrence_rule) {
+      await this.expandRecurrence(event);
+    }
 
     return event;
   }
 
   private async enqueueReminders(eventId: string, startAt: Date, reminders: { id: string; minutes_before: number; channel: string }[]) {
     for (const r of reminders) {
-      if (r.channel !== 'WHATSAPP') continue; // PUSH handled by cron
+      if (r.channel !== 'WHATSAPP' && r.channel !== 'EMAIL') continue; // PUSH handled by cron
       const triggerAt = startAt.getTime() - r.minutes_before * 60 * 1000;
       const delay = Math.max(triggerAt - Date.now(), 1000); // min 1s
       const jobId = `reminder-${r.id}`;
@@ -279,7 +298,6 @@ export class CalendarService {
   }
 
   async setSchedule(userId: string, slots: { day_of_week: number; start_time: string; end_time: string }[]) {
-    // Upsert cada dia
     const results = await Promise.all(
       slots.map((s) =>
         this.prisma.userSchedule.upsert({
@@ -296,11 +314,15 @@ export class CalendarService {
     const date = new Date(dateStr);
     const dayOfWeek = date.getDay(); // 0=dom..6=sab
 
+    // 0. Verificar se e feriado
+    const isHoliday = await this.isHoliday(date);
+    if (isHoliday) return [];
+
     // 1. Horario de trabalho do dia
     const schedule = await this.prisma.userSchedule.findUnique({
       where: { user_id_day_of_week: { user_id: userId, day_of_week: dayOfWeek } },
     });
-    if (!schedule) return []; // Nao trabalha nesse dia
+    if (!schedule) return [];
 
     // 2. Eventos existentes nesse dia
     const dayStart = new Date(date);
@@ -324,12 +346,11 @@ export class CalendarService {
     const workStart = startH * 60 + startM;
     const workEnd = endH * 60 + endM;
 
-    // Blocos ocupados (em minutos desde meia-noite)
     const busy = events.map((e) => {
       const s = e.start_at.getHours() * 60 + e.start_at.getMinutes();
       const eEnd = e.end_at
         ? e.end_at.getHours() * 60 + e.end_at.getMinutes()
-        : s + 30; // default 30min se sem end_at
+        : s + 30;
       return { start: s, end: eEnd };
     });
 
@@ -346,7 +367,6 @@ export class CalendarService {
       }
       if (b.end > cursor) cursor = b.end;
     }
-    // Slots apos ultimo evento
     while (cursor + durationMinutes <= workEnd) {
       const slotEnd = cursor + durationMinutes;
       slots.push({
@@ -363,7 +383,7 @@ export class CalendarService {
 
   async findAppointmentTypes(tenantId?: string) {
     return this.prisma.appointmentType.findMany({
-      where: tenantId ? { tenant_id: tenantId, active: true } : { active: true },
+      where: tenantId ? { tenant_id: tenantId } : {},
       orderBy: { name: 'asc' },
     });
   }
@@ -375,5 +395,250 @@ export class CalendarService {
     tenant_id?: string;
   }) {
     return this.prisma.appointmentType.create({ data });
+  }
+
+  async updateAppointmentType(id: string, data: { name?: string; duration?: number; color?: string; active?: boolean }) {
+    return this.prisma.appointmentType.update({ where: { id }, data });
+  }
+
+  async deleteAppointmentType(id: string) {
+    await this.prisma.appointmentType.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  // ─── Holidays ─────────────────────────────────────────
+
+  async findHolidays(tenantId?: string) {
+    return this.prisma.holiday.findMany({
+      where: tenantId ? { tenant_id: tenantId } : {},
+      orderBy: { date: 'asc' },
+    });
+  }
+
+  async createHoliday(data: { date: string; name: string; recurring_yearly?: boolean; tenant_id?: string }) {
+    return this.prisma.holiday.create({
+      data: {
+        date: new Date(data.date),
+        name: data.name,
+        recurring_yearly: data.recurring_yearly ?? false,
+        tenant_id: data.tenant_id,
+      },
+    });
+  }
+
+  async updateHoliday(id: string, data: { date?: string; name?: string; recurring_yearly?: boolean }) {
+    const updateData: any = {};
+    if (data.date) updateData.date = new Date(data.date);
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.recurring_yearly !== undefined) updateData.recurring_yearly = data.recurring_yearly;
+    return this.prisma.holiday.update({ where: { id }, data: updateData });
+  }
+
+  async deleteHoliday(id: string) {
+    await this.prisma.holiday.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  private async isHoliday(date: Date): Promise<boolean> {
+    const dayStart = new Date(date);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Check exact date holidays
+    const exactMatch = await this.prisma.holiday.findFirst({
+      where: {
+        date: { gte: dayStart, lte: dayEnd },
+        recurring_yearly: false,
+      },
+    });
+    if (exactMatch) return true;
+
+    // Check recurring yearly holidays (same month + day, any year)
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const recurringMatch = await this.prisma.$queryRaw`
+      SELECT id FROM "Holiday"
+      WHERE recurring_yearly = true
+        AND EXTRACT(MONTH FROM date) = ${month}
+        AND EXTRACT(DAY FROM date) = ${day}
+      LIMIT 1
+    ` as any[];
+    return recurringMatch.length > 0;
+  }
+
+  // ─── Recurrence ───────────────────────────────────────
+
+  async expandRecurrence(parentEvent: any) {
+    const rule = parentEvent.recurrence_rule;
+    if (!rule) return [];
+
+    const startAt = new Date(parentEvent.start_at);
+    const endAt = parentEvent.end_at ? new Date(parentEvent.end_at) : null;
+    const duration = endAt ? endAt.getTime() - startAt.getTime() : 30 * 60 * 1000;
+    const recurrenceEnd = parentEvent.recurrence_end
+      ? new Date(parentEvent.recurrence_end)
+      : new Date(startAt.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 dias
+
+    const dates: Date[] = [];
+    let cursor = new Date(startAt);
+
+    const advanceCursor = () => {
+      switch (rule) {
+        case 'DAILY':
+          cursor.setDate(cursor.getDate() + 1);
+          break;
+        case 'WEEKLY':
+          cursor.setDate(cursor.getDate() + 7);
+          break;
+        case 'BIWEEKLY':
+          cursor.setDate(cursor.getDate() + 14);
+          break;
+        case 'MONTHLY':
+          cursor.setMonth(cursor.getMonth() + 1);
+          break;
+        case 'CUSTOM':
+          cursor.setDate(cursor.getDate() + 1);
+          break;
+      }
+    };
+
+    // Gerar datas (pular a primeira que ja e o pai)
+    advanceCursor();
+    while (cursor <= recurrenceEnd && dates.length < 365) {
+      if (rule === 'CUSTOM') {
+        const dow = cursor.getDay();
+        if ((parentEvent.recurrence_days || []).includes(dow)) {
+          dates.push(new Date(cursor));
+        }
+      } else {
+        dates.push(new Date(cursor));
+      }
+      advanceCursor();
+    }
+
+    // Criar instancias filhas em batch
+    if (dates.length === 0) return [];
+
+    const children = await Promise.all(
+      dates.map((d) => {
+        const childStart = new Date(d);
+        childStart.setHours(startAt.getHours(), startAt.getMinutes(), startAt.getSeconds());
+        const childEnd = new Date(childStart.getTime() + duration);
+
+        return this.prisma.calendarEvent.create({
+          data: {
+            type: parentEvent.type,
+            title: parentEvent.title,
+            description: parentEvent.description,
+            start_at: childStart,
+            end_at: childEnd,
+            all_day: parentEvent.all_day,
+            status: parentEvent.status || 'AGENDADO',
+            priority: parentEvent.priority || 'NORMAL',
+            color: parentEvent.color,
+            location: parentEvent.location,
+            lead_id: parentEvent.lead_id,
+            legal_case_id: parentEvent.legal_case_id,
+            assigned_user_id: parentEvent.assigned_user_id,
+            created_by_id: parentEvent.created_by_id,
+            appointment_type_id: parentEvent.appointment_type_id,
+            tenant_id: parentEvent.tenant_id,
+            parent_event_id: parentEvent.id,
+          },
+        });
+      }),
+    );
+
+    this.logger.log(`Criadas ${children.length} instancias recorrentes para evento ${parentEvent.id}`);
+    return children;
+  }
+
+  async updateRecurrenceAll(parentId: string, data: any) {
+    // Atualizar pai
+    const parent = await this.update(parentId, data);
+    // Atualizar todos os filhos
+    const updateData: any = {};
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.type !== undefined) updateData.type = data.type;
+    if (data.priority !== undefined) updateData.priority = data.priority;
+    if (data.location !== undefined) updateData.location = data.location;
+    if (data.assigned_user_id !== undefined) updateData.assigned_user_id = data.assigned_user_id;
+
+    if (Object.keys(updateData).length > 0) {
+      await this.prisma.calendarEvent.updateMany({
+        where: { parent_event_id: parentId },
+        data: updateData,
+      });
+    }
+    return parent;
+  }
+
+  async removeRecurrenceAll(parentId: string) {
+    // Deletar filhos primeiro, depois o pai
+    await this.prisma.calendarEvent.deleteMany({ where: { parent_event_id: parentId } });
+    await this.prisma.calendarEvent.delete({ where: { id: parentId } });
+    return { deleted: true };
+  }
+
+  // ─── Search ───────────────────────────────────────────
+
+  async search(query: string, tenantId?: string) {
+    return this.prisma.calendarEvent.findMany({
+      where: {
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+        OR: [
+          { title: { contains: query, mode: 'insensitive' } },
+          { description: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      include: {
+        assigned_user: { select: { id: true, name: true } },
+        lead: { select: { id: true, name: true, phone: true } },
+      },
+      orderBy: { start_at: 'desc' },
+      take: 20,
+    });
+  }
+
+  // ─── ICS Export ───────────────────────────────────────
+
+  async exportICS(eventIds: string[]): Promise<string> {
+    const events = await this.prisma.calendarEvent.findMany({
+      where: { id: { in: eventIds } },
+      include: {
+        assigned_user: { select: { name: true } },
+        lead: { select: { name: true } },
+      },
+    });
+
+    const formatIcsDate = (d: Date) =>
+      d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//LexCRM//Calendar//PT',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+    ];
+
+    for (const evt of events) {
+      lines.push('BEGIN:VEVENT');
+      lines.push(`UID:${evt.id}@lexcrm`);
+      lines.push(`DTSTART:${formatIcsDate(evt.start_at)}`);
+      if (evt.end_at) lines.push(`DTEND:${formatIcsDate(evt.end_at)}`);
+      lines.push(`SUMMARY:${(evt.title || '').replace(/[,;\\]/g, ' ')}`);
+      if (evt.description) lines.push(`DESCRIPTION:${evt.description.replace(/\n/g, '\\n').replace(/[,;\\]/g, ' ')}`);
+      if (evt.location) lines.push(`LOCATION:${evt.location.replace(/[,;\\]/g, ' ')}`);
+      lines.push(`STATUS:${evt.status === 'CONFIRMADO' ? 'CONFIRMED' : evt.status === 'CANCELADO' ? 'CANCELLED' : 'TENTATIVE'}`);
+      lines.push(`CREATED:${formatIcsDate(evt.created_at)}`);
+      lines.push(`LAST-MODIFIED:${formatIcsDate(evt.updated_at)}`);
+      lines.push('END:VEVENT');
+    }
+
+    lines.push('END:VCALENDAR');
+    return lines.join('\r\n');
   }
 }

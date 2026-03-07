@@ -9,7 +9,8 @@ import { createDragAndDropPlugin } from '@schedule-x/drag-and-drop';
 import '@schedule-x/theme-default/dist/index.css';
 import {
   Plus, X, Calendar as CalendarIcon, Filter, ChevronDown,
-  Clock, MapPin, User, FileText, Gavel, AlertTriangle, CheckCircle2, Bell
+  Clock, MapPin, User, FileText, Gavel, AlertTriangle, CheckCircle2, Bell,
+  Search, Download, Copy, Repeat
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import api from '@/lib/api';
@@ -82,6 +83,17 @@ const REMINDER_OPTIONS = [
   { value: 60, label: '1 hora antes' },
   { value: 1440, label: '1 dia antes' },
 ];
+
+const RECURRENCE_OPTIONS = [
+  { value: '', label: 'Não repetir' },
+  { value: 'DAILY', label: 'Diário' },
+  { value: 'WEEKLY', label: 'Semanal' },
+  { value: 'BIWEEKLY', label: 'Quinzenal' },
+  { value: 'MONTHLY', label: 'Mensal' },
+  { value: 'CUSTOM', label: 'Personalizado' },
+];
+
+const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 function getEventColor(type: string) {
   return EVENT_TYPES.find(t => t.id === type)?.color || '#6b7280';
@@ -159,12 +171,19 @@ export default function AgendaPage() {
     lead_id: '',
     legal_case_id: '',
     reminders: [{ minutes_before: 30, channel: 'PUSH' }] as { minutes_before: number; channel: string }[],
+    recurrence_rule: '',
+    recurrence_end: '',
+    recurrence_days: [] as number[],
   });
 
   // Real-time & UX
   const [reminderToast, setReminderToast] = useState<{ eventId: string; title: string; type: string; start_at: string; minutesBefore: number } | null>(null);
   const [conflictWarning, setConflictWarning] = useState<{ id: string; title: string; start_at: string; end_at: string }[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<CalendarEvent[]>([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -253,7 +272,7 @@ export default function AgendaPage() {
     const filtered = events.filter(e => filterTypes.includes(e.type));
     const calEvents = filtered.map(e => ({
       id: e.id,
-      title: `${EVENT_TYPES.find(t => t.id === e.type)?.emoji || ''} ${e.title}`,
+      title: `${EVENT_TYPES.find(t => t.id === e.type)?.emoji || ''} ${e.title}${(e as any).recurrence_rule || (e as any).parent_event_id ? ' 🔁' : ''}`,
       start: toLocalDateTime(e.start_at),
       end: e.end_at ? toLocalDateTime(e.end_at) : toLocalDateTime(new Date(new Date(e.start_at).getTime() + 30 * 60000).toISOString()),
       calendarId: e.type,
@@ -325,6 +344,9 @@ export default function AgendaPage() {
       lead_id: '',
       legal_case_id: '',
       reminders: [{ minutes_before: 30, channel: 'PUSH' }],
+      recurrence_rule: '',
+      recurrence_end: '',
+      recurrence_days: [],
     });
     setEditingEvent(null);
     setConflictWarning([]);
@@ -346,6 +368,9 @@ export default function AgendaPage() {
       lead_id: ev.lead_id || '',
       legal_case_id: ev.legal_case_id || '',
       reminders: (ev as any).reminders?.map((r: any) => ({ minutes_before: r.minutes_before, channel: r.channel })) || [{ minutes_before: 30, channel: 'PUSH' }],
+      recurrence_rule: (ev as any).recurrence_rule || '',
+      recurrence_end: (ev as any).recurrence_end ? formatDateInput((ev as any).recurrence_end) : '',
+      recurrence_days: (ev as any).recurrence_days || [],
     });
     setEditingEvent(ev);
     setConflictWarning([]);
@@ -383,6 +408,9 @@ export default function AgendaPage() {
       lead_id: formData.lead_id || null,
       legal_case_id: formData.legal_case_id || null,
       reminders: formData.reminders.length > 0 ? formData.reminders : undefined,
+      recurrence_rule: formData.recurrence_rule || undefined,
+      recurrence_end: formData.recurrence_end || undefined,
+      recurrence_days: formData.recurrence_days.length > 0 ? formData.recurrence_days : undefined,
     };
 
     try {
@@ -410,8 +438,23 @@ export default function AgendaPage() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (scope: 'single' | 'all' = 'single') => {
     if (!editingEvent) return;
+    const isRecurring = (editingEvent as any).parent_event_id || (editingEvent as any).recurrence_rule;
+    if (isRecurring && scope === 'single') {
+      const deleteAll = confirm('Este evento faz parte de uma série.\n\nClique OK para excluir TODA a série.\nClique Cancelar para excluir apenas este evento.');
+      if (deleteAll) {
+        const parentId = (editingEvent as any).parent_event_id || editingEvent.id;
+        try {
+          await api.delete(`/calendar/events/${parentId}?deleteScope=all`);
+          setShowModal(false);
+          if (rangeRef.current) fetchEvents(rangeRef.current.start, rangeRef.current.end);
+        } catch (e: any) {
+          alert('Erro: ' + (e?.response?.data?.message || e?.message));
+        }
+        return;
+      }
+    }
     if (!confirm('Remover este evento?')) return;
     try {
       await api.delete(`/calendar/events/${editingEvent.id}`);
@@ -420,6 +463,91 @@ export default function AgendaPage() {
     } catch (e: any) {
       alert('Erro ao remover: ' + (e?.response?.data?.message || e?.message));
     }
+  };
+
+  const handleDuplicate = () => {
+    if (!editingEvent) return;
+    setShowModal(false);
+    setTimeout(() => {
+      const now = new Date();
+      setFormData({
+        type: editingEvent.type,
+        title: editingEvent.title + ' (cópia)',
+        description: editingEvent.description || '',
+        date: formatDateInput(now.toISOString()),
+        startTime: formatTimeInput(editingEvent.start_at),
+        endTime: editingEvent.end_at ? formatTimeInput(editingEvent.end_at) : '',
+        all_day: editingEvent.all_day,
+        priority: editingEvent.priority,
+        location: editingEvent.location || '',
+        assigned_user_id: editingEvent.assigned_user_id || '',
+        lead_id: editingEvent.lead_id || '',
+        legal_case_id: editingEvent.legal_case_id || '',
+        reminders: [{ minutes_before: 30, channel: 'PUSH' }],
+        recurrence_rule: '',
+        recurrence_end: '',
+        recurrence_days: [],
+      });
+      setEditingEvent(null);
+      setConflictWarning([]);
+      setShowModal(true);
+    }, 100);
+  };
+
+  const handleExportICS = async (eventId: string) => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${apiUrl}/calendar/export/ics/${eventId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `event-${eventId}.ics`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Erro ao exportar');
+    }
+  };
+
+  const handleExportRange = async () => {
+    if (!rangeRef.current) return;
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({
+        start: rangeRef.current.start,
+        end: rangeRef.current.end,
+      });
+      if (filterUserId) params.set('userId', filterUserId);
+      const res = await fetch(`${apiUrl}/calendar/export/ics?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'calendar-export.ics';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Erro ao exportar');
+    }
+  };
+
+  const handleSearch = (q: string) => {
+    setSearchQuery(q);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    if (!q.trim()) { setSearchResults([]); return; }
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await api.get('/calendar/search', { params: { q } });
+        setSearchResults(res.data || []);
+      } catch { setSearchResults([]); }
+    }, 300);
   };
 
   const toggleFilterType = (typeId: string) => {
@@ -472,6 +600,53 @@ export default function AgendaPage() {
               <option value="">Todos os advogados</option>
               {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
+            {/* Search */}
+            <div className="relative hidden md:block">
+              <div className="flex items-center gap-1 px-3 py-2 rounded-lg border border-border bg-card text-sm">
+                <Search size={14} className="text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => handleSearch(e.target.value)}
+                  onFocus={() => setShowSearch(true)}
+                  placeholder="Buscar eventos..."
+                  className="w-36 bg-transparent text-foreground placeholder:text-muted-foreground outline-none text-sm"
+                />
+                {searchQuery && (
+                  <button onClick={() => { setSearchQuery(''); setSearchResults([]); }} className="text-muted-foreground hover:text-foreground">
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              {/* Search results dropdown */}
+              {showSearch && searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-2xl z-50 max-h-64 overflow-y-auto">
+                  {searchResults.map(ev => (
+                    <button
+                      key={ev.id}
+                      onClick={() => { openEditModal(ev); setShowSearch(false); setSearchQuery(''); setSearchResults([]); }}
+                      className="w-full text-left px-3 py-2 hover:bg-accent/50 transition-colors border-b border-border/30 last:border-0"
+                    >
+                      <p className="text-xs font-semibold text-foreground truncate">
+                        {EVENT_TYPES.find(t => t.id === ev.type)?.emoji} {ev.title}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {new Date(ev.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        {ev.assigned_user ? ` · ${ev.assigned_user.name}` : ''}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Export button */}
+            <button
+              onClick={handleExportRange}
+              className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:bg-accent transition-colors"
+              title="Exportar .ics"
+            >
+              <Download size={14} />
+            </button>
             {/* Botao novo evento */}
             <button
               onClick={() => openCreateModal()}
@@ -832,6 +1007,7 @@ export default function AgendaPage() {
                       >
                         <option value="PUSH">Push</option>
                         <option value="WHATSAPP">WhatsApp</option>
+                        <option value="EMAIL">Email</option>
                       </select>
                       <button
                         onClick={() => setFormData(f => ({ ...f, reminders: f.reminders.filter((_, i) => i !== idx) }))}
@@ -852,6 +1028,65 @@ export default function AgendaPage() {
                 </div>
               </div>
 
+              {/* Recorrência */}
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
+                  <Repeat size={11} /> Repetir
+                </label>
+                <select
+                  value={formData.recurrence_rule}
+                  onChange={e => setFormData(f => ({ ...f, recurrence_rule: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  {RECURRENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+
+                {formData.recurrence_rule && (
+                  <div className="mt-2 space-y-2">
+                    {/* Custom weekdays */}
+                    {formData.recurrence_rule === 'CUSTOM' && (
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground mb-1 block">Dias da semana</label>
+                        <div className="flex gap-1">
+                          {WEEKDAYS.map((day, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setFormData(f => ({
+                                  ...f,
+                                  recurrence_days: f.recurrence_days.includes(idx)
+                                    ? f.recurrence_days.filter(d => d !== idx)
+                                    : [...f.recurrence_days, idx].sort(),
+                                }));
+                              }}
+                              className={`w-9 h-8 rounded-md text-[11px] font-bold border transition-all ${
+                                formData.recurrence_days.includes(idx)
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'border-border text-muted-foreground hover:bg-accent'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* End date */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground mb-1 block">Repetir até</label>
+                      <input
+                        type="date"
+                        value={formData.recurrence_end}
+                        onChange={e => setFormData(f => ({ ...f, recurrence_end: e.target.value }))}
+                        className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Descricao */}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 block">Descricao</label>
@@ -867,14 +1102,30 @@ export default function AgendaPage() {
 
             {/* Modal footer */}
             <div className="flex items-center justify-between px-5 py-4 border-t border-border">
-              <div>
+              <div className="flex items-center gap-1">
                 {editingEvent && (
-                  <button
-                    onClick={handleDelete}
-                    className="px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                  >
-                    Remover
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleDelete()}
+                      className="px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                    >
+                      Remover
+                    </button>
+                    <button
+                      onClick={handleDuplicate}
+                      className="px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-accent rounded-lg transition-colors inline-flex items-center gap-1"
+                      title="Duplicar evento"
+                    >
+                      <Copy size={12} /> Duplicar
+                    </button>
+                    <button
+                      onClick={() => handleExportICS(editingEvent.id)}
+                      className="px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-accent rounded-lg transition-colors inline-flex items-center gap-1"
+                      title="Exportar .ics"
+                    >
+                      <Download size={12} /> .ics
+                    </button>
+                  </>
                 )}
               </div>
               <div className="flex gap-2">

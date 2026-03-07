@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign } from 'lucide-react';
+import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar } from 'lucide-react';
 
 type MenuItem = {
   label: string;
@@ -23,7 +23,7 @@ const settingsMenu: MenuItem[] = [
     ],
   },
   { label: 'Integração WhatsApp', href: '/atendimento/settings/whatsapp', icon: MessageSquare },
-  { label: 'Escritório', href: '/atendimento/settings/office', icon: Building2 },
+  { label: 'Agenda & Escritório', href: '/atendimento/settings/office', icon: Calendar },
   { label: 'Permissões', href: '/atendimento/settings/permissions', icon: Shield },
   { label: 'Notificações', href: '/atendimento/settings/notifications', icon: Bell },
 ];

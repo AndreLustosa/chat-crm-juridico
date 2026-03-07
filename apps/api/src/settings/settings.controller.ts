@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, UseGuards, Request, ForbiddenException, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, UseGuards, Request, ForbiddenException, Param, Put } from '@nestjs/common';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -10,6 +10,20 @@ export class SettingsController {
     private readonly settingsService: SettingsService,
     private readonly whatsappService: WhatsappService,
   ) {}
+
+  // ─── Generic Settings ─────────────────────────────────
+
+  @Get()
+  async getAll(@Request() req: any) {
+    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+    return this.settingsService.getAll();
+  }
+
+  @Put()
+  async upsert(@Request() req: any, @Body() data: { key: string; value: string }) {
+    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+    return this.settingsService.upsert(data.key, data.value);
+  }
 
   @Get('whatsapp-config/health')
   async checkHealth(@Request() req: any) {

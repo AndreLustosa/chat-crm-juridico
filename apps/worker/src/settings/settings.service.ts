@@ -38,6 +38,22 @@ export class SettingsService {
     });
   }
 
+  async getSmtpConfig() {
+    const keys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
+    const rows = await this.prisma.globalSetting.findMany({
+      where: { key: { in: keys } },
+    });
+    const cfg: Record<string, string> = {};
+    for (const r of rows) cfg[r.key] = r.value;
+    return {
+      host: cfg.SMTP_HOST || '',
+      port: parseInt(cfg.SMTP_PORT || '587'),
+      user: cfg.SMTP_USER || '',
+      pass: cfg.SMTP_PASS || '',
+      from: cfg.SMTP_FROM || '',
+    };
+  }
+
   private async get(key: string): Promise<string | null> {
     const row = await this.prisma.globalSetting.findUnique({ where: { key } });
     return row?.value || null;

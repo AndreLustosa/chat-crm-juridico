@@ -19,6 +19,7 @@ model Tenant {
   legal_cases       LegalCase[]
   calendar_events   CalendarEvent[]
   appointment_types AppointmentType[]
+  holidays          Holiday[]
 }
 
 model User {
@@ -422,6 +423,14 @@ model CalendarEvent {
   created_by_id       String
   appointment_type_id String?
 
+  // Recurrence
+  recurrence_rule     String?   // DAILY, WEEKLY, BIWEEKLY, MONTHLY, CUSTOM
+  recurrence_end      DateTime?
+  recurrence_days     Int[]     @default([]) // dias da semana para CUSTOM (0-6)
+  parent_event_id     String?
+  parent_event        CalendarEvent?  @relation("RecurrenceChildren", fields: [parent_event_id], references: [id])
+  child_events        CalendarEvent[] @relation("RecurrenceChildren")
+
   lead                Lead?            @relation(fields: [lead_id], references: [id])
   conversation        Conversation?    @relation(fields: [conversation_id], references: [id])
   legal_case          LegalCase?       @relation(fields: [legal_case_id], references: [id])
@@ -440,6 +449,7 @@ model CalendarEvent {
   @@index([assigned_user_id, start_at])
   @@index([lead_id])
   @@index([legal_case_id])
+  @@index([parent_event_id])
 }
 
 model EventReminder {
@@ -474,4 +484,17 @@ model AppointmentType {
 
   events    CalendarEvent[]
   tenant    Tenant?         @relation(fields: [tenant_id], references: [id])
+}
+
+model Holiday {
+  id               String   @id @default(uuid())
+  tenant_id        String?
+  date             DateTime
+  name             String
+  recurring_yearly Boolean  @default(false)
+  created_at       DateTime @default(now())
+
+  tenant           Tenant?  @relation(fields: [tenant_id], references: [id])
+
+  @@index([tenant_id, date])
 }

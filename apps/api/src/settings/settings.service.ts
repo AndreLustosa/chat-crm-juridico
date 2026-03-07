@@ -26,6 +26,34 @@ function estimateCostUsd(model: string, inputTk: number, outputTk: number): numb
 export class SettingsService {
   constructor(private prisma: PrismaService) {}
 
+  async getAll() {
+    return this.prisma.globalSetting.findMany({ orderBy: { key: 'asc' } });
+  }
+
+  async upsert(key: string, value: string) {
+    return this.prisma.globalSetting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value },
+    });
+  }
+
+  async getSmtpConfig() {
+    const keys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
+    const rows = await this.prisma.globalSetting.findMany({
+      where: { key: { in: keys } },
+    });
+    const cfg: Record<string, string> = {};
+    for (const r of rows) cfg[r.key] = r.value;
+    return {
+      host: cfg.SMTP_HOST || '',
+      port: parseInt(cfg.SMTP_PORT || '587'),
+      user: cfg.SMTP_USER || '',
+      pass: cfg.SMTP_PASS || '',
+      from: cfg.SMTP_FROM || '',
+    };
+  }
+
   async get(key: string): Promise<string | null> {
     try {
       const setting = await this.prisma.globalSetting.findUnique({
