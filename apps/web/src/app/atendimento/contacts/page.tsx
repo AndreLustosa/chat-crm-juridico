@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, ArrowLeft, UserPlus, AlertCircle, CheckCircle2, ClipboardList } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 
@@ -1068,6 +1068,7 @@ function getIsAdminFromToken(): boolean {
 
 export default function ContactsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [search, setSearch] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1077,6 +1078,12 @@ export default function ContactsPage() {
   const [view, setView] = useState<'active' | 'archived'>('active');
   const [showNewContact, setShowNewContact] = useState(false);
   const [isAdmin] = useState<boolean>(getIsAdminFromToken);
+
+  // Abre o painel do cliente via query param ?lead=<id>
+  useEffect(() => {
+    const leadId = searchParams.get('lead');
+    if (leadId) setSelectedLeadId(leadId);
+  }, [searchParams]);
 
   const fetchAllContacts = async () => {
     try {

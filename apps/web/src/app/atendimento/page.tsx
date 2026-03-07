@@ -1345,7 +1345,13 @@ export default function Dashboard() {
                  </div>
                  <div
                    className="min-w-0 flex-1 cursor-pointer active:opacity-70 transition-opacity"
-                   onClick={() => setShowDetailsPanel(true)}
+                   onClick={() => {
+                     if (isMobile) {
+                       setShowDetailsPanel(true);
+                     } else {
+                       router.push(`/atendimento/contacts?lead=${selected.leadId}`);
+                     }
+                   }}
                  >
                    <div className="flex items-center gap-1">
                      <h3 className="font-bold text-base md:text-lg leading-tight truncate">{selected.contactName || selected.contactPhone}</h3>
