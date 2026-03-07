@@ -27,6 +27,7 @@ model User {
   tenant_id       String?
   name            String
   email           String         @unique
+  phone           String?
   password_hash   String
   role            String
   specialties     String[]       @default([])

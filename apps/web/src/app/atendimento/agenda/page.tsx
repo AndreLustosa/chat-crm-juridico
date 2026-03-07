@@ -170,7 +170,7 @@ export default function AgendaPage() {
     assigned_user_id: '',
     lead_id: '',
     legal_case_id: '',
-    reminders: [{ minutes_before: 30, channel: 'PUSH' }] as { minutes_before: number; channel: string }[],
+    reminders: [{ minutes_before: 30, channel: 'WHATSAPP' }] as { minutes_before: number; channel: string }[],
     recurrence_rule: '',
     recurrence_end: '',
     recurrence_days: [] as number[],
@@ -343,7 +343,7 @@ export default function AgendaPage() {
       assigned_user_id: '',
       lead_id: '',
       legal_case_id: '',
-      reminders: [{ minutes_before: 30, channel: 'PUSH' }],
+      reminders: [{ minutes_before: 30, channel: 'WHATSAPP' }],
       recurrence_rule: '',
       recurrence_end: '',
       recurrence_days: [],
@@ -367,7 +367,7 @@ export default function AgendaPage() {
       assigned_user_id: ev.assigned_user_id || '',
       lead_id: ev.lead_id || '',
       legal_case_id: ev.legal_case_id || '',
-      reminders: (ev as any).reminders?.map((r: any) => ({ minutes_before: r.minutes_before, channel: r.channel })) || [{ minutes_before: 30, channel: 'PUSH' }],
+      reminders: (ev as any).reminders?.map((r: any) => ({ minutes_before: r.minutes_before, channel: r.channel })) || [{ minutes_before: 30, channel: 'WHATSAPP' }],
       recurrence_rule: (ev as any).recurrence_rule || '',
       recurrence_end: (ev as any).recurrence_end ? formatDateInput((ev as any).recurrence_end) : '',
       recurrence_days: (ev as any).recurrence_days || [],
@@ -483,7 +483,7 @@ export default function AgendaPage() {
         assigned_user_id: editingEvent.assigned_user_id || '',
         lead_id: editingEvent.lead_id || '',
         legal_case_id: editingEvent.legal_case_id || '',
-        reminders: [{ minutes_before: 30, channel: 'PUSH' }],
+        reminders: [{ minutes_before: 30, channel: 'WHATSAPP' }],
         recurrence_rule: '',
         recurrence_end: '',
         recurrence_days: [],
@@ -1019,7 +1019,7 @@ export default function AgendaPage() {
                   ))}
                   {formData.reminders.length < 3 && (
                     <button
-                      onClick={() => setFormData(f => ({ ...f, reminders: [...f.reminders, { minutes_before: 60, channel: 'PUSH' }] }))}
+                      onClick={() => setFormData(f => ({ ...f, reminders: [...f.reminders, { minutes_before: 60, channel: 'WHATSAPP' }] }))}
                       className="text-[11px] font-semibold text-primary hover:underline"
                     >
                       + Adicionar lembrete

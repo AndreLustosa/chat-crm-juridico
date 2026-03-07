@@ -34,7 +34,7 @@ export class ReminderProcessor extends WorkerHost {
         include: {
           event: {
             include: {
-              assigned_user: { select: { id: true, name: true, email: true } },
+              assigned_user: { select: { id: true, name: true, email: true, phone: true } },
               lead: { select: { id: true, name: true, phone: true, email: true } },
             },
           },
@@ -81,12 +81,6 @@ export class ReminderProcessor extends WorkerHost {
   }
 
   private async sendWhatsAppReminder(event: any, reminder: any) {
-    const phone = event.lead?.phone;
-    if (!phone) {
-      this.logger.warn(`Evento ${event.id} nao tem lead com telefone — lembrete WhatsApp ignorado`);
-      return;
-    }
-
     const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
     if (!apiUrl) {
       this.logger.warn('EVOLUTION_API_URL nao configurada — lembrete WhatsApp ignorado');
@@ -94,27 +88,46 @@ export class ReminderProcessor extends WorkerHost {
     }
 
     const instance = process.env.EVOLUTION_INSTANCE_NAME || '';
-    const leadName = event.lead?.name || phone;
     const typeEmoji = event.type === 'CONSULTA' ? '🟣' : event.type === 'AUDIENCIA' ? '🔴' : event.type === 'PRAZO' ? '🟠' : '📅';
 
-    const msg = [
-      `${typeEmoji} *Lembrete de Evento*`,
-      '',
-      `📋 *${event.title}*`,
-      `📆 ${formatDate(event.start_at)}`,
-      `⏰ ${formatTime(event.start_at)}`,
-      event.location ? `📍 ${event.location}` : '',
-      '',
-      `Ola ${leadName}, este e um lembrete do seu compromisso agendado.`,
-    ].filter(Boolean).join('\n');
+    // Destinatarios: lead (cliente) e/ou advogado responsavel
+    const recipients: { phone: string; name: string }[] = [];
 
-    await axios.post(
-      `${apiUrl}/message/sendText/${instance}`,
-      { number: phone, text: msg },
-      { headers: { apikey: apiKey } },
-    );
+    if (event.lead?.phone) {
+      recipients.push({ phone: event.lead.phone, name: event.lead.name || event.lead.phone });
+    }
+    if (event.assigned_user?.phone) {
+      recipients.push({ phone: event.assigned_user.phone, name: event.assigned_user.name });
+    }
 
-    this.logger.log(`WhatsApp lembrete enviado para ${phone}`);
+    if (recipients.length === 0) {
+      this.logger.warn(`Evento ${event.id} nao tem telefone (lead ou advogado) — lembrete WhatsApp ignorado`);
+      return;
+    }
+
+    for (const recipient of recipients) {
+      const msg = [
+        `${typeEmoji} *Lembrete de Evento*`,
+        '',
+        `📋 *${event.title}*`,
+        `📆 ${formatDate(event.start_at)}`,
+        `⏰ ${formatTime(event.start_at)}`,
+        event.location ? `📍 ${event.location}` : '',
+        '',
+        `Ola ${recipient.name}, este e um lembrete do seu compromisso agendado.`,
+      ].filter(Boolean).join('\n');
+
+      try {
+        await axios.post(
+          `${apiUrl}/message/sendText/${instance}`,
+          { number: recipient.phone, text: msg },
+          { headers: { apikey: apiKey } },
+        );
+        this.logger.log(`WhatsApp lembrete enviado para ${recipient.phone} (${recipient.name})`);
+      } catch (err: any) {
+        this.logger.error(`Falha ao enviar WhatsApp para ${recipient.phone}: ${err.message}`);
+      }
+    }
   }
 
   private async sendEmailReminder(event: any, _reminder: any) {

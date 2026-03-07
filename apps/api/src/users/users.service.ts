@@ -60,12 +60,13 @@ export class UsersService {
     }
   }
 
-  async create(data: { name: string; email: string; password: string; role: string; tenant_id?: string; inboxIds?: string[] }): Promise<Omit<User, 'password_hash'>> {
+  async create(data: { name: string; email: string; password: string; role: string; tenant_id?: string; inboxIds?: string[]; phone?: string }): Promise<Omit<User, 'password_hash'>> {
     const password_hash = await argon2.hash(data.password);
     const user = await this.prisma.user.create({
       data: {
         name: data.name,
         email: data.email,
+        phone: data.phone || null,
         password_hash,
         role: data.role,
         tenant_id: data.tenant_id,
@@ -79,11 +80,12 @@ export class UsersService {
     return result as any;
   }
 
-  async update(id: string, data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[] }): Promise<Omit<User, 'password_hash'>> {
+  async update(id: string, data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }): Promise<Omit<User, 'password_hash'>> {
     const updateData: Prisma.UserUpdateInput = {};
     if (data.name) updateData.name = data.name;
     if (data.email) updateData.email = data.email;
     if (data.role) updateData.role = data.role;
+    if (data.phone !== undefined) updateData.phone = data.phone || null;
     if (data.password) updateData.password_hash = await argon2.hash(data.password);
     if (data.specialties !== undefined) (updateData as any).specialties = { set: data.specialties };
 

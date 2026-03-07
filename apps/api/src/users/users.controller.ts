@@ -34,7 +34,7 @@ export class UsersController {
   }
 
   @Post()
-  create(@Request() req: any, @Body() data: { name: string; email: string; password: string; role: string }) {
+  create(@Request() req: any, @Body() data: { name: string; email: string; password: string; role: string; phone?: string }) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem criar usuários');
     }
@@ -42,7 +42,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[] }) {
+  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem editar usuários');
     }

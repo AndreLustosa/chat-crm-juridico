@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Pencil, Trash2, X, UserCog } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, UserCog, Phone } from 'lucide-react';
 import api from '@/lib/api';
 
 const SPECIALTY_SUGGESTIONS = ['Trabalhista', 'Civil', 'Criminal', 'Tributário', 'Família', 'Empresarial', 'Previdenciário', 'Imobiliário', 'Consumidor'];
@@ -17,6 +17,7 @@ function roleBadge(role: string) {
 interface UserForm {
   name: string;
   email: string;
+  phone: string;
   password: string;
   role: string;
   inboxIds: string[];
@@ -24,7 +25,7 @@ interface UserForm {
   supervisorIds: string[];
 }
 
-const emptyForm: UserForm = { name: '', email: '', password: '', role: '', inboxIds: [], specialties: [], supervisorIds: [] };
+const emptyForm: UserForm = { name: '', email: '', phone: '', password: '', role: '', inboxIds: [], specialties: [], supervisorIds: [] };
 
 export default function UsersSettingsPage() {
   const router = useRouter();
@@ -107,6 +108,7 @@ export default function UsersSettingsPage() {
     setForm({
       name: user.name,
       email: user.email,
+      phone: user.phone || '',
       password: '',
       role: user.role,
       inboxIds: user.inboxes?.map((i: any) => i.id) || [],
@@ -139,6 +141,7 @@ export default function UsersSettingsPage() {
         const payload: any = {
           name: form.name,
           email: form.email,
+          phone: form.phone || null,
           role: form.role,
           inboxIds: form.inboxIds,
           specialties: form.specialties,
@@ -215,6 +218,7 @@ export default function UsersSettingsPage() {
                   <tr className="bg-foreground/[0.02] border-b border-border">
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Nome</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Email</th>
+                    <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Telefone</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Inboxes (Chat)</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Especialidades</th>
                     <th className="px-6 py-4 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Supervisores</th>
@@ -237,6 +241,16 @@ export default function UsersSettingsPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-[13px] text-muted-foreground">{user.email}</td>
+                      <td className="px-6 py-4 text-[13px] text-muted-foreground">
+                        {user.phone ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-green-400" />
+                            {user.phone}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground opacity-50">—</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-1">
                           {user.inboxes?.map((inbox: any) => (
@@ -339,6 +353,19 @@ export default function UsersSettingsPage() {
                   className="w-full px-4 py-2.5 border border-border rounded-xl bg-background text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
                   placeholder="email@exemplo.com"
                 />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Telefone (WhatsApp)</label>
+                <input
+                  type="tel"
+                  value={form.phone}
+                  onChange={e => setForm({ ...form, phone: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-border rounded-xl bg-background text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+                  placeholder="5582999999999"
+                />
+                <p className="text-[10px] text-muted-foreground opacity-70 ml-1">
+                  Formato: código do país + DDD + número (ex: 5582999999999). Usado para lembretes via WhatsApp.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">
