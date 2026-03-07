@@ -309,7 +309,7 @@ export default function Dashboard() {
   const fetchConversations = useCallback(async (inboxId?: string | null, silent = false) => {
     try {
       const res = await api.get('/conversations', {
-        params: { inboxId: inboxId || undefined, page: 1, limit: 50 },
+        params: { inboxId: inboxId || undefined, page: 1, limit: 500 },
         // silent=true: chamadas de background (inboxUpdate) não disparam redirect global de 401
         ...( silent ? { _silent401: true } as any : {} ),
       });

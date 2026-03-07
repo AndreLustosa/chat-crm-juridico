@@ -16,7 +16,12 @@ export class ConversationsService {
 
   async findAll(status?: string, userId?: string, inboxId?: string, page = 1, limit = 50) {
     const where: any = {};
-    if (status) where.status = status;
+    if (status) {
+      where.status = status;
+    } else {
+      // Por padrão excluir conversas fechadas do inbox
+      where.status = { not: 'FECHADO' };
+    }
 
     // Se um inboxId específico foi solicitado, filtramos por ele
     if (inboxId) {
@@ -36,7 +41,7 @@ export class ConversationsService {
     }
 
     const safePage = Math.max(1, page);
-    const safeLimit = Math.min(Math.max(1, limit), 200);
+    const safeLimit = Math.min(Math.max(1, limit), 500);
 
     const [conversations, total] = await Promise.all([
       this.prisma.conversation.findMany({
