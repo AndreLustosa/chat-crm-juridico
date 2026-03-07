@@ -1,12 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { CalendarService } from '../calendar/calendar.service';
 
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger(TasksService.name);
+
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
+    private calendarService: CalendarService,
   ) {}
 
   async findAll() {
@@ -29,8 +33,9 @@ export class TasksService {
     assigned_user_id?: string;
     due_at?: Date;
     tenant_id?: string;
+    created_by_id?: string;
   }) {
-    return this.prisma.task.create({
+    const task = await this.prisma.task.create({
       data: {
         title: data.title,
         description: data.description,
@@ -43,13 +48,34 @@ export class TasksService {
         status: 'A_FAZER',
       },
     });
+
+    // Sync to calendar if has due_at
+    if (task.due_at && data.created_by_id) {
+      await this.syncTaskToCalendar(task, data.created_by_id);
+    }
+
+    return task;
   }
 
   async updateStatus(id: string, status: string) {
-    return this.prisma.task.update({
+    const task = await this.prisma.task.update({
       where: { id },
       data: { status },
     });
+
+    // Sync calendar event status
+    if (task.calendar_event_id) {
+      try {
+        const calStatus = status === 'CONCLUIDA' ? 'CONCLUIDO' : status === 'CANCELADA' ? 'CANCELADO' : undefined;
+        if (calStatus) {
+          await this.calendarService.updateStatus(task.calendar_event_id, calStatus);
+        }
+      } catch (e: any) {
+        this.logger.warn(`Erro ao sincronizar status do calendario para task ${id}: ${e.message}`);
+      }
+    }
+
+    return task;
   }
 
   async update(id: string, data: {
@@ -66,10 +92,55 @@ export class TasksService {
     if (data.due_at !== undefined) updateData.due_at = data.due_at ? new Date(data.due_at) : null;
     if (data.assigned_user_id !== undefined) updateData.assigned_user_id = data.assigned_user_id;
 
-    return this.prisma.task.update({
+    const task = await this.prisma.task.update({
       where: { id },
       data: updateData,
     });
+
+    // Update linked calendar event if due_at changed
+    if (task.calendar_event_id && data.due_at !== undefined) {
+      try {
+        if (data.due_at) {
+          await this.calendarService.update(task.calendar_event_id, {
+            start_at: new Date(data.due_at).toISOString(),
+            end_at: new Date(new Date(data.due_at).getTime() + 30 * 60000).toISOString(),
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`Erro ao atualizar evento do calendario para task ${id}: ${e.message}`);
+      }
+    }
+
+    return task;
+  }
+
+  // ─── Calendar Sync ──────────────────────────────────────────────
+
+  private async syncTaskToCalendar(task: any, createdById: string) {
+    try {
+      const event = await this.calendarService.create({
+        type: 'TAREFA',
+        title: task.title,
+        description: task.description || undefined,
+        start_at: task.due_at.toISOString(),
+        end_at: new Date(task.due_at.getTime() + 30 * 60000).toISOString(),
+        assigned_user_id: task.assigned_user_id || undefined,
+        lead_id: task.lead_id || undefined,
+        legal_case_id: task.legal_case_id || undefined,
+        created_by_id: createdById,
+        tenant_id: task.tenant_id || undefined,
+      });
+
+      // Link task to calendar event
+      await this.prisma.task.update({
+        where: { id: task.id },
+        data: { calendar_event_id: event.id },
+      });
+
+      this.logger.log(`Task ${task.id} sincronizada com CalendarEvent ${event.id}`);
+    } catch (e: any) {
+      this.logger.warn(`Erro ao sincronizar task ${task.id} com calendario: ${e.message}`);
+    }
   }
 
   // ─── Legal Case Tasks ──────────────────────────────────────────
@@ -93,7 +164,7 @@ export class TasksService {
       include: { user: { select: { id: true, name: true } } },
     });
 
-    // Notificar o atribuído da tarefa (se for diferente de quem comentou)
+    // Notificar o atribuido da tarefa (se for diferente de quem comentou)
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       select: { assigned_user_id: true },

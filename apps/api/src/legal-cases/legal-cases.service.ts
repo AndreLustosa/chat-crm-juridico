@@ -1,15 +1,19 @@
-import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Inject, forwardRef, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { CalendarService } from '../calendar/calendar.service';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 
 @Injectable()
 export class LegalCasesService {
+  private readonly logger = new Logger(LegalCasesService.name);
+
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
     @Inject(forwardRef(() => WhatsappService)) private whatsappService: WhatsappService,
+    private calendarService: CalendarService,
   ) {}
 
   // ─── CRUD ───────────────────────────────────────────────────────
@@ -234,7 +238,7 @@ export class LegalCasesService {
     reference_url?: string;
     event_date?: Date;
   }) {
-    return this.prisma.caseEvent.create({
+    const caseEvent = await this.prisma.caseEvent.create({
       data: {
         case_id: caseId,
         type: data.type,
@@ -245,6 +249,37 @@ export class LegalCasesService {
         event_date: data.event_date ? new Date(data.event_date) : null,
       },
     });
+
+    // Auto-create CalendarEvent for audiencia/prazo types with date
+    if (data.event_date && ['audiencia', 'prazo'].includes(data.type?.toLowerCase())) {
+      try {
+        const legalCase = await this.prisma.legalCase.findUnique({
+          where: { id: caseId },
+          select: { lawyer_id: true, lead_id: true, tenant_id: true },
+        });
+        if (legalCase?.lawyer_id) {
+          const calType = data.type.toLowerCase() === 'audiencia' ? 'AUDIENCIA' : 'PRAZO';
+          await this.calendarService.create({
+            type: calType,
+            title: data.title,
+            description: data.description,
+            start_at: new Date(data.event_date).toISOString(),
+            end_at: new Date(new Date(data.event_date).getTime() + 60 * 60000).toISOString(),
+            assigned_user_id: legalCase.lawyer_id,
+            lead_id: legalCase.lead_id || undefined,
+            legal_case_id: caseId,
+            created_by_id: legalCase.lawyer_id,
+            tenant_id: legalCase.tenant_id || undefined,
+            reminders: [{ minutes_before: 1440, channel: 'PUSH' }, { minutes_before: 60, channel: 'PUSH' }],
+          });
+          this.logger.log(`CalendarEvent ${calType} criado automaticamente para caso ${caseId}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`Erro ao criar CalendarEvent para CaseEvent: ${e.message}`);
+      }
+    }
+
+    return caseEvent;
   }
 
   async findEvents(caseId: string) {

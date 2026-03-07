@@ -22,6 +22,7 @@ export class TasksController {
     return this.tasksService.create({
       ...data,
       tenant_id: req.user?.tenant_id,
+      created_by_id: req.user?.id,
     });
   }
 

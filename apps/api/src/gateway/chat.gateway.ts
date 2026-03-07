@@ -90,4 +90,9 @@ export class ChatGateway {
     this.logger.log(`[SOCKET] Emitting calendar_update to user:${userId}`);
     this.server.to(`user:${userId}`).emit('calendar_update', data);
   }
+
+  emitCalendarReminder(userId: string, data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) {
+    this.logger.log(`[SOCKET] Emitting calendar_reminder to user:${userId} — ${data.title} em ${data.minutesBefore}min`);
+    this.server.to(`user:${userId}`).emit('calendar_reminder', data);
+  }
 }

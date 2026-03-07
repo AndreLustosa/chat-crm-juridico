@@ -9,9 +9,12 @@ import { createDragAndDropPlugin } from '@schedule-x/drag-and-drop';
 import '@schedule-x/theme-default/dist/index.css';
 import {
   Plus, X, Calendar as CalendarIcon, Filter, ChevronDown,
-  Clock, MapPin, User, FileText, Gavel, AlertTriangle, CheckCircle2
+  Clock, MapPin, User, FileText, Gavel, AlertTriangle, CheckCircle2, Bell
 } from 'lucide-react';
+import { io } from 'socket.io-client';
 import api from '@/lib/api';
+import { playNotificationSound } from '@/lib/notificationSounds';
+import { AvailabilityPicker } from '@/components/AvailabilityPicker';
 
 // ─── Tipos ────────────────────────────────────────────
 
@@ -73,8 +76,31 @@ const EVENT_STATUSES = [
   { id: 'ADIADO', label: 'Adiado', color: '#f59e0b' },
 ];
 
+const REMINDER_OPTIONS = [
+  { value: 15, label: '15 minutos antes' },
+  { value: 30, label: '30 minutos antes' },
+  { value: 60, label: '1 hora antes' },
+  { value: 1440, label: '1 dia antes' },
+];
+
 function getEventColor(type: string) {
   return EVENT_TYPES.find(t => t.id === type)?.color || '#6b7280';
+}
+
+function getWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+  if (apiUrl.startsWith('http')) {
+    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
+  }
+  return apiUrl;
+}
+
+function getSocketPath(): string {
+  if (process.env.NEXT_PUBLIC_SOCKET_PATH) return process.env.NEXT_PUBLIC_SOCKET_PATH;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+  const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
+  return isDev ? '/socket.io/' : '/api/socket.io/';
 }
 
 function toLocalDateTime(isoStr: string): string {
@@ -132,39 +158,24 @@ export default function AgendaPage() {
     assigned_user_id: '',
     lead_id: '',
     legal_case_id: '',
+    reminders: [{ minutes_before: 30, channel: 'PUSH' }] as { minutes_before: number; channel: string }[],
   });
+
+  // Real-time & UX
+  const [reminderToast, setReminderToast] = useState<{ eventId: string; title: string; type: string; start_at: string; minutesBefore: number } | null>(null);
+  const [conflictWarning, setConflictWarning] = useState<{ id: string; title: string; start_at: string; end_at: string }[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // schedule-x
   const eventsServicePlugin = useState(() => createEventsServicePlugin())[0];
   const rangeRef = useRef<{ start: string; end: string } | null>(null);
-
-  const calendar = useNextCalendarApp({
-    views: [createViewWeek(), createViewMonthGrid(), createViewDay()],
-    defaultView: 'week',
-    locale: 'pt-BR',
-    firstDayOfWeek: 1,
-    dayBoundaries: { start: '07:00', end: '20:00' },
-    weekOptions: { gridHeight: 600 },
-    isDark: true,
-    callbacks: {
-      onRangeUpdate(range) {
-        rangeRef.current = { start: range.start, end: range.end };
-        fetchEvents(range.start, range.end);
-      },
-      onEventClick(calEvent) {
-        const ev = events.find(e => e.id === calEvent.id);
-        if (ev) openEditModal(ev);
-      },
-      onClickDateTime(dateTime) {
-        openCreateModal(dateTime);
-      },
-      onClickDate(date) {
-        openCreateModal(date);
-      },
-    },
-    plugins: [eventsServicePlugin, createDragAndDropPlugin()],
-    events: [],
-  });
 
   // ─── Data Fetching ──────────────────────────────────
 
@@ -182,6 +193,51 @@ export default function AgendaPage() {
       setLoading(false);
     }
   }, [filterUserId]);
+
+  // Drag-and-drop persistence
+  const handleDragUpdate = useCallback(async (updatedEvent: any) => {
+    try {
+      const startIso = toISOFromLocal(updatedEvent.start);
+      const endIso = toISOFromLocal(updatedEvent.end);
+      await api.patch(`/calendar/events/${updatedEvent.id}`, { start_at: startIso, end_at: endIso });
+      // Update local state optimistically
+      setEvents(prev => prev.map(e => e.id === updatedEvent.id ? { ...e, start_at: startIso, end_at: endIso } : e));
+    } catch {
+      // Rollback: refetch on error
+      if (rangeRef.current) fetchEvents(rangeRef.current.start, rangeRef.current.end);
+    }
+  }, [fetchEvents]);
+
+  const calendar = useNextCalendarApp({
+    views: [createViewWeek(), createViewMonthGrid(), createViewDay()],
+    defaultView: isMobile ? 'day' : 'week',
+    locale: 'pt-BR',
+    firstDayOfWeek: 1,
+    dayBoundaries: { start: '07:00', end: '20:00' },
+    weekOptions: { gridHeight: isMobile ? 500 : 600 },
+    isDark: true,
+    callbacks: {
+      onRangeUpdate(range) {
+        rangeRef.current = { start: range.start, end: range.end };
+        fetchEvents(range.start, range.end);
+      },
+      onEventClick(calEvent) {
+        const ev = events.find(e => e.id === calEvent.id);
+        if (ev) openEditModal(ev);
+      },
+      onClickDateTime(dateTime) {
+        openCreateModal(dateTime);
+      },
+      onClickDate(date) {
+        openCreateModal(date);
+      },
+      onEventUpdate(updatedEvent) {
+        handleDragUpdate(updatedEvent);
+      },
+    },
+    plugins: [eventsServicePlugin, createDragAndDropPlugin()],
+    events: [],
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -213,6 +269,40 @@ export default function AgendaPage() {
     }
   }, [filterUserId, fetchEvents]);
 
+  // ─── Socket.io Real-Time ─────────────────────────────
+  useEffect(() => {
+    const wsUrl = getWsUrl();
+    const socket = io(wsUrl, {
+      path: getSocketPath(),
+      transports: ['polling', 'websocket'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      timeout: 10000,
+    });
+
+    socket.on('connect', () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          if (payload?.sub) socket.emit('join_user', payload.sub);
+        } catch {}
+      }
+    });
+
+    socket.on('calendar_update', () => {
+      if (rangeRef.current) fetchEvents(rangeRef.current.start, rangeRef.current.end);
+    });
+
+    socket.on('calendar_reminder', (data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) => {
+      setReminderToast(data);
+      try { playNotificationSound(); } catch {}
+      setTimeout(() => setReminderToast(null), 10000);
+    });
+
+    return () => { socket.disconnect(); };
+  }, [fetchEvents]);
+
   // ─── Modal Handlers ─────────────────────────────────
 
   const openCreateModal = (dateTime?: string) => {
@@ -234,8 +324,10 @@ export default function AgendaPage() {
       assigned_user_id: '',
       lead_id: '',
       legal_case_id: '',
+      reminders: [{ minutes_before: 30, channel: 'PUSH' }],
     });
     setEditingEvent(null);
+    setConflictWarning([]);
     setShowModal(true);
   };
 
@@ -253,15 +345,30 @@ export default function AgendaPage() {
       assigned_user_id: ev.assigned_user_id || '',
       lead_id: ev.lead_id || '',
       legal_case_id: ev.legal_case_id || '',
+      reminders: (ev as any).reminders?.map((r: any) => ({ minutes_before: r.minutes_before, channel: r.channel })) || [{ minutes_before: 30, channel: 'PUSH' }],
     });
     setEditingEvent(ev);
+    setConflictWarning([]);
     setShowModal(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (forceIgnoreConflict = false) => {
     if (!formData.title.trim() || !formData.date) return;
     const startIso = toISOFromLocal(`${formData.date} ${formData.startTime}`);
     const endIso = formData.endTime ? toISOFromLocal(`${formData.date} ${formData.endTime}`) : undefined;
+
+    // Conflict check
+    if (!forceIgnoreConflict && formData.assigned_user_id && endIso) {
+      try {
+        const params: any = { userId: formData.assigned_user_id, start: startIso, end: endIso };
+        if (editingEvent) params.excludeId = editingEvent.id;
+        const conflicts = await api.get('/calendar/conflicts', { params });
+        if (conflicts.data?.length > 0) {
+          setConflictWarning(conflicts.data);
+          return; // show warning, user must click "Salvar mesmo assim"
+        }
+      } catch {} // ignore conflict check failure, proceed with save
+    }
 
     const payload: any = {
       type: formData.type,
@@ -275,6 +382,7 @@ export default function AgendaPage() {
       assigned_user_id: formData.assigned_user_id || null,
       lead_id: formData.lead_id || null,
       legal_case_id: formData.legal_case_id || null,
+      reminders: formData.reminders.length > 0 ? formData.reminders : undefined,
     };
 
     try {
@@ -284,9 +392,21 @@ export default function AgendaPage() {
         await api.post('/calendar/events', payload);
       }
       setShowModal(false);
+      setConflictWarning([]);
       if (rangeRef.current) fetchEvents(rangeRef.current.start, rangeRef.current.end);
     } catch (e: any) {
       alert('Erro ao salvar: ' + (e?.response?.data?.message || e?.message || 'Tente novamente'));
+    }
+  };
+
+  const handleStatusChange = async (newStatus: string) => {
+    if (!editingEvent) return;
+    try {
+      await api.patch(`/calendar/events/${editingEvent.id}/status`, { status: newStatus });
+      setEditingEvent({ ...editingEvent, status: newStatus });
+      if (rangeRef.current) fetchEvents(rangeRef.current.start, rangeRef.current.end);
+    } catch (e: any) {
+      alert('Erro: ' + (e?.response?.data?.message || e?.message));
     }
   };
 
@@ -472,6 +592,33 @@ export default function AgendaPage() {
         </div>
       </div>
 
+      {/* ═══ Toast de Lembrete ═══ */}
+      {reminderToast && (
+        <div className="fixed top-4 right-4 z-[10000] w-80 bg-card border border-primary/30 rounded-xl shadow-2xl p-4 animate-in slide-in-from-right-5 duration-300">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+              <Bell size={18} className="text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-primary mb-0.5">
+                Lembrete em {reminderToast.minutesBefore} min
+              </p>
+              <p className="text-sm font-semibold text-foreground truncate">
+                {EVENT_TYPES.find(t => t.id === reminderToast.type)?.emoji} {reminderToast.title}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {new Date(reminderToast.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                {' - '}
+                {new Date(reminderToast.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}
+              </p>
+            </div>
+            <button onClick={() => setReminderToast(null)} className="p-1 text-muted-foreground hover:text-foreground">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ═══ Modal de Criacao/Edicao ═══ */}
       {showModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -486,7 +633,52 @@ export default function AgendaPage() {
               </button>
             </div>
 
+            {/* Status pills (only when editing) */}
+            {editingEvent && (
+              <div className="px-5 pt-3 flex flex-wrap gap-1.5">
+                {EVENT_STATUSES.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => handleStatusChange(s.id)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                      editingEvent.status === s.id
+                        ? 'text-white shadow-sm'
+                        : 'opacity-50 hover:opacity-80'
+                    }`}
+                    style={{
+                      borderColor: s.color + '60',
+                      background: editingEvent.status === s.id ? s.color : 'transparent',
+                      color: editingEvent.status === s.id ? '#fff' : s.color,
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="p-5 space-y-4">
+              {/* Conflict warning */}
+              {conflictWarning.length > 0 && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertTriangle size={14} className="text-amber-500" />
+                    <span className="text-xs font-bold text-amber-500">Conflito de horario</span>
+                  </div>
+                  {conflictWarning.map(c => (
+                    <p key={c.id} className="text-xs text-amber-400 ml-5">
+                      {c.title} ({new Date(c.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - {new Date(c.end_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})
+                    </p>
+                  ))}
+                  <button
+                    onClick={() => { setConflictWarning([]); handleSave(true); }}
+                    className="mt-2 ml-5 text-[11px] font-semibold text-amber-500 underline hover:text-amber-400"
+                  >
+                    Salvar mesmo assim
+                  </button>
+                </div>
+              )}
+
               {/* Tipo */}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 block">Tipo</label>
@@ -562,6 +754,17 @@ export default function AgendaPage() {
                 </select>
               </div>
 
+              {/* Availability picker (only for CONSULTA with assigned user) */}
+              {formData.type === 'CONSULTA' && formData.assigned_user_id && !editingEvent && (
+                <AvailabilityPicker
+                  userId={formData.assigned_user_id}
+                  duration={60}
+                  onSelectSlot={(start, end) => {
+                    setFormData(f => ({ ...f, startTime: start, endTime: end }));
+                  }}
+                />
+              )}
+
               {/* Lead */}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 block">Lead / Cliente</label>
@@ -599,6 +802,56 @@ export default function AgendaPage() {
                 />
               </div>
 
+              {/* Lembretes */}
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
+                  <Bell size={11} /> Lembretes
+                </label>
+                <div className="space-y-1.5">
+                  {formData.reminders.map((rem, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <select
+                        value={rem.minutes_before}
+                        onChange={e => {
+                          const updated = [...formData.reminders];
+                          updated[idx] = { ...updated[idx], minutes_before: parseInt(e.target.value) };
+                          setFormData(f => ({ ...f, reminders: updated }));
+                        }}
+                        className="flex-1 px-2 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground outline-none"
+                      >
+                        {REMINDER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                      <select
+                        value={rem.channel}
+                        onChange={e => {
+                          const updated = [...formData.reminders];
+                          updated[idx] = { ...updated[idx], channel: e.target.value };
+                          setFormData(f => ({ ...f, reminders: updated }));
+                        }}
+                        className="w-28 px-2 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground outline-none"
+                      >
+                        <option value="PUSH">Push</option>
+                        <option value="WHATSAPP">WhatsApp</option>
+                      </select>
+                      <button
+                        onClick={() => setFormData(f => ({ ...f, reminders: f.reminders.filter((_, i) => i !== idx) }))}
+                        className="p-1 text-muted-foreground hover:text-destructive"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {formData.reminders.length < 3 && (
+                    <button
+                      onClick={() => setFormData(f => ({ ...f, reminders: [...f.reminders, { minutes_before: 60, channel: 'PUSH' }] }))}
+                      className="text-[11px] font-semibold text-primary hover:underline"
+                    >
+                      + Adicionar lembrete
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Descricao */}
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1 block">Descricao</label>
@@ -632,7 +885,7 @@ export default function AgendaPage() {
                   Cancelar
                 </button>
                 <button
-                  onClick={handleSave}
+                  onClick={() => handleSave()}
                   disabled={!formData.title.trim() || !formData.date}
                   className="px-5 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors shadow-md disabled:opacity-40 disabled:pointer-events-none"
                 >

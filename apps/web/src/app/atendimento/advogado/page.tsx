@@ -996,6 +996,7 @@ export default function AdvogadoPage() {
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState<LegalCase | null>(null);
   const [creatingCase, setCreatingCase] = useState<string | null>(null);
+  const [upcomingEvents, setUpcomingEvents] = useState<{ id: string; type: string; title: string; start_at: string; lead?: { name: string | null } | null }[]>([]);
 
   // Board pan
   const boardRef = useRef<HTMLDivElement>(null);
@@ -1049,6 +1050,12 @@ export default function AdvogadoPage() {
     const token = localStorage.getItem('token');
     if (!token) { router.push('/atendimento/login'); return; }
     fetchCases();
+    // Fetch upcoming calendar events
+    const now = new Date().toISOString();
+    const in7d = new Date(Date.now() + 7 * 86400000).toISOString();
+    api.get('/calendar/events', { params: { start: now, end: in7d } })
+      .then(r => setUpcomingEvents((r.data || []).filter((e: any) => e.status !== 'CANCELADO' && e.status !== 'CONCLUIDO').slice(0, 5)))
+      .catch(() => {});
     const interval = setInterval(() => fetchCases(true), 30_000);
     return () => clearInterval(interval);
   }, [router, fetchCases]);
@@ -1170,6 +1177,38 @@ export default function AdvogadoPage() {
             </button>
           </div>
         </header>
+
+        {/* Upcoming events strip */}
+        {upcomingEvents.length > 0 && view === 'active' && (
+          <div className="px-6 py-2 border-b border-border bg-card/30 flex items-center gap-3 overflow-x-auto shrink-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground shrink-0 flex items-center gap-1">
+              <Calendar size={10} /> Agenda
+            </span>
+            {upcomingEvents.map(ev => {
+              const d = new Date(ev.start_at);
+              const typeColor = ev.type === 'CONSULTA' ? '#8b5cf6' : ev.type === 'AUDIENCIA' ? '#ef4444' : ev.type === 'PRAZO' ? '#f59e0b' : '#22c55e';
+              return (
+                <button
+                  key={ev.id}
+                  onClick={() => router.push('/atendimento/agenda')}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border/50 hover:bg-accent/50 transition-colors shrink-0"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: typeColor }} />
+                  <span className="text-[11px] font-medium text-foreground truncate max-w-[150px]">{ev.title}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => router.push('/atendimento/agenda')}
+              className="text-[11px] font-semibold text-primary hover:underline shrink-0"
+            >
+              Ver agenda →
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex-1 flex items-center justify-center">

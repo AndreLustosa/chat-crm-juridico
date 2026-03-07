@@ -59,6 +59,18 @@ export class CalendarController {
     return this.calendarService.remove(id);
   }
 
+  // ─── Conflict Detection ─────────────────────────────────
+
+  @Get('conflicts')
+  checkConflicts(
+    @Query('userId') userId: string,
+    @Query('start') start: string,
+    @Query('end') end: string,
+    @Query('excludeId') excludeId?: string,
+  ) {
+    return this.calendarService.checkConflicts(userId, start, end, excludeId);
+  }
+
   // ─── Availability ─────────────────────────────────────
 
   @Get('availability/:userId')

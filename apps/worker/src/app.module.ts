@@ -5,6 +5,7 @@ import { S3Module } from './s3/s3.module';
 import { SettingsModule } from './settings/settings.module';
 import { MediaModule } from './media/media.module';
 import { AiModule } from './ai/ai.module';
+import { ReminderModule } from './reminder/reminder.module';
 
 @Module({
   imports: [
@@ -18,7 +19,8 @@ import { AiModule } from './ai/ai.module';
       },
     }),
     MediaModule,
-    AiModule
+    AiModule,
+    ReminderModule,
   ],
 })
 export class AppModule {}

@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 
@@ -7,9 +9,12 @@ const EVENT_STATUSES = ['AGENDADO', 'CONFIRMADO', 'CONCLUIDO', 'CANCELADO', 'ADI
 
 @Injectable()
 export class CalendarService {
+  private readonly logger = new Logger(CalendarService.name);
+
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
+    @InjectQueue('calendar-reminders') private reminderQueue: Queue,
   ) {}
 
   // ─── CRUD Events ──────────────────────────────────────
@@ -139,7 +144,29 @@ export class CalendarService {
       } catch {}
     }
 
+    // Enqueue WhatsApp reminders
+    await this.enqueueReminders(event.id, event.start_at, event.reminders || []);
+
     return event;
+  }
+
+  private async enqueueReminders(eventId: string, startAt: Date, reminders: { id: string; minutes_before: number; channel: string }[]) {
+    for (const r of reminders) {
+      if (r.channel !== 'WHATSAPP') continue; // PUSH handled by cron
+      const triggerAt = startAt.getTime() - r.minutes_before * 60 * 1000;
+      const delay = Math.max(triggerAt - Date.now(), 1000); // min 1s
+      const jobId = `reminder-${r.id}`;
+      try {
+        await this.reminderQueue.add('send-reminder', {
+          reminderId: r.id,
+          eventId,
+          channel: r.channel,
+        }, { delay, jobId });
+        this.logger.log(`Lembrete ${r.id} enfileirado: canal=${r.channel}, delay=${Math.round(delay / 60000)}min`);
+      } catch (e: any) {
+        this.logger.error(`Erro ao enfileirar lembrete ${r.id}: ${e.message}`);
+      }
+    }
   }
 
   async update(
@@ -224,6 +251,22 @@ export class CalendarService {
     }
 
     return { deleted: true };
+  }
+
+  // ─── Conflict Detection ─────────────────────────────────
+
+  async checkConflicts(userId: string, startAt: string, endAt: string, excludeEventId?: string) {
+    const where: any = {
+      assigned_user_id: userId,
+      status: { notIn: ['CANCELADO'] },
+      start_at: { lt: new Date(endAt) },
+      end_at: { gt: new Date(startAt) },
+    };
+    if (excludeEventId) where.id = { not: excludeEventId };
+    return this.prisma.calendarEvent.findMany({
+      where,
+      select: { id: true, title: true, start_at: true, end_at: true },
+    });
   }
 
   // ─── Availability ─────────────────────────────────────
