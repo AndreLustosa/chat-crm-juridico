@@ -580,10 +580,11 @@ export default function Dashboard() {
             // Guard: ignore messages that belong to a different conversation
             if (msg.conversation_id && msg.conversation_id !== selectedIdRef.current) return;
             setMessages(prev => {
-              // Já existe pelo ID real ou external_message_id — ignorar
-              if (prev.find(m => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id))) return prev;
-              // Se é mensagem outgoing, pode ser duplicata da optimistic UI
-              // Substituir a msg otimista correspondente em vez de adicionar
+              // Dedup: já existe pelo ID real
+              if (prev.some(m => m.id === msg.id)) return prev;
+              // Dedup: já existe pelo external_message_id (webhook pode ter ID interno diferente)
+              if (msg.external_message_id && prev.some(m => m.external_message_id === msg.external_message_id)) return prev;
+              // Se é outgoing, substituir msg otimista correspondente (optimistic UI)
               if (msg.direction === 'out') {
                 const optimisticIdx = prev.findIndex(m => typeof m.id === 'string' && m.id.startsWith('optimistic_'));
                 if (optimisticIdx >= 0) {
@@ -664,7 +665,11 @@ export default function Dashboard() {
       if (res.data?.id) {
         setMessages(prev => {
           const hasOptimistic = prev.some(m => m.id === optimisticId);
-          const hasReal = prev.some(m => m.id === res.data.id);
+          // Checar se WebSocket já entregou (por id ou external_message_id)
+          const hasReal = prev.some(m =>
+            m.id === res.data.id ||
+            (res.data.external_message_id && m.external_message_id === res.data.external_message_id)
+          );
           if (hasReal) {
             // WebSocket já entregou — só remover a otimista se ainda existir
             return hasOptimistic ? prev.filter(m => m.id !== optimisticId) : prev;
@@ -1851,7 +1856,14 @@ export default function Dashboard() {
                 {isRealConvo && messages.length > 0 ? (
                   (() => {
                     let lastMsgDateKey = '';
-                    return messages.map((msg, msgIdx) => {
+                    // Dedup: remove mensagens com mesmo id (safety net contra race conditions)
+                    const seen = new Set<string>();
+                    const uniqueMessages = messages.filter(m => {
+                      if (seen.has(m.id)) return false;
+                      seen.add(m.id);
+                      return true;
+                    });
+                    return uniqueMessages.map((msg, msgIdx) => {
                       const isOut = msg.direction === 'out';
                       const msgDateKey = msg.created_at ? getDateKey(msg.created_at) : `__nodate__${msgIdx}`;
                       const showMsgDateSep = msgDateKey !== lastMsgDateKey;
