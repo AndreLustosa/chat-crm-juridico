@@ -83,4 +83,11 @@ export class ChatGateway {
     this.logger.log(`[SOCKET] Emitting task_comment to user:${userId}`);
     this.server.to(`user:${userId}`).emit('task_comment', data);
   }
+
+  // ─── Calendar ──────────────────────────────────────────────────
+
+  emitCalendarUpdate(userId: string, data: { eventId: string; action: string; [key: string]: any }) {
+    this.logger.log(`[SOCKET] Emitting calendar_update to user:${userId}`);
+    this.server.to(`user:${userId}`).emit('calendar_update', data);
+  }
 }

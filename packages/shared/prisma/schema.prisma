@@ -8,15 +8,17 @@ datasource db {
 }
 
 model Tenant {
-  id            String         @id @default(uuid())
-  name          String
-  conversations Conversation[]
-  leads         Lead[]
-  tasks         Task[]
-  users         User[]
-  inboxes       Inbox[]
-  instances     Instance[]
-  legal_cases   LegalCase[]
+  id                String            @id @default(uuid())
+  name              String
+  conversations     Conversation[]
+  leads             Lead[]
+  tasks             Task[]
+  users             User[]
+  inboxes           Inbox[]
+  instances         Instance[]
+  legal_cases       LegalCase[]
+  calendar_events   CalendarEvent[]
+  appointment_types AppointmentType[]
 }
 
 model User {
@@ -38,6 +40,9 @@ model User {
   task_comments   TaskComment[]
   supervisors     User[]         @relation("InternSupervisors")
   interns         User[]         @relation("InternSupervisors")
+  calendar_events_assigned CalendarEvent[] @relation("EventAssigned")
+  calendar_events_created  CalendarEvent[] @relation("EventCreator")
+  schedules                UserSchedule[]
 }
 
 model Lead {
@@ -58,6 +63,7 @@ model Lead {
   tasks              Task[]
   legal_cases        LegalCase[]
   ficha_trabalhista  FichaTrabalhista?
+  calendar_events    CalendarEvent[]
 
   @@index([tenant_id, phone])
   @@index([stage])
@@ -92,6 +98,7 @@ model Conversation {
   messages         Message[]
   tasks            Task[]
   legal_cases      LegalCase[]
+  calendar_events  CalendarEvent[]
 
   @@index([lead_id])
   @@index([last_message_at(sort: Desc)])
@@ -314,6 +321,7 @@ model LegalCase {
   tasks             Task[]
   events            CaseEvent[]
   djen_publications DjenPublication[]
+  calendar_events   CalendarEvent[]
 
   @@index([lawyer_id, stage])
   @@index([lead_id])
@@ -385,4 +393,82 @@ model DjenPublication {
   @@index([data_disponibilizacao])
   @@index([numero_processo])
   @@index([legal_case_id])
+}
+
+// ═══════════════════════════════════════════════
+// Calendar / Agenda
+// ═══════════════════════════════════════════════
+
+model CalendarEvent {
+  id                  String    @id @default(uuid())
+  tenant_id           String?
+  type                String    // CONSULTA, TAREFA, AUDIENCIA, PRAZO, OUTRO
+  title               String
+  description         String?
+  start_at            DateTime
+  end_at              DateTime?
+  all_day             Boolean   @default(false)
+  status              String    @default("AGENDADO") // AGENDADO, CONFIRMADO, CONCLUIDO, CANCELADO, ADIADO
+  priority            String    @default("NORMAL")   // BAIXA, NORMAL, ALTA, URGENTE
+  color               String?
+  location            String?
+
+  lead_id             String?
+  conversation_id     String?
+  legal_case_id       String?
+  assigned_user_id    String?
+  created_by_id       String
+  appointment_type_id String?
+
+  lead                Lead?            @relation(fields: [lead_id], references: [id])
+  conversation        Conversation?    @relation(fields: [conversation_id], references: [id])
+  legal_case          LegalCase?       @relation(fields: [legal_case_id], references: [id])
+  assigned_user       User?            @relation("EventAssigned", fields: [assigned_user_id], references: [id])
+  created_by          User             @relation("EventCreator", fields: [created_by_id], references: [id])
+  appointment_type    AppointmentType? @relation(fields: [appointment_type_id], references: [id])
+
+  reminders           EventReminder[]
+  tenant              Tenant?          @relation(fields: [tenant_id], references: [id])
+
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  @@index([tenant_id, start_at])
+  @@index([assigned_user_id, start_at])
+  @@index([lead_id])
+  @@index([legal_case_id])
+}
+
+model EventReminder {
+  id             String        @id @default(uuid())
+  event_id       String
+  event          CalendarEvent @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  minutes_before Int           // 15, 30, 60, 1440 (1 dia)
+  channel        String        @default("PUSH") // PUSH, WHATSAPP, EMAIL
+  sent_at        DateTime?
+
+  @@index([event_id])
+}
+
+model UserSchedule {
+  id          String @id @default(uuid())
+  user_id     String
+  user        User   @relation(fields: [user_id], references: [id])
+  day_of_week Int    // 0=dom, 1=seg, ..., 6=sab
+  start_time  String // "09:00"
+  end_time    String // "18:00"
+
+  @@unique([user_id, day_of_week])
+}
+
+model AppointmentType {
+  id        String  @id @default(uuid())
+  tenant_id String?
+  name      String  // "Consulta Trabalhista 30min"
+  duration  Int     // minutos
+  color     String?
+  active    Boolean @default(true)
+
+  events    CalendarEvent[]
+  tenant    Tenant?         @relation(fields: [tenant_id], references: [id])
 }

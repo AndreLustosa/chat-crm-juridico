@@ -22,6 +22,7 @@ import { TransferAudioModule } from './transfer-audio/transfer-audio.module';
 import { LegalCasesModule } from './legal-cases/legal-cases.module';
 import { DjenModule } from './djen/djen.module';
 import { FichaTrabalhistaModule } from './ficha-trabalhista/ficha-trabalhista.module';
+import { CalendarModule } from './calendar/calendar.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -63,6 +64,7 @@ import { APP_FILTER } from '@nestjs/core';
     LegalCasesModule,
     DjenModule,
     FichaTrabalhistaModule,
+    CalendarModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

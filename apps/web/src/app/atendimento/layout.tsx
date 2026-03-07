@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import {
   MessageSquare, Briefcase, Users, Check, Scale, BookOpen,
-  Megaphone, Settings, Palette, LogOut, MoreHorizontal, X
+  Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
@@ -116,6 +116,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
 
   const moreItems = [
     { label: 'Tarefas', href: '/atendimento/tasks', icon: Check, match: (p: string) => p.startsWith('/atendimento/tasks') },
+    { label: 'Agenda', href: '/atendimento/agenda', icon: Calendar, match: (p: string) => p.startsWith('/atendimento/agenda') },
     { label: 'Advogado', href: '/atendimento/advogado', icon: Scale, match: (p: string) => p.startsWith('/atendimento/advogado') },
     { label: 'Processos', href: '/atendimento/processos', icon: BookOpen, match: (p: string) => p.startsWith('/atendimento/processos') },
     { label: 'Marketing', href: '/atendimento/marketing/analytics', icon: Megaphone, match: (p: string) => p.startsWith('/atendimento/marketing') },
