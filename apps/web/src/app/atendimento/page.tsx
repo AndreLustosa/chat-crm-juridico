@@ -1884,41 +1884,66 @@ export default function Dashboard() {
             </div>
             </div>{/* end watermark wrapper */}
 
-            {/* ═══ MINIMAL MOBILE ACTION BAR ═══ */}
+            {/* ═══ BOTTOM ACTION BAR — mobile only, conversa aberta ═══ */}
             {isMobile && selectedId && selected && isRealConvo && (
-              <div className="shrink-0 bg-card/95 backdrop-blur-md border-t border-border flex items-center justify-between px-3 py-2">
-                {/* IA pill */}
+              <div className="shrink-0 bg-card/95 backdrop-blur-md border-t border-border flex items-center justify-around px-2 py-1.5">
+
+                {/* IA */}
                 <button
                   onClick={handleToggleAiMode}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                    aiMode
-                      ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
-                      : 'text-muted-foreground bg-muted/30 border-border'
-                  }`}
+                  className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg active:bg-accent transition-colors min-w-[56px]"
                 >
-                  {aiMode ? <Bot size={14} /> : <BotOff size={14} />}
-                  {aiMode ? 'IA On' : 'IA Off'}
+                  {aiMode
+                    ? <Bot size={20} className="text-emerald-400" />
+                    : <BotOff size={20} className="text-muted-foreground" />
+                  }
+                  <span className={`text-[10px] font-medium ${aiMode ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                    {aiMode ? 'IA On' : 'IA Off'}
+                  </span>
                 </button>
+
+                {/* Ficha — só trabalhista */}
+                {selected.legalArea?.toLowerCase().includes('trabalhist') && (
+                  <button
+                    onClick={() => setFichaInboxVisible(true)}
+                    className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg active:bg-accent transition-colors min-w-[56px]"
+                  >
+                    <ClipboardList size={20} className="text-violet-400" />
+                    <span className="text-[10px] font-medium text-violet-400">Ficha</span>
+                  </button>
+                )}
 
                 {/* Aceitar — só WAITING */}
                 {selected.status === 'WAITING' && (
                   <button
                     onClick={handleAccept}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold text-primary bg-primary/10 border border-primary/20 active:bg-primary/20"
+                    className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg active:bg-accent transition-colors min-w-[56px]"
                   >
-                    <Check size={14} />
-                    Aceitar
+                    <Check size={20} className="text-primary" />
+                    <span className="text-[10px] font-medium text-primary">Aceitar</span>
                   </button>
                 )}
 
-                {/* Ações → abre painel */}
+                {/* Transferir — não fechada */}
+                {!isClosed && (
+                  <button
+                    onClick={handleOpenTransferModal}
+                    className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg active:bg-accent transition-colors min-w-[56px]"
+                  >
+                    <UserCheck size={20} className="text-sky-400" />
+                    <span className="text-[10px] font-medium text-sky-400">Transferir</span>
+                  </button>
+                )}
+
+                {/* Mais — abre painel de detalhes & ações */}
                 <button
                   onClick={() => setShowDetailsPanel(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold text-muted-foreground bg-muted/30 border border-border active:bg-accent transition-colors"
+                  className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg active:bg-accent transition-colors min-w-[56px]"
                 >
-                  Ações
-                  <ChevronRight size={14} />
+                  <MoreVertical size={20} className="text-muted-foreground" />
+                  <span className="text-[10px] font-medium text-muted-foreground">Mais</span>
                 </button>
+
               </div>
             )}
 
