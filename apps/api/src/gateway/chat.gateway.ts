@@ -1,11 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ChatGateway {
   server: Server;
 
   private logger = new Logger('ChatGateway');
+
+  constructor(private prisma: PrismaService) {}
 
   handleConnection(client: Socket) {
     this.logger.log(`[SOCKET] Client connected: ${client.id} (transport: ${client.conn?.transport?.name})`);
@@ -15,7 +18,48 @@ export class ChatGateway {
     this.logger.log(`Client disconnected: ${client.id}`);
   }
 
-  handleJoinConversation(conversationId: string, client: Socket) {
+  async handleJoinConversation(conversationId: string, client: Socket) {
+    const socketUser = (client as any).user;
+    if (!socketUser?.sub) {
+      this.logger.warn(`[SOCKET] BLOQUEADO: join_conversation sem user no socket`);
+      return;
+    }
+
+    // Admin pode entrar em qualquer sala
+    if (socketUser.role === 'ADMIN') {
+      client.join(conversationId);
+      this.logger.log(`[SOCKET] Client ${client.id} (ADMIN) joined room: ${conversationId}`);
+      this.server.to(client.id).emit('joined_room', { room: conversationId });
+      return;
+    }
+
+    // Verificar se a conversa existe
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { inbox_id: true, assigned_user_id: true },
+    });
+
+    if (!conversation) {
+      this.logger.warn(`[SOCKET] BLOQUEADO: conversa ${conversationId} nao encontrada`);
+      return;
+    }
+
+    // Verificar: usuario esta atribuido OU pertence ao inbox da conversa
+    const user = await this.prisma.user.findUnique({
+      where: { id: socketUser.sub },
+      select: { inboxes: { select: { id: true } } },
+    });
+
+    const userInboxIds = (user?.inboxes || []).map((i: any) => i.id);
+    const hasAccess =
+      conversation.assigned_user_id === socketUser.sub ||
+      ((conversation as any).inbox_id && userInboxIds.includes((conversation as any).inbox_id));
+
+    if (!hasAccess) {
+      this.logger.warn(`[SOCKET] BLOQUEADO: user ${socketUser.sub} sem acesso a conversa ${conversationId}`);
+      return;
+    }
+
     client.join(conversationId);
     this.logger.log(`[SOCKET] Client ${client.id} joined room: ${conversationId}`);
     this.server.to(client.id).emit('joined_room', { room: conversationId });
@@ -27,6 +71,12 @@ export class ChatGateway {
   }
 
   handleJoinUser(userId: string, client: Socket) {
+    const socketUser = (client as any).user;
+    // So permite entrar na propria sala
+    if (socketUser?.sub !== userId) {
+      this.logger.warn(`[SOCKET] BLOQUEADO: Client ${client.id} tentou entrar em user:${userId} (user real: ${socketUser?.sub})`);
+      return;
+    }
     client.join(`user:${userId}`);
     this.logger.log(`[SOCKET] Client ${client.id} joined user room: user:${userId}`);
   }

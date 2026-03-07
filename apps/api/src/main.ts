@@ -75,18 +75,51 @@ async function bootstrap() {
     }
   });
 
+  // Rate limiting para eventos Socket.IO
+  const socketRateLimits = new Map<string, Map<string, number[]>>();
+
+  function checkSocketRateLimit(socketId: string, event: string, maxPerMinute: number): boolean {
+    if (!socketRateLimits.has(socketId)) {
+      socketRateLimits.set(socketId, new Map());
+    }
+    const events = socketRateLimits.get(socketId)!;
+    const now = Date.now();
+    const timestamps = events.get(event) || [];
+    const recent = timestamps.filter(t => now - t < 60000);
+    if (recent.length >= maxPerMinute) {
+      return false;
+    }
+    recent.push(now);
+    events.set(event, recent);
+    return true;
+  }
+
   io.on('connection', (socket) => {
     chatGateway.handleConnection(socket);
-    socket.on('disconnect', () => chatGateway.handleDisconnect(socket));
-    socket.on('join_conversation', (conversationId) =>
-      chatGateway.handleJoinConversation(conversationId, socket),
-    );
-    socket.on('leave_conversation', (conversationId) =>
-      chatGateway.handleLeaveConversation(conversationId, socket),
-    );
-    socket.on('join_user', (userId) =>
-      chatGateway.handleJoinUser(userId, socket),
-    );
+    socket.on('disconnect', () => {
+      socketRateLimits.delete(socket.id);
+      chatGateway.handleDisconnect(socket);
+    });
+    socket.on('join_conversation', (conversationId) => {
+      if (!checkSocketRateLimit(socket.id, 'join_conversation', 30)) {
+        logger.warn(`[SOCKET] Rate limited: join_conversation de ${socket.id}`);
+        return;
+      }
+      chatGateway.handleJoinConversation(conversationId, socket);
+    });
+    socket.on('leave_conversation', (conversationId) => {
+      if (!checkSocketRateLimit(socket.id, 'leave_conversation', 30)) {
+        return;
+      }
+      chatGateway.handleLeaveConversation(conversationId, socket);
+    });
+    socket.on('join_user', (userId) => {
+      if (!checkSocketRateLimit(socket.id, 'join_user', 10)) {
+        logger.warn(`[SOCKET] Rate limited: join_user de ${socket.id}`);
+        return;
+      }
+      chatGateway.handleJoinUser(userId, socket);
+    });
   });
 
   logger.log(`[SOCKET] Socket.IO attached to HTTP server on port ${port}, path /socket.io`);

@@ -123,6 +123,7 @@ export default function Dashboard() {
   const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [socketConnected, setSocketConnected] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -363,6 +364,19 @@ export default function Dashboard() {
         console.error('Failed to fetch pending transfers', e);
       }
     }
+  }, []);
+
+  // Deteccao offline/online (navigator.onLine + events)
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    setIsOnline(navigator.onLine);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
   }, []);
 
   // WebSocket connection (once, does not reconnect on filter changes)
@@ -1554,10 +1568,14 @@ export default function Dashboard() {
         {selected ? (
           <>
             {/* Banner de reconexao WebSocket */}
-            {!socketConnected && (
-              <div className="bg-yellow-500 text-white text-center text-sm py-1.5 px-4 flex items-center justify-center gap-2 z-50 shrink-0">
+            {(!isOnline || !socketConnected) && (
+              <div className={`text-white text-center text-sm py-1.5 px-4 flex items-center justify-center gap-2 z-50 shrink-0 ${
+                !isOnline ? 'bg-red-500' : 'bg-yellow-500'
+              }`}>
                 <span className="inline-block w-2 h-2 rounded-full bg-white animate-pulse" />
-                Conexao perdida. Reconectando...
+                {!isOnline
+                  ? 'Sem conexao com a internet'
+                  : 'Conexao perdida. Reconectando...'}
               </div>
             )}
             <header className="min-h-[60px] md:min-h-[80px] py-2 md:py-3 px-3 md:px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
