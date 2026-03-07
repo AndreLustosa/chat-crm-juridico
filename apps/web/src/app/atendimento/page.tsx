@@ -1,13 +1,11 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, Fragment } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftClose, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical, ChevronRight } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
-import { AudioPlayer } from '@/components/AudioPlayer';
 import { AudioRecorder } from '@/components/AudioRecorder';
-import { TransferAudioRecorder } from '@/components/TransferAudioRecorder';
 import { AuthAudioPlayer } from '@/components/AuthAudioPlayer';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
@@ -17,42 +15,9 @@ import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import { showError, showSuccess } from '@/lib/toast';
-
-interface ConversationSummary {
-  id: string;
-  leadId: string;
-  contactName: string;
-  contactPhone: string;
-  channel: string;
-  status: string;
-  lastMessage: string;
-  lastMessageAt: string;
-  assignedAgentId?: string | null;
-  assignedAgentName: string | null;
-  aiMode: boolean;
-  profile_picture_url?: string | null;
-  inboxId?: string | null;
-  legalArea?: string | null;
-  assignedLawyerId?: string | null;
-  assignedLawyerName?: string | null;
-  originAssignedUserId?: string | null;
-  originAssignedUserName?: string | null;
-  leadStage?: string | null;
-}
-
-interface MessageItem {
-  id: string;
-  conversation_id: string;
-  external_message_id?: string | null;
-  direction: 'in' | 'out';
-  type: string;
-  text: string | null;
-  status: string;
-  created_at: string;
-  reply_to_id?: string | null;
-  reply_to_text?: string | null;
-  media?: { original_url?: string; mime_type?: string; duration?: number | null; original_name?: string | null } | null;
-}
+import type { ConversationSummary, MessageItem } from './types';
+import { MessageBubble } from './components/MessageBubble';
+import { TransferModals } from './components/TransferModals';
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
@@ -101,13 +66,6 @@ function DateSeparator({ label }: { label: string }) {
   );
 }
 
-function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
-  if (!isOut) return null;
-  if (status === 'enviando') return <div className="w-3 h-3 border border-primary-foreground/60 border-t-transparent rounded-full animate-spin" />;
-  if (status === 'lido' || status === 'read') return <CheckCheck size={12} className="text-blue-400" />;
-  if (status === 'entregue' || status === 'delivered') return <CheckCheck size={12} className="text-primary-foreground/60" />;
-  return <Check size={12} className="text-primary-foreground/60" />;
-}
 
 
 export default function Dashboard() {
@@ -1177,21 +1135,18 @@ export default function Dashboard() {
   const myActiveConvs = (c: ConversationSummary) =>
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
 
-  const filteredConversations = (() => {
+  const filteredConversations = useMemo(() => {
     let result: ConversationSummary[];
     if (leadFilter === 'ACTIVE') {
       result = conversations.filter(myActiveConvs);
     } else if (leadFilter === 'BOT') {
-      // SophIA: somente conversas com IA ativa atribuídas ao usuário logado
       result = conversations.filter(c => c.aiMode && c.assignedAgentId === currentUserId);
     } else if (leadFilter) {
       result = conversations.filter(c => c.status === leadFilter);
     } else {
       result = conversations;
     }
-    // Ocultar contatos arquivados (marcados como Perdido no CRM)
     result = result.filter(c => normalizeStage(c.leadStage) !== 'PERDIDO');
-    // Filtro de busca: nome do contato, telefone ou conteúdo da última mensagem
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase().trim();
       result = result.filter(c =>
@@ -1205,7 +1160,7 @@ export default function Dashboard() {
       const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
       return tb - ta;
     });
-  })();
+  }, [conversations, leadFilter, debouncedSearch, currentUserId]);
 
   const selected = conversations.find((c) => c.id === selectedId);
   const isDemo = selectedId?.startsWith('demo-');
@@ -1272,11 +1227,6 @@ export default function Dashboard() {
     }
   };
 
-  const isEmojiOnly = (text: string): boolean => {
-    const t = text.trim();
-    if (!t) return false;
-    return /^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\s)+$/u.test(t);
-  };
 
   const handleTranscribe = async (msgId: string) => {
     setTranscribing(prev => ({ ...prev, [msgId]: true }));
@@ -1959,212 +1909,21 @@ export default function Dashboard() {
                               <div className="flex-1 h-px bg-muted-foreground/30" />
                             </div>
                           )}
-                      <div id={`msg-${msg.id}`} key={msg.id} className={`w-full flex items-end gap-1 ${isOut ? 'justify-end' : 'justify-start'} group rounded-xl transition-all duration-300`}>
-                        {!isOut && (
-                          <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
-                            <button
-                              onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
-                              className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
-                              title="Responder"
-                              aria-label="Responder mensagem"
-                            >
-                              <Reply size={13} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteMessage(msg.id)}
-                              className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-                              title="Apagar mensagem"
-                              aria-label="Apagar mensagem"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        )}
-                        <div className={`max-w-[74%] md:max-w-[65%] min-w-[60px] p-3 md:p-4 shadow-sm break-words overflow-hidden ${
-                          isOut
-                            ? 'bg-gradient-to-tr from-primary/90 to-ring/90 text-primary-foreground rounded-2xl rounded-tr-sm'
-                            : 'bg-card border border-border rounded-2xl rounded-tl-sm'
-                        }`}>
-                          {msg.reply_to_text && msg.type !== 'deleted' && (
-                            <div
-                              className={`mb-2 pl-3 border-l-2 rounded-sm cursor-pointer ${isOut ? 'border-white/40 bg-white/10' : 'border-primary/50 bg-primary/5'}`}
-                              onClick={() => {
-                                const el = document.getElementById(`msg-${msg.reply_to_id}`);
-                                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                el?.classList.add('ring-2', 'ring-primary/50');
-                                setTimeout(() => el?.classList.remove('ring-2', 'ring-primary/50'), 1500);
-                              }}
-                            >
-                              <p className={`text-[11px] py-1 pr-2 line-clamp-2 ${isOut ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.reply_to_text}</p>
-                            </div>
-                          )}
-                          {msg.type === 'deleted' ? (
-                            <p className="text-sm italic opacity-50">🚫 Mensagem apagada</p>
-                          ) : msg.type === 'text' || !msg.type ? (
-                            editingMsg?.id === msg.id ? (
-                              <div className="flex flex-col gap-2 min-w-[200px]">
-                                <textarea
-                                  autoFocus
-                                  rows={3}
-                                  value={editingMsg.text}
-                                  onChange={e => setEditingMsg(prev => prev ? { ...prev, text: e.target.value } : null)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditMessage(editingMsg.id, editingMsg.text); }
-                                    if (e.key === 'Escape') setEditingMsg(null);
-                                  }}
-                                  className="w-full bg-white/10 text-primary-foreground rounded-lg p-2 text-[14px] resize-none outline-none border border-white/30 focus:border-white/60"
-                                />
-                                <div className="flex justify-end gap-2">
-                                  <button onClick={() => setEditingMsg(null)} className="text-[11px] px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-primary-foreground/70">Cancelar</button>
-                                  <button onClick={() => handleEditMessage(editingMsg.id, editingMsg.text)} className="text-[11px] px-2 py-1 rounded bg-white/25 hover:bg-white/35 text-primary-foreground font-medium">Salvar</button>
-                                </div>
-                              </div>
-                            ) : isEmojiOnly(msg.text || '') ? (
-                              <p className="text-4xl leading-tight">{msg.text}</p>
-                            ) : (
-                              <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                            )
-                          ) : msg.type === 'audio' ? (
-                            msg.media ? (
-                              <div>
-                                <AudioPlayer
-                                  src={`/api/media/${msg.id}`}
-                                  duration={msg.media.duration}
-                                  isOutgoing={isOut}
-                                />
-                                {msg.text ? (
-                                  <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                                    {msg.text}
-                                  </p>
-                                ) : (
-                                  <button
-                                    onClick={() => handleTranscribe(msg.id)}
-                                    disabled={transcribing[msg.id]}
-                                    className={`mt-2 flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg transition-colors disabled:opacity-50 ${isOut ? 'bg-white/15 hover:bg-white/25 text-white/80' : 'bg-primary/10 hover:bg-primary/20 text-primary'}`}
-                                  >
-                                    <Mic size={11} />
-                                    {transcribing[msg.id] ? 'Transcrevendo...' : 'Transcrever'}
-                                  </button>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-3 w-48 animate-pulse">
-                                <div className="w-8 h-8 rounded-full bg-current opacity-20 shrink-0" />
-                                <div className="flex-1 space-y-1.5">
-                                  <div className="h-1 rounded bg-current opacity-20" />
-                                  <div className="h-1 rounded bg-current opacity-10 w-3/4" />
-                                </div>
-                              </div>
-                            )
-                          ) : msg.type === 'image' ? (
-                            msg.media ? (
-                              <div className="relative group inline-block">
-                                <img
-                                  src={`/api/media/${msg.id}`}
-                                  alt="Imagem"
-                                  className="max-w-[220px] max-h-[220px] object-cover rounded-lg cursor-pointer"
-                                  loading="lazy"
-                                  onClick={() => setLightbox(`/api/media/${msg.id}`)}
-                                />
-                                <button
-                                  onClick={() => handleImageDownload(`/api/media/${msg.id}`)}
-                                  className="absolute bottom-1.5 right-1.5 bg-black/50 hover:bg-black/70 text-white rounded-md p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  title="Baixar imagem"
-                                  aria-label="Baixar imagem"
-                                >
-                                  <Download size={13} />
-                                </button>
-                              </div>
-                            ) : (
-                              <p className="text-sm italic opacity-70">🖼️ Imagem processando...</p>
-                            )
-                          ) : msg.type === 'video' ? (
-                            msg.media ? (
-                              <video
-                                src={`/api/media/${msg.id}`}
-                                controls
-                                className="max-w-full rounded-lg"
-                              />
-                            ) : (
-                              <p className="text-sm italic opacity-70">🎬 Vídeo processando...</p>
-                            )
-                          ) : msg.type === 'document' ? (
-                            msg.media ? (
-                              <div
-                                className={`flex items-center gap-3 cursor-pointer rounded-xl p-3 min-w-[200px] transition-colors ${isOut ? 'bg-white/10 hover:bg-white/20' : 'bg-muted/60 hover:bg-muted'}`}
-                                onClick={() => setDocPreview({ url: `/api/media/${msg.id}`, name: msg.media!.original_name || 'documento', mime: msg.media!.mime_type || '' })}
-                              >
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isOut ? 'bg-white/20' : 'bg-primary/10'}`}>
-                                  <FileText size={20} className={isOut ? 'text-white' : 'text-primary'} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium truncate">{msg.media!.original_name || 'Documento'}</p>
-                                  <p className={`text-[11px] uppercase font-semibold mt-0.5 ${isOut ? 'text-white/50' : 'text-muted-foreground'}`}>{getDocLabel(msg.media!.mime_type || '', msg.media!.original_name || '')}</p>
-                                </div>
-                                <button
-                                  onClick={e => { e.stopPropagation(); handleDocDownload(`/api/media/${msg.id}`, msg.media!.original_name || 'documento'); }}
-                                  className={`p-1.5 rounded-lg transition-colors shrink-0 ${isOut ? 'hover:bg-white/20 text-white/70' : 'hover:bg-primary/10 text-muted-foreground'}`}
-                                  title="Baixar"
-                                  aria-label="Baixar documento"
-                                >
-                                  <Download size={14} />
-                                </button>
-                              </div>
-                            ) : (
-                              <p className="text-sm italic opacity-70">📄 Documento processando...</p>
-                            )
-                          ) : msg.type === 'sticker' ? (
-                            msg.media ? (
-                              <img
-                                src={`/api/media/${msg.id}`}
-                                alt="Figurinha"
-                                className="max-w-[140px] max-h-[140px] object-contain"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <p className="text-sm italic opacity-70">🎭 Figurinha processando...</p>
-                            )
-                          ) : (
-                            <p className="text-sm italic opacity-70">📎 Anexo: {msg.type}</p>
-                          )}
-                          {msg.type !== 'deleted' && (
-                            <div className={`text-[10px] mt-2 flex justify-end items-center gap-1.5 ${isOut ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>
-                              <span>{formatTime(msg.created_at)}</span>
-                              <StatusIcon status={msg.status} isOut={isOut} />
-                            </div>
-                          )}
-                        </div>
-                        {isOut && (
-                          <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mb-1">
-                            <button
-                              onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }}
-                              className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
-                              title="Responder"
-                              aria-label="Responder mensagem"
-                            >
-                              <Reply size={16} />
-                            </button>
-                            {(msg.type === 'text' || !msg.type) && msg.type !== 'deleted' && (
-                              <button
-                                onClick={() => setEditingMsg({ id: msg.id, text: msg.text || '' })}
-                                className="p-1.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"
-                                title="Editar mensagem"
-                                aria-label="Editar mensagem"
-                              >
-                                <Pencil size={16} />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteMessage(msg.id)}
-                              className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
-                              title="Apagar mensagem"
-                              aria-label="Apagar mensagem"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <MessageBubble
+                        msg={msg}
+                        isOut={isOut}
+                        editingMsg={editingMsg}
+                        transcribing={transcribing}
+                        onReply={(m) => { setReplyingTo(m); inputRef.current?.focus(); }}
+                        onEdit={handleEditMessage}
+                        onSetEditing={setEditingMsg}
+                        onDelete={handleDeleteMessage}
+                        onTranscribe={handleTranscribe}
+                        onLightbox={setLightbox}
+                        onDocPreview={setDocPreview}
+                        onImageDownload={handleImageDownload}
+                        onDocDownload={handleDocDownload}
+                      />
                         </Fragment>
                       );
                     });
@@ -2757,333 +2516,43 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Transfer Modal */}
-      {transferModal && (
-        <div
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm"
-          onClick={() => setTransferModal(false)}
-        >
-          <div
-            className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl max-h-[80vh] flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 mb-4 shrink-0">
-              <UserCheck size={18} className="text-sky-400" />
-              <h3 className="font-bold text-base">Solicitar Transferência</h3>
-            </div>
-            {transferError && (
-              <p className="text-red-400 text-sm mb-3 px-1">{transferError}</p>
-            )}
-            {loadingOperators ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-3">
-                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                <p className="text-muted-foreground text-sm">Carregando operadores...</p>
-              </div>
-            ) : transferGroups.every(g => g.users.length === 0) || transferGroups.length === 0 ? (
-              <p className="text-muted-foreground text-sm py-2">Nenhum operador cadastrado.</p>
-            ) : (
-              <>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-1 shrink-0">Selecione o destino</p>
-                <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
-                  {transferGroups.filter(g => g.users.length > 0 || (g.type === 'SECTOR' && g.auto_route)).map(group => (
-                    <div key={group.id}>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1.5 px-1">
-                        {group.type === 'SECTOR' ? (group.auto_route ? '⚖️' : '🏢') : '📥'} {group.name}
-                        {group.auto_route && <span className="ml-1 text-violet-400">(auto)</span>}
-                      </p>
-                      {group.type === 'SECTOR' && group.auto_route ? (
-                        <div className="space-y-2">
-                          {selected?.assignedLawyerId ? (
-                            /* Advogado atribuído → botão que abre popup de motivo */
-                            (() => {
-                              const lawyer = group.users.find(u => u.id === selected.assignedLawyerId);
-                              const lawyerName = lawyer?.name || selected.assignedLawyerName || 'Advogado vinculado';
-                              return (
-                                <button
-                                  onClick={() => openReasonPopup('lawyer', lawyerName)}
-                                  className="w-full py-3 bg-violet-500/10 border border-violet-500/30 text-violet-300 rounded-xl font-bold text-sm hover:bg-violet-500/20 transition-colors flex items-center justify-center gap-2"
-                                >
-                                  ⚖️ Transferir para {lawyerName}{selected.legalArea ? ` (${selected.legalArea})` : ''}
-                                </button>
-                              );
-                            })()
-                          ) : (
-                            /* Sem advogado atribuído → lista manual */
-                            group.users.length > 0 ? (
-                              <div className="flex flex-col gap-1">
-                                {group.users.map(user => (
-                                  <button
-                                    key={user.id}
-                                    onClick={() => setSelectedTransferUserId(user.id)}
-                                    className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
-                                      selectedTransferUserId === user.id
-                                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
-                                        : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
-                                    }`}
-                                  >
-                                    {selectedTransferUserId === user.id && <span className="mr-2">✓</span>}
-                                    {user.name}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-sm text-muted-foreground text-center py-2 px-1 italic">
-                                Nenhum advogado especialista cadastrado.
-                              </p>
-                            )
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          {group.users.map(user => (
-                            <button
-                              key={user.id}
-                              onClick={() => setSelectedTransferUserId(user.id)}
-                              className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
-                                selectedTransferUserId === user.id
-                                  ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
-                                  : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
-                              }`}
-                            >
-                              {selectedTransferUserId === user.id && <span className="mr-2">✓</span>}
-                              {user.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {selectedTransferUserId && (
-                  <button
-                    onClick={() => {
-                      const destUser = transferGroups.flatMap(g => g.users).find(u => u.id === selectedTransferUserId);
-                      openReasonPopup('operator', destUser?.name || 'Operador');
-                    }}
-                    className="mt-3 shrink-0 w-full py-2.5 bg-sky-500 text-white rounded-xl font-bold text-sm hover:bg-sky-600 transition-colors"
-                  >
-                    Solicitar Transferência
-                  </button>
-                )}
-              </>
-            )}
-            <button
-              onClick={() => setTransferModal(false)}
-              className="mt-2 shrink-0 w-full py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
+      <TransferModals
+        transferModal={transferModal}
+        onCloseTransferModal={() => setTransferModal(false)}
+        transferGroups={transferGroups}
+        loadingOperators={loadingOperators}
+        transferError={transferError}
+        selectedTransferUserId={selectedTransferUserId}
+        onSelectTransferUser={setSelectedTransferUserId}
+        selected={selected || null}
+        onOpenReasonPopup={openReasonPopup}
+        showReasonPopup={showReasonPopup}
+        reasonPopupContext={reasonPopupContext}
+        reasonPopupTargetName={reasonPopupTargetName}
+        transferReason={transferReason}
+        onSetTransferReason={setTransferReason}
+        transferring={transferring}
+        onCloseReasonPopup={closeReasonPopup}
+        onTransferToLawyer={handleTransferToLawyer}
+        onReturnWithReason={handleReturnWithReason}
+        onTransfer={handleTransfer}
+        onSetTransferAudioIds={setTransferAudioIds}
+        selectedConversationId={selectedId}
+        incomingTransfer={incomingTransfer}
+        onCloseIncomingTransfer={() => setIncomingTransfer(null)}
+        showDeclineInput={showDeclineInput}
+        onSetShowDeclineInput={setShowDeclineInput}
+        declineReason={declineReason}
+        onSetDeclineReason={setDeclineReason}
+        processingTransfer={processingTransfer}
+        onAcceptTransfer={handleAcceptTransfer}
+        onDeclineTransfer={handleDeclineTransfer}
+        transferSentMsg={transferSentMsg}
+        onClearTransferSentMsg={() => setTransferSentMsg(null)}
+        transferResponseMsg={transferResponseMsg}
+        onClearTransferResponseMsg={() => setTransferResponseMsg(null)}
+      />
 
-      {/* ── Popup de Motivo de Transferência ── */}
-      {showReasonPopup && (
-        <div
-          className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm"
-          onClick={closeReasonPopup}
-        >
-          <div
-            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-[360px] mx-4 overflow-hidden"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className={`px-5 pt-5 pb-3 border-b border-border/60 ${
-              reasonPopupContext === 'lawyer' ? 'bg-violet-500/5' :
-              reasonPopupContext === 'return' ? 'bg-amber-500/5' :
-              'bg-sky-500/5'
-            }`}>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">
-                {reasonPopupContext === 'lawyer' ? '⚖️ Transferência para especialista' :
-                 reasonPopupContext === 'return' ? '↩ Devolver contato' :
-                 '📨 Solicitar transferência'}
-              </p>
-              <h3 className="font-bold text-sm text-foreground">
-                {reasonPopupContext === 'return' ? `Para: ${reasonPopupTargetName}` : reasonPopupTargetName}
-              </h3>
-            </div>
-
-            {/* Caixa unificada: textarea + gravador de áudio */}
-            <div className={`m-4 rounded-xl border bg-muted/40 overflow-hidden transition-colors ${
-              reasonPopupContext === 'return' ? 'border-amber-500/30 focus-within:border-amber-500/60' :
-              'border-border focus-within:border-violet-500/50'
-            }`}>
-              <textarea
-                autoFocus
-                value={transferReason}
-                onChange={e => setTransferReason(e.target.value)}
-                placeholder={
-                  reasonPopupContext === 'return'
-                    ? `Observações para ${reasonPopupTargetName} (opcional)...`
-                    : `Explique o motivo para ${reasonPopupTargetName}...`
-                }
-                className="w-full bg-transparent px-4 pt-3 pb-2 text-sm resize-none outline-none min-h-[80px]"
-                rows={3}
-              />
-              {/* Divisor + gravador dentro da mesma caixa */}
-              <div className="border-t border-border/50 px-3 py-2.5 bg-muted/20">
-                <TransferAudioRecorder
-                  conversationId={selectedId!}
-                  onAudioIdsChange={setTransferAudioIds}
-                />
-              </div>
-            </div>
-
-            {/* Erro */}
-            {transferError && (
-              <p className="text-red-400 text-xs px-4 pb-2">{transferError}</p>
-            )}
-
-            {/* Botões */}
-            <div className="flex gap-2 px-4 pb-4">
-              <button
-                onClick={closeReasonPopup}
-                className="flex-1 py-2.5 bg-muted border border-border text-muted-foreground rounded-xl text-sm font-semibold hover:bg-accent transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={
-                  reasonPopupContext === 'lawyer' ? handleTransferToLawyer :
-                  reasonPopupContext === 'return' ? handleReturnWithReason :
-                  handleTransfer
-                }
-                disabled={
-                  transferring ||
-                  (reasonPopupContext !== 'return' && !transferReason.trim() && transferAudioIds.length === 0)
-                }
-                className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  reasonPopupContext === 'lawyer'
-                    ? 'bg-violet-500/15 border border-violet-500/40 text-violet-300 hover:bg-violet-500/25'
-                    : reasonPopupContext === 'return'
-                    ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
-                    : 'bg-sky-500 text-white hover:bg-sky-600'
-                }`}
-              >
-                {transferring ? '⏳ Enviando...' :
-                 reasonPopupContext === 'lawyer' ? '⚖️ Confirmar' :
-                 reasonPopupContext === 'return' ? '↩ Devolver' :
-                 'Enviar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Incoming Transfer Popup */}
-      {incomingTransfer && (
-        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-card border-2 border-amber-500/40 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]">
-            {/* Header fixo */}
-            <div className="flex items-center gap-3 px-6 pt-6 pb-4 shrink-0">
-              <span className="text-2xl">📨</span>
-              <div>
-                <h3 className="font-bold text-base">Pedido de Transferência</h3>
-                <p className="text-xs text-muted-foreground">De: <strong className="text-foreground">{incomingTransfer.fromUserName}</strong></p>
-              </div>
-            </div>
-
-            {/* Corpo rolável */}
-            <div className="overflow-y-auto px-6 flex-1 min-h-0">
-              <div className="bg-muted/50 rounded-xl p-4 mb-4 space-y-3 text-sm">
-                <p><span className="text-muted-foreground">Contato:</span> <strong>{incomingTransfer.contactName}</strong></p>
-                {incomingTransfer.reason && (
-                  <div>
-                    <p className="text-muted-foreground text-xs mb-1">Motivo:</p>
-                    <p className="whitespace-pre-wrap break-words leading-relaxed">{incomingTransfer.reason}</p>
-                  </div>
-                )}
-                {incomingTransfer.audioIds && incomingTransfer.audioIds.length > 0 && (
-                  <div>
-                    <p className="text-muted-foreground text-xs mb-1.5">Áudios explicativos ({incomingTransfer.audioIds.length}):</p>
-                    <div className="space-y-1.5">
-                      {incomingTransfer.audioIds.map((aid, i) => (
-                        <div key={aid} className="flex items-center gap-2">
-                          <span className="text-[10px] text-muted-foreground shrink-0">#{i + 1}</span>
-                          <AuthAudioPlayer
-                            audioId={aid}
-                            className="h-7 w-full"
-                            style={{ filter: 'hue-rotate(240deg) brightness(0.9)' }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {showDeclineInput && (
-                <textarea
-                  value={declineReason}
-                  onChange={e => setDeclineReason(e.target.value)}
-                  placeholder="Justificativa para recusa (opcional)..."
-                  className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm mb-3 resize-none outline-none focus:border-red-500/50"
-                  rows={2}
-                  autoFocus
-                />
-              )}
-            </div>
-
-            {/* Botões fixos no rodapé */}
-            <div className="px-6 pb-6 pt-2 shrink-0">
-              <div className="flex gap-2">
-                {!showDeclineInput ? (
-                  <>
-                    <button
-                      onClick={handleAcceptTransfer}
-                      disabled={processingTransfer}
-                      className="flex-1 py-2.5 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors disabled:opacity-50"
-                    >
-                      ✓ Aceitar
-                    </button>
-                    <button
-                      onClick={() => setShowDeclineInput(true)}
-                      disabled={processingTransfer}
-                      className="flex-1 py-2.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-xl font-bold text-sm hover:bg-red-500/20 transition-colors"
-                    >
-                      ✗ Recusar
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => setShowDeclineInput(false)}
-                      className="py-2.5 px-4 text-muted-foreground text-sm rounded-xl hover:bg-accent transition-colors"
-                    >
-                      Voltar
-                    </button>
-                    <button
-                      onClick={handleDeclineTransfer}
-                      disabled={processingTransfer}
-                      className="flex-1 py-2.5 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-colors disabled:opacity-50"
-                    >
-                      {processingTransfer ? 'Enviando...' : 'Confirmar Recusa'}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transfer Sent Banner */}
-      {transferSentMsg && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-card border border-sky-500/30 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium flex items-center gap-3">
-          {transferSentMsg}
-          <button onClick={() => setTransferSentMsg(null)} className="text-muted-foreground hover:text-foreground ml-2" aria-label="Fechar aviso"><X size={14} /></button>
-        </div>
-      )}
-
-      {/* Transfer Response Banner (for sender) */}
-      {transferResponseMsg && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[90] bg-card border border-border rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium flex items-center gap-3">
-          {transferResponseMsg}
-          <button onClick={() => setTransferResponseMsg(null)} className="text-muted-foreground hover:text-foreground ml-2" aria-label="Fechar aviso">
-            <X size={14} />
-          </button>
-        </div>
-      )}
 
       {/* Ficha Trabalhista Slide-over */}
       {fichaInboxVisible && selected?.leadId && (
