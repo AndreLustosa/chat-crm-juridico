@@ -111,4 +111,12 @@ export class ConversationsController {
   ) {
     return this.conversationsService.setAssignedLawyer(id, lawyerId ?? null);
   }
+
+  @Patch(':id/legal-area')
+  setLegalArea(
+    @Param('id') id: string,
+    @Body('legalArea') legalArea: string | null,
+  ) {
+    return this.conversationsService.setLegalArea(id, legalArea ?? null);
+  }
 }

@@ -129,6 +129,13 @@ export class ConversationsService {
     });
   }
 
+  async setLegalArea(id: string, legalArea: string | null): Promise<Conversation> {
+    return (this.prisma as any).conversation.update({
+      where: { id },
+      data: { legal_area: legalArea },
+    });
+  }
+
   async setAiMode(id: string, ai_mode: boolean): Promise<Conversation> {
     return this.prisma.conversation.update({
       where: { id },

@@ -85,6 +85,11 @@ function formatDateLabel(dateStr: string): string {
   return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
+const LEGAL_AREAS = [
+  'Trabalhista', 'Consumidor', 'Família', 'Previdenciário',
+  'Penal', 'Civil', 'Empresarial', 'Imobiliário', 'Outro',
+];
+
 function DateSeparator({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2 select-none sticky top-0 z-10 bg-card/80 backdrop-blur-sm">
@@ -162,6 +167,8 @@ export default function Dashboard() {
   const mobileMoreRef = useRef<HTMLDivElement>(null);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [clientPanelLeadId, setClientPanelLeadId] = useState<string | null>(null);
+  const [showLegalAreaDropdown, setShowLegalAreaDropdown] = useState(false);
+  const legalAreaDropdownRef = useRef<HTMLDivElement>(null);
   const touchStartXRef = useRef<number>(0);
   const touchStartYRef = useRef<number>(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -242,11 +249,24 @@ export default function Dashboard() {
     // NÃO fechar o dropdown aqui — conversations muda via socket e fecharia prematuramente
   }, [selectedId, conversations]);
 
-  // Fechar dropdown ao trocar de conversa
+  // Fechar dropdowns ao trocar de conversa
   useEffect(() => {
     setShowLawyerDropdown(false);
+    setShowLegalAreaDropdown(false);
     setShowDetailsPanel(false);
   }, [selectedId]);
+
+  // Fechar dropdown de área ao clicar fora
+  useEffect(() => {
+    if (!showLegalAreaDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (legalAreaDropdownRef.current && !legalAreaDropdownRef.current.contains(e.target as Node)) {
+        setShowLegalAreaDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showLegalAreaDropdown]);
 
   // Fechar dropdown de especialista ao clicar fora
   useEffect(() => {
@@ -733,6 +753,11 @@ export default function Dashboard() {
   const handleChangeLeadStage = async (newStage: string) => {
     const conv = conversations.find(c => c.id === selectedId);
     if (!conv?.leadId) return;
+    // Bloquear FINALIZADO sem área de atendimento definida
+    if (newStage === 'FINALIZADO' && !conv?.legalArea) {
+      alert('⚠️ Defina a Área de Atendimento antes de marcar como Finalizado.');
+      return;
+    }
     setLeadStage(newStage); // otimista
     setShowStageDropdown(false);
     // Atualiza leadStage no objeto local para o filtro reagir imediatamente
@@ -746,6 +771,21 @@ export default function Dashboard() {
       await api.patch(`/leads/${conv.leadId}/stage`, { stage: newStage });
     } catch (e: any) {
       console.error('Failed to change lead stage', e);
+    }
+  };
+
+  const handleChangeLegalArea = async (area: string | null) => {
+    if (!selectedId) return;
+    const prevArea = selected?.legalArea ?? null;
+    setShowLegalAreaDropdown(false);
+    // Optimistic update
+    setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, legalArea: area } : c));
+    try {
+      await api.patch(`/conversations/${selectedId}/legal-area`, { legalArea: area });
+    } catch (e: any) {
+      // Rollback
+      setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, legalArea: prevArea } : c));
+      alert('Erro ao atualizar área: ' + (e?.response?.data?.message || e?.message || 'Tente novamente'));
     }
   };
 
@@ -1363,65 +1403,91 @@ export default function Dashboard() {
                      {selected.channel} <span className="mx-1">•</span> {selected.contactPhone}
                    </div>
                    {/* Área jurídica + especialista pré-atribuído — hidden on mobile */}
-                   {(selected.legalArea || selected.assignedLawyerId) && (
-                     <div className="hidden md:flex items-center gap-2 flex-wrap mt-1.5">
-                       {selected.legalArea && (
-                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20">
-                           ⚖️ {selected.legalArea}
-                         </span>
-                       )}
-                       {fichaFinalizada && (
-                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
-                           ✅ Ficha Finalizada
-                         </span>
-                       )}
-                       {selected.legalArea && (
-                         <div className="relative" ref={lawyerDropdownRef}>
-                           <button
-                             onClick={() => setShowLawyerDropdown(v => !v)}
-                             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${selected.assignedLawyerName ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20' : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'}`}
-                             title="Clique para atribuir ou trocar o especialista"
-                           >
-                             <UserCheck size={10} />
-                             {selected.assignedLawyerName || 'Atribuir especialista'}
-                           </button>
-                           {showLawyerDropdown && (
-                             <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-xl shadow-xl w-56 py-1 text-[12px]" style={{ zIndex: 9999 }}>
-                               <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                                 {selected.assignedLawyerName ? 'Trocar especialista' : 'Escolher especialista'}
-                               </p>
-                               {allSpecialists.length === 0 && (
-                                 <p className="px-3 py-2 text-[11px] text-muted-foreground">Nenhum especialista cadastrado</p>
-                               )}
-                               {allSpecialists.map(u => (
-                                 <button
-                                   key={u.id}
-                                   onClick={() => handleAssignLawyerInbox(u.id)}
-                                   className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${u.id === selected.assignedLawyerId ? 'text-primary font-semibold' : 'text-foreground'}`}
-                                 >
-                                   <span className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary shrink-0">
-                                     {u.name.charAt(0)}
-                                   </span>
-                                   <div>
-                                     <p className="leading-tight">{u.name}</p>
-                                     <p className="text-[9px] text-muted-foreground">{u.specialties.join(', ')}</p>
-                                   </div>
-                                 </button>
-                               ))}
-                               {selected.assignedLawyerId && (
-                                 <button
-                                   onClick={() => handleAssignLawyerInbox(null)}
-                                   className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
-                                 >
-                                   Remover especialista
-                                 </button>
-                               )}
-                             </div>
+                   <div className="hidden md:flex items-center gap-2 flex-wrap mt-1.5">
+                     {/* Badge de área — clicável para editar */}
+                     <div className="relative" ref={legalAreaDropdownRef}>
+                       <button
+                         onClick={() => setShowLegalAreaDropdown(v => !v)}
+                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors hover:opacity-80 ${selected.legalArea ? 'bg-violet-500/15 text-violet-400 border-violet-500/20 hover:bg-violet-500/25' : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'}`}
+                         title="Clique para definir ou alterar a área de atendimento"
+                       >
+                         ⚖️ {selected.legalArea || 'Definir área'}
+                         <ChevronDown size={9} className="ml-0.5 opacity-70" />
+                       </button>
+                       {showLegalAreaDropdown && (
+                         <div className="absolute left-0 top-full mt-1 bg-card border border-border rounded-xl shadow-xl w-44 py-1 text-[12px] z-[200]">
+                           <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Área de Atendimento</p>
+                           {LEGAL_AREAS.map(area => (
+                             <button
+                               key={area}
+                               onClick={() => handleChangeLegalArea(area)}
+                               className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${selected.legalArea === area ? 'text-violet-400 font-semibold' : 'text-foreground'}`}
+                             >
+                               ⚖️ {area}
+                             </button>
+                           ))}
+                           {selected.legalArea && (
+                             <button
+                               onClick={() => handleChangeLegalArea(null)}
+                               className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
+                             >
+                               Remover área
+                             </button>
                            )}
                          </div>
                        )}
                      </div>
-                   )}
+                     {fichaFinalizada && (
+                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                         ✅ Ficha Finalizada
+                       </span>
+                     )}
+                     {selected.legalArea && (
+                       <div className="relative" ref={lawyerDropdownRef}>
+                         <button
+                           onClick={() => setShowLawyerDropdown(v => !v)}
+                           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${selected.assignedLawyerName ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20' : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'}`}
+                           title="Clique para atribuir ou trocar o especialista"
+                         >
+                           <UserCheck size={10} />
+                           {selected.assignedLawyerName || 'Atribuir especialista'}
+                         </button>
+                         {showLawyerDropdown && (
+                           <div className="absolute top-full left-0 mt-1 bg-card border border-border rounded-xl shadow-xl w-56 py-1 text-[12px]" style={{ zIndex: 9999 }}>
+                             <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                               {selected.assignedLawyerName ? 'Trocar especialista' : 'Escolher especialista'}
+                             </p>
+                             {allSpecialists.length === 0 && (
+                               <p className="px-3 py-2 text-[11px] text-muted-foreground">Nenhum especialista cadastrado</p>
+                             )}
+                             {allSpecialists.map(u => (
+                               <button
+                                 key={u.id}
+                                 onClick={() => handleAssignLawyerInbox(u.id)}
+                                 className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${u.id === selected.assignedLawyerId ? 'text-primary font-semibold' : 'text-foreground'}`}
+                               >
+                                 <span className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary shrink-0">
+                                   {u.name.charAt(0)}
+                                 </span>
+                                 <div>
+                                   <p className="leading-tight">{u.name}</p>
+                                   <p className="text-[9px] text-muted-foreground">{u.specialties.join(', ')}</p>
+                                 </div>
+                               </button>
+                             ))}
+                             {selected.assignedLawyerId && (
+                               <button
+                                 onClick={() => handleAssignLawyerInbox(null)}
+                                 className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
+                               >
+                                 Remover especialista
+                               </button>
+                             )}
+                           </div>
+                         )}
+                       </div>
+                     )}
+                   </div>
                  </div>
                </div>
                <div className="flex flex-col items-end gap-2 shrink-0">
@@ -1995,12 +2061,41 @@ export default function Dashboard() {
                         <span className="text-muted-foreground">Telefone</span>
                         <span className="font-medium">{selected.contactPhone}</span>
                       </div>
-                      {selected.legalArea && (
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-muted-foreground">Área</span>
-                          <span className="font-medium text-violet-400">⚖️ {selected.legalArea}</span>
+                      {/* Área — sempre visível, editável via dropdown */}
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Área</span>
+                        <div className="relative">
+                          <button
+                            onClick={() => setShowLegalAreaDropdown(v => !v)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border transition-colors hover:opacity-80 active:scale-95 ${selected.legalArea ? 'bg-violet-500/15 text-violet-400 border-violet-500/20' : 'bg-muted/40 text-muted-foreground border-border'}`}
+                          >
+                            ⚖️ {selected.legalArea || 'Definir área'}
+                            <ChevronDown size={10} className="opacity-70" />
+                          </button>
+                          {showLegalAreaDropdown && (
+                            <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-xl w-44 py-1 text-[12px] z-[100]">
+                              <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Área de Atendimento</p>
+                              {LEGAL_AREAS.map(area => (
+                                <button
+                                  key={area}
+                                  onClick={() => handleChangeLegalArea(area)}
+                                  className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${selected.legalArea === area ? 'text-violet-400 font-semibold' : 'text-foreground'}`}
+                                >
+                                  ⚖️ {area}
+                                </button>
+                              ))}
+                              {selected.legalArea && (
+                                <button
+                                  onClick={() => handleChangeLegalArea(null)}
+                                  className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
+                                >
+                                  Remover área
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                       {selected.assignedAgentName && (
                         <div className="flex justify-between items-center text-sm">
                           <span className="text-muted-foreground">Atendente</span>
