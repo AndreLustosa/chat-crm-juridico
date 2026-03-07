@@ -1407,7 +1407,7 @@ export default function Dashboard() {
                      {/* Badge de área — clicável para editar */}
                      <div className="relative" ref={legalAreaDropdownRef}>
                        <button
-                         onClick={() => setShowLegalAreaDropdown(v => !v)}
+                         onClick={(e) => { e.stopPropagation(); setShowLegalAreaDropdown(v => !v); }}
                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors hover:opacity-80 ${selected.legalArea ? 'bg-violet-500/15 text-violet-400 border-violet-500/20 hover:bg-violet-500/25' : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'}`}
                          title="Clique para definir ou alterar a área de atendimento"
                        >
