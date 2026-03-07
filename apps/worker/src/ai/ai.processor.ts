@@ -1,5 +1,5 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { Job, Queue } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
@@ -62,6 +62,7 @@ export class AiProcessor extends WorkerHost {
     private prisma: PrismaService,
     private settings: SettingsService,
     private s3: S3Service,
+    @InjectQueue('calendar-reminders') private reminderQueue: Queue,
   ) {
     super();
   }
@@ -160,13 +161,18 @@ export class AiProcessor extends WorkerHost {
   }
 
   // ─── Parseia resposta JSON da IA com fallbacks robustos ───
-  private parseAiResponse(raw: string): { reply: string; updates: any } {
+  private parseAiResponse(raw: string): {
+    reply: string;
+    updates: any;
+    scheduling_action?: { action: string; date?: string; time?: string };
+  } {
     try {
       const parsed = JSON.parse(raw);
       if (parsed.reply) {
         return {
           reply: parsed.reply,
           updates: parsed.updates || parsed.lead_update || {},
+          scheduling_action: parsed.scheduling_action || undefined,
         };
       }
     } catch {}
@@ -179,6 +185,7 @@ export class AiProcessor extends WorkerHost {
           return {
             reply: parsed.reply,
             updates: parsed.updates || parsed.lead_update || {},
+            scheduling_action: parsed.scheduling_action || undefined,
           };
         }
       } catch {}
@@ -337,11 +344,13 @@ export class AiProcessor extends WorkerHost {
     }
 
     // b. Status → Lead.stage
+    let resolvedStage: string | null = null;
     if (updates.status && updates.status !== 'null') {
       await this.prisma.lead.update({
         where: { id: leadId },
         data: { stage: updates.status },
       });
+      resolvedStage = updates.status;
       this.logger.log(`[AI] Lead.stage → "${updates.status}"`);
     } else if (!updates.status && updates.next_step) {
       // Se a IA enviou next_step mas esqueceu o status, inferir o stage automaticamente
@@ -356,7 +365,49 @@ export class AiProcessor extends WorkerHost {
       const inferred = inferMap[updates.next_step];
       if (inferred) {
         await this.prisma.lead.update({ where: { id: leadId }, data: { stage: inferred } });
+        resolvedStage = inferred;
         this.logger.log(`[AI] Stage inferido do next_step "${updates.next_step}": ${inferred}`);
+      }
+    }
+
+    // === AUTOMAÇÃO: Criar tarefas automáticas baseado no novo stage ===
+    if (resolvedStage) {
+      try {
+        const conv = await (this.prisma as any).conversation.findUnique({
+          where: { id: convoId },
+          select: { assigned_lawyer_id: true },
+        });
+        const lawyerId = conv?.assigned_lawyer_id;
+
+        if (lawyerId) {
+          const taskMap: Record<string, string> = {
+            AGUARDANDO_DOCS: 'Cobrar documentos do lead',
+            AGUARDANDO_PROC: 'Cobrar procuração do lead',
+            AGUARDANDO_FORM: 'Acompanhar preenchimento do formulário',
+          };
+          const taskTitle = taskMap[resolvedStage];
+          if (taskTitle) {
+            const lead = await this.prisma.lead.findUnique({
+              where: { id: leadId },
+              select: { name: true },
+            });
+            await this.createCalendarEvent({
+              type: 'TAREFA',
+              title: `${taskTitle} — ${lead?.name || 'Lead'}`,
+              description: `Tarefa automática criada pela IA ao mover lead para ${resolvedStage}`,
+              start_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+              assigned_user_id: lawyerId,
+              lead_id: leadId,
+              conversation_id: convoId,
+              created_by_id: lawyerId,
+            });
+            this.logger.log(
+              `[AI] Tarefa automática criada: "${taskTitle}" para advogado ${lawyerId}`,
+            );
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`[AI] Falha ao criar tarefa automática: ${e.message}`);
       }
     }
 
@@ -523,6 +574,141 @@ export class AiProcessor extends WorkerHost {
         this.logger.warn(`[AI] Falha ao preencher ficha da memória: ${e.message}`);
       }
     }
+  }
+
+  // ─── Cria CalendarEvent diretamente + enfileira lembretes ───
+  private async createCalendarEvent(params: {
+    type: string;
+    title: string;
+    description?: string;
+    start_at: Date;
+    end_at?: Date;
+    assigned_user_id: string;
+    lead_id: string;
+    conversation_id?: string;
+    created_by_id: string;
+  }): Promise<any> {
+    const event = await this.prisma.calendarEvent.create({
+      data: {
+        type: params.type,
+        title: params.title,
+        description: params.description,
+        start_at: params.start_at,
+        end_at: params.end_at || new Date(params.start_at.getTime() + 30 * 60 * 1000),
+        status: 'AGENDADO',
+        priority: 'NORMAL',
+        assigned_user_id: params.assigned_user_id,
+        lead_id: params.lead_id,
+        conversation_id: params.conversation_id,
+        created_by_id: params.created_by_id,
+        reminders: {
+          create: [
+            { minutes_before: 60, channel: 'WHATSAPP' },
+            { minutes_before: 1440, channel: 'WHATSAPP' },
+          ],
+        },
+      },
+      include: { reminders: true },
+    });
+
+    // Enqueue WhatsApp reminders
+    for (const r of event.reminders) {
+      const fireAt = new Date(event.start_at.getTime() - r.minutes_before * 60 * 1000);
+      if (fireAt > new Date()) {
+        await this.reminderQueue.add(
+          'send-reminder',
+          { reminderId: r.id, eventId: event.id, channel: r.channel },
+          { delay: fireAt.getTime() - Date.now() },
+        );
+      }
+    }
+
+    this.logger.log(
+      `[AI] CalendarEvent criado: "${params.title}" (${params.type}) para ${params.assigned_user_id}`,
+    );
+    return event;
+  }
+
+  // ─── Consulta disponibilidade de horários de um advogado ───
+  private async getAvailability(
+    userId: string,
+    dateStr: string,
+    durationMinutes: number,
+  ): Promise<{ start: string; end: string }[]> {
+    const date = new Date(dateStr);
+    const dayOfWeek = date.getDay();
+
+    // Verificar feriado
+    const dateOnly = date.toISOString().split('T')[0];
+    const holidayCount = await (this.prisma as any).holiday.count({
+      where: {
+        OR: [
+          { date: new Date(dateOnly) },
+          { date: { gte: new Date(dateOnly + 'T00:00:00'), lte: new Date(dateOnly + 'T23:59:59') } },
+        ],
+      },
+    });
+    if (holidayCount > 0) return [];
+
+    // Horário de trabalho do dia
+    const schedule = await (this.prisma as any).userSchedule.findUnique({
+      where: { user_id_day_of_week: { user_id: userId, day_of_week: dayOfWeek } },
+    });
+    if (!schedule) return [];
+
+    // Eventos existentes nesse dia
+    const dayStart = new Date(date);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const events = await this.prisma.calendarEvent.findMany({
+      where: {
+        assigned_user_id: userId,
+        start_at: { gte: dayStart, lte: dayEnd },
+        status: { notIn: ['CANCELADO'] },
+      },
+      select: { start_at: true, end_at: true },
+      orderBy: { start_at: 'asc' },
+    });
+
+    // Calcular slots livres
+    const [startH, startM] = schedule.start_time.split(':').map(Number);
+    const [endH, endM] = schedule.end_time.split(':').map(Number);
+    const workStart = startH * 60 + startM;
+    const workEnd = endH * 60 + endM;
+
+    const busy = events.map((e: any) => {
+      const s = e.start_at.getHours() * 60 + e.start_at.getMinutes();
+      const eEnd = e.end_at
+        ? e.end_at.getHours() * 60 + e.end_at.getMinutes()
+        : s + 30;
+      return { start: s, end: eEnd };
+    });
+
+    const slots: { start: string; end: string }[] = [];
+    let cursor = workStart;
+    for (const b of busy) {
+      while (cursor + durationMinutes <= b.start) {
+        const slotEnd = cursor + durationMinutes;
+        slots.push({
+          start: `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`,
+          end: `${String(Math.floor(slotEnd / 60)).padStart(2, '0')}:${String(slotEnd % 60).padStart(2, '0')}`,
+        });
+        cursor = slotEnd;
+      }
+      if (b.end > cursor) cursor = b.end;
+    }
+    while (cursor + durationMinutes <= workEnd) {
+      const slotEnd = cursor + durationMinutes;
+      slots.push({
+        start: `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`,
+        end: `${String(Math.floor(slotEnd / 60)).padStart(2, '0')}:${String(slotEnd % 60).padStart(2, '0')}`,
+      });
+      cursor = slotEnd;
+    }
+
+    return slots;
   }
 
   // ─── Encontra o especialista menos ocupado para uma área jurídica ───
@@ -830,6 +1016,38 @@ export class AiProcessor extends WorkerHost {
       }
 
       const siteUrl = process.env.APP_URL || 'https://andrelustosaadvogados.com.br';
+
+      // 10c. Buscar horários disponíveis do advogado atribuído (para agendamento)
+      let availableSlots = 'Nenhum advogado atribuído — horários indisponíveis.';
+      const assignedLawyerId = (convo as any).assigned_lawyer_id;
+      if (assignedLawyerId) {
+        try {
+          const now = new Date();
+          const formatDateBR = (d: Date) =>
+            d.toLocaleDateString('pt-BR', { timeZone: 'America/Maceio', day: '2-digit', month: '2-digit' });
+          const slotParts: string[] = [];
+          // Buscar slots para os próximos 5 dias úteis
+          for (let i = 1; i <= 7 && slotParts.length < 5; i++) {
+            const day = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+            if (day.getDay() === 0 || day.getDay() === 6) continue; // pular fim de semana
+            const dateStr = day.toISOString().split('T')[0];
+            const slots = await this.getAvailability(assignedLawyerId, dateStr, 60);
+            if (slots.length > 0) {
+              const slotsStr = slots.slice(0, 6).map((s) => s.start).join(', ');
+              slotParts.push(`${formatDateBR(day)} (${dateStr}): ${slotsStr}`);
+            }
+          }
+          if (slotParts.length > 0) {
+            availableSlots = slotParts.join(' | ');
+          } else {
+            availableSlots = 'Sem horários disponíveis nos próximos dias.';
+          }
+        } catch (e: any) {
+          this.logger.warn(`[AI] Falha ao buscar disponibilidade: ${e.message}`);
+          availableSlots = 'Erro ao consultar horários — tente novamente.';
+        }
+      }
+
       const vars: Record<string, string> = {
         lead_name: convo.lead.name || 'Desconhecido',
         lead_phone: convo.lead.phone || '',
@@ -849,6 +1067,7 @@ export class AiProcessor extends WorkerHost {
           hour: '2-digit', minute: '2-digit',
         }),
         ficha_status: fichaStatus,
+        available_slots: availableSlots,
       };
 
       // Cabeçalho fixo de capacidades — injetado antes de qualquer skill prompt
@@ -889,6 +1108,23 @@ FICHA TRABALHISTA (apenas quando area = Trabalhista):
 Quando a área for TRABALHISTA, você DEVE coletar ATIVAMENTE todos os campos da ficha através de perguntas.
 NÃO envie o link do formulário até ter coletado todos os campos essenciais. O formulário serve para REVISÃO, não para preenchimento.
 Siga o ROTEIRO DE COLETA no final do prompt. Inclua "form_data" no JSON a cada resposta. Se NÃO for trabalhista: form_data: null.
+
+═══════════════════════════════════════════════════
+HORÁRIOS DISPONÍVEIS DO ADVOGADO:
+{{available_slots}}
+═══════════════════════════════════════════════════
+
+AGENDAMENTO DE REUNIÃO:
+Quando o next_step for "reuniao" ou o cliente quiser agendar uma reunião/consulta:
+1. Consulte os HORÁRIOS DISPONÍVEIS DO ADVOGADO listados acima.
+2. Ofereça ao cliente 3-5 opções de horário (data + hora), de forma natural e amigável.
+3. Aguarde o cliente escolher um horário.
+4. Quando o cliente CONFIRMAR o horário, inclua no JSON:
+   "scheduling_action": { "action": "confirm_slot", "date": "YYYY-MM-DD", "time": "HH:MM" }
+   E defina status = "REUNIAO_AGENDADA".
+5. Se nenhum horário servir ao cliente, pergunte outra data.
+NUNCA agende sem confirmação do cliente. SEMPRE mostre opções primeiro.
+Se não houver horários disponíveis, informe que entrará em contato quando houver vagas.
 
 `;
 
@@ -981,7 +1217,11 @@ Quando next_step = "formulario", inclua o link na reply:
 "Já temos quase todas as informações! Preenchi a ficha com o que você me informou. Agora preciso que você acesse o link abaixo para conferir os dados, completar o que faltar (como endereço e CPF se não informou) e finalizar: {{form_url}}"
 
 FORMATO DO JSON:
-{"reply":"texto","updates":{"name":"João","status":"QUALIFICANDO","area":"Trabalhista","lead_summary":"resumo","next_step":"duvidas","notes":"","form_data":{"nome_completo":"João da Silva","nome_empregador":"Empresa X","funcao":"Operador","salario":"2000","fazia_horas_extras":"Sim"}}}
+{"reply":"texto","updates":{"name":"João","status":"QUALIFICANDO","area":"Trabalhista","lead_summary":"resumo","next_step":"duvidas","notes":"","form_data":{"nome_completo":"João da Silva","nome_empregador":"Empresa X","funcao":"Operador","salario":"2000","fazia_horas_extras":"Sim"}},"scheduling_action":null}
+
+scheduling_action: Use SOMENTE quando agendar reunião.
+- Para confirmar horário: {"action":"confirm_slot","date":"2026-03-10","time":"09:00"}
+- Quando não for agendamento: null
 `;
 
       if (skill) {
@@ -1007,11 +1247,12 @@ ROTEIRO (siga na ordem, UMA pergunta por vez):
 4. Pergunte se possui documentos ou provas (contrato, mensagens, fotos, etc.).
 5. Quando tiver informações suficientes, informe que o advogado vai analisar e oriente o próximo passo.
 
-Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":"","form_data":null}}
+Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":"","form_data":null},"scheduling_action":null}
 
 Valores válidos para updates.status: INICIAL | QUALIFICANDO | AGUARDANDO_FORM | REUNIAO_AGENDADA | AGUARDANDO_DOCS | AGUARDANDO_PROC | FINALIZADO | PERDIDO
 Valores válidos para updates.next_step: duvidas | triagem_concluida | formulario | reuniao | documentos | procuracao | encerrado
-form_data: objeto com campos trabalhistas extraídos (só quando area=Trabalhista). Null quando não se aplica.`;
+form_data: objeto com campos trabalhistas extraídos (só quando area=Trabalhista). Null quando não se aplica.
+scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} quando confirmar agendamento. Null quando não se aplica.`;
         model = await this.settings.getDefaultModel();
         maxTokens = 1500;
         temperature = 0.7;
@@ -1099,7 +1340,7 @@ form_data: objeto com campos trabalhistas extraídos (só quando area=Trabalhist
       });
 
       // 13. Parsear resposta JSON
-      const { reply: aiText, updates } = this.parseAiResponse(rawResponse);
+      const { reply: aiText, updates, scheduling_action } = this.parseAiResponse(rawResponse);
       this.logger.log(
         `[AI] JSON parseado — reply: ${aiText.slice(0, 80)}... | updates: ${JSON.stringify(updates).slice(0, 200)}`,
       );
@@ -1128,6 +1369,40 @@ form_data: objeto com campos trabalhistas extraídos (só quando area=Trabalhist
         convo.lead.phone,
         convo.instance_name || null,
       );
+
+      // 15b. Processar scheduling_action (agendamento automático de reunião)
+      if (scheduling_action?.action === 'confirm_slot' && scheduling_action.date && scheduling_action.time) {
+        try {
+          const lawyerId = (await (this.prisma as any).conversation.findUnique({
+            where: { id: convo.id },
+            select: { assigned_lawyer_id: true },
+          }))?.assigned_lawyer_id;
+
+          if (lawyerId) {
+            const [h, m] = scheduling_action.time.split(':').map(Number);
+            const startAt = new Date(scheduling_action.date + 'T00:00:00');
+            startAt.setHours(h, m, 0, 0);
+            const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
+
+            await this.createCalendarEvent({
+              type: 'CONSULTA',
+              title: `Consulta — ${convo.lead.name || 'Lead'}`,
+              description: `Reunião agendada automaticamente pela IA`,
+              start_at: startAt,
+              end_at: endAt,
+              assigned_user_id: lawyerId,
+              lead_id: convo.lead.id,
+              conversation_id: convo.id,
+              created_by_id: lawyerId,
+            });
+            this.logger.log(
+              `[AI] Consulta agendada: ${scheduling_action.date} ${scheduling_action.time} — advogado ${lawyerId}`,
+            );
+          }
+        } catch (e: any) {
+          this.logger.warn(`[AI] Falha ao agendar consulta: ${e.message}`);
+        }
+      }
 
       // 16. Ler config da Evolution e enviar via WhatsApp
       const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();

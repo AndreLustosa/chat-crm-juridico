@@ -67,6 +67,7 @@ model Lead {
   legal_cases        LegalCase[]
   ficha_trabalhista  FichaTrabalhista?
   calendar_events    CalendarEvent[]
+  last_followup_at   DateTime?
 
   @@index([tenant_id, phone])
   @@index([stage])

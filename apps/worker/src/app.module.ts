@@ -1,17 +1,20 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { S3Module } from './s3/s3.module';
 import { SettingsModule } from './settings/settings.module';
 import { MediaModule } from './media/media.module';
 import { AiModule } from './ai/ai.module';
 import { ReminderModule } from './reminder/reminder.module';
+import { FollowupModule } from './followup/followup.module';
 
 @Module({
   imports: [
     PrismaModule,
     S3Module,
     SettingsModule,
+    ScheduleModule.forRoot(),
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',
@@ -21,6 +24,7 @@ import { ReminderModule } from './reminder/reminder.module';
     MediaModule,
     AiModule,
     ReminderModule,
+    FollowupModule,
   ],
 })
 export class AppModule {}
