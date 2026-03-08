@@ -93,6 +93,18 @@ export class InboxesService {
   }
 
   async remove(id: string) {
+    // Desassociar conversas e instancias antes de deletar
+    // (onDelete: SetNull no schema cuida disso, mas garantimos manualmente)
+    await Promise.all([
+      (this.prisma as any).conversation.updateMany({
+        where: { inbox_id: id },
+        data: { inbox_id: null },
+      }),
+      (this.prisma as any).instance.updateMany({
+        where: { inbox_id: id },
+        data: { inbox_id: null },
+      }),
+    ]);
     return this.inbox.delete({ where: { id } });
   }
 

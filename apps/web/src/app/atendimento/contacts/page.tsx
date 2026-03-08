@@ -207,14 +207,27 @@ function ClientPanel({
   }, [leadId]);
 
   const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
+  const [deletingDoc, setDeletingDoc] = useState(false);
   const deleteDoc = (messageId: string) => {
     setConfirmDeleteDocId(messageId);
   };
-  const confirmDeleteDoc = () => {
-    if (confirmDeleteDocId) {
-      setDocuments(prev => prev.filter(d => d.messageId !== confirmDeleteDocId));
-    }
+  const confirmDeleteDoc = async () => {
+    if (!confirmDeleteDocId) return;
+    const msgId = confirmDeleteDocId;
+    setDeletingDoc(true);
+    // Optimistic update
+    const prevDocs = [...documents];
+    setDocuments(prev => prev.filter(d => d.messageId !== msgId));
     setConfirmDeleteDocId(null);
+    try {
+      await api.delete(`/messages/${msgId}`);
+    } catch {
+      // Rollback
+      setDocuments(prevDocs);
+      showError('Erro ao excluir documento. Tente novamente.');
+    } finally {
+      setDeletingDoc(false);
+    }
   };
 
   const saveField = async (field: 'name' | 'email', value: string) => {
@@ -892,6 +905,7 @@ function getIsAdminFromToken(): boolean {
 export default function ContactsPage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -900,8 +914,22 @@ export default function ContactsPage() {
   const [view, setView] = useState<'active' | 'archived'>('active');
   const [showNewContact, setShowNewContact] = useState(false);
   const [isAdmin] = useState<boolean>(getIsAdminFromToken);
+  // Paginacao
+  const [page, setPage] = useState(1);
+  const [totalContacts, setTotalContacts] = useState(0);
+  const PAGE_SIZE = 50;
 
-  // Abre o painel do cliente via query param ?lead=<id>
+  // Debounce search — 300ms
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1); // Reset para pagina 1 ao buscar
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [search]);
+
   // Abre o painel do cliente via query param ?lead=<id> (sem useSearchParams para evitar Suspense)
   useEffect(() => {
     const leadId = new URLSearchParams(window.location.search).get('lead');
@@ -914,8 +942,18 @@ export default function ContactsPage() {
     try {
       setLoading(true);
       setLoadError(false);
-      const response = await api.get('/leads');
-      const leads = response.data;
+      const params: Record<string, string> = {
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      };
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+      const response = await api.get('/leads', { params });
+      const result = response.data;
+
+      // Backend retorna { data, total, page, limit } quando paginado
+      const leads = Array.isArray(result) ? result : (result.data || []);
+      const total = result.total ?? leads.length;
+      setTotalContacts(total);
 
       const mappedContacts: Contact[] = leads.map((lead: any) => ({
         id: lead.id,
@@ -934,11 +972,11 @@ export default function ContactsPage() {
       setContacts(mappedContacts);
     } catch {
       setLoadError(true);
-      showError('Não foi possível carregar contatos.');
+      showError('Nao foi possivel carregar contatos.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, debouncedSearch]);
 
   useEffect(() => {
     fetchAllContacts();
@@ -946,6 +984,8 @@ export default function ContactsPage() {
     window.addEventListener('auth:logout', onLogout);
     return () => window.removeEventListener('auth:logout', onLogout);
   }, [fetchAllContacts, router]);
+
+  const totalPages = Math.ceil(totalContacts / PAGE_SIZE);
 
   const handleNewContactCreated = (convId: string) => {
     sessionStorage.setItem('crm_open_conv', convId);
@@ -968,12 +1008,10 @@ export default function ContactsPage() {
     }
   };
 
-  const searchMatch = (c: Contact) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search);
-
-  const activeContacts  = contacts.filter(c => c.stage !== 'PERDIDO' && searchMatch(c));
-  const archivedContacts = contacts.filter(c => c.stage === 'PERDIDO' && searchMatch(c));
-  const archivedCount   = contacts.filter(c => c.stage === 'PERDIDO').length;
+  // Busca agora e server-side via debouncedSearch; filtragem local so por stage
+  const activeContacts  = contacts.filter(c => c.stage !== 'PERDIDO');
+  const archivedContacts = contacts.filter(c => c.stage === 'PERDIDO');
+  const archivedCount   = archivedContacts.length;
 
   // ─── Tela de Arquivados ───────────────────────────────────────────────────
   if (view === 'archived') {
@@ -1122,10 +1160,7 @@ export default function ContactsPage() {
           <div>
             <h1 className="text-2xl font-bold text-foreground tracking-tight">Contatos</h1>
             <p className="text-[13px] text-muted-foreground mt-0.5">
-              {loading ? 'Carregando...' : (() => {
-                const active = contacts.filter(c => c.stage !== 'PERDIDO').length;
-                return `${active} contatos ativos`;
-              })()}
+              {loading ? 'Carregando...' : `${totalContacts} contatos${debouncedSearch ? ' encontrados' : ' ativos'}`}
             </p>
           </div>
 
@@ -1191,6 +1226,7 @@ export default function ContactsPage() {
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Nome</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Telefone</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest max-w-[200px]">Ultima Msg</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Origem</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-20"></th>
                   </tr>
@@ -1222,6 +1258,16 @@ export default function ContactsPage() {
                         {formatPhone(contact.phone)}
                       </td>
                       <td className="px-6 py-5 text-[13px] text-muted-foreground font-medium">{contact.email || '-'}</td>
+                      <td className="px-6 py-5 max-w-[200px]">
+                        <p className="text-[12px] text-muted-foreground truncate" title={contact.lastMessage !== '-' ? contact.lastMessage : undefined}>
+                          {contact.lastMessage !== '-' ? contact.lastMessage : <span className="text-muted-foreground/40 italic">Sem mensagens</span>}
+                        </p>
+                        {contact.conversations > 0 && (
+                          <span className="text-[10px] text-muted-foreground/50 mt-0.5">
+                            {contact.conversations} conversa{contact.conversations !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-6 py-5">
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold uppercase tracking-wider border border-green-500/20">
@@ -1252,7 +1298,7 @@ export default function ContactsPage() {
 
                   {activeContacts.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-20 text-center">
+                      <td colSpan={6} className="py-20 text-center">
                         <div className="flex flex-col items-center opacity-30">
                           <User className="w-12 h-12 mb-3 stroke-[1.2]" />
                           <p className="text-sm font-medium">Nenhum contato encontrado</p>
@@ -1262,6 +1308,31 @@ export default function ContactsPage() {
                   )}
                 </tbody>
               </table>
+
+              {/* Paginacao */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-6 py-3 border-t border-border bg-foreground/[0.01]">
+                  <span className="text-[12px] text-muted-foreground">
+                    {totalContacts} contatos | Pagina {page} de {totalPages}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={page <= 1}
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border bg-card hover:bg-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      disabled={page >= totalPages}
+                      onClick={() => setPage(p => p + 1)}
+                      className="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-border bg-card hover:bg-accent transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Proximo
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -126,6 +126,32 @@ export class UsersService {
 
   async remove(id: string, tenantId?: string): Promise<void> {
     await this.verifyTenantOwnership(id, tenantId);
+
+    // Verificar se o usuario possui registros que impedem exclusao (FKs required)
+    const [caseCount, createdEventCount] = await Promise.all([
+      this.prisma.legalCase.count({ where: { lawyer_id: id } }),
+      this.prisma.calendarEvent.count({ where: { created_by_id: id } }),
+    ]);
+
+    if (caseCount > 0) {
+      throw new ForbiddenException(
+        `Nao e possivel excluir: usuario possui ${caseCount} caso(s) juridico(s) como advogado. Reatribua os casos antes.`,
+      );
+    }
+    if (createdEventCount > 0) {
+      throw new ForbiddenException(
+        `Nao e possivel excluir: usuario criou ${createdEventCount} evento(s) de calendario. Exclua ou reatribua os eventos antes.`,
+      );
+    }
+
+    // Desassociar conversas atribuidas (SetNull via schema, mas limpar explicitamente)
+    await this.prisma.conversation.updateMany({
+      where: { assigned_user_id: id },
+      data: { assigned_user_id: null },
+    });
+
+    // As demais relacoes (Task, TaskComment, CalendarEventComment, UserSchedule, AuditLog)
+    // sao tratadas pelo onDelete: SetNull/Cascade no schema Prisma
     await this.prisma.user.delete({ where: { id } });
   }
 
