@@ -1,5 +1,4 @@
 import { Controller, Get, Post, Body, Patch, Delete, Param, Query, UseGuards, Request, BadRequestException, Res } from '@nestjs/common';
-import { Response } from 'express';
 import { LeadsService } from './leads.service';
 import { LeadsCleanupService } from './leads-cleanup.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -49,7 +48,7 @@ export class LeadsController {
   async exportCsv(
     @Request() req: any,
     @Query('search') search: string,
-    @Res() res: Response,
+    @Res() res: any,
   ) {
     const csv = await this.leadsService.exportCsv(req.user?.tenant_id, search);
     const filename = `leads_${new Date().toISOString().split('T')[0]}.csv`;
