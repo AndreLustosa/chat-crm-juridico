@@ -209,10 +209,13 @@ export class ConversationsService {
     const { fromUser, conv } = await this.prisma.$transaction(async (tx) => {
       const existing = await (tx as any).conversation.findUnique({
         where: { id },
-        select: { assigned_user_id: true },
+        select: { assigned_user_id: true, pending_transfer_to_id: true },
       });
       if (!existing || existing.assigned_user_id !== fromUserId) {
         throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
+      }
+      if (existing.pending_transfer_to_id) {
+        throw new BadRequestException('Esta conversa já possui uma transferência pendente.');
       }
 
       const [fromUser, conv] = await Promise.all([
@@ -253,8 +256,12 @@ export class ConversationsService {
     const { current, acceptingUser, conv } = await this.prisma.$transaction(async (tx) => {
       const current = await (tx as any).conversation.findUnique({
         where: { id },
-        select: { pending_transfer_from_id: true, lead: { select: { name: true, phone: true } } },
+        select: { pending_transfer_to_id: true, pending_transfer_from_id: true, lead: { select: { name: true, phone: true } } },
       });
+
+      if (!current?.pending_transfer_to_id || current.pending_transfer_to_id !== userId) {
+        throw new ForbiddenException('Você não é o destinatário desta transferência.');
+      }
 
       const [acceptingUser, conv] = await Promise.all([
         tx.user.findUnique({ where: { id: userId }, select: { name: true } }),

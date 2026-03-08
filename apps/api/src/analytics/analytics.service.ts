@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 
@@ -17,6 +17,8 @@ export class TrackEventDto {
 
 @Injectable()
 export class AnalyticsService {
+  private readonly logger = new Logger(AnalyticsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   // ── Helpers para globalSetting ────────────────────────────────────────────
@@ -305,7 +307,7 @@ export class AnalyticsService {
         by_day,
       };
     } catch (e) {
-      console.error('[GA4] Erro ao consultar Analytics Data API:', e);
+      this.logger.error('[GA4] Erro ao consultar Analytics Data API:', e);
       return null;
     }
   }

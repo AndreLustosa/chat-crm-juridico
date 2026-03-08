@@ -32,6 +32,7 @@ model User {
   role            String
   specialties     String[]       @default([])
   created_at      DateTime       @default(now())
+  updated_at      DateTime       @updatedAt
   audit_logs      AuditLog[]
   assigned_convos Conversation[]
   inboxes         Inbox[]
@@ -209,6 +210,8 @@ model PromptSkill {
   temperature       Float   @default(0.7)
   handoff_signal    String? // Palavra que a IA usa para sinalizar escalada ao humano (ex: "ESCALAR_HUMANO")
   order             Int     @default(0)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 }
 
 model AuditLog {
@@ -223,8 +226,9 @@ model AuditLog {
 }
 
 model GlobalSetting {
-  key   String @id
-  value String
+  key        String   @id
+  value      String
+  updated_at DateTime @updatedAt
 }
 
 model AiUsage {

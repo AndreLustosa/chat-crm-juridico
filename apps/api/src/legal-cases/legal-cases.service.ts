@@ -38,34 +38,50 @@ export class LegalCasesService {
     });
   }
 
-  async findAll(lawyerId?: string, stage?: string, archived?: boolean, inTracking?: boolean) {
+  async findAll(lawyerId?: string, stage?: string, archived?: boolean, inTracking?: boolean, page?: number, limit?: number) {
     const where: any = {};
     if (lawyerId) where.lawyer_id = lawyerId;
     if (stage) where.stage = stage;
     if (archived !== undefined) where.archived = archived;
     if (inTracking !== undefined) where.in_tracking = inTracking;
 
-    return this.prisma.legalCase.findMany({
-      where,
-      include: {
-        lead: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-            email: true,
-            profile_picture_url: true,
-            stage: true,
-          },
-        },
-        _count: {
-          select: {
-            tasks: true,
-            events: true,
-            djen_publications: true,
-          },
+    const includeOpts = {
+      lead: {
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          profile_picture_url: true,
+          stage: true,
         },
       },
+      _count: {
+        select: {
+          tasks: true,
+          events: true,
+          djen_publications: true,
+        },
+      },
+    };
+
+    if (page && limit) {
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.legalCase.findMany({
+          where,
+          include: includeOpts,
+          orderBy: { updated_at: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.legalCase.count({ where }),
+      ]);
+      return { data, total, page, limit };
+    }
+
+    return this.prisma.legalCase.findMany({
+      where,
+      include: includeOpts,
       orderBy: { updated_at: 'desc' },
     });
   }
@@ -188,7 +204,7 @@ export class LegalCasesService {
           legalCase.conversation?.instance_name ?? undefined,
         );
       } catch (e) {
-        console.error('Erro ao enviar notificação de arquivamento:', e);
+        this.logger.error('Erro ao enviar notificação de arquivamento:', e);
       }
     }
 
@@ -333,6 +349,7 @@ export class LegalCasesService {
   async sendToTracking(id: string, caseNumber: string, court?: string) {
     const lc = await this.prisma.legalCase.findUnique({ where: { id } });
     if (!lc) throw new NotFoundException('Caso não encontrado');
+    if (lc.archived) throw new BadRequestException('Caso arquivado não pode ser protocolado.');
     if (lc.stage !== 'PROTOCOLO') throw new BadRequestException('Caso deve estar no stage PROTOCOLO para ser protocolado');
 
     const updated = await this.prisma.legalCase.update({

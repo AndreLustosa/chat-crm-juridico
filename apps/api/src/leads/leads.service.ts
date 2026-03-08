@@ -30,7 +30,7 @@ export class LeadsService {
     return this.prisma.lead.create({ data });
   }
 
-  async findAll(tenant_id?: string, inbox_id?: string): Promise<Lead[]> {
+  async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number) {
     const baseWhere = tenant_id
       ? { OR: [{ tenant_id }, { tenant_id: null }] }
       : undefined;
@@ -42,26 +42,42 @@ export class LeadsService {
         }
       : baseWhere;
 
-    return (await this.prisma.lead.findMany({
-      where,
-      include: {
-        _count: {
-          select: { conversations: true },
-        },
-        conversations: {
-          where: inbox_id ? { inbox_id } : undefined,
-          orderBy: { last_message_at: 'desc' },
-          take: 1,
-          include: {
-            messages: {
-              orderBy: { created_at: 'desc' },
-              take: 1,
-            },
+    const includeOpts = {
+      _count: {
+        select: { conversations: true },
+      },
+      conversations: {
+        where: inbox_id ? { inbox_id } : undefined,
+        orderBy: { last_message_at: 'desc' as const },
+        take: 1,
+        include: {
+          messages: {
+            orderBy: { created_at: 'desc' as const },
+            take: 1,
           },
         },
       },
+    };
+
+    if (page && limit) {
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.lead.findMany({
+          where,
+          include: includeOpts,
+          orderBy: { created_at: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.lead.count({ where }),
+      ]);
+      return { data, total, page, limit };
+    }
+
+    return this.prisma.lead.findMany({
+      where,
+      include: includeOpts,
       orderBy: { created_at: 'desc' },
-    })) as any;
+    }) as any;
   }
 
   async findOne(id: string, tenantId?: string): Promise<Lead | null> {

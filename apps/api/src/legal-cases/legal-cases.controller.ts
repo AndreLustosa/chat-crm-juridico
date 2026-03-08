@@ -39,12 +39,16 @@ export class LegalCasesController {
     @Query('stage') stage?: string,
     @Query('archived') archived?: string,
     @Query('inTracking') inTracking?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     const isAdmin = req.user.role === 'ADMIN';
     const lawyerId = isAdmin ? undefined : req.user.id;
     const archivedBool = archived === 'true' ? true : archived === 'false' ? false : undefined;
     const inTrackingBool = inTracking === 'true' ? true : inTracking === 'false' ? false : undefined;
-    return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool);
+    const p = page ? parseInt(page, 10) : undefined;
+    const l = limit ? parseInt(limit, 10) : undefined;
+    return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool, p, l);
   }
 
   @Get(':id')

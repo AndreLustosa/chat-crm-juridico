@@ -25,6 +25,8 @@ function estimateCostUsd(model: string, inputTk: number, outputTk: number): numb
 
 @Injectable()
 export class SettingsService {
+  private readonly logger = new Logger(SettingsService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async getAll() {
@@ -84,7 +86,7 @@ export class SettingsService {
       }
       return setting.value;
     } catch (e) {
-      console.error(`Erro ao buscar configuração [${key}] do banco:`, e.message);
+      this.logger.error(`Erro ao buscar configuração [${key}] do banco: ${e.message}`);
       return null; // Retorna null para disparar o fallback da Env
     }
   }
@@ -620,7 +622,7 @@ Você prepara o caso. O advogado decide.
       ]);
     } catch (e: any) {
       // Tabela AiUsage ainda não existe — retorna zerados
-      console.warn('[getAiCosts] Prisma falhou (tabela pode não existir):', e?.message);
+      this.logger.warn(`[getAiCosts] Prisma falhou (tabela pode não existir): ${e?.message}`);
     }
 
     // Agrega últimos 7 dias por data (yyyy-mm-dd)

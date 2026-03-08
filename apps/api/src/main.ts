@@ -15,10 +15,11 @@ const possiblePaths = [
   path.resolve(__dirname, '../../../../.env'),
 ];
 
+const bootstrapLogger = new Logger('Bootstrap');
 for (const envPath of possiblePaths) {
   const result = dotenv.config({ path: envPath });
   if (!result.error) {
-    console.log(`[Bootstrap] Configuração carregada de: ${envPath}`);
+    bootstrapLogger.log(`Configuração carregada de: ${envPath}`);
     break;
   }
 }

@@ -30,8 +30,15 @@ export class LeadsController {
   }
 
   @Get()
-  findAll(@Request() req: any, @Query('inboxId') inboxId?: string) {
-    return this.leadsService.findAll(req.user?.tenant_id, inboxId);
+  findAll(
+    @Request() req: any,
+    @Query('inboxId') inboxId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const p = page ? parseInt(page, 10) : undefined;
+    const l = limit ? parseInt(limit, 10) : undefined;
+    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l);
   }
 
   @Get('check-phone')

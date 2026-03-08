@@ -13,13 +13,28 @@ export class TasksService {
     private calendarService: CalendarService,
   ) {}
 
-  async findAll() {
+  async findAll(page?: number, limit?: number) {
+    const includeOpts = {
+      lead: true,
+      assigned_user: true,
+      _count: { select: { comments: true } },
+    };
+
+    if (page && limit) {
+      const [data, total] = await this.prisma.$transaction([
+        this.prisma.task.findMany({
+          include: includeOpts,
+          orderBy: { created_at: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        this.prisma.task.count(),
+      ]);
+      return { data, total, page, limit };
+    }
+
     return this.prisma.task.findMany({
-      include: {
-        lead: true,
-        assigned_user: true,
-        _count: { select: { comments: true } },
-      },
+      include: includeOpts,
       orderBy: { created_at: 'desc' },
     });
   }
