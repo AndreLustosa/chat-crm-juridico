@@ -51,6 +51,40 @@ export class LegalCasesController {
     return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool, p, l, req.user?.tenant_id);
   }
 
+  @Get(':id/workspace')
+  getWorkspace(@Param('id') id: string, @Request() req: any) {
+    return this.service.getWorkspaceData(id, req.user?.tenant_id);
+  }
+
+  @Get(':id/communications')
+  getCommunications(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Request() req?: any,
+  ) {
+    const p = page ? parseInt(page, 10) : 1;
+    const l = limit ? parseInt(limit, 10) : 50;
+    return this.service.getCommunications(id, p, l, req.user?.tenant_id);
+  }
+
+  @Patch(':id/details')
+  updateDetails(
+    @Param('id') id: string,
+    @Body() body: {
+      action_type?: string;
+      claim_value?: number;
+      opposing_party?: string;
+      judge?: string;
+      notes?: string;
+      court?: string;
+      legal_area?: string;
+    },
+    @Request() req?: any,
+  ) {
+    return this.service.updateDetails(id, body, req.user?.tenant_id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @Request() req: any) {
     return this.service.findOne(id, req.user?.tenant_id);

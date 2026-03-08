@@ -23,6 +23,8 @@ import { LegalCasesModule } from './legal-cases/legal-cases.module';
 import { DjenModule } from './djen/djen.module';
 import { FichaTrabalhistaModule } from './ficha-trabalhista/ficha-trabalhista.module';
 import { CalendarModule } from './calendar/calendar.module';
+import { CaseDocumentsModule } from './case-documents/case-documents.module';
+import { CaseDeadlinesModule } from './case-deadlines/case-deadlines.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -68,6 +70,8 @@ import { RolesGuard } from './auth/guards/roles.guard';
     DjenModule,
     FichaTrabalhistaModule,
     CalendarModule,
+    CaseDocumentsModule,
+    CaseDeadlinesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

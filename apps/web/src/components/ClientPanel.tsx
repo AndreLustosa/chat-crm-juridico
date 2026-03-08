@@ -699,7 +699,16 @@ export function ClientPanel({
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-muted-foreground/60">Criado em {formatDateShort(c.created_at)}</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-[10px] text-muted-foreground/60">Criado em {formatDateShort(c.created_at)}</p>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); router.push(`/atendimento/workspace/${c.id}`); }}
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-violet-400 hover:text-violet-300 transition-colors"
+                            >
+                              <ExternalLink size={10} />
+                              Workspace
+                            </button>
+                          </div>
                         </div>
                       );
                     })}

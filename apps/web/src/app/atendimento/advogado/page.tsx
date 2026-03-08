@@ -495,6 +495,13 @@ function CaseDetailPanel({
             <h2 className="text-base font-bold text-foreground truncate">{legalCase.lead?.name || 'Sem nome'}</h2>
             <p className="text-[12px] text-muted-foreground">{formatPhone(legalCase.lead?.phone || '')}</p>
           </div>
+          <button
+            onClick={() => router.push(`/atendimento/workspace/${legalCase.id}`)}
+            className="p-1.5 rounded-lg text-violet-400 hover:text-violet-300 hover:bg-accent transition-all"
+            title="Abrir Workspace"
+          >
+            <ExternalLink size={18} />
+          </button>
           <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
             <X size={18} />
           </button>

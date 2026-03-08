@@ -20,6 +20,8 @@ model Tenant {
   calendar_events   CalendarEvent[]
   appointment_types AppointmentType[]
   holidays          Holiday[]
+  case_documents    CaseDocument[]
+  case_deadlines    CaseDeadline[]
 }
 
 model User {
@@ -51,6 +53,8 @@ model User {
   schedules                UserSchedule[]
   calendar_event_comments  CalendarEventComment[]
   transfer_audios          TransferAudio[] @relation("AudioUploader")
+  uploaded_documents       CaseDocument[]  @relation("DocumentUploader")
+  created_deadlines        CaseDeadline[]  @relation("DeadlineCreator")
 }
 
 model Lead {
@@ -363,6 +367,10 @@ model LegalCase {
   archive_reason  String?
   notes           String?
   court           String?
+  action_type     String?        // Tipo de ação (Reclamatória Trabalhista, Indenizatória, etc.)
+  claim_value     Decimal?       // Valor da causa
+  opposing_party  String?        // Parte contrária (nome)
+  judge           String?        // Juiz/Desembargador
   created_at      DateTime       @default(now())
   updated_at      DateTime       @updatedAt
 
@@ -374,6 +382,8 @@ model LegalCase {
   events            CaseEvent[]
   djen_publications DjenPublication[]
   calendar_events   CalendarEvent[]
+  documents         CaseDocument[]
+  deadlines         CaseDeadline[]
 
   @@index([lawyer_id, stage])
   @@index([lead_id])
@@ -491,6 +501,7 @@ model CalendarEvent {
   reminders           EventReminder[]
   comments            CalendarEventComment[]
   task                Task?
+  deadline            CaseDeadline?
   tenant              Tenant?          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   created_at          DateTime  @default(now())
@@ -599,4 +610,62 @@ model CalendarEventComment {
   user       User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([event_id, created_at])
+}
+
+// ===============================================
+// Case Documents (documentos organizados por caso)
+// ===============================================
+
+model CaseDocument {
+  id             String    @id @default(uuid())
+  tenant_id      String?
+  legal_case_id  String
+  uploaded_by_id String
+  folder         String    @default("OUTROS") // CLIENTE, PROVAS, CONTRATOS, PETICOES, DECISOES, PROCURACOES, OUTROS
+  name           String                       // Nome exibido
+  original_name  String                       // Nome original do arquivo
+  s3_key         String                       // Chave no MinIO/S3
+  mime_type      String
+  size           Int                          // bytes
+  version        Int       @default(1)
+  parent_id      String?                      // Para versionamento: aponta pro doc original
+  description    String?
+  created_at     DateTime  @default(now())
+
+  legal_case     LegalCase     @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
+  uploaded_by    User          @relation("DocumentUploader", fields: [uploaded_by_id], references: [id])
+  tenant         Tenant?       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  parent         CaseDocument? @relation("DocumentVersions", fields: [parent_id], references: [id], onDelete: SetNull)
+  versions       CaseDocument[] @relation("DocumentVersions")
+
+  @@index([legal_case_id, folder])
+  @@index([parent_id])
+}
+
+// ===============================================
+// Case Deadlines (prazos processuais)
+// ===============================================
+
+model CaseDeadline {
+  id                String    @id @default(uuid())
+  tenant_id         String?
+  legal_case_id     String
+  created_by_id     String
+  type              String    // CONTESTACAO, RECURSO, IMPUGNACAO, MANIFESTACAO, AUDIENCIA, PERICIA, OUTRO
+  title             String
+  description       String?
+  due_at            DateTime
+  alert_days        Int       @default(2)  // Dias antes para alertar
+  completed         Boolean   @default(false)
+  completed_at      DateTime?
+  calendar_event_id String?   @unique      // Link para CalendarEvent gerado automaticamente
+  created_at        DateTime  @default(now())
+
+  legal_case        LegalCase      @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
+  created_by        User           @relation("DeadlineCreator", fields: [created_by_id], references: [id])
+  tenant            Tenant?        @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  calendar_event    CalendarEvent? @relation(fields: [calendar_event_id], references: [id], onDelete: SetNull)
+
+  @@index([legal_case_id, due_at])
+  @@index([due_at, completed])
 }

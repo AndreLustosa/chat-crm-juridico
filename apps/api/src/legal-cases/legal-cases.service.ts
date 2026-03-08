@@ -407,6 +407,99 @@ export class LegalCasesService {
     });
   }
 
+  // ─── WORKSPACE ──────────────────────────────────────────────────
+
+  async getWorkspaceData(id: string, tenantId?: string) {
+    await this.verifyTenantOwnership(id, tenantId);
+
+    const legalCase = await this.prisma.legalCase.findUnique({
+      where: { id },
+      include: {
+        lead: {
+          include: {
+            memory: { select: { summary: true, facts_json: true } },
+            ficha_trabalhista: { select: { data: true, completion_pct: true, finalizado: true } },
+          },
+        },
+        conversation: {
+          select: { id: true, instance_name: true, status: true, legal_area: true },
+        },
+        lawyer: { select: { id: true, name: true, email: true } },
+        _count: {
+          select: {
+            tasks: true,
+            events: true,
+            documents: true,
+            deadlines: true,
+            djen_publications: true,
+            calendar_events: true,
+          },
+        },
+      },
+    });
+
+    if (!legalCase) throw new NotFoundException('Caso jurídico não encontrado');
+    return legalCase;
+  }
+
+  async updateDetails(
+    id: string,
+    data: {
+      action_type?: string;
+      claim_value?: number;
+      opposing_party?: string;
+      judge?: string;
+      notes?: string;
+      court?: string;
+      legal_area?: string;
+    },
+    tenantId?: string,
+  ) {
+    await this.verifyTenantOwnership(id, tenantId);
+
+    const updateData: any = {};
+    if (data.action_type !== undefined) updateData.action_type = data.action_type;
+    if (data.claim_value !== undefined) updateData.claim_value = data.claim_value;
+    if (data.opposing_party !== undefined) updateData.opposing_party = data.opposing_party;
+    if (data.judge !== undefined) updateData.judge = data.judge;
+    if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.court !== undefined) updateData.court = data.court;
+    if (data.legal_area !== undefined) updateData.legal_area = data.legal_area;
+
+    return this.prisma.legalCase.update({
+      where: { id },
+      data: updateData,
+    });
+  }
+
+  async getCommunications(id: string, page: number, limit: number, tenantId?: string) {
+    await this.verifyTenantOwnership(id, tenantId);
+
+    const legalCase = await this.prisma.legalCase.findUnique({
+      where: { id },
+      select: { conversation_id: true },
+    });
+    if (!legalCase) throw new NotFoundException('Caso não encontrado');
+    if (!legalCase.conversation_id) return { data: [], total: 0, page, limit };
+
+    const where = { conversation_id: legalCase.conversation_id };
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.message.findMany({
+        where,
+        include: {
+          media: { select: { id: true, mime_type: true, s3_key: true, original_name: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.message.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
   // ─── STAGES LIST ────────────────────────────────────────────────
 
   getStages() {
