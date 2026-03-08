@@ -34,7 +34,8 @@ model User {
   created_at      DateTime       @default(now())
   updated_at      DateTime       @updatedAt
   audit_logs      AuditLog[]
-  assigned_convos Conversation[]
+  assigned_convos Conversation[] @relation("AssignedUser")
+  lawyer_convos   Conversation[] @relation("AssignedLawyer")
   inboxes         Inbox[]
   sectors         Sector[]       @relation("SectorUsers")
   tasks           Task[]
@@ -99,7 +100,8 @@ model Conversation {
   next_step                    String?   // Proximo passo: "duvidas" | "triagem_concluida" | "formulario" | "reuniao" | "encerrado"
   ai_notes                     String?   // Observacoes internas da IA (campo notes do JSON)
   last_message_at              DateTime  @default(now())
-  assigned_user    User?     @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  assigned_user    User?     @relation("AssignedUser", fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  assigned_lawyer  User?     @relation("AssignedLawyer", fields: [assigned_lawyer_id], references: [id], onDelete: SetNull)
   lead             Lead      @relation(fields: [lead_id], references: [id], onDelete: Cascade)
   tenant           Tenant?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   inbox            Inbox?    @relation(fields: [inbox_id], references: [id], onDelete: SetNull)
