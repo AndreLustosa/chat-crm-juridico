@@ -25,6 +25,8 @@ import { FichaTrabalhistaModule } from './ficha-trabalhista/ficha-trabalhista.mo
 import { CalendarModule } from './calendar/calendar.module';
 import { CaseDocumentsModule } from './case-documents/case-documents.module';
 import { CaseDeadlinesModule } from './case-deadlines/case-deadlines.module';
+import { PetitionsModule } from './petitions/petitions.module';
+import { LegalTemplatesModule } from './legal-templates/legal-templates.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -72,6 +74,8 @@ import { RolesGuard } from './auth/guards/roles.guard';
     CalendarModule,
     CaseDocumentsModule,
     CaseDeadlinesModule,
+    PetitionsModule,
+    LegalTemplatesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

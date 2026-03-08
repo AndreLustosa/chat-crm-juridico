@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, FileText, ListTodo, Clock, MessageSquare, Activity,
-  Loader2, AlertTriangle, ClipboardList,
+  Loader2, AlertTriangle, ClipboardList, FileSignature, BookOpen,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError } from '@/lib/toast';
@@ -14,6 +14,8 @@ import TabTarefas from './components/TabTarefas';
 import TabPrazos from './components/TabPrazos';
 import TabComunicacoes from './components/TabComunicacoes';
 import TabTimeline from './components/TabTimeline';
+import TabPeticoes from './components/TabPeticoes';
+import TabBancoPecas from './components/TabBancoPecas';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -68,11 +70,13 @@ interface WorkspaceData {
   };
 }
 
-type TabId = 'resumo' | 'documentos' | 'tarefas' | 'prazos' | 'comunicacoes' | 'timeline';
+type TabId = 'resumo' | 'documentos' | 'peticoes' | 'banco' | 'tarefas' | 'prazos' | 'comunicacoes' | 'timeline';
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'resumo', label: 'Resumo', icon: ClipboardList },
   { id: 'documentos', label: 'Documentos', icon: FileText },
+  { id: 'peticoes', label: 'Petições', icon: FileSignature },
+  { id: 'banco', label: 'Peças', icon: BookOpen },
   { id: 'tarefas', label: 'Tarefas', icon: ListTodo },
   { id: 'prazos', label: 'Prazos', icon: Clock },
   { id: 'comunicacoes', label: 'Comunicações', icon: MessageSquare },
@@ -223,6 +227,15 @@ export default function WorkspacePage() {
           )}
           {activeTab === 'documentos' && (
             <TabDocumentos caseId={caseId} />
+          )}
+          {activeTab === 'peticoes' && (
+            <TabPeticoes caseId={caseId} />
+          )}
+          {activeTab === 'banco' && (
+            <TabBancoPecas
+              caseId={caseId}
+              onUsePetition={() => setActiveTab('peticoes')}
+            />
           )}
           {activeTab === 'tarefas' && (
             <TabTarefas caseId={caseId} lawyerId={data.lawyer_id} />
