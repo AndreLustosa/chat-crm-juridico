@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar } from 'lucide-react';
+import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar, Scale, UserCheck } from 'lucide-react';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
@@ -24,6 +24,8 @@ interface CrmLead {
     assigned_lawyer_id: string | null;
     last_message_at: string;
     messages: Array<{ text: string | null; direction: string; created_at: string }>;
+    assigned_user: { id: string; name: string } | null;
+    assigned_lawyer: { id: string; name: string } | null;
   }>;
 }
 
@@ -98,6 +100,7 @@ function LeadCard({
   const conv = lead.conversations?.[0];
   const lastMsg = conv?.messages?.[0];
   const legalArea = conv?.legal_area;
+  const lawyerName = conv?.assigned_lawyer?.name;
   const normalizedStage = normalizeStage(lead.stage);
   const days = daysInStage(lead.stage_entered_at);
 
@@ -190,6 +193,11 @@ function LeadCard({
             ⚖️ {legalArea}
           </span>
         )}
+        {lawyerName && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/12 text-blue-400 text-[9px] font-bold border border-blue-500/20">
+            <UserCheck size={9} /> {lawyerName.split(' ')[0]}
+          </span>
+        )}
         {lead.tags?.map(tag => (
           <span key={tag} className="inline-flex px-1.5 py-0.5 rounded-full bg-accent text-muted-foreground text-[9px] font-medium border border-border">
             {tag}
@@ -244,6 +252,9 @@ export default function CrmPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
+  const [lawyerFilter, setLawyerFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [agingFilter, setAgingFilter] = useState(''); // '', 'ok', 'warning', 'critical'
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
@@ -370,10 +381,21 @@ export default function CrmPage() {
     router.push('/atendimento');
   };
 
-  // Coletar todas as áreas únicas para o filtro
+  // Coletar valores únicos para filtros
   const allAreas = [...new Set(
     leads.flatMap(l => l.conversations?.map(c => c.legal_area).filter(Boolean) ?? [])
   )].sort() as string[];
+
+  const allLawyers = [...new Map(
+    leads.flatMap(l => l.conversations?.map(c => c.assigned_lawyer).filter(Boolean) ?? [])
+      .map(lawyer => [lawyer!.id, lawyer!])
+  ).values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  const allTags = [...new Set(
+    leads.flatMap(l => l.tags ?? [])
+  )].sort();
+
+  const activeFilterCount = [areaFilter, lawyerFilter, tagFilter, agingFilter].filter(Boolean).length;
 
   // Filtrar leads
   const filteredLeads = leads.filter(lead => {
@@ -386,6 +408,19 @@ export default function CrmPage() {
     if (areaFilter) {
       const hasArea = lead.conversations?.some(c => c.legal_area === areaFilter);
       if (!hasArea) return false;
+    }
+    if (lawyerFilter) {
+      const hasLawyer = lead.conversations?.some(c => c.assigned_lawyer?.id === lawyerFilter);
+      if (!hasLawyer) return false;
+    }
+    if (tagFilter) {
+      if (!lead.tags?.includes(tagFilter)) return false;
+    }
+    if (agingFilter) {
+      const days = daysInStage(lead.stage_entered_at);
+      if (agingFilter === 'ok' && days > 2) return false;
+      if (agingFilter === 'warning' && (days <= 2 || days > 5)) return false;
+      if (agingFilter === 'critical' && days <= 5) return false;
     }
     return true;
   });
@@ -408,12 +443,20 @@ export default function CrmPage() {
           <div className="flex-1">
             <h1 className="text-xl font-bold text-foreground tracking-tight">CRM Pipeline</h1>
             <p className="text-[12px] text-muted-foreground mt-0.5">
-              {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} {searchQuery || areaFilter ? 'filtrados' : 'no total'}
+              {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} {searchQuery || activeFilterCount > 0 ? 'filtrados' : 'no total'}
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={() => { setAreaFilter(''); setLawyerFilter(''); setTagFilter(''); setAgingFilter(''); }}
+                  className="ml-2 text-primary hover:underline"
+                >
+                  Limpar filtros ({activeFilterCount})
+                </button>
+              )}
             </p>
           </div>
 
           {/* Filtros */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {/* Filtro por área */}
             {allAreas.length > 0 && (
               <div className="relative">
@@ -428,6 +471,51 @@ export default function CrmPage() {
                 <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
             )}
+
+            {/* Filtro por advogado */}
+            {allLawyers.length > 0 && (
+              <div className="relative">
+                <select
+                  value={lawyerFilter}
+                  onChange={e => setLawyerFilter(e.target.value)}
+                  className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+                >
+                  <option value="">Todos os advogados</option>
+                  {allLawyers.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
+
+            {/* Filtro por tag */}
+            {allTags.length > 0 && (
+              <div className="relative">
+                <select
+                  value={tagFilter}
+                  onChange={e => setTagFilter(e.target.value)}
+                  className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+                >
+                  <option value="">Todas as tags</option>
+                  {allTags.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
+
+            {/* Filtro por tempo no estágio */}
+            <div className="relative">
+              <select
+                value={agingFilter}
+                onChange={e => setAgingFilter(e.target.value)}
+                className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+              >
+                <option value="">Tempo no estágio</option>
+                <option value="ok">Recentes (até 2d)</option>
+                <option value="warning">Atenção (3-5d)</option>
+                <option value="critical">Críticos (6d+)</option>
+              </select>
+              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            </div>
 
             {/* Busca por nome/telefone */}
             <div className="relative">

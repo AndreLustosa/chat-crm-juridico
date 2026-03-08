@@ -71,6 +71,8 @@ export class LeadsService {
             orderBy: { created_at: 'desc' as const },
             take: 1,
           },
+          assigned_user: { select: { id: true, name: true } },
+          assigned_lawyer: { select: { id: true, name: true } },
         },
       },
     };
