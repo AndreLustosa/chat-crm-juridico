@@ -117,6 +117,13 @@ export class LeadsService {
           orderBy: { created_at: 'desc' },
           take: 10,
         },
+        legal_cases: {
+          where: { archived: false },
+          orderBy: { created_at: 'desc' },
+          include: {
+            lawyer: { select: { id: true, name: true } },
+          },
+        },
         _count: {
           select: { conversations: true },
         },
@@ -335,5 +342,57 @@ export class LeadsService {
 
     this.logger.log(`[deleteContact] Contato ${id} e todos os seus dados foram excluídos.`);
     return { ok: true };
+  }
+
+  // ─── EXPORT CSV ───────────────────────────────────────────────────────────
+  async exportCsv(tenantId?: string, search?: string): Promise<string> {
+    const where: any = {};
+    if (tenantId) where.tenant_id = tenantId;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+      ];
+    }
+
+    const leads = await this.prisma.lead.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      include: {
+        conversations: {
+          orderBy: { last_message_at: 'desc' },
+          take: 1,
+          select: { legal_area: true, assigned_lawyer: { select: { name: true } } },
+        },
+      },
+    });
+
+    const escape = (v: string | null | undefined) => {
+      if (!v) return '';
+      const s = String(v).replace(/"/g, '""');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+    };
+
+    const msPerDay = 86400000;
+    const daysInStage = (d: Date | string) =>
+      Math.floor((Date.now() - new Date(d).getTime()) / msPerDay);
+
+    const header = ['Nome', 'Telefone', 'Email', 'Estágio', 'Área Jurídica', 'Advogado', 'Tags', 'Dias no Estágio', 'Criado em'];
+    const rows = leads.map(l => {
+      const conv = (l as any).conversations?.[0];
+      return [
+        escape(l.name),
+        escape(l.phone),
+        escape(l.email),
+        escape(l.stage),
+        escape(conv?.legal_area),
+        escape(conv?.assigned_lawyer?.name),
+        escape((l.tags || []).join('; ')),
+        escape(String(daysInStage(l.stage_entered_at))),
+        escape(new Date(l.created_at).toLocaleDateString('pt-BR')),
+      ].join(',');
+    });
+
+    return [header.join(','), ...rows].join('\n');
   }
 }

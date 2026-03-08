@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Delete, Param, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Delete, Param, Query, UseGuards, Request, BadRequestException, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { LeadsService } from './leads.service';
 import { LeadsCleanupService } from './leads-cleanup.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -42,6 +43,19 @@ export class LeadsController {
   checkPhone(@Query('phone') phone: string) {
     if (!phone) throw new BadRequestException('phone e obrigatorio');
     return this.leadsService.checkPhone(phone);
+  }
+
+  @Get('export')
+  async exportCsv(
+    @Request() req: any,
+    @Query('search') search: string,
+    @Res() res: Response,
+  ) {
+    const csv = await this.leadsService.exportCsv(req.user?.tenant_id, search);
+    const filename = `leads_${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + csv); // BOM UTF-8 para Excel abrir corretamente
   }
 
   @Get(':id')
