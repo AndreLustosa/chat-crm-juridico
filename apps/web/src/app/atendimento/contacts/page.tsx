@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, ArrowLeft, UserPlus, AlertCircle, CheckCircle2, ClipboardList } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, KeyboardEvent } from 'react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, ArrowLeft, UserPlus, AlertCircle, CheckCircle2, ClipboardList, RefreshCw } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
+import { showError, showSuccess } from '@/lib/toast';
 
 interface Contact {
   id: string;
@@ -143,14 +144,18 @@ function ClientPanel({
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setResolvedAgent(null);
     setResolvedConvId(null);
     setDocuments([]);
-    api.get(`/leads/${leadId}`).then(r => {
+    api.get(`/leads/${leadId}`, { signal: controller.signal }).then(r => {
       setLead(r.data);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch((e) => {
+      if (e?.code !== 'ERR_CANCELED') setLoading(false);
+    });
+    return () => controller.abort();
   }, [leadId]);
 
   // Buscar atendente e documentos das conversas
@@ -201,18 +206,31 @@ function ClientPanel({
     }).catch(() => {});
   }, [leadId]);
 
+  const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
   const deleteDoc = (messageId: string) => {
-    if (!confirm('Remover do Banco de Documentos?\n(O arquivo permanece no chat e no banco de dados)')) return;
-    setDocuments(prev => prev.filter(d => d.messageId !== messageId));
+    setConfirmDeleteDocId(messageId);
+  };
+  const confirmDeleteDoc = () => {
+    if (confirmDeleteDocId) {
+      setDocuments(prev => prev.filter(d => d.messageId !== confirmDeleteDocId));
+    }
+    setConfirmDeleteDocId(null);
   };
 
   const saveField = async (field: 'name' | 'email', value: string) => {
     if (!lead) return;
+    const previousValue = lead[field];
+    // Optimistic update
+    setLead(prev => prev ? { ...prev, [field]: value } : prev);
+    setEditing(null);
     setSaving(true);
     try {
       await api.patch(`/leads/${leadId}`, { [field]: value });
-      setLead(prev => prev ? { ...prev, [field]: value } : prev);
-    } catch (e) { console.error(e); } finally { setSaving(false); setEditing(null); }
+    } catch {
+      // Rollback
+      setLead(prev => prev ? { ...prev, [field]: previousValue } : prev);
+      showError('Erro ao salvar. Tente novamente.');
+    } finally { setSaving(false); }
   };
 
   // Atendente: resolvedAgent (via /conversations/lead/:id) tem prioridade, fallback para lead.conversations
@@ -220,15 +238,17 @@ function ClientPanel({
 
   const factsJson = lead?.memory?.facts_json as any;
 
+  const [confirmResetMemory, setConfirmResetMemory] = useState(false);
   const handleResetMemory = async () => {
     if (!lead) return;
-    if (!window.confirm('Resetar a memória da IA para este contato? A IA começará do zero na próxima conversa.')) return;
+    setConfirmResetMemory(false);
     setResettingMemory(true);
     try {
       await api.delete(`/leads/${lead.id}/memory`);
       setLead(prev => prev ? { ...prev, memory: undefined } : prev);
+      showSuccess('Memória da IA resetada.');
     } catch {
-      alert('Erro ao resetar memória. Tente novamente.');
+      showError('Erro ao resetar memória. Tente novamente.');
     } finally {
       setResettingMemory(false);
     }
@@ -242,7 +262,7 @@ function ClientPanel({
       onDeleteSuccess?.(lead.id);
       onClose();
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Erro ao excluir contato. Tente novamente.');
+      showError(e?.response?.data?.message || 'Erro ao excluir contato. Tente novamente.');
       setShowDeleteConfirm(false);
     } finally {
       setDeleting(false);
@@ -381,7 +401,7 @@ function ClientPanel({
                     {memoryOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
                   </button>
                   <button
-                    onClick={handleResetMemory}
+                    onClick={() => setConfirmResetMemory(true)}
                     disabled={resettingMemory}
                     title="Resetar memória da IA"
                     className="mr-4 p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-50"
@@ -822,6 +842,36 @@ function ClientPanel({
           </div>
         </>
       )}
+
+      {/* Modal de confirmação — remover documento */}
+      {confirmDeleteDocId && (
+        <>
+          <div className="fixed inset-0 z-[130] bg-black/50 backdrop-blur-[2px]" onClick={() => setConfirmDeleteDocId(null)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[360px] z-[140] bg-card border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-150">
+            <p className="text-[14px] font-semibold text-foreground">Remover do Banco de Documentos?</p>
+            <p className="text-[12px] text-muted-foreground">O arquivo permanece no chat e no banco de dados.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmDeleteDocId(null)} className="flex-1 py-2 rounded-xl border border-border text-[13px] font-semibold text-muted-foreground hover:bg-accent transition-colors">Cancelar</button>
+              <button onClick={confirmDeleteDoc} className="flex-1 py-2 rounded-xl bg-red-500 text-white text-[13px] font-semibold hover:bg-red-600 transition-colors">Remover</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal de confirmação — resetar memória */}
+      {confirmResetMemory && (
+        <>
+          <div className="fixed inset-0 z-[130] bg-black/50 backdrop-blur-[2px]" onClick={() => setConfirmResetMemory(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] z-[140] bg-card border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-150">
+            <p className="text-[14px] font-semibold text-foreground">Resetar memória da IA?</p>
+            <p className="text-[12px] text-muted-foreground">A IA começará do zero na próxima conversa com este contato. Esta ação não pode ser desfeita.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setConfirmResetMemory(false)} className="flex-1 py-2 rounded-xl border border-border text-[13px] font-semibold text-muted-foreground hover:bg-accent transition-colors">Cancelar</button>
+              <button onClick={handleResetMemory} className="flex-1 py-2 rounded-xl bg-red-500 text-white text-[13px] font-semibold hover:bg-red-600 transition-colors">Resetar</button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -860,23 +910,26 @@ function NewContactModal({ onClose, onCreated }: {
     }).catch(() => {});
   }, []);
 
-  const checkPhone = async () => {
-    const normalized = normalizePhone(phone);
-    if (normalized.length < 10) return;
-    setChecking(true);
-    setDuplicate(null);
-    try {
-      const r = await api.get(`/leads/check-phone?phone=${normalized}`);
-      if (r.data.exists) {
-        const lead = r.data.lead;
-        // Busca a conversa mais recente do lead para o atalho
-        const convR = await api.get(`/conversations/lead/${lead.id}`).catch(() => ({ data: [] }));
-        const convs = (convR.data as any[]).filter(c => c.status === 'ABERTO');
-        const convId = convs[0]?.id;
-        setDuplicate({ name: lead.name || lead.phone, convId });
-      }
-    } catch { /* ignora */ } finally { setChecking(false); }
-  };
+  const checkPhoneDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const checkPhone = useCallback((phoneVal: string) => {
+    if (checkPhoneDebounceRef.current) clearTimeout(checkPhoneDebounceRef.current);
+    const normalized = normalizePhone(phoneVal);
+    if (normalized.length < 10) { setDuplicate(null); return; }
+    checkPhoneDebounceRef.current = setTimeout(async () => {
+      setChecking(true);
+      setDuplicate(null);
+      try {
+        const r = await api.get(`/leads/check-phone?phone=${normalized}`);
+        if (r.data.exists) {
+          const lead = r.data.lead;
+          const convR = await api.get(`/conversations/lead/${lead.id}`).catch(() => ({ data: [] }));
+          const convs = (convR.data as any[]).filter((c: any) => c.status === 'ABERTO');
+          const convId = convs[0]?.id;
+          setDuplicate({ name: lead.name || lead.phone, convId });
+        }
+      } catch { /* ignora */ } finally { setChecking(false); }
+    }, 500);
+  }, []);
 
   const openDuplicate = (convId?: string) => {
     if (convId) sessionStorage.setItem('crm_open_conv', convId);
@@ -961,8 +1014,7 @@ function NewContactModal({ onClose, onCreated }: {
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Telefone (DDD + número) *</label>
             <div className="relative">
               <input
-                value={phone} onChange={e => { setPhone(e.target.value); setDuplicate(null); }}
-                onBlur={checkPhone}
+                value={phone} onChange={e => { setPhone(e.target.value); checkPhone(e.target.value); }}
                 placeholder="(82) 99913-0127"
                 className={`w-full px-3.5 py-2.5 bg-background border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 transition-all placeholder:text-muted-foreground/40 ${
                   duplicate ? 'border-amber-500/50 focus:ring-amber-500/20 focus:border-amber-500' : 'border-border focus:ring-primary/20 focus:border-primary'
@@ -1085,9 +1137,12 @@ export default function ContactsPage() {
     if (leadId) setSelectedLeadId(leadId);
   }, []);
 
-  const fetchAllContacts = async () => {
+  const [loadError, setLoadError] = useState(false);
+
+  const fetchAllContacts = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(false);
       const response = await api.get('/leads');
       const leads = response.data;
 
@@ -1099,22 +1154,27 @@ export default function ContactsPage() {
         conversations: lead._count?.conversations || 0,
         lastMessage: lead.conversations?.[0]?.messages?.[0]?.text || '-',
         origin: lead.origin || 'crm',
+        instanceName: lead.conversations?.[0]?.instance_name,
         profile_picture_url: lead.profile_picture_url,
         stage: lead.stage || 'INICIAL',
       }));
 
       mappedContacts.sort((a, b) => a.name.localeCompare(b.name));
       setContacts(mappedContacts);
-    } catch (error) {
-      console.error('Erro ao carregar contatos:', error);
+    } catch {
+      setLoadError(true);
+      showError('Não foi possível carregar contatos.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchAllContacts();
-  }, []);
+    const onLogout = () => router.push('/atendimento/login');
+    window.addEventListener('auth:logout', onLogout);
+    return () => window.removeEventListener('auth:logout', onLogout);
+  }, [fetchAllContacts, router]);
 
   const handleNewContactCreated = (convId: string) => {
     sessionStorage.setItem('crm_open_conv', convId);
@@ -1130,8 +1190,10 @@ export default function ContactsPage() {
     setContacts(prev => prev.map(c => c.id === contactId ? { ...c, stage: 'INICIAL' } : c));
     try {
       await api.patch(`/leads/${contactId}/stage`, { stage: 'INICIAL' });
+      showSuccess('Contato desarquivado.');
     } catch {
       fetchAllContacts();
+      showError('Erro ao desarquivar contato.');
     }
   };
 
@@ -1341,6 +1403,15 @@ export default function ContactsPage() {
               <Loader2 className="w-10 h-10 animate-spin mb-4" />
               <p className="text-sm font-medium">Carregando contatos...</p>
             </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <AlertCircle className="w-10 h-10 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">Erro ao carregar contatos.</p>
+              <button onClick={fetchAllContacts} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[13px] font-semibold hover:bg-primary/90 transition-colors">
+                <RefreshCw size={14} />
+                Tentar novamente
+              </button>
+            </div>
           ) : (
             <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
               <table className="w-full text-left table-auto">
@@ -1350,6 +1421,7 @@ export default function ContactsPage() {
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Telefone</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Email</th>
                     <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Origem</th>
+                    <th className="px-6 py-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-foreground/[0.04]">
@@ -1392,12 +1464,24 @@ export default function ContactsPage() {
                           )}
                         </div>
                       </td>
+                      <td className="px-6 py-5">
+                        <button
+                          onClick={() => {
+                            sessionStorage.setItem('crm_open_lead', contact.id);
+                            router.push('/atendimento');
+                          }}
+                          title="Abrir no chat"
+                          className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <MessageSquare size={15} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
 
                   {activeContacts.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="py-20 text-center">
+                      <td colSpan={5} className="py-20 text-center">
                         <div className="flex flex-col items-center opacity-30">
                           <User className="w-12 h-12 mb-3 stroke-[1.2]" />
                           <p className="text-sm font-medium">Nenhum contato encontrado</p>
