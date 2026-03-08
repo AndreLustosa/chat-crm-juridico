@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Put, Delete, Request, UseGuards } from '@nestjs/common';
 import { InboxesService } from './inboxes.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @UseGuards(JwtAuthGuard)
 @Controller('inboxes')
@@ -24,16 +25,19 @@ export class InboxesController {
   }
 
   @Post()
+  @Roles('ADMIN')
   async create(@Body() data: { name: string }) {
     return this.inboxesService.create(data);
   }
 
   @Put(':id')
+  @Roles('ADMIN')
   async update(@Param('id') id: string, @Body() data: { name: string }) {
     return this.inboxesService.update(id, data);
   }
 
   @Delete(':id')
+  @Roles('ADMIN')
   async remove(@Param('id') id: string) {
     return this.inboxesService.remove(id);
   }
@@ -41,11 +45,13 @@ export class InboxesController {
   // --- Gestão de Usuários ---
 
   @Post(':id/users')
+  @Roles('ADMIN')
   async addUser(@Param('id') id: string, @Body() data: { userId: string }) {
     return this.inboxesService.addUser(id, data.userId);
   }
 
   @Delete(':id/users/:userId')
+  @Roles('ADMIN')
   async removeUser(@Param('id') id: string, @Param('userId') userId: string) {
     return this.inboxesService.removeUser(id, userId);
   }
@@ -53,8 +59,9 @@ export class InboxesController {
   // --- Gestão de Instâncias ---
 
   @Post(':id/instances')
+  @Roles('ADMIN')
   async addInstance(
-    @Param('id') id: string, 
+    @Param('id') id: string,
     @Body() data: { name: string; type: 'whatsapp' | 'instagram' }
   ) {
     return this.inboxesService.addInstance(id, data.name, data.type);

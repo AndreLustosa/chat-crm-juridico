@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatGateway } from '../gateway/chat.gateway';
@@ -19,7 +19,18 @@ export class MessagesService {
     private settings: SettingsService,
   ) {}
 
-  async getMessages(conversationId: string, page = 1, limit = 100) {
+  async getMessages(conversationId: string, page = 1, limit = 100, tenantId?: string) {
+    // Verificar ownership da conversa
+    if (tenantId) {
+      const conv = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { tenant_id: true },
+      });
+      if (conv?.tenant_id && conv.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
+
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(Math.max(1, limit), 500);
 

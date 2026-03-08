@@ -6,10 +6,12 @@ import { Injectable, Logger } from '@nestjs/common';
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
     const secret = process.env.JWT_SECRET;
+    if (!secret && process.env.NODE_ENV === 'production') {
+      new Logger('JwtStrategy').error('FATAL: JWT_SECRET não definido em produção!');
+      process.exit(1);
+    }
     if (!secret) {
-      new Logger('JwtStrategy').error(
-        '⚠️  JWT_SECRET não definido! Usando fallback INSEGURO.',
-      );
+      new Logger('JwtStrategy').warn('⚠️  JWT_SECRET não definido! Usando fallback INSEGURO.');
     }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

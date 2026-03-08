@@ -1,8 +1,8 @@
 import { Controller, Get, Param, Patch, Body, Post, Query, UseGuards, Request } from '@nestjs/common';
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Prisma } from '@crm/shared';
 import { TransferRequestDto, TransferToLawyerDto, ReturnToOriginDto } from './dto/transfer-request.dto';
+import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SendPresenceDto } from './dto/presence.dto';
 
 @UseGuards(JwtAuthGuard)
@@ -30,18 +30,26 @@ export class ConversationsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.conversationsService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.findOne(id, req.user?.tenant_id);
   }
 
   @Get('lead/:leadId')
-  findAllByLead(@Param('leadId') leadId: string) {
-    return this.conversationsService.findAllByLead(leadId);
+  findAllByLead(@Param('leadId') leadId: string, @Request() req: any) {
+    return this.conversationsService.findAllByLead(leadId, req.user?.tenant_id);
   }
 
   @Post()
-  create(@Body() data: Prisma.ConversationCreateInput) {
-    return this.conversationsService.create(data);
+  create(@Body() dto: CreateConversationDto, @Request() req: any) {
+    return this.conversationsService.create({
+      lead: { connect: { id: dto.lead_id } },
+      channel: dto.channel || 'whatsapp',
+      external_id: dto.external_id,
+      inbox: dto.inbox_id ? { connect: { id: dto.inbox_id } } : undefined,
+      instance_name: dto.instance_name,
+      ai_mode: dto.ai_mode ?? true,
+      tenant: req.user?.tenant_id ? { connect: { id: req.user.tenant_id } } : undefined,
+    });
   }
 
   @Patch(':id/ai-mode')

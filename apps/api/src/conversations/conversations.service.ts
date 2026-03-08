@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -98,8 +98,8 @@ export class ConversationsService {
     return { data, total };
   }
 
-  async findOne(id: string) {
-    return this.prisma.conversation.findUnique({
+  async findOne(id: string, tenantId?: string) {
+    const conv = await this.prisma.conversation.findUnique({
       where: { id },
       include: {
         lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
@@ -108,9 +108,20 @@ export class ConversationsService {
         assigned_user: { select: { id: true, name: true } },
       },
     });
+    if (conv && tenantId && conv.tenant_id && conv.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado a este recurso');
+    }
+    return conv;
   }
 
-  async findAllByLead(lead_id: string): Promise<any[]> {
+  async findAllByLead(lead_id: string, tenantId?: string): Promise<any[]> {
+    // Verificar ownership do lead
+    if (tenantId) {
+      const lead = await this.prisma.lead.findUnique({ where: { id: lead_id }, select: { tenant_id: true } });
+      if (lead?.tenant_id && lead.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
     const convos = await (this.prisma as any).conversation.findMany({
       where: { lead_id },
       orderBy: { last_message_at: 'desc' },

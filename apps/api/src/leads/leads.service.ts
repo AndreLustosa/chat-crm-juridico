@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, Lead } from '@crm/shared';
 import { LegalCasesService } from '../legal-cases/legal-cases.service';
@@ -64,8 +64,8 @@ export class LeadsService {
     })) as any;
   }
 
-  async findOne(id: string): Promise<Lead | null> {
-    return this.prisma.lead.findUnique({
+  async findOne(id: string, tenantId?: string): Promise<Lead | null> {
+    const lead = await this.prisma.lead.findUnique({
       where: { id },
       include: {
         memory: true,
@@ -88,6 +88,10 @@ export class LeadsService {
         },
       },
     }) as any;
+    if (lead && tenantId && lead.tenant_id && lead.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado a este recurso');
+    }
+    return lead;
   }
 
   async upsert(data: Prisma.LeadCreateInput): Promise<Lead> {
@@ -123,14 +127,26 @@ export class LeadsService {
     return { exists: true, lead: found };
   }
 
-  async update(id: string, data: { name?: string; email?: string; tags?: string[] }): Promise<Lead> {
+  async update(id: string, data: { name?: string; email?: string; tags?: string[] }, tenantId?: string): Promise<Lead> {
+    if (tenantId) {
+      const existing = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
+      if (existing?.tenant_id && existing.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
     return this.prisma.lead.update({
       where: { id },
       data,
     });
   }
 
-  async updateStatus(id: string, stage: string): Promise<Lead> {
+  async updateStatus(id: string, stage: string, tenantId?: string): Promise<Lead> {
+    if (tenantId) {
+      const existing = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
+      if (existing?.tenant_id && existing.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
     const lead = await this.prisma.lead.update({
       where: { id },
       data: { stage },
@@ -161,7 +177,13 @@ export class LeadsService {
     return lead;
   }
 
-  async resetMemory(id: string): Promise<{ ok: boolean }> {
+  async resetMemory(id: string, tenantId?: string): Promise<{ ok: boolean }> {
+    if (tenantId) {
+      const lead = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
+      if (lead?.tenant_id && lead.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
     await this.prisma.aiMemory.deleteMany({ where: { lead_id: id } });
     return { ok: true };
   }

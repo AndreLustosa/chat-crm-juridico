@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { encryptValue, decryptValue, isSensitiveKey } from '../common/utils/crypto.util';
 
 // ── Tabela de preços OpenAI (USD por 1M tokens) ──────────────────────────────
 // Usa prefix-match: 'gpt-4o-mini' cobre 'gpt-4o-mini-2024-07-18', etc.
@@ -27,14 +28,20 @@ export class SettingsService {
   constructor(private prisma: PrismaService) {}
 
   async getAll() {
-    return this.prisma.globalSetting.findMany({ orderBy: { key: 'asc' } });
+    const settings = await this.prisma.globalSetting.findMany({ orderBy: { key: 'asc' } });
+    // Mascarar valores sensíveis na listagem
+    return settings.map(s => ({
+      ...s,
+      value: isSensitiveKey(s.key) ? '********' : s.value,
+    }));
   }
 
   async upsert(key: string, value: string) {
+    const storedValue = isSensitiveKey(key) ? encryptValue(value) : value;
     return this.prisma.globalSetting.upsert({
       where: { key },
-      update: { value },
-      create: { key, value },
+      update: { value: storedValue },
+      create: { key, value: storedValue },
     });
   }
 
@@ -44,7 +51,13 @@ export class SettingsService {
       where: { key: { in: keys } },
     });
     const cfg: Record<string, string> = {};
-    for (const r of rows) cfg[r.key] = r.value;
+    for (const r of rows) {
+      let val = r.value;
+      if (isSensitiveKey(r.key)) {
+        try { val = decryptValue(val); } catch { /* legado plaintext */ }
+      }
+      cfg[r.key] = val;
+    }
     return {
       host: cfg.SMTP_HOST || '',
       port: parseInt(cfg.SMTP_PORT || '587'),
@@ -59,7 +72,17 @@ export class SettingsService {
       const setting = await this.prisma.globalSetting.findUnique({
         where: { key },
       });
-      return setting?.value || null;
+      if (!setting?.value) return null;
+      // Descriptografa se for chave sensível
+      if (isSensitiveKey(key)) {
+        try {
+          return decryptValue(setting.value);
+        } catch {
+          // Valor legado em plaintext — retorna como está
+          return setting.value;
+        }
+      }
+      return setting.value;
     } catch (e) {
       console.error(`Erro ao buscar configuração [${key}] do banco:`, e.message);
       return null; // Retorna null para disparar o fallback da Env
@@ -67,10 +90,12 @@ export class SettingsService {
   }
 
   async set(key: string, value: string): Promise<void> {
+    // Criptografa valores sensíveis antes de salvar
+    const storedValue = isSensitiveKey(key) ? encryptValue(value) : value;
     await this.prisma.globalSetting.upsert({
       where: { key },
-      update: { value },
-      create: { key, value },
+      update: { value: storedValue },
+      create: { key, value: storedValue },
     });
   }
 

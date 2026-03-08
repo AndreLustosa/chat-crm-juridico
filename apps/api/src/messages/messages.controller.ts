@@ -42,16 +42,46 @@ export class MessagesController {
     @Param('id') conversationId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Req() req?: any,
   ) {
     return this.messagesService.getMessages(
       conversationId,
       page ? parseInt(page, 10) : 1,
       limit ? parseInt(limit, 10) : 100,
+      req?.user?.tenant_id,
     );
   }
 
   @Get('link-preview')
   getLinkPreview(@Query('url') url: string) {
+    if (!url) {
+      throw new BadRequestException('URL é obrigatória');
+    }
+    // Validar esquema — somente http/https
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new BadRequestException('URL inválida');
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      throw new BadRequestException('Apenas URLs http/https são permitidas');
+    }
+    // Bloquear IPs privados / loopback (prevenção SSRF)
+    const host = parsed.hostname;
+    if (
+      host === 'localhost' ||
+      host.startsWith('127.') ||
+      host.startsWith('10.') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('0.') ||
+      host === '[::1]' ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal')
+    ) {
+      throw new BadRequestException('URLs para endereços internos não são permitidas');
+    }
     return this.messagesService.getLinkPreview(url);
   }
 

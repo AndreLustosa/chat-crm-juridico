@@ -11,10 +11,21 @@ const jwtLogger = new Logger('AuthModule');
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    jwtLogger.error(
+    if (process.env.NODE_ENV === 'production') {
+      jwtLogger.error('FATAL: JWT_SECRET não definido em produção! Encerrando...');
+      process.exit(1);
+    }
+    jwtLogger.warn(
       '⚠️  JWT_SECRET não definido! Usando fallback INSEGURO. Defina JWT_SECRET no .env para produção.',
     );
     return '__INSECURE_DEV_FALLBACK_CHANGE_ME__';
+  }
+  if (secret === 'troque_esta_secret' || secret === '__INSECURE_DEV_FALLBACK_CHANGE_ME__') {
+    if (process.env.NODE_ENV === 'production') {
+      jwtLogger.error('FATAL: JWT_SECRET está com valor padrão inseguro em produção! Encerrando...');
+      process.exit(1);
+    }
+    jwtLogger.warn('⚠️  JWT_SECRET está com valor padrão inseguro! Troque para produção.');
   }
   return secret;
 }
