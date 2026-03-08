@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink } from 'lucide-react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
@@ -66,6 +66,32 @@ interface DocItem {
   size?: number;
   createdAt: string;
 }
+
+interface TimelineItem {
+  type: 'stage_change' | 'note';
+  id: string;
+  from_stage?: string | null;
+  to_stage?: string;
+  actor?: { id: string; name: string } | null;
+  loss_reason?: string | null;
+  text?: string;
+  author?: { id: string; name: string } | null;
+  created_at: string;
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  INICIAL: 'Inicial',
+  QUALIFICANDO: 'Qualificando',
+  AGUARDANDO_FORM: 'Aguardando Formulário',
+  REUNIAO_AGENDADA: 'Reunião Agendada',
+  AGUARDANDO_DOCS: 'Aguardando Documentos',
+  AGUARDANDO_PROC: 'Aguardando Processo',
+  FINALIZADO: 'Finalizado',
+  PERDIDO: 'Perdido',
+  NOVO: 'Novo',
+  QUALIFICADO: 'Qualificado',
+  EM_ATENDIMENTO: 'Em Atendimento',
+};
 
 function formatBytes(bytes?: number): string {
   if (!bytes) return '';
@@ -171,6 +197,11 @@ export function ClientPanel({
   const [addingNote, setAddingNote] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
+  // Histórico de atividades (timeline)
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+
   useEffect(() => {
     setLoading(true);
     setResolvedAgent(null);
@@ -250,6 +281,16 @@ export function ClientPanel({
     if (!notesOpen || !leadId) return;
     api.get(`/leads/${leadId}/notes`).then(r => setNotes(r.data || [])).catch(() => {});
   }, [notesOpen, leadId]);
+
+  // Buscar timeline quando seção abrir
+  useEffect(() => {
+    if (!timelineOpen || !leadId || timeline.length > 0) return;
+    setTimelineLoading(true);
+    api.get(`/leads/${leadId}/timeline`)
+      .then(r => setTimeline(r.data || []))
+      .catch(() => {})
+      .finally(() => setTimelineLoading(false));
+  }, [timelineOpen, leadId, timeline.length]);
 
   const submitNote = async () => {
     if (!noteText.trim() || !leadId) return;
@@ -739,6 +780,98 @@ export function ClientPanel({
                           </button>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Histórico de Atividades (Timeline) */}
+            <div className="border-t border-border">
+              <button
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors"
+                onClick={() => setTimelineOpen(!timelineOpen)}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Clock size={15} className="text-sky-400" />
+                  <span className="text-[13px] font-bold text-foreground">Histórico</span>
+                  {timeline.length > 0 && (
+                    <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{timeline.length}</span>
+                  )}
+                </div>
+                {timelineOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
+              </button>
+              {timelineOpen && (
+                <div className="px-6 pb-5">
+                  {timelineLoading ? (
+                    <div className="flex justify-center py-4">
+                      <Loader2 size={16} className="animate-spin text-muted-foreground" />
+                    </div>
+                  ) : timeline.length === 0 ? (
+                    <p className="text-[12px] text-muted-foreground/50 italic text-center py-3">Nenhuma atividade registrada ainda</p>
+                  ) : (
+                    <div className="relative">
+                      {/* Linha vertical da timeline */}
+                      <div className="absolute left-3 top-2 bottom-2 w-px bg-border" />
+                      <div className="space-y-4">
+                        {timeline.map(item => (
+                          <div key={item.id} className="flex gap-3 items-start pl-8 relative">
+                            {/* Ícone da timeline */}
+                            <div className={`absolute left-0 w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
+                              item.type === 'stage_change'
+                                ? 'border-sky-500/40 bg-sky-500/10'
+                                : 'border-amber-500/40 bg-amber-500/10'
+                            }`}>
+                              {item.type === 'stage_change'
+                                ? <ArrowRight size={10} className="text-sky-400" />
+                                : <StickyNote size={10} className="text-amber-400" />
+                              }
+                            </div>
+
+                            {/* Conteúdo */}
+                            <div className="flex-1 min-w-0">
+                              {item.type === 'stage_change' ? (
+                                <p className="text-[12px] text-foreground leading-snug">
+                                  {item.from_stage ? (
+                                    <>
+                                      <span className="text-muted-foreground">{STAGE_LABEL[item.from_stage] ?? item.from_stage}</span>
+                                      <span className="mx-1.5 text-muted-foreground/50">→</span>
+                                      <span className={`font-semibold ${
+                                        item.to_stage === 'PERDIDO' ? 'text-red-400' :
+                                        item.to_stage === 'FINALIZADO' ? 'text-emerald-400' : 'text-sky-400'
+                                      }`}>
+                                        {STAGE_LABEL[item.to_stage!] ?? item.to_stage}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      Iniciado em <span className="text-foreground font-semibold">{STAGE_LABEL[item.to_stage!] ?? item.to_stage}</span>
+                                    </span>
+                                  )}
+                                  {item.loss_reason && (
+                                    <span className="ml-1 text-red-400 text-[11px]">— {item.loss_reason}</span>
+                                  )}
+                                </p>
+                              ) : (
+                                <p className="text-[12px] text-foreground bg-amber-500/5 border border-amber-500/15 rounded-lg px-2.5 py-1.5 leading-snug">
+                                  {item.text}
+                                </p>
+                              )}
+                              <p className="text-[10px] text-muted-foreground/50 mt-1">
+                                {item.type === 'stage_change'
+                                  ? (item.actor?.name ?? 'Sistema')
+                                  : (item.author?.name ?? '')
+                                }
+                                {' · '}
+                                {new Date(item.created_at).toLocaleString('pt-BR', {
+                                  day: '2-digit', month: 'short', year: 'numeric',
+                                  hour: '2-digit', minute: '2-digit',
+                                })}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

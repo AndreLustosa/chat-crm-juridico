@@ -181,7 +181,7 @@ export class LeadsService {
     });
   }
 
-  async updateStatus(id: string, stage: string, tenantId?: string, lossReason?: string): Promise<Lead> {
+  async updateStatus(id: string, stage: string, tenantId?: string, lossReason?: string, actorId?: string): Promise<Lead> {
     if (tenantId) {
       const existing = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
       if (existing?.tenant_id && existing.tenant_id !== tenantId) {
@@ -206,6 +206,9 @@ export class LeadsService {
       }
     }
 
+    // Captura o stage atual antes de alterar (para o histórico)
+    const current = await this.prisma.lead.findUnique({ where: { id }, select: { stage: true } });
+
     const lead = await this.prisma.lead.update({
       where: { id },
       data: {
@@ -214,6 +217,17 @@ export class LeadsService {
         ...(stage === 'PERDIDO' && lossReason ? { loss_reason: lossReason } : {}),
       },
     });
+
+    // Registra o histórico de mudança de stage
+    this.prisma.leadStageHistory.create({
+      data: {
+        lead_id: id,
+        from_stage: current?.stage ?? null,
+        to_stage: stage,
+        actor_id: actorId ?? null,
+        loss_reason: lossReason ?? null,
+      },
+    }).catch(err => this.logger.warn(`Failed to record stage history for lead ${id}: ${err}`));
 
     // Broadcast: notificar outros clientes sobre mudanca de stage do lead
     this.chatGateway.emitConversationsUpdate(tenantId ?? null);
@@ -342,6 +356,52 @@ export class LeadsService {
 
     this.logger.log(`[deleteContact] Contato ${id} e todos os seus dados foram excluídos.`);
     return { ok: true };
+  }
+
+  // ─── TIMELINE ─────────────────────────────────────────────────────────────
+  async getTimeline(leadId: string, tenantId?: string): Promise<any[]> {
+    if (tenantId) {
+      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { tenant_id: true } });
+      if (lead?.tenant_id && lead.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
+
+    const [stageHistory, notes] = await Promise.all([
+      this.prisma.leadStageHistory.findMany({
+        where: { lead_id: leadId },
+        orderBy: { created_at: 'desc' },
+        take: 100,
+        include: { actor: { select: { id: true, name: true } } },
+      }),
+      this.prisma.leadNote.findMany({
+        where: { lead_id: leadId },
+        orderBy: { created_at: 'desc' },
+        take: 100,
+        include: { user: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    const items = [
+      ...stageHistory.map(h => ({
+        type: 'stage_change' as const,
+        id: h.id,
+        from_stage: h.from_stage,
+        to_stage: h.to_stage,
+        actor: (h as any).actor ?? null,
+        loss_reason: h.loss_reason,
+        created_at: h.created_at,
+      })),
+      ...notes.map(n => ({
+        type: 'note' as const,
+        id: n.id,
+        text: n.text,
+        author: (n as any).user ?? null,
+        created_at: n.created_at,
+      })),
+    ];
+
+    return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
   // ─── EXPORT CSV ───────────────────────────────────────────────────────────
