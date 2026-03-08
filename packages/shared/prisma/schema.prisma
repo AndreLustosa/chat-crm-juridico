@@ -22,6 +22,8 @@ model Tenant {
   holidays          Holiday[]
   case_documents    CaseDocument[]
   case_deadlines    CaseDeadline[]
+  petitions         CasePetition[]
+  legal_templates   LegalTemplate[]
 }
 
 model User {
@@ -55,6 +57,9 @@ model User {
   transfer_audios          TransferAudio[] @relation("AudioUploader")
   uploaded_documents       CaseDocument[]  @relation("DocumentUploader")
   created_deadlines        CaseDeadline[]  @relation("DeadlineCreator")
+  authored_petitions       CasePetition[]  @relation("PetitionAuthor")
+  saved_versions           PetitionVersion[] @relation("VersionSaver")
+  created_templates        LegalTemplate[] @relation("TemplateCreator")
 }
 
 model Lead {
@@ -384,6 +389,7 @@ model LegalCase {
   calendar_events   CalendarEvent[]
   documents         CaseDocument[]
   deadlines         CaseDeadline[]
+  petitions         CasePetition[]
 
   @@index([lawyer_id, stage])
   @@index([lead_id])
@@ -668,4 +674,72 @@ model CaseDeadline {
 
   @@index([legal_case_id, due_at])
   @@index([due_at, completed])
+}
+
+// ===============================================
+// Case Petitions (petições jurídicas com editor)
+// ===============================================
+
+model CasePetition {
+  id              String    @id @default(uuid())
+  tenant_id       String?
+  legal_case_id   String
+  created_by_id   String
+  title           String
+  type            String    // INICIAL, CONTESTACAO, REPLICA, EMBARGOS, RECURSO, MANIFESTACAO, OUTRO
+  status          String    @default("RASCUNHO") // RASCUNHO, EM_REVISAO, APROVADA, PROTOCOLADA
+  content_json    Json?     // Tiptap JSON (editor state)
+  content_html    String?   // HTML renderizado (para export)
+  template_id     String?   // Se gerada a partir de template
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  legal_case      LegalCase         @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
+  created_by      User              @relation("PetitionAuthor", fields: [created_by_id], references: [id])
+  template        LegalTemplate?    @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  tenant          Tenant?           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  versions        PetitionVersion[]
+
+  @@index([legal_case_id, status])
+}
+
+model PetitionVersion {
+  id           String   @id @default(uuid())
+  petition_id  String
+  version      Int
+  content_json Json
+  content_html String?
+  saved_by_id  String
+  created_at   DateTime @default(now())
+
+  petition     CasePetition @relation(fields: [petition_id], references: [id], onDelete: Cascade)
+  saved_by     User         @relation("VersionSaver", fields: [saved_by_id], references: [id])
+
+  @@index([petition_id, version])
+}
+
+// ===============================================
+// Legal Templates (banco de peças / modelos)
+// ===============================================
+
+model LegalTemplate {
+  id            String    @id @default(uuid())
+  tenant_id     String?
+  name          String
+  type          String    // INICIAL, CONTESTACAO, RECURSO, MANIFESTACAO, OUTRO
+  legal_area    String?   // TRABALHISTA, CIVIL, PREVIDENCIARIO, etc.
+  content_json  Json      // Tiptap JSON com placeholders {{nome_cliente}}, etc.
+  variables     String[]  @default([])
+  description   String?
+  is_global     Boolean   @default(false)
+  usage_count   Int       @default(0)
+  created_by_id String?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  petitions     CasePetition[]
+  created_by    User?    @relation("TemplateCreator", fields: [created_by_id], references: [id])
+  tenant        Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([legal_area, type])
 }
