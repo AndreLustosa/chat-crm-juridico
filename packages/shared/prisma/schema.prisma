@@ -58,6 +58,8 @@ model Lead {
   email         String?
   origin        String?
   stage              String         @default("NOVO")
+  stage_entered_at   DateTime       @default(now())
+  loss_reason        String?
   profile_picture_url String?
   tags               String[]
   created_at    DateTime       @default(now())

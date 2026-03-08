@@ -60,7 +60,7 @@ export class LeadsController {
 
   @Patch(':id/stage')
   updateStage(@Param('id') id: string, @Body() body: UpdateLeadStageDto, @Request() req: any) {
-    return this.leadsService.updateStatus(id, body.stage, req.user?.tenant_id);
+    return this.leadsService.updateStatus(id, body.stage, req.user?.tenant_id, body.loss_reason);
   }
 
   @Delete(':id/memory')

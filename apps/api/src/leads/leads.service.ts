@@ -172,16 +172,38 @@ export class LeadsService {
     });
   }
 
-  async updateStatus(id: string, stage: string, tenantId?: string): Promise<Lead> {
+  async updateStatus(id: string, stage: string, tenantId?: string, lossReason?: string): Promise<Lead> {
     if (tenantId) {
       const existing = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
       if (existing?.tenant_id && existing.tenant_id !== tenantId) {
         throw new ForbiddenException('Acesso negado a este recurso');
       }
     }
+
+    // Stage gate: PERDIDO exige motivo
+    if (stage === 'PERDIDO' && !lossReason) {
+      throw new ForbiddenException('Motivo de perda é obrigatório ao marcar como PERDIDO');
+    }
+
+    // Stage gate: FINALIZADO exige area juridica
+    if (stage === 'FINALIZADO') {
+      const conv = await this.prisma.conversation.findFirst({
+        where: { lead_id: id },
+        orderBy: { last_message_at: 'desc' },
+        select: { legal_area: true, assigned_lawyer_id: true },
+      });
+      if (!conv?.legal_area) {
+        throw new ForbiddenException('Lead precisa ter área jurídica definida para ser finalizado');
+      }
+    }
+
     const lead = await this.prisma.lead.update({
       where: { id },
-      data: { stage },
+      data: {
+        stage,
+        stage_entered_at: new Date(),
+        ...(stage === 'PERDIDO' && lossReason ? { loss_reason: lossReason } : {}),
+      },
     });
 
     // Broadcast: notificar outros clientes sobre mudanca de stage do lead

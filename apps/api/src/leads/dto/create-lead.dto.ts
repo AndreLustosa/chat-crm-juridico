@@ -48,4 +48,8 @@ export class UpdateLeadStageDto {
   @IsString()
   @IsIn(VALID_STAGES, { message: `Stage deve ser um de: ${VALID_STAGES.join(', ')}` })
   stage: string;
+
+  @IsOptional()
+  @IsString()
+  loss_reason?: string;
 }

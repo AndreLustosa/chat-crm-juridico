@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown } from 'lucide-react';
+import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar } from 'lucide-react';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
-import { showError } from '@/lib/toast';
+import { showError, showSuccess } from '@/lib/toast';
 
 interface CrmLead {
   id: string;
@@ -14,6 +14,7 @@ interface CrmLead {
   phone: string;
   email: string | null;
   stage: string;
+  stage_entered_at: string;
   profile_picture_url: string | null;
   tags: string[];
   created_at: string;
@@ -25,6 +26,8 @@ interface CrmLead {
     messages: Array<{ text: string | null; direction: string; created_at: string }>;
   }>;
 }
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function timeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return '';
@@ -38,6 +41,42 @@ function timeAgo(dateStr: string | null | undefined): string {
   if (d === 1) return 'ontem';
   return `há ${d}d`;
 }
+
+function daysInStage(dateStr: string | null | undefined): number {
+  if (!dateStr) return 0;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+
+function agingColor(days: number): string {
+  if (days <= 2) return 'text-emerald-400';
+  if (days <= 5) return 'text-yellow-400';
+  if (days <= 10) return 'text-orange-400';
+  return 'text-red-400';
+}
+
+function validateStageTransition(lead: CrmLead, newStage: string): string | null {
+  const conv = lead.conversations?.[0];
+  if (newStage === 'REUNIAO_AGENDADA' && !conv?.legal_area) {
+    return 'Defina a área jurídica antes de agendar reunião.';
+  }
+  if (newStage === 'FINALIZADO') {
+    if (!conv?.legal_area) return 'Defina a área jurídica antes de finalizar.';
+    if (!conv?.assigned_lawyer_id) return 'Atribua um advogado antes de finalizar.';
+  }
+  return null;
+}
+
+// ─── Motivos de perda ───────────────────────────────────────────────────────
+
+const LOSS_REASONS = [
+  'Sem interesse',
+  'Sem condições financeiras',
+  'Contratou outro escritório',
+  'Não respondeu',
+  'Caso inviável',
+];
+
+// ─── LeadCard ───────────────────────────────────────────────────────────────
 
 function LeadCard({
   lead,
@@ -60,6 +99,7 @@ function LeadCard({
   const lastMsg = conv?.messages?.[0];
   const legalArea = conv?.legal_area;
   const normalizedStage = normalizeStage(lead.stage);
+  const days = daysInStage(lead.stage_entered_at);
 
   // Fechar menu ao clicar fora
   useEffect(() => {
@@ -110,6 +150,22 @@ function LeadCard({
           </button>
           {showMenu && (
             <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl w-48 py-1 text-[12px]">
+              {/* Ações rápidas */}
+              <button
+                onClick={(e) => { e.stopPropagation(); onOpen(); setShowMenu(false); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground"
+              >
+                <MessageSquare size={12} />
+                <span>Enviar mensagem</span>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onStageChange('REUNIAO_AGENDADA'); setShowMenu(false); }}
+                className="w-full text-left px-3 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground"
+              >
+                <Calendar size={12} />
+                <span>Agendar reunião</span>
+              </button>
+              <div className="border-t border-border my-1" />
               <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Mover para etapa</p>
               {CRM_STAGES.map(s => (
                 <button
@@ -122,15 +178,6 @@ function LeadCard({
                   <span>{s.label}</span>
                 </button>
               ))}
-              <div className="border-t border-border mt-1 pt-1">
-                <button
-                  onClick={(e) => { e.stopPropagation(); onOpen(); setShowMenu(false); }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-muted-foreground"
-                >
-                  <MessageSquare size={12} />
-                  <span>Abrir no chat</span>
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -167,15 +214,28 @@ function LeadCard({
           <MessageSquare size={10} />
           Abrir chat
         </button>
-        {conv?.last_message_at && (
-          <span className="text-[10px] text-muted-foreground/60">
-            {timeAgo(conv.last_message_at)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Aging indicator */}
+          {days > 0 && (
+            <span
+              className={`text-[10px] font-bold ${agingColor(days)}`}
+              title={`${days} dia(s) neste estágio`}
+            >
+              {days}d
+            </span>
+          )}
+          {conv?.last_message_at && (
+            <span className="text-[10px] text-muted-foreground/60">
+              {timeAgo(conv.last_message_at)}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+// ─── CrmPage ────────────────────────────────────────────────────────────────
 
 export default function CrmPage() {
   const router = useRouter();
@@ -189,6 +249,10 @@ export default function CrmPage() {
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState(false);
 
+  // Modal de motivo de perda
+  const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
+  const [lossReason, setLossReason] = useState('');
+
   // Pan horizontal do board com clique+arraste do mouse
   const boardRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
@@ -196,9 +260,7 @@ export default function CrmPage() {
   const panScrollLeft = useRef(0);
 
   const handleBoardMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    // Não iniciar pan se clicou em cima de um card (elemento draggable)
     if ((e.target as HTMLElement).closest('[draggable="true"]')) return;
-    // Não iniciar pan se clicou em botão, select, input
     if ((e.target as HTMLElement).closest('button, select, input')) return;
     if (e.button !== 0) return;
     isPanning.current = true;
@@ -252,14 +314,49 @@ export default function CrmPage() {
   }, [router, fetchLeads]);
 
   const moveLeadToStage = async (leadId: string, newStage: string) => {
-    const prev = leads.find(l => l.id === leadId)?.stage;
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+
+    // Stage gate: validar antes de mover
+    const validationError = validateStageTransition(lead, newStage);
+    if (validationError) {
+      showError(validationError);
+      return;
+    }
+
+    // Se for PERDIDO, abrir modal de motivo
+    if (newStage === 'PERDIDO') {
+      setLossModal({ leadId, leadName: lead.name || 'Sem nome' });
+      setLossReason('');
+      return;
+    }
+
+    const prev = lead.stage;
     setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
     // Otimista
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage: newStage } : l));
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage: newStage, stage_entered_at: new Date().toISOString() } : l));
     try {
       await api.patch(`/leads/${leadId}/stage`, { stage: newStage });
     } catch {
       // Rollback
+      setLeads(prev => prev.map(l =>
+        l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
+      ));
+      showError('Erro ao mover lead. Tente novamente.');
+    }
+  };
+
+  const confirmLoss = async () => {
+    if (!lossModal || !lossReason.trim()) return;
+    const { leadId } = lossModal;
+    const lead = leads.find(l => l.id === leadId);
+    const prev = lead?.stage;
+    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage: 'PERDIDO', stage_entered_at: new Date().toISOString() } : l));
+    setLossModal(null);
+    try {
+      await api.patch(`/leads/${leadId}/stage`, { stage: 'PERDIDO', loss_reason: lossReason.trim() });
+    } catch {
       setLeads(prev => prev.map(l =>
         l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
       ));
@@ -382,6 +479,7 @@ export default function CrmPage() {
                 const stageLeads = getStageLeads(stage.id);
                 const isTerminal = stage.id === 'PERDIDO' || stage.id === 'FINALIZADO';
                 const isDragTarget = dragOverStage === stage.id;
+                const agingCount = stageLeads.filter(l => daysInStage(l.stage_entered_at) > 5).length;
 
                 return (
                   <div
@@ -396,7 +494,6 @@ export default function CrmPage() {
                     style={isDragTarget ? { borderColor: stage.color } : undefined}
                     onDragOver={e => { e.preventDefault(); setDragOverStage(stage.id); }}
                     onDragLeave={e => {
-                      // Só resetar se saiu da coluna de verdade (não entrou num filho)
                       if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverStage(null);
                     }}
                     onDrop={() => {
@@ -415,12 +512,24 @@ export default function CrmPage() {
                           {stage.label}
                         </h3>
                       </div>
-                      <span
-                        className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[10px] font-bold"
-                        style={{ backgroundColor: `${stage.color}20`, color: stage.color }}
-                      >
-                        {stageLeads.length}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        {/* Aging alert counter */}
+                        {agingCount > 0 && (
+                          <span
+                            className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[10px] font-bold bg-red-500/20 text-red-400"
+                            title={`${agingCount} lead(s) parado(s) há mais de 5 dias`}
+                          >
+                            {agingCount}
+                          </span>
+                        )}
+                        {/* Total counter */}
+                        <span
+                          className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-[10px] font-bold"
+                          style={{ backgroundColor: `${stage.color}20`, color: stage.color }}
+                        >
+                          {stageLeads.length}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Cards */}
@@ -451,6 +560,55 @@ export default function CrmPage() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Modal de motivo de perda */}
+        {lossModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+              <h3 className="text-lg font-bold text-foreground mb-1">Marcar como Perdido</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Por que o lead <strong>{lossModal.leadName}</strong> foi perdido?
+              </p>
+              <div className="space-y-2 mb-4">
+                {LOSS_REASONS.map(reason => (
+                  <button
+                    key={reason}
+                    onClick={() => setLossReason(reason)}
+                    className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-all ${
+                      lossReason === reason
+                        ? 'border-red-500 bg-red-500/10 text-red-400 font-medium'
+                        : 'border-border hover:bg-accent text-muted-foreground'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={LOSS_REASONS.includes(lossReason) ? '' : lossReason}
+                onChange={e => setLossReason(e.target.value)}
+                placeholder="Outro motivo..."
+                className="w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 mb-4"
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setLossModal(null)}
+                  className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmLoss}
+                  disabled={!lossReason.trim()}
+                  className="px-4 py-2 text-sm rounded-lg bg-red-500 text-white font-medium hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Confirmar Perda
+                </button>
+              </div>
             </div>
           </div>
         )}
