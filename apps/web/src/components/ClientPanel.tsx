@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send } from 'lucide-react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
@@ -34,7 +34,22 @@ interface LeadDetail {
     assigned_user?: { id: string; name: string };
     messages: Array<{ text?: string; direction: string; created_at: string }>;
   }>;
+  legal_cases?: LegalCaseItem[];
   _count?: { conversations: number };
+}
+
+interface LegalCaseItem {
+  id: string;
+  stage: string;
+  legal_area: string | null;
+  case_number: string | null;
+  created_at: string;
+  lawyer: { id: string; name: string } | null;
+}
+
+interface AgentUser {
+  id: string;
+  name: string;
 }
 
 interface LeadNote {
@@ -65,6 +80,13 @@ function DocIcon({ mimeType }: { mimeType: string }) {
   if (mimeType.startsWith('video/')) return <Video size={15} className="text-emerald-400" />;
   return <FileText size={15} className="text-amber-400" />;
 }
+
+const CASE_STAGE_MAP: Record<string, { label: string; color: string }> = {
+  VIABILIDADE:  { label: 'Viabilidade',  color: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+  ANDAMENTO:    { label: 'Em Andamento', color: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
+  CONCLUSAO:    { label: 'Conclusão',    color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
+  ARQUIVADO:    { label: 'Arquivado',    color: 'bg-gray-500/15 text-gray-400 border-gray-500/20' },
+};
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -131,6 +153,17 @@ export function ClientPanel({
   const [deleting, setDeleting] = useState(false);
   const [docViewer, setDocViewer] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
 
+  // Casos jurídicos
+  const [casesOpen, setCasesOpen] = useState(false);
+
+  // Modal de nova tarefa
+  const [taskModal, setTaskModal] = useState(false);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDueAt, setTaskDueAt] = useState('');
+  const [taskAssignedId, setTaskAssignedId] = useState('');
+  const [savingTask, setSavingTask] = useState(false);
+  const [agents, setAgents] = useState<AgentUser[]>([]);
+
   // Notas internas
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState<LeadNote[]>([]);
@@ -187,6 +220,30 @@ export function ClientPanel({
       setDocuments(docs);
     }).catch(() => {});
   }, [leadId]);
+
+  // Buscar agentes ao abrir modal de tarefa
+  useEffect(() => {
+    if (!taskModal || agents.length > 0) return;
+    api.get('/users/agents').then(r => setAgents(r.data || [])).catch(() => {});
+  }, [taskModal, agents.length]);
+
+  const submitTask = async () => {
+    if (!taskTitle.trim() || !leadId) return;
+    setSavingTask(true);
+    try {
+      await api.post('/tasks', {
+        title: taskTitle.trim(),
+        lead_id: leadId,
+        conversation_id: lead?.conversations?.[0]?.id ?? undefined,
+        due_at: taskDueAt || undefined,
+        assigned_user_id: taskAssignedId || undefined,
+      });
+      setTaskModal(false);
+      setTaskTitle('');
+      setTaskDueAt('');
+      setTaskAssignedId('');
+    } catch { /* silencioso */ } finally { setSavingTask(false); }
+  };
 
   // Buscar notas quando seção abrir
   useEffect(() => {
@@ -562,6 +619,68 @@ export function ClientPanel({
               )}
             </div>
 
+            {/* Casos Jurídicos */}
+            {(lead.legal_cases?.length ?? 0) > 0 && (
+              <div className="border-t border-border">
+                <button
+                  className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors"
+                  onClick={() => setCasesOpen(!casesOpen)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Scale size={15} className="text-violet-400" />
+                    <span className="text-[13px] font-bold text-foreground">Casos Jurídicos</span>
+                    <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{lead.legal_cases!.length}</span>
+                  </div>
+                  {casesOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
+                </button>
+                {casesOpen && (
+                  <div className="px-6 pb-5 flex flex-col gap-2.5">
+                    {lead.legal_cases!.map(c => {
+                      const stageBadge = CASE_STAGE_MAP[c.stage] ?? { label: c.stage, color: 'bg-gray-500/15 text-gray-400 border-gray-500/20' };
+                      return (
+                        <div key={c.id} className="bg-foreground/[0.03] border border-border rounded-xl p-3.5 flex flex-col gap-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${stageBadge.color}`}>
+                              {stageBadge.label}
+                            </span>
+                            {c.case_number && (
+                              <span className="text-[10px] text-muted-foreground font-mono">#{c.case_number}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {c.legal_area && (
+                              <span className="text-[11px] text-violet-400 font-medium">⚖️ {c.legal_area}</span>
+                            )}
+                            {c.lawyer && (
+                              <span className="text-[11px] text-blue-400">
+                                <UserCheck size={10} className="inline mr-0.5" />
+                                {c.lawyer.name.replace(/^(Dra?\.?)\s+/i, '')}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground/60">Criado em {formatDateShort(c.created_at)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Nova Tarefa rápida */}
+            <div className="border-t border-border">
+              <button
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors"
+                onClick={() => setTaskModal(true)}
+              >
+                <div className="flex items-center gap-2.5">
+                  <CheckSquare size={15} className="text-emerald-400" />
+                  <span className="text-[13px] font-bold text-foreground">Nova Tarefa</span>
+                </div>
+                <Plus size={15} className="text-muted-foreground" />
+              </button>
+            </div>
+
             {/* Notas Internas */}
             <div className="border-t border-border">
               <button
@@ -691,6 +810,78 @@ export function ClientPanel({
           </div>
         )}
       </div>
+
+      {/* Modal de nova tarefa */}
+      {taskModal && (
+        <>
+          <div className="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm" onClick={() => setTaskModal(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[130] w-[440px] max-w-[95vw] bg-card border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[15px] font-bold text-foreground flex items-center gap-2">
+                <CheckSquare size={16} className="text-emerald-400" />
+                Nova Tarefa
+              </h3>
+              <button onClick={() => setTaskModal(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground transition-colors">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Título *</label>
+                <input
+                  type="text"
+                  value={taskTitle}
+                  onChange={e => setTaskTitle(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') submitTask(); }}
+                  placeholder="Descreva a tarefa…"
+                  autoFocus
+                  className="w-full bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[13px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-emerald-400/30"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Prazo</label>
+                  <input
+                    type="datetime-local"
+                    value={taskDueAt}
+                    onChange={e => setTaskDueAt(e.target.value)}
+                    className="w-full bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-400/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Atribuir a</label>
+                  <select
+                    value={taskAssignedId}
+                    onChange={e => setTaskAssignedId(e.target.value)}
+                    className="w-full bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-400/30"
+                  >
+                    <option value="">Ninguém</option>
+                    {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-1">
+              <button
+                onClick={() => setTaskModal(false)}
+                className="px-4 py-2 text-[12px] rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={submitTask}
+                disabled={!taskTitle.trim() || savingTask}
+                className="px-4 py-2 text-[12px] rounded-lg bg-emerald-500 text-white font-medium hover:bg-emerald-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {savingTask ? <Loader2 size={13} className="animate-spin" /> : <CheckSquare size={13} />}
+                Criar Tarefa
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Viewer de documentos */}
       {docViewer && (

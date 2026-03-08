@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar, Scale, UserCheck } from 'lucide-react';
-import api from '@/lib/api';
+import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar, Scale, UserCheck, Download } from 'lucide-react';
+import api, { API_BASE_URL } from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
 import { showError, showSuccess } from '@/lib/toast';
@@ -283,6 +283,7 @@ export default function CrmPage() {
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // Modal de motivo de perda
   const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
@@ -315,6 +316,29 @@ export default function CrmPage() {
   const handleBoardMouseUp = () => {
     isPanning.current = false;
     if (boardRef.current) boardRef.current.style.cursor = 'grab';
+  };
+
+  const downloadCsv = async () => {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = searchQuery ? `?search=${encodeURIComponent(searchQuery)}` : '';
+      const res = await fetch(`${API_BASE_URL}/leads/export${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `leads_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      showError('Erro ao exportar leads.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const fetchLeads = useCallback(async (silent = false) => {
@@ -552,6 +576,16 @@ export default function CrmPage() {
                 className="pl-8 pr-3 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 w-44"
               />
             </div>
+
+            {/* Exportar CSV */}
+            <button
+              onClick={downloadCsv}
+              disabled={exporting}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+              title="Exportar leads para CSV"
+            >
+              <Download size={14} className={exporting ? 'animate-pulse' : ''} />
+            </button>
 
             {/* Atualizar */}
             <button
