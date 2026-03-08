@@ -36,6 +36,7 @@ model User {
   audit_logs      AuditLog[]
   assigned_convos Conversation[] @relation("AssignedUser")
   lawyer_convos   Conversation[] @relation("AssignedLawyer")
+  lead_notes      LeadNote[]
   inboxes         Inbox[]
   sectors         Sector[]       @relation("SectorUsers")
   tasks           Task[]
@@ -73,6 +74,7 @@ model Lead {
   ficha_trabalhista  FichaTrabalhista?
   calendar_events    CalendarEvent[]
   last_followup_at   DateTime?
+  notes              LeadNote[]
 
   @@index([tenant_id, phone])
   @@index([stage])
@@ -544,6 +546,25 @@ model Holiday {
   tenant           Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, date])
+}
+
+// ===============================================
+// Lead Notes (notas internas por contato)
+// ===============================================
+
+model LeadNote {
+  id         String   @id @default(uuid())
+  lead_id    String
+  user_id    String
+  text       String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  lead       Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([lead_id, created_at])
+  @@index([user_id])
 }
 
 model CalendarEventComment {

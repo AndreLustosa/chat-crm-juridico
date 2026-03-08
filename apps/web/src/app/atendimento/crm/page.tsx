@@ -15,6 +15,7 @@ interface CrmLead {
   email: string | null;
   stage: string;
   stage_entered_at: string;
+  loss_reason: string | null;
   profile_picture_url: string | null;
   tags: string[];
   created_at: string;
@@ -22,6 +23,7 @@ interface CrmLead {
     id: string;
     legal_area: string | null;
     assigned_lawyer_id: string | null;
+    next_step: string | null;
     last_message_at: string;
     messages: Array<{ text: string | null; direction: string; created_at: string }>;
     assigned_user: { id: string; name: string } | null;
@@ -55,6 +57,14 @@ function agingColor(days: number): string {
   if (days <= 10) return 'text-orange-400';
   return 'text-red-400';
 }
+
+const NEXT_STEP_MAP: Record<string, { label: string; color: string }> = {
+  duvidas:          { label: '❓ Dúvidas',  color: 'bg-gray-500/15 text-gray-400 border-gray-500/20' },
+  triagem_concluida:{ label: '✓ Triagem',   color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
+  formulario:       { label: '📋 Formulário', color: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
+  reuniao:          { label: '📞 Reunião',   color: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
+  encerrado:        { label: '✅ Encerrado', color: 'bg-violet-500/15 text-violet-400 border-violet-500/20' },
+};
 
 function validateStageTransition(lead: CrmLead, newStage: string): string | null {
   const conv = lead.conversations?.[0];
@@ -101,6 +111,7 @@ function LeadCard({
   const lastMsg = conv?.messages?.[0];
   const legalArea = conv?.legal_area;
   const lawyerName = conv?.assigned_lawyer?.name;
+  const nextStep = conv?.next_step ? NEXT_STEP_MAP[conv.next_step] : null;
   const normalizedStage = normalizeStage(lead.stage);
   const days = daysInStage(lead.stage_entered_at);
 
@@ -196,6 +207,19 @@ function LeadCard({
         {lawyerName && (
           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/12 text-blue-400 text-[9px] font-bold border border-blue-500/20">
             <UserCheck size={9} /> {lawyerName.replace(/^(Dra?\.?)\s+/i, '').split(' ')[0]}
+          </span>
+        )}
+        {nextStep && (
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${nextStep.color}`}>
+            {nextStep.label}
+          </span>
+        )}
+        {normalizedStage === 'PERDIDO' && lead.loss_reason && (
+          <span
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-500/12 text-red-400 text-[9px] font-medium border border-red-500/20 max-w-[140px] truncate"
+            title={lead.loss_reason}
+          >
+            ✗ {lead.loss_reason}
           </span>
         )}
         {lead.tags?.map(tag => (

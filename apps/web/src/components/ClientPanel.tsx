@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList } from 'lucide-react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
@@ -35,6 +35,13 @@ interface LeadDetail {
     messages: Array<{ text?: string; direction: string; created_at: string }>;
   }>;
   _count?: { conversations: number };
+}
+
+interface LeadNote {
+  id: string;
+  text: string;
+  created_at: string;
+  user: { id: string; name: string };
 }
 
 interface DocItem {
@@ -124,6 +131,13 @@ export function ClientPanel({
   const [deleting, setDeleting] = useState(false);
   const [docViewer, setDocViewer] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
 
+  // Notas internas
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notes, setNotes] = useState<LeadNote[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+
   useEffect(() => {
     setLoading(true);
     setResolvedAgent(null);
@@ -173,6 +187,31 @@ export function ClientPanel({
       setDocuments(docs);
     }).catch(() => {});
   }, [leadId]);
+
+  // Buscar notas quando seção abrir
+  useEffect(() => {
+    if (!notesOpen || !leadId) return;
+    api.get(`/leads/${leadId}/notes`).then(r => setNotes(r.data || [])).catch(() => {});
+  }, [notesOpen, leadId]);
+
+  const submitNote = async () => {
+    if (!noteText.trim() || !leadId) return;
+    setAddingNote(true);
+    try {
+      const res = await api.post(`/leads/${leadId}/notes`, { text: noteText.trim() });
+      setNotes(prev => [res.data, ...prev]);
+      setNoteText('');
+    } catch { /* silencioso */ } finally { setAddingNote(false); }
+  };
+
+  const deleteNote = async (noteId: string) => {
+    if (!window.confirm('Excluir esta nota?')) return;
+    setDeletingNoteId(noteId);
+    try {
+      await api.delete(`/leads/${leadId}/notes/${noteId}`);
+      setNotes(prev => prev.filter(n => n.id !== noteId));
+    } catch { /* silencioso */ } finally { setDeletingNoteId(null); }
+  };
 
   const deleteDoc = (messageId: string) => {
     if (!confirm('Remover do Banco de Documentos?\n(O arquivo permanece no chat e no banco de dados)')) return;
@@ -519,6 +558,70 @@ export function ClientPanel({
                       </div>
                     );
                   })()}
+                </div>
+              )}
+            </div>
+
+            {/* Notas Internas */}
+            <div className="border-t border-border">
+              <button
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors"
+                onClick={() => setNotesOpen(!notesOpen)}
+              >
+                <div className="flex items-center gap-2.5">
+                  <StickyNote size={15} className="text-amber-400" />
+                  <span className="text-[13px] font-bold text-foreground">Notas Internas</span>
+                  {notes.length > 0 && (
+                    <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{notes.length}</span>
+                  )}
+                </div>
+                {notesOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
+              </button>
+              {notesOpen && (
+                <div className="px-6 pb-5 flex flex-col gap-3">
+                  {/* Input de nova nota */}
+                  <div className="flex gap-2 items-end">
+                    <textarea
+                      value={noteText}
+                      onChange={e => setNoteText(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitNote(); }}
+                      placeholder="Adicionar nota interna… (Ctrl+Enter para enviar)"
+                      rows={2}
+                      className="flex-1 resize-none bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-amber-400/30"
+                    />
+                    <button
+                      onClick={submitNote}
+                      disabled={!noteText.trim() || addingNote}
+                      className="h-9 px-3 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-[12px] font-medium shrink-0"
+                    >
+                      {addingNote ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    </button>
+                  </div>
+
+                  {/* Lista de notas */}
+                  {notes.length === 0 ? (
+                    <p className="text-[12px] text-muted-foreground/50 italic text-center py-3">Nenhuma nota ainda</p>
+                  ) : (
+                    <div className="flex flex-col gap-2.5">
+                      {notes.map(note => (
+                        <div key={note.id} className="group bg-foreground/[0.03] border border-border rounded-xl p-3.5 relative">
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className="text-[11px] font-bold text-amber-400">{note.user.name}</span>
+                            <span className="text-[10px] text-muted-foreground/60">{formatDate(note.created_at)}</span>
+                          </div>
+                          <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{note.text}</p>
+                          <button
+                            onClick={() => deleteNote(note.id)}
+                            disabled={deletingNoteId === note.id}
+                            className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center justify-center rounded-md text-red-400 hover:bg-red-400/10 transition-all"
+                            title="Excluir nota"
+                          >
+                            {deletingNoteId === note.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
