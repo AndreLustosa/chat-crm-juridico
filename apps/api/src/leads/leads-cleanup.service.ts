@@ -32,17 +32,25 @@ export class LeadsCleanupService {
 
     while (true) {
       // Busca apenas id e phone para minimizar uso de memória
-      const batch = await this.prisma.lead.findMany({
-        take: BATCH_SIZE,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-        select: { id: true, phone: true },
-        orderBy: { id: 'asc' },
-      });
+      // Nota: cursor separado do findMany para evitar erro de inferência de tipo (TS7022)
+      const batch: { id: string; phone: string }[] = cursor
+        ? await this.prisma.lead.findMany({
+            take: BATCH_SIZE,
+            skip: 1,
+            cursor: { id: cursor },
+            select: { id: true, phone: true },
+            orderBy: { id: 'asc' },
+          })
+        : await this.prisma.lead.findMany({
+            take: BATCH_SIZE,
+            select: { id: true, phone: true },
+            orderBy: { id: 'asc' },
+          });
 
       if (batch.length === 0) break;
 
       // Filtra apenas os que precisam de normalização (formato antigo: 13 dígitos)
-      const leadsWithOldFormat = batch.filter((lead) => {
+      const leadsWithOldFormat = batch.filter((lead: { id: string; phone: string }) => {
         const cleaned = lead.phone.replace(/\D/g, '');
         return (
           cleaned.length === 13 &&
