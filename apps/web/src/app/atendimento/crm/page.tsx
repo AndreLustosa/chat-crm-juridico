@@ -195,7 +195,7 @@ function LeadCard({
         )}
         {lawyerName && (
           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/12 text-blue-400 text-[9px] font-bold border border-blue-500/20">
-            <UserCheck size={9} /> {lawyerName.split(' ')[0]}
+            <UserCheck size={9} /> {lawyerName.replace(/^(Dra?\.?)\s+/i, '').split(' ')[0]}
           </span>
         )}
         {lead.tags?.map(tag => (
