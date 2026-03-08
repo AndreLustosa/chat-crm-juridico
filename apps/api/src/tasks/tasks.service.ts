@@ -31,7 +31,7 @@ export class TasksService {
     conversation_id?: string;
     legal_case_id?: string;
     assigned_user_id?: string;
-    due_at?: Date;
+    due_at?: string | Date;
     tenant_id?: string;
     created_by_id?: string;
   }) {
@@ -82,7 +82,7 @@ export class TasksService {
     title?: string;
     description?: string;
     status?: string;
-    due_at?: Date | null;
+    due_at?: string | Date | null;
     assigned_user_id?: string | null;
   }) {
     const updateData: any = {};

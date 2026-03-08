@@ -303,23 +303,28 @@ export class ConversationsService {
   }
 
   async transferToAssignedLawyer(id: string, fromUserId: string, reason?: string, audioIds?: string[]) {
-    const conv = await (this.prisma as any).conversation.findUnique({
-      where: { id },
-      select: { assigned_user_id: true, assigned_lawyer_id: true, legal_area: true },
-    });
+    // Transação atômica: ler + validar ownership + definir origin em uma operação
+    const conv = await this.prisma.$transaction(async (tx) => {
+      const existing = await (tx as any).conversation.findUnique({
+        where: { id },
+        select: { assigned_user_id: true, assigned_lawyer_id: true, legal_area: true },
+      });
 
-    if (!conv || conv.assigned_user_id !== fromUserId) {
-      throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
-    }
-    if (!conv.assigned_lawyer_id) {
-      throw new BadRequestException(
-        'Nenhum advogado foi vinculado a esta conversa pela IA. Aguarde a IA processar as mensagens ou faça transferência manual.',
-      );
-    }
+      if (!existing || existing.assigned_user_id !== fromUserId) {
+        throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
+      }
+      if (!existing.assigned_lawyer_id) {
+        throw new BadRequestException(
+          'Nenhum advogado foi vinculado a esta conversa pela IA. Aguarde a IA processar as mensagens ou faça transferência manual.',
+        );
+      }
 
-    await (this.prisma as any).conversation.update({
-      where: { id },
-      data: { origin_assigned_user_id: fromUserId },
+      await (tx as any).conversation.update({
+        where: { id },
+        data: { origin_assigned_user_id: fromUserId },
+      });
+
+      return existing;
     });
 
     return this.requestTransfer(
@@ -332,38 +337,47 @@ export class ConversationsService {
   }
 
   async returnToOrigin(id: string, reason?: string, audioIds?: string[], returningUserId?: string) {
-    const conv = await (this.prisma as any).conversation.findUnique({
-      where: { id },
-      select: {
-        origin_assigned_user_id: true,
-        assigned_user_id: true,
-        lead: { select: { name: true, phone: true } },
-      },
-    });
-    if (!conv?.origin_assigned_user_id) {
-      throw new BadRequestException('Sem atendente de origem para devolver.');
-    }
+    // Transação atômica: ler estado + lookup user + atualizar conversa
+    const { originUserId, returningUserName, contactName } = await this.prisma.$transaction(async (tx) => {
+      const conv = await (tx as any).conversation.findUnique({
+        where: { id },
+        select: {
+          origin_assigned_user_id: true,
+          assigned_user_id: true,
+          lead: { select: { name: true, phone: true } },
+        },
+      });
+      if (!conv?.origin_assigned_user_id) {
+        throw new BadRequestException('Sem atendente de origem para devolver.');
+      }
 
-    const returningUser = returningUserId
-      ? await this.prisma.user.findUnique({ where: { id: returningUserId }, select: { name: true } })
-      : null;
+      const returningUser = returningUserId
+        ? await tx.user.findUnique({ where: { id: returningUserId }, select: { name: true } })
+        : null;
 
-    const linkedIds = [...new Set([conv.assigned_user_id, conv.origin_assigned_user_id].filter(Boolean) as string[])];
-    await (this.prisma as any).conversation.update({
-      where: { id },
-      data: {
-        assigned_user_id: conv.origin_assigned_user_id,
-        origin_assigned_user_id: null,
-        ai_mode: false,
-        linked_agent_ids: { push: linkedIds },
-      },
+      const linkedIds = [...new Set([conv.assigned_user_id, conv.origin_assigned_user_id].filter(Boolean) as string[])];
+      await (tx as any).conversation.update({
+        where: { id },
+        data: {
+          assigned_user_id: conv.origin_assigned_user_id,
+          origin_assigned_user_id: null,
+          ai_mode: false,
+          linked_agent_ids: { push: linkedIds },
+        },
+      });
+
+      return {
+        originUserId: conv.origin_assigned_user_id,
+        returningUserName: returningUser?.name || 'Advogado',
+        contactName: conv.lead?.name || conv.lead?.phone || 'Contato',
+      };
     });
 
     // Notificar o atendente de origem sobre a devolução com o contexto do advogado
-    this.chatGateway.emitTransferReturned(conv.origin_assigned_user_id, {
+    this.chatGateway.emitTransferReturned(originUserId, {
       conversationId: id,
-      fromUserName: returningUser?.name || 'Advogado',
-      contactName: conv.lead?.name || conv.lead?.phone || 'Contato',
+      fromUserName: returningUserName,
+      contactName,
       reason: reason?.trim() || null,
       audioIds: audioIds?.length ? audioIds : undefined,
     });

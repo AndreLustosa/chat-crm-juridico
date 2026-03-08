@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('tasks')
@@ -18,7 +19,7 @@ export class TasksController {
   }
 
   @Post()
-  create(@Body() data: any, @Request() req: any) {
+  create(@Body() data: CreateTaskDto, @Request() req: any) {
     return this.tasksService.create({
       ...data,
       tenant_id: req.user?.tenant_id,
@@ -32,7 +33,7 @@ export class TasksController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() data: any) {
+  update(@Param('id') id: string, @Body() data: UpdateTaskDto) {
     return this.tasksService.update(id, data);
   }
 

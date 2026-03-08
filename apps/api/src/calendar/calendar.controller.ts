@@ -2,6 +2,14 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Re
 import type { Response } from 'express';
 import { CalendarService } from './calendar.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  CreateEventDto,
+  UpdateEventDto,
+  CreateAppointmentTypeDto,
+  UpdateAppointmentTypeDto,
+  CreateHolidayDto,
+  UpdateHolidayDto,
+} from './dto/calendar.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('calendar')
@@ -49,7 +57,7 @@ export class CalendarController {
   }
 
   @Post('events')
-  create(@Body() data: any, @Request() req: any) {
+  create(@Body() data: CreateEventDto, @Request() req: any) {
     return this.calendarService.create({
       ...data,
       created_by_id: req.user.id,
@@ -60,7 +68,7 @@ export class CalendarController {
   @Patch('events/:id')
   async update(
     @Param('id') id: string,
-    @Body() data: any,
+    @Body() data: UpdateEventDto,
     @Query('updateScope') updateScope: string | undefined,
     @Request() req: any,
   ) {
@@ -151,7 +159,7 @@ export class CalendarController {
   }
 
   @Post('appointment-types')
-  createAppointmentType(@Body() data: any, @Request() req: any) {
+  createAppointmentType(@Body() data: CreateAppointmentTypeDto, @Request() req: any) {
     return this.calendarService.createAppointmentType({
       ...data,
       tenant_id: req.user?.tenant_id,
@@ -159,7 +167,7 @@ export class CalendarController {
   }
 
   @Patch('appointment-types/:id')
-  updateAppointmentType(@Param('id') id: string, @Body() data: any) {
+  updateAppointmentType(@Param('id') id: string, @Body() data: UpdateAppointmentTypeDto) {
     return this.calendarService.updateAppointmentType(id, data);
   }
 
@@ -176,7 +184,7 @@ export class CalendarController {
   }
 
   @Post('holidays')
-  createHoliday(@Body() data: any, @Request() req: any) {
+  createHoliday(@Body() data: CreateHolidayDto, @Request() req: any) {
     return this.calendarService.createHoliday({
       ...data,
       tenant_id: req.user?.tenant_id,
@@ -184,7 +192,7 @@ export class CalendarController {
   }
 
   @Patch('holidays/:id')
-  updateHoliday(@Param('id') id: string, @Body() data: any) {
+  updateHoliday(@Param('id') id: string, @Body() data: UpdateHolidayDto) {
     return this.calendarService.updateHoliday(id, data);
   }
 

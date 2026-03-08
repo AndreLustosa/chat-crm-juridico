@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Body, UseGuards, Request, Forbidd
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { CreateSkillDto, UpdateSkillDto } from './dto/settings.dto';
 
 /** Mascara uma chave de API, mostrando apenas os primeiros 4 e últimos 4 caracteres */
 function maskApiKey(key: string | null | undefined): string | null {
@@ -129,7 +130,7 @@ export class SettingsController {
   }
 
   @Post('skills')
-  async createSkill(@Request() req: any, @Body() data: any) {
+  async createSkill(@Request() req: any, @Body() data: CreateSkillDto) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem criar skills');
     }
@@ -137,7 +138,7 @@ export class SettingsController {
   }
 
   @Patch('skills/:id')
-  async updateSkill(@Request() req: any, @Param('id') id: string, @Body() data: any) {
+  async updateSkill(@Request() req: any, @Param('id') id: string, @Body() data: UpdateSkillDto) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem editar skills');
     }

@@ -421,6 +421,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             timeout: 10000,
+            auth: { token: localStorage.getItem('token') || '' },
           });
 
           socketRef.current.on('connect', () => {
@@ -458,7 +459,17 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     };
 
     fetchData();
-    return () => { socketRef.current?.disconnect(); };
+    return () => {
+      const s = socketRef.current;
+      if (s) {
+        s.off('connect');
+        s.off('incoming_message_notification');
+        s.off('newMessage');
+        s.off('messageUpdate');
+        s.off('mediaReady');
+        s.disconnect();
+      }
+    };
   }, [params.id, router]);
 
   useEffect(() => {
