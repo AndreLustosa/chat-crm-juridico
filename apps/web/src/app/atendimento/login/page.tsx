@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Mail, Lock, AlertCircle, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
-import api from '@/lib/api';
+import api, { API_BASE_URL } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -39,7 +39,7 @@ export default function LoginPage() {
   useEffect(() => {
     const checkDb = async () => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005'}/health/db`);
+        const res = await fetch(`${API_BASE_URL}/health/db`);
         const data = await res.json();
         setDbStatus(data.status === 'ok' ? 'online' : 'offline');
       } catch {

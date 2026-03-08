@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, Scale, BookOpen, Calendar } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { API_BASE_URL } from '@/lib/api';
 
 const THEMES = [
   { id: 'logo-dark', name: 'Dark (Logo)', color: '#000000' },
@@ -35,7 +36,7 @@ export function Sidebar() {
   useEffect(() => {
     const checkDb = async () => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005'}/health/db`);
+        const res = await fetch(`${API_BASE_URL}/health/db`);
         const data = await res.json();
         setDbStatus(data.status === 'ok' ? 'online' : 'offline');
       } catch (error) {

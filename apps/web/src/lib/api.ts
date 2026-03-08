@@ -81,4 +81,14 @@ api.interceptors.response.use(
   }
 );
 
+// ─── Helpers de URL ─────────────────────────────────────────────────────────
+
+/** URL base da API — centralizado para evitar hardcode em cada componente */
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+
+/** Gera URL completa para o endpoint de mídia */
+export function getMediaUrl(messageId: string, download = false): string {
+  return `${API_BASE_URL}/media/${messageId}${download ? '?dl=1' : ''}`;
+}
+
 export default api;

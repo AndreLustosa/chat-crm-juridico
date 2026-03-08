@@ -19,7 +19,7 @@ import {
   Search,
 } from 'lucide-react';
 import { FICHA_SECTIONS, type FichaField, getEmptyFormData } from '@/lib/fichaTrabalhistaFields';
-import api from '@/lib/api';
+import api, { API_BASE_URL } from '@/lib/api';
 
 // ─── Formatters ─────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ export default function FichaTrabalhista({
           : `/ficha-trabalhista/${leadId}`;
 
         const res = await (isPublic
-          ? fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}`)
+          ? fetch(`${API_BASE_URL}${endpoint}`)
           : api.get(endpoint));
 
         const fichaData = isPublic ? await (res as Response).json() : (res as any).data;
@@ -195,7 +195,7 @@ export default function FichaTrabalhista({
 
         if (isPublic) {
           const res = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}`,
+            `${API_BASE_URL}${endpoint}`,
             {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
@@ -246,7 +246,7 @@ export default function FichaTrabalhista({
 
           if (isPublic) {
             await fetch(
-              `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}`,
+              `${API_BASE_URL}${endpoint}`,
               {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
@@ -279,7 +279,7 @@ export default function FichaTrabalhista({
 
       if (isPublic) {
         await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${endpoint}`,
+          `${API_BASE_URL}${endpoint}`,
           { method: 'POST' },
         );
       } else {

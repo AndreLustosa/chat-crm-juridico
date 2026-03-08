@@ -108,6 +108,11 @@ model Conversation {
   @@index([lead_id])
   @@index([last_message_at(sort: Desc)])
   @@index([instance_name])
+  @@index([tenant_id])
+  @@index([assigned_user_id])
+  @@index([status])
+  @@index([pending_transfer_to_id])
+  @@index([inbox_id])
 }
 
 model Message {
@@ -185,6 +190,8 @@ model Task {
   @@index([assigned_user_id, due_at])
   @@index([status])
   @@index([legal_case_id])
+  @@index([tenant_id])
+  @@index([lead_id])
 }
 
 model AiMemory {
@@ -223,6 +230,9 @@ model AuditLog {
   meta_json     Json?
   created_at    DateTime @default(now())
   actor         User?    @relation(fields: [actor_user_id], references: [id])
+
+  @@index([actor_user_id, created_at])
+  @@index([entity, entity_id])
 }
 
 model GlobalSetting {
@@ -352,6 +362,7 @@ model LegalCase {
   @@index([lead_id])
   @@index([stage])
   @@index([in_tracking])
+  @@index([tenant_id])
 }
 
 model CaseEvent {

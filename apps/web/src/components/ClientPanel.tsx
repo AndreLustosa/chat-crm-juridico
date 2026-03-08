@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
-import api from '@/lib/api';
+import api, { getMediaUrl } from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 
 interface LeadDetail {
@@ -123,7 +123,6 @@ export function ClientPanel({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [docViewer, setDocViewer] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
   useEffect(() => {
     setLoading(true);
@@ -429,11 +428,11 @@ export function ClientPanel({
                               <div className="grid grid-cols-4 gap-2">
                                 {grouped[cat].map(doc => (
                                   <div key={doc.messageId} className="relative aspect-square group">
-                                    <button onClick={() => onLightbox(`${API_URL}/media/${doc.messageId}`)} className="w-full h-full rounded-xl overflow-hidden border border-border bg-foreground/[0.04] hover:opacity-90 transition-opacity" title={doc.filename}>
-                                      <img src={`${API_URL}/media/${doc.messageId}`} alt={doc.filename} className="w-full h-full object-cover" loading="lazy" />
+                                    <button onClick={() => onLightbox(getMediaUrl(doc.messageId))} className="w-full h-full rounded-xl overflow-hidden border border-border bg-foreground/[0.04] hover:opacity-90 transition-opacity" title={doc.filename}>
+                                      <img src={getMediaUrl(doc.messageId)} alt={doc.filename} className="w-full h-full object-cover" loading="lazy" />
                                     </button>
                                     <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <a href={`${API_URL}/media/${doc.messageId}?dl=1`} target="_blank" rel="noopener noreferrer" title="Baixar imagem" onClick={e => e.stopPropagation()} className="w-6 h-6 flex items-center justify-center rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors"><Download size={11} /></a>
+                                      <a href={getMediaUrl(doc.messageId, true)} target="_blank" rel="noopener noreferrer" title="Baixar imagem" onClick={e => e.stopPropagation()} className="w-6 h-6 flex items-center justify-center rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors"><Download size={11} /></a>
                                       <button onClick={e => { e.stopPropagation(); deleteDoc(doc.messageId); }} title="Excluir imagem" className="w-6 h-6 flex items-center justify-center rounded-lg bg-red-600/80 text-white hover:bg-red-700 transition-colors"><Trash2 size={11} /></button>
                                     </div>
                                   </div>
@@ -450,11 +449,11 @@ export function ClientPanel({
                                         <p className="text-[13px] font-medium text-foreground truncate leading-tight">{doc.filename}</p>
                                         <p className="text-[11px] text-muted-foreground mt-0.5">{formatBytes(doc.size)}{doc.size ? ' · ' : ''}{formatDateShort(doc.createdAt)}</p>
                                       </div>
-                                      <a href={`${API_URL}/media/${doc.messageId}?dl=1`} target="_blank" rel="noopener noreferrer" title="Baixar" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Download size={13} /></a>
+                                      <a href={getMediaUrl(doc.messageId, true)} target="_blank" rel="noopener noreferrer" title="Baixar" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Download size={13} /></a>
                                       <button onClick={() => deleteDoc(doc.messageId)} title="Remover do banco" className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Trash2 size={13} /></button>
                                     </div>
                                     <div className="px-3 pb-3">
-                                      <video controls preload="none" src={`${API_URL}/media/${doc.messageId}`} className="w-full rounded-lg" style={{ maxHeight: '220px' }} />
+                                      <video controls preload="none" src={getMediaUrl(doc.messageId)} className="w-full rounded-lg" style={{ maxHeight: '220px' }} />
                                     </div>
                                   </div>
                                 ))}
@@ -466,10 +465,10 @@ export function ClientPanel({
                                   const isPdf = doc.mimeType === 'application/pdf';
                                   return (
                                     <div key={doc.messageId} className="rounded-xl border border-border bg-foreground/[0.02] overflow-hidden group">
-                                      <button onClick={() => setDocViewer({ url: `${API_URL}/media/${doc.messageId}`, mimeType: doc.mimeType, filename: doc.filename })} title="Clique para visualizar" className="block w-full text-left relative">
+                                      <button onClick={() => setDocViewer({ url: getMediaUrl(doc.messageId), mimeType: doc.mimeType, filename: doc.filename })} title="Clique para visualizar" className="block w-full text-left relative">
                                         {isPdf ? (
                                           <div className="relative w-full h-[180px] bg-foreground/[0.04] overflow-hidden">
-                                            <iframe src={`${API_URL}/media/${doc.messageId}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title={doc.filename} className="absolute inset-0 w-full h-full pointer-events-none border-0" loading="lazy" />
+                                            <iframe src={`${getMediaUrl(doc.messageId)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title={doc.filename} className="absolute inset-0 w-full h-full pointer-events-none border-0" loading="lazy" />
                                             <div className="absolute inset-0 hover:bg-black/10 transition-colors flex items-end pb-2 justify-center">
                                               <span className="text-[10px] text-white/70 bg-black/40 px-2 py-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">Clique para abrir</span>
                                             </div>
@@ -487,7 +486,7 @@ export function ClientPanel({
                                           <p className="text-[12px] font-medium text-foreground truncate leading-tight">{doc.filename}</p>
                                           <p className="text-[10px] text-muted-foreground">{formatBytes(doc.size)}{doc.size ? ' · ' : ''}{formatDateShort(doc.createdAt)}</p>
                                         </div>
-                                        <a href={`${API_URL}/media/${doc.messageId}?dl=1`} target="_blank" rel="noopener noreferrer" title="Baixar arquivo" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0" onClick={e => e.stopPropagation()}><Download size={13} /></a>
+                                        <a href={getMediaUrl(doc.messageId, true)} target="_blank" rel="noopener noreferrer" title="Baixar arquivo" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0" onClick={e => e.stopPropagation()}><Download size={13} /></a>
                                         <button onClick={() => deleteDoc(doc.messageId)} title="Excluir arquivo" className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Trash2 size={13} /></button>
                                       </div>
                                     </div>
@@ -505,11 +504,11 @@ export function ClientPanel({
                                         <p className="text-[13px] font-medium text-foreground truncate leading-tight">{doc.filename}</p>
                                         <p className="text-[11px] text-muted-foreground mt-0.5">{formatBytes(doc.size)}{doc.size ? ' · ' : ''}{formatDateShort(doc.createdAt)}</p>
                                       </div>
-                                      <a href={`${API_URL}/media/${doc.messageId}?dl=1`} target="_blank" rel="noopener noreferrer" title="Baixar" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Download size={13} /></a>
+                                      <a href={getMediaUrl(doc.messageId, true)} target="_blank" rel="noopener noreferrer" title="Baixar" className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Download size={13} /></a>
                                       <button onClick={() => deleteDoc(doc.messageId)} title="Remover do banco" className="w-7 h-7 flex items-center justify-center rounded-lg text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100 shrink-0"><Trash2 size={13} /></button>
                                     </div>
                                     <div className="px-3 pb-3">
-                                      <audio controls preload="none" src={`${API_URL}/media/${doc.messageId}`} className="w-full h-8" style={{ colorScheme: 'dark' }} />
+                                      <audio controls preload="none" src={getMediaUrl(doc.messageId)} className="w-full h-8" style={{ colorScheme: 'dark' }} />
                                     </div>
                                   </div>
                                 ))}

@@ -13,7 +13,7 @@ import {
   Search, Download, Copy, Repeat, MessageSquare, Users, Send
 } from 'lucide-react';
 import { io } from 'socket.io-client';
-import api from '@/lib/api';
+import api, { API_BASE_URL } from '@/lib/api';
 import { playNotificationSound } from '@/lib/notificationSounds';
 import { AvailabilityPicker } from '@/components/AvailabilityPicker';
 
@@ -110,7 +110,7 @@ function getEventColor(type: string) {
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+  const apiUrl = API_BASE_URL;
   if (apiUrl.startsWith('http')) {
     try { return new URL(apiUrl).origin; } catch { /* fall through */ }
   }
@@ -557,7 +557,7 @@ export default function AgendaPage() {
 
   const handleExportICS = async (eventId: string) => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+      const apiUrl = API_BASE_URL;
       const token = localStorage.getItem('token');
       const res = await fetch(`${apiUrl}/calendar/export/ics/${eventId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -577,7 +577,7 @@ export default function AgendaPage() {
   const handleExportRange = async () => {
     if (!rangeRef.current) return;
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+      const apiUrl = API_BASE_URL;
       const token = localStorage.getItem('token');
       const params = new URLSearchParams({
         start: rangeRef.current.start,

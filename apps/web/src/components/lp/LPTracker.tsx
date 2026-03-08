@@ -9,7 +9,8 @@ declare global {
   }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { API_BASE_URL } from '@/lib/api';
+const API_URL = API_BASE_URL;
 
 function getVisitorId(): string {
   let id = localStorage.getItem('lp_visitor_id');
