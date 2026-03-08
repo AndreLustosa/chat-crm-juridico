@@ -51,6 +51,7 @@ export interface ChatHeaderProps {
   onShowDetails: () => void;
   onSetClientPanelLeadId: (id: string | null) => void;
   onLightbox: (url: string) => void;
+  contactPresence?: string;
 }
 
 export function ChatHeader({
@@ -88,6 +89,7 @@ export function ChatHeader({
   onShowDetails,
   onSetClientPanelLeadId,
   onLightbox,
+  contactPresence,
 }: ChatHeaderProps) {
   return (
     <header className="min-h-[60px] md:min-h-[80px] py-2 md:py-3 px-3 md:px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
@@ -130,6 +132,11 @@ export function ChatHeader({
           <div className="text-[11px] md:text-xs text-muted-foreground uppercase tracking-wider font-semibold mt-0.5 md:mt-1 truncate">
             {selected.channel} <span className="mx-1">•</span> {selected.contactPhone}
           </div>
+          {contactPresence && contactPresence !== 'unavailable' && (
+            <span className="text-[10px] font-medium text-emerald-400">
+              {contactPresence === 'composing' ? 'digitando...' : 'online'}
+            </span>
+          )}
           {/* Área jurídica + especialista pré-atribuído — hidden on mobile */}
           <div className="hidden md:flex items-center gap-2 flex-wrap mt-1.5">
             {/* Badge de área — clicável para editar */}

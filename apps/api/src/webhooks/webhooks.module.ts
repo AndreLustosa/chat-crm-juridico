@@ -7,6 +7,7 @@ import { LeadsModule } from '../leads/leads.module';
 import { InboxesModule } from '../inboxes/inboxes.module';
 import { SettingsModule } from '../settings/settings.module';
 import { HmacGuard } from './guards/hmac.guard';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { HmacGuard } from './guards/hmac.guard';
     LeadsModule,
     InboxesModule,
     SettingsModule,
+    WhatsappModule,
     BullModule.registerQueue({
       name: 'media-jobs',
     }),

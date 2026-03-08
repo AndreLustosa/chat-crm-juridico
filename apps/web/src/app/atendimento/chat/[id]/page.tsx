@@ -80,6 +80,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [allSpecialists, setAllSpecialists] = useState<{ id: string; name: string; specialties: string[] }[]>([]);
   const [showLawyerDropdown, setShowLawyerDropdown] = useState(false);
   const [originAssignedUserId, setOriginAssignedUserId] = useState<string | null>(null);
+  // Contact presence (online/composing/unavailable) — ephemeral, from WhatsApp
+  const [contactPresence, setContactPresence] = useState<string>('unavailable');
 
   // Decode current user ID once from JWT (never changes during session)
   const [currentUserId] = useState<string | null>(() => {
@@ -486,6 +488,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           socketRef.current.on('messageReaction', (data: { messageId: string; reactions: any[] }) => {
             setMessages(prev => prev.map((m: any) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
           });
+
+          socketRef.current.on('contact_presence', (data: { presence: string }) => {
+            setContactPresence(data.presence);
+          });
         }
       } catch (e: any) {
         // 401 handled globally by api.ts interceptor
@@ -503,6 +509,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         s.off('messageUpdate');
         s.off('mediaReady');
         s.off('messageReaction');
+        s.off('contact_presence');
         s.disconnect();
       }
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
@@ -581,6 +588,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 WHATSAPP <span className="mx-1">•</span> {formatPhone(lead?.phone) || ''}
                 {isClosed && <span className="ml-2 text-red-400">• FECHADA</span>}
               </div>
+              {contactPresence && contactPresence !== 'unavailable' && (
+                <span className="text-[10px] font-medium text-emerald-400">
+                  {contactPresence === 'composing' ? 'digitando...' : 'online'}
+                </span>
+              )}
               <div className="flex items-center gap-2 flex-wrap mt-1.5">
                   {legalArea && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20">

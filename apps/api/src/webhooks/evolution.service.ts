@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { LeadsService } from '../leads/leads.service';
 import { InboxesService } from '../inboxes/inboxes.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 interface EvolutionWebhookPayload {
   event: string;
@@ -24,6 +25,7 @@ export class EvolutionService {
     private inboxesService: InboxesService,
     @InjectQueue('media-jobs') private mediaQueue: Queue,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
+    private whatsappService: WhatsappService,
   ) {}
 
   async handleMessagesUpsert(payload: EvolutionWebhookPayload) {
@@ -501,5 +503,134 @@ export class EvolutionService {
 
       this.logger.log(`Contato sincronizado via webhook: ${phone} (${contactNameToSet ?? 'nome preservado'})`);
     }
+  }
+
+  // ─── messages.delete ──────────────────────────────────────────
+
+  async handleMessagesDelete(payload: EvolutionWebhookPayload) {
+    this.logger.log(`[WEBHOOK] messages.delete received`);
+    const data = payload?.data;
+    // Evolution v2: { key: { remoteJid, fromMe, id }, ... } or data directly
+    const messageKey = data?.key || data;
+    const externalId = messageKey?.id;
+    if (!externalId) return;
+
+    const msg = await this.prisma.message.findUnique({
+      where: { external_message_id: externalId },
+    });
+    if (!msg) return;
+
+    await this.prisma.message.update({
+      where: { id: msg.id },
+      data: { type: 'deleted', text: null },
+    });
+
+    // Emite messageUpdate — frontend ja escuta e atualiza
+    this.chatGateway.emitMessageUpdate(msg.conversation_id, {
+      id: msg.id,
+      type: 'deleted',
+      text: null,
+    });
+
+    this.logger.log(`[WEBHOOK] Message ${msg.id} marked as deleted`);
+  }
+
+  // ─── contacts.update ──────────────────────────────────────────
+
+  async handleContactsUpdate(payload: EvolutionWebhookPayload) {
+    this.logger.log(`[WEBHOOK] contacts.update received`);
+    const data = payload?.data;
+    const instanceName = payload?.instance || payload?.instanceId;
+    const contacts = Array.isArray(data) ? data : [data];
+
+    for (const contact of contacts) {
+      if (!contact) continue;
+      const jid = contact.id || contact.jid || contact.remoteJid;
+      if (!jid) continue;
+
+      const phone = jid.replace(/@.*$/, '');
+      if (!phone || phone.includes('-')) continue; // Ignorar grupos
+
+      const lead = await this.prisma.lead.findFirst({ where: { phone } });
+      if (!lead) continue;
+
+      const updates: Record<string, string> = {};
+
+      // Atualizar nome se mudou
+      const newName = contact.pushName || contact.name || contact.verifiedName;
+      if (newName && newName !== lead.name) {
+        updates.name = newName;
+      }
+
+      // Buscar nova foto de perfil
+      if (instanceName) {
+        try {
+          const newPic = await this.whatsappService.fetchProfilePicture(instanceName, phone);
+          if (newPic && newPic !== lead.profile_picture_url) {
+            updates.profile_picture_url = newPic;
+          }
+        } catch {
+          // Best-effort — ignorar falha ao buscar foto
+        }
+      }
+
+      if (Object.keys(updates).length === 0) continue;
+
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: updates,
+      });
+
+      this.chatGateway.emitConversationsUpdate(null);
+      this.logger.log(`[WEBHOOK] Lead ${lead.id} updated: ${JSON.stringify(updates)}`);
+    }
+  }
+
+  // ─── connection.update ──────────────────────────────────────────
+
+  async handleConnectionUpdate(payload: EvolutionWebhookPayload) {
+    this.logger.log(`[WEBHOOK] connection.update received`);
+    const data = payload?.data;
+    const instanceName = payload?.instance || payload?.instanceId;
+    const state = data?.state || data?.status || 'unknown';
+
+    this.chatGateway.emitConnectionStatusUpdate({
+      instanceName: instanceName || 'unknown',
+      state,
+      statusReason: data?.statusReason,
+    });
+
+    this.logger.log(`[WEBHOOK] Instance ${instanceName} connection: ${state}`);
+  }
+
+  // ─── presence.update ──────────────────────────────────────────
+
+  async handlePresenceUpdate(payload: EvolutionWebhookPayload) {
+    this.logger.log(`[WEBHOOK] presence.update received`);
+    const data = payload?.data;
+    const jid = data?.id || data?.remoteJid;
+    if (!jid) return;
+
+    const phone = jid.replace(/@.*$/, '');
+    if (!phone || phone.includes('-')) return; // Ignorar grupos
+
+    const lead = await this.prisma.lead.findFirst({ where: { phone } });
+    if (!lead) return;
+
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { lead_id: lead.id, status: { in: ['ABERTO', 'WAITING', 'MONITORING'] } },
+      orderBy: { last_message_at: 'desc' },
+    });
+    if (!conversation) return;
+
+    // Extrair presence do payload
+    const presences = data?.presences || {};
+    const presenceData = Object.values(presences)[0] as any;
+    const presence = presenceData?.lastKnownPresence || data?.presence || 'unavailable';
+
+    this.chatGateway.emitContactPresence(conversation.id, {
+      presence,
+      lastSeen: presence === 'unavailable' ? new Date().toISOString() : undefined,
+    });
   }
 }

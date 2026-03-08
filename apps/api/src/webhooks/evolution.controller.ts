@@ -23,6 +23,14 @@ export class EvolutionController {
       await this.evolutionService.handleContactsUpsert(payload);
     } else if (eventType === 'chats.upsert' || eventType === 'chats.set') {
       await this.evolutionService.handleChatsUpsert(payload);
+    } else if (eventType === 'messages.delete') {
+      await this.evolutionService.handleMessagesDelete(payload);
+    } else if (eventType === 'contacts.update') {
+      await this.evolutionService.handleContactsUpdate(payload);
+    } else if (eventType === 'connection.update') {
+      await this.evolutionService.handleConnectionUpdate(payload);
+    } else if (eventType === 'presence.update') {
+      await this.evolutionService.handlePresenceUpdate(payload);
     }
     // Ack the webhook quickly
     return { received: true };

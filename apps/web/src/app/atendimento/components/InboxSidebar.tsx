@@ -86,6 +86,7 @@ export interface InboxSidebarProps {
   onQuickAcceptTransfer: (convId: string) => void;
   onShowTransferPopup: (transfer: { conversationId: string; contactName: string; fromUserName: string; reason: string | null; audioIds?: string[] }) => void;
   onLightbox: (url: string) => void;
+  hasDisconnectedInstance?: boolean;
 }
 
 // ─── Component ──────────────────────────────────────────────────
@@ -115,6 +116,7 @@ export function InboxSidebar({
   onQuickAcceptTransfer,
   onShowTransferPopup,
   onLightbox,
+  hasDisconnectedInstance,
 }: InboxSidebarProps) {
 
   const myActiveConvs = (c: ConversationSummary) =>
@@ -179,6 +181,14 @@ export function InboxSidebar({
             >
               <X size={12} />
             </button>
+          </div>
+        )}
+
+        {/* WhatsApp disconnection banner */}
+        {hasDisconnectedInstance && (
+          <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium flex items-center gap-2">
+            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+            WhatsApp desconectado
           </div>
         )}
 

@@ -149,6 +149,10 @@ export default function Dashboard() {
   // Typing indicators
   const [typingUsers, setTypingUsers] = useState<Record<string, { userName: string; timeout: ReturnType<typeof setTimeout> }>>({});
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // WhatsApp instance connection statuses (ephemeral — no DB persistence)
+  const [instanceStatuses, setInstanceStatuses] = useState<Record<string, string>>({});
+  // Contact presence (online/composing/unavailable) — ephemeral
+  const [contactPresence, setContactPresence] = useState<string>('unavailable');
   const [showLegalAreaDropdown, setShowLegalAreaDropdown] = useState(false);
   const legalAreaDropdownRef = useRef<HTMLDivElement>(null);
   const touchStartXRef = useRef<number>(0);
@@ -569,6 +573,16 @@ export default function Dashboard() {
       setTimeout(() => setTransferResponseMsg(null), 8000);
     });
 
+    // WhatsApp instance connection status (connect/disconnect)
+    socket.on('connection_status_update', (data: { instanceName: string; state: string }) => {
+      setInstanceStatuses(prev => ({ ...prev, [data.instanceName]: data.state }));
+      if (data.state === 'close') {
+        showError(`WhatsApp desconectado: ${data.instanceName}`);
+      } else if (data.state === 'open') {
+        showSuccess(`WhatsApp reconectado: ${data.instanceName}`);
+      }
+    });
+
     socketRef.current = socket;
 
     return () => {
@@ -715,6 +729,10 @@ export default function Dashboard() {
           socketRef.current.on('messageUpdate', (updatedMsg: MessageItem) => {
             setMessages(prev => prev.map(m => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
           });
+          socketRef.current.off('contact_presence');
+          socketRef.current.on('contact_presence', (data: { presence: string }) => {
+            setContactPresence(data.presence);
+          });
         }
       } catch (e) {
         console.error('Failed to fetch conversation', e);
@@ -723,6 +741,8 @@ export default function Dashboard() {
       }
     };
 
+    // Reset presence when switching conversations
+    setContactPresence('unavailable');
     fetchDetail();
 
     return () => {
@@ -731,6 +751,7 @@ export default function Dashboard() {
         socketRef.current.off('newMessage');
         socketRef.current.off('mediaReady');
         socketRef.current.off('messageUpdate');
+        socketRef.current.off('contact_presence');
       }
     };
   }, [selectedId]);
@@ -1431,6 +1452,7 @@ export default function Dashboard() {
         onQuickAcceptTransfer={handleQuickAcceptTransfer}
         onShowTransferPopup={(pt) => { setIncomingTransfer(pt); setShowDeclineInput(false); setDeclineReason(''); }}
         onLightbox={setLightbox}
+        hasDisconnectedInstance={Object.values(instanceStatuses).some(s => s === 'close')}
       />
 
       {/* INBOX OPEN BUTTON (when collapsed) - desktop only */}
@@ -1510,6 +1532,7 @@ export default function Dashboard() {
               onShowDetails={() => setShowDetailsPanel(true)}
               onSetClientPanelLeadId={setClientPanelLeadId}
               onLightbox={setLightbox}
+              contactPresence={contactPresence}
             />
 
             {/* Banner de contexto da transferência (motivo + áudios — persiste após aceitar) */}

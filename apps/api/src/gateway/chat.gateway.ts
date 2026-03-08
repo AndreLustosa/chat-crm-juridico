@@ -159,4 +159,17 @@ export class ChatGateway {
   emitTypingIndicator(conversationId: string, data: { userId: string; userName: string; isTyping: boolean }) {
     this.server.to(conversationId).emit('typing_indicator', data);
   }
+
+  // ─── Connection Status ──────────────────────────────────────
+
+  emitConnectionStatusUpdate(data: { instanceName: string; state: string; statusReason?: number }) {
+    this.logger.log(`[SOCKET] Emitting connection_status_update: ${data.instanceName} → ${data.state}`);
+    this.server.emit('connection_status_update', data);
+  }
+
+  // ─── Contact Presence ──────────────────────────────────────
+
+  emitContactPresence(conversationId: string, data: { presence: string; lastSeen?: string }) {
+    this.server.to(conversationId).emit('contact_presence', data);
+  }
 }
