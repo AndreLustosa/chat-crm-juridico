@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const backendUrl = process.env.INTERNAL_API_URL || "http://crm-api:3001";
 
@@ -59,6 +60,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Necessário em monorepo: garante que server.js fique em apps/web/server.js
+  // dentro do standalone, que é o path que o Dockerfile espera no CMD.
+  outputFileTracingRoot: path.join(__dirname, "../../"),
   async headers() {
     return [
       {
