@@ -44,8 +44,9 @@ services:
     volumes:
       - minio_data:/data
 
-  # ------ NestJS Core API (build local) ------
+  # ------ NestJS Core API ------
   crm-api:
+    image: andreflustosa/chat-crm-juridico-api:latest
     build:
       context: .
       dockerfile: infra/Dockerfile.backend
@@ -71,14 +72,17 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - WEBHOOK_HMAC_REQUIRED=${WEBHOOK_HMAC_REQUIRED:-false}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-  # ------ NestJS Worker (build local) ------
+  # ------ NestJS Worker ------
   crm-worker:
+    image: andreflustosa/chat-crm-juridico-worker:latest
     build:
       context: .
       dockerfile: infra/Dockerfile.backend
@@ -101,8 +105,9 @@ services:
       redis:
         condition: service_healthy
 
-  # ------ Next.js Frontend (build local) ------
+  # ------ Next.js Frontend ------
   crm-web:
+    image: andreflustosa/chat-crm-juridico-web:latest
     build:
       context: .
       dockerfile: infra/Dockerfile.web
