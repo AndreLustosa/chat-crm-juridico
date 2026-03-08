@@ -66,6 +66,33 @@ const NEXT_STEP_MAP: Record<string, { label: string; color: string }> = {
   encerrado:        { label: '✅ Encerrado', color: 'bg-violet-500/15 text-violet-400 border-violet-500/20' },
 };
 
+// ─── Lead Score ─────────────────────────────────────────────────────────────
+
+const STAGE_BASE_SCORES: Record<string, number> = {
+  NOVO: 10, INICIAL: 15, EM_ATENDIMENTO: 25, QUALIFICANDO: 35, QUALIFICADO: 40,
+  AGUARDANDO_FORM: 50, REUNIAO_AGENDADA: 65, AGUARDANDO_DOCS: 70,
+  AGUARDANDO_PROC: 80, FINALIZADO: 100, PERDIDO: 0,
+};
+
+function computeLeadScore(lead: CrmLead): number {
+  const normalized = normalizeStage(lead.stage);
+  let score = STAGE_BASE_SCORES[normalized] ?? 20;
+  const conv = lead.conversations?.[0];
+  if (conv?.legal_area) score += 8;
+  if (conv?.assigned_lawyer_id) score += 5;
+  if (conv?.next_step && conv.next_step !== 'duvidas') score += 5;
+  const days = daysInStage(lead.stage_entered_at);
+  if (days > 3) score -= Math.min(25, (days - 3) * 3);
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function scoreStyle(score: number): string {
+  if (score >= 70) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  if (score >= 45) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
+  if (score >= 20) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+  return 'text-red-400 bg-red-500/10 border-red-500/20';
+}
+
 function validateStageTransition(lead: CrmLead, newStage: string): string | null {
   const conv = lead.conversations?.[0];
   if (newStage === 'REUNIAO_AGENDADA' && !conv?.legal_area) {
@@ -120,6 +147,7 @@ function LeadCard({
   const nextStep = conv?.next_step ? NEXT_STEP_MAP[conv.next_step] : null;
   const normalizedStage = normalizeStage(lead.stage);
   const days = daysInStage(lead.stage_entered_at);
+  const score = computeLeadScore(lead);
 
   // Fechar menu ao clicar fora
   useEffect(() => {
@@ -269,6 +297,15 @@ function LeadCard({
           Abrir chat
         </button>
         <div className="flex items-center gap-2">
+          {/* Score do lead */}
+          {normalizedStage !== 'PERDIDO' && normalizedStage !== 'FINALIZADO' && (
+            <span
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${scoreStyle(score)}`}
+              title={`Score do lead: ${score}/100`}
+            >
+              {score}
+            </span>
+          )}
           {/* Aging indicator */}
           {days > 0 && (
             <span
@@ -301,6 +338,7 @@ export default function CrmPage() {
   const [lawyerFilter, setLawyerFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
   const [agingFilter, setAgingFilter] = useState(''); // '', 'ok', 'warning', 'critical'
+  const [sortBy, setSortBy] = useState<'activity' | 'score'>('activity');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
@@ -544,6 +582,7 @@ export default function CrmPage() {
     filteredLeads
       .filter(l => normalizeStage(l.stage) === stageId)
       .sort((a, b) => {
+        if (sortBy === 'score') return computeLeadScore(b) - computeLeadScore(a);
         const ta = a.conversations?.[0]?.last_message_at ? new Date(a.conversations[0].last_message_at).getTime() : 0;
         const tb = b.conversations?.[0]?.last_message_at ? new Date(b.conversations[0].last_message_at).getTime() : 0;
         return tb - ta;
@@ -643,6 +682,19 @@ export default function CrmPage() {
                 className="pl-8 pr-3 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 w-44"
               />
             </div>
+
+            {/* Ordenar por score */}
+            <button
+              onClick={() => setSortBy(v => v === 'activity' ? 'score' : 'activity')}
+              className={`px-2.5 py-1.5 text-[12px] rounded-lg border transition-all ${
+                sortBy === 'score'
+                  ? 'border-primary/50 bg-primary/10 text-primary font-semibold'
+                  : 'border-border text-muted-foreground hover:bg-accent'
+              }`}
+              title="Ordenar por score do lead"
+            >
+              {sortBy === 'score' ? '⭐ Score' : '⭐ Score'}
+            </button>
 
             {/* Exportar CSV */}
             <button
