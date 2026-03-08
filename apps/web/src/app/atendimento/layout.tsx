@@ -5,7 +5,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import {
   MessageSquare, Briefcase, Users, Check, Scale, BookOpen,
-  Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar
+  Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar,
+  LayoutDashboard,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
@@ -38,7 +39,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
       router.replace('/atendimento/login');
     }
     if (token && isLoginPage) {
-      router.replace('/atendimento');
+      router.replace('/atendimento/dashboard');
     }
   }, [pathname, router]);
 
@@ -115,6 +116,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   ];
 
   const moreItems = [
+    { label: 'Dashboard', href: '/atendimento/dashboard', icon: LayoutDashboard, match: (p: string) => p.startsWith('/atendimento/dashboard') },
     { label: 'Agenda', href: '/atendimento/agenda', icon: Calendar, match: (p: string) => p.startsWith('/atendimento/agenda') },
     { label: 'Advogado', href: '/atendimento/advogado', icon: Scale, match: (p: string) => p.startsWith('/atendimento/advogado') },
     { label: 'Processos', href: '/atendimento/processos', icon: BookOpen, match: (p: string) => p.startsWith('/atendimento/processos') },

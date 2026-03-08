@@ -28,6 +28,7 @@ import { CaseDeadlinesModule } from './case-deadlines/case-deadlines.module';
 import { PetitionsModule } from './petitions/petitions.module';
 import { LegalTemplatesModule } from './legal-templates/legal-templates.module';
 import { HonorariosModule } from './honorarios/honorarios.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -78,6 +79,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     PetitionsModule,
     LegalTemplatesModule,
     HonorariosModule,
+    DashboardModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

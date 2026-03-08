@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, Scale, BookOpen, Calendar } from 'lucide-react';
+import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, Scale, BookOpen, Calendar, LayoutDashboard } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
 
@@ -58,6 +58,7 @@ export function Sidebar() {
   }, []);
 
   const navItems = [
+    { label: 'Dashboard', href: '/atendimento/dashboard', icon: <LayoutDashboard size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/dashboard') },
     { label: 'Inbox (WhatsApp)', href: '/atendimento', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/atendimento' || p.startsWith('/atendimento/chat'), badge: unreadTotal },
     { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm') },
     { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts') },
@@ -70,7 +71,7 @@ export function Sidebar() {
 
   return (
       <aside className="w-[72px] flex flex-col items-center py-6 bg-card border-r border-border relative z-50 shrink-0">
-        <div className="w-10 h-10 rounded-xl bg-[#111] flex items-center justify-center shadow-[0_0_15px_rgba(161,119,61,0.3)] mb-8 shrink-0 cursor-pointer group relative overflow-hidden" onClick={() => router.push('/atendimento')}>
+        <div className="w-10 h-10 rounded-xl bg-[#111] flex items-center justify-center shadow-[0_0_15px_rgba(161,119,61,0.3)] mb-8 shrink-0 cursor-pointer group relative overflow-hidden" onClick={() => router.push('/atendimento/dashboard')}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/landing/LOGO SEM FUNDO.png" alt="André Lustosa" className="w-full h-full object-contain p-1" draggable={false} />
           <div className="absolute left-[56px] px-3 py-2 bg-card text-foreground text-[13px] font-semibold rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap shadow-xl border border-border flex items-center z-[200] before:content-[''] before:absolute before:-left-[5px] before:top-1/2 before:-translate-y-1/2 before:border-y-[5px] before:border-y-transparent before:border-r-[5px] before:border-r-border">
