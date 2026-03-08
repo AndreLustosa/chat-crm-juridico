@@ -1,15 +1,21 @@
-import { IsString, IsOptional, IsEmail, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsArray, IsIn } from 'class-validator';
+
+const VALID_STAGES = ['NOVO', 'QUALIFICADO', 'EM_ATENDIMENTO', 'FINALIZADO', 'PERDIDO'];
 
 export class CreateLeadDto {
-  @IsString({ message: 'Nome é obrigatório' })
+  @IsString({ message: 'Nome e obrigatorio' })
   name: string;
 
-  @IsString({ message: 'Telefone é obrigatório' })
+  @IsString({ message: 'Telefone e obrigatorio' })
   phone: string;
 
   @IsOptional()
-  @IsEmail({}, { message: 'Email inválido' })
+  @IsEmail({}, { message: 'Email invalido' })
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  origin?: string;
 
   @IsOptional()
   @IsArray()
@@ -23,11 +29,17 @@ export class UpdateLeadDto {
   name?: string;
 
   @IsOptional()
-  @IsEmail({}, { message: 'Email inválido' })
+  @IsEmail({}, { message: 'Email invalido' })
   email?: string;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+}
+
+export class UpdateLeadStageDto {
+  @IsString()
+  @IsIn(VALID_STAGES, { message: `Stage deve ser um de: ${VALID_STAGES.join(', ')}` })
+  stage: string;
 }

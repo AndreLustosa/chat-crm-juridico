@@ -182,10 +182,13 @@ export class ConversationsService {
   }
 
   async close(id: string): Promise<Conversation> {
-    return this.prisma.conversation.update({
+    const conv = await this.prisma.conversation.update({
       where: { id },
       data: { status: 'FECHADO' },
     });
+    // Broadcast: notificar sidebar sobre mudanca de status
+    this.chatGateway.emitConversationsUpdate((conv as any).tenant_id ?? null);
+    return conv;
   }
 
   async findPendingTransfers(toUserId: string) {

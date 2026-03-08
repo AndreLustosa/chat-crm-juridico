@@ -1,10 +1,9 @@
-import { Controller, Get, Post, Body, Patch, Delete, Param, Query, UseGuards, Request, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Delete, Param, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { LeadsCleanupService } from './leads-cleanup.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { Prisma } from '@crm/shared';
-import { UpdateLeadDto } from './dto/create-lead.dto';
+import { CreateLeadDto, UpdateLeadDto, UpdateLeadStageDto } from './dto/create-lead.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('leads')
@@ -15,12 +14,15 @@ export class LeadsController {
   ) {}
 
   @Post()
-  create(@Body() createLeadDto: Prisma.LeadCreateInput, @Request() req: any) {
-    // Associar ao tenant do usuário logado se existir
-    if (req.user?.tenant_id) {
-       createLeadDto.tenant = { connect: { id: req.user.tenant_id } };
-    }
-    return this.leadsService.create(createLeadDto);
+  create(@Body() dto: CreateLeadDto, @Request() req: any) {
+    return this.leadsService.create({
+      name: dto.name,
+      phone: dto.phone,
+      email: dto.email,
+      origin: dto.origin,
+      tags: dto.tags,
+      tenant: req.user?.tenant_id ? { connect: { id: req.user.tenant_id } } : undefined,
+    });
   }
 
   @Get()
@@ -29,15 +31,16 @@ export class LeadsController {
     @Query('inboxId') inboxId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l);
+    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search);
   }
 
   @Get('check-phone')
   checkPhone(@Query('phone') phone: string) {
-    if (!phone) throw new BadRequestException('phone é obrigatório');
+    if (!phone) throw new BadRequestException('phone e obrigatorio');
     return this.leadsService.checkPhone(phone);
   }
 
@@ -56,8 +59,8 @@ export class LeadsController {
   }
 
   @Patch(':id/stage')
-  updateStage(@Param('id') id: string, @Body('stage') stage: string, @Request() req: any) {
-    return this.leadsService.updateStatus(id, stage, req.user?.tenant_id);
+  updateStage(@Param('id') id: string, @Body() body: UpdateLeadStageDto, @Request() req: any) {
+    return this.leadsService.updateStatus(id, body.stage, req.user?.tenant_id);
   }
 
   @Delete(':id/memory')

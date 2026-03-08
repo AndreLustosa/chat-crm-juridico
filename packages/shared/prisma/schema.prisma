@@ -38,7 +38,7 @@ model User {
   inboxes         Inbox[]
   sectors         Sector[]       @relation("SectorUsers")
   tasks           Task[]
-  tenant          Tenant?        @relation(fields: [tenant_id], references: [id])
+  tenant          Tenant?        @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   lawyer_cases    LegalCase[]    @relation("LawyerCases")
   task_comments   TaskComment[]
   supervisors     User[]         @relation("InternSupervisors")
@@ -47,6 +47,7 @@ model User {
   calendar_events_created  CalendarEvent[] @relation("EventCreator")
   schedules                UserSchedule[]
   calendar_event_comments  CalendarEventComment[]
+  transfer_audios          TransferAudio[] @relation("AudioUploader")
 }
 
 model Lead {
@@ -63,7 +64,7 @@ model Lead {
   updated_at    DateTime       @updatedAt
   memory             AiMemory?
   conversations      Conversation[]
-  tenant             Tenant?            @relation(fields: [tenant_id], references: [id])
+  tenant             Tenant?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   tasks              Task[]
   legal_cases        LegalCase[]
   ficha_trabalhista  FichaTrabalhista?
@@ -84,26 +85,27 @@ model Conversation {
   ai_mode          Boolean   @default(true)
   assigned_user_id             String?
   inbox_id                     String?
-  instance_name                String?   // Nome da instância de origem (ex: wa1)
+  instance_name                String?   // Nome da instancia de origem (ex: wa1)
   pending_transfer_to_id       String?
   pending_transfer_from_id     String?
   pending_transfer_reason      String?
   pending_transfer_audio_ids   String[]  @default([])
-  legal_area                   String?   // Área do direito detectada pela IA
-  assigned_lawyer_id           String?   // Advogado pré-designado pela IA
-  origin_assigned_user_id      String?   // Quem transferiu (para devolução)
+  legal_area                   String?   // Area do direito detectada pela IA
+  assigned_lawyer_id           String?   // Advogado pre-designado pela IA
+  origin_assigned_user_id      String?   // Quem transferiu (para devolucao)
   linked_agent_ids             String[]  @default([])  // Todos os agentes que atenderam
-  next_step                    String?   // Próximo passo: "duvidas" | "triagem_concluida" | "formulario" | "reuniao" | "encerrado"
-  ai_notes                     String?   // Observações internas da IA (campo notes do JSON)
+  next_step                    String?   // Proximo passo: "duvidas" | "triagem_concluida" | "formulario" | "reuniao" | "encerrado"
+  ai_notes                     String?   // Observacoes internas da IA (campo notes do JSON)
   last_message_at              DateTime  @default(now())
-  assigned_user    User?     @relation(fields: [assigned_user_id], references: [id])
+  assigned_user    User?     @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
   lead             Lead      @relation(fields: [lead_id], references: [id], onDelete: Cascade)
-  tenant           Tenant?   @relation(fields: [tenant_id], references: [id])
-  inbox            Inbox?    @relation(fields: [inbox_id], references: [id])
+  tenant           Tenant?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  inbox            Inbox?    @relation(fields: [inbox_id], references: [id], onDelete: SetNull)
   messages         Message[]
   tasks            Task[]
   legal_cases      LegalCase[]
   calendar_events  CalendarEvent[]
+  transfer_audios  TransferAudio[]
 
   @@index([lead_id])
   @@index([last_message_at(sort: Desc)])
@@ -130,6 +132,9 @@ model Message {
   media               Media?
   reactions           MessageReaction[]
   conversation        Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  reply_to            Message?     @relation("MessageReplies", fields: [reply_to_id], references: [id], onDelete: SetNull)
+  replies             Message[]    @relation("MessageReplies")
+  skill               PromptSkill? @relation(fields: [skill_id], references: [id], onDelete: SetNull)
   tasks               Task[]
 
   @@index([conversation_id, created_at])
@@ -178,13 +183,13 @@ model Task {
   status             String         @default("A_FAZER")
   assigned_user_id   String?
   created_at         DateTime       @default(now())
-  assigned_user      User?          @relation(fields: [assigned_user_id], references: [id])
-  conversation       Conversation?  @relation(fields: [conversation_id], references: [id])
-  lead               Lead?          @relation(fields: [lead_id], references: [id])
-  message            Message?       @relation(fields: [message_id], references: [id])
-  tenant             Tenant?        @relation(fields: [tenant_id], references: [id])
-  legal_case         LegalCase?     @relation(fields: [legal_case_id], references: [id])
-  calendar_event     CalendarEvent? @relation(fields: [calendar_event_id], references: [id])
+  assigned_user      User?          @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  conversation       Conversation?  @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
+  lead               Lead?          @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  message            Message?       @relation(fields: [message_id], references: [id], onDelete: SetNull)
+  tenant             Tenant?        @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  legal_case         LegalCase?     @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  calendar_event     CalendarEvent? @relation(fields: [calendar_event_id], references: [id], onDelete: SetNull)
   comments           TaskComment[]
 
   @@index([assigned_user_id, due_at])
@@ -219,6 +224,7 @@ model PromptSkill {
   order             Int     @default(0)
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
+  messages          Message[]
 }
 
 model AuditLog {
@@ -229,7 +235,7 @@ model AuditLog {
   entity_id     String
   meta_json     Json?
   created_at    DateTime @default(now())
-  actor         User?    @relation(fields: [actor_user_id], references: [id])
+  actor         User?    @relation(fields: [actor_user_id], references: [id], onDelete: SetNull)
 
   @@index([actor_user_id, created_at])
   @@index([entity, entity_id])
@@ -262,11 +268,11 @@ model Inbox {
   id            String         @id @default(uuid())
   tenant_id     String?
   name          String
-  rr_pointer    String?        // ID do último usuário atribuído (round-robin)
+  rr_pointer    String?        // ID do ultimo usuario atribuido (round-robin)
   is_active     Boolean        @default(true)
   created_at    DateTime       @default(now())
   updated_at    DateTime       @updatedAt
-  tenant        Tenant?        @relation(fields: [tenant_id], references: [id])
+  tenant        Tenant?        @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   users         User[]
   conversations Conversation[]
   instances     Instance[]
@@ -283,8 +289,8 @@ model Instance {
   connection    String   @default("evolution")
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
-  tenant        Tenant?  @relation(fields: [tenant_id], references: [id])
-  inbox         Inbox?   @relation(fields: [inbox_id], references: [id])
+  tenant        Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  inbox         Inbox?   @relation(fields: [inbox_id], references: [id], onDelete: SetNull)
 
   @@index([tenant_id])
   @@index([inbox_id])
@@ -297,8 +303,11 @@ model TransferAudio {
   mime_type      String   @default("audio/webm")
   size           Int?
   uploaded_by_id String?
-  expires_at     DateTime // 7 dias após upload — apagado pelo cron
+  expires_at     DateTime // 7 dias apos upload — apagado pelo cron
   created_at     DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  uploaded_by    User?        @relation("AudioUploader", fields: [uploaded_by_id], references: [id], onDelete: SetNull)
 
   @@index([conversation_id])
   @@index([expires_at])
@@ -349,10 +358,10 @@ model LegalCase {
   created_at      DateTime       @default(now())
   updated_at      DateTime       @updatedAt
 
-  lead              Lead              @relation(fields: [lead_id], references: [id])
-  conversation      Conversation?     @relation(fields: [conversation_id], references: [id])
+  lead              Lead              @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  conversation      Conversation?     @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
   lawyer            User              @relation("LawyerCases", fields: [lawyer_id], references: [id])
-  tenant            Tenant?           @relation(fields: [tenant_id], references: [id])
+  tenant            Tenant?           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   tasks             Task[]
   events            CaseEvent[]
   djen_publications DjenPublication[]
@@ -389,7 +398,7 @@ model TaskComment {
   created_at DateTime @default(now())
 
   task       Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [user_id], references: [id])
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([task_id, created_at])
 }
@@ -398,9 +407,9 @@ model FichaTrabalhista {
   id              String   @id @default(uuid())
   lead_id         String   @unique
   lead            Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
-  data            Json     @default("{}")    // todos os ~80 campos do formulário
-  nome_completo   String?                   // espelho para busca rápida
-  nome_empregador String?                   // espelho para busca rápida
+  data            Json     @default("{}")    // todos os ~80 campos do formulario
+  nome_completo   String?                   // espelho para busca rapida
+  nome_empregador String?                   // espelho para busca rapida
   finalizado      Boolean  @default(false)
   filled_by       String   @default("manual") // "manual" | "ai" | "lead"
   completion_pct  Int      @default(0)       // 0-100
@@ -423,7 +432,7 @@ model DjenPublication {
   nome_advogado         String?
   raw_json              Json
   legal_case_id         String?
-  legal_case            LegalCase? @relation(fields: [legal_case_id], references: [id])
+  legal_case            LegalCase? @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
   created_at            DateTime   @default(now())
 
   @@index([data_disponibilizacao])
@@ -431,9 +440,9 @@ model DjenPublication {
   @@index([legal_case_id])
 }
 
-// ═══════════════════════════════════════════════
+// ===============================================
 // Calendar / Agenda
-// ═══════════════════════════════════════════════
+// ===============================================
 
 model CalendarEvent {
   id                  String    @id @default(uuid())
@@ -461,20 +470,20 @@ model CalendarEvent {
   recurrence_end      DateTime?
   recurrence_days     Int[]     @default([]) // dias da semana para CUSTOM (0-6)
   parent_event_id     String?
-  parent_event        CalendarEvent?  @relation("RecurrenceChildren", fields: [parent_event_id], references: [id])
+  parent_event        CalendarEvent?  @relation("RecurrenceChildren", fields: [parent_event_id], references: [id], onDelete: Cascade)
   child_events        CalendarEvent[] @relation("RecurrenceChildren")
 
-  lead                Lead?            @relation(fields: [lead_id], references: [id])
-  conversation        Conversation?    @relation(fields: [conversation_id], references: [id])
-  legal_case          LegalCase?       @relation(fields: [legal_case_id], references: [id])
-  assigned_user       User?            @relation("EventAssigned", fields: [assigned_user_id], references: [id])
+  lead                Lead?            @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  conversation        Conversation?    @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
+  legal_case          LegalCase?       @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  assigned_user       User?            @relation("EventAssigned", fields: [assigned_user_id], references: [id], onDelete: SetNull)
   created_by          User             @relation("EventCreator", fields: [created_by_id], references: [id])
-  appointment_type    AppointmentType? @relation(fields: [appointment_type_id], references: [id])
+  appointment_type    AppointmentType? @relation(fields: [appointment_type_id], references: [id], onDelete: SetNull)
 
   reminders           EventReminder[]
   comments            CalendarEventComment[]
   task                Task?
-  tenant              Tenant?          @relation(fields: [tenant_id], references: [id])
+  tenant              Tenant?          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   created_at          DateTime  @default(now())
   updated_at          DateTime  @updatedAt
@@ -500,7 +509,7 @@ model EventReminder {
 model UserSchedule {
   id          String @id @default(uuid())
   user_id     String
-  user        User   @relation(fields: [user_id], references: [id])
+  user        User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
   day_of_week Int    // 0=dom, 1=seg, ..., 6=sab
   start_time  String // "09:00"
   end_time    String // "18:00"
@@ -517,7 +526,7 @@ model AppointmentType {
   active    Boolean @default(true)
 
   events    CalendarEvent[]
-  tenant    Tenant?         @relation(fields: [tenant_id], references: [id])
+  tenant    Tenant?         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 }
 
 model Holiday {
@@ -528,7 +537,7 @@ model Holiday {
   recurring_yearly Boolean  @default(false)
   created_at       DateTime @default(now())
 
-  tenant           Tenant?  @relation(fields: [tenant_id], references: [id])
+  tenant           Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, date])
 }
@@ -541,7 +550,7 @@ model CalendarEventComment {
   created_at DateTime      @default(now())
 
   event      CalendarEvent @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  user       User          @relation(fields: [user_id], references: [id])
+  user       User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([event_id, created_at])
 }

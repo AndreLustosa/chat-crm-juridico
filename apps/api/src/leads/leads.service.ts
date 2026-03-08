@@ -1,17 +1,18 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChatGateway } from '../gateway/chat.gateway';
 import { Prisma, Lead } from '@crm/shared';
 import { LegalCasesService } from '../legal-cases/legal-cases.service';
 
 /**
- * Remove o nono dígito de celulares brasileiros.
- * 13 dígitos (55+DD+9+8dig) → 12 dígitos (55+DD+8dig)
- * Ex: 5582999130127 → 558299130127
+ * Remove o nono digito de celulares brasileiros.
+ * 13 digitos (55+DD+9+8dig) -> 12 digitos (55+DD+8dig)
+ * Ex: 5582999130127 -> 558299130127
  */
 function to12Digits(phone: string): string {
   const d = phone.replace(/\D/g, '');
   if (d.length === 13 && d.startsWith('55') && d[4] === '9') {
-    return d.slice(0, 4) + d.slice(5); // remove o 5º caractere (o 9)
+    return d.slice(0, 4) + d.slice(5); // remove o 5o caractere (o 9)
   }
   return d;
 }
@@ -23,6 +24,7 @@ export class LeadsService {
   constructor(
     private prisma: PrismaService,
     private legalCasesService: LegalCasesService,
+    private chatGateway: ChatGateway,
   ) {}
 
   async create(data: Prisma.LeadCreateInput): Promise<Lead> {
@@ -30,10 +32,24 @@ export class LeadsService {
     return this.prisma.lead.create({ data });
   }
 
-  async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number) {
-    const baseWhere = tenant_id
+  async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number, search?: string) {
+    const baseWhere: any = tenant_id
       ? { OR: [{ tenant_id }, { tenant_id: null }] }
-      : undefined;
+      : {};
+
+    // Busca server-side por nome ou telefone
+    if (search && search.trim()) {
+      const s = search.trim();
+      baseWhere.AND = [
+        {
+          OR: [
+            { name: { contains: s, mode: 'insensitive' } },
+            { phone: { contains: s } },
+            { email: { contains: s, mode: 'insensitive' } },
+          ],
+        },
+      ];
+    }
 
     const where = inbox_id
       ? {
@@ -168,7 +184,10 @@ export class LeadsService {
       data: { stage },
     });
 
-    // Auto-criação de LegalCase quando lead atinge FINALIZADO
+    // Broadcast: notificar outros clientes sobre mudanca de stage do lead
+    this.chatGateway.emitConversationsUpdate(tenantId ?? null);
+
+    // Auto-criacao de LegalCase quando lead atinge FINALIZADO
     if (stage === 'FINALIZADO') {
       try {
         const conv = await this.prisma.conversation.findFirst({
@@ -183,7 +202,7 @@ export class LeadsService {
             conv.id,
             conv.tenant_id ?? undefined,
           );
-          this.logger.log(`Auto-created LegalCase for lead ${id} → lawyer ${conv.assigned_lawyer_id}`);
+          this.logger.log(`Auto-created LegalCase for lead ${id} -> lawyer ${conv.assigned_lawyer_id}`);
         }
       } catch (err) {
         this.logger.warn(`Failed to auto-create LegalCase for lead ${id}: ${err}`);
