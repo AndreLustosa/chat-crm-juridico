@@ -6,6 +6,7 @@ import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown } fro
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
+import { showError } from '@/lib/toast';
 
 interface CrmLead {
   id: string;
@@ -186,6 +187,7 @@ export default function CrmPage() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState(false);
 
   // Pan horizontal do board com clique+arraste do mouse
   const boardRef = useRef<HTMLDivElement>(null);
@@ -224,8 +226,10 @@ export default function CrmPage() {
     try {
       const res = await api.get('/leads');
       setLeads(res.data || []);
-    } catch (e: any) {
-      console.warn('Erro ao buscar leads', e);
+      setLoadError(false);
+    } catch {
+      if (!silent) setLoadError(true);
+      showError('Não foi possível carregar os leads. Tente novamente.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -236,8 +240,15 @@ export default function CrmPage() {
     const token = localStorage.getItem('token');
     if (!token) { router.push('/atendimento/login'); return; }
     fetchLeads();
-    const interval = setInterval(() => fetchLeads(true), 30_000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchLeads(true);
+    }, 30_000);
+    const onLogout = () => router.push('/atendimento/login');
+    window.addEventListener('auth:logout', onLogout);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('auth:logout', onLogout);
+    };
   }, [router, fetchLeads]);
 
   const moveLeadToStage = async (leadId: string, newStage: string) => {
@@ -252,6 +263,7 @@ export default function CrmPage() {
       setLeads(prev => prev.map(l =>
         l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
       ));
+      showError('Erro ao mover lead. Tente novamente.');
     }
   };
 
@@ -348,6 +360,13 @@ export default function CrmPage() {
         {loading ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-muted-foreground text-sm animate-pulse">Carregando leads…</div>
+          </div>
+        ) : loadError ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3">
+            <p className="text-muted-foreground text-sm">Erro ao carregar leads.</p>
+            <button onClick={() => fetchLeads()} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[13px] font-semibold hover:bg-primary/90 transition-colors">
+              Tentar novamente
+            </button>
           </div>
         ) : (
           <div
