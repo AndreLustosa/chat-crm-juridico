@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar, Scale, UserCheck, Download } from 'lucide-react';
+import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar, Scale, UserCheck, Download, CheckSquare, Square, X as XIcon } from 'lucide-react';
 import api, { API_BASE_URL } from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
@@ -97,6 +97,9 @@ function LeadCard({
   onDragEnd,
   onOpen,
   onStageChange,
+  isSelected,
+  onToggleSelect,
+  selectionMode,
 }: {
   lead: CrmLead;
   isDragging: boolean;
@@ -104,6 +107,9 @@ function LeadCard({
   onDragEnd: () => void;
   onOpen: () => void;
   onStageChange: (stageId: string) => void;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  selectionMode: boolean;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -126,17 +132,33 @@ function LeadCard({
 
   return (
     <div
-      draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
+      draggable={!selectionMode}
+      onDragStart={(e) => { if (selectionMode) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
       onDragEnd={onDragEnd}
-      className={`group p-3.5 bg-card border border-border rounded-xl cursor-grab active:cursor-grabbing select-none transition-all ${
-        isDragging
-          ? 'opacity-40 scale-95 rotate-1 shadow-2xl ring-2 ring-primary/30'
-          : 'hover:border-border/80 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/10'
+      onClick={() => { if (selectionMode) onToggleSelect(); }}
+      className={`group p-3.5 bg-card border rounded-xl select-none transition-all ${
+        selectionMode ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+      } ${
+        isSelected
+          ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/5'
+          : isDragging
+            ? 'opacity-40 scale-95 rotate-1 shadow-2xl ring-2 ring-primary/30 border-border'
+            : 'border-border hover:border-border/80 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/10'
       }`}
     >
       {/* Header do card */}
       <div className="flex items-start gap-2.5 mb-2.5">
+        {/* Checkbox de seleção */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
+          className={`shrink-0 mt-0.5 transition-all ${selectionMode || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        >
+          {isSelected
+            ? <CheckSquare size={15} className="text-primary" />
+            : <Square size={15} className="text-muted-foreground/50" />
+          }
+        </button>
+
         <div className="w-8 h-8 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm mt-0.5">
           {lead.profile_picture_url ? (
             <img src={lead.profile_picture_url} alt={lead.name || ''} className="w-full h-full object-cover" loading="lazy" />
@@ -285,6 +307,11 @@ export default function CrmPage() {
   const [loadError, setLoadError] = useState(false);
   const [exporting, setExporting] = useState(false);
 
+  // Bulk actions
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [bulkTargetStage, setBulkTargetStage] = useState('');
+  const [bulkMoving, setBulkMoving] = useState(false);
+
   // Modal de motivo de perda
   const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
   const [lossReason, setLossReason] = useState('');
@@ -420,6 +447,46 @@ export default function CrmPage() {
         l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
       ));
       showError('Erro ao mover lead. Tente novamente.');
+    }
+  };
+
+  const toggleSelect = (leadId: string) => {
+    setSelectedLeads(prev => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedLeads(new Set());
+    setBulkTargetStage('');
+  };
+
+  const bulkMoveLeads = async () => {
+    if (!bulkTargetStage || selectedLeads.size === 0 || bulkMoving) return;
+    // Não permite bulk move para PERDIDO (exige motivo) ou FINALIZADO (exige validações)
+    if (bulkTargetStage === 'PERDIDO' || bulkTargetStage === 'FINALIZADO') {
+      showError('Mova leads para PERDIDO ou FINALIZADO individualmente (requerem validações).');
+      return;
+    }
+    setBulkMoving(true);
+    const ids = [...selectedLeads];
+    // Otimismo: atualiza todos de vez
+    setLeads(prev => prev.map(l =>
+      ids.includes(l.id) ? { ...l, stage: bulkTargetStage, stage_entered_at: new Date().toISOString() } : l
+    ));
+    try {
+      await Promise.all(ids.map(id => api.patch(`/leads/${id}/stage`, { stage: bulkTargetStage })));
+      showSuccess(`${ids.length} lead(s) movidos para ${findStage(bulkTargetStage)?.label ?? bulkTargetStage}.`);
+      clearSelection();
+    } catch {
+      // Rollback parcial — rebusca do servidor
+      fetchLeads(true);
+      showError('Erro ao mover alguns leads. A lista foi atualizada.');
+    } finally {
+      setBulkMoving(false);
     }
   };
 
@@ -689,6 +756,9 @@ export default function CrmPage() {
                           onDragEnd={() => { setDraggingId(null); setDragOverStage(null); }}
                           onOpen={() => openInChat(lead)}
                           onStageChange={(newStage) => moveLeadToStage(lead.id, newStage)}
+                          isSelected={selectedLeads.has(lead.id)}
+                          onToggleSelect={() => toggleSelect(lead.id)}
+                          selectionMode={selectedLeads.size > 0}
                         />
                       ))}
 
@@ -707,6 +777,42 @@ export default function CrmPage() {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* Barra de ações em massa */}
+        {selectedLeads.size > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-card border border-border rounded-2xl shadow-2xl shadow-black/30 backdrop-blur-sm">
+            <span className="text-[13px] font-semibold text-foreground">
+              {selectedLeads.size} lead{selectedLeads.size !== 1 ? 's' : ''} selecionado{selectedLeads.size !== 1 ? 's' : ''}
+            </span>
+            <div className="w-px h-5 bg-border" />
+            <div className="flex items-center gap-2">
+              <select
+                value={bulkTargetStage}
+                onChange={e => setBulkTargetStage(e.target.value)}
+                className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+              >
+                <option value="">Mover para…</option>
+                {CRM_STAGES.filter(s => s.id !== 'PERDIDO' && s.id !== 'FINALIZADO').map(s => (
+                  <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>
+                ))}
+              </select>
+              <button
+                onClick={bulkMoveLeads}
+                disabled={!bulkTargetStage || bulkMoving}
+                className="px-4 py-1.5 text-[12px] rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {bulkMoving ? 'Movendo…' : 'Mover'}
+              </button>
+            </div>
+            <button
+              onClick={clearSelection}
+              className="ml-1 w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              title="Cancelar seleção"
+            >
+              <XIcon size={14} />
+            </button>
           </div>
         )}
 
