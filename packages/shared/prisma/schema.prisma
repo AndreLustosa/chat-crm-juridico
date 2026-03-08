@@ -37,6 +37,7 @@ model User {
   assigned_convos Conversation[] @relation("AssignedUser")
   lawyer_convos   Conversation[] @relation("AssignedLawyer")
   lead_notes      LeadNote[]
+  stage_history_actor LeadStageHistory[] @relation("StageHistoryActor")
   inboxes         Inbox[]
   sectors         Sector[]       @relation("SectorUsers")
   tasks           Task[]
@@ -75,6 +76,7 @@ model Lead {
   calendar_events    CalendarEvent[]
   last_followup_at   DateTime?
   notes              LeadNote[]
+  stage_history      LeadStageHistory[]
 
   @@index([tenant_id, phone])
   @@index([stage])
@@ -546,6 +548,25 @@ model Holiday {
   tenant           Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, date])
+}
+
+// ===============================================
+// Lead Stage History (histórico de mudanças de estágio)
+// ===============================================
+
+model LeadStageHistory {
+  id          String   @id @default(uuid())
+  lead_id     String
+  from_stage  String?
+  to_stage    String
+  actor_id    String?
+  loss_reason String?
+  created_at  DateTime @default(now())
+
+  lead        Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  actor       User?    @relation("StageHistoryActor", fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([lead_id, created_at])
 }
 
 // ===============================================
