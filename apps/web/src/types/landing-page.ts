@@ -6,6 +6,8 @@ export interface LPHero {
   ctaLink?: string;
   lawyerImage?: string;
   oab?: string;
+  backgroundDesktop?: string;
+  backgroundMobile?: string;
 }
 
 export interface LPStep {
