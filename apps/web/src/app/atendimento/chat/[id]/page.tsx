@@ -400,12 +400,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     }
   };
 
-  // Restaura foco no textarea sempre que terminar de enviar
+  // Mantém foco no textarea: ao abrir chat, trocar conversa, e após envio
   useEffect(() => {
-    if (!sending) {
-      inputRef.current?.focus();
-    }
-  }, [sending]);
+    const timer = setTimeout(() => inputRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
+  }, [convoId, sending]);
 
   // ── Socket + data fetch ───────────────────────────────────────────────────
 
@@ -1064,6 +1063,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                     }
                   }}
                   placeholder="Digite sua mensagem..."
+                  autoFocus
                   className="w-full bg-card border border-border rounded-xl pl-5 pr-24 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground resize-none overflow-y-auto leading-relaxed"
                   style={{ minHeight: '56px', maxHeight: '160px' }}
                 />
