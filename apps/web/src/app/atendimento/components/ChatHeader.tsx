@@ -13,33 +13,6 @@ function getInitial(name?: string) {
   return (name || 'V')[0].toUpperCase();
 }
 
-// ─── Lead Score ─────────────────────────────────────────────────────────────
-
-const STAGE_BASE_SCORES: Record<string, number> = {
-  NOVO: 10, INICIAL: 15, EM_ATENDIMENTO: 25, QUALIFICANDO: 35, QUALIFICADO: 40,
-  AGUARDANDO_FORM: 50, REUNIAO_AGENDADA: 65, AGUARDANDO_DOCS: 70,
-  AGUARDANDO_PROC: 80, FINALIZADO: 100, PERDIDO: 0,
-};
-
-function computeScore(conv: ConversationSummary): number {
-  const stage = normalizeStage(conv.leadStage || '');
-  let score = STAGE_BASE_SCORES[stage] ?? 20;
-  if (conv.legalArea) score += 8;
-  if (conv.assignedLawyerId) score += 5;
-  if (conv.nextStep && conv.nextStep !== 'duvidas') score += 5;
-  if (conv.stageEnteredAt) {
-    const days = Math.floor((Date.now() - new Date(conv.stageEnteredAt).getTime()) / 86400000);
-    if (days > 3) score -= Math.min(25, (days - 3) * 3);
-  }
-  return Math.max(0, Math.min(100, Math.round(score)));
-}
-
-function scoreStyle(score: number): string {
-  if (score >= 70) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
-  if (score >= 45) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
-  if (score >= 20) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
-  return 'text-red-400 bg-red-500/10 border-red-500/20';
-}
 
 export interface ChatHeaderProps {
   selected: ConversationSummary;
@@ -250,20 +223,6 @@ export function ChatHeader({
                 )}
               </div>
             )}
-            {/* Score do lead */}
-            {(() => {
-              const stage = normalizeStage(selected.leadStage || '');
-              if (stage === 'PERDIDO' || stage === 'FINALIZADO') return null;
-              const score = computeScore(selected);
-              return (
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border tabular-nums ${scoreStyle(score)}`}
-                  title={`Score do lead: ${score}/100`}
-                >
-                  {score}
-                </span>
-              );
-            })()}
           </div>
         </div>
       </div>

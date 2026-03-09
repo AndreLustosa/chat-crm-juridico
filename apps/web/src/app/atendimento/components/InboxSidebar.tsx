@@ -45,6 +45,34 @@ function getInitial(name?: string) {
   return (name || 'V')[0].toUpperCase();
 }
 
+// ─── Lead Score ──────────────────────────────────────────────────
+
+const STAGE_BASE_SCORES: Record<string, number> = {
+  NOVO: 10, INICIAL: 15, EM_ATENDIMENTO: 25, QUALIFICANDO: 35, QUALIFICADO: 40,
+  AGUARDANDO_FORM: 50, REUNIAO_AGENDADA: 65, AGUARDANDO_DOCS: 70,
+  AGUARDANDO_PROC: 80, FINALIZADO: 100, PERDIDO: 0,
+};
+
+function computeScore(conv: ConversationSummary): number {
+  const stage = normalizeStage(conv.leadStage || '');
+  let score = STAGE_BASE_SCORES[stage] ?? 20;
+  if (conv.legalArea) score += 8;
+  if (conv.assignedLawyerId) score += 5;
+  if (conv.nextStep && conv.nextStep !== 'duvidas') score += 5;
+  if (conv.stageEnteredAt) {
+    const days = Math.floor((Date.now() - new Date(conv.stageEnteredAt).getTime()) / 86400000);
+    if (days > 3) score -= Math.min(25, (days - 3) * 3);
+  }
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function scoreStyle(score: number): string {
+  if (score >= 70) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  if (score >= 45) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
+  if (score >= 20) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+  return 'text-red-400 bg-red-500/10 border-red-500/20';
+}
+
 function statusBadge(status: string) {
   const map: Record<string, { class: string; label: string }> = {
     BOT: { class: 'bg-slate-500/15 text-slate-400 border border-slate-500/20', label: '🤖 SophIA' },
@@ -304,16 +332,32 @@ export function InboxSidebar({
                     `}
                   >
                     {selectedId === conv.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />}
-                    <div
-                      className={`w-11 h-11 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shrink-0 shadow-sm ${conv.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                      onClick={conv.profile_picture_url ? (e) => { e.stopPropagation(); onLightbox(conv.profile_picture_url!); } : undefined}
-                      title={conv.profile_picture_url ? 'Ver foto ampliada' : undefined}
-                    >
-                      {conv.profile_picture_url ? (
-                        <img src={conv.profile_picture_url} alt={conv.contactName} className="w-full h-full object-cover" loading="lazy" />
-                      ) : (
-                        <span className="text-foreground font-bold text-lg">{getInitial(conv.contactName)}</span>
-                      )}
+                    {/* Avatar + score badge */}
+                    <div className="flex flex-col items-center gap-0.5 shrink-0">
+                      <div
+                        className={`w-11 h-11 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm ${conv.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                        onClick={conv.profile_picture_url ? (e) => { e.stopPropagation(); onLightbox(conv.profile_picture_url!); } : undefined}
+                        title={conv.profile_picture_url ? 'Ver foto ampliada' : undefined}
+                      >
+                        {conv.profile_picture_url ? (
+                          <img src={conv.profile_picture_url} alt={conv.contactName} className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <span className="text-foreground font-bold text-lg">{getInitial(conv.contactName)}</span>
+                        )}
+                      </div>
+                      {(() => {
+                        const stage = normalizeStage(conv.leadStage || '');
+                        if (stage === 'PERDIDO' || stage === 'FINALIZADO' || !conv.leadStage) return null;
+                        const score = computeScore(conv);
+                        return (
+                          <span
+                            className={`text-[9px] font-bold tabular-nums px-1.5 rounded-full border leading-[14px] ${scoreStyle(score)}`}
+                            title={`Score do lead: ${score}/100`}
+                          >
+                            {score}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-0.5">
