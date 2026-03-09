@@ -341,6 +341,7 @@ export default function CrmPage() {
   const [sortBy, setSortBy] = useState<'activity' | 'score'>('activity');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  const [dragOverPerdido, setDragOverPerdido] = useState(false);
   const [previousStageMap, setPreviousStageMap] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -597,7 +598,7 @@ export default function CrmPage() {
           <div className="flex-1">
             <h1 className="text-xl font-bold text-foreground tracking-tight">CRM Pipeline</h1>
             <p className="text-[12px] text-muted-foreground mt-0.5">
-              {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} {searchQuery || activeFilterCount > 0 ? 'filtrados' : 'no total'}
+              {filteredLeads.filter(l => normalizeStage(l.stage) !== 'PERDIDO').length} lead{filteredLeads.filter(l => normalizeStage(l.stage) !== 'PERDIDO').length !== 1 ? 's' : ''} {searchQuery || activeFilterCount > 0 ? 'filtrados' : 'no total'}
               {activeFilterCount > 0 && (
                 <button
                   onClick={() => { setAreaFilter(''); setLawyerFilter(''); setTagFilter(''); setAgingFilter(''); }}
@@ -739,10 +740,10 @@ export default function CrmPage() {
             onMouseUp={handleBoardMouseUp}
             onMouseLeave={handleBoardMouseUp}
           >
-            <div className="flex h-full gap-4" style={{ minWidth: `${CRM_STAGES.length * 272}px` }}>
-              {CRM_STAGES.map(stage => {
+            <div className="flex h-full gap-4" style={{ minWidth: `${(CRM_STAGES.length - 1) * 272}px` }}>
+              {CRM_STAGES.filter(s => s.id !== 'PERDIDO').map(stage => {
                 const stageLeads = getStageLeads(stage.id);
-                const isTerminal = stage.id === 'PERDIDO' || stage.id === 'FINALIZADO';
+                const isTerminal = stage.id === 'FINALIZADO';
                 const isDragTarget = dragOverStage === stage.id;
                 const agingCount = stageLeads.filter(l => daysInStage(l.stage_entered_at) > 5).length;
 
@@ -865,6 +866,39 @@ export default function CrmPage() {
             >
               <XIcon size={14} />
             </button>
+          </div>
+        )}
+
+        {/* ── Drop zone PERDIDO (aparece ao arrastar qualquer card) ── */}
+        {draggingId && (
+          <div
+            className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-4 rounded-2xl border-2 border-dashed transition-all duration-150 select-none ${
+              dragOverPerdido
+                ? 'bg-red-500/15 border-red-500 scale-105 shadow-lg shadow-red-500/20'
+                : 'bg-background/95 border-red-400/50 shadow-xl shadow-black/20 backdrop-blur-sm'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverPerdido(true); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverPerdido(false); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOverPerdido(false);
+              setDragOverStage(null);
+              if (draggingId) moveLeadToStage(draggingId, 'PERDIDO');
+            }}
+          >
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+              dragOverPerdido ? 'bg-red-500' : 'bg-red-500/15'
+            }`}>
+              <XIcon size={20} className={dragOverPerdido ? 'text-white' : 'text-red-400'} />
+            </div>
+            <div>
+              <p className={`text-sm font-bold leading-tight transition-colors ${
+                dragOverPerdido ? 'text-red-400' : 'text-foreground'
+              }`}>
+                {dragOverPerdido ? 'Soltar para marcar como Perdido' : 'Arraste aqui → Perdido'}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Arquivado após informar o motivo</p>
+            </div>
           </div>
         )}
 
