@@ -59,6 +59,7 @@ const NEXT_STEP_LABELS: Record<string, string> = {
   documentos:        '📎 Documentos',
   procuracao:        '✍️ Procuração',
   encerrado:         '🔒 Encerrado',
+  perdido:           '❌ Perdido',
 };
 
 export interface MessageBubbleProps {

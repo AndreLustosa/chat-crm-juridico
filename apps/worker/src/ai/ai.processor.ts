@@ -361,13 +361,22 @@ export class AiProcessor extends WorkerHost {
         procuracao:        'AGUARDANDO_PROC',
         encerrado:         'FINALIZADO',
         triagem_concluida: 'QUALIFICANDO',
+        perdido:           'PERDIDO',
       };
       const inferred = inferMap[updates.next_step];
       if (inferred) {
-        await this.prisma.lead.update({ where: { id: leadId }, data: { stage: inferred } });
+        const stageData: Record<string, any> = { stage: inferred, stage_entered_at: new Date() };
+        // Quando lead é perdido, salvar motivo se fornecido
+        if (inferred === 'PERDIDO' && updates.loss_reason) {
+          stageData.loss_reason = updates.loss_reason;
+        }
+        await this.prisma.lead.update({ where: { id: leadId }, data: stageData });
         resolvedStage = inferred;
-        this.logger.log(`[AI] Stage inferido do next_step "${updates.next_step}": ${inferred}`);
+        this.logger.log(`[AI] Stage inferido do next_step "${updates.next_step}": ${inferred}${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
       }
+    } else if (updates.status === 'PERDIDO' && updates.loss_reason) {
+      // Se a IA enviou PERDIDO diretamente no status, salvar loss_reason também
+      await this.prisma.lead.update({ where: { id: leadId }, data: { loss_reason: updates.loss_reason } });
     }
 
     // === AUTOMAÇÃO: Criar tarefas automáticas baseado no novo stage ===
@@ -1126,7 +1135,17 @@ Quando o next_step for "reuniao" ou o cliente quiser agendar uma reunião/consul
 NUNCA agende sem confirmação do cliente. SEMPRE mostre opções primeiro.
 Se não houver horários disponíveis, informe que entrará em contato quando houver vagas.
 
+DESISTÊNCIA DO CLIENTE:
+Quando o cliente EXPLICITAMENTE disser que não quer mais continuar, que não tem interesse, que vai resolver com outro escritório, ou que não deseja prosseguir:
+- Use next_step = "perdido" (NUNCA "encerrado" nesses casos)
+- Use status = "PERDIDO"
+- Inclua loss_reason resumido em português (ex: "Sem interesse", "Vai resolver sozinho", "Contratou outro escritório", "Não respondeu mais")
+- Encerre gentilmente: agradeça, deixe a porta aberta para retornar
+
+Use next_step = "encerrado" + status = "FINALIZADO" APENAS quando o processo foi concluído com SUCESSO (cliente assinou, contratou o escritório, caso entregue ao advogado).
+
 `;
+
 
       // Instrução de form_data injetada APÓS o prompt da skill (sobrescreve o JSON schema da skill)
       const FORM_DATA_INJECTION = `
@@ -1217,7 +1236,10 @@ Quando next_step = "formulario", inclua o link na reply:
 "Já temos quase todas as informações! Preenchi a ficha com o que você me informou. Agora preciso que você acesse o link abaixo para conferir os dados, completar o que faltar (como endereço e CPF se não informou) e finalizar: {{form_url}}"
 
 FORMATO DO JSON:
-{"reply":"texto","updates":{"name":"João","status":"QUALIFICANDO","area":"Trabalhista","lead_summary":"resumo","next_step":"duvidas","notes":"","form_data":{"nome_completo":"João da Silva","nome_empregador":"Empresa X","funcao":"Operador","salario":"2000","fazia_horas_extras":"Sim"}},"scheduling_action":null}
+{"reply":"texto","updates":{"name":"João","status":"QUALIFICANDO","area":"Trabalhista","lead_summary":"resumo","next_step":"duvidas","notes":"","loss_reason":null,"form_data":{"nome_completo":"João da Silva","nome_empregador":"Empresa X","funcao":"Operador","salario":"2000","fazia_horas_extras":"Sim"}},"scheduling_action":null}
+
+Valores válidos para updates.next_step: duvidas | triagem_concluida | formulario | reuniao | documentos | procuracao | encerrado | perdido
+updates.loss_reason: motivo da perda em português (ex: "Sem interesse"). Obrigatório quando next_step="perdido". Null nos demais casos.
 
 scheduling_action: Use SOMENTE quando agendar reunião.
 - Para confirmar horário: {"action":"confirm_slot","date":"2026-03-10","time":"09:00"}
@@ -1247,10 +1269,11 @@ ROTEIRO (siga na ordem, UMA pergunta por vez):
 4. Pergunte se possui documentos ou provas (contrato, mensagens, fotos, etc.).
 5. Quando tiver informações suficientes, informe que o advogado vai analisar e oriente o próximo passo.
 
-Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":"","form_data":null},"scheduling_action":null}
+Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":"","loss_reason":null,"form_data":null},"scheduling_action":null}
 
 Valores válidos para updates.status: INICIAL | QUALIFICANDO | AGUARDANDO_FORM | REUNIAO_AGENDADA | AGUARDANDO_DOCS | AGUARDANDO_PROC | FINALIZADO | PERDIDO
-Valores válidos para updates.next_step: duvidas | triagem_concluida | formulario | reuniao | documentos | procuracao | encerrado
+Valores válidos para updates.next_step: duvidas | triagem_concluida | formulario | reuniao | documentos | procuracao | encerrado | perdido
+updates.loss_reason: motivo da perda em português (ex: "Sem interesse"). Obrigatório quando next_step="perdido". Null nos demais casos.
 form_data: objeto com campos trabalhistas extraídos (só quando area=Trabalhista). Null quando não se aplica.
 scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} quando confirmar agendamento. Null quando não se aplica.`;
         model = await this.settings.getDefaultModel();
