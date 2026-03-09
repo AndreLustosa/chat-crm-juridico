@@ -97,18 +97,6 @@ export function TrabalhistaTemplate({
             />
           </button>
 
-          {/* Desktop badges */}
-          <div className="hidden md:flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-[#1a1a1a]/60 backdrop-blur-sm text-white px-4 py-2 rounded-lg border border-[#A89048]/30 text-sm">
-              <Shield size={16} className="text-[#A89048]" />
-              <span className="font-semibold">Segurança</span>
-            </div>
-            <div className="flex items-center gap-2 bg-[#1a1a1a]/60 backdrop-blur-sm text-white px-4 py-2 rounded-lg border border-[#A89048]/30 text-sm">
-              <Scale size={16} className="text-[#A89048]" />
-              <span className="font-semibold">Competência</span>
-            </div>
-          </div>
-
           {/* Mobile hamburger */}
           <div className="md:hidden">
             <button
@@ -131,7 +119,7 @@ export function TrabalhistaTemplate({
                 {id === "about" ? "Sobre" : id === "steps" ? "Processo" : id === "areas" ? "Serviços" : "FAQ"}
               </button>
             ))}
-            <button onClick={handleCtaClick} className="bg-[#A89048] text-white font-bold py-3 rounded-lg text-sm uppercase tracking-wider">
+            <button onClick={handleCtaClick} className="bg-[#25D366] text-white font-bold py-3 rounded-lg text-sm uppercase tracking-wider">
               Falar com Advogado
             </button>
           </div>
@@ -141,22 +129,50 @@ export function TrabalhistaTemplate({
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* HERO — Estilo da LP de referência */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      <section className="relative min-h-[90vh] md:min-h-[85vh] w-full flex items-center overflow-hidden">
-        {/* Background Image */}
+      <section className="relative min-h-[100vh] md:min-h-[85vh] w-full flex items-center overflow-hidden">
+        {/* Background Image — responsivo com picture */}
         <div className="absolute inset-0 z-0">
-          <Image
-            src={hero.backgroundDesktop || "/landing/carteira-trabalho-hero.webp"}
-            alt="Carteira de Trabalho"
-            fill
-            className="object-cover"
-            priority
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#1a1a1a]/85 via-[#1a1a1a]/60 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a1a]/70 via-transparent to-[#1a1a1a]/30" />
+          <picture>
+            <source
+              media="(min-width: 768px)"
+              srcSet={hero.backgroundDesktop || "/landing/carteira-trabalho-hero.webp"}
+            />
+            <img
+              src={hero.backgroundMobile || "/landing/carteira-trabalho-mobile.webp"}
+              alt="Carteira de Trabalho"
+              className="absolute inset-0 w-full h-full object-cover md:object-center object-top"
+              fetchPriority="high"
+            />
+          </picture>
+        </div>
+        {/* Overlay — mais leve como na referência */}
+        <div className="absolute inset-0 z-[1] bg-gradient-to-r from-[#1a1a1a]/75 via-[#1a1a1a]/45 to-[#1a1a1a]/20" />
+        <div className="absolute inset-0 z-[1] bg-gradient-to-t from-[#1a1a1a]/50 via-transparent to-[#1a1a1a]/20" />
+
+        {/* Watermark — texto lateral como na referência */}
+        <div className="absolute right-6 md:right-12 top-1/2 -translate-y-1/2 z-[2] hidden lg:block pointer-events-none select-none">
+          <p
+            className="text-white/[0.06] text-[4.5rem] font-black uppercase leading-none tracking-[0.15em]"
+            style={{ fontFamily: "var(--font-playfair), serif", writingMode: "vertical-rl", textOrientation: "mixed" }}
+          >
+            André Lustosa Advogados
+          </p>
         </div>
 
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-16 w-full">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-16 w-full">
           <div className="max-w-2xl">
+            {/* Badges — abaixo do logo, à esquerda, como na referência */}
+            <div className="flex items-center gap-3 mb-6 mt-2">
+              <div className="flex items-center gap-2 bg-[#1a1a1a]/50 backdrop-blur-sm text-white px-3 py-1.5 rounded-md border border-[#A89048]/30 text-xs">
+                <Shield size={14} className="text-[#A89048]" />
+                <span className="font-semibold">Segurança</span>
+              </div>
+              <div className="flex items-center gap-2 bg-[#1a1a1a]/50 backdrop-blur-sm text-white px-3 py-1.5 rounded-md border border-[#A89048]/30 text-xs">
+                <Scale size={14} className="text-[#A89048]" />
+                <span className="font-semibold">Competência</span>
+              </div>
+            </div>
+
             {/* Title */}
             <h1 className="text-white leading-[1.05] mb-8">
               <span className="block text-[clamp(2.5rem,6vw,4.5rem)] font-black" style={{ fontFamily: "var(--font-playfair), serif" }}>
@@ -173,28 +189,23 @@ export function TrabalhistaTemplate({
             {/* Subtitle */}
             {hero.subtitle && (
               <p className="text-white font-bold text-[clamp(1rem,2vw,1.35rem)] leading-relaxed mb-4">
-                &ldquo;{hero.subtitle}&rdquo;
+                &quot;{hero.subtitle}&quot;
               </p>
             )}
 
             {hero.secondarySubtitle && (
-              <p className="text-[#A89048] text-[clamp(0.95rem,1.5vw,1.15rem)] leading-relaxed mb-10 max-w-xl">
-                &ldquo;{hero.secondarySubtitle}&rdquo;
+              <p className="text-white/80 text-[clamp(0.95rem,1.5vw,1.15rem)] leading-relaxed mb-10 max-w-xl">
+                &quot;{hero.secondarySubtitle}&quot;
               </p>
             )}
 
-            {/* CTA Button — Premium Gold */}
-            <Button
+            {/* CTA Button — Verde como na referência */}
+            <button
               onClick={handleCtaClick}
-              size="lg"
-              className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-lg md:text-xl px-10 py-7 rounded-lg shadow-[0_30px_50px_rgba(168,144,72,0.2)] uppercase tracking-widest transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+              className="bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-lg md:text-xl px-10 py-5 rounded-xl shadow-[0_10px_40px_rgba(37,211,102,0.35)] uppercase tracking-wider transition-all duration-300 hover:scale-105 hover:shadow-[0_15px_50px_rgba(37,211,102,0.45)]"
             >
-              <span className="btn-premium-glow-overlay" />
-              <span className="relative z-10 flex items-center">
-                FALAR COM ADVOGADO
-                <ChevronRight className="ml-2 w-6 h-6" />
-              </span>
-            </Button>
+              FALAR COM ADVOGADO
+            </button>
           </div>
         </div>
       </section>

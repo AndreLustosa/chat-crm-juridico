@@ -18,6 +18,7 @@ const staticContent: LPTemplateContent = {
     ctaText: "Falar com Advogado Trabalhista",
     ctaLink: "https://wa.me/5582996390799",
     backgroundDesktop: "/landing/carteira-trabalho-hero.webp",
+    backgroundMobile: "/landing/carteira-trabalho-mobile.webp",
   },
   practiceAreas: [
     {
