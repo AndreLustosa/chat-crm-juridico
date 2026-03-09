@@ -392,12 +392,13 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           return [...prev, res.data];
         });
       }
-      inputRef.current?.focus();
     } catch (e) {
       console.error('Falha ao enviar mensagem', e);
       setText(msgText);
     } finally {
       setSending(false);
+      // Focus após setSending(false): o textarea só fica habilitado depois do re-render
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   };
 
