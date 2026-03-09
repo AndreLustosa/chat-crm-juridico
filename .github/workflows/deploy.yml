@@ -1,4 +1,4 @@
-name: Build, Push and Deploy to VPS
+name: Build and Push to Docker Hub
 
 on:
   push:
@@ -48,50 +48,6 @@ jobs:
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build-args }}
           push: true
-          # Tag :latest sobrescreve a anterior — sem acúmulo de versões
           tags: andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:latest
-          # Cache armazenado no próprio Docker Hub (grátis, não usa storage do GitHub)
           cache-from: type=registry,ref=andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:cache
           cache-to: type=registry,ref=andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:cache,mode=max
-
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            set -e
-            echo "=== Pulling latest images ==="
-            docker pull andreflustosa/chat-crm-juridico-api:latest
-            docker pull andreflustosa/chat-crm-juridico-worker:latest
-            docker pull andreflustosa/chat-crm-juridico-web:latest
-
-            echo "=== Updating Swarm services ==="
-            docker service update \
-              --image andreflustosa/chat-crm-juridico-api:latest \
-              --with-registry-auth \
-              --update-parallelism 1 \
-              --update-delay 5s \
-              lustosaadvogados_crm-api
-
-            docker service update \
-              --image andreflustosa/chat-crm-juridico-worker:latest \
-              --with-registry-auth \
-              --update-parallelism 1 \
-              --update-delay 5s \
-              lustosaadvogados_crm-worker
-
-            docker service update \
-              --image andreflustosa/chat-crm-juridico-web:latest \
-              --with-registry-auth \
-              --update-parallelism 1 \
-              --update-delay 5s \
-              lustosaadvogados_crm-web
-
-            echo "=== Deploy concluido ==="
-            docker service ls | grep lustosaadvogados
