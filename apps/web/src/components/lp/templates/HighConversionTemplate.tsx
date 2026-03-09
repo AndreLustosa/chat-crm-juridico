@@ -399,7 +399,7 @@ export function HighConversionTemplate({
           {/* Desktop Background */}
           <div className="hidden md:block absolute inset-0">
             <Image
-              src="/landing/Design sem nome (35).png"
+              src={hero.backgroundDesktop || "/landing/Design sem nome (35).png"}
               alt="Fundo Escritório Desktop"
               fill
               className="object-cover object-top"
@@ -409,7 +409,7 @@ export function HighConversionTemplate({
           {/* Mobile Background */}
           <div className="md:hidden absolute inset-0">
             <Image
-              src="/landing/Design sem nome (26).png"
+              src={hero.backgroundMobile || hero.backgroundDesktop || "/landing/Design sem nome (26).png"}
               alt="Fundo Escritório Mobile"
               fill
               className="object-cover object-top"

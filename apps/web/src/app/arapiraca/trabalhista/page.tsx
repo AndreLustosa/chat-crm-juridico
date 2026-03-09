@@ -17,6 +17,7 @@ const staticContent: LPTemplateContent = {
       "Advogados em Arapiraca especialistas em reverter Justa Causa, Rescisão indireta e Verbas Rescisórias. Análise do seu caso sem compromisso.",
     ctaText: "Falar com Advogado Trabalhista",
     ctaLink: "https://wa.me/5582996390799",
+    backgroundDesktop: "/landing/carteira-trabalho-hero.webp",
   },
   practiceAreas: [
     {
