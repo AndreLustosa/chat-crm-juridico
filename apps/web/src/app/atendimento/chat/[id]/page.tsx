@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Send, Bot, BotOff, Download, Mic, FileText, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, Pencil, UserCheck, ChevronDown, CornerUpLeft, ClipboardList } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -371,6 +371,13 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     }
   };
 
+  // ── Foco robusto no textarea ────────────────────────────────────────────
+  const focusInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }, []);
+
   const handleSend = async () => {
     if (!text.trim() || !convoId || sending) return;
     const msgText = text;
@@ -380,6 +387,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     setReplyingTo(null);
     // Reset textarea height after clearing
     if (inputRef.current) { inputRef.current.style.height = '56px'; }
+    // Foco síncrono — dentro da call-stack do gesto do usuário (Enter / click)
+    inputRef.current?.focus();
     try {
       const res = await api.post('/messages/send', {
         conversationId: convoId,
@@ -397,14 +406,23 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       setText(msgText);
     } finally {
       setSending(false);
+      // Foco após re-render do React
+      focusInput();
     }
   };
 
-  // Mantém foco no textarea: ao abrir chat, trocar conversa, e após envio
+  // Foco ao abrir chat / trocar conversa — múltiplas tentativas para cobrir hidratação
   useEffect(() => {
-    const timer = setTimeout(() => inputRef.current?.focus(), 50);
-    return () => clearTimeout(timer);
-  }, [convoId, sending]);
+    const timers = [0, 100, 300, 600].map(delay =>
+      setTimeout(() => inputRef.current?.focus(), delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [convoId]);
+
+  // Foco quando o envio termina
+  useEffect(() => {
+    if (!sending) focusInput();
+  }, [sending, focusInput]);
 
   // ── Socket + data fetch ───────────────────────────────────────────────────
 
