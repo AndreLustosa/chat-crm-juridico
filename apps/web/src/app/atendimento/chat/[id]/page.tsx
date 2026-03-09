@@ -371,29 +371,53 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     }
   };
 
-  // ── Foco robusto no textarea ────────────────────────────────────────────
+  // ── Foco robusto no textarea (padrão Slack / WhatsApp Web) ──────────────
 
-  // Callback ref: foca o textarea assim que o React o anexa ao DOM
+  // Callback ref: armazena referência quando React anexa ao DOM
   const attachInputRef = useCallback((node: HTMLTextAreaElement | null) => {
     inputRef.current = node;
-    if (node) {
-      // Tenta foco imediato + retries escalonados para cobrir hidratação SSR
-      node.focus();
-      [100, 300, 600, 1200].forEach(ms =>
-        setTimeout(() => {
-          if (document.activeElement !== node) node.focus();
-        }, ms),
-      );
-    }
+    if (node) node.focus();
   }, []);
 
-  // Clicar na área de mensagens foca o textarea (padrão WhatsApp Web)
+  // Clicar na área de mensagens foca o textarea
   const handleChatAreaClick = useCallback((e: React.MouseEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'AUDIO'].includes(tag)) return;
     if ((e.target as HTMLElement).closest('button, a, input, textarea')) return;
     inputRef.current?.focus();
   }, []);
+
+  // ── Global keyboard redirect ──────────────────────────────────────────
+  // Intercepta teclas digitadas em qualquer lugar da página e redireciona
+  // para o textarea. Mesmo padrão usado pelo Slack, Discord e WhatsApp Web.
+  // Isso garante que o usuário pode abrir uma conversa e simplesmente começar
+  // a digitar, sem precisar clicar no campo de texto.
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const node = inputRef.current;
+      if (!node) return;
+      // Se a conversa está fechada, não intercepta
+      if (convoStatus === 'FECHADO') return;
+      // Se já está no textarea principal, não faz nada
+      if (document.activeElement === node) return;
+      // Não intercepta se o foco está em outro campo de input (busca, edição, etc.)
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (active.isContentEditable) return;
+      }
+      // Não intercepta teclas de atalho (Ctrl+C, Cmd+V, Alt+Tab, etc.)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Não intercepta teclas especiais (F1-F12, Escape, Tab, Arrow, etc.)
+      if (e.key.length > 1 && !['Backspace', 'Delete'].includes(e.key)) return;
+      // Foca o textarea — a tecla será processada naturalmente pelo browser
+      node.focus();
+    };
+
+    document.addEventListener('keydown', handleGlobalKeyDown);
+    return () => document.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [convoStatus]);
 
   const handleSend = async () => {
     if (!text.trim() || !convoId || sending) return;
@@ -1070,6 +1094,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 <textarea
                   ref={attachInputRef}
                   rows={1}
+                  tabIndex={1}
+                  autoFocus
                   value={text}
                   onChange={e => {
                     setText(e.target.value);
