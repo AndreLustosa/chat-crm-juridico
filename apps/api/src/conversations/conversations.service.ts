@@ -109,7 +109,7 @@ export class ConversationsService {
       include: {
         lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
         // Mensagens sao carregadas via GET /messages/conversation/:id com paginacao
-        messages: { orderBy: { created_at: 'desc' }, take: 100, include: { media: true } },
+        messages: { orderBy: { created_at: 'desc' }, take: 100, include: { media: true, skill: { select: { id: true, name: true, area: true } } } },
         assigned_user: { select: { id: true, name: true } },
       },
     });
@@ -132,7 +132,7 @@ export class ConversationsService {
       orderBy: { last_message_at: 'desc' },
       include: {
         lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
-        messages: { orderBy: { created_at: 'asc' }, take: 100, include: { media: true } },
+        messages: { orderBy: { created_at: 'asc' }, take: 100, include: { media: true, skill: { select: { id: true, name: true, area: true } } } },
         assigned_user: { select: { id: true, name: true } },
       },
     });
