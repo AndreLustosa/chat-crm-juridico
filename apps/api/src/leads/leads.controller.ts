@@ -32,10 +32,11 @@ export class LeadsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('stage') stage?: string,
   ) {
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search);
+    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search, stage);
   }
 
   @Get('check-phone')

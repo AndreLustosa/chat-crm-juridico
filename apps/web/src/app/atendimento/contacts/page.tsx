@@ -913,6 +913,8 @@ export default function ContactsPage() {
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   // 'active' = tela principal | 'archived' = tela de arquivados
   const [view, setView] = useState<'active' | 'archived'>('active');
+  const [archivedLeads, setArchivedLeads] = useState<Contact[]>([]);
+  const [loadingArchived, setLoadingArchived] = useState(false);
   const [showNewContact, setShowNewContact] = useState(false);
   const [isAdmin] = useState<boolean>(getIsAdminFromToken);
   // Paginacao
@@ -1000,20 +1002,58 @@ export default function ContactsPage() {
   };
 
   const handleUnarchive = async (contactId: string) => {
-    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, stage: 'INICIAL' } : c));
+    setArchivedLeads(prev => prev.filter(c => c.id !== contactId));
     try {
       await api.patch(`/leads/${contactId}/stage`, { stage: 'INICIAL' });
-      showSuccess('Contato desarquivado.');
+      showSuccess('Contato movido de volta para o CRM.');
     } catch {
-      fetchAllContacts();
-      showError('Erro ao desarquivar contato.');
+      fetchArchivedContacts();
+      showError('Erro ao mover contato.');
     }
   };
 
+  const fetchArchivedContacts = useCallback(async () => {
+    try {
+      setLoadingArchived(true);
+      const response = await api.get('/leads', { params: { stage: 'PERDIDO', limit: '500' } });
+      const result = response.data;
+      const leads = Array.isArray(result) ? result : (result.data || []);
+      const mapped: Contact[] = leads.map((lead: any) => ({
+        id: lead.id,
+        name: lead.name || 'Sem Nome',
+        phone: lead.phone,
+        email: lead.email || '-',
+        conversations: lead._count?.conversations || 0,
+        conversationId: lead.conversations?.[0]?.id || null,
+        lastMessage: lead.conversations?.[0]?.messages?.[0]?.text || '-',
+        origin: lead.origin || 'crm',
+        instanceName: lead.conversations?.[0]?.instance_name,
+        profile_picture_url: lead.profile_picture_url,
+        stage: 'PERDIDO',
+      }));
+      mapped.sort((a, b) => a.name.localeCompare(b.name));
+      setArchivedLeads(mapped);
+    } catch {
+      showError('Erro ao carregar contatos arquivados.');
+    } finally {
+      setLoadingArchived(false);
+    }
+  }, []);
+
+  // Carrega arquivados ao abrir a aba
+  useEffect(() => {
+    if (view === 'archived') fetchArchivedContacts();
+  }, [view, fetchArchivedContacts]);
+
   // Busca agora e server-side via debouncedSearch; filtragem local so por stage
-  const activeContacts  = contacts.filter(c => c.stage !== 'PERDIDO');
-  const archivedContacts = contacts.filter(c => c.stage === 'PERDIDO');
-  const archivedCount   = archivedContacts.length;
+  const activeContacts = contacts.filter(c => c.stage !== 'PERDIDO');
+  const archivedCount  = archivedLeads.length;
+  const filteredArchivedLeads = search.trim()
+    ? archivedLeads.filter(c =>
+        c.name.toLowerCase().includes(search.toLowerCase()) ||
+        c.phone.includes(search)
+      )
+    : archivedLeads;
 
   // ─── Tela de Arquivados ───────────────────────────────────────────────────
   if (view === 'archived') {
@@ -1047,24 +1087,34 @@ export default function ContactsPage() {
               </div>
             </div>
 
-            <div className="relative w-80 group">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-              <input
-                type="text"
-                placeholder="Buscar por nome ou telefone..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-[13px] focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-              />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={fetchArchivedContacts}
+                disabled={loadingArchived}
+                title="Recarregar arquivados"
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-[13px] font-medium border border-border bg-card hover:bg-accent transition-all text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={loadingArchived ? 'animate-spin' : ''} />
+              </button>
+              <div className="relative w-80 group">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                <input
+                  type="text"
+                  placeholder="Buscar por nome ou telefone..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-background border border-border rounded-xl text-[13px] focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+                />
+              </div>
             </div>
           </header>
 
           {/* Table */}
           <div className="flex-1 overflow-y-auto p-8 bg-foreground/[0.01]">
-            {loading ? (
+            {loadingArchived ? (
               <div className="flex flex-col items-center justify-center py-20 opacity-50">
                 <Loader2 className="w-10 h-10 animate-spin mb-4" />
-                <p className="text-sm font-medium">Carregando...</p>
+                <p className="text-sm font-medium">Carregando arquivados...</p>
               </div>
             ) : (
               <div className="rounded-2xl border border-red-500/20 bg-card shadow-sm overflow-hidden">
@@ -1078,7 +1128,7 @@ export default function ContactsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-red-500/[0.06]">
-                    {archivedContacts.map((contact) => (
+                    {filteredArchivedLeads.map((contact) => (
                       <tr key={contact.id} className="hover:bg-red-500/[0.03] transition-colors group">
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-4">
@@ -1116,7 +1166,7 @@ export default function ContactsPage() {
                         </td>
                       </tr>
                     ))}
-                    {archivedContacts.length === 0 && (
+                    {filteredArchivedLeads.length === 0 && (
                       <tr>
                         <td colSpan={4} className="py-20 text-center">
                           <div className="flex flex-col items-center opacity-30">

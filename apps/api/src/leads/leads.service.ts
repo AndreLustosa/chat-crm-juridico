@@ -32,10 +32,15 @@ export class LeadsService {
     return this.prisma.lead.create({ data });
   }
 
-  async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number, search?: string) {
+  async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number, search?: string, stage?: string) {
     const baseWhere: any = tenant_id
       ? { OR: [{ tenant_id }, { tenant_id: null }] }
       : {};
+
+    // Filtro por stage (ex: stage=PERDIDO para buscar arquivados)
+    if (stage) {
+      baseWhere.stage = stage;
+    }
 
     // Busca server-side por nome ou telefone
     if (search && search.trim()) {
