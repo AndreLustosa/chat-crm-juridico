@@ -1085,7 +1085,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                     }
                   }}
                   placeholder="Digite sua mensagem..."
-                  className="w-full bg-card border border-border rounded-xl pl-5 pr-24 py-4 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm text-foreground resize-none overflow-y-auto leading-relaxed"
+                  className="w-full bg-card border-2 border-primary/40 rounded-xl pl-5 pr-24 py-4 outline-none ring-2 ring-primary/30 focus:border-primary focus:ring-primary/60 shadow-sm text-foreground resize-none overflow-y-auto leading-relaxed"
                   style={{ minHeight: '56px', maxHeight: '160px' }}
                 />
                 <div className="absolute inset-y-0 right-3 flex items-center gap-1">
