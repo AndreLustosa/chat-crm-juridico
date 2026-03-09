@@ -1,4 +1,4 @@
-import { HighConversionTemplate } from "@/components/lp/templates/HighConversionTemplate";
+import { TrabalhistaTemplate } from "@/components/lp/templates/TrabalhistaTemplate";
 import { LPTracker } from "@/components/lp/LPTracker";
 import { LPTemplateContent } from "@/types/landing-page";
 import localFont from "next/font/local";
@@ -317,7 +317,7 @@ export default function LandingPageArapiracaTrabalhista() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
       <LPTracker />
-      <HighConversionTemplate
+      <TrabalhistaTemplate
         content={staticContent}
         whatsappNumber="+5582996390799"
       />
