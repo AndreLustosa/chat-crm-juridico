@@ -49,5 +49,4 @@ jobs:
           build-args: ${{ matrix.build-args }}
           push: true
           tags: andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:latest
-          cache-from: type=registry,ref=andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:cache
-          cache-to: type=registry,ref=andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:cache,mode=max
+          no-cache: true
