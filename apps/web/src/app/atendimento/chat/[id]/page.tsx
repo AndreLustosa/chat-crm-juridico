@@ -1110,7 +1110,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                       (async () => {
                         try {
                           await api.patch(`/conversations/${convoId}/ai-mode`, { ai_mode: false });
-                          toast?.({ description: '👤 IA pausada automaticamente pela digitação.' });
                         } catch (error) {
                           setAiMode(true);
                           console.error('Failed to auto-disable AI:', error);
