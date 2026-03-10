@@ -4,7 +4,6 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ContractsService, ContratoVariaveis } from './contracts.service';
-import { Request } from 'express';
 
 @UseGuards(JwtAuthGuard)
 @Controller('contracts')
@@ -29,7 +28,7 @@ export class ContractsController {
   @Post('trabalhista/send')
   async send(
     @Body() body: { conversationId: string; variaveis: ContratoVariaveis },
-    @Req() req: Request,
+    @Req() req: any,
   ) {
     // Deriva a URL pública da API a partir do request (igual ao sendAudio)
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
