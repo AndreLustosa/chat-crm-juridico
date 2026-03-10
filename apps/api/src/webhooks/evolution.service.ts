@@ -14,6 +14,30 @@ interface EvolutionWebhookPayload {
   data: any;
 }
 
+/**
+ * Extrai o melhor número de telefone de dois JIDs do Evolution API.
+ *
+ * O WhatsApp Multi-Device pode enviar LIDs (Linked Device Identifiers)
+ * como JID primário em alguns eventos. LIDs são números com 14+ dígitos
+ * (ex: "237791032135755") e NÃO são números de telefone reais.
+ * Números de telefone reais têm ≤13 dígitos (ex: "558291420467" = 55+DDD+número).
+ *
+ * Esta função sempre prefere o JID que parece um número de telefone real.
+ */
+function extractPhone(remoteJid: string, remoteJidAlt?: string): string {
+  const p1 = (remoteJid || '').split('@')[0];
+  const p2 = (remoteJidAlt || '').split('@')[0];
+
+  // Heurística: telefones reais têm no máximo 13 dígitos (DDI+DDD+número)
+  // LIDs do WhatsApp geralmente têm 14+ dígitos
+  const looksLikePhone = (p: string) => p.length > 0 && p.length <= 13;
+
+  if (!p2) return p1;
+  if (looksLikePhone(p2) && !looksLikePhone(p1)) return p2; // p1 é LID, p2 é telefone
+  if (!looksLikePhone(p2) && looksLikePhone(p1)) return p1; // p2 é LID, p1 é telefone
+  return p2 || p1; // Ambos parecem telefone (ou ambos LID) → mantém comportamento original
+}
+
 @Injectable()
 export class EvolutionService {
   private readonly logger = new Logger(EvolutionService.name);
@@ -87,7 +111,7 @@ export class EvolutionService {
         continue;
       }
 
-      const phone = (remoteJidAlt || remoteJid).split('@')[0];
+      const phone = extractPhone(remoteJid, remoteJidAlt);
       // pushName from outgoing messages (fromMe=true) is the business account name, not the client.
       // Only use it as the contact name for incoming messages.
       const isFromMe = key.fromMe === true;
@@ -322,7 +346,7 @@ export class EvolutionService {
       const remoteJid = (data.remoteJidAlt || data.remoteJid) as string;
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
-      const phone = remoteJid.split('@')[0];
+      const phone = extractPhone(data.remoteJid as string, data.remoteJidAlt as string);
       const pushName = (data.pushName as string) || (data.name as string) || null;
 
       // 1. Upsert Lead — two guards:
@@ -481,7 +505,7 @@ export class EvolutionService {
       const remoteJid = (data.id as string) || (data.remoteJid as string);
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
-      const phone = remoteJid.split('@')[0];
+      const phone = extractPhone(remoteJid, (data.remoteJidAlt as string) || (data.remoteJid as string));
       const name =
         (data.pushName as string) ||
         (data.name as string) ||
