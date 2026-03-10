@@ -805,18 +805,22 @@ export class AiProcessor extends WorkerHost {
     const parsed = JSON.parse(rawContent);
 
     if (parsed.lead || parsed.case || parsed.facts) {
+      // Prioridade para summary: updates do agente AI > gerado pelo modelo de memória > anterior
+      const newSummary =
+        latestUpdates?.lead_summary ||
+        parsed?.case?.summary ||
+        existing?.summary ||
+        '';
       await this.prisma.aiMemory.upsert({
         where: { lead_id: leadId },
         create: {
           lead_id: leadId,
-          summary:
-            latestUpdates?.lead_summary || existing?.summary || '',
+          summary: newSummary,
           facts_json: parsed,
         },
         update: {
           facts_json: parsed,
-          summary:
-            latestUpdates?.lead_summary || existing?.summary || '',
+          summary: newSummary,
           last_updated_at: new Date(),
           version: { increment: 1 },
         },
@@ -858,7 +862,44 @@ export class AiProcessor extends WorkerHost {
       });
 
       // 3. Verificar ai_mode ativo
-      if (!convo || !convo.ai_mode) return;
+      if (!convo) return;
+
+      // 3a. Mesmo sem ai_mode, atualiza Long Memory para conversas do operador humano.
+      // Isso garante que o "Resumo dos Fatos" seja atualizado mesmo quando um humano atende.
+      if (!convo.ai_mode) {
+        const inboundTotal = convo.messages.filter((m) => m.direction === 'in').length;
+        if (inboundTotal > 0) {
+          try {
+            const aiForMemory = new OpenAI({ apiKey: openAiKey });
+            const chronologicalMemory = [...convo.messages].reverse();
+            const historyForMemory = chronologicalMemory
+              .map((m: any) => {
+                const sender =
+                  m.direction === 'in'
+                    ? 'Cliente'
+                    : m.external_message_id?.startsWith('sys_')
+                      ? 'Sophia'
+                      : 'Operador';
+                const content =
+                  m.text ||
+                  (m.type === 'audio'
+                    ? '[áudio sem transcrição]'
+                    : m.type === 'image'
+                      ? `[imagem${m.media?.original_name ? ': ' + m.media.original_name : ''}]`
+                      : m.type === 'document'
+                        ? `[documento${m.media?.original_name ? ': ' + m.media.original_name : ''}]`
+                        : '[mídia]');
+                return `${sender}: ${content}`;
+              })
+              .join('\n');
+            await this.updateLongMemory(aiForMemory, convo.lead_id, historyForMemory, null);
+            this.logger.log(`[AI] Long Memory atualizada para conversa do operador humano (conv ${conversation_id})`);
+          } catch (memErr: any) {
+            this.logger.warn(`[AI] Falha ao atualizar Long Memory (modo operador): ${memErr.message}`);
+          }
+        }
+        return;
+      }
 
       // 3b. Anti-stale check — aborta job duplicado/obsoleto
       // Mensagens carregadas em ordem DESC: convo.messages[0] = mais recente.
