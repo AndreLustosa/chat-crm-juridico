@@ -13,6 +13,7 @@ import {
   Instagram,
   Facebook,
   Linkedin,
+  MessageSquare,
   Shield,
   Scale,
   Menu,
@@ -40,16 +41,31 @@ import { trackWhatsappClick } from "../LPTracker";
 interface TrabalhistaTemplateProps {
   content: LPTemplateContent;
   whatsappNumber?: string;
+  city?: string;
+  state?: string;
 }
 
 const iconMap: Record<string, LucideIcon> = {
-  Clock, Briefcase, Users, FileText, AlertTriangle, HeartPulse,
-  ShieldCheck, HardHat, CircleDollarSign, Shield, Scale, Gavel, FileCheck,
+  Clock,
+  Briefcase,
+  Users,
+  FileText,
+  AlertTriangle,
+  HeartPulse,
+  ShieldCheck,
+  HardHat,
+  CircleDollarSign,
+  Shield,
+  Scale,
+  Gavel,
+  FileCheck,
 };
 
 export function TrabalhistaTemplate({
   content,
   whatsappNumber,
+  city = "Arapiraca",
+  state = "AL",
 }: TrabalhistaTemplateProps) {
   const { hero, faq = [], footer, practiceAreas = [] } = content;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -81,7 +97,6 @@ export function TrabalhistaTemplate({
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-[#FAFAFA] font-[family-name:var(--font-ubuntu)] overflow-x-hidden">
-
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* NAVBAR — idêntico ao HighConversionTemplate */}
       {/* ═══════════════════════════════════════════════════════════ */}
@@ -106,19 +121,31 @@ export function TrabalhistaTemplate({
             <div className="flex items-center gap-10">
               <div className="flex items-center gap-6 mr-4">
                 <button
-                  onClick={() => document.getElementById("areas")?.scrollIntoView({ behavior: "smooth" })}
+                  onClick={() =>
+                    document
+                      .getElementById("areas")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
                   className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2"
                 >
                   Serviços
                 </button>
                 <button
-                  onClick={() => document.getElementById("about")?.scrollIntoView({ behavior: "smooth" })}
+                  onClick={() =>
+                    document
+                      .getElementById("about")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
                   className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2"
                 >
                   Sobre
                 </button>
                 <button
-                  onClick={() => document.getElementById("steps")?.scrollIntoView({ behavior: "smooth" })}
+                  onClick={() =>
+                    document
+                      .getElementById("steps")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
                   className="text-[11px] font-bold text-slate-300 hover:text-[#FAFAFA] transition-colors uppercase tracking-widest px-2"
                 >
                   Processo
@@ -158,25 +185,45 @@ export function TrabalhistaTemplate({
         {isMenuOpen && (
           <div className="md:hidden mt-4 bg-slate-900/40 backdrop-blur-2xl rounded-2xl border border-[#A89048]/30 p-6 flex flex-col gap-6 animate-in fade-in slide-in-from-top-4 duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)] pointer-events-auto">
             <button
-              onClick={() => { document.getElementById("about")?.scrollIntoView({ behavior: "smooth" }); setIsMenuOpen(false); }}
+              onClick={() => {
+                document
+                  .getElementById("about")
+                  ?.scrollIntoView({ behavior: "smooth" });
+                setIsMenuOpen(false);
+              }}
               className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
             >
               Sobre
             </button>
             <button
-              onClick={() => { document.getElementById("areas")?.scrollIntoView({ behavior: "smooth" }); setIsMenuOpen(false); }}
+              onClick={() => {
+                document
+                  .getElementById("areas")
+                  ?.scrollIntoView({ behavior: "smooth" });
+                setIsMenuOpen(false);
+              }}
               className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
             >
               Serviços
             </button>
             <button
-              onClick={() => { document.getElementById("steps")?.scrollIntoView({ behavior: "smooth" }); setIsMenuOpen(false); }}
+              onClick={() => {
+                document
+                  .getElementById("steps")
+                  ?.scrollIntoView({ behavior: "smooth" });
+                setIsMenuOpen(false);
+              }}
               className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
             >
               Como Funciona
             </button>
             <button
-              onClick={() => { document.getElementById("faq")?.scrollIntoView({ behavior: "smooth" }); setIsMenuOpen(false); }}
+              onClick={() => {
+                document
+                  .getElementById("faq")
+                  ?.scrollIntoView({ behavior: "smooth" });
+                setIsMenuOpen(false);
+              }}
               className="text-sm font-bold text-slate-100 border-b border-[#A89048]/10 pb-2 text-left uppercase tracking-widest"
             >
               Dúvidas Frequentes
@@ -209,16 +256,24 @@ export function TrabalhistaTemplate({
         - div.flex-1.flex.items-center: conteúdo centralizado no espaço restante
         - fonte: clamp(min, vw + rem, max) — fórmula recomendada para escala suave
       */}
-      <section className="relative w-full overflow-hidden flex flex-col" style={{ height: "100dvh" }}>
+      <section
+        className="relative w-full overflow-hidden flex flex-col"
+        style={{ height: "100dvh" }}
+      >
         {/* Background Image — responsivo com picture */}
         <div className="absolute inset-0 z-0">
           <picture>
             <source
               media="(min-width: 768px)"
-              srcSet={hero.backgroundDesktop || "/landing/carteira-trabalho-hero.webp"}
+              srcSet={
+                hero.backgroundDesktop || "/landing/carteira-trabalho-hero.webp"
+              }
             />
             <img
-              src={hero.backgroundMobile || "/landing/carteira-trabalho-mobile.webp"}
+              src={
+                hero.backgroundMobile ||
+                "/landing/carteira-trabalho-mobile.webp"
+              }
               alt="Carteira de Trabalho"
               className="absolute inset-0 w-full h-full object-cover md:object-center object-top"
               fetchPriority="high"
@@ -236,7 +291,7 @@ export function TrabalhistaTemplate({
         <div className="relative z-10 flex-1 flex items-center">
           <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 w-full">
             <div className="max-w-3xl xl:max-w-4xl 2xl:max-w-5xl">
-
+              {/* Badges */}
               {/* Badges */}
               <div className="flex items-center gap-3 mb-6">
                 <div className="flex items-center gap-2 bg-[#0A0A0A]/50 backdrop-blur-sm text-[#FAFAFA] px-3 py-1.5 rounded-md border border-[#A89048]/30 text-xs">
@@ -251,23 +306,40 @@ export function TrabalhistaTemplate({
 
               {/* Title — clamp(min, vw + rem, max): escala suave em qualquer tela */}
               <h1 className="text-[#FAFAFA] leading-[1.05] mb-6">
-                <span className="block font-medium uppercase font-[family-name:var(--font-playfair)]"
-                  style={{ fontSize: "clamp(2.5rem, 4vw + 1rem, 5.5rem)" }}>
-                  Advogado
+                <span
+                  className="block font-medium uppercase font-[family-name:var(--font-playfair)]"
+                  style={{ fontSize: "clamp(2.5rem, 4vw + 1rem, 5.5rem)" }}
+                >
+                  {hero.title.split("\n")[0] || "Advogado"}
                 </span>
-                <span className="block font-medium uppercase text-[#A89048] font-[family-name:var(--font-playfair)]"
-                  style={{ fontSize: "clamp(2.5rem, 4vw + 1rem, 5.5rem)" }}>
-                  Trabalhista em
+                <span
+                  className="block font-medium uppercase text-[#A89048] font-[family-name:var(--font-playfair)]"
+                  style={{ fontSize: "clamp(2.5rem, 4vw + 1rem, 5.5rem)" }}
+                >
+                  {hero.title.split("\n")[1] || "Trabalhista em"}
                 </span>
-                <span className="block font-medium uppercase font-[family-name:var(--font-playfair)]"
-                  style={{ fontSize: "clamp(2.5rem, 4vw + 1rem, 5.5rem)" }}>
-                  ARAPIRACA-AL
+                <span
+                  className="block font-medium uppercase font-[family-name:var(--font-playfair)]"
+                  style={{ fontSize: "clamp(2.5rem, 4vw + 1rem, 5.5rem)" }}
+                >
+                  {hero.title.split("\n")[2] || "ARAPIRACA-AL"}
                 </span>
               </h1>
 
+              {hero.subtitle && (
+                <p
+                  className="text-[#9a9a9a] leading-relaxed mb-4 max-w-xl"
+                  style={{ fontSize: "clamp(0.95rem, 1vw + 0.5rem, 1.2rem)" }}
+                >
+                  {hero.subtitle}
+                </p>
+              )}
+
               {hero.secondarySubtitle && (
-                <p className="text-[#9a9a9a] leading-relaxed mb-8 max-w-xl"
-                  style={{ fontSize: "clamp(0.95rem, 1vw + 0.5rem, 1.2rem)" }}>
+                <p
+                  className="text-[#9a9a9a] leading-relaxed mb-8 max-w-xl"
+                  style={{ fontSize: "clamp(0.95rem, 1vw + 0.5rem, 1.2rem)" }}
+                >
                   {hero.secondarySubtitle}
                 </p>
               )}
@@ -277,9 +349,8 @@ export function TrabalhistaTemplate({
                 onClick={handleCtaClick}
                 className="bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-base md:text-lg px-10 py-4 rounded-xl shadow-[0_10px_40px_rgba(37,211,102,0.35)] uppercase tracking-wider transition-all duration-300 hover:scale-105 hover:shadow-[0_15px_50px_rgba(37,211,102,0.45)]"
               >
-                FALAR COM ADVOGADO
+                {hero.ctaText || "FALAR COM ADVOGADO"}
               </button>
-
             </div>
           </div>
         </div>
@@ -288,41 +359,60 @@ export function TrabalhistaTemplate({
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* TRUST BAR — card abaixo do hero */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      <div className="py-5" style={{ background: "#f4f0e6", borderBottom: "2px solid #A89048" }}>
+      <div
+        className="py-5"
+        style={{ background: "#f4f0e6", borderBottom: "2px solid #A89048" }}
+      >
         <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12">
           <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
-
             {/* Título esquerdo */}
             <div className="shrink-0 text-center md:text-left">
-              <p className="font-black text-xl leading-tight" style={{ color: "#1c1c1c" }}>
-                Especialista em<br />causas trabalhistas
+              <p
+                className="font-black text-xl leading-tight"
+                style={{ color: "#1c1c1c" }}
+              >
+                Especialista em
+                <br />
+                causas trabalhistas
               </p>
             </div>
 
             {/* Divisor vertical */}
-            <div className="hidden md:block w-px h-12 shrink-0" style={{ background: "#A89048", opacity: 0.5 }} />
+            <div
+              className="hidden md:block w-px h-12 shrink-0"
+              style={{ background: "#A89048", opacity: 0.5 }}
+            />
 
             {/* 3 itens */}
             <div className="flex flex-col sm:flex-row items-center gap-8 flex-1 justify-around w-full">
               {[
-                { Icon: Laptop,  text: "100% Online e direto\nno seu WhatsApp" },
-                { Icon: Users,   text: "Atendimento Presencial\ne ágil para Arapiraca\ne Região" },
-                { Icon: Trophy,  text: "Avaliação Gratuita\ndo Caso" },
+                { Icon: Laptop, text: "100% Online e direto\nno seu WhatsApp" },
+                {
+                  Icon: Users,
+                  text: `Atendimento Presencial\ne ágil para ${city}\ne Região`,
+                },
+                { Icon: Trophy, text: "Avaliação Gratuita\ndo Caso" },
               ].map(({ Icon, text }, i) => (
                 <div key={i} className="flex items-center gap-4">
                   <div
                     className="w-14 h-14 rounded-xl flex items-center justify-center shrink-0"
                     style={{ border: "2px solid #A89048" }}
                   >
-                    <Icon className="w-7 h-7" style={{ color: "#A89048" }} strokeWidth={1.5} />
+                    <Icon
+                      className="w-7 h-7"
+                      style={{ color: "#A89048" }}
+                      strokeWidth={1.5}
+                    />
                   </div>
-                  <p className="text-sm font-medium leading-snug whitespace-pre-line" style={{ color: "#2a2a2a" }}>
+                  <p
+                    className="text-sm font-medium leading-snug whitespace-pre-line"
+                    style={{ color: "#2a2a2a" }}
+                  >
                     {text}
                   </p>
                 </div>
               ))}
             </div>
-
           </div>
         </div>
       </div>
@@ -330,10 +420,13 @@ export function TrabalhistaTemplate({
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* SECTION 2 — COMO POSSO TE AJUDAR (Checklist) */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      <section id="about" className="py-16 md:py-24 overflow-hidden" style={{ background: "#f2f2f2" }}>
+      <section
+        id="about"
+        className="py-16 md:py-24 overflow-hidden"
+        style={{ background: "#f2f2f2" }}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
-
             {/* Esquerda: Imagem */}
             <div className="flex justify-center">
               <Image
@@ -347,8 +440,13 @@ export function TrabalhistaTemplate({
 
             {/* Direita: Checklist */}
             <div>
-              <h2 className="font-black leading-tight mb-3"
-                style={{ color: "#1a1a1a", fontSize: "clamp(1.75rem, 3vw, 2.5rem)" }}>
+              <h2
+                className="font-black leading-tight mb-3"
+                style={{
+                  color: "#1a1a1a",
+                  fontSize: "clamp(1.75rem, 3vw, 2.5rem)",
+                }}
+              >
                 Como posso te ajudar?
               </h2>
               <p className="mb-6 text-base" style={{ color: "#555555" }}>
@@ -377,9 +475,16 @@ export function TrabalhistaTemplate({
                   >
                     <div
                       className="w-6 h-6 shrink-0 flex items-center justify-center rounded-sm transition-colors"
-                      style={{ border: "2px solid #A89048", background: "transparent" }}
+                      style={{
+                        border: "2px solid #A89048",
+                        background: "transparent",
+                      }}
                     >
-                      <Check className="w-3.5 h-3.5" style={{ color: "#A89048" }} strokeWidth={3} />
+                      <Check
+                        className="w-3.5 h-3.5"
+                        style={{ color: "#A89048" }}
+                        strokeWidth={3}
+                      />
                     </div>
                     <span
                       className="text-sm font-medium underline-offset-2 group-hover:underline"
@@ -391,7 +496,6 @@ export function TrabalhistaTemplate({
                 ))}
               </div>
             </div>
-
           </div>
         </div>
       </section>
@@ -403,13 +507,16 @@ export function TrabalhistaTemplate({
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(168,144,72,0.03)_0%,transparent_70%)]" />
         <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-14">
-            <p className="text-[#A89048] font-bold text-xs uppercase tracking-widest mb-4 font-serif">PROCESSO</p>
+            <p className="text-[#A89048] font-bold text-xs uppercase tracking-widest mb-4 font-serif">
+              PROCESSO
+            </p>
             <h2 className="text-[clamp(1.5rem,3vw,2.25rem)] font-extrabold text-[#FAFAFA] uppercase mb-4 font-[family-name:var(--font-playfair)]">
               Como são as etapas do nosso atendimento?
             </h2>
             <p className="text-[#9a9a9a] max-w-3xl mx-auto text-[clamp(0.9rem,1.1vw,1.05rem)]">
-              Entender o nosso processo de atendimento é essencial para assegurar que
-              você está no caminho certo. Veja como funciona cada etapa:
+              Entender o nosso processo de atendimento é essencial para
+              assegurar que você está no caminho certo. Veja como funciona cada
+              etapa:
             </p>
           </div>
 
@@ -419,10 +526,26 @@ export function TrabalhistaTemplate({
             <div className="hidden lg:block absolute top-12 left-[12.5%] right-[12.5%] h-[2px] bg-[#A89048]/30" />
 
             {[
-              { num: "1", title: "RECEBEMOS SEU CASO", desc: "Nossa Equipe fará o seu atendimento, coletando informações sobre o caso." },
-              { num: "2", title: "ESTUDAMOS O SEU CASO", desc: "Seu caso será estudado por uma equipe de advogados trabalhistas, que vão preparar o melhor plano para cobrar os seus direitos." },
-              { num: "3", title: "COLETAMOS EVIDÊNCIAS", desc: "Solicitamos todos os documentos e provas disponíveis, para garantir o sucesso da ação." },
-              { num: "4", title: "ANDAMENTO E RESULTADO", desc: "A equipe irá providenciar o protocolo da ação, cuidando dos trâmites burocráticos para garantir o sucesso da ação, mantendo o cliente informado sobre todos os passos do processo." },
+              {
+                num: "1",
+                title: "RECEBEMOS SEU CASO",
+                desc: "Nossa Equipe fará o seu atendimento, coletando informações sobre o caso.",
+              },
+              {
+                num: "2",
+                title: "ESTUDAMOS O SEU CASO",
+                desc: "Seu caso será estudado por uma equipe de advogados trabalhistas, que vão preparar o melhor plano para cobrar os seus direitos.",
+              },
+              {
+                num: "3",
+                title: "COLETAMOS EVIDÊNCIAS",
+                desc: "Solicitamos todos os documentos e provas disponíveis, para garantir o sucesso da ação.",
+              },
+              {
+                num: "4",
+                title: "ANDAMENTO E RESULTADO",
+                desc: "A equipe irá providenciar o protocolo da ação, cuidando dos trâmites burocráticos para garantir o sucesso da ação, mantendo o cliente informado sobre todos os passos do processo.",
+              },
             ].map((step, idx) => (
               <div key={idx} className="flex flex-col items-center text-center">
                 {/* Number circle */}
@@ -447,15 +570,103 @@ export function TrabalhistaTemplate({
       <div className="h-px bg-gradient-to-r from-transparent via-[#A89048]/40 to-transparent" />
 
       {/* ═══════════════════════════════════════════════════════════ */}
+      {/* AUTHOR/LAWYER PROFILE SECTION */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <section className="py-16 md:py-24 bg-[#141414] relative overflow-hidden">
+        {/* Subtle background glow */}
+        <div className="absolute top-1/2 left-1/4 -translate-y-1/2 w-[500px] h-[500px] bg-[#A89048]/5 rounded-full blur-[120px] pointer-events-none" />
+
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+            {/* Esquerda: Texto */}
+            <div className="order-2 lg:order-1">
+              <h2 className="text-[clamp(1.75rem,4vw,2.5rem)] font-extrabold text-[#FAFAFA] leading-tight mb-2 font-[family-name:var(--font-playfair)]">
+                Dr. André Lustosa
+              </h2>
+              <p className="text-[#A89048] font-bold text-sm tracking-widest mb-6">
+                OAB/AL 14209
+              </p>
+
+              <div className="space-y-4 text-slate-300 text-base md:text-[17px] leading-relaxed mb-10">
+                <p>
+                  Sou advogado atuante desde 2016 e fundador do{" "}
+                  <strong className="text-white">
+                    escritório André Lustosa Advogados
+                  </strong>
+                  , onde nossa equipe atua com dedicação em causas{" "}
+                  <strong className="text-white">
+                    cíveis, trabalhistas, previdenciárias e de direito do
+                    consumidor
+                  </strong>
+                  .
+                </p>
+                <p>
+                  Nosso escritório conta com profissionais altamente
+                  qualificados, preparados para oferecer um atendimento próximo,
+                  ético e eficiente, sempre buscando as melhores soluções
+                  jurídicas para cada cliente.
+                </p>
+                <p>
+                  Ao longo da minha trajetória, construí uma atuação marcada
+                  pela seriedade, transparência e compromisso com resultados,
+                  transformando desafios jurídicos em conquistas reais para
+                  aqueles que confiam no nosso trabalho.
+                </p>
+              </div>
+
+              <Button
+                onClick={handleCtaClick}
+                size="lg"
+                className="bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-base px-10 py-6 rounded-xl shadow-[0_10px_30px_rgba(37,211,102,0.25)] hover:shadow-[0_15px_40px_rgba(37,211,102,0.35)] transition-all duration-300 hover:scale-[1.02] uppercase tracking-wider w-full sm:w-auto"
+              >
+                FALAR COM ADVOGADO
+              </Button>
+            </div>
+
+            {/* Direita: Imagem com moldura estilo "André Lustosa" vazada */}
+            <div className="order-1 lg:order-2 flex justify-center lg:justify-end relative">
+              <div className="relative w-full max-w-[450px]">
+                {/* Decorative border lines */}
+                <div className="absolute -top-4 -left-4 w-32 h-32 border-t-2 border-l-2 border-[#A89048]/40 rounded-tl-3xl pointer-events-none" />
+                <div className="absolute -bottom-4 -right-4 w-32 h-32 border-b-2 border-r-2 border-[#A89048]/40 rounded-br-3xl pointer-events-none" />
+
+                {/* Main image container */}
+                <div className="relative bg-[#262626] rounded-sm overflow-hidden border border-white/5 shadow-2xl group">
+                  
+                  {/* The Image */}
+                  <div className="relative z-10 aspect-[3/4] w-full">
+                    <Image
+                      src="https://framerusercontent.com/images/JPKhS2hs5A6C1FbCO8XVVvGW5s.webp"
+                      alt="Dr. André Lustosa"
+                      fill
+                      unoptimized
+                      className="object-cover object-top transition-transform duration-700 group-hover:scale-105"
+                      sizes="(max-width: 768px) 100vw, 500px"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Gold divider */}
+      <div className="h-px bg-gradient-to-r from-transparent via-[#A89048]/40 to-transparent" />
+
+      {/* ═══════════════════════════════════════════════════════════ */}
       {/* SECTION 4 — ÁREAS DE ATUAÇÃO TRABALHISTA (Cards) */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <section id="areas" className="py-16 md:py-24 bg-[#0A0A0A] relative">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(168,144,72,0.03)_0%,transparent_70%)]" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-14">
-            <p className="text-[#A89048] font-bold text-xs uppercase tracking-widest mb-4 font-serif">ÁREAS DE ATUAÇÃO TRABALHISTA</p>
+            <p className="text-[#A89048] font-bold text-xs uppercase tracking-widest mb-4 font-serif">
+              ÁREAS DE ATUAÇÃO TRABALHISTA
+            </p>
             <h2 className="text-[clamp(1.5rem,3vw,2.25rem)] font-extrabold text-[#FAFAFA] leading-tight max-w-3xl mx-auto font-[family-name:var(--font-playfair)]">
-              O escritório possui experiência em reclamações trabalhistas para pedidos diversos, como:
+              O escritório possui experiência em reclamações trabalhistas para
+              pedidos diversos, como:
             </h2>
           </div>
 
@@ -466,7 +677,7 @@ export function TrabalhistaTemplate({
               return (
                 <div
                   key={idx}
-                  className="bg-linear-to-br from-[#1a1a1a] to-[#141414] rounded-2xl border border-[#A89048]/20 p-6 flex flex-col hover:border-[#A89048]/60 hover:shadow-[0_8px_30px_rgba(168,144,72,0.08)] hover:-translate-y-1 transition-all duration-300 group"
+                  className={`bg-linear-to-br from-[#1a1a1a] to-[#141414] rounded-2xl border border-[#A89048]/20 p-6 flex flex-col hover:border-[#A89048]/60 hover:shadow-[0_8px_30px_rgba(168,144,72,0.08)] hover:-translate-y-1 transition-all duration-300 group ${area.colSpan2 ? "lg:col-span-2" : ""}`}
                 >
                   {/* Icon + Title */}
                   <div className="flex items-center gap-3 mb-4">
@@ -521,7 +732,9 @@ export function TrabalhistaTemplate({
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(168,144,72,0.03)_0%,transparent_70%)]" />
           <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-14">
-              <p className="text-[#A89048] font-bold text-xs uppercase tracking-widest mb-4 font-serif">FAQ</p>
+              <p className="text-[#A89048] font-bold text-xs uppercase tracking-widest mb-4 font-serif">
+                FAQ
+              </p>
               <h2 className="text-[clamp(1.5rem,3vw,2.25rem)] font-extrabold text-[#FAFAFA] uppercase font-[family-name:var(--font-playfair)]">
                 Dúvidas Frequentes
               </h2>
@@ -534,7 +747,9 @@ export function TrabalhistaTemplate({
                   className="border border-[#A89048]/20 rounded-xl overflow-hidden hover:border-[#A89048]/40 transition-colors bg-[#1a1a1a]/50"
                 >
                   <button
-                    onClick={() => setOpenFaqIndex(openFaqIndex === idx ? null : idx)}
+                    onClick={() =>
+                      setOpenFaqIndex(openFaqIndex === idx ? null : idx)
+                    }
                     className="w-full flex items-center justify-between p-4 text-left"
                   >
                     <div className="flex items-center gap-3">
@@ -588,9 +803,9 @@ export function TrabalhistaTemplate({
                 Escritório de Advocacia em Arapiraca – AL
               </p>
               <p className="text-[#9a9a9a] text-sm leading-relaxed">
-                Atuamos com excelência técnica, visão estratégica e sensibilidade no
-                atendimento. Com estrutura para atender presencialmente em Arapiraca e
-                virtualmente em todo o Brasil.
+                Atuamos com excelência técnica, visão estratégica e
+                sensibilidade no atendimento. Com estrutura para atender
+                presencialmente em Arapiraca e virtualmente em todo o Brasil.
               </p>
             </div>
 
@@ -600,8 +815,21 @@ export function TrabalhistaTemplate({
                 Mapa do Site
               </h4>
               <div className="space-y-3">
-                {["Home", "O Escritório", "Áreas de Atuação", "Blog", "Equipe", "Fale Conosco"].map((item) => (
-                  <button key={item} onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="block mx-auto text-[#9a9a9a] hover:text-[#A89048] transition-colors text-sm">
+                {[
+                  "Home",
+                  "O Escritório",
+                  "Áreas de Atuação",
+                  "Blog",
+                  "Equipe",
+                  "Fale Conosco",
+                ].map((item) => (
+                  <button
+                    key={item}
+                    onClick={() =>
+                      window.scrollTo({ top: 0, behavior: "smooth" })
+                    }
+                    className="block mx-auto text-[#9a9a9a] hover:text-[#A89048] transition-colors text-sm"
+                  >
                     {item}
                   </button>
                 ))}
@@ -615,7 +843,10 @@ export function TrabalhistaTemplate({
               </h4>
               <div className="space-y-4">
                 {footer?.phones?.map((phone, i) => (
-                  <div key={i} className="flex items-center gap-3 justify-center md:justify-end">
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 justify-center md:justify-end"
+                  >
                     <div className="w-10 h-10 rounded-full border border-[#A89048]/30 flex items-center justify-center">
                       <Phone size={16} className="text-[#A89048]" />
                     </div>
@@ -627,7 +858,9 @@ export function TrabalhistaTemplate({
                     <div className="w-10 h-10 rounded-full border border-[#A89048]/30 flex items-center justify-center">
                       <Mail size={16} className="text-[#A89048]" />
                     </div>
-                    <span className="text-[#9a9a9a] text-sm">{footer.email}</span>
+                    <span className="text-[#9a9a9a] text-sm">
+                      {footer.email}
+                    </span>
                   </div>
                 )}
                 {footer?.social?.instagram && (
@@ -635,46 +868,57 @@ export function TrabalhistaTemplate({
                     <div className="w-10 h-10 rounded-full border border-[#A89048]/30 flex items-center justify-center">
                       <Instagram size={16} className="text-[#A89048]" />
                     </div>
-                    <span className="text-[#9a9a9a] text-sm">@andrelustosaadvogados</span>
+                    <span className="text-[#9a9a9a] text-sm">
+                      @andrelustosaadvogados
+                    </span>
                   </div>
                 )}
                 <div className="flex items-center gap-3 justify-center md:justify-end">
                   <div className="w-10 h-10 rounded-full border border-[#A89048]/30 flex items-center justify-center">
                     <Clock size={16} className="text-[#A89048]" />
                   </div>
-                  <span className="text-[#9a9a9a] text-sm">Atendimento 24 Horas</span>
+                  <span className="text-[#9a9a9a] text-sm">
+                    Atendimento 24 Horas
+                  </span>
                 </div>
                 <div className="flex items-center gap-3 justify-center md:justify-end">
                   <div className="w-10 h-10 rounded-full border border-[#A89048]/30 flex items-center justify-center">
                     <MapPin size={16} className="text-[#A89048]" />
                   </div>
-                  <span className="text-[#9a9a9a] text-sm">Arapiraca-AL</span>
+                  <span className="text-[#9a9a9a] text-sm">{city}-{state}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Bottom bar */}
           <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-slate-500 text-xs">
-            <p>&copy; 2026 – Todos os Direitos Reservados à André Lustosa Advogados.</p>
+            <p>
+              &copy; 2026 – Todos os Direitos Reservados à André Lustosa
+              Advogados.
+            </p>
             <div className="flex gap-4">
-              <a href="#" className="hover:text-[#A89048] transition-colors">Termos de Uso</a>
+              <a href="#" className="hover:text-[#A89048] transition-colors">
+                Termos de Uso
+              </a>
               <span>|</span>
-              <a href="#" className="hover:text-[#A89048] transition-colors">Política de Privacidade</a>
+              <a href="#" className="hover:text-[#A89048] transition-colors">
+                Política de Privacidade
+              </a>
             </div>
           </div>
         </div>
       </footer>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* FLOATING WHATSAPP BUTTON */}
+      {/* HIGH CONVERSION FLOATING WHATSAPP BUTTON */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <button
         onClick={handleCtaClick}
-        className="fixed bottom-6 right-6 z-50 w-16 h-16 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.4)] flex items-center justify-center transition-all hover:scale-110 animate-bounce"
+        className="fixed bottom-6 right-6 md:bottom-8 md:right-8 z-50 w-16 h-16 bg-linear-to-r from-[#20bd5a] to-[#25D366] hover:from-[#1da851] hover:to-[#20bd5a] text-white rounded-full shadow-[0_4px_20px_rgba(37,211,102,0.5)] flex items-center justify-center transition-all duration-300 hover:scale-[1.15] animate-bounce hover:animate-none group"
         aria-label="Fale pelo WhatsApp"
       >
-        <MessageCircle size={28} fill="white" />
+        <div className="absolute inset-0 bg-[#25D366] rounded-full blur-md opacity-30 group-hover:opacity-60 transition-opacity"></div>
+        <MessageCircle size={30} fill="white" className="relative z-10" />
       </button>
     </div>
   );

@@ -11,8 +11,6 @@ const baseUrl = "https://andrelustosaadvogados.com.br";
 const staticContent: LPTemplateContent = {
   hero: {
     title: "Advogado\nTrabalhista em\nARAPIRACA-AL",
-    subtitle:
-      "Foi demitido e desconfia que seus direitos não foram pagos corretamente?",
     secondarySubtitle:
       "Advogados em Arapiraca especialistas em reverter Justa Causa, Rescisão indireta e Verbas Rescisórias. Análise do seu caso sem compromisso.",
     ctaText: "Falar com Advogado Trabalhista",
@@ -22,52 +20,60 @@ const staticContent: LPTemplateContent = {
   },
   practiceAreas: [
     {
+      iconName: "FileCheck",
+      title: "Reconhecimento de\nVínculo de Emprego",
+      description: "Garante ao trabalhador sem registro em carteira o reconhecimento formal da relação de emprego, com todos os direitos trabalhistas.",
+      colSpan2: true,
+    },
+    {
+      iconName: "FileText",
+      title: "Verbas Rescisórias",
+      description: "Atuação para garantir o pagamento correto de férias, 13º, FGTS, aviso prévio e demais valores devidos na rescisão.",
+    },
+    {
+      iconName: "FileText",
+      title: "Rescisão Indireta:",
+      description: "Defesa do empregado em casos de falta grave do empregador, buscando a rescisão do contrato com todos os direitos garantidos",
+    },
+    {
       iconName: "Clock",
-      title: "Horas Extras e Verbas Rescisórias",
-      description:
-        "Atuação para garantir o pagamento correto de férias, 13º, FGTS, aviso prévio e demais valores devidos na rescisão. Recuperamos o que é seu por direito.",
+      title: "Horas Extras",
+      description: "Atuação para garantir o pagamento correto de férias, 13º, FGTS, aviso prévio e demais valores devidos na rescisão.",
     },
     {
       iconName: "AlertTriangle",
-      title: "Adicional de Insalubridade e Periculosidade",
-      description:
-        "Ações para assegurar o pagamento do adicional devido ao trabalho em condições nocivas, perigosas ou insalubres. Protegemos sua saúde e seu bolso.",
+      title: "Adicional de\nInsalubridade\ne Periculosidade",
+      description: "Ações para assegurar o pagamento do adicional devido ao trabalho em condições nocivas ou perigosas.",
     },
     {
-      iconName: "Shield",
-      title: "Assédio Moral e Sexual",
-      description:
-        "Proteção contra abusos, humilhações ou condutas inapropriadas no ambiente de trabalho, com pedido de indenização. Você não precisa suportar isso.",
+      iconName: "Scale",
+      title: "Assédio Moral\ne Sexual",
+      description: "Proteção contra abusos, humilhações ou condutas inapropriadas no ambiente de trabalho, com pedido de indenização.",
     },
     {
       iconName: "HeartPulse",
-      title: "Acidente de Trabalho e Doença Ocupacional",
-      description:
-        "Defesa de direitos em casos de afastamento, indenização, estabilidade no emprego e benefícios do INSS decorrentes de acidentes ou doenças do trabalho.",
+      title: "Acidente de Trabalho\ne Doença Ocupacional",
+      description: "Defesa de direitos em casos de afastamento, indenização, estabilidade no emprego e benefícios do INSS.",
     },
     {
       iconName: "CircleDollarSign",
-      title: "Irregularidade no Depósito do FGTS",
-      description:
-        "Cobrança de depósitos não realizados e liberação de valores retidos indevidamente pelo empregador. Seu FGTS deve estar em dia.",
+      title: "Irregularidade no Depósito\ndo FGTS",
+      description: "Cobrança de depósitos não realizados e liberação de valores retidos indevidamente pelo empregador.",
     },
     {
       iconName: "ShieldCheck",
       title: "Estabilidade no Emprego",
-      description:
-        "Garantia de permanência em casos de gestantes, acidentados, dirigentes sindicais ou membros da CIPA. Conheça seus direitos de estabilidade.",
+      description: "Garantia de permanência em casos de gestantes, acidentados, dirigentes sindicais ou membros da CIPA.",
     },
     {
       iconName: "HardHat",
-      title: "Trabalho em Condições Irregulares",
-      description:
-        "Atuação em casos de jornada exaustiva, trabalho degradante ou sem registro formal. Trabalhador informal também tem direitos.",
+      title: "Trabalho em\nCondições Irregulares",
+      description: "Atuação em casos de jornada exaustiva, trabalho degradante ou sem registro formal.",
     },
     {
       iconName: "Users",
-      title: "Direitos de Terceirizados e Temporários",
-      description:
-        "Defesa para assegurar igualdade de direitos e proteção legal frente à empresa contratante. Terceirizado tem os mesmos direitos.",
+      title: "Direitos de Terceirizados\ne Temporários",
+      description: "Defesa para assegurar igualdade de direitos e proteção legal frente à empresa contratante.",
     },
   ],
   sectionLabels: {
@@ -321,6 +327,8 @@ export default function LandingPageArapiracaTrabalhista() {
       <TrabalhistaTemplate
         content={staticContent}
         whatsappNumber="+5582996390799"
+        city="Arapiraca"
+        state="AL"
       />
     </div>
   );

@@ -35,6 +35,7 @@ export interface LPPracticeArea {
   iconName: string;
   title: string;
   description: string;
+  colSpan2?: boolean;
 }
 
 export interface LPSectionLabels {
