@@ -467,7 +467,7 @@ export function HighConversionTemplate({
             </div>
 
             {/* Título Monumental - Elegante */}
-            <h1 className="text-[clamp(1.75rem,3vw,3rem)] 2xl:text-[clamp(2.25rem,3.5vw,4.25rem)] font-medium text-[#FAFAFA] leading-tight tracking-normal font-[family-name:var(--font-playfair)] drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)] flex flex-col items-center lg:items-start text-center lg:text-left">
+            <h1 className="text-[clamp(1.5rem,2.5vw,2.5rem)] 2xl:text-[clamp(1.8rem,2.8vw,3.2rem)] font-medium text-[#FAFAFA] leading-tight tracking-normal font-[family-name:var(--font-playfair)] drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)] flex flex-col items-center lg:items-start text-center lg:text-left">
               {hero.title.split('\n').map((line, lineIndex) => (
                 <span key={lineIndex} className="block w-full">
                   {line}
@@ -498,7 +498,7 @@ export function HighConversionTemplate({
                   {/* Glow overlay — masked by rotating conic-gradient */}
                   <span className="btn-premium-glow-overlay" />
                   <span className="relative z-10 flex items-center">
-                    REALIZAR CONSULTA
+                    {hero.ctaText?.toUpperCase() || "REALIZAR CONSULTA"}
                     <ChevronRight className="ml-2 w-6 h-6" />
                   </span>
                 </Button>
@@ -599,6 +599,20 @@ export function HighConversionTemplate({
         id="areas"
         className="pt-24 pb-12 md:py-24 px-4 md:px-8 bg-[#0A0A0A] relative overflow-hidden"
       >
+        {/* Section Background Image */}
+        <div className="absolute inset-0 z-0 opacity-40 mix-blend-luminosity">
+          <Image
+            src="/landing/chic_trigger_bg.png"
+            alt="Law firm elegant background"
+            fill
+            className="object-cover pointer-events-none"
+            priority
+          />
+          {/* Dark gradient to ensure cards and text pop */}
+          <div className="absolute inset-0 bg-[#0A0A0A]/80 pointer-events-none" />
+          <div className="absolute inset-0 bg-linear-to-b from-[#0A0A0A] via-transparent to-[#0A0A0A] pointer-events-none" />
+        </div>
+
         {/* Subtle Top Gradient Glow */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-32 bg-linear-to-b from-[#A89048]/10 to-transparent blur-3xl rounded-full z-10 pointer-events-none" />
 
@@ -628,7 +642,7 @@ export function HighConversionTemplate({
 
           {/* Grid of Cards — Premium Elegant Style with Framer Motion Entrance */}
           <motion.div
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-16"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16"
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: "-100px" }}
@@ -644,62 +658,69 @@ export function HighConversionTemplate({
           >
             {(practiceAreas
               ? practiceAreas.map((pa) => ({
-                  icon: iconMap[pa.iconName] || Briefcase,
                   title: pa.title,
                   description: pa.description,
+                  tag: "ESPECIALIDADE",
+                  bgImage: "/landing/Design sem nome (35).png"
                 }))
               : [
                   {
-                    icon: Briefcase,
-                    title: "Direito Trabalhista",
-                    description:
-                      "Protege os direitos dos trabalhadores, regulando relações como salários, jornada, férias, FGTS e demissões. Atuamos na defesa de quem busca justiça nas relações de emprego.",
+                    title: "DIREITO TRABALHISTA",
+                    description: "Relações profissionais ganham equilíbrio quando direitos são respeitados. Protegemos sua trajetória no trabalho com precisão e segurança.",
+                    tag: "JUSTIÇA QUE ILUMINA",
+                    bgImage: "/landing/img_trabalhista.png",
+                    href: "https://andrelustosaadvogados.com.br/arapiraca/trabalhista"
                   },
                   {
-                    icon: ShoppingCart,
-                    title: "Direito do Consumidor",
-                    description:
-                      "Garante a proteção contra práticas abusivas nas relações de consumo. Atuamos na defesa de clientes lesados por empresas, cobranças indevidas, produtos defeituosos ou serviços mal prestados.",
+                    title: "DIREITO DO CONSUMIDOR",
+                    description: "Quando produtos e serviços falham, sua voz deve ser ouvida. Reforçamos sua proteção diante de práticas abusivas.",
+                    tag: "CONFIANÇA EM CADA ESCOLHA",
+                    bgImage: "/landing/img_consumidor.png"
                   },
                   {
-                    icon: HeartPulse,
-                    title: "Direito Previdenciário",
-                    description:
-                      "Voltado à garantia de benefícios como aposentadoria, pensão, auxílio-doença e BPC/LOAS. Defendemos os direitos de quem busca amparo do INSS em momentos de necessidade.",
+                    title: "DIREITO PREVIDENCIÁRIO",
+                    description: "Entre contribuições, benefícios e revisões, garantimos que o seu futuro seja tão sólido quanto o seu esforço.",
+                    tag: "PROTEÇÃO ATEMPORAL",
+                    bgImage: "/landing/img_previdenciario.png"
                   },
                   {
-                    icon: Users,
-                    title: "Direito de Família",
-                    description:
-                      "Cuida das relações familiares, como divórcio, guarda de filhos, pensão alimentícia e inventário. Atuamos com sensibilidade e firmeza na defesa dos seus direitos e da sua família.",
+                    title: "DIREITO DE FAMÍLIA",
+                    description: "Nos momentos mais sensíveis, garantimos segurança jurídica e respeito às suas relações e ao que importa para você.",
+                    tag: "VÍNCULOS PROTEGIDOS",
+                    bgImage: "/landing/img_familia.png"
                   },
                   {
-                    icon: Gavel,
-                    title: "Direito Criminal",
-                    description:
-                      "Defesa em processos criminais, desde inquérito até julgamento. Atuamos com estratégia e compromisso na proteção dos direitos do acusado, sempre respeitando o devido processo legal.",
+                    title: "DIREITO CRIMINAL",
+                    description: "Defesa em processos criminais, desde inquérito até julgamento. Atuamos com estratégia e compromisso na proteção dos direitos do acusado.",
+                    tag: "DEFESA INTRANSIGENTE",
+                    bgImage: "/landing/img_criminal.png"
                   },
                   {
-                    icon: FileText,
-                    title: "Direito Civil",
-                    description:
-                      "Abrange questões do dia a dia como contratos, indenizações, posse, propriedade e responsabilidade civil. Atuamos na prevenção e resolução de conflitos com segurança jurídica.",
+                    title: "DIREITO CIVIL",
+                    description: "Conflitos cotidianos encontram solução em fundamentos claros e justos. Atuamos para preservar seus direitos em cada detalhe da vida civil.",
+                    tag: "ORDEM NAS RELAÇÕES",
+                    bgImage: "/landing/img_civil.png"
                   },
                   {
-                    icon: Building2,
-                    title: "Direito Imobiliário",
-                    description:
-                      "Atuação em compra e venda de imóveis, contratos de locação, usucapião, inventário de bens imóveis e regularização fundiária. Protegemos seu patrimônio com segurança jurídica.",
+                    title: "DIREITO IMOBILIÁRIO",
+                    description: "Atuação em compra e venda de imóveis, contratos de locação e regularização fundiária. Protegemos seu patrimônio.",
+                    tag: "PATRIMÔNIO SEGURO",
+                    bgImage: "/landing/img_imobiliario.png"
                   },
                   {
-                    icon: Landmark,
-                    title: "Direito das Sucessões",
-                    description:
-                      "Regula a transferência do patrimônio após o falecimento. Atuamos em inventários, partilhas, testamentos e planejamento sucessório, garantindo segurança jurídica e respeito à vontade dos herdeiros.",
+                    title: "DIREITO DAS SUCESSÕES",
+                    description: "Regula a transferência do patrimônio após o falecimento. Atuamos com segurança jurídica e respeito.",
+                    tag: "LEGADO PROTEGIDO",
+                    bgImage: "/landing/img_sucessoes.png"
+                  },
+                  {
+                    title: "DIREITO EMPRESARIAL",
+                    description: "Empresas crescem quando estão juridicamente protegidas. Cuidamos da base legal que sustenta suas decisões e expande resultados.",
+                    tag: "DIREITO ESTRATÉGICO",
+                    bgImage: "/landing/img_empresarial.png"
                   },
                 ]
             ).map((area, index) => {
-              const Icon = area.icon;
               return (
                 <motion.div
                   key={index}
@@ -711,33 +732,53 @@ export function HighConversionTemplate({
                       transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] },
                     },
                   }}
-                  className="relative bg-linear-to-br from-[#1a1a1a] to-[#141414] border border-[#A89048]/20 rounded-2xl p-7 flex flex-col justify-between hover:border-[#A89048]/60 hover:shadow-[0_8px_40px_rgba(168,144,72,0.15)] hover:-translate-y-2 transition-all duration-500 group overflow-hidden"
+                  className="group relative overflow-hidden rounded-xl border border-[#A89048]/20 min-h-[340px] md:min-h-[380px] flex flex-col justify-between p-5 md:p-6 transition-transform duration-500 hover:-translate-y-2 hover:border-[#A89048]/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)] cursor-pointer"
+                  onClick={() => {
+                    if ((area as any).href) {
+                      window.location.href = (area as any).href;
+                    } else {
+                      handleCtaClick();
+                    }
+                  }}
                 >
-                  {/* Subtle corner glow */}
-                  <div className="absolute -top-20 -right-20 w-40 h-40 bg-[#A89048]/5 rounded-full blur-3xl group-hover:bg-[#A89048]/15 transition-all duration-500 pointer-events-none" />
-
-                  <div className="relative z-10 flex flex-col items-center md:items-start text-center md:text-left">
-                    {/* Gold icon circle */}
-                    <div className="w-12 h-12 rounded-xl bg-[#A89048]/10 border border-[#A89048]/20 flex items-center justify-center mb-5 group-hover:bg-[#A89048]/20 group-hover:border-[#A89048]/40 transition-all duration-300">
-                      <Icon className="w-6 h-6 text-[#A89048]" />
-                    </div>
-                    <h3 className="text-lg font-bold text-[#FAFAFA] mb-3 group-hover:text-[#A89048] transition-colors duration-300 w-full">
-                      {area.title}
-                    </h3>
-                    <p className="text-sm text-[#9a9a9a] leading-relaxed mb-6 w-full">
-                      {area.description}
-                    </p>
+                  {/* Background Image */}
+                  <div className="absolute inset-0 z-0 overflow-hidden bg-slate-900">
+                    {area.bgImage && (
+                      <Image
+                        src={area.bgImage}
+                        alt={area.title}
+                        fill
+                        className="object-cover opacity-80 group-hover:scale-110 transition-transform duration-700 ease-out"
+                      />
+                    )}
+                    {/* Dark gradient overlay so text pops */}
+                    <div className="absolute inset-0 bg-linear-to-t from-[#0A0A0A]/95 via-[#0A0A0A]/40 to-[#0A0A0A]/85 pointer-events-none" />
                   </div>
 
-                  {/* Divider + Link */}
-                  <div className="relative z-10 flex flex-col items-center md:items-start">
-                    <div className="h-px w-full bg-linear-to-r from-[#A89048]/30 via-[#A89048]/10 to-transparent mb-4" />
-                    <button
-                      onClick={handleCtaClick}
-                      className="flex items-center gap-1.5 text-sm font-semibold text-[#A89048]/70 hover:text-[#A89048] transition-colors cursor-pointer group/link justify-center md:justify-start w-full"
-                    >
-                      <ChevronRight className="w-4 h-4 group-hover/link:translate-x-0.5 transition-transform" />
-                      Ler mais
+                  {/* Top Content: Badge + Title */}
+                  <div className="relative z-10 flex flex-col w-full gap-3">
+                    <div className="flex">
+                      <div className="border border-[#A89048]/30 bg-[#141414]/60 backdrop-blur-md rounded-full px-3 py-1.5 group-hover:bg-[#A89048]/20 group-hover:border-[#A89048]/50 transition-colors duration-300">
+                        <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest text-[#d4b568]">
+                          {area.tag}
+                        </span>
+                      </div>
+                    </div>
+                    <h3 className="text-[clamp(1.15rem,1.3vw,1.3rem)] font-medium text-[#FAFAFA] font-[family-name:var(--font-playfair)] tracking-wide group-hover:text-[#e3c788] transition-colors duration-300 drop-shadow-md">
+                      {area.title}
+                    </h3>
+                  </div>
+
+                  {/* Bottom Content: Description + Button */}
+                  <div className="relative z-10 flex flex-col items-start w-full transform transition-transform duration-500 group-hover:translate-y-0 mt-auto pt-4">
+                    {/* Description */}
+                    <p className="text-sm md:text-sm text-slate-200 leading-relaxed mb-4 line-clamp-3 md:line-clamp-4 drop-shadow-sm">
+                      {area.description}
+                    </p>
+
+                    {/* Gold Action Button matching the print */}
+                    <button className="bg-[#d4b568] hover:bg-[#c8aa62] text-[#0A0A0A] font-bold text-xs px-5 py-2.5 rounded shadow-lg uppercase tracking-wider transition-all duration-300 w-full lg:w-fit">
+                      Explorar Direito
                     </button>
                   </div>
                 </motion.div>
@@ -755,7 +796,7 @@ export function HighConversionTemplate({
               {/* Glow overlay — masked by rotating conic-gradient */}
               <span className="btn-premium-glow-overlay" />
               <span className="relative z-10 flex items-center">
-                REALIZAR CONSULTA
+                {hero.ctaText?.toUpperCase() || "REALIZAR CONSULTA"}
                 <ChevronRight className="ml-2 w-6 h-6" />
               </span>
             </Button>
@@ -1262,230 +1303,118 @@ export function HighConversionTemplate({
 
       {/* Redundant sections below removed as per design unification */}
 
-      {/* COMO FUNCIONA — Interactive Journey Navigator */}
+      {/* COMO FUNCIONA O ATENDIMENTO — Perfect Wavy Timeline */}
       <section
         id="steps"
-        className="py-[clamp(4rem,8vw,8rem)] bg-[#0B0B0B] relative overflow-hidden"
+        className="py-[clamp(4rem,8vw,8rem)] bg-[#111111] relative overflow-hidden"
       >
-            {/* Background Decor */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle_at_50%_20%,rgba(168,144,72,0.12)_0%,transparent_70%)] pointer-events-none" />
-            <div className="absolute -left-24 top-1/4 w-96 h-96 bg-[#A89048]/5 rounded-full blur-[100px] pointer-events-none" />
+        {/* Subtle grid background like the print */}
+        <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#80808008_1px,transparent_1px),linear-gradient(to_bottom,#80808008_1px,transparent_1px)] bg-[size:2rem_2rem]" />
+        
+        {/* Golden glow top border effect */}
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-linear-to-r from-transparent via-[#d4b568] to-transparent opacity-50" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[200px] h-[4px] bg-[#d4b568] rounded-b-lg shadow-[0_0_20px_rgba(212,181,104,0.8)]" />
 
-            <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-10">
-              <div className="flex flex-col items-center text-center mb-[clamp(4rem,6vw,6rem)]">
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.8 }}
-                >
-                  <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-[#A89048]/10 border border-[#A89048]/20 mb-6 backdrop-blur-md">
-                    <Clock size={14} className="text-[#A89048]" />
-                    <span className="text-[#A89048] text-[10px] font-black uppercase tracking-widest">
-                      A Jornada do Cliente • André Lustosa Advogados
+        <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-10">
+          <div className="flex flex-col items-center text-center mb-[5rem] md:mb-[7rem] lg:mb-10">
+            <h2 className="text-[clamp(1.5rem,3vw,2.5rem)] font-light text-[#FAFAFA] tracking-wide uppercase font-[family-name:var(--font-playfair)]">
+              Como Funciona <span className="text-[#d4b568] font-medium">O Atendimento</span>
+            </h2>
+          </div>
+
+          {/* Desktop Timeline - Absolute Positioning with EXACT alternating layout */}
+          <div className="hidden lg:flex relative w-full h-[550px] max-w-6xl mx-auto flex-row">
+            
+            {/* The SVG Wavy Line (S-curve sequence) */}
+            <svg 
+              className="absolute inset-0 w-full h-full pointer-events-none z-0" 
+              viewBox="0 0 1000 550" 
+              preserveAspectRatio="none"
+            >
+              {/* Shadow for the line */}
+              <path d="M -50 275 L 0 275 A 125 100 0 0 1 250 275 A 125 100 0 0 0 500 275 A 125 100 0 0 1 750 275 A 125 100 0 0 0 1000 275 L 1050 275" 
+                    fill="none" stroke="rgba(0,0,0,0.7)" strokeWidth="32" vectorEffect="non-scaling-stroke" strokeLinecap="round" className="translate-y-3 opacity-60" />
+              {/* Main curved line */}
+              <path d="M -50 275 L 0 275 A 125 100 0 0 1 250 275 A 125 100 0 0 0 500 275 A 125 100 0 0 1 750 275 A 125 100 0 0 0 1000 275 L 1050 275" 
+                    fill="none" stroke="#d4b568" strokeWidth="22" vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+            </svg>
+
+            {[
+              { num: "01", title: "Contato", desc: "Envie seu caso\n(WhatsApp ou formulário).", icon: <MessageCircle size={32} className="text-[#0B0B0B]" /> },
+              { num: "02", title: "Análise", desc: "Receba uma\nanálise gratuita.", icon: <Search size={32} className="text-[#0B0B0B]" /> },
+              { num: "03", title: "Direitos", desc: "Entenda\nclaramente seus direitos.", icon: <CheckCircle2 size={32} className="text-[#0B0B0B]" /> },
+              { num: "04", title: "Processo", desc: "Caso avance, iniciamos o processo\nimediatamente com acompanhamento.", icon: <Gavel size={32} className="text-[#0B0B0B]" /> }
+            ].map((step, index) => {
+              const isArch = index % 2 === 0; // 0 and 2 are arches (wave goes over)
+
+              return (
+                <div key={index} className="relative h-full flex flex-col items-center" style={{ width: '25%' }}>
+                  
+                  {/* TOP ZONE (0 to 50%) */}
+                  <div className="h-1/2 w-full flex flex-col items-center justify-start pt-8 relative">
+                    <span className="text-slate-400 uppercase tracking-widest text-[11px] font-light mb-1">
+                      Etapa
                     </span>
+                    <span className="text-5xl font-light text-[#d4b568] mb-4">
+                      {step.num}
+                    </span>
+                    {/* Only columns that are Troughs (isArch=false) have a Dashed line connecting TOP TEXT DOWN to the Circle */}
+                    {!isArch && (
+                      <div className="absolute top-[85px] bottom-0 w-[1.5px] border-l-2 border-dashed border-[#d4b568]/40" />
+                    )}
                   </div>
-                  <h2 className="text-[clamp(1.75rem,3.5vw,3rem)] font-black text-[#FAFAFA] mb-6 leading-tight uppercase">
-                    Como Funciona Seu{" "}
-                    <span className="text-[#A89048]">Atendimento</span>
-                  </h2>
-                  <p className="text-[clamp(1rem,1.1vw,1.125rem)] text-slate-400 max-w-2xl mx-auto font-medium">
-                    Uma experiência digital de{" "}
-                    <span className="text-slate-200">alto padrão</span>,
-                    desenhada para quem busca agilidade e segurança jurídica.
-                  </p>
-                </motion.div>
-              </div>
 
-              <div className="relative max-w-6xl mx-auto">
-                {/* Stage Selector Bar - Compacted to avoid scroll on PC */}
-                <div className="flex items-center gap-1 md:gap-2 mb-12 p-2 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl relative z-20 overflow-x-auto scrollbar-hide">
-                  {displaySteps.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => setActiveStep(index)}
-                      className={`flex-1 min-w-[85px] md:min-w-0 py-3 md:py-4 px-2 md:px-4 rounded-xl transition-all duration-500 relative flex flex-col items-center gap-1 md:gap-2 group ${
-                        activeStep === index
-                          ? "bg-[#A89048] shadow-[0_10px_30px_rgba(168,144,72,0.4)]"
-                          : "hover:bg-white/5"
-                      }`}
-                    >
-                      <span
-                        className={`text-[10px] font-black uppercase tracking-tighter ${activeStep === index ? "text-[#0B0B0B]" : "text-slate-500"}`}
-                      >
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <div
-                        className={`w-8 h-1 rounded-full transition-all duration-500 ${activeStep === index ? "bg-[#0B0B0B]/30" : "bg-white/10"}`}
-                      />
-                    </button>
-                  ))}
+                  {/* CENTER CIRCLE (Anchored exactly at 50% height) */}
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 rounded-full bg-[#FAFAFA] border-8 border-[rgba(212,181,104,1)] flex items-center justify-center shadow-[0_0_25px_rgba(212,181,104,0.6)] z-10 transition-transform duration-300 hover:scale-110">
+                    {step.icon}
+                  </div>
+
+                  {/* BOTTOM ZONE (50% to 100%) */}
+                  <div className="h-1/2 w-full flex flex-col items-center justify-end pb-12 relative">
+                    {/* Only columns that are Arches (isArch=true) have a Dashed line connecting the Circle DOWN to BOTTOM TEXT */}
+                    {isArch && (
+                      <div className="absolute top-0 bottom-[100px] w-[1.5px] border-l-2 border-dashed border-[#d4b568]/40" />
+                    )}
+                    
+                    <h3 className="text-2xl font-medium text-[#d4b568] font-[family-name:var(--font-playfair)] mb-2 z-10">
+                      {step.title}
+                    </h3>
+                    <p className="text-sm text-center text-slate-300 whitespace-pre-line leading-relaxed z-10 relative">
+                      {step.desc}
+                    </p>
+                  </div>
+
                 </div>
+              );
+            })}
+          </div>
 
-                {/* Active Step Content Stage */}
-                <div className="relative min-h-[450px] md:min-h-[500px]">
-                  {displaySteps.map((step: { title: string; description: string; icon?: React.ReactNode }, index: number) => {
-                    const getStepIcon = (idx: number, title: string) => {
-                      if (step.icon) return step.icon;
-                      const t = title.toLowerCase();
-                      if (t.includes("contato") || t.includes("whatsapp"))
-                        return <MessageCircle key="whatsapp" size={48} />;
-                      if (t.includes("análise") || t.includes("documento"))
-                        return <FileText key="filetext" size={48} />;
-                      if (t.includes("consult") || t.includes("reunião"))
-                        return <Users key="users" size={48} />;
-                      if (t.includes("estratégia") || t.includes("plano"))
-                        return <Lightbulb key="lightbulb" size={48} />;
-                      if (t.includes("ação") || t.includes("protocolo"))
-                        return <Gavel key="gavel" size={48} />;
-                      if (t.includes("resultado") || t.includes("fim"))
-                        return <Award key="award" size={48} />;
-                      
-                      const defaults = [
-                        <MessageCircle key="d1" size={48} />,
-                        <Search key="d2" size={48} />,
-                        <FileText key="d3" size={48} />,
-                        <CheckCircle2 key="d4" size={48} />,
-                      ];
-                      return defaults[idx] || <Zap key="dz" size={48} />;
-                    };
-
-                    return (
-                      <motion.div
-                        key={index}
-                        initial={{ opacity: 0, x: 20, scale: 0.98 }}
-                        animate={{
-                          opacity: activeStep === index ? 1 : 0,
-                          x:
-                            activeStep === index
-                              ? 0
-                              : activeStep > index
-                                ? -20
-                                : 20,
-                          scale: activeStep === index ? 1 : 0.98,
-                          zIndex: activeStep === index ? 10 : 0,
-                        }}
-                        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-                        className={`absolute inset-0 w-full h-full pointer-events-none ${activeStep === index ? "pointer-events-auto" : ""}`}
-                      >
-                        <div className="h-full w-full p-8 md:p-16 rounded-[2.5rem] bg-linear-to-br from-white/[0.08] to-transparent border border-white/10 backdrop-blur-3xl shadow-[0_30px_60px_rgba(0,0,0,0.5)] flex flex-col md:flex-row items-center gap-6 md:gap-12 overflow-hidden relative">
-                          {/* Large Background Numerals */}
-                          <span className="absolute -left-10 -top-10 text-[15rem] md:text-[20rem] font-black text-[#A89048]/5 italic pointer-events-none select-none">
-                            {index + 1}
-                          </span>
-
-                          {/* Visual Area */}
-                          <div className="w-full md:w-1/3 flex flex-col items-center justify-center relative">
-                            <motion.div
-                              animate={
-                                activeStep === index
-                                  ? {
-                                      scale: [1, 1.05, 1],
-                                      rotate: [0, 2, 0, -2, 0],
-                                    }
-                                  : {}
-                              }
-                              transition={{
-                                duration: 6,
-                                repeat: Infinity,
-                                ease: "linear",
-                              }}
-                              className="w-24 h-24 md:w-48 md:h-48 rounded-[2rem] bg-linear-to-br from-[#A89048]/20 to-[#A89048]/5 border border-[#A89048]/30 flex items-center justify-center text-[#A89048] shadow-[0_0_50px_rgba(168,144,72,0.2)] [&>svg]:w-10 [&>svg]:h-10 md:[&>svg]:w-16 md:[&>svg]:h-16"
-                            >
-                              {getStepIcon(index, step.title)}
-                            </motion.div>
-                          </div>
-
-                          {/* Text Area */}
-                          <div className="flex-1 text-center md:text-left relative z-10">
-                            <motion.div
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={
-                                activeStep === index ? { opacity: 1, y: 0 } : {}
-                              }
-                              transition={{ delay: 0.3 }}
-                            >
-                              <h3 className="text-xl md:text-5xl font-black text-[#FAFAFA] uppercase tracking-tight mb-3 md:mb-6 leading-tight">
-                                {step.title}
-                              </h3>
-                              <p className="text-base md:text-xl text-slate-400 leading-relaxed font-medium">
-                                {step.description}
-                              </p>
-
-                              {/* Step Progress Info */}
-                              <div className="mt-8 md:mt-12 pt-6 md:pt-8 border-t border-white/10 flex items-center justify-center md:justify-start gap-8 md:gap-12">
-                                <div>
-                                  <p className="text-[9px] md:text-[10px] uppercase tracking-widest text-[#A89048] font-black mb-1">
-                                    Status
-                                  </p>
-                                  <p className="text-slate-200 font-bold text-sm md:text-base">
-                                    100% Digital
-                                  </p>
-                                </div>
-                                <div className="h-6 md:h-8 w-px bg-white/10" />
-                                <div>
-                                  <p className="text-[9px] md:text-[10px] uppercase tracking-widest text-[#A89048] font-black mb-1">
-                                    Foco
-                                  </p>
-                                  <p className="text-slate-200 font-bold text-sm md:text-base">
-                                    Agilidade Total
-                                  </p>
-                                </div>
-                              </div>
-                            </motion.div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
+          {/* Mobile Timeline (Vertical fallback) */}
+          <div className="lg:hidden flex flex-col gap-10 relative max-w-sm mx-auto">
+            <div className="absolute top-8 bottom-8 left-[2.3rem] w-[3px] bg-linear-to-b from-[#d4b568]/10 via-[#d4b568]/50 to-[#d4b568]/10 rounded-full" />
+            
+            {[
+              { num: "01", title: "Contato", desc: "Envie seu caso\n(WhatsApp ou formulário).", icon: <MessageCircle size={36} className="text-[#0B0B0B]" /> },
+              { num: "02", title: "Análise", desc: "Receba uma\nanálise gratuita.", icon: <Search size={36} className="text-[#0B0B0B]" /> },
+              { num: "03", title: "Direitos", desc: "Entenda\nclaramente seus direitos.", icon: <CheckCircle2 size={36} className="text-[#0B0B0B]" /> },
+              { num: "04", title: "Processo", desc: "Caso avance, iniciamos o processo imediatamente.", icon: <Gavel size={36} className="text-[#0B0B0B]" /> }
+            ].map((step, index) => (
+              <div key={index} className="flex items-center gap-6 relative z-10">
+                <div className="w-20 h-20 shrink-0 rounded-full bg-[#FAFAFA] border-4 border-[#d4b568] flex items-center justify-center shadow-[0_0_15px_rgba(212,181,104,0.3)]">
+                  {React.cloneElement(step.icon as React.ReactElement, { size: 24 })}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[#d4b568] font-bold">ETAPA {step.num}</span>
+                  </div>
+                  <h3 className="text-xl font-medium text-[#FAFAFA] mb-1 font-[family-name:var(--font-playfair)]">{step.title}</h3>
+                  <p className="text-sm text-slate-300 whitespace-pre-line leading-relaxed">{step.desc}</p>
                 </div>
               </div>
+            ))}
+          </div>
 
-              {/* Navigation Controls (Dots & Arrows) */}
-              <div className="mt-10 md:mt-12 flex items-center justify-center gap-4 md:gap-8">
-                <button
-                  onClick={prevStep}
-                  className="w-10 h-10 md:w-12 md:h-12 rounded-full border border-white/10 bg-white/5 flex items-center justify-center text-slate-400 hover:bg-[#A89048] hover:text-[#0B0B0B] transition-all group"
-                >
-                  <ChevronLeft
-                    size={20}
-                    className="md:w-6 md:h-6 transition-transform"
-                  />
-                </button>
-                <div className="flex items-center gap-2 md:gap-3">
-                  {displaySteps.map((_, index) => (
-                    <button
-                      key={index}
-                      onClick={() => setActiveStep(index)}
-                      className={`h-1.5 md:h-2 rounded-full transition-all duration-500 ${activeStep === index ? "w-8 md:w-12 bg-[#A89048]" : "w-1.5 md:w-2 bg-white/20"}`}
-                    />
-                  ))}
-                </div>
-                <button
-                  onClick={nextStep}
-                  className="w-10 h-10 md:w-12 md:h-12 rounded-full border border-white/10 bg-white/5 flex items-center justify-center text-slate-400 hover:bg-[#A89048] hover:text-[#0B0B0B] transition-all group"
-                >
-                  <ChevronRight
-                    size={20}
-                    className="md:w-6 md:h-6 transition-transform"
-                  />
-                </button>
-              </div>
-
-              {/* Final CTA in section */}
-              <div className="mt-12 md:mt-16 text-center px-4">
-                <Button
-                  onClick={handleCtaClick}
-                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-[#0B0B0B] font-black w-full md:w-auto px-8 md:px-12 py-5 md:py-7 rounded-xl md:rounded-2xl shadow-[0_15px_50px_rgba(168,144,72,0.3)] transition-all transform hover:scale-105 active:scale-95 text-base md:text-lg ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
-                >
-                  <span className="btn-premium-glow-overlay" />
-                  <span className="relative z-10 flex items-center justify-center">
-                    INICIAR MEU ATENDIMENTO AGORA
-                    <ChevronRight className="ml-2 w-5 h-5 md:w-6 md:h-6" />
-                  </span>
-                </Button>
-              </div>
-            </div>
+        </div>
       </section>
 
       {/* FAQ — Elegant Light Section */}

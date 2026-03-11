@@ -10,9 +10,9 @@ const baseUrl = "https://andrelustosaadvogados.com.br";
 
 const staticContent: LPTemplateContent = {
   hero: {
-    title: "Escritório de Advocacia\nEspecializado em\nARAPIRACA-AL",
-    subtitle: "Defenda seus direitos com quem entende. Atuação ágil e focada em resultados nas áreas Trabalhista, Previdenciária, Civil e do Consumidor.",
-    ctaText: "Fale com um Especialista",
+    title: "Escritório de Advocacia em Arapiraca – AL\nAdvogados Especialistas para Defender Seus Direitos",
+    subtitle: "Atendimento jurídico em Arapiraca e online para todo Brasil.\nAnalisamos seu caso e orientamos o melhor caminho para resolver seu problema.",
+    ctaText: "Falar com advogado",
     ctaLink: "https://wa.me/5582996390799",
   },
   steps: [

@@ -77,17 +77,17 @@ model Lead {
   tags               String[]
   created_at    DateTime       @default(now())
   updated_at    DateTime       @updatedAt
-  memory             AiMemory?
-  conversations      Conversation[]
-  tenant             Tenant?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  tasks              Task[]
-  legal_cases        LegalCase[]
-  ficha_trabalhista   FichaTrabalhista?
-  calendar_events     CalendarEvent[]
-  last_followup_at    DateTime?
-  notes               LeadNote[]
-  stage_history       LeadStageHistory[]
-  contract_signatures ContractSignature[]
+  memory               AiMemory?
+  conversations        Conversation[]
+  tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tasks                Task[]
+  legal_cases          LegalCase[]
+  ficha_trabalhista    FichaTrabalhista?
+  calendar_events      CalendarEvent[]
+  last_followup_at     DateTime?
+  notes                LeadNote[]
+  stage_history        LeadStageHistory[]
+  contract_signatures  ContractSignature[]
 
   @@index([tenant_id, phone])
   @@index([stage])
@@ -120,12 +120,12 @@ model Conversation {
   lead             Lead      @relation(fields: [lead_id], references: [id], onDelete: Cascade)
   tenant           Tenant?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   inbox            Inbox?    @relation(fields: [inbox_id], references: [id], onDelete: SetNull)
-  messages         Message[]
-  tasks            Task[]
-  legal_cases         LegalCase[]
-  calendar_events     CalendarEvent[]
-  transfer_audios     TransferAudio[]
-  contract_signatures ContractSignature[]
+  messages             Message[]
+  tasks                Task[]
+  legal_cases          LegalCase[]
+  calendar_events      CalendarEvent[]
+  transfer_audios      TransferAudio[]
+  contract_signatures  ContractSignature[]
 
   @@index([lead_id])
   @@index([last_message_at(sort: Desc)])
@@ -795,14 +795,15 @@ model ContractSignature {
   conversation_id           String
 
   // Referências Clicksign
-  cs_document_key           String    @unique
-  cs_signer_key             String?
-  cs_request_signature_key  String?
-  signing_url               String?
+  cs_document_key           String    @unique   // key do documento no Clicksign
+  cs_signer_key             String?             // key do signatário
+  cs_request_signature_key  String?             // key para construir URL de assinatura
+  signing_url               String?             // link enviado ao cliente via WhatsApp
 
   // PDF assinado (preenchido após webhook de conclusão)
-  signed_s3_key             String?
+  signed_s3_key             String?             // ex: contracts-signed/{id}.pdf
 
+  // Status: PENDENTE | ASSINADO | CANCELADO | EXPIRADO
   status                    String    @default("PENDENTE")
   signed_at                 DateTime?
 
