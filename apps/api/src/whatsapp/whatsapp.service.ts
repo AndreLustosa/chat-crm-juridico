@@ -94,6 +94,7 @@ export class WhatsappService {
     mediaUrl: string,
     caption?: string,
     instanceName?: string,
+    fileName?: string,
   ) {
     const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'crm_instance';
 
@@ -109,6 +110,7 @@ export class WhatsappService {
       mediatype: mediaType,
       media: mediaUrl,
       caption: caption || '',
+      ...(fileName ? { fileName } : {}),
     });
   }
 

@@ -328,9 +328,10 @@ export class ContractsService {
       },
     });
 
-    // 5. URL pública para a Evolution API baixar
-    const mediaUrl = `${publicApiUrl}/media/${msg.id}`;
-    this.logger.log(`[CONTRATO] Enviando documento via Evolution: ${mediaUrl}`);
+    // 5. Montar base64 para envio direto (evita que a Evolution tente baixar URL)
+    const mimeDocx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const base64Media = `data:${mimeDocx};base64,${buffer.toString('base64')}`;
+    this.logger.log(`[CONTRATO] Enviando documento via base64 para ${convo.lead.phone}`);
 
     // 6. Enviar via WhatsApp como documento
     let sendStatus = 'enviado';
@@ -339,9 +340,10 @@ export class ContractsService {
       const result = await this.whatsapp.sendMedia(
         convo.lead.phone,
         'document',
-        mediaUrl,
+        base64Media,
         `📄 Contrato Trabalhista — ${variaveis.NOME_CONTRATANTE}`,
         convo.instance_name || undefined,
+        fileName,
       );
       if (result?.statusCode >= 400 || result?.error) {
         this.logger.error(`Evolution API erro contrato: ${JSON.stringify(result)}`);
