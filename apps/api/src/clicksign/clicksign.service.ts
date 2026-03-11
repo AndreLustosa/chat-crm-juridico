@@ -362,6 +362,64 @@ export class ClicksignService {
     }
   }
 
+  // ── Download do PDF assinado via API correta do Clicksign ─────────────────
+  // A API v1 NÃO tem endpoint /download.
+  // O correto é: GET /api/v1/documents/{key} → document.downloads.signed_file_url
+  // que retorna uma URL pré-assinada do S3 com validade de ~5 minutos.
+
+  private async downloadSignedPdfFromClicksign(documentKey: string): Promise<Buffer> {
+    interface ClicksignDocDetails {
+      document: {
+        status: string;
+        downloads?: {
+          original_file_url?: string;
+          signed_file_url?: string;
+          ziped_file_url?: string;
+        };
+      };
+    }
+
+    // Passo 1: buscar detalhes do documento para obter a URL pré-assinada
+    this.logger.log(`[Clicksign] Buscando detalhes do documento ${documentKey}`);
+    const details = await this.clicksignFetch<ClicksignDocDetails>(
+      'GET',
+      `/documents/${documentKey}`,
+    );
+
+    this.logger.log(
+      `[Clicksign] Documento status=${details?.document?.status} ` +
+      `signed_url=${!!details?.document?.downloads?.signed_file_url}`,
+    );
+
+    // Preferir o PDF assinado; fallback para o original (ex.: durante processamento)
+    const downloadUrl =
+      details?.document?.downloads?.signed_file_url ||
+      details?.document?.downloads?.original_file_url;
+
+    if (!downloadUrl) {
+      throw new Error(
+        `Documento ${documentKey} sem URL de download ` +
+        `(status: ${details?.document?.status}). ` +
+        `O PDF pode ainda estar sendo processado pelo Clicksign.`,
+      );
+    }
+
+    // Passo 2: baixar o PDF diretamente da URL pré-assinada do S3 (sem auth)
+    this.logger.log(`[Clicksign] Baixando PDF da URL pré-assinada S3`);
+    const res = await fetch(downloadUrl);
+    if (!res.ok) {
+      throw new Error(`S3 retornou ${res.status} ao baixar PDF assinado`);
+    }
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) {
+      throw new Error('PDF recebido do S3 está vazio');
+    }
+
+    this.logger.log(`[Clicksign] PDF baixado com sucesso: ${buf.length} bytes`);
+    return buf;
+  }
+
   // ── Processar evento do webhook ───────────────────────────────────────────
 
   async handleWebhookEvent(payload: any): Promise<void> {
@@ -418,21 +476,15 @@ export class ClicksignService {
     const instanceName = convo.instance_name ?? undefined;
     const signedAt = new Date();
 
-    // Download do PDF assinado via Clicksign
+    // Download do PDF assinado via Clicksign (usando endpoint correto da v1)
     let signedS3Key: string | undefined;
     try {
-      const dlResult = await this.clicksignFetch<{ buffer?: Buffer }>(
-        'GET',
-        `/documents/${documentKey}/download`,
-      );
-
-      if (dlResult?.buffer && dlResult.buffer.length > 0) {
-        signedS3Key = `contracts-signed/${sig.id}.pdf`;
-        await this.s3.uploadBuffer(signedS3Key, dlResult.buffer, 'application/pdf');
-        this.logger.log(`[Clicksign] PDF assinado salvo: ${signedS3Key}`);
-      }
+      const pdfBuf = await this.downloadSignedPdfFromClicksign(documentKey);
+      signedS3Key = `contracts-signed/${sig.id}.pdf`;
+      await this.s3.uploadBuffer(signedS3Key, pdfBuf, 'application/pdf');
+      this.logger.log(`[Clicksign] PDF assinado salvo no S3: ${signedS3Key}`);
     } catch (e: any) {
-      this.logger.warn(`[Clicksign] Falha ao baixar PDF assinado: ${e.message}`);
+      this.logger.warn(`[Clicksign] Falha ao baixar PDF assinado no webhook: ${e.message}`);
     }
 
     // Atualizar status no banco
@@ -510,56 +562,14 @@ export class ClicksignService {
       throw new BadRequestException('PDF assinado não disponível — chave do documento ausente');
     }
 
-    this.logger.log(`[Clicksign] Baixando PDF assinado on-demand para sig ${sig.id} (doc: ${sig.cs_document_key})`);
+    // Usa o endpoint correto: GET /api/v1/documents/{key} → downloads.signed_file_url
+    this.logger.log(`[Clicksign] Baixando PDF on-demand para sig ${sig.id} (doc: ${sig.cs_document_key})`);
     let pdfBuffer: Buffer;
     try {
-      const { baseUrl, token } = await this.getCfg();
-
-      // Tenta os dois endpoints de download que o Clicksign suporta
-      const endpoints = [
-        `/api/v1/documents/${sig.cs_document_key}/download`,
-        `/api/v1/documents/${sig.cs_document_key}/download?type=signed`,
-      ];
-
-      let downloaded = false;
-      for (const endpoint of endpoints) {
-        try {
-          const url = `${baseUrl}${endpoint}${endpoint.includes('?') ? '&' : '?'}access_token=${token}`;
-          this.logger.log(`[Clicksign] Tentando download: ${baseUrl}${endpoint}`);
-          const res = await fetch(url, { redirect: 'follow' });
-
-          this.logger.log(`[Clicksign] Resposta download: status=${res.status} content-type=${res.headers.get('content-type')}`);
-
-          if (!res.ok) {
-            const errText = await res.text().catch(() => '');
-            this.logger.warn(`[Clicksign] Endpoint ${endpoint} retornou ${res.status}: ${errText}`);
-            continue;
-          }
-
-          const arrayBuffer = await res.arrayBuffer();
-          const buf = Buffer.from(arrayBuffer);
-
-          if (buf.length > 0) {
-            pdfBuffer = buf;
-            downloaded = true;
-            this.logger.log(`[Clicksign] PDF baixado com sucesso (${buf.length} bytes) via ${endpoint}`);
-            break;
-          }
-          this.logger.warn(`[Clicksign] Endpoint ${endpoint} retornou buffer vazio`);
-        } catch (innerErr: any) {
-          this.logger.warn(`[Clicksign] Erro no endpoint ${endpoint}: ${innerErr.message}`);
-        }
-      }
-
-      if (!downloaded || !pdfBuffer!) {
-        throw new Error('Nenhum endpoint retornou o PDF assinado');
-      }
+      pdfBuffer = await this.downloadSignedPdfFromClicksign(sig.cs_document_key);
     } catch (e: any) {
       this.logger.error(`[Clicksign] Falha ao baixar PDF on-demand: ${e.message}`);
-      throw new BadRequestException(
-        'Não foi possível baixar o PDF assinado do Clicksign. ' +
-        'Acesse o painel do Clicksign para baixar o documento manualmente.',
-      );
+      throw new BadRequestException(e.message);
     }
 
     // Salva no S3 e atualiza o banco para downloads futuros
