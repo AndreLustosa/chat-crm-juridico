@@ -1401,7 +1401,7 @@ export function HighConversionTemplate({
             ].map((step, index) => (
               <div key={index} className="flex items-center gap-6 relative z-10">
                 <div className="w-20 h-20 shrink-0 rounded-full bg-[#FAFAFA] border-4 border-[#d4b568] flex items-center justify-center shadow-[0_0_15px_rgba(212,181,104,0.3)]">
-                  {React.cloneElement(step.icon as React.ReactElement, { size: 24 })}
+                  {React.cloneElement(step.icon as React.ReactElement<{ size?: number }>, { size: 24 })}
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-1">
