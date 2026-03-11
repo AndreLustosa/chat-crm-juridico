@@ -328,9 +328,8 @@ export class ContractsService {
       },
     });
 
-    // 5. Montar base64 para envio direto (evita que a Evolution tente baixar URL)
-    const mimeDocx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    const base64Media = `data:${mimeDocx};base64,${buffer.toString('base64')}`;
+    // 5. Montar base64 puro (sem prefixo data URI) para a Evolution API
+    const base64Media = buffer.toString('base64');
     this.logger.log(`[CONTRATO] Enviando documento via base64 para ${convo.lead.phone}`);
 
     // 6. Enviar via WhatsApp como documento
