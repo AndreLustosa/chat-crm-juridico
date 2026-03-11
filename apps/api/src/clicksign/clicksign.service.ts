@@ -134,14 +134,18 @@ export class ClicksignService {
     email: string,
     phone: string,
   ): Promise<string> {
-    // phone: +5511999999999 → formatar sem +
-    const phoneNumber = phone.replace(/\D/g, '');
+    // Remove tudo que não é dígito e retira o DDI 55 do Brasil
+    // Ex: +5582991301276 → 82991301276 (só DDD + número)
+    let phoneNumber = phone.replace(/\D/g, '');
+    if (phoneNumber.startsWith('55') && phoneNumber.length >= 12) {
+      phoneNumber = phoneNumber.slice(2);
+    }
 
     const payload = {
       signer: {
         name,
         email,
-        phone_number: `+${phoneNumber}`,
+        phone_number: phoneNumber,
         auths: ['whatsapp'],   // token enviado via WhatsApp (não SMS)
         selfie_enabled: true,
         has_documentation: false,
