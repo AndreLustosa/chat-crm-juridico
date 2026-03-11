@@ -142,7 +142,17 @@ export default function ContratoTrabalhistaModal({ open, conversationId, onClose
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || 'Erro ao baixar o PDF assinado.';
+      // Com responseType:'blob', e.response.data é um Blob — precisamos ler o texto
+      let msg = 'Erro ao baixar o PDF assinado.';
+      try {
+        if (e?.response?.data instanceof Blob) {
+          const text = await (e.response.data as Blob).text();
+          const parsed = JSON.parse(text);
+          msg = parsed?.message || msg;
+        } else {
+          msg = e?.response?.data?.message || e?.message || msg;
+        }
+      } catch {}
       setError(msg);
     } finally {
       setDownloadingPdf(false);

@@ -510,22 +510,55 @@ export class ClicksignService {
       throw new BadRequestException('PDF assinado não disponível — chave do documento ausente');
     }
 
-    this.logger.log(`[Clicksign] Baixando PDF assinado on-demand para sig ${sig.id}`);
+    this.logger.log(`[Clicksign] Baixando PDF assinado on-demand para sig ${sig.id} (doc: ${sig.cs_document_key})`);
     let pdfBuffer: Buffer;
     try {
-      const dlResult = await this.clicksignFetch<{ buffer?: Buffer }>(
-        'GET',
-        `/documents/${sig.cs_document_key}/download`,
-      );
+      const { baseUrl, token } = await this.getCfg();
 
-      if (!dlResult?.buffer || dlResult.buffer.length === 0) {
-        throw new Error('Resposta vazia do Clicksign');
+      // Tenta os dois endpoints de download que o Clicksign suporta
+      const endpoints = [
+        `/api/v1/documents/${sig.cs_document_key}/download`,
+        `/api/v1/documents/${sig.cs_document_key}/download?type=signed`,
+      ];
+
+      let downloaded = false;
+      for (const endpoint of endpoints) {
+        try {
+          const url = `${baseUrl}${endpoint}${endpoint.includes('?') ? '&' : '?'}access_token=${token}`;
+          this.logger.log(`[Clicksign] Tentando download: ${baseUrl}${endpoint}`);
+          const res = await fetch(url, { redirect: 'follow' });
+
+          this.logger.log(`[Clicksign] Resposta download: status=${res.status} content-type=${res.headers.get('content-type')}`);
+
+          if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            this.logger.warn(`[Clicksign] Endpoint ${endpoint} retornou ${res.status}: ${errText}`);
+            continue;
+          }
+
+          const arrayBuffer = await res.arrayBuffer();
+          const buf = Buffer.from(arrayBuffer);
+
+          if (buf.length > 0) {
+            pdfBuffer = buf;
+            downloaded = true;
+            this.logger.log(`[Clicksign] PDF baixado com sucesso (${buf.length} bytes) via ${endpoint}`);
+            break;
+          }
+          this.logger.warn(`[Clicksign] Endpoint ${endpoint} retornou buffer vazio`);
+        } catch (innerErr: any) {
+          this.logger.warn(`[Clicksign] Erro no endpoint ${endpoint}: ${innerErr.message}`);
+        }
       }
-      pdfBuffer = dlResult.buffer;
+
+      if (!downloaded || !pdfBuffer!) {
+        throw new Error('Nenhum endpoint retornou o PDF assinado');
+      }
     } catch (e: any) {
       this.logger.error(`[Clicksign] Falha ao baixar PDF on-demand: ${e.message}`);
       throw new BadRequestException(
-        'Não foi possível baixar o PDF assinado. O documento pode ainda estar sendo processado pelo Clicksign.',
+        'Não foi possível baixar o PDF assinado do Clicksign. ' +
+        'Acesse o painel do Clicksign para baixar o documento manualmente.',
       );
     }
 
