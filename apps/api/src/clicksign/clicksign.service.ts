@@ -127,7 +127,7 @@ export class ClicksignService {
     return key;
   }
 
-  // ── Passo 2: criar signatário (SMS + Selfie) ───────────────────────────────
+  // ── Passo 2: criar signatário (WhatsApp + Selfie) ─────────────────────────
 
   private async createSigner(
     name: string,
@@ -142,7 +142,7 @@ export class ClicksignService {
         name,
         email,
         phone_number: `+${phoneNumber}`,
-        auths: ['sms'],
+        auths: ['whatsapp'],   // token enviado via WhatsApp (não SMS)
         selfie_enabled: true,
         has_documentation: false,
       },
