@@ -338,31 +338,16 @@ export default function ContratoTrabalhistaModal({ open, conversationId, onClose
 
                   {/* Botões de download do PDF assinado */}
                   {existingSignature.status === 'ASSINADO' && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Download via backend (S3 ou Clicksign on-demand) */}
-                      <button
-                        onClick={handleDownloadSignedPdf}
-                        disabled={downloadingPdf}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/20 disabled:opacity-60 transition-colors"
-                      >
-                        {downloadingPdf
-                          ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Baixando…</>
-                          : <><Download className="h-3.5 w-3.5" /> Baixar PDF assinado</>
-                        }
-                      </button>
-
-                      {/* Link direto ao painel Clicksign (fallback para sandbox) */}
-                      {existingSignature.dashboard_url && (
-                        <a
-                          href={existingSignature.dashboard_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-500/30 bg-slate-500/10 text-slate-400 text-xs font-semibold hover:bg-slate-500/20 transition-colors"
-                        >
-                          <FileCheck2 className="h-3.5 w-3.5" /> Abrir no Clicksign
-                        </a>
-                      )}
-                    </div>
+                    <button
+                      onClick={handleDownloadSignedPdf}
+                      disabled={downloadingPdf}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/20 disabled:opacity-60 transition-colors"
+                    >
+                      {downloadingPdf
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Baixando…</>
+                        : <><Download className="h-3.5 w-3.5" /> Baixar PDF assinado</>
+                      }
+                    </button>
                   )}
 
                   {/* Link de assinatura se pendente */}
