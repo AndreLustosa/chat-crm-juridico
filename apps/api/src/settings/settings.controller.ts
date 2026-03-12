@@ -153,6 +153,14 @@ export class SettingsController {
     return this.settingsService.deleteSkill(id);
   }
 
+  @Post('skills/reset-defaults')
+  async resetSkillsToDefaults(@Request() req: any) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Apenas administradores');
+    }
+    return this.settingsService.resetSkillsToDefaults();
+  }
+
   @Get('ai-costs')
   async getAiCosts(@Request() req: any) {
     if (req.user.role !== 'ADMIN') {

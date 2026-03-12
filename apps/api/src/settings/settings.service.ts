@@ -526,6 +526,16 @@ Você prepara o caso. O advogado decide.
     return (this.prisma as any).promptSkill.delete({ where: { id } });
   }
 
+  /** Apaga todas as skills e recria a partir dos defaults do código */
+  async resetSkillsToDefaults() {
+    await (this.prisma as any).promptSkill.deleteMany({});
+    this.logger.log('Skills deletadas — recriando defaults...');
+    // getSkills() detecta banco vazio e cria os defaults automaticamente
+    const newSkills = await this.getSkills();
+    this.logger.log(`${newSkills.length} skills recriadas com defaults atualizados`);
+    return { ok: true, count: newSkills.length, skills: newSkills.map((s: any) => ({ name: s.name, model: s.model, area: s.area })) };
+  }
+
   // ── OpenAI Organization API (requer Admin Key) ────────────────────────────
 
   /**
