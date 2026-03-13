@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, Briefcase, Trash2, Plus, Save, X, Star, Mail } from 'lucide-react';
+import { Calendar, Clock, Briefcase, Trash2, Plus, Save, X, Star, Mail, Users } from 'lucide-react';
 import api from '@/lib/api';
 
 const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -28,9 +28,18 @@ interface Holiday {
   recurring_yearly: boolean;
 }
 
+interface UserOption {
+  id: string;
+  name: string;
+  role: string;
+}
+
 export default function OfficeSettingsPage() {
   // ─── State ─────────────────────────────────────────
   const [userId, setUserId] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState('');
   const [schedule, setSchedule] = useState<ScheduleSlot[]>(
     Array.from({ length: 7 }, (_, i) => ({
       day_of_week: i,
@@ -67,14 +76,32 @@ export default function OfficeSettingsPage() {
     try {
       const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       if (payload?.sub) {
+        const role = payload?.role || '';
+        const isAdminUser = role === 'ADMIN' || role === 'admin';
         setUserId(payload.sub);
+        setIsAdmin(isAdminUser);
+        setSelectedUserId(payload.sub);
         loadSchedule(payload.sub);
+        if (isAdminUser) loadUsers();
       }
     } catch {}
     loadAppTypes();
     loadHolidays();
     loadSmtpConfig();
   }, []);
+
+  const loadUsers = async () => {
+    try {
+      const res = await api.get('/users?limit=100');
+      const data = (res.data?.data || res.data?.users || res.data || []) as UserOption[];
+      setUsers(data.map((u: any) => ({ id: u.id, name: u.name, role: u.role })));
+    } catch {}
+  };
+
+  const handleUserChange = (uid: string) => {
+    setSelectedUserId(uid);
+    loadSchedule(uid);
+  };
 
   const loadSchedule = async (uid: string) => {
     try {
@@ -125,13 +152,14 @@ export default function OfficeSettingsPage() {
   // ─── Handlers ──────────────────────────────────────
 
   const saveSchedule = async () => {
-    if (!userId) return;
+    const targetId = selectedUserId || userId;
+    if (!targetId) return;
     setScheduleSaving(true);
     try {
       const slots = schedule
         .filter((s) => s.enabled && s.start_time && s.end_time)
         .map((s) => ({ day_of_week: s.day_of_week, start_time: s.start_time, end_time: s.end_time }));
-      await api.put(`/calendar/schedule/${userId}`, { slots });
+      await api.put(`/calendar/schedule/${targetId}`, { slots });
       setScheduleSaved(true);
       setTimeout(() => setScheduleSaved(false), 2000);
     } catch {}
@@ -225,6 +253,25 @@ export default function OfficeSettingsPage() {
               </button>
             </div>
           </div>
+
+          {/* Seletor de advogado — visível apenas para ADMIN */}
+          {isAdmin && users.length > 0 && (
+            <div className="flex items-center gap-2 mb-5 p-3 rounded-xl bg-muted/20 border border-border/50">
+              <Users size={14} className="text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Configurando horários de:</span>
+              <select
+                value={selectedUserId}
+                onChange={(e) => handleUserChange(e.target.value)}
+                className="flex-1 px-2 py-1 text-sm bg-muted/30 border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} {u.id === userId ? '(você)' : `— ${u.role}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-2">
             {schedule.map((slot, idx) => (
