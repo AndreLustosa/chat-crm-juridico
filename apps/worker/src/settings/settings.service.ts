@@ -18,13 +18,14 @@ export class SettingsService {
 
     return {
       apiUrl,
-      apiKey: apiKeyRow?.value || process.env.EVOLUTION_GLOBAL_APIKEY || '',
+      apiKey: this.decryptIfNeeded(apiKeyRow?.value || process.env.EVOLUTION_GLOBAL_APIKEY || ''),
     };
   }
 
   async getOpenAiKey(): Promise<string | null> {
     const row = await this.prisma.globalSetting.findUnique({ where: { key: 'OPENAI_API_KEY' } });
-    return row?.value || process.env.OPENAI_API_KEY || null;
+    const raw = row?.value || process.env.OPENAI_API_KEY || null;
+    return raw ? this.decryptIfNeeded(raw) : null;
   }
 
   async getDefaultModel(): Promise<string> {
@@ -45,7 +46,7 @@ export class SettingsService {
       where: { key: { in: keys } },
     });
     const cfg: Record<string, string> = {};
-    for (const r of rows) cfg[r.key] = r.value;
+    for (const r of rows) cfg[r.key] = this.decryptIfNeeded(r.value);
     return {
       host: cfg.SMTP_HOST || '',
       port: parseInt(cfg.SMTP_PORT || '587'),
