@@ -496,6 +496,25 @@ export default function AgendaPage() {
     }
   }, [events, filterTypes, eventsServicePlugin, showAllUsers, filterUserId]);
 
+  // Carga inicial: schedule-x v4 não chama onRangeUpdate no mount.
+  // Calculamos o range da semana atual e buscamos os eventos imediatamente.
+  useEffect(() => {
+    const now = new Date();
+    const day = now.getDay(); // 0=Dom, 1=Seg … 6=Sab
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    const start = monday.toISOString();
+    const end = sunday.toISOString();
+    rangeRef.current = { start, end };
+    fetchEvents(start, end);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // apenas no mount — onRangeUpdate atualiza o range nas navegações
+
   // Refetch quando filtro de usuario muda
   useEffect(() => {
     if (rangeRef.current) {
