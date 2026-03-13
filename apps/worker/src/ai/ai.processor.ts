@@ -346,12 +346,14 @@ export class AiProcessor extends WorkerHost {
     // b. Status → Lead.stage
     let resolvedStage: string | null = null;
     if (updates.status && updates.status !== 'null') {
-      await this.prisma.lead.update({
-        where: { id: leadId },
-        data: { stage: updates.status },
-      });
+      const stageData: Record<string, any> = { stage: updates.status, stage_entered_at: new Date() };
+      // Se for PERDIDO, salvar loss_reason junto
+      if (updates.status === 'PERDIDO' && updates.loss_reason) {
+        stageData.loss_reason = updates.loss_reason;
+      }
+      await this.prisma.lead.update({ where: { id: leadId }, data: stageData });
       resolvedStage = updates.status;
-      this.logger.log(`[AI] Lead.stage → "${updates.status}"`);
+      this.logger.log(`[AI] Lead.stage → "${updates.status}"${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
     } else if (!updates.status && updates.next_step) {
       // Se a IA enviou next_step mas esqueceu o status, inferir o stage automaticamente
       const inferMap: Record<string, string> = {
@@ -1383,10 +1385,17 @@ scheduling_action: Use SOMENTE quando agendar reunião.
 `;
 
       if (skill) {
-        systemPrompt = MEDIA_CAPABILITIES_HEADER + this.injectVariables(BEHAVIOR_RULES, vars) + this.injectVariables(skill.system_prompt, vars) + this.injectVariables(FORM_DATA_INJECTION, vars);
+        // FORM_DATA_INJECTION contém o roteiro Trabalhista completo (fases 5-9, form, honorários, etc.)
+        // Injetar SOMENTE no skill Trabalhista — outros skills (SDR, Consumidor, etc.) ficam sem ele
+        const formInjection = skill.area === 'Trabalhista'
+          ? this.injectVariables(FORM_DATA_INJECTION, vars)
+          : '';
+        systemPrompt = MEDIA_CAPABILITIES_HEADER + this.injectVariables(BEHAVIOR_RULES, vars) + this.injectVariables(skill.system_prompt, vars) + formInjection;
         model = skill.model || (await this.settings.getDefaultModel());
-        // Mínimo de 1500 tokens para acomodar JSON com form_data (trabalhista)
-        maxTokens = Math.max(skill.max_tokens || 500, 1500);
+        // Trabalhista precisa de mais tokens para o form_data completo; outros usam o padrão do skill
+        maxTokens = skill.area === 'Trabalhista'
+          ? Math.max(skill.max_tokens || 500, 1500)
+          : (skill.max_tokens || 500);
         temperature = skill.temperature ?? 0.7;
         this.logger.log(
           `[AI] Usando skill: "${skill.name}" (area=${skill.area}, model=${model})`,
