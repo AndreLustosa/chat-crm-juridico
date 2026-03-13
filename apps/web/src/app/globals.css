@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* ─── Schedule-X overrides ────────────────────────────
+   Center time labels in cells instead of on dividing lines.
+   Default: top: -0.75em (sits on the border line)
+   Fixed:   top: calc(50% - 0.5em) (centered in cell)
+─────────────────────────────────────────────────────── */
+.sx__week-grid__hour-text {
+  top: calc(50% - 0.5em) !important;
+}
+.sx__week-grid__hour:first-child {
+  visibility: visible !important;
+}
+
 @theme {
   --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-ubuntu: var(--font-ubuntu), ui-sans-serif, system-ui, sans-serif;

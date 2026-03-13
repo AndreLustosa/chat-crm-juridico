@@ -135,6 +135,55 @@ function toLocalDateTime(isoStr: string): string {
   return `${y}-${m}-${day} ${h}:${min}`;
 }
 
+/**
+ * Converte Temporal.ZonedDateTime, Temporal.PlainDate, ou string
+ * para ISO string usável como query param no backend.
+ * Schedule-x v4 passa objetos Temporal nos callbacks — o Axios
+ * não os serializa corretamente como query params.
+ */
+function temporalToISO(dt: any): string {
+  if (!dt) return '';
+  if (typeof dt === 'string') return dt;
+  // Temporal.ZonedDateTime — usar toInstant().toString() p/ UTC ISO
+  if (typeof dt.toInstant === 'function') {
+    return dt.toInstant().toString(); // "2026-03-09T00:00:00Z"
+  }
+  // Temporal.PlainDate / PlainDateTime — construir manualmente
+  if (typeof dt.year === 'number') {
+    const y = String(dt.year).padStart(4, '0');
+    const mo = String(dt.month).padStart(2, '0');
+    const d = String(dt.day).padStart(2, '0');
+    if (typeof dt.hour === 'number') {
+      const h = String(dt.hour).padStart(2, '0');
+      const mi = String(dt.minute).padStart(2, '0');
+      return `${y}-${mo}-${d}T${h}:${mi}:00`;
+    }
+    return `${y}-${mo}-${d}`;
+  }
+  return String(dt);
+}
+
+/**
+ * Converte Temporal.ZonedDateTime ou Temporal.PlainDate
+ * para "YYYY-MM-DD HH:mm" (formato que openCreateModal espera).
+ */
+function temporalToLocalStr(dt: any): string {
+  if (!dt) return '';
+  if (typeof dt === 'string') return dt;
+  if (typeof dt.year === 'number') {
+    const y = String(dt.year).padStart(4, '0');
+    const mo = String(dt.month).padStart(2, '0');
+    const d = String(dt.day).padStart(2, '0');
+    if (typeof dt.hour === 'number') {
+      const h = String(dt.hour).padStart(2, '0');
+      const mi = String(dt.minute).padStart(2, '0');
+      return `${y}-${mo}-${d} ${h}:${mi}`;
+    }
+    return `${y}-${mo}-${d}`;
+  }
+  return String(dt);
+}
+
 function toISOFromLocal(localStr: string): string {
   // "2026-03-07 14:00" → ISO string
   return new Date(localStr.replace(' ', 'T')).toISOString();
@@ -299,6 +348,9 @@ export default function AgendaPage() {
   // schedule-x
   const eventsServicePlugin = useState(() => createEventsServicePlugin())[0];
   const rangeRef = useRef<{ start: string; end: string } | null>(null);
+  // Ref para fetchEvents — evita stale closure nos callbacks do schedule-x
+  // (useNextCalendarApp captura apenas a versão inicial de fetchEvents)
+  const fetchEventsRef = useRef<typeof fetchEvents | null>(null);
 
   // ─── Data Fetching ──────────────────────────────────
 
@@ -320,6 +372,9 @@ export default function AgendaPage() {
       setLoading(false);
     }
   }, [filterUserId, showAllUsers]);
+
+  // Manter ref atualizado com a versão mais recente de fetchEvents
+  useEffect(() => { fetchEventsRef.current = fetchEvents; }, [fetchEvents]);
 
   // Drag-and-drop persistence
   const handleDragUpdate = useCallback(async (updatedEvent: any) => {
@@ -346,8 +401,13 @@ export default function AgendaPage() {
     callbacks: {
       onRangeUpdate(range) {
         try {
-          rangeRef.current = { start: range.start, end: range.end };
-          fetchEvents(range.start, range.end);
+          // schedule-x v4 passa Temporal.ZonedDateTime — converter para ISO string
+          const startISO = temporalToISO(range.start);
+          const endISO = temporalToISO(range.end);
+          rangeRef.current = { start: startISO, end: endISO };
+          // Usar ref para ter sempre a versão mais recente de fetchEvents
+          const fn = fetchEventsRef.current ?? fetchEvents;
+          fn(startISO, endISO);
         } catch (e) {
           console.error('[Agenda] onRangeUpdate error:', e);
         }
@@ -357,10 +417,12 @@ export default function AgendaPage() {
         if (ev) openEditModal(ev);
       },
       onClickDateTime(dateTime) {
-        openCreateModal(dateTime);
+        // schedule-x v4 passa Temporal.ZonedDateTime — converter para "YYYY-MM-DD HH:mm"
+        openCreateModal(temporalToLocalStr(dateTime));
       },
       onClickDate(date) {
-        openCreateModal(date);
+        // schedule-x v4 passa Temporal.PlainDate — converter para "YYYY-MM-DD"
+        openCreateModal(temporalToLocalStr(date));
       },
       onEventUpdate(updatedEvent) {
         handleDragUpdate(updatedEvent);
@@ -1029,15 +1091,6 @@ export default function AgendaPage() {
 
         {/* Calendário schedule-x */}
         <div className="flex-1 overflow-auto">
-          {/* Override schedule-x time label position: center in cells, not on border lines */}
-          <style>{`
-            .sx__week-grid__hour-text {
-              top: calc(50% - 0.5em) !important;
-            }
-            .sx__week-grid__hour:first-child {
-              visibility: visible !important;
-            }
-          `}</style>
           <div className="sx-react-calendar-wrapper h-full min-h-[500px]" style={{
             ['--sx-color-primary' as any]: 'hsl(var(--primary))',
             ['--sx-color-surface' as any]: 'hsl(var(--card))',
