@@ -225,9 +225,14 @@ export class EvolutionService {
       // 3. Insert Message (idempotent)
       const existingMsg = await this.prisma.message.findUnique({
         where: { external_message_id: externalMessageId },
+        include: { media: true, skill: { select: { id: true, name: true, area: true } } },
       });
       if (existingMsg) {
-        this.logger.log(`Mensagem duplicada ignorada: ${externalMessageId}`);
+        this.logger.log(`[DEDUP] Mensagem já existe: ${externalMessageId} — re-emitindo WebSocket como fallback`);
+        // Re-emite WebSocket para cobrir o caso em que o BullMQ QueueEvents perdeu o evento
+        // (mensagem já está no banco mas o frontend pode não ter sido notificado em tempo real)
+        this.chatGateway.emitNewMessage(existingMsg.conversation_id, existingMsg);
+        this.chatGateway.emitConversationsUpdate(null);
         continue;
       }
 
