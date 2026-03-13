@@ -340,7 +340,7 @@ export default function AgendaPage() {
     defaultView: isMobile ? 'day' : 'week',
     locale: 'pt-BR',
     firstDayOfWeek: 1,
-    dayBoundaries: { start: '07:00', end: '20:00' },
+    dayBoundaries: { start: '06:00', end: '21:00' },
     weekOptions: { gridHeight: isMobile ? 500 : 600 },
     isDark: true,
     callbacks: {
