@@ -269,33 +269,12 @@ export default function AgendaPage() {
     recurrence_days: [] as number[],
   });
 
-  // Usuario logado + controle de acesso — inicialização síncrona do JWT
-  const [currentUserId, setCurrentUserId] = useState<string>(() => {
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (!token) return '';
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      return payload?.sub || '';
-    } catch { return ''; }
-  });
-  const [currentUserRole, setCurrentUserRole] = useState<string>(() => {
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (!token) return '';
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      return payload?.role || '';
-    } catch { return ''; }
-  });
-  // Inicializa showAllUsers de forma síncrona a partir do JWT para evitar
-  // race condition com o primeiro onRangeUpdate do schedule-x
-  const [showAllUsers, setShowAllUsers] = useState(() => {
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (!token) return false;
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      return payload?.role === 'ADMIN' || payload?.role === 'admin';
-    } catch { return false; }
-  });
+  // Usuario logado + controle de acesso
+  // Inicializado com valores neutros para evitar hydration mismatch (SSR ≠ client)
+  // O useEffect abaixo popula os valores reais a partir do JWT no client
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [currentUserRole, setCurrentUserRole] = useState<string>('');
+  const [showAllUsers, setShowAllUsers] = useState(false);
 
   // Comentarios do evento
   const [eventComments, setEventComments] = useState<EventComment[]>([]);

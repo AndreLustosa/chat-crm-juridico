@@ -58,9 +58,12 @@ export class CalendarService {
     }
 
     if (query.start || query.end) {
+      // Schedule-x pode enviar datas com sufixo IANA entre colchetes ex: "2026-03-09T07:00:00+00:00[UTC]"
+      // que new Date() não consegue parsear → remover o sufixo antes de converter
+      const parseDate = (s: string) => new Date(s.replace(/\[.*?\]$/, ''));
       where.start_at = {};
-      if (query.start) where.start_at.gte = new Date(query.start);
-      if (query.end) where.start_at.lte = new Date(query.end);
+      if (query.start) where.start_at.gte = parseDate(query.start);
+      if (query.end) where.start_at.lte = parseDate(query.end);
     }
 
     return this.prisma.calendarEvent.findMany({
