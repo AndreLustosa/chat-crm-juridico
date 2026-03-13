@@ -1520,7 +1520,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       // Exibe "digitando..." por 5s via endpoint dedicado da Evolution API.
       // Fire-and-forget (sem await): dispara o indicador e imediatamente começa
       // a contar os 5s em paralelo — evita dupla espera (API delay + setTimeout).
-      const TYPING_DELAY_MS = 5000;
+      const TYPING_DELAY_MS = 2000;
       // Formato flat (sem wrapper "options") — conforme comportamento real da API
       axios
         .post(

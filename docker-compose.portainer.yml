@@ -68,6 +68,7 @@ services:
       - "${API_PORT:-43001}:3001"
     environment:
       - PORT=3001
+      - TZ=America/Sao_Paulo
       - RUN_MIGRATIONS=true
       - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@postgres:5432/${POSTGRES_DB:-lexcrm}?schema=public
       - REDIS_HOST=redis
@@ -116,6 +117,7 @@ services:
     image: andreflustosa/chat-crm-juridico-worker:latest
     environment:
       - PORT=3002
+      - TZ=America/Sao_Paulo
       - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@postgres:5432/${POSTGRES_DB:-lexcrm}?schema=public
       - REDIS_HOST=redis
       - REDIS_PORT=6379
