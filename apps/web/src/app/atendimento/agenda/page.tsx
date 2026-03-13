@@ -379,8 +379,9 @@ export default function AgendaPage() {
   // Drag-and-drop persistence
   const handleDragUpdate = useCallback(async (updatedEvent: any) => {
     try {
-      const startIso = toISOFromLocal(updatedEvent.start);
-      const endIso = toISOFromLocal(updatedEvent.end);
+      // schedule-x v4: updatedEvent.start/end são Temporal.ZonedDateTime — usar temporalToISO
+      const startIso = temporalToISO(updatedEvent.start);
+      const endIso = temporalToISO(updatedEvent.end);
       await api.patch(`/calendar/events/${updatedEvent.id}`, { start_at: startIso, end_at: endIso });
       // Update local state optimistically
       setEvents(prev => prev.map(e => e.id === updatedEvent.id ? { ...e, start_at: startIso, end_at: endIso } : e));
@@ -459,9 +460,14 @@ export default function AgendaPage() {
   }, [router]);
 
   // Sync filtro → calendar
+  // schedule-x v4 exige Temporal.ZonedDateTime (não string) em start/end
   useEffect(() => {
     if (!eventsServicePlugin) return;
     try {
+      // Temporal disponível nativamente no Chrome 137+ (Mar/2026) e polyfillado pelo schedule-x
+      const T = (globalThis as any).Temporal;
+      const tz: string = T ? T.Now.timeZoneId() : 'America/Sao_Paulo';
+
       const filtered = events.filter(e => filterTypes.includes(e.type));
       const calEvents = filtered
         .filter(e => {
@@ -474,18 +480,31 @@ export default function AgendaPage() {
           const userPrefix = (showAllUsers && !filterUserId && e.assigned_user)
             ? `[${e.assigned_user.name.split(' ')[0]}] `
             : '';
-          const startLocal = toLocalDateTime(e.start_at);
+          const startLocal = toLocalDateTime(e.start_at); // "YYYY-MM-DD HH:mm"
           let endLocal: string;
           if (e.end_at && !isNaN(new Date(e.end_at).getTime())) {
             endLocal = toLocalDateTime(e.end_at);
           } else {
             endLocal = toLocalDateTime(new Date(new Date(e.start_at).getTime() + 30 * 60000).toISOString());
           }
+
+          // Converter strings para Temporal.ZonedDateTime (obrigatório no schedule-x v4)
+          let startSx: any = startLocal;
+          let endSx: any = endLocal;
+          if (T) {
+            try {
+              startSx = T.ZonedDateTime.from(`${startLocal.replace(' ', 'T')}:00[${tz}]`);
+              endSx   = T.ZonedDateTime.from(`${endLocal.replace(' ', 'T')}:00[${tz}]`);
+            } catch {
+              // fallback: manter string se Temporal falhar para este evento
+            }
+          }
+
           return {
             id: e.id,
             title: `${EVENT_TYPES.find(t => t.id === e.type)?.emoji || ''} ${userPrefix}${e.title}${e.status === 'ADIADO' ? ' ⏸️' : ''}${e.status === 'CANCELADO' ? ' ✖️' : ''}${(e as any).recurrence_rule || (e as any).parent_event_id ? ' 🔁' : ''}${e._count?.comments ? ` 💬${e._count.comments}` : ''}`,
-            start: startLocal,
-            end: endLocal,
+            start: startSx,
+            end: endSx,
             calendarId: e.type,
             _customContent: {},
           };
