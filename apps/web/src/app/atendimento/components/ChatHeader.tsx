@@ -156,7 +156,7 @@ export function ChatHeader({
                   {LEGAL_AREAS.map(area => (
                     <button
                       key={area}
-                      onClick={() => onChangeLegalArea(area)}
+                      onClick={(e) => { e.stopPropagation(); onChangeLegalArea(area); }}
                       className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${selected.legalArea === area ? 'text-violet-400 font-semibold' : 'text-foreground'}`}
                     >
                       ⚖️ {area}
@@ -164,7 +164,7 @@ export function ChatHeader({
                   ))}
                   {selected.legalArea && (
                     <button
-                      onClick={() => onChangeLegalArea(null)}
+                      onClick={(e) => { e.stopPropagation(); onChangeLegalArea(null); }}
                       className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
                     >
                       Remover área
@@ -181,7 +181,7 @@ export function ChatHeader({
             {selected.legalArea && (
               <div className="relative" ref={lawyerDropdownRef}>
                 <button
-                  onClick={() => onToggleLawyer()}
+                  onClick={(e) => { e.stopPropagation(); onToggleLawyer(); }}
                   className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${selected.assignedLawyerName ? 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20' : 'bg-muted/50 text-muted-foreground border-border hover:bg-muted'}`}
                   title="Clique para atribuir ou trocar o especialista"
                 >
@@ -199,7 +199,7 @@ export function ChatHeader({
                     {allSpecialists.map(u => (
                       <button
                         key={u.id}
-                        onClick={() => onAssignLawyer(u.id)}
+                        onClick={(e) => { e.stopPropagation(); onAssignLawyer(u.id); }}
                         className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${u.id === selected.assignedLawyerId ? 'text-primary font-semibold' : 'text-foreground'}`}
                       >
                         <span className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[9px] font-bold text-primary shrink-0">
@@ -213,7 +213,7 @@ export function ChatHeader({
                     ))}
                     {selected.assignedLawyerId && (
                       <button
-                        onClick={() => onAssignLawyer(null)}
+                        onClick={(e) => { e.stopPropagation(); onAssignLawyer(null); }}
                         className="w-full text-left px-3 py-2 text-muted-foreground hover:bg-accent hover:text-destructive transition-colors text-[11px] border-t border-border mt-1"
                       >
                         Remover especialista
