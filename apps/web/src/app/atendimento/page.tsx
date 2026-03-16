@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, Fragment } from 'rea
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical, CheckSquare } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { AuthAudioPlayer } from '@/components/AuthAudioPlayer';
@@ -171,6 +171,13 @@ export default function Dashboard() {
   // Modal de motivo de perda (PERDIDO) — exigido pelo backend
   const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
   const [lossReason, setLossReason] = useState('');
+  // Modal de criação rápida de tarefa a partir do chat
+  const [taskModal, setTaskModal] = useState<{ leadId: string; conversationId: string; leadName: string } | null>(null);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDueAt, setTaskDueAt] = useState('');
+  const [taskAssignedId, setTaskAssignedId] = useState('');
+  const [savingTask, setSavingTask] = useState(false);
+  const [taskAgents, setTaskAgents] = useState<{ id: string; name: string }[]>([]);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashMenuPos, setSlashMenuPos] = useState<{ bottom: number; left: number } | null>(null);
   // Typing indicators
@@ -1184,6 +1191,42 @@ export default function Dashboard() {
     }
   };
 
+  // Abre o modal de criação rápida de tarefa vinculada ao lead do chat atual
+  const openTaskModal = async () => {
+    const conv = conversations.find(c => c.id === selectedId);
+    if (!conv?.leadId) return;
+    setTaskTitle('');
+    setTaskDueAt('');
+    setTaskAssignedId('');
+    setTaskModal({ leadId: conv.leadId, conversationId: conv.id, leadName: conv.contactName || 'Lead' });
+    if (taskAgents.length === 0) {
+      try {
+        const res = await api.get('/users/agents');
+        setTaskAgents(res.data || []);
+      } catch { /* silencioso */ }
+    }
+  };
+
+  const createTask = async () => {
+    if (!taskModal || !taskTitle.trim() || savingTask) return;
+    setSavingTask(true);
+    try {
+      await api.post('/tasks', {
+        title: taskTitle.trim(),
+        lead_id: taskModal.leadId,
+        conversation_id: taskModal.conversationId,
+        due_at: taskDueAt || undefined,
+        assigned_user_id: taskAssignedId || undefined,
+      });
+      setTaskModal(null);
+      showSuccess('✅ Tarefa criada com sucesso!');
+    } catch {
+      showError('Erro ao criar tarefa');
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
   const handleChangeLegalArea = async (area: string | null) => {
     if (!selectedId) return;
     const prevArea = selected?.legalArea ?? null;
@@ -1646,6 +1689,7 @@ export default function Dashboard() {
               onShowDetails={() => setShowDetailsPanel(true)}
               onSetClientPanelLeadId={setClientPanelLeadId}
               onLightbox={setLightbox}
+              onCreateTask={openTaskModal}
               contactPresence={contactPresence}
             />
 
@@ -2161,6 +2205,16 @@ export default function Dashboard() {
                         : <Paperclip size={20} />}
                     </button>
                   )}
+                  {/* Desktop: botão criação rápida de tarefa */}
+                  {!isMobile && selected?.leadId && (
+                    <button
+                      onClick={openTaskModal}
+                      title="Criar tarefa para este lead (atalho rápido)"
+                      className="p-2.5 md:p-3 rounded-xl bg-card border border-border text-muted-foreground hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/10 transition-colors shrink-0 mb-0.5"
+                    >
+                      <CheckSquare size={20} />
+                    </button>
+                  )}
 
                   {/* Hidden file input */}
                   <input
@@ -2573,6 +2627,76 @@ export default function Dashboard() {
                 className="px-4 py-2 text-sm rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 font-medium hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Confirmar Perda
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal Criação Rápida de Tarefa — portal para garantir z-index acima de tudo */}
+      {taskModal && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm dark">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckSquare size={20} className="text-emerald-400 shrink-0" />
+              <h3 className="text-lg font-bold text-foreground">Nova Tarefa</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-5">
+              Lead: <strong className="text-foreground">{taskModal.leadName}</strong>
+            </p>
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Título *</label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={taskTitle}
+                  onChange={e => setTaskTitle(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) createTask(); }}
+                  placeholder="Ex: Receber documentação do cliente"
+                  className="w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Prazo</label>
+                <input
+                  type="datetime-local"
+                  value={taskDueAt}
+                  onChange={e => setTaskDueAt(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground [color-scheme:dark]"
+                />
+              </div>
+              {taskAgents.length > 0 && (
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 block">Atribuir a</label>
+                  <select
+                    value={taskAssignedId}
+                    onChange={e => setTaskAssignedId(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground"
+                  >
+                    <option value="" className="bg-card">Sem atribuição</option>
+                    {taskAgents.map(a => (
+                      <option key={a.id} value={a.id} className="bg-card">{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setTaskModal(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={createTask}
+                disabled={!taskTitle.trim() || savingTask}
+                className="px-4 py-2 text-sm rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium hover:bg-emerald-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {savingTask && <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />}
+                Criar Tarefa
               </button>
             </div>
           </div>

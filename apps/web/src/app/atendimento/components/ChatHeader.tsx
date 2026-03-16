@@ -1,6 +1,6 @@
 'use client';
 
-import { Bot, BotOff, UserCheck, XCircle, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical } from 'lucide-react';
+import { Bot, BotOff, UserCheck, XCircle, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, CheckSquare } from 'lucide-react';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import type { ConversationSummary } from '../types';
 
@@ -52,6 +52,7 @@ export interface ChatHeaderProps {
   onShowDetails: () => void;
   onSetClientPanelLeadId: (id: string | null) => void;
   onLightbox: (url: string) => void;
+  onCreateTask: () => void;
   contactPresence?: string;
 }
 
@@ -90,6 +91,7 @@ export function ChatHeader({
   onShowDetails,
   onSetClientPanelLeadId,
   onLightbox,
+  onCreateTask,
   contactPresence,
 }: ChatHeaderProps) {
   return (
@@ -320,6 +322,16 @@ export function ChatHeader({
                 Manter Aqui
               </button>
             </>
+          )}
+          {selected?.leadId && (
+            <button
+              onClick={onCreateTask}
+              title="Criar tarefa para este lead"
+              className="px-3 py-2 text-sm font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-colors flex items-center gap-2"
+            >
+              <CheckSquare size={16} />
+              Tarefa
+            </button>
           )}
           {!isClosed && isRealConvo && (
             <button
