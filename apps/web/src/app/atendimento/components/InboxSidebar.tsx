@@ -151,8 +151,8 @@ export function InboxSidebar({
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
 
   return (
-    <section className={`flex flex-col bg-card border-r border-border shrink-0 z-40 transition-all duration-300 ${isMobile ? (selectedId ? 'hidden' : 'w-full') : (inboxOpen ? 'w-[380px]' : 'w-0 overflow-hidden')}`}>
-      <div className="p-5 border-b border-border space-y-4">
+    <section className={`flex flex-col overflow-hidden bg-card border-r border-border shrink-0 z-40 transition-all duration-300 ${isMobile ? (selectedId ? 'hidden' : 'w-full') : (inboxOpen ? 'w-[380px]' : 'w-0')}`}>
+      <div className="shrink-0 p-5 border-b border-border space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold">Inbox</h2>
           <button
