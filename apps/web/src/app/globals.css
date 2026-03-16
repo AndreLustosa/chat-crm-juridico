@@ -155,6 +155,14 @@
   }
 }
 
+/* ─── Scrollbar utilities ─────────────────── */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ============================================
    PREMIUM BUTTON EFFECT (LP Templates)
    ============================================ */
