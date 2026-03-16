@@ -394,9 +394,14 @@ export default function UsersSettingsPage() {
                   <option value="Advogados" className="bg-card text-foreground">⚖️ Advogados</option>
                   <option value="Atendente Comercial" className="bg-card text-foreground">💼 Atendente Comercial</option>
                   <option value="Estagiário" className="bg-card text-foreground">🎓 Estagiário</option>
-                  {sectors.filter(s => !['Advogados','Atendente Comercial','Estagiário'].includes(s.name)).map(s => (
-                    <option key={s.id} value={s.name} className="bg-card text-foreground">{s.name}</option>
-                  ))}
+                  {(() => {
+                    // normaliza para singular lowercase: "Estagiários" → "estagiário", "Advogados" → "advogado"
+                    const norm = (s: string) => { const l = s.toLowerCase(); return l.endsWith('s') ? l.slice(0, -1) : l; };
+                    const FIXED = new Set(['advogados', 'atendente comercial', 'estagiário'].map(norm));
+                    return sectors.filter(s => !FIXED.has(norm(s.name))).map(s => (
+                      <option key={s.id} value={s.name} className="bg-card text-foreground">{s.name}</option>
+                    ));
+                  })()}
                 </select>
               </div>
 

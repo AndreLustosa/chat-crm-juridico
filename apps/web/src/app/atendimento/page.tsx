@@ -79,6 +79,14 @@ const LEGAL_AREAS = [
   'Penal', 'Civil', 'Empresarial', 'Imobiliário', 'Outro',
 ];
 
+const LOSS_REASONS = [
+  'Sem interesse',
+  'Sem condições financeiras',
+  'Contratou outro escritório',
+  'Não respondeu',
+  'Caso inviável',
+];
+
 function DateSeparator({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2 select-none sticky top-0 z-10 bg-card/80 backdrop-blur-sm">
@@ -161,6 +169,9 @@ export default function Dashboard() {
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [clientPanelLeadId, setClientPanelLeadId] = useState<string | null>(null);
   const [showContratoModal, setShowContratoModal] = useState(false);
+  // Modal de motivo de perda (PERDIDO) — exigido pelo backend
+  const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
+  const [lossReason, setLossReason] = useState('');
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashMenuPos, setSlashMenuPos] = useState<{ bottom: number; left: number } | null>(null);
   // Typing indicators
@@ -1133,19 +1144,44 @@ export default function Dashboard() {
       alert('⚠️ Defina a Área de Atendimento antes de marcar como Finalizado.');
       return;
     }
-    setLeadStage(newStage); // otimista
     setShowStageDropdown(false);
+    // PERDIDO exige motivo — abre modal antes de prosseguir
+    if (newStage === 'PERDIDO') {
+      setLossModal({ leadId: conv.leadId, leadName: conv.contactName || 'Lead' });
+      setLossReason('');
+      return;
+    }
+    setLeadStage(newStage); // otimista
     // Atualiza leadStage no objeto local para o filtro reagir imediatamente
     setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, leadStage: newStage } : c));
-    // Se marcado como Perdido, arquiva: sai da conversa e painel
-    if (newStage === 'PERDIDO') {
-      setSelectedId(null);
-      setShowDetailsPanel(false);
-    }
     try {
       await api.patch(`/leads/${conv.leadId}/stage`, { stage: newStage });
     } catch (e: any) {
       console.error('Failed to change lead stage', e);
+      // Rollback otimismo
+      setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, leadStage: conv.leadStage } : c));
+      setLeadStage(conv.leadStage ?? null);
+    }
+  };
+
+  // Confirma arquivamento com motivo de perda obrigatório
+  const confirmLoss = async () => {
+    if (!lossModal || !lossReason.trim()) return;
+    const { leadId } = lossModal;
+    const conv = conversations.find(c => c.leadId === leadId);
+    const prevStage = conv?.leadStage ?? 'INICIAL';
+    setLossModal(null);
+    // Otimismo: remove da lista e fecha painel
+    setLeadStage('PERDIDO');
+    setConversations(prev => prev.map(c => c.leadId === leadId ? { ...c, leadStage: 'PERDIDO' } : c));
+    setSelectedId(null);
+    setShowDetailsPanel(false);
+    try {
+      await api.patch(`/leads/${leadId}/stage`, { stage: 'PERDIDO', loss_reason: lossReason.trim() });
+    } catch (e: any) {
+      console.error('Failed to mark lead as PERDIDO', e);
+      // Rollback
+      setConversations(prev => prev.map(c => c.leadId === leadId ? { ...c, leadStage: prevStage } : c));
     }
   };
 
@@ -2494,6 +2530,56 @@ export default function Dashboard() {
         conversationId={selectedId}
         onClose={() => setShowContratoModal(false)}
       />
+
+      {/* Modal Motivo de Perda — portal para garantir z-index acima de tudo */}
+      {lossModal && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm dark">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-foreground mb-1">Marcar como Perdido</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Por que o lead <strong>{lossModal.leadName}</strong> foi perdido?
+            </p>
+            <div className="space-y-2 mb-4">
+              {LOSS_REASONS.map(reason => (
+                <button
+                  key={reason}
+                  onClick={() => setLossReason(reason)}
+                  className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-all ${
+                    lossReason === reason
+                      ? 'border-red-500 bg-red-500/10 text-red-400 font-medium'
+                      : 'border-border hover:bg-accent text-muted-foreground'
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={LOSS_REASONS.includes(lossReason) ? '' : lossReason}
+              onChange={e => setLossReason(e.target.value)}
+              placeholder="Outro motivo..."
+              className="w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 mb-4"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setLossModal(null)}
+                className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmLoss}
+                disabled={!lossReason.trim()}
+                className="px-4 py-2 text-sm rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 font-medium hover:bg-red-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Confirmar Perda
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Ficha Trabalhista Slide-over */}
       {fichaInboxVisible && selected?.leadId && (
