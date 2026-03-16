@@ -314,19 +314,20 @@ export default function UsersSettingsPage() {
       {/* Modal Criar/Editar */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] animate-in fade-in duration-200 dark">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border bg-foreground/[0.02]">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border bg-foreground/[0.02] shrink-0">
               <h2 className="text-lg font-bold text-foreground tracking-tight">
                 {editingId ? 'Editar Usuário' : 'Novo Usuário'}
               </h2>
-              <button 
-                onClick={() => setShowModal(false)} 
+              <button
+                onClick={() => setShowModal(false)}
                 className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/[0.05] transition-all rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1">
               {error && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-xl text-destructive text-[13px] font-medium">
                   {error}
@@ -390,17 +391,13 @@ export default function UsersSettingsPage() {
                 >
                   <option value="" disabled className="bg-card text-muted-foreground">Selecione um departamento...</option>
                   <option value="ADMIN" className="bg-card text-foreground">🛡️ Administrador</option>
-                  {sectors.length > 0 && (
-                    sectors.map(s => (
-                      <option key={s.id} value={s.name} className="bg-card text-foreground">{s.name}</option>
-                    ))
-                  )}
+                  <option value="Advogados" className="bg-card text-foreground">⚖️ Advogados</option>
+                  <option value="Atendente Comercial" className="bg-card text-foreground">💼 Atendente Comercial</option>
+                  <option value="Estagiário" className="bg-card text-foreground">🎓 Estagiário</option>
+                  {sectors.filter(s => !['Advogados','Atendente Comercial','Estagiário'].includes(s.name)).map(s => (
+                    <option key={s.id} value={s.name} className="bg-card text-foreground">{s.name}</option>
+                  ))}
                 </select>
-                {sectors.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground opacity-70 ml-1">
-                    Crie departamentos primeiro em <strong>Configurações → Departamentos</strong>.
-                  </p>
-                )}
               </div>
 
               <div className="space-y-1.5">
@@ -509,7 +506,8 @@ export default function UsersSettingsPage() {
                 </div>
               )}
 
-              <div className="flex justify-end space-x-3 pt-4">
+              </div>{/* fim do div scrollável */}
+              <div className="flex justify-end space-x-3 px-6 py-4 border-t border-border shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
