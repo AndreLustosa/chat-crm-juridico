@@ -120,8 +120,8 @@ export function ChatHeader({
   const isOverdue = activeTask?.dueAt ? new Date(activeTask.dueAt) < new Date() : false;
 
   return (
-    <div className="shrink-0">
-    <header className="min-h-[60px] md:min-h-[80px] py-2 md:py-3 px-3 md:px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30">
+    <div className="shrink-0 relative z-40">
+    <header className="min-h-[60px] md:min-h-[80px] py-2 md:py-3 px-3 md:px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between">
       <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
         {/* Botão Voltar - mobile only */}
         {isMobile && (
