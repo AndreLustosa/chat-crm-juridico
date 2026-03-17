@@ -1249,6 +1249,12 @@ export default function Dashboard() {
     if (!taskModal || !taskTitle.trim() || savingTask) return;
     setSavingTask(true);
     try {
+      // Se já tem tarefa ativa (re-adiar), cancelar a antiga
+      const existingConv = adiadoConversations.find(c => c.id === taskModal.conversationId);
+      if (existingConv?.activeTask) {
+        await api.patch(`/tasks/${existingConv.activeTask.id}/status`, { status: 'CANCELADA' });
+      }
+      // Criar nova tarefa
       await api.post('/tasks', {
         title: taskTitle.trim(),
         lead_id: taskModal.leadId,
@@ -1256,8 +1262,10 @@ export default function Dashboard() {
         due_at: taskDueAt || undefined,
         assigned_user_id: taskAssignedId || undefined,
       });
-      // Adiar a conversa após criar a tarefa
-      await api.patch(`/conversations/${taskModal.conversationId}/defer`);
+      // Adiar a conversa se ainda não está adiada
+      if (!existingConv || existingConv.status !== 'ADIADO') {
+        await api.patch(`/conversations/${taskModal.conversationId}/defer`);
+      }
       setTaskModal(null);
       setSelectedId(null);
       showSuccess('⏰ Atendimento adiado com sucesso!');
@@ -1267,6 +1275,31 @@ export default function Dashboard() {
       showError('Erro ao adiar atendimento');
     } finally {
       setSavingTask(false);
+    }
+  };
+
+  const handleCompleteTask = async () => {
+    const conv = conversations.find(c => c.id === selectedId) ?? adiadoConversations.find(c => c.id === selectedId);
+    if (!conv?.activeTask) return;
+    try {
+      await api.post(`/tasks/${conv.activeTask.id}/complete-reopen`);
+      showSuccess('✅ Tarefa concluída! Conversa reaberta.');
+      fetchConversations(selectedInboxIdRef.current, true);
+      fetchAdiadoConversations(selectedInboxIdRef.current);
+    } catch {
+      showError('Erro ao concluir tarefa');
+    }
+  };
+
+  const handleRescheduleTask = async (newDate: string) => {
+    const conv = conversations.find(c => c.id === selectedId) ?? adiadoConversations.find(c => c.id === selectedId);
+    if (!conv?.activeTask) return;
+    try {
+      await api.patch(`/tasks/${conv.activeTask.id}`, { due_at: newDate });
+      showSuccess('📅 Prazo atualizado!');
+      fetchAdiadoConversations(selectedInboxIdRef.current);
+    } catch {
+      showError('Erro ao reagendar');
     }
   };
 
@@ -1743,6 +1776,10 @@ export default function Dashboard() {
               onLightbox={setLightbox}
               onCreateTask={openTaskModal}
               contactPresence={contactPresence}
+              activeTask={selected?.activeTask}
+              onCompleteTask={handleCompleteTask}
+              onRescheduleTask={handleRescheduleTask}
+              onNewTask={openTaskModal}
             />
 
             {/* Banner de contexto da transferência (motivo + áudios — persiste após aceitar) */}

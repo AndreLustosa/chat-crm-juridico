@@ -20,6 +20,11 @@ export class TasksController {
     return this.tasksService.findByLegalCase(caseId);
   }
 
+  @Get('conversation/:conversationId/active')
+  findActiveByConversation(@Param('conversationId') conversationId: string) {
+    return this.tasksService.findActiveByConversation(conversationId);
+  }
+
   @Post()
   create(@Body() data: CreateTaskDto, @Request() req: any) {
     return this.tasksService.create({
@@ -27,6 +32,11 @@ export class TasksController {
       tenant_id: req.user?.tenant_id,
       created_by_id: req.user?.id,
     });
+  }
+
+  @Post(':id/complete-reopen')
+  completeAndReopen(@Param('id') id: string, @Request() req: any) {
+    return this.tasksService.completeAndReopen(id, req.user?.tenant_id);
   }
 
   @Patch(':id/status')

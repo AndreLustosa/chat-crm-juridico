@@ -152,9 +152,9 @@ export class EvolutionService {
         },
       });
       if (!conv) {
-        // Antes de criar nova conversa, verifica se existe uma fechada para reabrir
+        // 1) Tentar reabrir conversa FECHADO
         const closedConv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: { in: ['FECHADO', 'ADIADO'] }, instance_name: instanceName },
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
           orderBy: { last_message_at: 'desc' },
         });
         if (closedConv) {
@@ -167,7 +167,23 @@ export class EvolutionService {
             },
           });
           this.logger.log(`[REOPEN] Conversa ${conv.id} reaberta para lead ${lead.id}`);
-        } else {
+        }
+        // 2) Se não achou FECHADO, checar ADIADO — mantém status, só atualiza timestamp
+        if (!conv) {
+          const adiadoConv = await this.prisma.conversation.findFirst({
+            where: { lead_id: lead.id, channel: 'whatsapp', status: 'ADIADO', instance_name: instanceName },
+            orderBy: { last_message_at: 'desc' },
+          });
+          if (adiadoConv) {
+            conv = await this.prisma.conversation.update({
+              where: { id: adiadoConv.id },
+              data: { last_message_at: new Date() },
+            });
+            this.logger.log(`[ADIADO] Conversa ${conv.id} recebeu msg mas permanece ADIADO`);
+          }
+        }
+        // 3) Se não encontrou nenhuma, criar nova
+        if (!conv) {
           conv = await this.prisma.conversation.create({
             data: {
               lead_id: lead.id,
@@ -427,9 +443,9 @@ export class EvolutionService {
       });
 
       if (!conv) {
-        // Antes de criar nova conversa, verifica se existe uma fechada para reabrir
+        // 1) Tentar reabrir conversa FECHADO
         const closedConv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: { in: ['FECHADO', 'ADIADO'] }, instance_name: instanceName },
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
           orderBy: { last_message_at: 'desc' },
         });
         if (closedConv) {
@@ -444,7 +460,23 @@ export class EvolutionService {
             },
           });
           this.logger.log(`[REOPEN] Conversa ${conv.id} reaberta via chat webhook: ${phone}`);
-        } else {
+        }
+        // 2) Se não achou FECHADO, checar ADIADO — mantém status, só atualiza timestamp
+        if (!conv) {
+          const adiadoConv = await this.prisma.conversation.findFirst({
+            where: { lead_id: lead.id, channel: 'whatsapp', status: 'ADIADO', instance_name: instanceName },
+            orderBy: { last_message_at: 'desc' },
+          });
+          if (adiadoConv) {
+            conv = await this.prisma.conversation.update({
+              where: { id: adiadoConv.id },
+              data: { last_message_at: new Date() },
+            });
+            this.logger.log(`[ADIADO] Conversa ${conv.id} recebeu msg via chat webhook mas permanece ADIADO`);
+          }
+        }
+        // 3) Se não encontrou nenhuma, criar nova
+        if (!conv) {
           conv = await this.prisma.conversation.create({
             data: {
               lead_id: lead.id,

@@ -1,3 +1,11 @@
+export interface ActiveTask {
+  id: string;
+  title: string;
+  dueAt: string | null;
+  status: string;
+  assignedUserId: string | null;
+}
+
 export interface ConversationSummary {
   id: string;
   leadId: string;
@@ -20,6 +28,7 @@ export interface ConversationSummary {
   leadStage?: string | null;
   stageEnteredAt?: string | null;
   nextStep?: string | null;
+  activeTask?: ActiveTask | null;
 }
 
 export interface MessageReaction {

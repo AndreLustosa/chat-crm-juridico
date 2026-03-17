@@ -1,8 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { Bot, BotOff, UserCheck, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, Clock } from 'lucide-react';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
-import type { ConversationSummary } from '../types';
+import type { ConversationSummary, ActiveTask } from '../types';
 
 const LEGAL_AREAS = [
   'Trabalhista', 'Consumidor', 'Família', 'Previdenciário',
@@ -11,6 +12,18 @@ const LEGAL_AREAS = [
 
 function getInitial(name?: string) {
   return (name || 'V')[0].toUpperCase();
+}
+
+function formatTaskDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+  if (d < now) return 'Atrasado';
+  if (isToday) return `Hoje ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  if (isTomorrow) return `Amanhã ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
 
@@ -53,6 +66,11 @@ export interface ChatHeaderProps {
   onLightbox: (url: string) => void;
   onCreateTask: () => void;
   contactPresence?: string;
+  // Task management (ADIADO)
+  activeTask?: ActiveTask | null;
+  onCompleteTask?: () => void;
+  onRescheduleTask?: (newDate: string) => void;
+  onNewTask?: () => void;
 }
 
 export function ChatHeader({
@@ -91,9 +109,19 @@ export function ChatHeader({
   onLightbox,
   onCreateTask,
   contactPresence,
+  activeTask,
+  onCompleteTask,
+  onRescheduleTask,
+  onNewTask,
 }: ChatHeaderProps) {
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const isAdiado = selected?.status === 'ADIADO';
+  const isOverdue = activeTask?.dueAt ? new Date(activeTask.dueAt) < new Date() : false;
+
   return (
-    <header className="min-h-[60px] md:min-h-[80px] py-2 md:py-3 px-3 md:px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30 shrink-0">
+    <div className="shrink-0">
+    <header className="min-h-[60px] md:min-h-[80px] py-2 md:py-3 px-3 md:px-8 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between z-30">
       <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
         {/* Botão Voltar - mobile only */}
         {isMobile && (
@@ -371,5 +399,73 @@ export function ChatHeader({
         })()}
       </div>
     </header>
+
+    {/* Barra de gestão de tarefa — só para conversas ADIADO */}
+    {isAdiado && activeTask && (
+      <div className="flex items-center gap-2 px-3 md:px-8 py-2 bg-amber-500/5 border-b border-amber-500/20 relative">
+        <Clock size={14} className={`shrink-0 ${isOverdue ? 'text-red-400' : 'text-amber-400'}`} />
+        <span className={`text-xs font-medium truncate flex-1 ${isOverdue ? 'text-red-400' : 'text-amber-300'}`}>
+          {activeTask.title}
+          {activeTask.dueAt && (
+            <span className={`ml-2 ${isOverdue ? 'font-bold' : 'opacity-70'}`}>
+              {formatTaskDate(activeTask.dueAt)}
+            </span>
+          )}
+        </span>
+        <button
+          onClick={onCompleteTask}
+          className="px-2.5 py-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
+        >
+          ✓ Concluir
+        </button>
+        <div className="relative">
+          <button
+            onClick={() => { setShowReschedule(!showReschedule); setRescheduleDate(''); }}
+            className="px-2.5 py-1 text-[11px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-lg hover:bg-sky-500/20 transition-colors whitespace-nowrap"
+          >
+            Reagendar
+          </button>
+          {showReschedule && (
+            <div className="absolute top-full right-0 mt-1 bg-card border border-border rounded-xl shadow-xl p-3 z-50 w-64">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Novo prazo</p>
+              <input
+                type="datetime-local"
+                value={rescheduleDate}
+                onChange={e => setRescheduleDate(e.target.value)}
+                className="w-full px-2.5 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground [color-scheme:dark] mb-2"
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setShowReschedule(false)}
+                  className="px-3 py-1.5 text-[11px] rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    if (rescheduleDate && onRescheduleTask) {
+                      onRescheduleTask(rescheduleDate);
+                      setShowReschedule(false);
+                      setRescheduleDate('');
+                    }
+                  }}
+                  disabled={!rescheduleDate}
+                  className="px-3 py-1.5 text-[11px] font-bold rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400 hover:bg-sky-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onNewTask}
+          className="px-2.5 py-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+        >
+          + Nova
+        </button>
+      </div>
+    )}
+    </div>
   );
 }

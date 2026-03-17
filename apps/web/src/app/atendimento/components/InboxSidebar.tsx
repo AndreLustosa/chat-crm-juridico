@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, X, PanelLeftClose, Bell } from 'lucide-react';
+import { Search, X, PanelLeftClose, Bell, Clock } from 'lucide-react';
 import {
   requestNotificationPermission,
   dismissBanner,
@@ -71,6 +71,18 @@ function scoreStyle(score: number): string {
   if (score >= 45) return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20';
   if (score >= 20) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
   return 'text-red-400 bg-red-500/10 border-red-500/20';
+}
+
+function formatTaskDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+  if (d < now) return 'Atrasado';
+  if (isToday) return `Hoje ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  if (isTomorrow) return `Amanhã ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
 function statusBadge(status: string) {
@@ -401,6 +413,22 @@ export function InboxSidebar({
                           )}
                         </div>
                       )}
+                      {conv.status === 'ADIADO' && conv.activeTask && (() => {
+                        const isOverdue = conv.activeTask.dueAt ? new Date(conv.activeTask.dueAt) < new Date() : false;
+                        return (
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <Clock size={11} className={isOverdue ? 'text-red-400' : 'text-amber-400'} />
+                            <span className={`text-[10px] font-medium truncate max-w-[120px] ${isOverdue ? 'text-red-400' : 'text-amber-400'}`}>
+                              {conv.activeTask.title}
+                            </span>
+                            {conv.activeTask.dueAt && (
+                              <span className={`text-[9px] font-bold whitespace-nowrap ${isOverdue ? 'text-red-500' : 'text-muted-foreground'}`}>
+                                {formatTaskDate(conv.activeTask.dueAt)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <p className={`text-sm truncate ${(unreadCounts[conv.id] || 0) > 0 ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
                         {conv.lastMessage}
                       </p>

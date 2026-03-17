@@ -1,4 +1,4 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { CalendarService } from '../calendar/calendar.service';
@@ -144,6 +144,44 @@ export class TasksService {
     }
 
     return task;
+  }
+
+  // ─── Complete Task & Reopen Conversation ───────────────────────
+
+  async completeAndReopen(taskId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) throw new NotFoundException('Tarefa não encontrada');
+
+    const [updatedTask] = await this.prisma.$transaction([
+      this.prisma.task.update({ where: { id: taskId }, data: { status: 'CONCLUIDA' } }),
+      ...(task.conversation_id ? [
+        this.prisma.conversation.update({ where: { id: task.conversation_id }, data: { status: 'ABERTO' } }),
+      ] : []),
+    ]);
+
+    // Sync calendar event status
+    if (updatedTask.calendar_event_id) {
+      try {
+        await this.calendarService.updateStatus(updatedTask.calendar_event_id, 'CONCLUIDO');
+      } catch (e: any) {
+        this.logger.warn(`Erro ao sync calendario para task ${taskId}: ${e.message}`);
+      }
+    }
+
+    // Emit socket update para atualizar sidebar em tempo real
+    this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
+
+    return { task: updatedTask, conversationId: task.conversation_id };
+  }
+
+  // ─── Find Active Task by Conversation ─────────────────────────
+
+  async findActiveByConversation(conversationId: string) {
+    return this.prisma.task.findFirst({
+      where: { conversation_id: conversationId, status: 'A_FAZER' },
+      orderBy: { created_at: 'desc' },
+    });
   }
 
   // ─── Calendar Sync ──────────────────────────────────────────────

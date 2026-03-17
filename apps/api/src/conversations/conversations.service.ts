@@ -60,6 +60,12 @@ export class ConversationsService {
           lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true } },
           messages: { orderBy: { created_at: 'desc' }, take: 1, include: { media: true } },
           assigned_user: { select: { id: true, name: true } },
+          tasks: {
+            where: { status: 'A_FAZER' },
+            orderBy: { created_at: 'desc' },
+            take: 1,
+            select: { id: true, title: true, due_at: true, status: true, assigned_user_id: true },
+          },
         },
       }),
       this.prisma.conversation.count({ where }),
@@ -104,6 +110,13 @@ export class ConversationsService {
       leadStage: c.lead?.stage || null,
       stageEnteredAt: (c.lead as any)?.stage_entered_at?.toISOString() || null,
       nextStep: (c as any).next_step || null,
+      activeTask: (c as any).tasks?.[0] ? {
+        id: (c as any).tasks[0].id,
+        title: (c as any).tasks[0].title,
+        dueAt: (c as any).tasks[0].due_at?.toISOString() || null,
+        status: (c as any).tasks[0].status,
+        assignedUserId: (c as any).tasks[0].assigned_user_id || null,
+      } : null,
     }));
 
     return { data, total };
