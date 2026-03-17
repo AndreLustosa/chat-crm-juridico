@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, Fragment } from 'rea
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical, CheckSquare } from 'lucide-react';
+import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X, CheckCheck, Check, Eye, XCircle, Trash2, Reply, UserCheck, PanelLeftOpen, CornerDownLeft, Inbox, Pencil, Search, ChevronDown, ClipboardList, ArrowLeft, MoreVertical, Clock } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { AudioRecorder } from '@/components/AudioRecorder';
 import { AuthAudioPlayer } from '@/components/AuthAudioPlayer';
@@ -181,6 +181,7 @@ export default function Dashboard() {
   const [taskAssignedId, setTaskAssignedId] = useState('');
   const [savingTask, setSavingTask] = useState(false);
   const [taskAgents, setTaskAgents] = useState<{ id: string; name: string }[]>([]);
+  const [adiadoConversations, setAdiadoConversations] = useState<ConversationSummary[]>([]);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashMenuPos, setSlashMenuPos] = useState<{ bottom: number; left: number } | null>(null);
   // Typing indicators
@@ -432,6 +433,17 @@ export default function Dashboard() {
     }
   }, []);
 
+  const fetchAdiadoConversations = useCallback(async (inboxId?: string | null) => {
+    try {
+      const res = await api.get('/conversations', {
+        params: { status: 'ADIADO', inboxId: inboxId || undefined },
+        ...({ _silent401: true } as any),
+      });
+      const items = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      setAdiadoConversations(items);
+    } catch { /* silencioso */ }
+  }, []);
+
   const fetchInboxes = async (silent = false) => {
     try {
       const res = await api.get('/inboxes', {
@@ -507,6 +519,7 @@ export default function Dashboard() {
       }
       // Refresh sidebar to catch up on missed inboxUpdate events
       fetchConversations(selectedInboxIdRef.current, true);
+      fetchAdiadoConversations(selectedInboxIdRef.current);
       // Join personal user room for transfer notifications
       const token = localStorage.getItem('token');
       if (token) {
@@ -530,6 +543,7 @@ export default function Dashboard() {
       console.log('[SOCKET] inboxUpdate received, fetching conversations...');
       // silent=true: 401 nestas chamadas de background não redireciona todos os usuários
       fetchConversations(selectedInboxIdRef.current, true);
+      fetchAdiadoConversations(selectedInboxIdRef.current);
       fetchPendingTransfers(true);
     });
 
@@ -650,15 +664,16 @@ export default function Dashboard() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [fetchConversations]);
+  }, [fetchConversations, fetchAdiadoConversations]);
 
   // Initial data load + refetch on inbox filter change
   useEffect(() => {
     fetchInboxes();
     fetchConversations(selectedInboxId);
+    fetchAdiadoConversations(selectedInboxId);
     fetchPendingTransfers();
     fetchSpecialists();
-  }, [fetchConversations, fetchPendingTransfers, selectedInboxId]);
+  }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId]);
 
   // Auto-abrir conversa vinda do CRM (via sessionStorage 'crm_open_conv')
   // Roda uma vez no mount — não depende da lista de conversas estar carregada.
@@ -1216,7 +1231,7 @@ export default function Dashboard() {
 
   // Abre o modal de criação rápida de tarefa vinculada ao lead do chat atual
   const openTaskModal = async () => {
-    const conv = conversations.find(c => c.id === selectedId);
+    const conv = conversations.find(c => c.id === selectedId) ?? adiadoConversations.find(c => c.id === selectedId);
     if (!conv?.leadId) return;
     setTaskTitle('');
     setTaskDueAt('');
@@ -1241,10 +1256,15 @@ export default function Dashboard() {
         due_at: taskDueAt || undefined,
         assigned_user_id: taskAssignedId || undefined,
       });
+      // Adiar a conversa após criar a tarefa
+      await api.patch(`/conversations/${taskModal.conversationId}/defer`);
       setTaskModal(null);
-      showSuccess('✅ Tarefa criada com sucesso!');
+      setSelectedId(null);
+      showSuccess('⏰ Atendimento adiado com sucesso!');
+      fetchConversations(selectedInboxIdRef.current, true);
+      fetchAdiadoConversations(selectedInboxIdRef.current);
     } catch {
-      showError('Erro ao criar tarefa');
+      showError('Erro ao adiar atendimento');
     } finally {
       setSavingTask(false);
     }
@@ -1477,6 +1497,15 @@ export default function Dashboard() {
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
 
   const filteredConversations = useMemo(() => {
+    if (leadFilter === 'ADIADO') {
+      return adiadoConversations
+        .filter(c => normalizeStage(c.leadStage) !== 'PERDIDO')
+        .sort((a, b) => {
+          const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+          const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+          return tb - ta;
+        });
+    }
     let result: ConversationSummary[];
     if (leadFilter === 'ACTIVE') {
       result = conversations.filter(myActiveConvs);
@@ -1501,13 +1530,13 @@ export default function Dashboard() {
       const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
       return tb - ta;
     });
-  }, [conversations, leadFilter, debouncedSearch, currentUserId]);
+  }, [conversations, adiadoConversations, leadFilter, debouncedSearch, currentUserId]);
 
   // Keep ref in sync for keyboard shortcut handler (declared before useMemo)
   const filteredConversationsRef = useRef(filteredConversations);
   useEffect(() => { filteredConversationsRef.current = filteredConversations; }, [filteredConversations]);
 
-  const selected = conversations.find((c) => c.id === selectedId);
+  const selected = conversations.find((c) => c.id === selectedId) ?? adiadoConversations.find((c) => c.id === selectedId);
   const isDemo = selectedId?.startsWith('demo-');
   const isRealConvo = selectedId && !isDemo;
   const isClosed = selected?.status === 'CLOSED';
@@ -1609,6 +1638,7 @@ export default function Dashboard() {
       {/* INBOX */}
       <InboxSidebar
         conversations={conversations}
+        adiadoConversations={adiadoConversations}
         filteredConversations={filteredConversations}
         userInboxes={userInboxes}
         pendingTransfers={pendingTransfers}
@@ -1704,7 +1734,6 @@ export default function Dashboard() {
               onOpenTransferModal={handleOpenTransferModal}
               onOpenReasonPopup={openReasonPopup}
               onKeepInInbox={handleKeepInInbox}
-              onClose={handleClose}
               onToggleStage={() => setShowStageDropdown(v => !v)}
               onChangeStage={handleChangeLeadStage}
               onSendFormLink={handleSendFormLink}
@@ -2228,14 +2257,14 @@ export default function Dashboard() {
                         : <Paperclip size={20} />}
                     </button>
                   )}
-                  {/* Desktop: botão criação rápida de tarefa */}
+                  {/* Desktop: botão adiar atendimento (atalho rápido) */}
                   {!isMobile && selected?.leadId && (
                     <button
                       onClick={openTaskModal}
-                      title="Criar tarefa para este lead (atalho rápido)"
-                      className="p-2.5 md:p-3 rounded-xl bg-card border border-border text-muted-foreground hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/10 transition-colors shrink-0 mb-0.5"
+                      title="Adiar atendimento (criar lembrete)"
+                      className="p-2.5 md:p-3 rounded-xl bg-card border border-border text-muted-foreground hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10 transition-colors shrink-0 mb-0.5"
                     >
-                      <CheckSquare size={20} />
+                      <Clock size={20} />
                     </button>
                   )}
 
@@ -2657,16 +2686,16 @@ export default function Dashboard() {
         document.body
       )}
 
-      {/* Modal Criação Rápida de Tarefa — portal para garantir z-index acima de tudo */}
+      {/* Modal Adiar Atendimento — portal para garantir z-index acima de tudo */}
       {taskModal && typeof document !== 'undefined' && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm dark">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-2 mb-1">
-              <CheckSquare size={20} className="text-emerald-400 shrink-0" />
-              <h3 className="text-lg font-bold text-foreground">Nova Tarefa</h3>
+              <Clock size={20} className="text-amber-400 shrink-0" />
+              <h3 className="text-lg font-bold text-foreground">Adiar Atendimento</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-5">
-              Lead: <strong className="text-foreground">{taskModal.leadName}</strong>
+              Crie um lembrete e <strong className="text-foreground">{taskModal.leadName}</strong> será movido para Adiados.
             </p>
             <div className="space-y-3 mb-5">
               <div>
@@ -2716,10 +2745,10 @@ export default function Dashboard() {
               <button
                 onClick={createTask}
                 disabled={!taskTitle.trim() || savingTask}
-                className="px-4 py-2 text-sm rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium hover:bg-emerald-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-4 py-2 text-sm rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {savingTask && <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />}
-                Criar Tarefa
+                {savingTask && <div className="w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />}
+                Adiar
               </button>
             </div>
           </div>

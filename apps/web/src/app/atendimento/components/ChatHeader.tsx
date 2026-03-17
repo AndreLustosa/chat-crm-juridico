@@ -1,6 +1,6 @@
 'use client';
 
-import { Bot, BotOff, UserCheck, XCircle, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, CheckSquare } from 'lucide-react';
+import { Bot, BotOff, UserCheck, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, Clock } from 'lucide-react';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import type { ConversationSummary } from '../types';
 
@@ -44,7 +44,6 @@ export interface ChatHeaderProps {
   onOpenTransferModal: () => void;
   onOpenReasonPopup: (ctx: 'lawyer' | 'operator' | 'return', name: string) => void;
   onKeepInInbox: () => void;
-  onClose: () => void;
   onToggleStage: () => void;
   onChangeStage: (stage: string) => void;
   onSendFormLink: () => void;
@@ -83,7 +82,6 @@ export function ChatHeader({
   onOpenTransferModal,
   onOpenReasonPopup,
   onKeepInInbox,
-  onClose,
   onToggleStage,
   onChangeStage,
   onSendFormLink,
@@ -323,24 +321,14 @@ export function ChatHeader({
               </button>
             </>
           )}
-          {selected?.leadId && (
+          {selected?.leadId && isRealConvo && !isClosed && (
             <button
               onClick={onCreateTask}
-              title="Criar tarefa para este lead"
-              className="px-3 py-2 text-sm font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl hover:bg-emerald-500/20 transition-colors flex items-center gap-2"
+              title="Adiar atendimento"
+              className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
             >
-              <CheckSquare size={16} />
-              Tarefa
-            </button>
-          )}
-          {!isClosed && isRealConvo && (
-            <button
-              onClick={onClose}
-              title="Fechar conversa"
-              className="px-3 py-2 text-sm font-semibold text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl hover:bg-red-500/20 transition-colors flex items-center gap-2"
-            >
-              <XCircle size={16} />
-              Fechar
+              <Clock size={16} />
+              Adiar
             </button>
           )}
         </div>

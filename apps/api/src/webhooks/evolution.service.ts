@@ -154,7 +154,7 @@ export class EvolutionService {
       if (!conv) {
         // Antes de criar nova conversa, verifica se existe uma fechada para reabrir
         const closedConv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
+          where: { lead_id: lead.id, channel: 'whatsapp', status: { in: ['FECHADO', 'ADIADO'] }, instance_name: instanceName },
           orderBy: { last_message_at: 'desc' },
         });
         if (closedConv) {
@@ -429,7 +429,7 @@ export class EvolutionService {
       if (!conv) {
         // Antes de criar nova conversa, verifica se existe uma fechada para reabrir
         const closedConv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
+          where: { lead_id: lead.id, channel: 'whatsapp', status: { in: ['FECHADO', 'ADIADO'] }, instance_name: instanceName },
           orderBy: { last_message_at: 'desc' },
         });
         if (closedConv) {

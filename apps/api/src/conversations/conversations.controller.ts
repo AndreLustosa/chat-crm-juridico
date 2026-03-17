@@ -13,10 +13,11 @@ export class ConversationsController {
   @Get()
   async findAll(
     @Query('inboxId') inboxId: string | undefined,
+    @Query('status') status: string | undefined,
     @Request() req?: any,
   ) {
     const userId = req?.user?.id;
-    return this.conversationsService.findAll(undefined, userId, inboxId, req?.user?.tenant_id);
+    return this.conversationsService.findAll(status, userId, inboxId, req?.user?.tenant_id);
   }
 
   @Get('pending-transfers')
@@ -89,6 +90,11 @@ export class ConversationsController {
   @Patch(':id/close')
   close(@Param('id') id: string) {
     return this.conversationsService.close(id);
+  }
+
+  @Patch(':id/defer')
+  defer(@Param('id') id: string) {
+    return this.conversationsService.defer(id);
   }
 
   @Post(':id/transfer-to-lawyer')

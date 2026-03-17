@@ -23,8 +23,8 @@ export class ConversationsService {
     if (status) {
       where.status = status;
     } else {
-      // Por padrão excluir conversas fechadas do inbox
-      where.status = { not: 'FECHADO' };
+      // Por padrão excluir conversas fechadas ou adiadas do inbox principal
+      where.status = { notIn: ['FECHADO', 'ADIADO'] };
     }
 
     // Sempre excluir conversas de leads arquivados (PERDIDO) do inbox
@@ -86,6 +86,7 @@ export class ConversationsService {
       contactEmail: c.lead?.email || '',
       channel: c.channel?.toUpperCase() || 'WHATSAPP',
       status: c.status === 'FECHADO' ? 'CLOSED'
+        : c.status === 'ADIADO'            ? 'ADIADO'      // conversa adiada (aguardando tarefa)
         : c.ai_mode                        ? 'BOT'         // IA ativa (com ou sem operador)
         : c.assigned_user_id               ? 'ACTIVE'      // operador assumiu (ai_mode=false)
         : 'WAITING',                                       // sem IA, sem operador
@@ -192,6 +193,16 @@ export class ConversationsService {
       data: { status: 'FECHADO' },
     });
     // Broadcast: notificar sidebar sobre mudanca de status
+    this.chatGateway.emitConversationsUpdate((conv as any).tenant_id ?? null);
+    return conv;
+  }
+
+  async defer(id: string): Promise<Conversation> {
+    const conv = await this.prisma.conversation.update({
+      where: { id },
+      data: { status: 'ADIADO' },
+    });
+    // Broadcast: remover da lista principal e mover para Adiados
     this.chatGateway.emitConversationsUpdate((conv as any).tenant_id ?? null);
     return conv;
   }

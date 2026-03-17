@@ -79,6 +79,7 @@ function statusBadge(status: string) {
     WAITING: { class: 'bg-amber-500/15 text-amber-500 border border-amber-500/20 shadow-[0_0_10px_rgba(251,191,36,0.15)]', label: '⏳ Aguardando' },
     ACTIVE: { class: 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/20', label: '🟢 Atribuído' },
     CLOSED: { class: 'bg-gray-500/15 text-gray-400 border border-gray-500/20', label: '⬛ Fechado' },
+    ADIADO: { class: 'bg-amber-500/15 text-amber-400 border border-amber-500/20', label: '⏰ Adiado' },
   };
   const badge = map[status] || map.CLOSED;
   return <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${badge.class}`}>{badge.label}</span>;
@@ -89,6 +90,7 @@ function statusBadge(status: string) {
 export interface InboxSidebarProps {
   // Data
   conversations: ConversationSummary[];
+  adiadoConversations: ConversationSummary[];
   filteredConversations: ConversationSummary[];
   userInboxes: { id: string; name: string }[];
   pendingTransfers: { conversationId: string; contactName: string; fromUserName: string; reason: string | null; audioIds?: string[] }[];
@@ -121,6 +123,7 @@ export interface InboxSidebarProps {
 
 export function InboxSidebar({
   conversations,
+  adiadoConversations,
   filteredConversations,
   userInboxes,
   pendingTransfers,
@@ -285,6 +288,7 @@ export function InboxSidebar({
             { value: 'BOT', label: 'SophIA', count: conversations.filter(c => c.aiMode && c.assignedAgentId === currentUserId && normalizeStage(c.leadStage) !== 'PERDIDO').length },
             { value: 'WAITING', label: 'Espera', count: conversations.filter(c => c.status === 'WAITING' && normalizeStage(c.leadStage) !== 'PERDIDO').length },
             { value: 'ACTIVE', label: 'Ativas', count: conversations.filter(c => myActiveConvs(c) && normalizeStage(c.leadStage) !== 'PERDIDO').length },
+            { value: 'ADIADO', label: 'Adiados', count: adiadoConversations.filter(c => normalizeStage(c.leadStage) !== 'PERDIDO').length },
           ].map((tab) => (
             <button
               key={tab.value}
