@@ -194,11 +194,17 @@ export class TasksService {
         description: task.description || undefined,
         start_at: task.due_at.toISOString(),
         end_at: new Date(task.due_at.getTime() + 30 * 60000).toISOString(),
-        assigned_user_id: task.assigned_user_id || undefined,
+        assigned_user_id: task.assigned_user_id || createdById,
         lead_id: task.lead_id || undefined,
         legal_case_id: task.legal_case_id || undefined,
         created_by_id: createdById,
         tenant_id: task.tenant_id || undefined,
+        // Lembretes PUSH: no momento exato + 15min antes + 1h antes
+        reminders: [
+          { minutes_before: 0, channel: 'PUSH' },
+          { minutes_before: 15, channel: 'PUSH' },
+          { minutes_before: 60, channel: 'PUSH' },
+        ],
       });
 
       // Link task to calendar event

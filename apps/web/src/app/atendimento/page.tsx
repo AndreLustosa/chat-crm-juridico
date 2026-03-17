@@ -189,6 +189,8 @@ export default function Dashboard() {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // WhatsApp instance connection statuses (ephemeral — no DB persistence)
   const [instanceStatuses, setInstanceStatuses] = useState<Record<string, string>>({});
+  // Toast de lembrete de tarefa agendada
+  const [taskReminderToast, setTaskReminderToast] = useState<{ eventId: string; title: string; type: string; start_at: string; minutesBefore: number } | null>(null);
   // Contact presence (online/composing/unavailable) — ephemeral
   const [contactPresence, setContactPresence] = useState<string>('unavailable');
   const [showLegalAreaDropdown, setShowLegalAreaDropdown] = useState(false);
@@ -656,6 +658,17 @@ export default function Dashboard() {
       } else if (data.state === 'open') {
         showSuccess(`WhatsApp reconectado: ${data.instanceName}`);
       }
+    });
+
+    // Lembrete de tarefa agendada (PUSH via calendar cron)
+    socket.on('calendar_reminder', (data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) => {
+      setTaskReminderToast(data);
+      try { playNotificationSound(); } catch {}
+      showDesktopNotification({
+        title: data.minutesBefore > 0 ? `⏰ Lembrete em ${data.minutesBefore} min` : '⏰ Tarefa agora!',
+        body: data.title,
+      });
+      setTimeout(() => setTaskReminderToast(null), 12000);
     });
 
     socketRef.current = socket;
@@ -2824,6 +2837,34 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Toast de Lembrete de Tarefa Agendada */}
+      {taskReminderToast && typeof document !== 'undefined' && createPortal(
+        <div className="fixed top-4 right-4 z-[10000] w-80 bg-card border border-amber-500/30 rounded-xl shadow-2xl p-4 animate-in slide-in-from-right-5 duration-300">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+              <Clock size={18} className="text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400 mb-0.5">
+                {taskReminderToast.minutesBefore > 0 ? `Lembrete em ${taskReminderToast.minutesBefore} min` : 'Tarefa agora!'}
+              </p>
+              <p className="text-sm font-semibold text-foreground truncate">
+                ⏰ {taskReminderToast.title}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {new Date(taskReminderToast.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                {' - '}
+                {new Date(taskReminderToast.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}
+              </p>
+            </div>
+            <button onClick={() => setTaskReminderToast(null)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <X size={14} />
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
