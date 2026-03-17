@@ -668,11 +668,11 @@ export default function Dashboard() {
 
   // Initial data load + refetch on inbox filter change
   useEffect(() => {
-    fetchInboxes();
-    fetchConversations(selectedInboxId);
+    fetchInboxes(true);
+    fetchConversations(selectedInboxId, true);
     fetchAdiadoConversations(selectedInboxId);
-    fetchPendingTransfers();
-    fetchSpecialists();
+    fetchPendingTransfers(true);
+    fetchSpecialists(true);
   }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId]);
 
   // Auto-abrir conversa vinda do CRM (via sessionStorage 'crm_open_conv')
@@ -1037,7 +1037,7 @@ export default function Dashboard() {
     if (!selectedId || selectedId.startsWith('demo-')) return;
     try {
       await api.patch(`/conversations/${selectedId}/assign`);
-      fetchConversations();
+      fetchConversations(selectedInboxIdRef.current, true);
       showSuccess('Conversa aceita');
     } catch (e) {
       console.error('Failed to accept', e);
@@ -1051,7 +1051,7 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${selectedId}/close`);
       setSelectedId(null);
-      fetchConversations();
+      fetchConversations(selectedInboxIdRef.current, true);
       showSuccess('Conversa encerrada');
     } catch (e) {
       console.error('Failed to close', e);
@@ -1147,7 +1147,7 @@ export default function Dashboard() {
     if (!selectedId) return;
     try {
       await api.patch(`/conversations/${selectedId}/return-to-origin`);
-      fetchConversations(selectedInboxIdRef.current);
+      fetchConversations(selectedInboxIdRef.current, true);
       showSuccess('Conversa devolvida');
     } catch (e: any) {
       console.error('Failed to return to origin', e);
@@ -1159,7 +1159,7 @@ export default function Dashboard() {
     if (!selectedId) return;
     try {
       await api.patch(`/conversations/${selectedId}/keep-in-inbox`);
-      fetchConversations(selectedInboxIdRef.current);
+      fetchConversations(selectedInboxIdRef.current, true);
       showSuccess('Conversa mantida no inbox');
     } catch (e: any) {
       console.error('Failed to keep in inbox', e);
@@ -1173,7 +1173,7 @@ export default function Dashboard() {
     setShowLawyerDropdown(false);
     try {
       await api.patch(`/conversations/${convId}/assign-lawyer`, { lawyerId });
-      fetchConversations(selectedInboxIdRef.current);
+      fetchConversations(selectedInboxIdRef.current, true);
     } catch (e: any) {
       console.error('Failed to assign lawyer', e);
       alert('Erro ao atribuir especialista: ' + (e?.response?.data?.message || e?.message || 'Tente novamente'));
@@ -1303,8 +1303,8 @@ export default function Dashboard() {
         }));
       }
       setIncomingTransfer(null);
-      fetchPendingTransfers();
-      fetchConversations(selectedInboxIdRef.current);
+      fetchPendingTransfers(true);
+      fetchConversations(selectedInboxIdRef.current, true);
     } catch (e) {
       console.error('Failed to accept transfer', e);
     } finally {
@@ -1327,7 +1327,7 @@ export default function Dashboard() {
         delete next[selectedId];
         return next;
       });
-      fetchConversations(selectedInboxIdRef.current);
+      fetchConversations(selectedInboxIdRef.current, true);
     } catch (e: any) {
       console.error('Failed to return to origin', e);
     } finally {
@@ -1356,8 +1356,8 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${conversationId}/transfer-accept`);
       shownTransferIdsRef.current.delete(conversationId);
-      fetchPendingTransfers();
-      fetchConversations(selectedInboxIdRef.current);
+      fetchPendingTransfers(true);
+      fetchConversations(selectedInboxIdRef.current, true);
     } catch (e) {
       console.error('Failed to quick accept transfer', e);
     }
@@ -1381,7 +1381,7 @@ export default function Dashboard() {
     try {
       await api.patch(`/conversations/${selectedId}/ai-mode`, { ai_mode: newMode });
       setAiMode(newMode);
-      fetchConversations();
+      fetchConversations(selectedInboxIdRef.current, true);
       showSuccess(newMode ? 'IA ativada' : 'IA desativada');
     } catch (e) {
       console.error('Erro ao alterar modo IA', e);
