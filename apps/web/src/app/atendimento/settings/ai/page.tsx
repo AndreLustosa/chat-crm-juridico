@@ -4,6 +4,27 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bot, KeyRound, CheckCircle2, RefreshCw, Eye, EyeOff, Plus, Pencil, Trash2, ChevronDown, ChevronUp, Volume2 } from 'lucide-react';
 import api from '@/lib/api';
 
+interface SkillTool {
+  id: string;
+  name: string;
+  description: string;
+  parameters_json: any;
+  handler_type: string;
+  handler_config: any;
+  active: boolean;
+}
+
+interface SkillAsset {
+  id: string;
+  name: string;
+  s3_key: string;
+  mime_type: string;
+  size: number;
+  asset_type: 'asset' | 'reference';
+  inject_mode: 'none' | 'full_text' | 'summary';
+  content_text: string | null;
+}
+
 interface Skill {
   id: string;
   name: string;
@@ -15,6 +36,14 @@ interface Skill {
   handoffSignal: string | null;
   isActive: boolean;
   order: number;
+  // Skills V2
+  description: string | null;
+  triggerKeywords: string[];
+  skillType: string;
+  maxContextTokens: number;
+  provider: string;
+  tools: SkillTool[];
+  assets: SkillAsset[];
 }
 
 interface SkillForm {
@@ -27,9 +56,13 @@ interface SkillForm {
   temperature: number;
   handoffSignal: string;
   isActive: boolean;
+  // Skills V2
+  description: string;
+  triggerKeywords: string;
+  provider: string;
 }
 
-const AVAILABLE_MODELS = [
+const OPENAI_MODELS = [
   { value: 'gpt-5.1', label: 'GPT-5.1 — conversacional avançado' },
   { value: 'gpt-4.1', label: 'GPT-4.1 — analítico' },
   { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado' },
@@ -37,6 +70,14 @@ const AVAILABLE_MODELS = [
   { value: 'gpt-4o', label: 'GPT-4o — capaz' },
   { value: 'o1-mini', label: 'o1 Mini — raciocínio' },
 ];
+
+const ANTHROPIC_MODELS = [
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 — balanceado' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — rápido, econômico' },
+  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6 — máxima capacidade' },
+];
+
+const AVAILABLE_MODELS = [...OPENAI_MODELS, ...ANTHROPIC_MODELS];
 
 const TEMPLATE_VARS = [
   { key: '{{lead_name}}', desc: 'Nome do cliente' },
@@ -60,6 +101,9 @@ const BLANK_FORM: SkillForm = {
   temperature: 0.7,
   handoffSignal: '',
   isActive: true,
+  description: '',
+  triggerKeywords: '',
+  provider: 'openai',
 };
 
 export default function AiSettingsPage() {
@@ -177,6 +221,9 @@ export default function AiSettingsPage() {
       temperature: skill.temperature,
       handoffSignal: skill.handoffSignal || '',
       isActive: skill.isActive,
+      description: skill.description || '',
+      triggerKeywords: (skill.triggerKeywords || []).join(', '),
+      provider: skill.provider || 'openai',
     });
     setEditingId(skill.id);
   };
@@ -207,6 +254,9 @@ export default function AiSettingsPage() {
         temperature: form.temperature,
         handoff_signal: form.handoffSignal.trim() || null,
         active: form.isActive,
+        description: form.description.trim() || null,
+        trigger_keywords: form.triggerKeywords.split(',').map((k: string) => k.trim()).filter(Boolean),
+        provider: form.provider,
       };
       if (form.id) {
         await api.patch(`/settings/skills/${form.id}`, payload);
@@ -267,9 +317,14 @@ export default function AiSettingsPage() {
       'gpt-4.1': 'bg-purple-500/10 text-purple-400 border-purple-500/20',
       'gpt-4.1-mini': 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
       'o1-mini': 'bg-pink-500/10 text-pink-400 border-pink-500/20',
+      'claude-sonnet-4-6': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      'claude-haiku-4-5': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+      'claude-opus-4-6': 'bg-orange-500/10 text-orange-400 border-orange-500/20',
     };
     return colors[model] || 'bg-muted text-muted-foreground border-border';
   };
+
+  const providerModels = form.provider === 'anthropic' ? ANTHROPIC_MODELS : OPENAI_MODELS;
 
   return (
     <div className="flex-1 flex flex-col pt-8 overflow-hidden bg-background">
@@ -493,6 +548,21 @@ export default function AiSettingsPage() {
                         <span className={`text-[10px] font-bold border px-1.5 py-0.5 rounded ${modelBadge(skill.model)}`}>
                           {skill.model}
                         </span>
+                        {skill.provider === 'anthropic' && (
+                          <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                            Anthropic
+                          </span>
+                        )}
+                        {(skill.tools?.length || 0) > 0 && (
+                          <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-1.5 py-0.5 rounded">
+                            {skill.tools.length} tool{skill.tools.length > 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {(skill.assets?.length || 0) > 0 && (
+                          <span className="text-[10px] font-bold text-green-400 bg-green-500/10 border border-green-500/20 px-1.5 py-0.5 rounded">
+                            {skill.assets.length} arquivo{skill.assets.length > 1 ? 's' : ''}
+                          </span>
+                        )}
                         {skill.handoffSignal && (
                           <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
                             escalada: {skill.handoffSignal}
@@ -500,7 +570,7 @@ export default function AiSettingsPage() {
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-xl">
-                        {(skill.systemPrompt || '').slice(0, 80)}{skill.systemPrompt?.length > 80 ? '…' : ''}
+                        {skill.description || (skill.systemPrompt || '').slice(0, 80)}{!skill.description && skill.systemPrompt?.length > 80 ? '…' : ''}
                       </p>
                     </div>
 
@@ -756,8 +826,47 @@ function SkillEditor({
         </div>
       </div>
 
-      {/* Modelo + Tokens + Temperatura */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* V2: Descrição + Trigger Keywords */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Descrição <span className="normal-case font-normal">(para o router)</span></label>
+          <input
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            placeholder="Ex: Especialista em direito do trabalho. Coleta ficha trabalhista."
+            className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+          />
+          <p className="text-[10px] text-muted-foreground">Descrição curta usada pelo router inteligente para decidir quando ativar esta skill</p>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Trigger Keywords</label>
+          <input
+            value={form.triggerKeywords}
+            onChange={(e) => setForm((f) => ({ ...f, triggerKeywords: e.target.value }))}
+            placeholder="trabalhista, CLT, demissão, salário"
+            className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+          />
+          <p className="text-[10px] text-muted-foreground">Palavras-chave separadas por vírgula (hints para o router)</p>
+        </div>
+      </div>
+
+      {/* Provider + Modelo + Tokens + Temperatura */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="space-y-1.5">
+          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Provider</label>
+          <select
+            value={form.provider}
+            onChange={(e) => {
+              const p = e.target.value;
+              const defaultModel = p === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini';
+              setForm((f) => ({ ...f, provider: p, model: defaultModel }));
+            }}
+            className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+          >
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic Claude</option>
+          </select>
+        </div>
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Modelo</label>
           <select
@@ -765,7 +874,7 @@ function SkillEditor({
             onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
             className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
           >
-            {AVAILABLE_MODELS.map((m) => (
+            {(form.provider === 'anthropic' ? ANTHROPIC_MODELS : OPENAI_MODELS).map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
             ))}
           </select>
