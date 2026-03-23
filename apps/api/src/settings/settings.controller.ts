@@ -103,13 +103,14 @@ export class SettingsController {
   @Post('ai-config')
   async setAiConfig(
     @Request() req: any,
-    @Body() data: { apiKey?: string; adminKey?: string; defaultModel?: string; cooldownSeconds?: number }
+    @Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; cooldownSeconds?: number }
   ) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Apenas administradores podem alterar configurações de IA');
     }
     if (data.apiKey)    await this.settingsService.setAiConfig(data.apiKey);
     if (data.adminKey)  await this.settingsService.setAdminKey(data.adminKey);
+    if (data.anthropicApiKey) await this.settingsService.upsert('ANTHROPIC_API_KEY', data.anthropicApiKey);
     if (data.defaultModel) await this.settingsService.setDefaultModel(data.defaultModel);
     if (data.cooldownSeconds !== undefined) await this.settingsService.setCooldownSeconds(Number(data.cooldownSeconds));
     return { message: 'Configurações de IA salvas com sucesso' };

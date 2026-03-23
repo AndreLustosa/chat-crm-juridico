@@ -126,6 +126,7 @@ export class SettingsService {
   async getAiConfig() {
     const apiKey = await this.get('OPENAI_API_KEY');
     const adminKey = await this.get('OPENAI_ADMIN_KEY');
+    const anthropicKey = await this.get('ANTHROPIC_API_KEY');
     const defaultModel = (await this.get('OPENAI_DEFAULT_MODEL')) || 'gpt-4o-mini';
     const cooldownRaw = await this.get('AI_COOLDOWN_SECONDS');
     const cooldownSeconds = cooldownRaw ? parseInt(cooldownRaw, 10) : 8;
@@ -133,6 +134,7 @@ export class SettingsService {
       apiKey: apiKey || process.env.OPENAI_API_KEY || null,
       isConfigured: !!(apiKey || process.env.OPENAI_API_KEY),
       isAdminKeyConfigured: !!adminKey,
+      isAnthropicKeyConfigured: !!(anthropicKey || process.env.ANTHROPIC_API_KEY),
       defaultModel,
       cooldownSeconds: isNaN(cooldownSeconds) ? 8 : cooldownSeconds,
     };

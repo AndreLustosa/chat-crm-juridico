@@ -122,6 +122,12 @@ export default function AiSettingsPage() {
   const [savedConfig, setSavedConfig] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // Anthropic Key
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [isAnthropicKeyConfigured, setIsAnthropicKeyConfigured] = useState(false);
+  const [isEditingAnthropicKey, setIsEditingAnthropicKey] = useState(false);
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false);
+
   // TTS
   const [ttsEnabled, setTtsEnabled]         = useState(false);
   const [ttsConfigured, setTtsConfigured]   = useState(false);
@@ -150,6 +156,7 @@ export default function AiSettingsPage() {
       ]);
       setIsConfigured(configRes.data.isConfigured);
       setIsAdminKeyConfigured(configRes.data.isAdminKeyConfigured ?? false);
+      setIsAnthropicKeyConfigured(configRes.data.isAnthropicKeyConfigured ?? false);
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
       setSkills(skillsRes.data);
@@ -170,15 +177,19 @@ export default function AiSettingsPage() {
     setSavingConfig(true);
     try {
       const payload: any = { defaultModel, cooldownSeconds };
-      if (apiKey.trim())   payload.apiKey   = apiKey.trim();
-      if (adminKey.trim()) payload.adminKey = adminKey.trim();
+      if (apiKey.trim())       payload.apiKey         = apiKey.trim();
+      if (adminKey.trim())     payload.adminKey       = adminKey.trim();
+      if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
       await api.post('/settings/ai-config', payload);
-      if (apiKey.trim())   setIsConfigured(true);
-      if (adminKey.trim()) setIsAdminKeyConfigured(true);
+      if (apiKey.trim())       setIsConfigured(true);
+      if (adminKey.trim())     setIsAdminKeyConfigured(true);
+      if (anthropicKey.trim()) setIsAnthropicKeyConfigured(true);
       setIsEditingKey(false);
       setIsEditingAdminKey(false);
+      setIsEditingAnthropicKey(false);
       setApiKey('');
       setAdminKey('');
+      setAnthropicKey('');
       setSavedConfig(true);
       setTimeout(() => setSavedConfig(false), 3000);
     } catch (e) {
@@ -472,6 +483,51 @@ export default function AiSettingsPage() {
                       <span className="flex items-center gap-1.5 text-emerald-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> CONFIGURADO</span>
                     ) : (
                       <span className="flex items-center gap-1.5 text-amber-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> NÃO CONFIGURADO</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── API Key Anthropic Claude ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">API Key Anthropic Claude</label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Necessária para skills que usam provider &quot;Anthropic Claude&quot;.</p>
+                  </div>
+                  <button
+                    onClick={() => { setIsEditingAnthropicKey(!isEditingAnthropicKey); setAnthropicKey(''); setShowAnthropicKey(false); }}
+                    className="text-xs font-bold text-primary hover:underline shrink-0 ml-4"
+                  >
+                    {isEditingAnthropicKey ? 'Cancelar' : isAnthropicKeyConfigured ? 'Trocar' : 'Configurar'}
+                  </button>
+                </div>
+                {isEditingAnthropicKey ? (
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <input
+                        type={showAnthropicKey ? 'text' : 'password'}
+                        value={anthropicKey}
+                        onChange={(e) => setAnthropicKey(e.target.value)}
+                        placeholder="sk-ant-..."
+                        className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 pr-10 text-sm outline-none focus:border-primary/50 transition-all font-mono"
+                        autoFocus
+                      />
+                      <button type="button" onClick={() => setShowAnthropicKey(!showAnthropicKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                        {showAnthropicKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Obtenha em <span className="font-mono text-primary">console.anthropic.com/settings/keys</span>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-xs bg-muted/30 rounded-xl px-4 py-2.5">
+                    <span className="text-muted-foreground">Usada por skills com provider Anthropic</span>
+                    {isAnthropicKeyConfigured ? (
+                      <span className="flex items-center gap-1.5 text-emerald-500 font-bold"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> CONFIGURADO</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-muted-foreground font-bold"><div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" /> NÃO CONFIGURADO</span>
                     )}
                   </div>
                 )}
