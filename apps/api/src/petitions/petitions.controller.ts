@@ -6,14 +6,20 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   Request,
   Res,
+  UseInterceptors,
+  UploadedFile,
+  NotFoundException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { PetitionsService } from './petitions.service';
 import { PetitionAiService } from './petition-ai.service';
-import { PetitionChatService, ChatMessage } from './petition-chat.service';
+import { PetitionChatService } from './petition-chat.service';
+import type { ChatMessage, SkillRef, StreamChatParams } from './petition-chat.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -25,18 +31,57 @@ export class PetitionsController {
     private readonly chatService: PetitionChatService,
   ) {}
 
-  // ─── Chat (Claude Streaming) ───────────────────────────
+  // ─── Console Skills ────────────────────────────────────
 
-  /** GET /petitions/chat/skills — list skills available for petition chat */
+  /** GET /petitions/chat/skills — list skills from Claude Console */
   @Get('chat/skills')
-  getChatSkills() {
-    return this.chatService.getAvailableSkills();
+  getChatSkills(@Query('source') source?: 'all' | 'anthropic' | 'custom') {
+    return this.chatService.listConsoleSkills(source || 'all');
   }
 
-  /** POST /petitions/chat — stream a Claude response (SSE) */
+  // ─── Console Files ─────────────────────────────────────
+
+  /** GET /petitions/chat/files — list files from Claude Console */
+  @Get('chat/files')
+  getChatFiles() {
+    return this.chatService.listConsoleFiles();
+  }
+
+  /** POST /petitions/chat/files — upload file to Claude Console */
+  @Post('chat/files')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadChatFile(@UploadedFile() file: any) {
+    if (!file) throw new NotFoundException('Nenhum arquivo enviado');
+    return this.chatService.uploadFileToConsole(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+  }
+
+  /** GET /petitions/chat/files/:fileId/download — download file from Claude Console */
+  @Get('chat/files/:fileId/download')
+  async downloadChatFile(
+    @Param('fileId') fileId: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename, contentType } =
+      await this.chatService.downloadFileFromConsole(fileId);
+
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
+  }
+
+  // ─── Chat (Claude Streaming with Skills) ───────────────
+
+  /** POST /petitions/chat — stream a Claude response (SSE) with Console skills */
   @Post('chat')
   async chat(
-    @Body() body: { messages: ChatMessage[]; skillId?: string; model?: string },
+    @Body() body: any,
     @Res() res: Response,
   ) {
     return this.chatService.streamChat(body, res);
