@@ -604,6 +604,10 @@ export default function AiSettingsPage() {
                       onSave={saveSkill}
                       onCancel={cancelEdit}
                       insertVar={insertVar}
+                      skillId={form.id}
+                      tools={skills.find(s => s.id === form.id)?.tools || []}
+                      assets={skills.find(s => s.id === form.id)?.assets || []}
+                      onRefresh={fetchData}
                     />
                   )}
                 </div>
@@ -792,6 +796,10 @@ function SkillEditor({
   onSave,
   onCancel,
   insertVar,
+  skillId,
+  tools,
+  assets,
+  onRefresh,
 }: {
   form: SkillForm;
   setForm: React.Dispatch<React.SetStateAction<SkillForm>>;
@@ -800,6 +808,10 @@ function SkillEditor({
   onSave: () => void;
   onCancel: () => void;
   insertVar: (v: string) => void;
+  skillId: string | null;
+  tools: SkillTool[];
+  assets: SkillAsset[];
+  onRefresh: () => void;
 }) {
   return (
     <div className="p-5 bg-card border-t border-border/50 space-y-4">
@@ -952,6 +964,140 @@ function SkillEditor({
           className="w-full font-mono text-sm bg-muted/50 border border-border rounded-xl p-4 resize-y outline-none focus:border-primary/50 transition-all leading-relaxed"
         />
       </div>
+
+      {/* ── Tools (apenas para skills já salvas) ── */}
+      {skillId && (
+        <div className="space-y-2 border border-border/50 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Ferramentas ({tools.length})</label>
+            <button
+              onClick={async () => {
+                const name = prompt('Nome da ferramenta (ex: book_appointment):');
+                if (!name) return;
+                const desc = prompt('Descrição (ex: Agendar reunião com o advogado):') || '';
+                try {
+                  await api.post(`/settings/skills/${skillId}/tools`, {
+                    name: name.trim(),
+                    description: desc.trim(),
+                    parameters_json: { type: 'object', properties: {} },
+                    handler_type: 'builtin',
+                    handler_config: { builtin: name.trim() },
+                  });
+                  onRefresh();
+                } catch { alert('Erro ao criar ferramenta'); }
+              }}
+              className="text-[11px] font-bold text-primary hover:underline"
+            >
+              + Adicionar
+            </button>
+          </div>
+          {tools.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">Nenhuma ferramenta configurada. Skills sem tools usam o modo JSON legado.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {tools.map((tool) => (
+                <div key={tool.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-1.5 py-0.5 rounded">
+                      {tool.handler_type}
+                    </span>
+                    <span className="text-sm font-mono font-bold text-foreground">{tool.name}</span>
+                    <span className="text-[11px] text-muted-foreground truncate">{tool.description}</span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Excluir ferramenta "${tool.name}"?`)) return;
+                      try {
+                        await api.delete(`/settings/skills/tools/${tool.id}`);
+                        onRefresh();
+                      } catch { alert('Erro ao excluir'); }
+                    }}
+                    className="p-1 text-muted-foreground hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Assets & References (apenas para skills já salvas) ── */}
+      {skillId && (
+        <div className="space-y-2 border border-border/50 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Arquivos e Referências ({assets.length})</label>
+            <label className="text-[11px] font-bold text-primary hover:underline cursor-pointer">
+              + Upload
+              <input
+                type="file"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const isRef = file.name.endsWith('.md') || file.name.endsWith('.txt');
+                  const formData = new FormData();
+                  formData.append('file', file);
+                  formData.append('asset_type', isRef ? 'reference' : 'asset');
+                  formData.append('inject_mode', isRef ? 'full_text' : 'none');
+                  try {
+                    await api.post(`/settings/skills/${skillId}/assets`, formData, {
+                      headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                    onRefresh();
+                  } catch { alert('Erro no upload'); }
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+          {assets.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">Nenhum arquivo. References (.md/.txt) são injetadas no prompt. Assets ficam disponíveis para download.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {assets.map((asset) => (
+                <div key={asset.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                      asset.asset_type === 'reference'
+                        ? 'text-green-400 bg-green-500/10 border-green-500/20'
+                        : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+                    }`}>
+                      {asset.asset_type === 'reference' ? 'REF' : 'ASSET'}
+                    </span>
+                    <span className="text-sm font-medium text-foreground truncate">{asset.name}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {(asset.size / 1024).toFixed(1)} KB
+                    </span>
+                    {asset.asset_type === 'reference' && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        asset.inject_mode === 'full_text'
+                          ? 'text-emerald-400 bg-emerald-500/10'
+                          : 'text-muted-foreground bg-muted'
+                      }`}>
+                        {asset.inject_mode === 'full_text' ? 'injetado' : 'não injetado'}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Excluir "${asset.name}"?`)) return;
+                      try {
+                        await api.delete(`/settings/skills/assets/${asset.id}`);
+                        onRefresh();
+                      } catch { alert('Erro ao excluir'); }
+                    }}
+                    className="p-1 text-muted-foreground hover:text-red-400 transition-colors shrink-0"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Toggle ativo */}
       <label className="flex items-center gap-3 cursor-pointer select-none">
