@@ -6,6 +6,11 @@ import { SettingsService } from '../settings/settings.service';
 import { S3Service } from '../s3/s3.service';
 import OpenAI, { toFile } from 'openai';
 import axios from 'axios';
+import { SkillRouter } from './skill-router';
+import { ToolExecutor } from './tool-executor';
+import { PromptBuilder } from './prompt-builder';
+import { buildHandlerMap } from './tool-handlers';
+import { createLLMClient, calculateCost, type LLMProvider } from './llm-client';
 
 // Modelos com suporte a visão (imagens)
 const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5'];
@@ -57,6 +62,8 @@ Retorne SOMENTE o JSON no schema:
 @Processor('ai-jobs')
 export class AiProcessor extends WorkerHost {
   private readonly logger = new Logger(AiProcessor.name);
+  private skillRouter = new SkillRouter();
+  private promptBuilder = new PromptBuilder();
 
   constructor(
     private prisma: PrismaService,
@@ -1047,12 +1054,54 @@ export class AiProcessor extends WorkerHost {
         })
         .join('\n');
 
-      // 8. Carregar skills ativas
+      // 8. Carregar skills ativas (com tools e assets inclusos)
       const activeSkills = await this.settings.getActiveSkills();
 
-      // 9. Selecionar skill baseada na área jurídica detectada
+      // 9. Selecionar skill — via Router inteligente ou fallback area-matching
       const legalArea = (convo as any).legal_area || null;
-      const skill = this.selectSkill(activeSkills, legalArea);
+      const nextStep = (convo as any).next_step || null;
+      const routerConfig = await this.settings.getRouterConfig();
+      let skill: any = null;
+      let routerReason = '';
+      let routerTokens = 0;
+
+      if (routerConfig.enabled && activeSkills.length > 1) {
+        try {
+          const routerApiKey = routerConfig.provider === 'anthropic'
+            ? await this.settings.getAnthropicKey()
+            : await this.settings.getOpenAiKey();
+
+          if (routerApiKey) {
+            // Últimas 5 mensagens para contexto do router
+            const lastMsgs = chronological.slice(-5).map((m: any) => {
+              const sender = m.direction === 'in' ? 'Cliente' : 'Sophia';
+              return `${sender}: ${(m.text || '[mídia]').slice(0, 200)}`;
+            });
+
+            const routerResult = await this.skillRouter.selectSkill({
+              skills: activeSkills,
+              lastMessages: lastMsgs,
+              legalArea,
+              nextStep,
+              routerModel: routerConfig.model,
+              routerProvider: routerConfig.provider as LLMProvider,
+              apiKey: routerApiKey,
+            });
+
+            skill = activeSkills.find((s: any) => s.id === routerResult.skillId) || null;
+            routerReason = routerResult.reason;
+            routerTokens = routerResult.tokensUsed;
+          }
+        } catch (err: any) {
+          this.logger.warn(`[AI] Router falhou: ${err.message}. Usando fallback.`);
+        }
+      }
+
+      // Fallback: area-matching original
+      if (!skill) {
+        skill = this.selectSkill(activeSkills, legalArea);
+        routerReason = routerReason || 'fallback: area matching';
+      }
 
       // 10. Preparar prompt e parâmetros
       let systemPrompt: string;
@@ -1485,32 +1534,133 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
 
       this.logger.log(`[AI] Multi-turn: ${chatTurns.length} turns + instrução (${chronological.length} msgs carregadas)`);
 
-      // 12. Chamar OpenAI com JSON mode
-      const completion = await ai.chat.completions.create({
-        model,
-        messages: openAiMessages,
-        ...this.tokenParam(model, maxTokens),
-        temperature,
-        response_format: { type: 'json_object' },
-      });
+      // 12. Chamar LLM — com tools (function calling) ou JSON mode (legado)
+      const skillTools = (skill?.tools || []).filter((t: any) => t.active);
+      const useToolCalling = skillTools.length > 0;
+      let aiText = '';
+      let updates: any = {};
+      let scheduling_action: any = null;
+      let toolCallLogs: any[] = [];
 
-      const rawResponse =
-        completion.choices[0]?.message?.content ||
-        '{"reply":"Desculpe, estou com instabilidade no momento."}';
+      if (useToolCalling) {
+        // ─── PATH NOVO: Function Calling com Tool Executor ───
+        const provider: LLMProvider = skill.provider || 'openai';
+        const apiKeyForSkill = provider === 'anthropic'
+          ? await this.settings.getAnthropicKey()
+          : await this.settings.getOpenAiKey();
 
-      // Registra uso de tokens para dashboard de custos
-      await this.saveUsage({
-        conversation_id: conversation_id,
-        skill_id: skill?.id ?? null,
-        model,
-        call_type: 'chat',
-        usage: completion.usage,
-      });
+        if (!apiKeyForSkill) {
+          this.logger.error(`[AI] API key não encontrada para provider "${provider}"`);
+          return;
+        }
 
-      // 13. Parsear resposta JSON
-      const { reply: aiText, updates, scheduling_action } = this.parseAiResponse(rawResponse);
+        const llmClient = createLLMClient(provider, apiKeyForSkill);
+        const toolDefs = this.promptBuilder.buildToolDefinitions(skillTools);
+        toolDefs.push(this.promptBuilder.buildRespondToClientTool());
+
+        const handlerMap = buildHandlerMap(skillTools);
+
+        // Converter chatTurns para LLMMessage format
+        const llmMessages = chatTurns.map((t: any) => ({
+          role: t.role as 'user' | 'assistant',
+          content: t.content,
+        }));
+
+        // Add instruction + vision as last user message
+        if (visionImages.length > 0) {
+          llmMessages.push({
+            role: 'user' as const,
+            content: [{ type: 'text', text: instruction }, ...visionImages],
+          });
+        } else {
+          llmMessages.push({ role: 'user' as const, content: instruction });
+        }
+
+        const toolExecutor = new ToolExecutor(handlerMap);
+        const toolResult = await toolExecutor.execute({
+          client: llmClient,
+          model,
+          systemPrompt,
+          messages: llmMessages,
+          tools: toolDefs,
+          maxTokens,
+          temperature,
+          context: {
+            conversationId: convo.id,
+            leadId: convo.lead.id,
+            leadPhone: convo.lead.phone,
+            instanceName: convo.instance_name || null,
+            prisma: this.prisma,
+            s3: this.s3,
+            skillAssets: skill.assets || [],
+          },
+        });
+
+        toolCallLogs = toolResult.toolCallLogs;
+
+        // Extract reply from respond_to_client tool call or final content
+        const respondCall = toolCallLogs.find((l: any) => l.name === 'respond_to_client');
+        if (respondCall) {
+          aiText = respondCall.input.reply || '';
+          updates = respondCall.input.updates || {};
+          scheduling_action = respondCall.input.scheduling_action || null;
+        } else if (toolResult.response.content) {
+          // Fallback: parse content as JSON (hybrid mode)
+          try {
+            const parsed = JSON.parse(toolResult.response.content);
+            aiText = parsed.reply || toolResult.response.content;
+            updates = parsed.updates || {};
+            scheduling_action = parsed.scheduling_action || null;
+          } catch {
+            aiText = toolResult.response.content;
+          }
+        }
+
+        // Save usage
+        await this.saveUsage({
+          conversation_id,
+          skill_id: skill?.id ?? null,
+          model,
+          call_type: 'chat',
+          usage: {
+            prompt_tokens: toolResult.response.usage.promptTokens,
+            completion_tokens: toolResult.response.usage.completionTokens,
+            total_tokens: toolResult.response.usage.totalTokens,
+          },
+        });
+
+        this.logger.log(`[AI] Tool calling: ${toolCallLogs.length} tools executados, reply: ${aiText.slice(0, 80)}...`);
+
+      } else {
+        // ─── PATH LEGADO: JSON mode (sem tools) ───
+        const completion = await ai.chat.completions.create({
+          model,
+          messages: openAiMessages,
+          ...this.tokenParam(model, maxTokens),
+          temperature,
+          response_format: { type: 'json_object' },
+        });
+
+        const rawResponse =
+          completion.choices[0]?.message?.content ||
+          '{"reply":"Desculpe, estou com instabilidade no momento."}';
+
+        await this.saveUsage({
+          conversation_id: conversation_id,
+          skill_id: skill?.id ?? null,
+          model,
+          call_type: 'chat',
+          usage: completion.usage,
+        });
+
+        const parsed = this.parseAiResponse(rawResponse);
+        aiText = parsed.reply;
+        updates = parsed.updates;
+        scheduling_action = parsed.scheduling_action;
+      }
+
       this.logger.log(
-        `[AI] JSON parseado — reply: ${aiText.slice(0, 80)}... | updates: ${JSON.stringify(updates).slice(0, 200)}`,
+        `[AI] Resposta — reply: ${aiText.slice(0, 80)}... | updates: ${JSON.stringify(updates).slice(0, 200)}`,
       );
 
       // 14. Verificar sinal de escalada (handoff para humano)
@@ -1528,6 +1678,20 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           `[AI] Sinal de escalada detectado ("${handoffSignal}") — ai_mode desativado para ${conversation_id}`,
         );
       }
+
+      // 14b. Salvar log de execução da skill (observabilidade)
+      try {
+        await (this.prisma as any).skillExecutionLog.create({
+          data: {
+            conversation_id,
+            skill_id: skill?.id || null,
+            tool_calls_json: toolCallLogs.length > 0 ? toolCallLogs : undefined,
+            selection_reason: routerReason || null,
+            router_tokens: routerTokens || null,
+            duration_ms: Date.now() - (job.processedOn || Date.now()),
+          },
+        });
+      } catch { /* non-critical */ }
 
       // 15. Aplicar updates automaticamente
       await this.applyAiUpdates(
