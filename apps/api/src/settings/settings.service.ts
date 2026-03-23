@@ -288,6 +288,11 @@ Você qualifica. O sistema decide. O especialista aprofunda.
           handoff_signal: null,
           active: true,
           order: 0,
+          // Skills V2
+          description: 'Primeiro contato. Coleta nome, entende problema, identifica área jurídica.',
+          trigger_keywords: ['triagem', 'primeiro contato', 'olá', 'bom dia', 'boa tarde'],
+          skill_type: 'specialist',
+          provider: 'openai',
         },
         {
           name: 'Especialista Trabalhista',
@@ -486,6 +491,11 @@ name: se já existir na memória, mantenha sem perguntar. Nunca inventar.
           handoff_signal: null,
           active: true,
           order: 1,
+          // Skills V2
+          description: 'Direito do trabalho. Coleta ficha trabalhista, avalia viabilidade, agenda reunião.',
+          trigger_keywords: ['trabalhista', 'CLT', 'demissão', 'salário', 'FGTS', 'empregador', 'carteira'],
+          skill_type: 'specialist',
+          provider: 'openai',
         },
         {
           name: 'Especialista Geral',
@@ -561,6 +571,11 @@ Você prepara o caso. O advogado decide.
           handoff_signal: null,
           active: true,
           order: 10,
+          // Skills V2
+          description: 'Atendimento geral para áreas não especializadas. Coleta informações básicas.',
+          trigger_keywords: ['geral', 'dúvida', 'civil', 'consumidor', 'família', 'previdenciário'],
+          skill_type: 'specialist',
+          provider: 'openai',
         },
       ];
 
