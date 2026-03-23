@@ -6,8 +6,8 @@ import {
   Send, Plus, FileText, ChevronDown, Bot, User,
   Copy, Check, Loader2, Paperclip, X, Sparkles,
   Trash2, MessageSquare, Cpu, AlertCircle,
-  Download, Zap, Code2, FileSpreadsheet, FileType,
-  Presentation, File,
+  Download, Code2, FileSpreadsheet, FileType,
+  Presentation, File, Settings2,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -38,7 +38,6 @@ interface SkillRef {
 interface Conversation {
   id: string;
   title: string;
-  skills: SkillRef[];
   model: string;
   containerId: string | null;
   messages: ChatMessage[];
@@ -49,12 +48,12 @@ interface Conversation {
 // ─── Constants ──────────────────────────────────────────────
 
 const MODELS = [
-  { id: 'claude-haiku-4-5',  label: 'Claude Haiku',  desc: 'Rápido e econômico',         badge: 'Rápido',      badgeClass: 'bg-blue-500/10 text-blue-600' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Equilíbrio custo/qualidade', badge: 'Recomendado', badgeClass: 'bg-green-500/10 text-green-600' },
-  { id: 'claude-opus-4-6',   label: 'Claude Opus',   desc: 'Máxima qualidade',           badge: 'Premium',     badgeClass: 'bg-purple-500/10 text-purple-600' },
+  { id: 'claude-haiku-4-5',  label: 'Claude Haiku',  desc: 'Rapido e economico',         badge: 'Rapido',      badgeClass: 'bg-blue-500/10 text-blue-600' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Equilibrio custo/qualidade', badge: 'Recomendado', badgeClass: 'bg-green-500/10 text-green-600' },
+  { id: 'claude-opus-4-6',   label: 'Claude Opus',   desc: 'Maxima qualidade',           badge: 'Premium',     badgeClass: 'bg-purple-500/10 text-purple-600' },
 ];
 
-const STORAGE_KEY = 'peticoes_conversations_v2';
+const STORAGE_KEY = 'peticoes_conversations_v3';
 const MAX_CONVERSATIONS = 50;
 
 const ANTHROPIC_SKILL_ICONS: Record<string, React.ReactNode> = {
@@ -64,21 +63,21 @@ const ANTHROPIC_SKILL_ICONS: Record<string, React.ReactNode> = {
   pdf:  <FileText size={14} className="text-red-500" />,
 };
 
-const DEFAULT_SYSTEM_PROMPT = `Você é um assistente jurídico especializado em direito brasileiro, auxiliando advogados na redação de petições, análise de casos e pesquisa jurídica.
+const DEFAULT_SYSTEM_PROMPT = `Voce e um assistente juridico especializado em direito brasileiro, auxiliando advogados na redacao de peticoes, analise de casos e pesquisa juridica.
 
 ## Suas capacidades:
-- Redigir petições iniciais, recursos, contestações, réplicas, embargos e demais documentos processuais
-- Analisar casos e identificar teses jurídicas aplicáveis
-- Citar jurisprudência, legislação e doutrina relevante
+- Redigir peticoes iniciais, recursos, contestacoes, replicas, embargos e demais documentos processuais
+- Analisar casos e identificar teses juridicas aplicaveis
+- Citar jurisprudencia, legislacao e doutrina relevante
 - Calcular prazos processuais (CPC, CLT, etc.)
 - Revisar documentos e sugerir melhorias
 
 ## Regras:
-- Use linguagem jurídica formal e técnica
-- Cite artigos de lei (CLT, CPC, CF/88, CC, CDC, etc.) quando aplicável
-- Estruture petições com: Endereçamento, Qualificação das Partes, Dos Fatos, Do Direito, Dos Pedidos
-- Use marcadores [ ] para informações que precisam ser completadas
-- Responda sempre em português brasileiro`;
+- Use linguagem juridica formal e tecnica
+- Cite artigos de lei (CLT, CPC, CF/88, CC, CDC, etc.) quando aplicavel
+- Estruture peticoes com: Enderecamento, Qualificacao das Partes, Dos Fatos, Do Direito, Dos Pedidos
+- Use marcadores [ ] para informacoes que precisam ser completadas
+- Responda sempre em portugues brasileiro`;
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -100,7 +99,7 @@ function getConvTitle(messages: ChatMessage[]): string {
   const first = messages.find((m) => m.role === 'user');
   if (!first) return 'Nova Conversa';
   const text = typeof first.content === 'string' ? first.content : '';
-  return text.slice(0, 60) + (text.length > 60 ? '…' : '');
+  return text.slice(0, 60) + (text.length > 60 ? '...' : '');
 }
 
 function formatDate(iso: string): string {
@@ -109,7 +108,7 @@ function formatDate(iso: string): string {
   const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
   if (diffDays === 0) return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   if (diffDays === 1) return 'Ontem';
-  if (diffDays < 7) return `${diffDays}d atrás`;
+  if (diffDays < 7) return `${diffDays}d atras`;
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }
 
@@ -248,16 +247,13 @@ export default function PeticoesPage() {
   // Skills from Claude Console
   const [consoleSkills, setConsoleSkills] = useState<ConsoleSkill[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(true);
-  const [selectedSkills, setSelectedSkills] = useState<SkillRef[]>([]);
-  const [showSkillMenu, setShowSkillMenu] = useState(false);
 
   // Model
   const [selectedModel, setSelectedModel] = useState<string>('claude-sonnet-4-6');
   const [showModelMenu, setShowModelMenu] = useState(false);
 
-  // Mode: 'skills' (Console skills) or 'free' (custom system prompt)
-  const [mode, setMode] = useState<'skills' | 'free'>('skills');
-  const [customPrompt, setCustomPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  // System prompt (always sent alongside skills)
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
 
   // Conversations
@@ -275,12 +271,14 @@ export default function PeticoesPage() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{ id: string; name: string }[]>([]);
 
+  // Skills panel
+  const [showSkillsPanel, setShowSkillsPanel] = useState(false);
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const skillMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
   // ─── Init ──────────────────────────────────────────────
@@ -304,7 +302,6 @@ export default function PeticoesPage() {
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (skillMenuRef.current && !skillMenuRef.current.contains(e.target as Node)) setShowSkillMenu(false);
       if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) setShowModelMenu(false);
     };
     document.addEventListener('mousedown', handler);
@@ -323,7 +320,7 @@ export default function PeticoesPage() {
   const createNewConversation = useCallback(() => {
     const id = genId();
     const conv: Conversation = {
-      id, title: 'Nova Conversa', skills: selectedSkills, model: selectedModel,
+      id, title: 'Nova Conversa', model: selectedModel,
       containerId: null, messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     setConversations((prev) => { const next = [...prev, conv]; saveConversations(next); return next; });
@@ -333,13 +330,12 @@ export default function PeticoesPage() {
     setStreamError(null);
     setAttachedFiles([]);
     setInput('');
-  }, [selectedSkills, selectedModel]);
+  }, [selectedModel]);
 
   const selectConversation = useCallback((conv: Conversation) => {
     if (isStreaming) return;
     setActiveConvId(conv.id);
     setMessages(conv.messages);
-    setSelectedSkills(conv.skills);
     setSelectedModel(conv.model);
     setContainerId(conv.containerId);
     setStreamError(null);
@@ -356,25 +352,14 @@ export default function PeticoesPage() {
     (convId: string, msgs: ChatMessage[], cId: string | null) => {
       setConversations((prev) => {
         const next = prev.map((c) =>
-          c.id !== convId ? c : { ...c, messages: msgs, title: getConvTitle(msgs), containerId: cId, skills: selectedSkills, model: selectedModel, updatedAt: new Date().toISOString() },
+          c.id !== convId ? c : { ...c, messages: msgs, title: getConvTitle(msgs), containerId: cId, model: selectedModel, updatedAt: new Date().toISOString() },
         );
         saveConversations(next);
         return next;
       });
     },
-    [selectedSkills, selectedModel],
+    [selectedModel],
   );
-
-  // ─── Skill Toggle ──────────────────────────────────────
-
-  const toggleSkill = (skill: ConsoleSkill) => {
-    setSelectedSkills((prev) => {
-      const exists = prev.find((s) => s.skill_id === skill.id);
-      if (exists) return prev.filter((s) => s.skill_id !== skill.id);
-      if (prev.length >= 8) return prev; // Max 8 skills
-      return [...prev, { type: skill.source, skill_id: skill.id, version: 'latest' }];
-    });
-  };
 
   // ─── File Upload ───────────────────────────────────────
 
@@ -424,7 +409,7 @@ export default function PeticoesPage() {
     if (!convId) {
       const id = genId();
       const conv: Conversation = {
-        id, title: 'Nova Conversa', skills: selectedSkills, model: selectedModel,
+        id, title: 'Nova Conversa', model: selectedModel,
         containerId: null, messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
       setConversations((prev) => { const next = [...prev, conv]; saveConversations(next); return next; });
@@ -444,26 +429,29 @@ export default function PeticoesPage() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Build API payload
+    // Build API payload — always send all skills + system prompt
+    // Claude decides automatically which skill to use (just like Claude Desktop)
     const apiMessages = [...messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
 
     const body: any = {
       messages: apiMessages,
       model: selectedModel,
+      systemPrompt: systemPrompt,
     };
 
-    // Skills mode → send skills + container
-    if (mode === 'skills' && selectedSkills.length > 0) {
-      body.skills = selectedSkills;
-      if (containerId) body.containerId = containerId;
+    // Always send all available skills (Claude picks which to use)
+    if (consoleSkills.length > 0) {
+      body.skills = consoleSkills.map((s) => ({
+        type: s.source,
+        skill_id: s.id,
+        version: 'latest',
+      }));
     }
 
-    // Free mode → send system prompt
-    if (mode === 'free') {
-      body.systemPrompt = customPrompt;
-    }
+    // Reuse container across turns
+    if (containerId) body.containerId = containerId;
 
-    // Attached files (uploaded to Console)
+    // Attached files
     if (attachedFiles.length > 0) {
       body.fileIds = attachedFiles.map((f) => f.id);
     }
@@ -521,7 +509,6 @@ export default function PeticoesPage() {
         }
       }
 
-      // Update container ID for next turn
       if (newContainerId) setContainerId(newContainerId);
 
       const finalAssistant: ChatMessage = {
@@ -541,7 +528,7 @@ export default function PeticoesPage() {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, activeConvId, messages, selectedSkills, selectedModel, mode, customPrompt, containerId, attachedFiles, persistMessages]);
+  }, [input, isStreaming, activeConvId, messages, consoleSkills, selectedModel, systemPrompt, containerId, attachedFiles, persistMessages]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -554,11 +541,6 @@ export default function PeticoesPage() {
 
   const customSkills = consoleSkills.filter((s) => s.source === 'custom');
   const anthropicSkills = consoleSkills.filter((s) => s.source === 'anthropic');
-
-  const selectedSkillNames = selectedSkills.map((sr) => {
-    const s = consoleSkills.find((cs) => cs.id === sr.skill_id);
-    return s?.displayTitle || s?.name || sr.skill_id;
-  });
 
   // ─── Render ────────────────────────────────────────────
 
@@ -573,7 +555,7 @@ export default function PeticoesPage() {
             <Sparkles size={16} className="text-amber-500" />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-sm font-bold text-foreground">IA Jurídica</h1>
+            <h1 className="text-sm font-bold text-foreground">IA Juridica</h1>
             <p className="text-[11px] text-muted-foreground">Claude Console</p>
           </div>
         </div>
@@ -586,115 +568,89 @@ export default function PeticoesPage() {
           </button>
         </div>
 
-        {/* Mode Toggle */}
+        {/* Skills (always visible, informational — Claude auto-selects) */}
         <div className="px-3 pt-3">
-          <div className="flex rounded-xl border border-border overflow-hidden">
-            <button onClick={() => setMode('skills')}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] font-medium transition-colors ${mode === 'skills' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'}`}>
-              <Code2 size={13} /> Skills
-            </button>
-            <button onClick={() => setMode('free')}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] font-medium transition-colors ${mode === 'free' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'}`}>
-              <Zap size={13} /> Livre
-            </button>
-          </div>
+          <button onClick={() => setShowSkillsPanel(!showSkillsPanel)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted/50 transition-colors text-sm">
+            <div className="flex items-center gap-2">
+              <Code2 size={14} className="text-amber-500 shrink-0" />
+              <span className="font-medium text-foreground text-[12px]">
+                {loadingSkills ? 'Carregando...' : `${consoleSkills.length} skills ativas`}
+              </span>
+            </div>
+            <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${showSkillsPanel ? 'rotate-180' : ''}`} />
+          </button>
+
+          {showSkillsPanel && (
+            <div className="mt-1 rounded-xl border border-border bg-card shadow-sm overflow-hidden max-h-60 overflow-y-auto">
+              {loadingSkills && (
+                <div className="flex items-center gap-2 px-3 py-3 text-muted-foreground text-sm">
+                  <Loader2 size={14} className="animate-spin" /> Carregando do Console...
+                </div>
+              )}
+
+              {customSkills.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 pt-2 pb-1">Suas Skills</p>
+                  {customSkills.map((skill) => (
+                    <div key={skill.id} className="flex items-start gap-2.5 px-3 py-2 border-b border-border/30 last:border-0">
+                      <Bot size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-medium text-foreground truncate">{skill.displayTitle || skill.name}</p>
+                        {skill.description && <p className="text-[10px] text-muted-foreground line-clamp-1">{skill.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {anthropicSkills.length > 0 && (
+                <div className={customSkills.length > 0 ? 'border-t border-border' : ''}>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 pt-2 pb-1">Skills Anthropic</p>
+                  {anthropicSkills.map((skill) => (
+                    <div key={skill.id} className="flex items-center gap-2.5 px-3 py-2 border-b border-border/30 last:border-0">
+                      {ANTHROPIC_SKILL_ICONS[skill.name] || <Bot size={14} className="text-muted-foreground" />}
+                      <span className="text-[12px] font-medium text-foreground">{skill.displayTitle || skill.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!loadingSkills && consoleSkills.length === 0 && (
+                <p className="px-3 py-3 text-[12px] text-muted-foreground text-center">
+                  Nenhuma skill encontrada. Verifique sua API Key no Console.
+                </p>
+              )}
+
+              <p className="px-3 py-2 text-[10px] text-muted-foreground bg-muted/30 border-t border-border">
+                O Claude seleciona automaticamente a skill adequada com base na sua mensagem.
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Skills Selector (Skills mode) */}
-        {mode === 'skills' && (
-          <div className="px-3 pt-3" ref={skillMenuRef}>
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 px-1">
-              Skills do Console ({selectedSkills.length}/8)
-            </p>
-            <button onClick={() => setShowSkillMenu(!showSkillMenu)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted/50 transition-colors text-sm">
-              <span className="truncate text-foreground font-medium text-[12px]">
-                {selectedSkills.length === 0 ? 'Selecionar skills...' : selectedSkillNames.join(', ')}
-              </span>
-              <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+        {/* System Prompt */}
+        <div className="px-3 pt-3">
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 px-1">System Prompt</p>
+          {showPromptEditor ? (
+            <div>
+              <textarea value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)}
+                rows={8} className="w-full text-xs bg-background border border-border rounded-xl px-3 py-2 resize-none text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+              <button onClick={() => setShowPromptEditor(false)} className="mt-1 text-[11px] text-primary hover:underline">Fechar editor</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowPromptEditor(true)}
+              className="w-full text-left px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted/50 transition-colors">
+              <div className="flex items-center gap-2">
+                <Settings2 size={13} className="text-muted-foreground shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[12px] text-foreground font-medium truncate">Assistente Juridico</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{systemPrompt.slice(0, 50)}...</p>
+                </div>
+              </div>
             </button>
-
-            {showSkillMenu && (
-              <div className="mt-1 rounded-xl border border-border bg-card shadow-xl overflow-hidden max-h-80 overflow-y-auto z-50 relative">
-                {loadingSkills && (
-                  <div className="flex items-center gap-2 px-3 py-3 text-muted-foreground text-sm">
-                    <Loader2 size={14} className="animate-spin" /> Carregando do Console...
-                  </div>
-                )}
-
-                {/* Custom skills */}
-                {customSkills.length > 0 && (
-                  <div>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 pt-2 pb-1">Suas Skills</p>
-                    {customSkills.map((skill) => {
-                      const isSelected = selectedSkills.some((s) => s.skill_id === skill.id);
-                      return (
-                        <button key={skill.id} onClick={() => toggleSkill(skill)}
-                          className={`w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${isSelected ? 'bg-amber-500/10' : ''}`}>
-                          <div className={`w-4 h-4 rounded border mt-0.5 shrink-0 flex items-center justify-center ${isSelected ? 'bg-primary border-primary' : 'border-border'}`}>
-                            {isSelected && <Check size={10} className="text-primary-foreground" />}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground truncate">{skill.displayTitle || skill.name}</p>
-                            {skill.description && <p className="text-[11px] text-muted-foreground line-clamp-2">{skill.description}</p>}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Anthropic built-in skills */}
-                {anthropicSkills.length > 0 && (
-                  <div className={customSkills.length > 0 ? 'border-t border-border' : ''}>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 pt-2 pb-1">Skills Anthropic</p>
-                    {anthropicSkills.map((skill) => {
-                      const isSelected = selectedSkills.some((s) => s.skill_id === skill.id);
-                      return (
-                        <button key={skill.id} onClick={() => toggleSkill(skill)}
-                          className={`w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${isSelected ? 'bg-amber-500/10' : ''}`}>
-                          <div className={`w-4 h-4 rounded border mt-0.5 shrink-0 flex items-center justify-center ${isSelected ? 'bg-primary border-primary' : 'border-border'}`}>
-                            {isSelected && <Check size={10} className="text-primary-foreground" />}
-                          </div>
-                          <div className="flex items-center gap-2 min-w-0">
-                            {ANTHROPIC_SKILL_ICONS[skill.name] || <Bot size={14} className="text-muted-foreground" />}
-                            <span className="text-sm font-medium text-foreground">{skill.displayTitle || skill.name}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {!loadingSkills && consoleSkills.length === 0 && (
-                  <p className="px-3 py-3 text-[12px] text-muted-foreground text-center">
-                    Nenhuma skill encontrada. Verifique sua API Key.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Custom System Prompt (Free mode) */}
-        {mode === 'free' && (
-          <div className="px-3 pt-3">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 px-1">System Prompt</p>
-            {showPromptEditor ? (
-              <div>
-                <textarea value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)}
-                  rows={8} className="w-full text-xs bg-background border border-border rounded-xl px-3 py-2 resize-none text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
-                <button onClick={() => setShowPromptEditor(false)} className="mt-1 text-[11px] text-primary hover:underline">Fechar editor</button>
-              </div>
-            ) : (
-              <button onClick={() => setShowPromptEditor(true)}
-                className="w-full text-left px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted/50 transition-colors">
-                <p className="text-[12px] text-foreground font-medium truncate">Assistente Jurídico</p>
-                <p className="text-[11px] text-muted-foreground truncate">{customPrompt.slice(0, 60)}…</p>
-              </button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Model Selector */}
         <div className="px-3 pt-3" ref={modelMenuRef}>
@@ -760,25 +716,19 @@ export default function PeticoesPage() {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-foreground">
-                {activeConvId ? (conversations.find((c) => c.id === activeConvId)?.title || 'Nova Conversa') : 'Assistente Jurídico IA'}
+                {activeConvId ? (conversations.find((c) => c.id === activeConvId)?.title || 'Nova Conversa') : 'Assistente Juridico IA'}
               </h2>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-muted-foreground">{selectedModelInfo.label}</span>
-                {mode === 'skills' && selectedSkills.length > 0 && (
+                {consoleSkills.length > 0 && (
                   <>
-                    <span className="text-muted-foreground/50">·</span>
-                    <span className="text-[11px] text-amber-600 font-medium">{selectedSkills.length} skill{selectedSkills.length > 1 ? 's' : ''}</span>
-                  </>
-                )}
-                {mode === 'free' && (
-                  <>
-                    <span className="text-muted-foreground/50">·</span>
-                    <span className="text-[11px] text-purple-600 font-medium">Modo Livre</span>
+                    <span className="text-muted-foreground/50">.</span>
+                    <span className="text-[11px] text-amber-600 font-medium">{consoleSkills.length} skills</span>
                   </>
                 )}
                 {containerId && (
                   <>
-                    <span className="text-muted-foreground/50">·</span>
+                    <span className="text-muted-foreground/50">.</span>
                     <span className="text-[11px] text-green-600 font-medium flex items-center gap-1"><Code2 size={10} /> Container ativo</span>
                   </>
                 )}
@@ -806,25 +756,35 @@ export default function PeticoesPage() {
               <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4">
                 <Sparkles size={28} className="text-amber-500" />
               </div>
-              <h3 className="text-lg font-bold text-foreground mb-2">Assistente Jurídico com Claude</h3>
+              <h3 className="text-lg font-bold text-foreground mb-2">Assistente Juridico com Claude</h3>
               <p className="text-sm text-muted-foreground max-w-md mb-2">
-                Conectado ao <strong>Claude Console</strong>. Use suas skills, faça upload de arquivos e gere documentos.
+                Conectado ao <strong>Claude Console</strong>. As skills sao acionadas automaticamente conforme o contexto.
               </p>
-              <p className="text-[12px] text-muted-foreground max-w-md mb-6">
-                {mode === 'skills'
-                  ? 'Selecione skills no painel lateral (xlsx, pdf, docx, ou suas skills customizadas).'
-                  : 'Modo Livre — usando prompt personalizado sem skills.'}
-              </p>
+              {consoleSkills.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 justify-center mb-4 max-w-lg">
+                  {consoleSkills.slice(0, 12).map((s) => (
+                    <span key={s.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-700 font-medium">
+                      {ANTHROPIC_SKILL_ICONS[s.name] || <Bot size={10} />}
+                      {s.displayTitle || s.name}
+                    </span>
+                  ))}
+                  {consoleSkills.length > 12 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] text-muted-foreground">
+                      +{consoleSkills.length - 12} mais
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
                 {[
-                  { text: 'Redija uma petição inicial trabalhista por rescisão indireta', icon: '⚖️' },
-                  { text: 'Gere um contrato de honorários em DOCX', icon: '📄' },
-                  { text: 'Analise este processo criminal e prepare estratégia para audiência', icon: '🔍' },
-                  { text: 'Crie uma planilha Excel com cálculos trabalhistas', icon: '📊' },
+                  { text: 'Redija uma peticao inicial trabalhista por rescisao indireta', icon: <FileText size={16} className="text-blue-500" /> },
+                  { text: 'Gere um contrato de honorarios em DOCX', icon: <FileType size={16} className="text-blue-500" /> },
+                  { text: 'Analise este processo criminal e prepare estrategia para audiencia', icon: <Bot size={16} className="text-purple-500" /> },
+                  { text: 'Crie uma planilha Excel com calculos trabalhistas', icon: <FileSpreadsheet size={16} className="text-green-500" /> },
                 ].map((s) => (
                   <button key={s.text} onClick={() => { setInput(s.text); textareaRef.current?.focus(); }}
                     className="flex items-start gap-2 p-3 rounded-xl border border-border bg-card hover:bg-muted/50 text-left text-sm text-foreground transition-colors">
-                    <span className="text-base shrink-0">{s.icon}</span>
+                    <span className="shrink-0 mt-0.5">{s.icon}</span>
                     <span className="text-[12px] text-muted-foreground leading-relaxed">{s.text}</span>
                   </button>
                 ))}
@@ -881,7 +841,7 @@ export default function PeticoesPage() {
               <div className="flex-1 relative">
                 <textarea ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown} disabled={isStreaming}
-                  placeholder="Descreva a petição ou faça uma pergunta jurídica... (Enter para enviar)"
+                  placeholder="Descreva a peticao ou faca uma pergunta juridica... (Enter para enviar)"
                   rows={1}
                   className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 min-h-[46px] max-h-[200px] leading-relaxed" />
               </div>
@@ -898,7 +858,7 @@ export default function PeticoesPage() {
             </div>
 
             <p className="text-[10px] text-muted-foreground text-center mt-2">
-              {selectedModelInfo.label} · Claude Console · IA pode cometer erros — revise antes de usar
+              {selectedModelInfo.label} . Claude Console . IA pode cometer erros - revise antes de usar
             </p>
           </div>
         </div>
