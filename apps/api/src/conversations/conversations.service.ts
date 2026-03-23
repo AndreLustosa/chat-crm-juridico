@@ -173,10 +173,45 @@ export class ConversationsService {
   }
 
   async setAssignedLawyer(id: string, lawyerId: string | null): Promise<Conversation> {
-    return this.prisma.conversation.update({
+    const updated = await this.prisma.conversation.update({
       where: { id },
       data: { assigned_lawyer_id: lawyerId } as any,
     });
+
+    // Enviar notificação WhatsApp para o atendente atribuído
+    if (lawyerId) {
+      try {
+        const [lawyer, conv] = await Promise.all([
+          this.prisma.user.findUnique({ where: { id: lawyerId }, select: { name: true, phone: true } }),
+          (this.prisma as any).conversation.findUnique({
+            where: { id },
+            include: { lead: { select: { name: true, phone: true } } },
+          }),
+        ]);
+
+        if (lawyer?.phone && conv?.lead) {
+          const leadName = conv.lead.name || 'Lead sem nome';
+          const leadPhone = conv.lead.phone || '';
+          const area = (conv as any).legal_area || 'não identificada';
+
+          // Buscar instância da conversa para enviar pelo mesmo número
+          const instanceName = (conv as any).instance_name || undefined;
+
+          const msg = `📋 *Novo atendimento atribuído a você*\n\n` +
+            `👤 *Cliente:* ${leadName}\n` +
+            `📱 *Telefone:* ${leadPhone}\n` +
+            `⚖️ *Área:* ${area}\n\n` +
+            `Acesse o painel para continuar o atendimento.`;
+
+          await this.whatsappService.sendText(lawyer.phone, msg, instanceName);
+          this.logger.log(`[Assign] Notificação WhatsApp enviada para ${lawyer.name} (${lawyer.phone}) — lead: ${leadName}`);
+        }
+      } catch (err: any) {
+        this.logger.warn(`[Assign] Falha ao enviar notificação WhatsApp: ${err.message}`);
+      }
+    }
+
+    return updated;
   }
 
   async setLegalArea(id: string, legalArea: string | null): Promise<Conversation> {
