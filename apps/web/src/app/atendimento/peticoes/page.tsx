@@ -407,6 +407,43 @@ export default function PeticoesPage() {
       return;
     }
 
+    // ── Aviso de custo para arquivos grandes ─────────────────────────────
+    const fileMb = file.size / (1024 * 1024);
+    if (fileMb > 5) {
+      // Estimativa: ~1 token por 4 bytes de texto após extração de PDF
+      // PDFs têm overhead, então usamos 1 token por 3 bytes como estimativa conservadora
+      const estimatedInputTokens = Math.ceil(file.size / 3);
+      const modelInfo = MODELS.find((m) => m.id === selectedModel) || MODELS[0];
+      const pricePer1M = selectedModel.includes('haiku') ? 0.80 : selectedModel.includes('opus') ? 15.00 : 3.00;
+      const estimatedCostUsd = (estimatedInputTokens / 1_000_000) * pricePer1M;
+      const estimated = estimatedInputTokens > 1_000_000
+        ? `~${(estimatedInputTokens / 1_000_000).toFixed(1)}M`
+        : `~${Math.round(estimatedInputTokens / 1000)}K`;
+
+      const msg = [
+        `⚠️ Arquivo grande: ${fileMb.toFixed(1)} MB`,
+        ``,
+        `Estimativa de custo com ${modelInfo.label}:`,
+        `  • Tokens de entrada: ${estimated}`,
+        `  • Custo estimado: ~U$ ${estimatedCostUsd.toFixed(2)} por análise`,
+        selectedModel !== 'claude-haiku-4-5'
+          ? `\n💡 Dica: Use Claude Haiku para reduzir o custo em ~73%.`
+          : ``,
+        ``,
+        `Deseja continuar?`,
+      ].join('\n');
+
+      if (!window.confirm(msg)) return;
+
+      // Se o usuário confirmou e não está usando Haiku, sugerir troca
+      if (selectedModel !== 'claude-haiku-4-5') {
+        const switchToHaiku = window.confirm(
+          `Deseja trocar para Claude Haiku para reduzir o custo de U$ ${estimatedCostUsd.toFixed(2)} para ~U$ ${((estimatedInputTokens / 1_000_000) * 0.80).toFixed(2)}?`
+        );
+        if (switchToHaiku) setSelectedModel('claude-haiku-4-5');
+      }
+    }
+
     setUploadingFile(true);
     setStreamError(null);
     const token = localStorage.getItem('token');
@@ -878,15 +915,34 @@ export default function PeticoesPage() {
 
             {/* Attached files */}
             {attachedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {attachedFiles.map((f) => (
-                  <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted/50 border border-border text-[12px]">
-                    <FileText size={13} className="text-blue-500" />
-                    <span className="truncate max-w-40">{f.name}</span>
-                    <button onClick={() => setAttachedFiles((prev) => prev.filter((x) => x.id !== f.id))}
-                      className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"><X size={11} /></button>
+              <div className="mb-2 space-y-1.5">
+                <div className="flex flex-wrap gap-2">
+                  {attachedFiles.map((f) => (
+                    <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted/50 border border-border text-[12px]">
+                      <FileText size={13} className="text-blue-500" />
+                      <span className="truncate max-w-40">{f.name}</span>
+                      <button onClick={() => setAttachedFiles((prev) => prev.filter((x) => x.id !== f.id))}
+                        className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"><X size={11} /></button>
+                    </div>
+                  ))}
+                </div>
+                {/* Cost warning for large files */}
+                {consoleSkills.length > 0 && (
+                  <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-700">
+                    <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                    <span>
+                      <strong>PDFs grandes + skills</strong> consomem muitos tokens por turno de execução.
+                      {selectedModel !== 'claude-haiku-4-5' && (
+                        <> Modelo atual: <strong>{selectedModelInfo.label}</strong>.{' '}
+                          <button className="underline font-semibold" onClick={() => setSelectedModel('claude-haiku-4-5')}>
+                            Trocar para Haiku (73% mais barato)
+                          </button>
+                        </>
+                      )}
+                      {selectedModel === 'claude-haiku-4-5' && <> Haiku ativo — custo reduzido.</>}
+                    </span>
                   </div>
-                ))}
+                )}
               </div>
             )}
 
