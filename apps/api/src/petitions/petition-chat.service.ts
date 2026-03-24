@@ -422,42 +422,67 @@ export class PetitionChatService {
         pdf: ['pdf', 'gerar pdf', 'converter pdf', 'extrair pdf'],
       };
 
+      // Keywords from custom skill IDs (derived from skill ID name)
+      // Used to match user message to custom skills without loading full content
+      const CUSTOM_SKILL_KEYWORDS: Record<string, string[]> = {
+        'analise-audiencia-criminal': ['criminal', 'audiencia', 'pena', 'denuncia', 'acusado', 'reu', 'crime', 'delito', 'processo criminal', 'defesa criminal', 'habeas corpus'],
+        'peticoes-criminais': ['criminal', 'peticao criminal', 'habeas corpus', 'apelacao criminal', 'recurso criminal', 'defesa penal'],
+        'replica-contestacao-trabalhista': ['replica', 'trabalhista', 'trabalhis', 'clt', 'reclamacao', 'reclamante', 'empregad', 'horas extras', 'rescisao', 'fgts', 'verbas'],
+        'alegacoes-finais-civeis': ['alegacoes finais', 'memoriais', 'consumidor', 'cdc', 'dano moral'],
+        'analise-trct': ['trct', 'rescisao', 'verbas rescisórias', 'demissão'],
+        'calculos-trabalhistas': ['calculo', 'calculos trabalhistas', 'liquidacao', 'horas extras calcul'],
+        'notificacao-extrajudicial': ['notificacao', 'notific', 'interpelacao', 'cobranca extrajudicial'],
+        'recurso-inominado': ['recurso inominado', 'juizado', 'turma recursal'],
+        'usucapiao': ['usucapiao', 'posse', 'prescricao aquisitiva'],
+        'inventario': ['inventario', 'heranca', 'espolio', 'inventariante', 'partilha'],
+        'quesitos-pericia': ['quesitos', 'pericia', 'perito', 'laudo'],
+        'recursos-stj': ['stj', 'recurso especial', 'embargos de declaracao'],
+        'revisao-peticoes': ['revisar', 'revisao', 'corrigir peticao', 'conferir peticao'],
+        'analise-caso': ['analise de caso', 'viabilidade', 'parecer', 'teses'],
+      };
+
       let filteredSkills = params.skills || [];
 
       if (filteredSkills.length > 0) {
-        // Get last user message text for matching
         const lastUserMsg = [...msgs].reverse().find((m) => m.role === 'user');
-        const userText = (
-          typeof lastUserMsg?.content === 'string'
-            ? lastUserMsg.content
-            : JSON.stringify(lastUserMsg?.content || '')
-        ).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const rawText = typeof lastUserMsg?.content === 'string'
+          ? lastUserMsg.content
+          : JSON.stringify(lastUserMsg?.content || '');
+        const userText = rawText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-        // If the message is trivial (< 20 chars, greetings), skip ALL skills
-        const isTrivial = userText.length < 20 ||
-          /^(oi|ola|bom dia|boa tarde|boa noite|hey|hi|hello|obrigad|valeu|ok|tudo bem|como vai)\b/.test(userText);
+        // Trivial/meta messages — skip ALL skills (greetings, questions about skills, short messages)
+        const isTrivial =
+          userText.length < 15 ||
+          /^(oi|ola|bom dia|boa tarde|boa noite|hey|hi|hello|obrigad|valeu|ok|tudo bem|como vai)\b/.test(userText) ||
+          /\b(vc tem|voce tem|tem skill|tem capacidade|quais skills|o que voce|pode me ajudar|me ajuda com)\b/.test(userText);
 
         if (isTrivial) {
-          this.logger.log('Trivial message detected — skipping all skills');
+          this.logger.log('Trivial/meta message — skipping all skills');
           filteredSkills = [];
         } else if (!hasFiles) {
-          // Only filter if no files attached (files always need code_execution)
           const matched = filteredSkills.filter((s) => {
+            if (s.type === 'custom') {
+              // Match custom skills via their keyword map (derived from skill ID)
+              const skillName = s.skill_id.toLowerCase().replace(/skill_[a-z0-9]+$/i, '');
+              // Find matching entry by checking if any key is contained in skill_id
+              const entry = Object.entries(CUSTOM_SKILL_KEYWORDS).find(([key]) =>
+                s.skill_id.toLowerCase().includes(key) || key.split('-').every(w => s.skill_id.toLowerCase().includes(w.slice(0, 4)))
+              );
+              const keywords = entry ? entry[1] : [];
+              return keywords.length > 0
+                ? keywords.some((kw) => userText.includes(kw))
+                : false; // unknown custom skill: don't send without explicit match
+            }
+            // Anthropic built-in skills: check keyword map
             const keywords = SKILL_KEYWORDS[s.skill_id] || [];
-            // Custom skills always pass through (we can't easily filter them)
-            if (s.type === 'custom') return true;
-            // Anthropic skills: check keywords
             return keywords.some((kw) => userText.includes(kw));
           });
 
+          filteredSkills = matched;
           if (matched.length > 0) {
-            filteredSkills = matched;
-            this.logger.log(`Skills filtered: ${matched.map((s) => s.skill_id).join(', ')}`);
+            this.logger.log(`Skills matched: ${matched.map((s) => s.skill_id).join(', ')}`);
           } else {
-            // No keyword match — send max 2 skills (the custom ones + pdf as default)
-            const customs = filteredSkills.filter((s) => s.type === 'custom');
-            filteredSkills = customs.slice(0, 1); // max 1 custom skill
-            this.logger.log(`No keyword match — sending ${filteredSkills.length} skills`);
+            this.logger.log('No skill keyword match — sending 0 skills');
           }
         }
       }
