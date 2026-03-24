@@ -1,0 +1,23 @@
+{
+  "_instrucoes": {
+    "passo_1": "Instale as dependências: cd apps/mcp-server && npm install && npm run build",
+    "passo_2": "Edite os valores de CRM_EMAIL e CRM_PASSWORD abaixo",
+    "passo_3": "Substitua CAMINHO_ABSOLUTO pelo caminho completo até este projeto",
+    "passo_4": "Copie o bloco 'mcpServers' para o arquivo claude_desktop_config.json",
+    "local_config_mac":   "~/Library/Application Support/Claude/claude_desktop_config.json",
+    "local_config_win":   "%APPDATA%\\Claude\\claude_desktop_config.json",
+    "local_config_linux": "~/.config/Claude/claude_desktop_config.json",
+    "passo_5": "Reinicie o Claude Desktop"
+  },
+  "mcpServers": {
+    "crm-juridico": {
+      "command": "node",
+      "args": ["CAMINHO_ABSOLUTO/apps/mcp-server/dist/index.js"],
+      "env": {
+        "CRM_BASE_URL": "http://localhost:3005",
+        "CRM_EMAIL": "seu-email@escritorio.com",
+        "CRM_PASSWORD": "sua-senha"
+      }
+    }
+  }
+}

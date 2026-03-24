@@ -1,0 +1,23 @@
+{
+  "name": "crm-juridico-mcp",
+  "version": "1.0.0",
+  "description": "Servidor MCP para integração do CRM Jurídico com o Claude",
+  "type": "module",
+  "bin": {
+    "crm-juridico-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
