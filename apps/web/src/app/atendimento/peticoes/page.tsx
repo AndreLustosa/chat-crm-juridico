@@ -540,7 +540,16 @@ export default function PeticoesPage() {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.type === 'thinking') {
+            if (data.type === 'info') {
+              // Show info message as thinking (warning from backend)
+              fullThinking += data.text + '\n';
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, thinking: fullThinking };
+                return updated;
+              });
+            } else if (data.type === 'thinking') {
               fullThinking += data.text;
               setMessages((prev) => {
                 const updated = [...prev];

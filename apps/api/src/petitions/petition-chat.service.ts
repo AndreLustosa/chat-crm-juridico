@@ -409,155 +409,206 @@ export class PetitionChatService {
       }
 
       // ── Step 4: Determine if we need beta features ─────
-      // Beta (raw fetch) is needed when: skills OR container OR file uploads
       const hasSkills = params.skills && params.skills.length > 0;
       const needsBeta = hasSkills || !!params.containerId || hasFiles;
 
-      // ── Step 5: Build the request body ─────────────────
-      const body: any = {
-        model,
-        max_tokens: 16384,
-        messages: msgs,
-        thinking: { type: 'enabled', budget_tokens: 8000 },
+      // ── Step 5: Build request body ─────────────────────
+      const buildBody = (opts?: { noSkills?: boolean; noThinking?: boolean }): { body: any; useBeta: boolean } => {
+        const b: any = {
+          model,
+          max_tokens: 16384,
+          messages: msgs,
+        };
+
+        // Thinking: disable if files present (saves tokens) or on retry
+        if (!opts?.noThinking && !hasFiles) {
+          b.thinking = { type: 'enabled', budget_tokens: 8000 };
+        }
+
+        if (params.systemPrompt) b.system = params.systemPrompt;
+
+        const useBeta = needsBeta && !opts?.noSkills;
+        if (useBeta) {
+          const container: any = {};
+          if (params.containerId) container.id = params.containerId;
+          if (hasSkills && !opts?.noSkills) {
+            container.skills = params.skills!.map((s) => ({
+              type: s.type,
+              skill_id: s.skill_id,
+              version: s.version || 'latest',
+            }));
+          }
+          b.container = container;
+          b.tools = [
+            { type: 'code_execution_20250825', name: 'code_execution' },
+          ];
+        }
+
+        return { body: b, useBeta: !!useBeta };
       };
 
-      if (params.systemPrompt) body.system = params.systemPrompt;
+      // ── Step 6: Stream helper (reusable for retry) ─────
 
-      // Container (for skills + file persistence across turns)
-      if (needsBeta) {
-        const container: any = {};
-        if (params.containerId) container.id = params.containerId;
-        if (hasSkills) {
-          container.skills = params.skills!.map((s) => ({
-            type: s.type,
-            skill_id: s.skill_id,
-            version: s.version || 'latest',
-          }));
-        }
-        body.container = container;
-
-        // code_execution is REQUIRED for skills and container_upload
-        body.tools = [
-          { type: 'code_execution_20250825', name: 'code_execution' },
-        ];
-      }
-
-      // ── Step 6: Stream the response ────────────────────
       let resultContainerId: string | null = null;
       const fileResults: any[] = [];
 
-      if (!needsBeta) {
-        // ── Standard SDK streaming (no beta features) ──
-        const streamParams: any = {
-          model: body.model,
-          max_tokens: body.max_tokens,
-          messages: body.messages,
-          thinking: body.thinking,
-        };
-        if (body.system) streamParams.system = body.system;
+      const doStream = async (reqBody: any, useBeta: boolean) => {
+        if (!useBeta) {
+          // ── Standard SDK streaming ──
+          const streamParams: any = {
+            model: reqBody.model,
+            max_tokens: reqBody.max_tokens,
+            messages: reqBody.messages,
+          };
+          if (reqBody.thinking) streamParams.thinking = reqBody.thinking;
+          if (reqBody.system) streamParams.system = reqBody.system;
 
-        const stream = client.messages.stream(streamParams);
+          const stream = client.messages.stream(streamParams);
 
-        for await (const event of stream) {
-          const ev = event as any;
-          if (event.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
-            res.write(`data: ${JSON.stringify({ type: 'thinking', text: ev.delta.thinking })}\n\n`);
+          for await (const event of stream) {
+            const ev = event as any;
+            if (event.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+              res.write(`data: ${JSON.stringify({ type: 'thinking', text: ev.delta.thinking })}\n\n`);
+            }
+            if (event.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+              res.write(`data: ${JSON.stringify({ type: 'text', text: ev.delta.text })}\n\n`);
+            }
+            if (event.type === 'message_start' && ev.message?.usage) {
+              inputTokens = ev.message.usage.input_tokens || 0;
+            }
+            if (event.type === 'message_delta' && ev.usage) {
+              outputTokens = ev.usage.output_tokens || 0;
+            }
           }
-          if (event.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-            res.write(`data: ${JSON.stringify({ type: 'text', text: ev.delta.text })}\n\n`);
+        } else {
+          // ── Beta streaming via raw fetch ──
+          const apiKey = await this.getApiKey();
+          reqBody.stream = true;
+
+          const fetchRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-beta': BETA_HEADERS.join(','),
+            },
+            body: JSON.stringify(reqBody),
+          });
+
+          if (!fetchRes.ok) {
+            const errBody = await fetchRes.text();
+            this.logger.error(`Anthropic API error ${fetchRes.status}: ${errBody}`);
+
+            if (fetchRes.status === 429) {
+              const err = new Error('RATE_LIMIT') as any;
+              err.statusCode = 429;
+              throw err;
+            }
+            throw new Error(`Erro da API Anthropic (${fetchRes.status}): ${errBody.slice(0, 300)}`);
           }
-          if (event.type === 'message_start' && ev.message?.usage) {
-            inputTokens = ev.message.usage.input_tokens || 0;
-          }
-          if (event.type === 'message_delta' && ev.usage) {
-            outputTokens = ev.usage.output_tokens || 0;
-          }
-        }
-      } else {
-        // ── Beta streaming via raw fetch ──
-        const apiKey = await this.getApiKey();
-        body.stream = true;
 
-        const fetchRes = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-beta': BETA_HEADERS.join(','),
-          },
-          body: JSON.stringify(body),
-        });
+          const reader = fetchRes.body!.getReader();
+          const decoder = new TextDecoder();
+          let sseBuffer = '';
 
-        if (!fetchRes.ok) {
-          const errBody = await fetchRes.text();
-          this.logger.error(`Anthropic API error ${fetchRes.status}: ${errBody}`);
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          // Better error messages
-          if (fetchRes.status === 429) {
-            throw new Error('Limite de tokens por minuto excedido. Aguarde 1 minuto e tente novamente.');
-          }
-          throw new Error(`Erro da API Anthropic (${fetchRes.status}): ${errBody.slice(0, 200)}`);
-        }
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop() || '';
 
-        const reader = fetchRes.body!.getReader();
-        const decoder = new TextDecoder();
-        let sseBuffer = '';
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const payload = line.slice(6).trim();
+              if (payload === '[DONE]') continue;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+              try {
+                const event = JSON.parse(payload);
 
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop() || '';
+                if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+                  res.write(`data: ${JSON.stringify({ type: 'thinking', text: event.delta.thinking })}\n\n`);
+                }
+                if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+                  res.write(`data: ${JSON.stringify({ type: 'text', text: event.delta.text })}\n\n`);
+                }
+                if (event.type === 'message_start' && event.message) {
+                  if (event.message.container?.id) resultContainerId = event.message.container.id;
+                  if (event.message.usage) inputTokens = event.message.usage.input_tokens || 0;
+                }
+                if (event.type === 'message_delta' && event.usage) {
+                  outputTokens = event.usage.output_tokens || 0;
+                }
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const payload = line.slice(6).trim();
-            if (payload === '[DONE]') continue;
-
-            try {
-              const event = JSON.parse(payload);
-
-              if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
-                res.write(`data: ${JSON.stringify({ type: 'thinking', text: event.delta.thinking })}\n\n`);
-              }
-              if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-                res.write(`data: ${JSON.stringify({ type: 'text', text: event.delta.text })}\n\n`);
-              }
-              if (event.type === 'message_start' && event.message) {
-                if (event.message.container?.id) resultContainerId = event.message.container.id;
-                if (event.message.usage) inputTokens = event.message.usage.input_tokens || 0;
-              }
-              if (event.type === 'message_delta' && event.usage) {
-                outputTokens = event.usage.output_tokens || 0;
-              }
-
-              // Capture generated files from code execution
-              if (
-                event.type === 'content_block_stop' &&
-                event.content_block?.type === 'bash_code_execution_tool_result'
-              ) {
-                const block = event.content_block;
-                const items = block.content?.content || [];
-                for (const item of items) {
-                  if (item.file_id) {
-                    fileResults.push({
-                      fileId: item.file_id,
-                      filename: item.filename || `file-${item.file_id}`,
-                    });
+                if (
+                  event.type === 'content_block_stop' &&
+                  event.content_block?.type === 'bash_code_execution_tool_result'
+                ) {
+                  const items = event.content_block.content?.content || [];
+                  for (const item of items) {
+                    if (item.file_id) {
+                      fileResults.push({
+                        fileId: item.file_id,
+                        filename: item.filename || `file-${item.file_id}`,
+                      });
+                    }
                   }
                 }
+              } catch {
+                // Skip malformed SSE chunks
               }
-            } catch {
-              // Skip malformed SSE chunks
             }
           }
         }
+      };
+
+      // ── Step 7: Execute with retry logic ───────────────
+      // If rate limit hit, retry without skills (reduce token count)
+
+      const { body: firstBody, useBeta: firstUseBeta } = buildBody();
+
+      // Estimate tokens (rough: 1 token ≈ 4 chars for text messages)
+      const textCharCount = msgs.reduce((acc, m) => {
+        const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        return acc + c.length;
+      }, 0) + (params.systemPrompt?.length || 0);
+      const estimatedTokens = Math.ceil(textCharCount / 4);
+      this.logger.log(`Estimated input: ~${estimatedTokens} text tokens + files/skills overhead`);
+
+      try {
+        await doStream(firstBody, firstUseBeta);
+      } catch (err: any) {
+        if (err?.message === 'RATE_LIMIT' && hasSkills) {
+          // Retry without skills to reduce token count
+          this.logger.warn('Rate limit hit — retrying without skills...');
+          res.write(`data: ${JSON.stringify({ type: 'info', text: '⚠️ Limite de tokens excedido. Retentando sem skills...' })}\n\n`);
+
+          const { body: retryBody, useBeta: retryBeta } = buildBody({ noSkills: true, noThinking: true });
+          try {
+            await doStream(retryBody, retryBeta);
+          } catch (retryErr: any) {
+            if (retryErr?.message === 'RATE_LIMIT') {
+              throw new Error(
+                'Limite de tokens excedido mesmo sem skills. Seu plano permite apenas 30.000 tokens/min. ' +
+                'Aguarde 1 minuto ou use o modelo Haiku (mais leve). Para processar PDFs grandes, ' +
+                'solicite aumento de limite em console.anthropic.com.',
+              );
+            }
+            throw retryErr;
+          }
+        } else if (err?.message === 'RATE_LIMIT') {
+          throw new Error(
+            'Limite de 30.000 tokens/min excedido. Seu plano Anthropic e Tier 1. ' +
+            'Opcoes: (1) Aguarde 1 minuto, (2) Use modelo Haiku, (3) Solicite aumento em console.anthropic.com',
+          );
+        } else {
+          throw err;
+        }
       }
 
-      // ── Step 7: Send done metadata ─────────────────────
+      // ── Step 8: Send done metadata ─────────────────────
       const metadata: any = { type: 'done' };
       if (resultContainerId) metadata.containerId = resultContainerId;
       if (fileResults.length > 0) metadata.files = fileResults;
