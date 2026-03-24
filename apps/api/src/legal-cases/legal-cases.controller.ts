@@ -41,6 +41,8 @@ export class LegalCasesController {
     @Query('inTracking') inTracking?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('leadId') leadId?: string,
+    @Query('caseNumber') caseNumber?: string,
   ) {
     const isAdmin = req.user.role === 'ADMIN';
     const lawyerId = isAdmin ? undefined : req.user.id;
@@ -48,7 +50,7 @@ export class LegalCasesController {
     const inTrackingBool = inTracking === 'true' ? true : inTracking === 'false' ? false : undefined;
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool, p, l, req.user?.tenant_id);
+    return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool, p, l, req.user?.tenant_id, leadId, caseNumber);
   }
 
   @Get(':id/workspace')

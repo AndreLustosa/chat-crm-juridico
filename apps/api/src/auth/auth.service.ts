@@ -26,4 +26,10 @@ export class AuthService {
       user: payload
     };
   }
+
+  async generateMcpToken(user: any) {
+    const payload = { email: user.email, sub: user.sub, role: user.role, tenant_id: user.tenant_id };
+    const mcp_token = this.jwtService.sign(payload, { expiresIn: '365d' });
+    return { mcp_token };
+  }
 }

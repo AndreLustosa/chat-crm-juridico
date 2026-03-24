@@ -50,12 +50,14 @@ export class LegalCasesService {
     });
   }
 
-  async findAll(lawyerId?: string, stage?: string, archived?: boolean, inTracking?: boolean, page?: number, limit?: number, tenantId?: string) {
+  async findAll(lawyerId?: string, stage?: string, archived?: boolean, inTracking?: boolean, page?: number, limit?: number, tenantId?: string, leadId?: string, caseNumber?: string) {
     const where: any = { ...this.tenantWhere(tenantId) };
     if (lawyerId) where.lawyer_id = lawyerId;
     if (stage) where.stage = stage;
     if (archived !== undefined) where.archived = archived;
     if (inTracking !== undefined) where.in_tracking = inTracking;
+    if (leadId) where.lead_id = leadId;
+    if (caseNumber) where.case_number = { contains: caseNumber, mode: 'insensitive' };
 
     const includeOpts = {
       lead: {
