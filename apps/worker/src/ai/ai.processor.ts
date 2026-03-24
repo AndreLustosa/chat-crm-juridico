@@ -1593,6 +1593,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             prisma: this.prisma,
             s3: this.s3,
             skillAssets: skill.assets || [],
+            reminderQueue: this.reminderQueue,
           },
         });
 

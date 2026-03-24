@@ -3,6 +3,9 @@ import { EscalateToHumanHandler } from './escalate-to-human';
 import { UpdateLeadHandler } from './update-lead';
 import { SaveFormFieldHandler } from './save-form-field';
 import { WebhookHandler } from './webhook-handler';
+import { BookAppointmentHandler } from './book-appointment';
+import { CheckAvailabilityHandler } from './check-availability';
+import { SearchReferencesHandler } from './search-references';
 
 /**
  * Registry central de tool handlers built-in.
@@ -14,6 +17,9 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new EscalateToHumanHandler(),
   new UpdateLeadHandler(),
   new SaveFormFieldHandler(),
+  new BookAppointmentHandler(),
+  new CheckAvailabilityHandler(),
+  new SearchReferencesHandler(),
 ];
 
 /**

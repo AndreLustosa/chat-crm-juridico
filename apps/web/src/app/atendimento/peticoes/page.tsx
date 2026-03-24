@@ -3,11 +3,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL } from '@/lib/api';
 import {
-  Send, Plus, FileText, ChevronDown, ChevronRight, Bot, User,
+  Send, Plus, FileText, ChevronDown, ChevronRight, User,
   Copy, Check, Loader2, Paperclip, X, Sparkles,
   Trash2, MessageSquare, Cpu, AlertCircle, Brain,
-  Download, Code2, FileSpreadsheet, FileType,
-  Presentation, File, Settings2,
+  Download, Settings2, Bot,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -20,7 +19,7 @@ interface ConsoleSkill {
   source: 'anthropic' | 'custom';
 }
 
-interface ChatMessage {
+interface ChatMessage { // ConsoleSkill kept for API typing
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -46,13 +45,6 @@ const MODELS = [
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Qualidade — limite 30K tokens/min', badge: 'Avancado',   badgeClass: 'bg-green-500/10 text-green-600' },
   { id: 'claude-opus-4-6',   label: 'Claude Opus',   desc: 'Premium — limite 10K tokens/min',   badge: 'Premium',    badgeClass: 'bg-purple-500/10 text-purple-600' },
 ];
-
-const ANTHROPIC_SKILL_ICONS: Record<string, React.ReactNode> = {
-  xlsx: <FileSpreadsheet size={14} className="text-green-500" />,
-  pptx: <Presentation size={14} className="text-orange-500" />,
-  docx: <FileType size={14} className="text-blue-500" />,
-  pdf:  <FileText size={14} className="text-red-500" />,
-};
 
 const DEFAULT_SYSTEM_PROMPT = `Voce e um assistente juridico especializado em direito brasileiro, auxiliando advogados na redacao de peticoes, analise de casos e pesquisa juridica.
 
@@ -267,10 +259,8 @@ function MessageBubble({ msg, isStreaming }: { msg: ChatMessage; isStreaming: bo
 // ─── Main Page ───────────────────────────────────────────────
 
 export default function PeticoesPage() {
-  // Skills from Claude Console
+  // Skills from Claude Console (loaded silently; all sent automatically)
   const [consoleSkills, setConsoleSkills] = useState<ConsoleSkill[]>([]);
-  const [activeSkillIds, setActiveSkillIds] = useState<Set<string>>(new Set());
-  const [loadingSkills, setLoadingSkills] = useState(true);
 
   // Model
   // Haiku por padrão: limite 60K tokens/min (vs 30K do Sonnet no Tier 1)
@@ -300,9 +290,6 @@ export default function PeticoesPage() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<{ id: string; name: string }[]>([]);
 
-  // Skills panel
-  const [showSkillsPanel, setShowSkillsPanel] = useState(false);
-
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -313,17 +300,10 @@ export default function PeticoesPage() {
   // ─── Init: load skills + chats from DB ──────────────────
 
   useEffect(() => {
-    // Load skills
+    // Load skills silently — all are sent automatically; Claude Console selects the right one
     api<ConsoleSkill[]>('/petitions/chat/skills?source=all')
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setConsoleSkills(data);
-          // Activate all skills by default — Claude auto-selects via progressive disclosure
-          setActiveSkillIds(new Set(data.map((s) => s.id)));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingSkills(false));
+      .then((data) => { if (Array.isArray(data)) setConsoleSkills(data); })
+      .catch(() => {});
 
     // Load chats from DB
     api<ChatSummary[]>('/petitions/chat/conversations')
@@ -492,8 +472,7 @@ export default function PeticoesPage() {
       systemPrompt: systemPrompt,
     };
 
-    // Send all skills — Claude auto-selects via progressive disclosure
-    // Only metadata (~150 tokens/skill) is loaded; full instructions load on-demand
+    // Send all skills — Claude Console selects automatically via progressive disclosure
     if (consoleSkills.length > 0) {
       body.skills = consoleSkills.map((s) => ({
         type: s.source,
@@ -628,7 +607,7 @@ export default function PeticoesPage() {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, activeChatId, messages, consoleSkills, activeSkillIds, selectedModel, systemPrompt, containerId, attachedFiles, refreshChatList]);
+  }, [input, isStreaming, activeChatId, messages, consoleSkills, selectedModel, systemPrompt, containerId, attachedFiles, refreshChatList]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -637,8 +616,6 @@ export default function PeticoesPage() {
   // ─── Derived state ─────────────────────────────────────
 
   const selectedModelInfo = MODELS.find((m) => m.id === selectedModel) || MODELS[1];
-  const customSkills = consoleSkills.filter((s) => s.source === 'custom');
-  const anthropicSkills = consoleSkills.filter((s) => s.source === 'anthropic');
 
   // ─── Render ────────────────────────────────────────────
 
@@ -664,91 +641,6 @@ export default function PeticoesPage() {
             className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm">
             <Plus size={16} /> Nova Conversa
           </button>
-        </div>
-
-        {/* Skills panel */}
-        <div className="px-3 pt-3">
-          <button onClick={() => setShowSkillsPanel(!showSkillsPanel)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-border bg-background hover:bg-muted/50 transition-colors text-sm">
-            <div className="flex items-center gap-2">
-              <Code2 size={14} className="text-amber-500 shrink-0" />
-              <span className="font-medium text-foreground text-[12px]">
-                {loadingSkills ? 'Carregando...' : `${activeSkillIds.size}/${consoleSkills.length} skills`}
-              </span>
-            </div>
-            <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${showSkillsPanel ? 'rotate-180' : ''}`} />
-          </button>
-
-          {showSkillsPanel && (
-            <div className="mt-1 rounded-xl border border-border bg-card shadow-sm overflow-hidden max-h-60 overflow-y-auto">
-              {loadingSkills && (
-                <div className="flex items-center gap-2 px-3 py-3 text-muted-foreground text-sm">
-                  <Loader2 size={14} className="animate-spin" /> Carregando do Console...
-                </div>
-              )}
-
-              {consoleSkills.length > 0 && (
-                <div className="px-3 py-2 border-b border-border flex gap-2">
-                  <button onClick={() => setActiveSkillIds(new Set(consoleSkills.map(s => s.id)))}
-                    className="text-[10px] text-primary hover:underline">Ativar todas</button>
-                  <span className="text-[10px] text-muted-foreground">|</span>
-                  <button onClick={() => setActiveSkillIds(new Set())}
-                    className="text-[10px] text-muted-foreground hover:underline">Desativar todas</button>
-                </div>
-              )}
-
-              {customSkills.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 pt-2 pb-1">Suas Skills</p>
-                  {customSkills.map((skill) => (
-                    <label key={skill.id} className="flex items-center gap-2.5 px-3 py-2 border-b border-border/30 last:border-0 cursor-pointer hover:bg-muted/30 transition-colors">
-                      <input type="checkbox" checked={activeSkillIds.has(skill.id)}
-                        onChange={(e) => {
-                          const next = new Set(activeSkillIds);
-                          e.target.checked ? next.add(skill.id) : next.delete(skill.id);
-                          setActiveSkillIds(next);
-                        }}
-                        className="w-3.5 h-3.5 rounded border-border accent-amber-500 shrink-0" />
-                      <Bot size={14} className="text-amber-500 shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-[12px] font-medium text-foreground truncate">{skill.displayTitle || skill.name}</p>
-                        {skill.description && <p className="text-[10px] text-muted-foreground line-clamp-1">{skill.description}</p>}
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {anthropicSkills.length > 0 && (
-                <div className={customSkills.length > 0 ? 'border-t border-border' : ''}>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 pt-2 pb-1">Skills Anthropic</p>
-                  {anthropicSkills.map((skill) => (
-                    <label key={skill.id} className="flex items-center gap-2.5 px-3 py-2 border-b border-border/30 last:border-0 cursor-pointer hover:bg-muted/30 transition-colors">
-                      <input type="checkbox" checked={activeSkillIds.has(skill.id)}
-                        onChange={(e) => {
-                          const next = new Set(activeSkillIds);
-                          e.target.checked ? next.add(skill.id) : next.delete(skill.id);
-                          setActiveSkillIds(next);
-                        }}
-                        className="w-3.5 h-3.5 rounded border-border accent-amber-500 shrink-0" />
-                      {ANTHROPIC_SKILL_ICONS[skill.name] || <Bot size={14} className="text-muted-foreground" />}
-                      <span className="text-[12px] font-medium text-foreground">{skill.displayTitle || skill.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {!loadingSkills && consoleSkills.length === 0 && (
-                <p className="px-3 py-3 text-[12px] text-muted-foreground text-center">
-                  Nenhuma skill encontrada. Verifique sua API Key no Console.
-                </p>
-              )}
-
-              <p className="px-3 py-2 text-[10px] text-muted-foreground bg-muted/30 border-t border-border">
-                Claude seleciona automaticamente. Desative skills para economizar tokens se necessario.
-              </p>
-            </div>
-          )}
         </div>
 
         {/* System Prompt */}
@@ -874,7 +766,7 @@ export default function PeticoesPage() {
                 {containerId && (
                   <>
                     <span className="text-muted-foreground/50">.</span>
-                    <span className="text-[11px] text-green-600 font-medium flex items-center gap-1"><Code2 size={10} /> Container ativo</span>
+                    <span className="text-[11px] text-green-600 font-medium">Container ativo</span>
                   </>
                 )}
               </div>
@@ -909,7 +801,7 @@ export default function PeticoesPage() {
                 <div className="flex flex-wrap gap-1.5 justify-center mb-4 max-w-lg">
                   {consoleSkills.slice(0, 12).map((s) => (
                     <span key={s.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-700 font-medium">
-                      {ANTHROPIC_SKILL_ICONS[s.name] || <Bot size={10} />}
+                      <Sparkles size={10} />
                       {s.displayTitle || s.name}
                     </span>
                   ))}
@@ -923,9 +815,9 @@ export default function PeticoesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
                 {[
                   { text: 'Redija uma peticao inicial trabalhista por rescisao indireta', icon: <FileText size={16} className="text-blue-500" /> },
-                  { text: 'Gere um contrato de honorarios em DOCX', icon: <FileType size={16} className="text-blue-500" /> },
+                  { text: 'Gere um contrato de honorarios em DOCX', icon: <FileText size={16} className="text-blue-500" /> },
                   { text: 'Analise este processo criminal e prepare estrategia', icon: <Bot size={16} className="text-purple-500" /> },
-                  { text: 'Crie uma planilha Excel com calculos trabalhistas', icon: <FileSpreadsheet size={16} className="text-green-500" /> },
+                  { text: 'Crie uma planilha Excel com calculos trabalhistas', icon: <FileText size={16} className="text-green-500" /> },
                 ].map((s) => (
                   <button key={s.text} onClick={() => { setInput(s.text); textareaRef.current?.focus(); }}
                     className="flex items-start gap-2 p-3 rounded-xl border border-border bg-card hover:bg-muted/50 text-left text-sm text-foreground transition-colors">
@@ -964,7 +856,7 @@ export default function PeticoesPage() {
               <div className="flex flex-wrap gap-2 mb-2">
                 {attachedFiles.map((f) => (
                   <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted/50 border border-border text-[12px]">
-                    <File size={13} className="text-blue-500" />
+                    <FileText size={13} className="text-blue-500" />
                     <span className="truncate max-w-40">{f.name}</span>
                     <button onClick={() => setAttachedFiles((prev) => prev.filter((x) => x.id !== f.id))}
                       className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"><X size={11} /></button>

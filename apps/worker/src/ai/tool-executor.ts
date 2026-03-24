@@ -11,6 +11,7 @@ export interface ToolContext {
   calendarService?: any;
   whatsappService?: any;
   skillAssets?: any[];
+  reminderQueue?: any; // Bull queue for WhatsApp reminders (optional)
 }
 
 export interface ToolHandler {
