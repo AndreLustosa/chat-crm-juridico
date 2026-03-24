@@ -311,7 +311,13 @@ export default function PeticoesPage() {
   useEffect(() => {
     // Load skills
     api<ConsoleSkill[]>('/petitions/chat/skills?source=all')
-      .then((data) => { if (Array.isArray(data)) setConsoleSkills(data); })
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setConsoleSkills(data);
+          // Activate all skills by default — Claude auto-selects via progressive disclosure
+          setActiveSkillIds(new Set(data.map((s) => s.id)));
+        }
+      })
       .catch(() => {})
       .finally(() => setLoadingSkills(false));
 
@@ -482,9 +488,10 @@ export default function PeticoesPage() {
       systemPrompt: systemPrompt,
     };
 
-    const selectedSkills = consoleSkills.filter((s) => activeSkillIds.has(s.id));
-    if (selectedSkills.length > 0) {
-      body.skills = selectedSkills.map((s) => ({
+    // Send all skills — Claude auto-selects via progressive disclosure
+    // Only metadata (~150 tokens/skill) is loaded; full instructions load on-demand
+    if (consoleSkills.length > 0) {
+      body.skills = consoleSkills.map((s) => ({
         type: s.source,
         skill_id: s.id,
         version: 'latest',
@@ -724,7 +731,7 @@ export default function PeticoesPage() {
               )}
 
               <p className="px-3 py-2 text-[10px] text-muted-foreground bg-muted/30 border-t border-border">
-                Ative apenas as skills necessarias para reduzir custo de tokens.
+                Claude seleciona automaticamente. Desative skills para economizar tokens se necessario.
               </p>
             </div>
           )}
@@ -825,10 +832,10 @@ export default function PeticoesPage() {
               </h2>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-muted-foreground">{selectedModelInfo.label}</span>
-                {activeSkillIds.size > 0 && (
+                {consoleSkills.length > 0 && (
                   <>
                     <span className="text-muted-foreground/50">.</span>
-                    <span className="text-[11px] text-amber-600 font-medium">{activeSkillIds.size} skills</span>
+                    <span className="text-[11px] text-amber-600 font-medium">{consoleSkills.length} skills</span>
                   </>
                 )}
                 {containerId && (
@@ -863,22 +870,22 @@ export default function PeticoesPage() {
               </div>
               <h3 className="text-lg font-bold text-foreground mb-2">Assistente Juridico com Claude</h3>
               <p className="text-sm text-muted-foreground max-w-md mb-2">
-                Conectado ao <strong>Claude Console</strong>. Ative as skills necessarias no painel esquerdo.
+                Conectado ao <strong>Claude Console</strong>. As skills sao selecionadas automaticamente conforme o contexto.
               </p>
-              {activeSkillIds.size > 0 && (
+              {consoleSkills.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 justify-center mb-4 max-w-lg">
-                  {consoleSkills.filter(s => activeSkillIds.has(s.id)).slice(0, 12).map((s) => (
+                  {consoleSkills.slice(0, 12).map((s) => (
                     <span key={s.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-700 font-medium">
                       {ANTHROPIC_SKILL_ICONS[s.name] || <Bot size={10} />}
                       {s.displayTitle || s.name}
                     </span>
                   ))}
+                  {consoleSkills.length > 12 && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-muted text-[10px] text-muted-foreground">
+                      +{consoleSkills.length - 12} mais
+                    </span>
+                  )}
                 </div>
-              )}
-              {activeSkillIds.size === 0 && consoleSkills.length > 0 && (
-                <p className="text-[11px] text-muted-foreground mb-4">
-                  Nenhuma skill ativa — o chat funcionara sem skills (mais barato)
-                </p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg">
                 {[
