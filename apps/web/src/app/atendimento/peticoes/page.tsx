@@ -214,7 +214,7 @@ function MessageBubble({ msg, isStreaming }: { msg: ChatMessage; isStreaming: bo
 
   return (
     <div className="flex justify-start mb-4 group">
-      <div className="max-w-[85%] flex items-start gap-2">
+      <div className="w-full flex items-start gap-2">
         <div className="w-7 h-7 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 mt-1">
           <Sparkles size={13} className="text-amber-500" />
         </div>
@@ -870,7 +870,7 @@ export default function PeticoesPage() {
               </div>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto">
+            <div className="w-full px-8">
               {messages.map((msg, idx) => (
                 <MessageBubble key={msg.id} msg={msg} isStreaming={isStreaming && idx === messages.length - 1} />
               ))}
