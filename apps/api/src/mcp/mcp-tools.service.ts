@@ -42,9 +42,8 @@ export class McpToolsService {
           name: args.name,
           phone: args.phone,
           email: args.email,
-          inbox_id: args.inbox_id,
           tenant_id: tenantId,
-        });
+        } as any);
       }
 
       case 'atualizar_cliente': {
@@ -77,10 +76,6 @@ export class McpToolsService {
           lead_id: args.lead_id,
           lawyer_id: userId,
           legal_area: args.legal_area,
-          action_type: args.action_type,
-          claim_value: args.claim_value,
-          opposing_party: args.opposing_party,
-          notes: args.notes,
           tenant_id: tenantId,
         });
       }

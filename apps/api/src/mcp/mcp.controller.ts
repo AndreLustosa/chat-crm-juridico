@@ -1,7 +1,7 @@
 import {
   Controller, Post, Body, Req, Res, HttpCode, Logger,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { Public } from '../auth/decorators/public.decorator';
 import { McpToolsService } from './mcp-tools.service';
