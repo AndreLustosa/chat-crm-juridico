@@ -547,16 +547,27 @@ export class PetitionChatService {
           reqHeaders['anthropic-beta'] = betaList.join(',');
         }
 
+        const bodyJson = JSON.stringify(reqBody);
+        const msgsTokenEst = Math.ceil(
+          reqBody.messages.reduce((a: number, m: any) => {
+            const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return a + c.length;
+          }, 0) / 4,
+        );
+        const systemTokenEst = Math.ceil((reqBody.system?.length || 0) / 4);
+
         this.logger.log(
           `Sending request: model=${reqBody.model} max_tokens=${reqBody.max_tokens} ` +
           `thinking=${!!reqBody.thinking} beta=[${betaList.join(',')}] ` +
-          `skills=${reqBody.container?.skills?.length ?? 0} container=${!!reqBody.container?.id}`,
+          `skills=${reqBody.container?.skills?.length ?? 0} container=${!!reqBody.container?.id} ` +
+          `body_bytes=${bodyJson.length} msgs=${reqBody.messages.length} ` +
+          `est_tokens(system=${systemTokenEst} msgs=${msgsTokenEst} total=${systemTokenEst + msgsTokenEst})`,
         );
 
         const fetchRes = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: reqHeaders,
-          body: JSON.stringify(reqBody),
+          body: bodyJson,
         });
 
         if (!fetchRes.ok) {
