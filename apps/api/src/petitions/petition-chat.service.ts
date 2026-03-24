@@ -352,6 +352,10 @@ export class PetitionChatService {
         max_tokens: 16384,
         messages: params.messages,
         betas: BETA_HEADERS,
+        thinking: {
+          type: 'enabled',
+          budget_tokens: 8000,
+        },
       };
 
       // System prompt (optional override for free-form mode)
@@ -400,7 +404,11 @@ export class PetitionChatService {
             type: 'document',
             source: { type: 'file', file_id: fid },
           }));
-          contentBlocks.push({ type: 'text', text: textContent });
+          // Always add a text block (required by the API, even if empty use a prompt)
+          contentBlocks.push({
+            type: 'text',
+            text: textContent || 'Analise o(s) arquivo(s) enviado(s) e responda de forma detalhada.',
+          });
 
           requestParams.messages = [...params.messages];
           requestParams.messages[idx] = {
@@ -425,20 +433,27 @@ export class PetitionChatService {
           model: requestParams.model,
           max_tokens: requestParams.max_tokens,
           messages: requestParams.messages,
+          thinking: requestParams.thinking,
         };
         if (requestParams.system) streamParams.system = requestParams.system;
 
         const stream = client.messages.stream(streamParams);
 
         for await (const event of stream) {
-          if (event.type === 'content_block_delta' && (event as any).delta?.type === 'text_delta') {
-            res.write(`data: ${JSON.stringify({ type: 'text', text: (event as any).delta.text })}\n\n`);
+          const ev = event as any;
+          // Thinking deltas
+          if (event.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
+            res.write(`data: ${JSON.stringify({ type: 'thinking', text: ev.delta.thinking })}\n\n`);
           }
-          if (event.type === 'message_start' && (event as any).message?.usage) {
-            inputTokens = (event as any).message.usage.input_tokens || 0;
+          // Text deltas
+          if (event.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+            res.write(`data: ${JSON.stringify({ type: 'text', text: ev.delta.text })}\n\n`);
           }
-          if (event.type === 'message_delta' && (event as any).usage) {
-            outputTokens = (event as any).usage.output_tokens || 0;
+          if (event.type === 'message_start' && ev.message?.usage) {
+            inputTokens = ev.message.usage.input_tokens || 0;
+          }
+          if (event.type === 'message_delta' && ev.usage) {
+            outputTokens = ev.usage.output_tokens || 0;
           }
         }
       } else {
@@ -450,6 +465,7 @@ export class PetitionChatService {
           max_tokens: requestParams.max_tokens,
           messages: requestParams.messages,
           stream: true,
+          thinking: requestParams.thinking,
         };
         if (requestParams.system) betaBody.system = requestParams.system;
         if (requestParams.container) betaBody.container = requestParams.container;
@@ -493,6 +509,12 @@ export class PetitionChatService {
             try {
               const event = JSON.parse(payload);
 
+              // Thinking deltas
+              if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+                res.write(`data: ${JSON.stringify({ type: 'thinking', text: event.delta.thinking })}\n\n`);
+              }
+
+              // Text deltas
               if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
                 res.write(`data: ${JSON.stringify({ type: 'text', text: event.delta.text })}\n\n`);
               }

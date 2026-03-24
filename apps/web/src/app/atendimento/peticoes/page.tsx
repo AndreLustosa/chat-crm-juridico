@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL } from '@/lib/api';
 import {
-  Send, Plus, FileText, ChevronDown, Bot, User,
+  Send, Plus, FileText, ChevronDown, ChevronRight, Bot, User,
   Copy, Check, Loader2, Paperclip, X, Sparkles,
-  Trash2, MessageSquare, Cpu, AlertCircle,
+  Trash2, MessageSquare, Cpu, AlertCircle, Brain,
   Download, Code2, FileSpreadsheet, FileType,
   Presentation, File, Settings2,
 } from 'lucide-react';
@@ -24,6 +24,7 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  thinking?: string;
   created_at: string;
   files_json?: { fileId: string; filename: string }[] | null;
 }
@@ -104,6 +105,35 @@ function formatDate(iso: string): string {
 }
 
 // ─── Markdown Renderer ──────────────────────────────────────
+
+// ─── Thinking Block (collapsible) ─────────────────────────
+function ThinkingBlock({ thinking, isStreaming }: { thinking: string; isStreaming: boolean }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-muted/50"
+      >
+        {isStreaming && !isOpen ? (
+          <Loader2 size={12} className="animate-spin text-amber-500" />
+        ) : isOpen ? (
+          <ChevronDown size={12} />
+        ) : (
+          <ChevronRight size={12} />
+        )}
+        <Brain size={12} className="text-amber-500/70" />
+        <span>{isStreaming ? 'Pensando...' : 'Pensamento'}</span>
+      </button>
+      {(isOpen || isStreaming) && (
+        <div className="mt-1 ml-2 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground bg-muted/30 border border-border/50 rounded-xl max-h-[300px] overflow-y-auto whitespace-pre-wrap font-mono">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function renderMarkdown(text: string): string {
   if (!text) return '';
@@ -189,6 +219,7 @@ function MessageBubble({ msg, isStreaming }: { msg: ChatMessage; isStreaming: bo
           <Sparkles size={13} className="text-amber-500" />
         </div>
         <div className="flex-1 min-w-0">
+          {msg.thinking && <ThinkingBlock thinking={msg.thinking} isStreaming={isStreaming && msg.content === ''} />}
           <div
             className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed shadow-sm"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
@@ -207,7 +238,7 @@ function MessageBubble({ msg, isStreaming }: { msg: ChatMessage; isStreaming: bo
               ))}
             </div>
           )}
-          {isStreaming && msg.content === '' && (
+          {isStreaming && msg.content === '' && !msg.thinking && (
             <div className="flex gap-1 mt-2 ml-2">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '0ms' }} />
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -404,7 +435,7 @@ export default function PeticoesPage() {
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if ((!text && attachedFiles.length === 0) || isStreaming) return;
 
     setStreamError(null);
 
@@ -428,7 +459,8 @@ export default function PeticoesPage() {
     // Optimistic UI: add user + empty assistant message
     const tempUserId = `temp-${Date.now()}`;
     const tempAsstId = `temp-asst-${Date.now()}`;
-    const userMsg: ChatMessage = { id: tempUserId, role: 'user', content: text, created_at: new Date().toISOString() };
+    const displayContent = text || (attachedFiles.length > 0 ? `📎 ${attachedFiles.map(f => f.name).join(', ')}` : '');
+    const userMsg: ChatMessage = { id: tempUserId, role: 'user', content: displayContent, created_at: new Date().toISOString() };
     const assistantMsg: ChatMessage = { id: tempAsstId, role: 'assistant', content: '', created_at: new Date().toISOString() };
 
     const prevMessages = [...messages];
@@ -481,8 +513,9 @@ export default function PeticoesPage() {
 
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
+      let sseBuffer = '';
       let fullText = '';
+      let fullThinking = '';
       let newContainerId: string | null = containerId;
       let generatedFiles: { fileId: string; filename: string }[] = [];
 
@@ -490,15 +523,23 @@ export default function PeticoesPage() {
         const { done, value } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || '';
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.type === 'text') {
+            if (data.type === 'thinking') {
+              fullThinking += data.text;
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last?.role === 'assistant') updated[updated.length - 1] = { ...last, thinking: fullThinking };
+                return updated;
+              });
+            } else if (data.type === 'text') {
               fullText += data.text;
               setMessages((prev) => {
                 const updated = [...prev];
@@ -523,7 +564,7 @@ export default function PeticoesPage() {
       await Promise.all([
         api(`/petitions/chat/conversations/${finalChatId}/messages`, {
           method: 'POST',
-          body: JSON.stringify({ role: 'user', content: text }),
+          body: JSON.stringify({ role: 'user', content: displayContent }),
         }),
         api(`/petitions/chat/conversations/${finalChatId}/messages`, {
           method: 'POST',
@@ -887,7 +928,7 @@ export default function PeticoesPage() {
                 <button onClick={() => { abortRef.current?.abort(); setIsStreaming(false); }}
                   className="p-2.5 rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"><X size={18} /></button>
               ) : (
-                <button onClick={sendMessage} disabled={!input.trim()}
+                <button onClick={sendMessage} disabled={!input.trim() && attachedFiles.length === 0}
                   className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 shadow-sm">
                   <Send size={18} />
                 </button>
