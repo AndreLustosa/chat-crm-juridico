@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar, FileSignature } from 'lucide-react';
+import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar, FileSignature, Plug } from 'lucide-react';
 
 type MenuItem = {
   label: string;
@@ -27,6 +27,7 @@ const settingsMenu: MenuItem[] = [
   { label: 'Agenda & Escritório', href: '/atendimento/settings/office', icon: Calendar },
   { label: 'Permissões', href: '/atendimento/settings/permissions', icon: Shield },
   { label: 'Notificações', href: '/atendimento/settings/notifications', icon: Bell },
+  { label: 'Integração MCP', href: '/atendimento/settings/mcp', icon: Plug },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
