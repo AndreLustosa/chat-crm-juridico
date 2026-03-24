@@ -616,6 +616,8 @@ export default function PeticoesPage() {
             } else if (data.type === 'done') {
               if (data.containerId) newContainerId = data.containerId;
               if (data.files) generatedFiles = data.files;
+              // Automatic model fallback happened on the backend — update UI
+              if (data.fallbackModel) setSelectedModel(data.fallbackModel);
             }
           } catch {}
         }

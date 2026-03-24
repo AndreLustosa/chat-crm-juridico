@@ -671,8 +671,11 @@ export class PetitionChatService {
         }
       };
 
-      // ── Step 7: Execute with retry logic ───────────────
-      // If rate limit hit, retry without skills (reduce token count)
+      // ── Step 7: Execute with automatic model fallback on 429 ──────────
+      // Sonnet/Opus share the 30K tokens/min pool. Haiku has a SEPARATE
+      // 60K tokens/min pool. When Sonnet is rate-limited (e.g. after a
+      // heavy PDF analysis that consumed 800K tokens = ~27 min of backpressure),
+      // automatically retry with Haiku so the user always gets a response.
 
       const { body: firstBody, useBeta: firstUseBeta } = buildBody();
 
@@ -684,34 +687,80 @@ export class PetitionChatService {
       const estimatedTokens = Math.ceil(textCharCount / 4);
       this.logger.log(`Estimated input: ~${estimatedTokens} text tokens + files/skills overhead`);
 
+      let usedFallbackModel: string | null = null;
+
       try {
         await doStream(firstBody, firstUseBeta);
       } catch (err: any) {
-        if (err?.message === 'RATE_LIMIT' && hasSkills) {
-          // Retry without skills to reduce token count
-          this.logger.warn('Rate limit hit — retrying without skills...');
-          res.write(`data: ${JSON.stringify({ type: 'info', text: '⚠️ Limite de tokens excedido. Retentando sem skills...' })}\n\n`);
+        if (err?.message !== 'RATE_LIMIT') throw err;
 
-          const { body: retryBody, useBeta: retryBeta } = buildBody({ noSkills: true, noThinking: true });
+        // ── 429 hit ────────────────────────────────────────────────────
+        // Step A: if not already on Haiku, retry with Haiku (separate pool)
+        if (model !== 'claude-haiku-4-5') {
+          this.logger.warn(`Rate limit on ${model} — falling back to claude-haiku-4-5 (separate pool)`);
+          res.write(`data: ${JSON.stringify({ type: 'info', text: `⚠️ Limite de tokens do ${model} excedido. Usando Haiku automaticamente...` })}\n\n`);
+
+          const { body: haikiBody, useBeta: haikuBeta } = buildBody({ noThinking: true });
+          haikiBody.model = 'claude-haiku-4-5';
+          // Adaptive max_tokens for Haiku
+          haikiBody.max_tokens = (hasSkills || hasFiles) ? 8192 : 2048;
+
           try {
-            await doStream(retryBody, retryBeta);
-          } catch (retryErr: any) {
-            if (retryErr?.message === 'RATE_LIMIT') {
+            await doStream(haikiBody, haikuBeta);
+            usedFallbackModel = 'claude-haiku-4-5';
+          } catch (haikiErr: any) {
+            if (haikiErr?.message !== 'RATE_LIMIT') throw haikiErr;
+
+            // Step B: Haiku also rate-limited — try without skills
+            if (hasSkills) {
+              this.logger.warn('Rate limit on Haiku too — retrying without skills');
+              res.write(`data: ${JSON.stringify({ type: 'info', text: '⚠️ Limite do Haiku também atingido. Retentando sem skills...' })}\n\n`);
+              const { body: bare, useBeta: bareBeta } = buildBody({ noSkills: true, noThinking: true });
+              bare.model = 'claude-haiku-4-5';
+              bare.max_tokens = 2048;
+              try {
+                await doStream(bare, bareBeta);
+                usedFallbackModel = 'claude-haiku-4-5';
+              } catch (bareErr: any) {
+                if (bareErr?.message === 'RATE_LIMIT') {
+                  throw new Error(
+                    'Limite de tokens excedido em todos os modelos. Sua conta atingiu o teto Tier 1 (30K tokens/min Sonnet + 60K tokens/min Haiku). ' +
+                    'O processo de análise do PDF consumiu muitos tokens. Aguarde 5–10 minutos ou acesse console.anthropic.com para solicitar aumento de limite.',
+                  );
+                }
+                throw bareErr;
+              }
+            } else {
               throw new Error(
-                'Limite de tokens excedido mesmo sem skills. Seu plano permite apenas 30.000 tokens/min. ' +
-                'Aguarde 1 minuto ou use o modelo Haiku (mais leve). Para processar PDFs grandes, ' +
-                'solicite aumento de limite em console.anthropic.com.',
+                'Limite de tokens excedido no Haiku. Aguarde 1–2 minutos e tente novamente. ' +
+                'Dica: PDFs grandes (>10MB) consomem muitos tokens por análise.',
               );
             }
-            throw retryErr;
           }
-        } else if (err?.message === 'RATE_LIMIT') {
-          throw new Error(
-            'Limite de 30.000 tokens/min excedido. Seu plano Anthropic e Tier 1. ' +
-            'Opcoes: (1) Aguarde 1 minuto, (2) Use modelo Haiku, (3) Solicite aumento em console.anthropic.com',
-          );
         } else {
-          throw err;
+          // Already on Haiku and still rate-limited
+          if (hasSkills) {
+            this.logger.warn('Rate limit on Haiku — retrying without skills');
+            res.write(`data: ${JSON.stringify({ type: 'info', text: '⚠️ Limite atingido. Retentando sem skills...' })}\n\n`);
+            const { body: bare, useBeta: bareBeta } = buildBody({ noSkills: true, noThinking: true });
+            bare.max_tokens = 2048;
+            try {
+              await doStream(bare, bareBeta);
+            } catch (bareErr: any) {
+              if (bareErr?.message === 'RATE_LIMIT') {
+                throw new Error(
+                  'Limite de tokens do Haiku excedido. Aguarde 1–2 minutos. ' +
+                  'O processo de análise do PDF anterior consumiu muitos tokens.',
+                );
+              }
+              throw bareErr;
+            }
+          } else {
+            throw new Error(
+              'Limite de 60.000 tokens/min do Haiku excedido. Aguarde 1–2 minutos. ' +
+              'PDFs grandes consomem muitos tokens por análise.',
+            );
+          }
         }
       }
 
@@ -719,6 +768,8 @@ export class PetitionChatService {
       const metadata: any = { type: 'done' };
       if (resultContainerId) metadata.containerId = resultContainerId;
       if (fileResults.length > 0) metadata.files = fileResults;
+      // Inform frontend which model was actually used (may differ if fallback occurred)
+      if (usedFallbackModel) metadata.fallbackModel = usedFallbackModel;
       res.write(`data: ${JSON.stringify(metadata)}\n\n`);
 
       // Save usage
