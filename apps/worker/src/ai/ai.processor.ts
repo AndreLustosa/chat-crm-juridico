@@ -1618,33 +1618,30 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
 
         toolCallLogs = toolResult.toolCallLogs;
 
-        // Extract reply from respond_to_client tool call or final content
+        // Cacheia ambas as calls de interesse antes de qualquer ramificação
         const respondCall = toolCallLogs.find((l: any) => l.name === 'respond_to_client');
+        const updateLeadCall = toolCallLogs.find((l: any) => l.name === 'update_lead');
+
         if (respondCall) {
           aiText = respondCall.input.reply || '';
           updates = respondCall.input.updates || {};
           scheduling_action = respondCall.input.scheduling_action || null;
-
-          // Se respond_to_client não trouxe status, tenta propagar de update_lead
-          // (a IA frequentemente seta next_step ou stage em update_lead separadamente)
-          if (!updates.status) {
-            const updateLeadCall = toolCallLogs.find((l: any) => l.name === 'update_lead');
-            if (updateLeadCall) {
-              if (updateLeadCall.input?.stage) {
-                // IA setou stage explicitamente no update_lead
-                updates.status = updateLeadCall.input.stage;
-              } else if (updateLeadCall.input?.next_step && !updates.next_step) {
-                // IA setou next_step; applyAiUpdates usa o inferMap para resolver o stage
-                updates.next_step = updateLeadCall.input.next_step;
-              }
-            }
-          }
         } else if (toolResult.response.content) {
           // Fallback: parse content as JSON (hybrid mode) ou texto puro
           const parsed = this.parseAiResponse(toolResult.response.content);
           aiText = parsed.reply;
           updates = parsed.updates || {};
           scheduling_action = parsed.scheduling_action || null;
+        }
+
+        // Propaga stage/next_step de update_lead quando respond_to_client não trouxe status.
+        // Cobre todos os paths: com ou sem respond_to_client.
+        if (!updates.status && updateLeadCall) {
+          if (updateLeadCall.input?.stage) {
+            updates.status = updateLeadCall.input.stage;
+          } else if (updateLeadCall.input?.next_step && !updates.next_step) {
+            updates.next_step = updateLeadCall.input.next_step;
+          }
         }
 
         // Save usage
@@ -1693,6 +1690,9 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       this.logger.log(
         `[AI] Resposta — reply: ${aiText.slice(0, 80)}... | updates: ${JSON.stringify(updates).slice(0, 200)}`,
       );
+      if (!updates.status && !updates.next_step && !updates.name) {
+        this.logger.warn(`[AI] updates vazio após processamento — stage não será atualizado. convo=${conversation_id}`);
+      }
 
       // 14. Verificar sinal de escalada (handoff para humano)
       let finalText = aiText;
