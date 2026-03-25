@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { Prisma, Lead } from '@crm/shared';
 import { LegalCasesService } from '../legal-cases/legal-cases.service';
+import OpenAI from 'openai';
 
 /**
  * Remove o nono digito de celulares brasileiros.
@@ -408,6 +409,58 @@ export class LeadsService {
     ];
 
     return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  // ─── IA SUMMARY ───────────────────────────────────────────────────────────
+  async summarizeLead(leadId: string, tenantId?: string): Promise<{ summary: string }> {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      include: {
+        conversations: {
+          include: {
+            messages: {
+              where: { type: 'text' },
+              orderBy: { created_at: 'desc' },
+              take: 30,
+              select: { text: true, direction: true, created_at: true },
+            },
+          },
+          take: 1,
+        },
+      },
+    });
+    if (!lead) throw new NotFoundException('Lead não encontrado');
+    if (tenantId && lead.tenant_id && lead.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado');
+    }
+
+    const conv = lead.conversations?.[0];
+    const messages = (conv?.messages ?? []).reverse();
+    const messagesText = messages
+      .filter((m) => m.text)
+      .map((m) => `${m.direction === 'out' ? 'Atendente' : 'Cliente'}: ${m.text}`)
+      .join('\n');
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new BadRequestException('API key OpenAI não configurada.');
+
+    const openai = new OpenAI({ apiKey });
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 300,
+      messages: [
+        {
+          role: 'system',
+          content: 'Você é um assistente jurídico. Produza um briefing conciso (3-5 linhas) sobre o lead: quem é, qual é o problema jurídico, o que já foi tratado e qual o próximo passo recomendado. Responda em português, sem tópicos, em texto corrido.',
+        },
+        {
+          role: 'user',
+          content: `Lead: ${lead.name || 'Sem nome'} | Etapa: ${lead.stage} | Área: ${(conv as any)?.legal_area || 'não definida'}\n\nConversa:\n${messagesText || 'Sem mensagens registradas.'}`,
+        },
+      ],
+    });
+
+    return { summary: completion.choices[0]?.message?.content ?? 'Não foi possível gerar o resumo.' };
   }
 
   // ─── EXPORT CSV ───────────────────────────────────────────────────────────

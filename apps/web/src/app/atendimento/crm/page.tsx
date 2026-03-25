@@ -385,6 +385,21 @@ function LeadDetailPanel({
   const score = computeLeadScore(lead);
   const isNew = (Date.now() - new Date(lead.created_at).getTime()) < 3_600_000;
 
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+
+  const handleSummarize = async () => {
+    setSummarizing(true);
+    try {
+      const res = await api.post<{ summary: string }>(`/leads/${lead.id}/summary`);
+      setAiSummary(res.data.summary);
+    } catch {
+      showError('Não foi possível gerar o resumo. Verifique a configuração da API.');
+    } finally {
+      setSummarizing(false);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => showSuccess('Copiado!'));
   };
@@ -509,6 +524,25 @@ function LeadDetailPanel({
               )}
             </div>
           )}
+
+          {/* Resumo IA */}
+          <div className="bg-accent/40 border border-border rounded-xl p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Briefing IA</p>
+              <button
+                onClick={handleSummarize}
+                disabled={summarizing}
+                className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+              >
+                <TrendingUp size={11} />
+                {summarizing ? 'Analisando…' : aiSummary ? 'Atualizar' : 'Resumir com IA'}
+              </button>
+            </div>
+            {aiSummary
+              ? <p className="text-[11px] text-foreground/80 leading-relaxed">{aiSummary}</p>
+              : <p className="text-[11px] text-muted-foreground/50 italic">Clique em "Resumir com IA" para gerar um briefing automático do lead.</p>
+            }
+          </div>
 
           {/* Template de mensagem */}
           {STAGE_TEMPLATES[normalizedStage] && (
@@ -896,6 +930,9 @@ export default function CrmPage() {
 
   // Analytics panel
   const [showAnalytics, setShowAnalytics] = useState(false);
+
+  // Alertas de leads estagnados
+  const [dismissedStagnation, setDismissedStagnation] = useState(false);
 
   // Conversão de lead para caso
   const [convertingCase, setConvertingCase] = useState(false);
@@ -1392,6 +1429,31 @@ export default function CrmPage() {
             </button>
           </div>
         </header>
+
+        {/* Alerta de leads estagnados */}
+        {!dismissedStagnation && !loading && (() => {
+          const stagnant = leads.filter(l => {
+            const stage = normalizeStage(l.stage);
+            if (stage === 'PERDIDO' || stage === 'FINALIZADO') return false;
+            const days = daysInStage(l.stage_entered_at);
+            const lastMsg = l.conversations?.[0]?.last_message_at;
+            const daysSinceMsg = lastMsg ? Math.floor((Date.now() - new Date(lastMsg).getTime()) / 86400000) : 999;
+            return days > 3 && daysSinceMsg > 3;
+          });
+          if (stagnant.length === 0) return null;
+          return (
+            <div className="mx-6 mt-3 mb-1 flex items-center gap-3 px-4 py-2.5 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+              <AlertCircle size={15} className="text-yellow-400 shrink-0" />
+              <p className="flex-1 text-[12px] text-yellow-300">
+                <span className="font-bold">{stagnant.length} lead{stagnant.length !== 1 ? 's' : ''}</span> sem atividade há mais de 3 dias:{' '}
+                <span className="opacity-80">{stagnant.slice(0, 3).map(l => l.name || l.phone).join(', ')}{stagnant.length > 3 ? ` e mais ${stagnant.length - 3}` : ''}</span>
+              </p>
+              <button onClick={() => setDismissedStagnation(true)} className="p-1 rounded-md text-yellow-400/60 hover:text-yellow-400 transition-colors shrink-0">
+                <XIcon size={13} />
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Board / Lista */}
         {loading ? (

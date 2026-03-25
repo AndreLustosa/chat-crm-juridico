@@ -82,6 +82,11 @@ export class LeadsController {
     return this.leadsService.getTimeline(id, req.user?.tenant_id);
   }
 
+  @Post(':id/summary')
+  summarize(@Param('id') id: string, @Request() req: any) {
+    return this.leadsService.summarizeLead(id, req.user?.tenant_id);
+  }
+
   @Delete(':id/memory')
   resetMemory(@Param('id') id: string, @Request() req: any) {
     return this.leadsService.resetMemory(id, req.user?.tenant_id);
