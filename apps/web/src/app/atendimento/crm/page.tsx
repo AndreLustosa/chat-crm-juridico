@@ -93,6 +93,27 @@ function scoreStyle(score: number): string {
   return 'text-red-400 bg-red-500/10 border-red-500/20';
 }
 
+function agingBorderClass(days: number, stage: string): string {
+  if (stage === 'PERDIDO' || stage === 'FINALIZADO') return '';
+  if (days <= 2) return 'border-l-[3px] border-l-emerald-500/50';
+  if (days <= 5) return 'border-l-[3px] border-l-yellow-500/60';
+  return 'border-l-[3px] border-l-red-500/70';
+}
+
+function getScoreFactors(lead: CrmLead): string[] {
+  const normalized = normalizeStage(lead.stage);
+  const conv = lead.conversations?.[0];
+  const days = daysInStage(lead.stage_entered_at);
+  const factors: string[] = [];
+  const base = STAGE_BASE_SCORES[normalized] ?? 20;
+  factors.push(`+${base} etapa atual`);
+  if (conv?.legal_area) factors.push('+8 área jurídica definida');
+  if (conv?.assigned_lawyer_id) factors.push('+5 advogado atribuído');
+  if (conv?.next_step && conv.next_step !== 'duvidas') factors.push('+5 próximo passo definido');
+  if (days > 3) factors.push(`-${Math.min(25, (days - 3) * 3)} estagnado há ${days}d`);
+  return factors;
+}
+
 function validateStageTransition(lead: CrmLead, newStage: string): string | null {
   const conv = lead.conversations?.[0];
   if (newStage === 'REUNIAO_AGENDADA' && !conv?.legal_area) {
@@ -148,6 +169,8 @@ function LeadCard({
   const normalizedStage = normalizeStage(lead.stage);
   const days = daysInStage(lead.stage_entered_at);
   const score = computeLeadScore(lead);
+  const isNew = (Date.now() - new Date(lead.created_at).getTime()) < 3_600_000;
+  const agingBorder = agingBorderClass(days, normalizedStage);
 
   // Fechar menu ao clicar fora
   useEffect(() => {
@@ -171,7 +194,7 @@ function LeadCard({
           ? 'border-primary/60 ring-2 ring-primary/20 bg-primary/5'
           : isDragging
             ? 'opacity-40 scale-95 rotate-1 shadow-2xl ring-2 ring-primary/30 border-border'
-            : 'border-border hover:border-border/80 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/10'
+            : `border-border hover:border-border/80 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/10 ${agingBorder}`
       }`}
     >
       {/* Header do card */}
@@ -249,6 +272,11 @@ function LeadCard({
 
       {/* Badges */}
       <div className="flex flex-wrap gap-1 mb-2">
+        {isNew && (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[9px] font-bold border border-emerald-500/30 animate-pulse">
+            NOVO
+          </span>
+        )}
         {legalArea && (
           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-400 text-[9px] font-bold border border-violet-500/20">
             ⚖️ {legalArea}
@@ -300,8 +328,8 @@ function LeadCard({
           {/* Score do lead */}
           {normalizedStage !== 'PERDIDO' && normalizedStage !== 'FINALIZADO' && (
             <span
-              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${scoreStyle(score)}`}
-              title={`Score do lead: ${score}/100`}
+              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border cursor-help ${scoreStyle(score)}`}
+              title={`Score: ${score}/100\n${getScoreFactors(lead).join('\n')}`}
             >
               {score}
             </span>
@@ -355,6 +383,9 @@ export default function CrmPage() {
   // Modal de motivo de perda
   const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
   const [lossReason, setLossReason] = useState('');
+
+  // Modal de confirmação — Finalizado
+  const [finalizedModal, setFinalizedModal] = useState<{ leadId: string; leadName: string } | null>(null);
 
   // Leads cujo PATCH ainda está em voo — fetchLeads silencioso não os sobrescreve
   const movingLeads = useRef<Set<string>>(new Set());
@@ -470,6 +501,12 @@ export default function CrmPage() {
       return;
     }
 
+    // Se for FINALIZADO, pedir confirmação
+    if (newStage === 'FINALIZADO') {
+      setFinalizedModal({ leadId, leadName: lead.name || 'Sem nome' });
+      return;
+    }
+
     const prev = lead.stage;
     setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
     // Marca como em trânsito para proteger do auto-refresh
@@ -511,6 +548,29 @@ export default function CrmPage() {
       setLeads(cur => cur.map(l =>
         l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
       ));
+      showError('Erro ao mover lead. Tente novamente.');
+    } finally {
+      movingLeads.current.delete(leadId);
+    }
+  };
+
+  const confirmFinalized = async () => {
+    if (!finalizedModal) return;
+    const { leadId } = finalizedModal;
+    setFinalizedModal(null);
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    const validationError = validateStageTransition(lead, 'FINALIZADO');
+    if (validationError) { showError(validationError); return; }
+    const prev = lead.stage;
+    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
+    movingLeads.current.add(leadId);
+    setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: 'FINALIZADO', stage_entered_at: new Date().toISOString() } : l));
+    try {
+      const res = await api.patch(`/leads/${leadId}/stage`, { stage: 'FINALIZADO' });
+      if (res.data) setLeads(cur => cur.map(l => l.id === leadId ? { ...l, ...res.data } : l));
+    } catch {
+      setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l));
       showError('Erro ao mover lead. Tente novamente.');
     } finally {
       movingLeads.current.delete(leadId);
@@ -845,12 +905,19 @@ export default function CrmPage() {
 
                       {stageLeads.length === 0 && (
                         <div
-                          className={`text-center p-5 border-2 border-dashed rounded-xl text-[11px] text-muted-foreground/50 transition-all ${
-                            isDragTarget ? 'border-current opacity-100' : 'border-border/40 opacity-70'
+                          className={`text-center p-5 border-2 border-dashed rounded-xl text-muted-foreground/50 transition-all ${
+                            isDragTarget ? 'border-current opacity-100' : 'border-border/40 opacity-60'
                           }`}
                           style={isDragTarget ? { borderColor: stage.color, color: stage.color } : undefined}
                         >
-                          {isDragTarget ? `Soltar aqui` : 'Arraste leads aqui'}
+                          {isDragTarget ? (
+                            <p className="text-[12px] font-semibold">Soltar aqui</p>
+                          ) : (
+                            <>
+                              <p className="text-[11px] font-medium">Nenhum lead aqui</p>
+                              <p className="text-[10px] mt-1 opacity-70">Arraste cards ou use o menu ⋮</p>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
@@ -963,6 +1030,32 @@ export default function CrmPage() {
               </div>
             </div>
 
+          </div>
+        )}
+
+        {/* Modal de confirmação — Finalizado */}
+        {finalizedModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+              <h3 className="text-lg font-bold text-foreground mb-1">Finalizar lead?</h3>
+              <p className="text-sm text-muted-foreground mb-5">
+                Deseja marcar <strong>{finalizedModal.leadName}</strong> como <span className="text-emerald-400 font-semibold">Finalizado</span>? Essa etapa indica que o lead foi convertido com sucesso.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setFinalizedModal(null)}
+                  className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmFinalized}
+                  className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-700 transition-colors"
+                >
+                  Confirmar ✅
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
