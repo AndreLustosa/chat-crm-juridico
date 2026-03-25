@@ -165,11 +165,12 @@ export class EvolutionService {
       const messageType = (data.messageType as string) || 'text';
 
       // 1. Upsert Lead (via LeadsService para garantir normalização)
+      // stage não é passado: o upsert nunca sobrescreve stage em updates existentes,
+      // e em creates o campo usa o default 'NOVO' definido no schema Prisma.
       const lead = await this.leadsService.upsert({
         phone,
         name: pushName,
         origin: 'whatsapp',
-        stage: 'NOVO',
       });
 
       // 2. Find or Create Conversation
@@ -458,7 +459,6 @@ export class EvolutionService {
         phone,
         name: nameToSet,
         origin: 'whatsapp',
-        stage: 'NOVO',
         tenant: inbox?.tenant_id ? { connect: { id: inbox.tenant_id } } : undefined,
       });
 
@@ -636,7 +636,6 @@ export class EvolutionService {
         phone,
         name: contactNameToSet,
         origin: 'whatsapp',
-        stage: 'NOVO',
       });
 
       this.logger.log(`Contato sincronizado via webhook: ${phone} (${contactNameToSet ?? 'nome preservado'})`);

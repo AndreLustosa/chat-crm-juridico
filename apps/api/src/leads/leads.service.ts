@@ -147,16 +147,12 @@ export class LeadsService {
 
   async upsert(data: Prisma.LeadCreateInput): Promise<Lead> {
     const phone = to12Digits(data.phone);
-    const { phone: _phone, name: _name, ...rest } = data;
+    // No UPDATE nunca sobrescreve nome nem stage:
+    // - nome: pushName do WhatsApp é placeholder; o real é capturado pela IA.
+    // - stage: webhook sempre envia 'NOVO', mas o stage é gerenciado pela IA.
+    const { phone: _phone, name: _name, stage: _stage, ...updateData } = data as any;
 
     this.logger.debug(`Upsert lead: raw=${data.phone} → stored=${phone}`);
-
-    // No UPDATE nunca sobrescreve o nome com o pushName do WhatsApp.
-    // O pushName é apenas um placeholder inicial (pode ser número de telefone,
-    // apelido ou nome de perfil do WhatsApp). O nome real é capturado pela IA
-    // quando o contato o informa explicitamente durante o atendimento.
-    // Na criação do lead (create) o nome do WhatsApp ainda é usado como fallback inicial.
-    const updateData: any = { ...rest };
 
     return this.prisma.lead.upsert({
       where: { phone },
