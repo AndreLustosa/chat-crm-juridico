@@ -10,6 +10,7 @@ function getSocketPath() { return process.env.NEXT_PUBLIC_SOCKET_PATH ?? '/socke
 import api, { API_BASE_URL } from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
+import { STAGE_TEMPLATES } from '@/lib/crmTemplates';
 import { showError, showSuccess } from '@/lib/toast';
 
 interface CrmLead {
@@ -129,17 +130,6 @@ function validateStageTransition(lead: CrmLead, newStage: string): string | null
   }
   return null;
 }
-
-// ─── Templates de mensagem por estágio ──────────────────────────────────────
-
-const STAGE_TEMPLATES: Partial<Record<string, { label: string; text: string }>> = {
-  QUALIFICANDO:     { label: 'Iniciar triagem', text: 'Olá! Sou do Escritório André Lustosa Advogados. Estamos analisando seu caso. Poderia me contar um pouco mais sobre sua situação para que possamos ajudá-lo melhor?' },
-  AGUARDANDO_FORM:  { label: 'Enviar formulário', text: 'Olá! Para darmos continuidade ao seu atendimento, precisamos que você preencha nosso formulário de triagem. Vou te enviar o link agora.' },
-  AGUARDANDO_DOCS:  { label: 'Solicitar documentos', text: 'Olá! Para avançarmos com o seu caso, precisamos de alguns documentos: RG ou CPF, comprovante de residência e documentos relacionados ao seu caso. Pode nos enviar por aqui mesmo!' },
-  AGUARDANDO_PROC:  { label: 'Atualizar andamento', text: 'Olá! Seu caso está em análise pela nossa equipe. Em breve entraremos em contato com as próximas informações. Qualquer dúvida, estou à disposição!' },
-  REUNIAO_AGENDADA: { label: 'Confirmar reunião', text: 'Olá! Sua consulta foi agendada com sucesso. Lembre-se de separar todos os documentos relacionados ao seu caso. Qualquer dúvida antes da reunião, pode me chamar!' },
-  FINALIZADO:       { label: 'Agradecer conversão', text: 'Olá! É um prazer tê-lo como cliente do Escritório André Lustosa Advogados. Nossa equipe estará dedicada ao seu caso. Em breve entraremos em contato com os próximos passos!' },
-};
 
 // ─── Motivos de perda ───────────────────────────────────────────────────────
 
@@ -904,9 +894,6 @@ export default function CrmPage() {
   // Modo de visualização: kanban ou lista
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
 
-  // Template de mensagem sugerido após mudança de estágio
-  const [templateModal, setTemplateModal] = useState<{ stage: string; text: string; label: string } | null>(null);
-
   // Analytics panel
   const [showAnalytics, setShowAnalytics] = useState(false);
 
@@ -1065,9 +1052,6 @@ export default function CrmPage() {
       if (res.data) {
         setLeads(cur => cur.map(l => l.id === leadId ? { ...l, ...res.data } : l));
       }
-      // Sugere template de mensagem se disponível para o novo estágio
-      const tpl = STAGE_TEMPLATES[newStage];
-      if (tpl) setTemplateModal({ stage: newStage, text: tpl.text, label: tpl.label });
     } catch {
       // Rollback
       setLeads(cur => cur.map(l =>
@@ -1739,41 +1723,6 @@ export default function CrmPage() {
         <CrmAnalyticsPanel leads={leads} onClose={() => setShowAnalytics(false)} />
       )}
 
-      {/* Modal de template de mensagem */}
-      {templateModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 mb-4 sm:mb-0 p-5">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="text-[14px] font-bold text-foreground">Mensagem sugerida</h3>
-              <button onClick={() => setTemplateModal(null)} className="p-1 rounded-lg hover:bg-accent text-muted-foreground">
-                <XIcon size={14} />
-              </button>
-            </div>
-            <p className="text-[11px] text-muted-foreground mb-3">{templateModal.label} — copie e envie pelo chat</p>
-            <div className="bg-accent/50 border border-border rounded-xl p-3 mb-4">
-              <p className="text-[12px] text-foreground leading-relaxed">{templateModal.text}</p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setTemplateModal(null)}
-                className="px-3 py-2 text-[12px] rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
-              >
-                Ignorar
-              </button>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(templateModal.text);
-                  showSuccess('Mensagem copiada!');
-                  setTemplateModal(null);
-                }}
-                className="px-3 py-2 text-[12px] rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors flex items-center gap-1.5"
-              >
-                <Copy size={12} /> Copiar mensagem
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

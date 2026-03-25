@@ -21,6 +21,7 @@ import {
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
+import { STAGE_TEMPLATES } from '@/lib/crmTemplates';
 import { showError, showSuccess } from '@/lib/toast';
 import type { ConversationSummary, MessageItem } from './types';
 import { MessageBubble } from './components/MessageBubble';
@@ -216,6 +217,8 @@ export default function Dashboard() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // IDs de conversas onde a barra de resposta rápida foi dispensada
+  const [dismissedQuickReply, setDismissedQuickReply] = useState<Set<string>>(new Set());
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2342,6 +2345,35 @@ export default function Dashboard() {
                   </button>
                 </div>
               )}
+
+              {/* ── Barra de resposta rápida por estágio do lead ──────── */}
+              {!isClosed && selectedId && selected?.leadStage && (() => {
+                const stage = normalizeStage(selected.leadStage);
+                const tpl = STAGE_TEMPLATES[stage];
+                if (!tpl || dismissedQuickReply.has(selectedId) || text.length > 0) return null;
+                return (
+                  <div className="max-w-4xl mx-auto mb-2 flex items-center gap-2 px-3 py-2 bg-accent/40 border border-border/60 rounded-xl">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider shrink-0">Sugestão</span>
+                    <button
+                      onClick={() => {
+                        setText(tpl.text);
+                        requestAnimationFrame(() => inputRef.current?.focus());
+                      }}
+                      className="flex-1 text-left text-[12px] text-foreground hover:text-primary transition-colors truncate"
+                      title={tpl.text}
+                    >
+                      💬 {tpl.label} — <span className="text-muted-foreground">{tpl.text.slice(0, 60)}…</span>
+                    </button>
+                    <button
+                      onClick={() => setDismissedQuickReply(prev => new Set([...prev, selectedId]))}
+                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+                      title="Dispensar sugestão"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })()}
 
               {isClosed ? (
                 <div className="max-w-4xl mx-auto text-center text-sm text-muted-foreground py-3 border border-border rounded-xl bg-card/50">
