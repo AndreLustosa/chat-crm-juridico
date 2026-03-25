@@ -1486,6 +1486,7 @@ export default function CrmPage() {
             onMouseMove={handleBoardMouseMove}
             onMouseUp={handleBoardMouseUp}
             onMouseLeave={handleBoardMouseUp}
+            onDragEnd={() => { setDraggingId(null); setDragOverStage(null); setDragOverFinalizado(false); setDragOverPerdido(false); }}
           >
             <div className="flex h-full gap-4" style={{ minWidth: `${(CRM_STAGES.length - 2) * 272}px` }}>
               {CRM_STAGES.filter(s => s.id !== 'PERDIDO' && s.id !== 'FINALIZADO').map(stage => {
@@ -1639,9 +1640,11 @@ export default function CrmPage() {
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverFinalizado(false); }}
               onDrop={(e) => {
                 e.preventDefault();
+                const id = draggingId;
                 setDragOverFinalizado(false);
                 setDragOverStage(null);
-                if (draggingId) moveLeadToStage(draggingId, 'FINALIZADO');
+                setDraggingId(null);
+                if (id) moveLeadToStage(id, 'FINALIZADO');
               }}
             >
               <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -1670,9 +1673,11 @@ export default function CrmPage() {
               onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverPerdido(false); }}
               onDrop={(e) => {
                 e.preventDefault();
+                const id = draggingId;
                 setDragOverPerdido(false);
                 setDragOverStage(null);
-                if (draggingId) moveLeadToStage(draggingId, 'PERDIDO');
+                setDraggingId(null);
+                if (id) moveLeadToStage(id, 'PERDIDO');
               }}
             >
               <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
