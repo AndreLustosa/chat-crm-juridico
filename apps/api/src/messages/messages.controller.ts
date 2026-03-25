@@ -119,12 +119,7 @@ export class MessagesController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
-    // Construir URL pública: usa env var ou deriva dos headers do Traefik
-    const publicApiUrl =
-      process.env.PUBLIC_API_URL ||
-      `${(req.headers['x-forwarded-proto'] as string) || req.protocol}://${(req.headers['x-forwarded-host'] as string) || req.headers['host']}/api`;
-
-    return this.messagesService.sendAudio(conversationId, file, publicApiUrl, req.user?.id);
+    return this.messagesService.sendAudio(conversationId, file, req.user?.id);
   }
 
   @Throttle({ default: { ttl: 60000, limit: 10 } })
@@ -145,10 +140,7 @@ export class MessagesController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
-    const publicApiUrl =
-      process.env.PUBLIC_API_URL ||
-      `${(req.headers['x-forwarded-proto'] as string) || req.protocol}://${(req.headers['x-forwarded-host'] as string) || req.headers['host']}/api`;
-    return this.messagesService.sendFile(conversationId, file, publicApiUrl, caption, req.user?.id);
+    return this.messagesService.sendFile(conversationId, file, caption, req.user?.id);
   }
 
   @Post('ai-correct')

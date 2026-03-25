@@ -271,10 +271,21 @@ export class MessagesService {
     return msg;
   }
 
+  /** Resolve a URL pública da API: prioriza o valor salvo pelo admin no banco (CONTRACT_CONFIG),
+   *  depois a variável de ambiente, por último o header do reverse proxy. */
+  private async resolvePublicApiUrl(fallbackFromRequest?: string): Promise<string> {
+    try {
+      const contract = await this.settings.getContractConfig();
+      if (contract?.publicApiUrl?.startsWith('http')) return contract.publicApiUrl;
+    } catch {
+      // ignorar erro ao buscar settings
+    }
+    return process.env.PUBLIC_API_URL || fallbackFromRequest || '';
+  }
+
   async sendAudio(
     conversationId: string,
     file: Express.Multer.File,
-    publicApiUrl: string,
     senderId?: string,
   ) {
     const convo = await this.prisma.conversation.findUnique({
@@ -312,8 +323,9 @@ export class MessagesService {
       },
     });
 
-    // 4. URL pública que a Evolution API vai baixar
-    const mediaUrl = `${publicApiUrl}/media/${msg.id}`;
+    // 4. URL pública que a Evolution API vai baixar (prioridade: banco → env → fallback)
+    const resolvedApiUrl = await this.resolvePublicApiUrl();
+    const mediaUrl = `${resolvedApiUrl}/media/${msg.id}`;
     this.logger.log(`[AUDIO] Enviando áudio via Evolution: ${mediaUrl}`);
 
     // 5. Enviar via Evolution API
@@ -371,7 +383,6 @@ export class MessagesService {
   async sendFile(
     conversationId: string,
     file: Express.Multer.File,
-    publicApiUrl: string,
     caption?: string,
     senderId?: string,
   ) {
@@ -415,7 +426,8 @@ export class MessagesService {
       },
     });
 
-    const mediaUrl = `${publicApiUrl}/media/${msg.id}`;
+    const resolvedApiUrl = await this.resolvePublicApiUrl();
+    const mediaUrl = `${resolvedApiUrl}/media/${msg.id}`;
     this.logger.log(`[FILE] Enviando ${mediaType} via Evolution: ${mediaUrl}`);
     try {
       const result = await this.whatsapp.sendMedia(
