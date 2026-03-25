@@ -356,6 +356,9 @@ export default function CrmPage() {
   const [lossModal, setLossModal] = useState<{ leadId: string; leadName: string } | null>(null);
   const [lossReason, setLossReason] = useState('');
 
+  // Leads cujo PATCH ainda está em voo — fetchLeads silencioso não os sobrescreve
+  const movingLeads = useRef<Set<string>>(new Set());
+
   // Pan horizontal do board com clique+arraste do mouse
   const boardRef = useRef<HTMLDivElement>(null);
   const isPanning = useRef(false);
@@ -413,7 +416,17 @@ export default function CrmPage() {
     else setRefreshing(true);
     try {
       const res = await api.get('/leads');
-      setLeads(res.data || []);
+      const fresh: CrmLead[] = res.data || [];
+      setLeads(prev => {
+        // No refresh silencioso, preserva o estado otimista de leads em trânsito
+        // para evitar race condition entre o PATCH e o auto-refresh
+        if (silent && movingLeads.current.size > 0) {
+          return fresh.map(l =>
+            movingLeads.current.has(l.id) ? (prev.find(p => p.id === l.id) ?? l) : l
+          );
+        }
+        return fresh;
+      });
       setLoadError(false);
     } catch {
       if (!silent) setLoadError(true);
@@ -459,16 +472,24 @@ export default function CrmPage() {
 
     const prev = lead.stage;
     setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
-    // Otimista
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage: newStage, stage_entered_at: new Date().toISOString() } : l));
+    // Marca como em trânsito para proteger do auto-refresh
+    movingLeads.current.add(leadId);
+    // Atualização otimista imediata
+    setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: newStage, stage_entered_at: new Date().toISOString() } : l));
     try {
-      await api.patch(`/leads/${leadId}/stage`, { stage: newStage });
+      const res = await api.patch(`/leads/${leadId}/stage`, { stage: newStage });
+      // Confirma com dados autoritativos do servidor
+      if (res.data) {
+        setLeads(cur => cur.map(l => l.id === leadId ? { ...l, ...res.data } : l));
+      }
     } catch {
       // Rollback
-      setLeads(prev => prev.map(l =>
+      setLeads(cur => cur.map(l =>
         l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
       ));
       showError('Erro ao mover lead. Tente novamente.');
+    } finally {
+      movingLeads.current.delete(leadId);
     }
   };
 
@@ -478,15 +499,21 @@ export default function CrmPage() {
     const lead = leads.find(l => l.id === leadId);
     const prev = lead?.stage;
     setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage: 'PERDIDO', stage_entered_at: new Date().toISOString() } : l));
+    movingLeads.current.add(leadId);
+    setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: 'PERDIDO', stage_entered_at: new Date().toISOString() } : l));
     setLossModal(null);
     try {
-      await api.patch(`/leads/${leadId}/stage`, { stage: 'PERDIDO', loss_reason: lossReason.trim() });
+      const res = await api.patch(`/leads/${leadId}/stage`, { stage: 'PERDIDO', loss_reason: lossReason.trim() });
+      if (res.data) {
+        setLeads(cur => cur.map(l => l.id === leadId ? { ...l, ...res.data } : l));
+      }
     } catch {
-      setLeads(prev => prev.map(l =>
+      setLeads(cur => cur.map(l =>
         l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
       ));
       showError('Erro ao mover lead. Tente novamente.');
+    } finally {
+      movingLeads.current.delete(leadId);
     }
   };
 
