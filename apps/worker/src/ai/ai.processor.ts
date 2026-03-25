@@ -1625,13 +1625,19 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           updates = respondCall.input.updates || {};
           scheduling_action = respondCall.input.scheduling_action || null;
 
-          // Se update_lead foi chamado com stage mas respond_to_client não trouxe status,
-          // propaga o stage para que applyAiUpdates dispare as automações (tarefas etc.)
+          // Se respond_to_client não trouxe status, tenta propagar de update_lead
+          // (a IA frequentemente seta next_step ou stage em update_lead separadamente)
           if (!updates.status) {
-            const updateLeadCall = toolCallLogs.find(
-              (l: any) => l.name === 'update_lead' && l.input?.stage,
-            );
-            if (updateLeadCall) updates.status = updateLeadCall.input.stage;
+            const updateLeadCall = toolCallLogs.find((l: any) => l.name === 'update_lead');
+            if (updateLeadCall) {
+              if (updateLeadCall.input?.stage) {
+                // IA setou stage explicitamente no update_lead
+                updates.status = updateLeadCall.input.stage;
+              } else if (updateLeadCall.input?.next_step && !updates.next_step) {
+                // IA setou next_step; applyAiUpdates usa o inferMap para resolver o stage
+                updates.next_step = updateLeadCall.input.next_step;
+              }
+            }
           }
         } else if (toolResult.response.content) {
           // Fallback: parse content as JSON (hybrid mode) ou texto puro
