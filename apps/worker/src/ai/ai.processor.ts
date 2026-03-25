@@ -1513,8 +1513,13 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         }
       }
 
+      // Detecta primeira mensagem do cliente (nenhum turn de assistant ainda)
+      const isFirstMessage = chatTurns.length > 0 && !chatTurns.some((t) => t.role === 'assistant');
+
       // Instrução final para a IA (não aparece no chat do cliente)
-      const instruction = `[INSTRUÇÃO INTERNA — não exiba ao cliente]\nResponda à última mensagem do cliente. Consulte o histórico completo acima e a MEMÓRIA DO LEAD no system prompt: NÃO repita perguntas já respondidas. Avance o roteiro para o próximo ponto que ainda não foi coberto.`;
+      const instruction = isFirstMessage
+        ? `[INSTRUÇÃO INTERNA — não exiba ao cliente]\nEsta é a PRIMEIRA mensagem do cliente. Faça uma apresentação humana e acolhedora, como se fosse uma atendente real. Apresente-se como Sophia, atendente do Escritório André Lustosa Advogados. Horário atual: ${vars.data_hoje}. Use "Bom dia", "Boa tarde" ou "Boa noite" conforme a hora. Pergunte o nome do cliente. NÃO mencione que é IA. Seja breve e natural, estilo WhatsApp.`
+        : `[INSTRUÇÃO INTERNA — não exiba ao cliente]\nResponda à última mensagem do cliente. Consulte o histórico completo acima e a MEMÓRIA DO LEAD no system prompt: NÃO repita perguntas já respondidas. Avance o roteiro para o próximo ponto que ainda não foi coberto.`;
 
       // Montar array final de mensagens para a OpenAI (multi-turn real)
       const openAiMessages: any[] = [
