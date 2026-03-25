@@ -11,6 +11,7 @@ import api, { API_BASE_URL } from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
 import { STAGE_TEMPLATES } from '@/lib/crmTemplates';
+import { getStagnationDays } from '@/lib/crmSettings';
 import { showError, showSuccess } from '@/lib/toast';
 
 interface CrmLead {
@@ -1432,13 +1433,13 @@ export default function CrmPage() {
 
         {/* Alerta de leads estagnados */}
         {!dismissedStagnation && !loading && (() => {
+          const threshold = getStagnationDays();
           const stagnant = leads.filter(l => {
             const stage = normalizeStage(l.stage);
             if (stage === 'PERDIDO' || stage === 'FINALIZADO') return false;
-            const days = daysInStage(l.stage_entered_at);
             const lastMsg = l.conversations?.[0]?.last_message_at;
             const daysSinceMsg = lastMsg ? Math.floor((Date.now() - new Date(lastMsg).getTime()) / 86400000) : 999;
-            return days > 3 && daysSinceMsg > 3;
+            return daysSinceMsg >= threshold;
           });
           if (stagnant.length === 0) return null;
           return (
