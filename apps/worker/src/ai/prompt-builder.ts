@@ -91,14 +91,45 @@ export class PromptBuilder {
             },
             updates: {
               type: 'object',
-              description: 'Atualizações opcionais: name, status, area, lead_summary, next_step, notes',
+              description: 'Atualizações opcionais do lead. Preencha sempre que houver mudança de estágio ou informação nova coletada.',
               properties: {
-                name: { type: 'string' },
-                status: { type: 'string' },
-                area: { type: 'string' },
-                lead_summary: { type: 'string' },
-                next_step: { type: 'string' },
-                notes: { type: 'string' },
+                name: {
+                  type: 'string',
+                  description: 'Nome real do cliente quando informado',
+                },
+                status: {
+                  type: 'string',
+                  enum: [
+                    'QUALIFICANDO',
+                    'AGUARDANDO_FORM',
+                    'AGUARDANDO_DOCS',
+                    'AGUARDANDO_PROC',
+                    'REUNIAO_AGENDADA',
+                    'FINALIZADO',
+                    'PERDIDO',
+                  ],
+                  description: 'Novo estágio do lead no funil. Use QUALIFICANDO ao iniciar triagem, AGUARDANDO_FORM ao enviar formulário, AGUARDANDO_DOCS ao pedir documentos, AGUARDANDO_PROC ao pedir procuração, REUNIAO_AGENDADA ao confirmar reunião, FINALIZADO ao contratar, PERDIDO ao desistir.',
+                },
+                loss_reason: {
+                  type: 'string',
+                  description: 'Motivo da perda (obrigatório quando status = PERDIDO)',
+                },
+                area: {
+                  type: 'string',
+                  description: 'Área jurídica do caso (ex: Trabalhista, Cível, Criminal)',
+                },
+                lead_summary: {
+                  type: 'string',
+                  description: 'Resumo do caso coletado até agora',
+                },
+                next_step: {
+                  type: 'string',
+                  description: 'Próximo passo do atendimento',
+                },
+                notes: {
+                  type: 'string',
+                  description: 'Observações internas sobre o lead',
+                },
               },
             },
           },

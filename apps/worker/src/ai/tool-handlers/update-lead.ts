@@ -22,7 +22,10 @@ export class UpdateLeadHandler implements ToolHandler {
     const convUpdate: Record<string, any> = {};
 
     if (params.name) leadUpdate.name = params.name;
-    if (params.stage) leadUpdate.stage = params.stage;
+    if (params.stage) {
+      leadUpdate.stage = params.stage;
+      leadUpdate.stage_entered_at = new Date();
+    }
     if (params.notes) leadUpdate.notes = params.notes;
 
     if (params.legal_area) convUpdate.legal_area = params.legal_area;

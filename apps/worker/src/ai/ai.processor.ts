@@ -1605,6 +1605,15 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           aiText = respondCall.input.reply || '';
           updates = respondCall.input.updates || {};
           scheduling_action = respondCall.input.scheduling_action || null;
+
+          // Se update_lead foi chamado com stage mas respond_to_client não trouxe status,
+          // propaga o stage para que applyAiUpdates dispare as automações (tarefas etc.)
+          if (!updates.status) {
+            const updateLeadCall = toolCallLogs.find(
+              (l: any) => l.name === 'update_lead' && l.input?.stage,
+            );
+            if (updateLeadCall) updates.status = updateLeadCall.input.stage;
+          }
         } else if (toolResult.response.content) {
           // Fallback: parse content as JSON (hybrid mode)
           try {
