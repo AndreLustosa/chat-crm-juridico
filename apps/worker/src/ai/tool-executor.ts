@@ -73,6 +73,19 @@ export class ToolExecutor {
         return { response, toolCallLogs, allMessages: messages };
       }
 
+      // Se respond_to_client está entre as calls, é ação terminal — log e para imediatamente
+      const respondCall = response.toolCalls.find((tc) => tc.name === 'respond_to_client');
+      if (respondCall) {
+        toolCallLogs.push({
+          name: respondCall.name,
+          input: JSON.parse(respondCall.arguments),
+          output: { success: true },
+          durationMs: 0,
+        });
+        this.logger.log(`[ToolExecutor] respond_to_client chamado — encerrando loop`);
+        return { response, toolCallLogs, allMessages: messages };
+      }
+
       // Execute each tool call
       const assistantMsg: LLMMessage = {
         role: 'assistant',

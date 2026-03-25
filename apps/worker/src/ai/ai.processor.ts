@@ -1634,15 +1634,11 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             if (updateLeadCall) updates.status = updateLeadCall.input.stage;
           }
         } else if (toolResult.response.content) {
-          // Fallback: parse content as JSON (hybrid mode)
-          try {
-            const parsed = JSON.parse(toolResult.response.content);
-            aiText = parsed.reply || toolResult.response.content;
-            updates = parsed.updates || {};
-            scheduling_action = parsed.scheduling_action || null;
-          } catch {
-            aiText = toolResult.response.content;
-          }
+          // Fallback: parse content as JSON (hybrid mode) ou texto puro
+          const parsed = this.parseAiResponse(toolResult.response.content);
+          aiText = parsed.reply;
+          updates = parsed.updates || {};
+          scheduling_action = parsed.scheduling_action || null;
         }
 
         // Save usage
