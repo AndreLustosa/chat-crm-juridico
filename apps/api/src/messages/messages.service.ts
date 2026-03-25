@@ -7,6 +7,45 @@ import { SettingsService } from '../settings/settings.service';
 import { Readable } from 'stream';
 import OpenAI, { toFile } from 'openai';
 
+/** Mapeia MIME type para extensão de arquivo correta */
+function mimeToExt(mime: string): string {
+  const clean = mime.split(';')[0].trim().toLowerCase();
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/svg+xml': 'svg',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov',
+    'video/x-msvideo': 'avi',
+    'audio/ogg': 'ogg',
+    'audio/webm': 'webm',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/mp4': 'mp4',
+    'audio/wav': 'wav',
+    'audio/wave': 'wav',
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/zip': 'zip',
+    'application/x-zip-compressed': 'zip',
+    'application/x-rar-compressed': 'rar',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+  };
+  // Retorna do mapa ou usa a parte após última '/' e último '.' como fallback
+  return map[clean] || clean.split('/').pop()?.split('.').pop()?.split('+').pop() || 'bin';
+}
+
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
@@ -259,11 +298,7 @@ export class MessagesService {
     });
 
     // 2. Upload para S3 usando o ID da mensagem como chave
-    const ext = file.mimetype.includes('ogg')
-      ? 'ogg'
-      : file.mimetype.includes('mp4')
-        ? 'mp4'
-        : 'webm';
+    const ext = mimeToExt(file.mimetype);
     const s3Key = `media/${msg.id}.${ext}`;
     await this.s3.uploadBuffer(s3Key, file.buffer, file.mimetype);
 
@@ -366,7 +401,7 @@ export class MessagesService {
       },
     });
 
-    const ext = mime.split('/')[1]?.split(';')[0] || 'bin';
+    const ext = mimeToExt(mime);
     const s3Key = `media/${msg.id}.${ext}`;
     await this.s3.uploadBuffer(s3Key, file.buffer, mime);
 
@@ -389,16 +424,29 @@ export class MessagesService {
         mediaUrl,
         caption,
         convo.instance_name || undefined,
+        file.originalname,
       );
-      const extId = result?.key?.id;
-      if (extId) {
+      if (result?.statusCode >= 400 || result?.error) {
+        this.logger.error(`Evolution API erro ao enviar arquivo: ${JSON.stringify(result)}`);
         await this.prisma.message.update({
           where: { id: msg.id },
-          data: { external_message_id: extId },
+          data: { status: 'erro' },
         });
+      } else {
+        const extId = result?.key?.id;
+        if (extId) {
+          await this.prisma.message.update({
+            where: { id: msg.id },
+            data: { external_message_id: extId },
+          });
+        }
       }
     } catch (e) {
-      this.logger.warn(`Falha ao enviar arquivo via WhatsApp: ${e.message}`);
+      this.logger.error(`Exceção ao enviar arquivo via WhatsApp: ${e.message}`);
+      await this.prisma.message.update({
+        where: { id: msg.id },
+        data: { status: 'erro' },
+      });
     }
 
     await this.prisma.conversation.update({

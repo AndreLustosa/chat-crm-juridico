@@ -147,30 +147,25 @@ export class WhatsappService {
 
   async listInstances() {
     const data = await this.request('GET', 'instance/fetchInstances');
-    this.logger.log(`Evolution API Response structure: ${Object.keys(data || {}).join(', ')}`);
-    this.logger.log(`Evolution API Raw Data: ${JSON.stringify(data)}`);
-    
     // Na v2, a Evolution retorna [{ instance: { ... } }] ou um objeto com { data: [...] }
     let instancesArray = (data as any)?.instances || (data as any)?.data || data;
     
     if (Array.isArray(instancesArray)) {
       return instancesArray.map(item => {
         const inst = item.instance || item;
-        
+
         // Tenta encontrar o status em vários lugares comuns na v2 e v1
         const rawStatus = (
-          inst.status || 
-          inst.state || 
-          inst.connectionStatus || 
-          inst.connection?.state || 
+          inst.status ||
+          inst.state ||
+          inst.connectionStatus ||
+          inst.connection?.state ||
           'connecting'
         ).toString().toLowerCase();
-        
+
         // Mapeamento extra-robusto para 'open' (o que o front espera)
         const isOnline = ['open', 'connected', 'online', 'authenticated'].includes(rawStatus);
         const finalStatus = isOnline ? 'open' : rawStatus;
-
-        this.logger.log(`Instance: ${inst.instanceName || inst.name} | Raw: ${rawStatus} | Final: ${finalStatus}`);
 
         return {
           ...inst,
