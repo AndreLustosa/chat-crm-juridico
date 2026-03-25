@@ -73,8 +73,59 @@ export class ToolExecutor {
         return { response, toolCallLogs, allMessages: messages };
       }
 
-      // Se respond_to_client está entre as calls, é ação terminal — log e para imediatamente
+      // Separa respond_to_client (ação terminal) dos demais tools
       const respondCall = response.toolCalls.find((tc) => tc.name === 'respond_to_client');
+      const otherCalls = response.toolCalls.filter((tc) => tc.name !== 'respond_to_client');
+
+      // Executa os outros tools normalmente (ex: update_lead) antes de encerrar
+      if (otherCalls.length > 0) {
+        const assistantMsg: LLMMessage = {
+          role: 'assistant',
+          content: response.content || '',
+          tool_calls: response.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        };
+        messages.push(assistantMsg);
+
+        for (const toolCall of otherCalls) {
+          const start = Date.now();
+          let result: any;
+
+          try {
+            const handler = this.handlers.get(toolCall.name);
+            if (!handler) {
+              result = { error: `Tool "${toolCall.name}" não encontrada` };
+              this.logger.warn(`[ToolExecutor] Handler não encontrado: ${toolCall.name}`);
+            } else {
+              const args = JSON.parse(toolCall.arguments);
+              this.logger.log(`[ToolExecutor] Executando ${toolCall.name}(${JSON.stringify(args).slice(0, 200)})`);
+              result = await handler.execute(args, context);
+            }
+          } catch (err: any) {
+            result = { error: err.message || 'Erro ao executar tool' };
+            this.logger.error(`[ToolExecutor] Erro em ${toolCall.name}: ${err.message}`);
+          }
+
+          const duration = Date.now() - start;
+          toolCallLogs.push({
+            name: toolCall.name,
+            input: JSON.parse(toolCall.arguments),
+            output: result,
+            durationMs: duration,
+          });
+
+          messages.push({
+            role: 'tool',
+            content: typeof result === 'string' ? result : JSON.stringify(result),
+            tool_call_id: toolCall.id,
+          });
+        }
+      }
+
+      // Se respond_to_client foi chamado, loga e encerra o loop imediatamente
       if (respondCall) {
         toolCallLogs.push({
           name: respondCall.name,
@@ -86,54 +137,7 @@ export class ToolExecutor {
         return { response, toolCallLogs, allMessages: messages };
       }
 
-      // Execute each tool call
-      const assistantMsg: LLMMessage = {
-        role: 'assistant',
-        content: response.content || '',
-        tool_calls: response.toolCalls.map((tc) => ({
-          id: tc.id,
-          type: 'function',
-          function: { name: tc.name, arguments: tc.arguments },
-        })),
-      };
-      messages.push(assistantMsg);
-
-      for (const toolCall of response.toolCalls) {
-        const start = Date.now();
-        let result: any;
-
-        try {
-          const handler = this.handlers.get(toolCall.name);
-          if (!handler) {
-            result = { error: `Tool "${toolCall.name}" não encontrada` };
-            this.logger.warn(`[ToolExecutor] Handler não encontrado: ${toolCall.name}`);
-          } else {
-            const args = JSON.parse(toolCall.arguments);
-            this.logger.log(`[ToolExecutor] Executando ${toolCall.name}(${JSON.stringify(args).slice(0, 200)})`);
-            result = await handler.execute(args, context);
-          }
-        } catch (err: any) {
-          result = { error: err.message || 'Erro ao executar tool' };
-          this.logger.error(`[ToolExecutor] Erro em ${toolCall.name}: ${err.message}`);
-        }
-
-        const duration = Date.now() - start;
-        toolCallLogs.push({
-          name: toolCall.name,
-          input: JSON.parse(toolCall.arguments),
-          output: result,
-          durationMs: duration,
-        });
-
-        // Add tool result message
-        messages.push({
-          role: 'tool',
-          content: typeof result === 'string' ? result : JSON.stringify(result),
-          tool_call_id: toolCall.id,
-        });
-      }
-
-      this.logger.log(`[ToolExecutor] Iteração ${iteration + 1}: ${response.toolCalls.length} tools executados`);
+      this.logger.log(`[ToolExecutor] Iteração ${iteration + 1}: ${otherCalls.length} tools executados`);
     }
 
     this.logger.warn(`[ToolExecutor] Atingiu max iterações (${MAX_ITERATIONS})`);
