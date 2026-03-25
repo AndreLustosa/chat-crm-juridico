@@ -4,6 +4,7 @@ import {
   Param,
   Query,
   Res,
+  Req,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
@@ -26,6 +27,7 @@ export class MediaController {
   async getMedia(
     @Param('messageId') messageId: string,
     @Query('dl') dl: string,
+    @Req() req: any,
     @Res() res: any,
   ) {
     const media = await this.prisma.media.findUnique({
@@ -60,8 +62,32 @@ export class MediaController {
       }
 
       const disposition = dl === '1' ? 'attachment' : 'inline';
+      const safeFilename = encodeURIComponent(filename);
+
+      // Suporte a Range requests (necessário para streaming de áudio/vídeo)
+      const rangeHeader = req.headers['range'] as string | undefined;
+      if (rangeHeader && contentLength) {
+        const [startStr, endStr] = rangeHeader.replace('bytes=', '').split('-');
+        const start = parseInt(startStr, 10);
+        const end = endStr ? parseInt(endStr, 10) : contentLength - 1;
+        const chunkSize = end - start + 1;
+
+        // Re-fetch do S3 com range (se o stream já foi iniciado, destroi e recria)
+        stream.destroy();
+        const ranged = await this.s3.getObjectStream(media.s3_key, start, end);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${contentLength}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', String(chunkSize));
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${safeFilename}`);
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        ranged.stream.pipe(res);
+        return;
+      }
+
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+      res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${safeFilename}`);
       res.setHeader('Cache-Control', 'private, max-age=3600');
       res.setHeader('Accept-Ranges', 'bytes');
       if (contentLength) res.setHeader('Content-Length', String(contentLength));

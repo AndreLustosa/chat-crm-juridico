@@ -22,7 +22,17 @@ export function AudioRecorder({ conversationId, onSent, disabled, onRecordingSta
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
+
+      // Prioriza OGG (formato PTT nativo do WhatsApp) → WebM → MP4
+      const preferredTypes = [
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+      ];
+      const mimeType = preferredTypes.find((t) => MediaRecorder.isTypeSupported(t)) || '';
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
@@ -45,11 +55,16 @@ export function AudioRecorder({ conversationId, onSent, disabled, onRecordingSta
       const blob = new Blob(chunksRef.current, { type: mimeType });
       setSending(true);
       try {
-        const ext = mimeType.includes('ogg')
-          ? 'ogg'
-          : mimeType.includes('mp4')
-            ? 'mp4'
-            : 'webm';
+        // Deriva extensão do mimeType real gravado pelo browser
+        const clean = mimeType.split(';')[0].trim();
+        const extMap: Record<string, string> = {
+          'audio/ogg': 'ogg',
+          'audio/webm': 'webm',
+          'audio/mp4': 'mp4',
+          'audio/mpeg': 'mp3',
+          'audio/wav': 'wav',
+        };
+        const ext = extMap[clean] ?? clean.split('/')[1] ?? 'webm';
         const formData = new FormData();
         formData.append('conversationId', conversationId);
         formData.append('audio', blob, `gravacao.${ext}`);

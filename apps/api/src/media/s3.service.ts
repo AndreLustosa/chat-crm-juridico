@@ -55,12 +55,16 @@ export class MediaS3Service implements OnModuleInit {
     this.logger.log(`Deleted: ${key}`);
   }
 
-  async getObjectStream(key: string): Promise<{
+  async getObjectStream(key: string, rangeStart?: number, rangeEnd?: number): Promise<{
     stream: Readable;
     contentType: string;
     contentLength?: number;
   }> {
-    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    const input: any = { Bucket: this.bucket, Key: key };
+    if (rangeStart !== undefined && rangeEnd !== undefined) {
+      input.Range = `bytes=${rangeStart}-${rangeEnd}`;
+    }
+    const command = new GetObjectCommand(input);
     const response = await this.client.send(command);
     return {
       stream: response.Body as Readable,
