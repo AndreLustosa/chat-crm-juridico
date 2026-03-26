@@ -17,6 +17,9 @@ export class DashboardService {
     const now = new Date();
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     // ─── Resolve user inbox IDs (for non-admin conversation counting) ──
     let userInboxIds: string[] = [];
@@ -85,6 +88,9 @@ export class DashboardService {
       overdueCount,
       recentDjen,
       teamUsers,
+      closedToday,
+      closedThisWeek,
+      closedThisMonth,
     ] = await Promise.all([
       // 1. User name
       this.prisma.user.findUnique({
@@ -206,6 +212,18 @@ export class DashboardService {
             orderBy: { name: 'asc' },
           })
         : Promise.resolve([]),
+      // 18. Conversas encerradas hoje
+      this.prisma.conversation.count({
+        where: { status: 'FECHADO', updated_at: { gte: startOfToday }, ...tw },
+      }),
+      // 19. Conversas encerradas esta semana
+      this.prisma.conversation.count({
+        where: { status: 'FECHADO', updated_at: { gte: startOfWeek }, ...tw },
+      }),
+      // 20. Conversas encerradas este mês
+      this.prisma.conversation.count({
+        where: { status: 'FECHADO', updated_at: { gte: startOfMonth }, ...tw },
+      }),
     ]);
 
     // ─── Build team metrics (ADMIN only) ──
@@ -340,6 +358,11 @@ export class DashboardService {
         legal_case_id: d.legal_case?.id || null,
       })),
       teamMetrics,
+      inboxStats: {
+        closedToday,
+        closedThisWeek,
+        closedThisMonth,
+      },
     };
   }
 }

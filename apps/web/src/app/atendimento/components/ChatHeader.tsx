@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Bot, BotOff, UserCheck, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, Clock, Copy, Check } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Bot, BotOff, UserCheck, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, Clock, Copy, Check, Tag, Plus, X as XIcon } from 'lucide-react';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import type { ConversationSummary, ActiveTask } from '../types';
 
@@ -71,6 +71,8 @@ export interface ChatHeaderProps {
   onCompleteTask?: () => void;
   onRescheduleTask?: (newDate: string) => void;
   onNewTask?: () => void;
+  leadTags?: string[];
+  onUpdateTags?: (tags: string[]) => void;
 }
 
 export function ChatHeader({
@@ -113,10 +115,31 @@ export function ChatHeader({
   onCompleteTask,
   onRescheduleTask,
   onNewTask,
+  leadTags,
+  onUpdateTags,
 }: ChatHeaderProps) {
   const [showReschedule, setShowReschedule] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [copiedPhone, setCopiedPhone] = useState(false);
+  const [tagInput, setTagInput] = useState('');
+  const [showTagInput, setShowTagInput] = useState(false);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (showTagInput) setTimeout(() => tagInputRef.current?.focus(), 50);
+  }, [showTagInput]);
+
+  const handleAddTag = () => {
+    const t = tagInput.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!t || (leadTags ?? []).includes(t)) { setTagInput(''); setShowTagInput(false); return; }
+    onUpdateTags?.([...(leadTags ?? []), t]);
+    setTagInput('');
+    setShowTagInput(false);
+  };
+
+  const handleRemoveTag = (tag: string) => {
+    onUpdateTags?.((leadTags ?? []).filter(t => t !== tag));
+  };
   const isAdiado = selected?.status === 'ADIADO';
   const isOverdue = activeTask?.dueAt ? new Date(activeTask.dueAt) < new Date() : false;
 
@@ -183,6 +206,42 @@ export function ChatHeader({
             <span className="text-[10px] font-medium text-emerald-400">
               {contactPresence === 'composing' ? 'digitando...' : 'online'}
             </span>
+          )}
+          {/* Tags do lead */}
+          {isRealConvo && (
+            <div className="hidden md:flex items-center gap-1 flex-wrap mt-1" onClick={e => e.stopPropagation()}>
+              {(leadTags ?? []).map(tag => (
+                <span
+                  key={tag}
+                  className="group inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary/80 border border-primary/20 transition-colors hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 cursor-pointer"
+                  onClick={() => handleRemoveTag(tag)}
+                  title={`Remover tag "${tag}"`}
+                >
+                  {tag}
+                  <XIcon size={8} className="opacity-60 group-hover:opacity-100" />
+                </span>
+              ))}
+              {showTagInput ? (
+                <input
+                  ref={tagInputRef}
+                  value={tagInput}
+                  onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleAddTag(); if (e.key === 'Escape') { setShowTagInput(false); setTagInput(''); } }}
+                  onBlur={handleAddTag}
+                  placeholder="nova tag…"
+                  className="text-[10px] bg-transparent border-b border-primary/40 outline-none text-foreground w-20 px-0.5"
+                />
+              ) : (
+                <button
+                  onClick={() => setShowTagInput(true)}
+                  title="Adicionar etiqueta"
+                  className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground/50 hover:text-primary transition-colors"
+                >
+                  <Tag size={9} />
+                  <Plus size={8} />
+                </button>
+              )}
+            </div>
           )}
           {/* Área jurídica + especialista pré-atribuído — hidden on mobile */}
           <div className="hidden md:flex items-center gap-2 flex-wrap mt-1.5">

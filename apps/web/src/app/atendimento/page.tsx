@@ -176,6 +176,7 @@ export default function Dashboard() {
   const [lossReason, setLossReason] = useState('');
   // Modal de encerramento de conversa
   const [closeConvModal, setCloseConvModal] = useState(false);
+  const [csatOnClose, setCsatOnClose] = useState(false);
   // Modo nota interna (mensagem não enviada ao cliente)
   const [internalNoteMode, setInternalNoteMode] = useState(false);
   // Chave para forçar re-fetch de mensagens (incrementada no reconnect do socket)
@@ -1246,12 +1247,23 @@ export default function Dashboard() {
 
   const confirmClose = async () => {
     if (!selectedId) return;
+    const convId = selectedId;
+    const sendCsat = csatOnClose;
     setCloseConvModal(false);
     try {
-      await api.patch(`/conversations/${selectedId}/close`);
+      await api.patch(`/conversations/${convId}/close`);
+      // Enviar pesquisa de satisfação (CSAT) se habilitado
+      if (sendCsat) {
+        try {
+          await api.post('/messages/send', {
+            conversationId: convId,
+            text: '⭐ *Como você avalia nosso atendimento?*\n\nResponda com um número de 1 a 5:\n\n1️⃣ Péssimo\n2️⃣ Ruim\n3️⃣ Regular\n4️⃣ Bom\n5️⃣ Excelente\n\nSua avaliação nos ajuda a melhorar! 🙏',
+          });
+        } catch { /* não bloqueia o encerramento se CSAT falhar */ }
+      }
       setSelectedId(null);
       fetchConversations(selectedInboxIdRef.current, true);
-      showSuccess('Conversa encerrada');
+      showSuccess(sendCsat ? 'Conversa encerrada e pesquisa enviada' : 'Conversa encerrada');
     } catch (e) {
       console.error('Failed to close', e);
       showError('Falha ao fechar conversa');
@@ -2066,6 +2078,14 @@ export default function Dashboard() {
               onCompleteTask={handleCompleteTask}
               onRescheduleTask={handleRescheduleTask}
               onNewTask={openTaskModal}
+              leadTags={selected?.leadTags ?? []}
+              onUpdateTags={async (tags) => {
+                if (!selected) return;
+                try {
+                  await api.patch(`/leads/${selected.leadId}`, { tags });
+                  setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, leadTags: tags } : c));
+                } catch { /* silencioso */ }
+              }}
             />
 
             {/* Banner de contexto da transferência (motivo + áudios — persiste após aceitar) */}
@@ -3300,9 +3320,26 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-            <p className="text-sm text-muted-foreground mb-5">
+            <p className="text-sm text-muted-foreground mb-4">
               O histórico de mensagens será preservado. A conversa não receberá novas mensagens automáticas.
             </p>
+            {/* CSAT toggle */}
+            <label className="flex items-center gap-3 mb-5 p-3 rounded-xl border border-border bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
+              <div className="relative shrink-0">
+                <input
+                  type="checkbox"
+                  checked={csatOnClose}
+                  onChange={e => setCsatOnClose(e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-9 h-5 rounded-full transition-colors ${csatOnClose ? 'bg-primary' : 'bg-muted'}`} />
+                <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${csatOnClose ? 'translate-x-4' : 'translate-x-0'}`} />
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold text-foreground">Enviar pesquisa de satisfação</p>
+                <p className="text-[11px] text-muted-foreground">Envia uma mensagem de avaliação 1–5 ⭐ para o cliente</p>
+              </div>
+            </label>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setCloseConvModal(false)}
@@ -3314,7 +3351,7 @@ export default function Dashboard() {
                 onClick={confirmClose}
                 className="px-4 py-2 text-sm rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 font-bold hover:bg-red-500/20 transition-colors"
               >
-                Encerrar
+                Encerrar{csatOnClose ? ' + CSAT' : ''}
               </button>
             </div>
           </div>

@@ -40,6 +40,7 @@ interface DashboardData {
     lead_name: string | null; legal_case_id: string | null;
   }[];
   tasks: { pending: number; inProgress: number; overdue: number };
+  inboxStats?: { closedToday: number; closedThisWeek: number; closedThisMonth: number };
   financials: {
     totalContracted: number; totalCollected: number;
     totalReceivable: number; totalOverdue: number; overdueCount: number;
@@ -253,7 +254,36 @@ export default function DashboardPage() {
           <StatCard icon={BookOpen} label="Processos" value={data.trackingCases.total} color="text-teal-500 bg-teal-500/10" />
         </div>
 
-        {/* ─── C) Stats Financeiro ─── */}
+        {/* ─── C) Métricas de Atendimento ─── */}
+        {data.inboxStats && (
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <Activity size={15} className="text-primary" />
+                Atendimentos Encerrados
+              </h2>
+              <button onClick={() => router.push('/atendimento')} className="text-[10px] text-primary hover:underline flex items-center gap-0.5">
+                Ver inbox <ChevronRight size={11} />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                <p className="text-2xl font-bold text-emerald-400">{data.inboxStats.closedToday}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Hoje</p>
+              </div>
+              <div className="text-center p-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
+                <p className="text-2xl font-bold text-blue-400">{data.inboxStats.closedThisWeek}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Esta semana</p>
+              </div>
+              <div className="text-center p-3 rounded-xl bg-violet-500/5 border border-violet-500/20">
+                <p className="text-2xl font-bold text-violet-400">{data.inboxStats.closedThisMonth}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Este mês</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── C2) Stats Financeiro ─── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard icon={DollarSign} label="Contratado" value={fmtBRL(data.financials.totalContracted)} color="text-indigo-500 bg-indigo-500/10" />
           <StatCard icon={TrendingUp} label="Recebido" value={fmtBRL(data.financials.totalCollected)} color="text-emerald-500 bg-emerald-500/10" />
