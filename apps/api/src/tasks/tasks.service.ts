@@ -1,4 +1,6 @@
 import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { CalendarService } from '../calendar/calendar.service';
@@ -347,5 +349,149 @@ export class TasksService {
       include: { user: { select: { id: true, name: true } } },
       orderBy: { created_at: 'asc' },
     });
+  }
+
+  // ─── SPRINT 4: Escalonamento progressivo de tarefas vencidas ──────────────
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async checkOverdueTasks() {
+    try {
+      const now = new Date();
+      const overdueTasks = await this.prisma.task.findMany({
+        where: {
+          due_at: { lt: now },
+          status: { notIn: ['CONCLUIDA', 'CANCELADA'] },
+          assigned_user_id: { not: null },
+        },
+        select: {
+          id: true,
+          title: true,
+          due_at: true,
+          assigned_user_id: true,
+          assigned_user: { select: { id: true, name: true } },
+        },
+      });
+
+      for (const task of overdueTasks) {
+        if (!task.assigned_user_id || !task.due_at) continue;
+        const hoursOverdue = (now.getTime() - new Date(task.due_at).getTime()) / 3_600_000;
+
+        // Escalonamento: apenas notifica em intervalos específicos para evitar spam
+        const level = hoursOverdue >= 72 ? 'critical' : hoursOverdue >= 24 ? 'urgent' : 'warning';
+        // Emitir apenas 1x por intervalo (na primeira hora de cada nível)
+        const shouldNotify = (
+          (level === 'warning'  && hoursOverdue < 2) ||
+          (level === 'urgent'   && hoursOverdue >= 24 && hoursOverdue < 25) ||
+          (level === 'critical' && hoursOverdue >= 72 && hoursOverdue < 73)
+        );
+
+        if (shouldNotify) {
+          this.chatGateway.server?.to(`user:${task.assigned_user_id}`).emit('task_overdue_alert', {
+            taskId: task.id,
+            title: task.title,
+            dueAt: task.due_at,
+            hoursOverdue: Math.round(hoursOverdue),
+            level,
+          });
+        }
+      }
+
+      this.logger.log(`[TasksCron] Verificadas ${overdueTasks.length} tarefas vencidas`);
+    } catch (e: any) {
+      this.logger.error(`[TasksCron] Erro ao verificar tarefas vencidas: ${e.message}`);
+    }
+  }
+
+  // ─── SPRINT 4: Carga de trabalho por usuário (smart assignment) ───────────
+
+  async getWorkload(tenantId?: string) {
+    const baseTenant = this.tenantWhere(tenantId);
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        ...baseTenant,
+        status: { notIn: ['CONCLUIDA', 'CANCELADA'] },
+        assigned_user_id: { not: null },
+      },
+      select: {
+        assigned_user_id: true,
+        status: true,
+        due_at: true,
+        assigned_user: { select: { id: true, name: true } },
+      },
+    });
+
+    const now = new Date();
+    const map = new Map<string, { id: string; name: string; total: number; overdue: number; urgent: number }>();
+
+    for (const task of tasks) {
+      if (!task.assigned_user_id || !task.assigned_user) continue;
+      if (!map.has(task.assigned_user_id)) {
+        map.set(task.assigned_user_id, {
+          id: task.assigned_user_id,
+          name: task.assigned_user.name,
+          total: 0, overdue: 0, urgent: 0,
+        });
+      }
+      const entry = map.get(task.assigned_user_id)!;
+      entry.total++;
+      if (task.due_at && new Date(task.due_at) < now) entry.overdue++;
+      if (task.due_at) {
+        const daysLeft = (new Date(task.due_at).getTime() - now.getTime()) / 86_400_000;
+        if (daysLeft >= 0 && daysLeft <= 2) entry.urgent++;
+      }
+    }
+
+    // Ordenar do menos carregado ao mais carregado
+    return Array.from(map.values()).sort((a, b) => a.total - b.total);
+  }
+
+  // ─── SPRINT 4: Sugestão de próxima ação por IA (Next-Best-Action) ─────────
+
+  async suggestNextAction(context: {
+    title?: string;
+    description?: string;
+    leadName?: string;
+    caseSummary?: string;
+    recentTasks?: string[];
+    assignedTo?: string;
+  }) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return {
+        acao: null,
+        urgencia: 'media',
+        justificativa: 'API OpenAI não configurada. Defina OPENAI_API_KEY no ambiente.',
+        tipo: 'outro',
+      };
+    }
+
+    try {
+      const openai = new OpenAI({ apiKey });
+      const prompt = `Você é um assistente jurídico especializado. Analise o contexto abaixo e sugira a próxima ação mais importante que o responsável deveria tomar.
+
+Contexto:
+- Tarefa/Situação: ${context.title || 'Não informado'}
+- Descrição: ${context.description || 'Não disponível'}
+- Cliente/Lead: ${context.leadName || 'Não informado'}
+- Resumo do caso: ${context.caseSummary || 'Não disponível'}
+- Tarefas recentes relacionadas: ${context.recentTasks?.join('; ') || 'Nenhuma'}
+- Responsável atual: ${context.assignedTo || 'Não definido'}
+
+Responda APENAS em JSON válido no formato:
+{"acao": "texto da ação sugerida (máx 80 chars)", "urgencia": "alta|media|baixa", "justificativa": "por que esta ação é prioritária (máx 120 chars)", "tipo": "ligacao|email|elaborar_peca|reuniao|protocolar|outro"}`;
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        max_tokens: 256,
+        temperature: 0.4,
+      });
+
+      return JSON.parse(completion.choices[0].message.content || '{}');
+    } catch (e: any) {
+      this.logger.warn(`[NBA] Erro ao consultar OpenAI: ${e.message}`);
+      return { acao: null, urgencia: 'media', justificativa: 'Erro ao consultar IA.', tipo: 'outro' };
+    }
   }
 }

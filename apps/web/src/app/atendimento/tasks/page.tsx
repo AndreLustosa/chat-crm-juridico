@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Plus, CheckCircle2, Circle, Clock, Search, X, ChevronDown,
+  Plus, CheckCircle2, Circle, Search, X, ChevronDown,
   User, Briefcase, MessageSquare, AlertTriangle, Loader2,
-  CheckSquare, Filter, RotateCcw, CalendarDays,
+  CheckSquare, Filter, RotateCcw, CalendarDays, Sparkles,
+  Zap, Clock, TrendingDown,
 } from 'lucide-react';
+import { io } from 'socket.io-client';
 import api from '@/lib/api';
-import { showError, showSuccess } from '@/lib/toast';
+import { showError, showSuccess, showInfo } from '@/lib/toast';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,21 @@ interface Task {
 }
 
 interface UserOption { id: string; name: string; }
+
+interface WorkloadUser {
+  id: string;
+  name: string;
+  total: number;
+  overdue: number;
+  urgent: number;
+}
+
+interface NbaResult {
+  acao: string | null;
+  urgencia: 'alta' | 'media' | 'baixa';
+  justificativa: string;
+  tipo: string;
+}
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -93,6 +110,12 @@ export default function TasksPage() {
   // ── Produtividade (contadores gerais, sem filtro)
   const [stats, setStats] = useState({ total: 0, a_fazer: 0, em_progresso: 0, concluida: 0, vencidas: 0 });
 
+  // ── Sprint 4: Workload + NBA
+  const [workload, setWorkload] = useState<WorkloadUser[]>([]);
+  const [nba, setNba] = useState<NbaResult | null>(null);
+  const [nbaLoading, setNbaLoading] = useState(false);
+  const [overdueAlerts, setOverdueAlerts] = useState<{ taskId: string; title: string; level: string; hoursOverdue: number }[]>([]);
+
   // ─── Fetch de tasks ───────────────────────────────────────────────────────
 
   const fetchTasks = useCallback(async (pg = 1) => {
@@ -142,7 +165,36 @@ export default function TasksPage() {
       setUsers(data.filter((u: any) => u.role));
     }).catch(() => {});
     fetchStats();
+    // Sprint 4: buscar carga de trabalho
+    api.get('/tasks/workload').then(r => setWorkload(r.data || [])).catch(() => {});
   }, [fetchStats]);
+
+  // Sprint 4: Socket.IO — alertas de tarefas vencidas em tempo real
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL
+        || (apiUrl.startsWith('http') ? new URL(apiUrl).origin : apiUrl);
+      const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
+      const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || (isDev ? '/socket.io/' : '/api/socket.io/');
+      const socket = io(wsUrl, {
+        path: socketPath,
+        transports: ['polling', 'websocket'],
+        auth: { token },
+      });
+      socket.on('task_overdue_alert', (data: any) => {
+        setOverdueAlerts(prev => {
+          if (prev.some(a => a.taskId === data.taskId)) return prev;
+          return [data, ...prev].slice(0, 5);
+        });
+        if (data.level === 'critical') showError(`🚨 Tarefa crítica em atraso: ${data.title}`);
+        else if (data.level === 'urgent') showInfo(`⚠️ Tarefa urgente vencida: ${data.title}`);
+      });
+      return () => { socket.disconnect(); };
+    } catch {}
+  }, []);
 
   useEffect(() => {
     setPage(1);
@@ -194,6 +246,30 @@ export default function TasksPage() {
   const resetFilters = () => {
     setStatusFilter(''); setDueFilter('');
     setAssignedFilter(''); setSearch(''); setSearchInput('');
+  };
+
+  // Sprint 4: Sugestão de próxima ação por IA
+  const fetchNba = async () => {
+    setNbaLoading(true);
+    try {
+      // Pega as primeiras tarefas vencidas/urgentes para contextualizar a IA
+      const overdueTasks = tasks.filter(t =>
+        t.due_at && new Date(t.due_at) < new Date() && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+      );
+      const topTask = overdueTasks[0] ?? tasks[0];
+      const res = await api.post('/tasks/next-action', {
+        title: topTask?.title,
+        description: topTask?.description,
+        leadName: topTask?.lead?.name || topTask?.lead?.phone,
+        recentTasks: tasks.slice(0, 5).map(t => `${t.title} [${STATUS_CONFIG[t.status]?.label}]`),
+        assignedTo: topTask?.assigned_user?.name,
+      });
+      setNba(res.data);
+    } catch {
+      showError('Erro ao consultar IA');
+    } finally {
+      setNbaLoading(false);
+    }
   };
 
   const hasFilters = statusFilter || dueFilter || assignedFilter || search;
@@ -252,6 +328,72 @@ export default function TasksPage() {
         </div>
       </div>
 
+      {/* ── Sprint 4: Alertas de vencimento em tempo real ── */}
+      {overdueAlerts.length > 0 && (
+        <div className="shrink-0 px-6 py-2 flex items-center gap-2 bg-red-500/5 border-b border-red-500/20">
+          <AlertTriangle size={14} className="text-red-400 shrink-0" />
+          <span className="text-xs font-semibold text-red-400">
+            {overdueAlerts.length} tarefa{overdueAlerts.length > 1 ? 's' : ''} em atraso requer{overdueAlerts.length > 1 ? 'em' : ''} atenção imediata
+          </span>
+          <div className="flex gap-1.5 flex-wrap flex-1">
+            {overdueAlerts.map(a => (
+              <span key={a.taskId} className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.level === 'critical' ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                {a.level === 'critical' ? '🚨' : '⚠️'} {a.title.slice(0, 30)}{a.title.length > 30 ? '…' : ''} (+{a.hoursOverdue}h)
+              </span>
+            ))}
+          </div>
+          <button onClick={() => setOverdueAlerts([])} className="text-muted-foreground hover:text-foreground"><X size={13} /></button>
+        </div>
+      )}
+
+      {/* ── Sprint 4: Painel NBA (Next-Best-Action por IA) ── */}
+      <div className="shrink-0 px-6 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-transparent">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Sparkles size={13} className="text-primary" />
+            <span className="font-semibold text-foreground">Próxima Ação IA</span>
+          </div>
+
+          {!nba && !nbaLoading && (
+            <button
+              onClick={fetchNba}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors"
+            >
+              <Zap size={11} />
+              Analisar tarefas
+            </button>
+          )}
+
+          {nbaLoading && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" />
+              Consultando IA...
+            </div>
+          )}
+
+          {nba && nba.acao && (
+            <div className="flex-1 flex items-center gap-3 min-w-0">
+              <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                nba.urgencia === 'alta' ? 'bg-red-500/15 text-red-400' :
+                nba.urgencia === 'media' ? 'bg-amber-500/15 text-amber-400' :
+                'bg-green-500/15 text-green-400'
+              }`}>
+                {nba.urgencia === 'alta' ? '🔴' : nba.urgencia === 'media' ? '🟡' : '🟢'} {nba.urgencia.charAt(0).toUpperCase() + nba.urgencia.slice(1)}
+              </span>
+              <span className="text-xs font-semibold text-foreground truncate">{nba.acao}</span>
+              <span className="text-[10px] text-muted-foreground truncate hidden sm:block">{nba.justificativa}</span>
+              <button onClick={() => setNba(null)} className="shrink-0 text-muted-foreground hover:text-foreground ml-auto">
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
+          {nba && !nba.acao && (
+            <span className="text-xs text-muted-foreground">{nba.justificativa}</span>
+          )}
+        </div>
+      </div>
+
       {/* ── Formulário nova tarefa ── */}
       {showNew && (
         <div className="shrink-0 px-6 py-4 border-b border-border bg-accent/20">
@@ -271,14 +413,31 @@ export default function TasksPage() {
                 value={newDue}
                 onChange={e => setNewDue(e.target.value)}
               />
-              <select
-                className="flex-1 px-3 py-2 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                value={newAssigned}
-                onChange={e => setNewAssigned(e.target.value)}
-              >
-                <option value="">Responsável (opcional)</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
+              <div className="flex-1 relative">
+                <select
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
+                  value={newAssigned}
+                  onChange={e => setNewAssigned(e.target.value)}
+                >
+                  <option value="">Responsável (opcional)</option>
+                  {users.map(u => {
+                    const wl = workload.find(w => w.id === u.id);
+                    const tag = wl ? ` · ${wl.total} tarefas${wl.overdue > 0 ? ` ⚠️${wl.overdue}` : ''}` : '';
+                    return <option key={u.id} value={u.id}>{u.name}{tag}</option>;
+                  })}
+                </select>
+                {newAssigned && workload.length > 0 && (() => {
+                  const wl = workload.find(w => w.id === newAssigned);
+                  if (!wl) return null;
+                  return (
+                    <div className="absolute -top-5 right-0 flex items-center gap-2 text-[10px]">
+                      <span className="text-muted-foreground flex items-center gap-1"><TrendingDown size={9}/> {wl.total} pendentes</span>
+                      {wl.overdue > 0 && <span className="text-red-400 font-bold">⚠️ {wl.overdue} vencidas</span>}
+                      {wl.overdue === 0 && wl.total <= 3 && <span className="text-green-400 font-semibold">✓ Disponível</span>}
+                    </div>
+                  );
+                })()}
+              </div>
               <button onClick={() => setShowNew(false)} className="px-3 py-2 rounded-xl border border-border text-sm text-muted-foreground hover:bg-accent transition-colors">
                 <X size={14} />
               </button>

@@ -5,3 +5,6 @@ export const showError = (msg: string) =>
 
 export const showSuccess = (msg: string) =>
   toast.success(msg, { duration: 3000 });
+
+export const showInfo = (msg: string) =>
+  toast(msg, { duration: 4000, icon: 'ℹ️' });

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
@@ -7,6 +7,26 @@ import { CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
 @Controller('tasks')
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
+
+  // Sprint 4: Carga de trabalho por usuário (deve vir ANTES de :id)
+  @Get('workload')
+  getWorkload(@Request() req: any) {
+    return this.tasksService.getWorkload(req.user?.tenant_id);
+  }
+
+  // Sprint 4: Sugestão de próxima ação por IA
+  @Post('next-action')
+  @HttpCode(HttpStatus.OK)
+  suggestNextAction(@Body() body: any) {
+    return this.tasksService.suggestNextAction({
+      title: body.title,
+      description: body.description,
+      leadName: body.leadName,
+      caseSummary: body.caseSummary,
+      recentTasks: body.recentTasks,
+      assignedTo: body.assignedTo,
+    });
+  }
 
   @Get()
   findAll(
