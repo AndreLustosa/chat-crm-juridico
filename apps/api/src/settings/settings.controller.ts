@@ -322,6 +322,20 @@ export class SettingsController {
     return { ok: true };
   }
 
+  // ─── CRM Config ───────────────────────────────────────
+
+  @Get('crm-config')
+  async getCrmConfig() {
+    return this.settingsService.getCrmConfig();
+  }
+
+  @Patch('crm-config')
+  async setCrmConfig(@Request() req: any, @Body() body: { stagnationDays?: number }) {
+    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+    await this.settingsService.setCrmConfig(body);
+    return { ok: true };
+  }
+
   // ─── Canned Responses ─────────────────────────────────
 
   @Get('canned-responses')

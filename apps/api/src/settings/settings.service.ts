@@ -101,6 +101,20 @@ export class SettingsService {
     });
   }
 
+  // ─── CRM Config ────────────────────────────────────────────────
+  async getCrmConfig(): Promise<{ stagnationDays: number }> {
+    const raw = await this.get('CRM_CONFIG');
+    if (!raw) return { stagnationDays: 3 };
+    try { return { stagnationDays: 3, ...JSON.parse(raw) }; } catch { return { stagnationDays: 3 }; }
+  }
+
+  async setCrmConfig(config: { stagnationDays?: number }): Promise<void> {
+    const current = await this.getCrmConfig();
+    const merged = { ...current, ...config };
+    if (merged.stagnationDays !== undefined) merged.stagnationDays = Math.max(1, Math.round(merged.stagnationDays));
+    await this.set('CRM_CONFIG', JSON.stringify(merged));
+  }
+
   // ─── Canned Responses ─────────────────────────────────────────
   async getCannedResponses(): Promise<{ id: string; label: string; text: string }[]> {
     const raw = await this.get('CANNED_RESPONSES');
