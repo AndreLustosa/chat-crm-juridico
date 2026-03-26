@@ -144,15 +144,14 @@ export class CaseDeadlinesService {
     if (data.due_at) updateData.due_at = new Date(data.due_at);
     if (data.alert_days !== undefined) updateData.alert_days = data.alert_days;
 
-    // Se alterou data, atualizar CalendarEvent também
+    // Se alterou data, atualizar CalendarEvent via service (re-enfileira lembretes BullMQ)
     if (data.due_at && deadline.calendar_event_id) {
-      await this.prisma.calendarEvent.update({
-        where: { id: deadline.calendar_event_id },
-        data: {
-          start_at: new Date(data.due_at),
-          ...(data.title ? { title: `Prazo: ${data.title}` } : {}),
-          ...(data.description !== undefined ? { description: data.description } : {}),
-        },
+      await this.calendarService.update(deadline.calendar_event_id, {
+        start_at: data.due_at,
+        ...(data.title ? { title: `Prazo: ${data.title}` } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+      }).catch((e: any) => {
+        this.logger.warn(`Erro ao atualizar CalendarEvent do prazo ${deadlineId}: ${e.message}`);
       });
     }
 

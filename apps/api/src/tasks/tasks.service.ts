@@ -136,6 +136,24 @@ export class TasksService {
       data: updateData,
     });
 
+    // Sync calendar event status if status changed via full update
+    if (task.calendar_event_id && data.status !== undefined) {
+      try {
+        const statusMap: Record<string, string> = {
+          'CONCLUIDA': 'CONCLUIDO',
+          'CANCELADA': 'CANCELADO',
+          'EM_PROGRESSO': 'CONFIRMADO',
+          'A_FAZER': 'AGENDADO',
+        };
+        const calStatus = statusMap[data.status];
+        if (calStatus) {
+          await this.calendarService.updateStatus(task.calendar_event_id, calStatus);
+        }
+      } catch (e: any) {
+        this.logger.warn(`Erro ao sincronizar status do calendario via update() para task ${id}: ${e.message}`);
+      }
+    }
+
     // Update linked calendar event if due_at changed
     if (task.calendar_event_id && data.due_at !== undefined) {
       try {
@@ -144,6 +162,10 @@ export class TasksService {
             start_at: new Date(data.due_at).toISOString(),
             end_at: new Date(new Date(data.due_at).getTime() + 30 * 60000).toISOString(),
           });
+        } else {
+          // Prazo removido: deletar CalendarEvent vinculado e desvincular da task
+          await this.calendarService.remove(task.calendar_event_id).catch(() => {});
+          await this.prisma.task.update({ where: { id }, data: { calendar_event_id: null } });
         }
       } catch (e: any) {
         this.logger.warn(`Erro ao atualizar evento do calendario para task ${id}: ${e.message}`);
@@ -184,9 +206,18 @@ export class TasksService {
 
   // ─── Find Active Task by Conversation ─────────────────────────
 
-  async findActiveByConversation(conversationId: string) {
+  async findActiveByConversation(conversationId: string, tenantId?: string) {
+    if (tenantId) {
+      const conv = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { tenant_id: true },
+      });
+      if (conv?.tenant_id && conv.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
     return this.prisma.task.findFirst({
-      where: { conversation_id: conversationId, status: 'A_FAZER' },
+      where: { conversation_id: conversationId, status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
       orderBy: { created_at: 'desc' },
     });
   }
@@ -228,7 +259,16 @@ export class TasksService {
 
   // ─── Legal Case Tasks ──────────────────────────────────────────
 
-  async findByLegalCase(legalCaseId: string) {
+  async findByLegalCase(legalCaseId: string, tenantId?: string) {
+    if (tenantId) {
+      const lc = await this.prisma.legalCase.findUnique({
+        where: { id: legalCaseId },
+        select: { tenant_id: true },
+      });
+      if (lc?.tenant_id && lc.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
     return this.prisma.task.findMany({
       where: { legal_case_id: legalCaseId },
       include: {

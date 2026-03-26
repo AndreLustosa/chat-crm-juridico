@@ -48,8 +48,8 @@ export class CalendarController {
 
   // IMPORTANTE: rotas com paths fixos ANTES de :id para evitar conflito
   @Get('events/legal-case/:caseId')
-  findByLegalCase(@Param('caseId') caseId: string) {
-    return this.calendarService.findByLegalCase(caseId);
+  findByLegalCase(@Param('caseId') caseId: string, @Query('type') type: string | undefined, @Request() req: any) {
+    return this.calendarService.findByLegalCase(caseId, type, req.user?.tenant_id);
   }
 
   @Get('events/:id')
@@ -73,7 +73,7 @@ export class CalendarController {
     @Query('updateScope') updateScope: string | undefined,
     @Request() req: any,
   ) {
-    const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.role);
+    const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.role, req.user?.tenant_id);
     if (!canEdit) throw new ForbiddenException('Sem permissao para editar este evento');
 
     if (updateScope === 'all') {
@@ -84,7 +84,7 @@ export class CalendarController {
 
   @Patch('events/:id/status')
   async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: any) {
-    const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.role);
+    const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.role, req.user?.tenant_id);
     if (!canEdit) throw new ForbiddenException('Sem permissao para alterar status deste evento');
     return this.calendarService.updateStatus(id, status);
   }
@@ -95,7 +95,7 @@ export class CalendarController {
     @Query('deleteScope') deleteScope: string | undefined,
     @Request() req: any,
   ) {
-    const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.role);
+    const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.role, req.user?.tenant_id);
     if (!canEdit) throw new ForbiddenException('Sem permissao para remover este evento');
 
     if (deleteScope === 'all') {
@@ -107,12 +107,16 @@ export class CalendarController {
   // ─── Event Comments ──────────────────────────────────
 
   @Get('events/:id/comments')
-  findComments(@Param('id') id: string) {
+  async findComments(@Param('id') id: string, @Request() req: any) {
+    const canAccess = await this.calendarService.checkOwnership(id, req.user.id, req.user.role, req.user?.tenant_id);
+    if (!canAccess) throw new ForbiddenException('Sem permissao para acessar este evento');
     return this.calendarService.findComments(id);
   }
 
   @Post('events/:id/comments')
-  addComment(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
+  async addComment(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
+    const canAccess = await this.calendarService.checkOwnership(id, req.user.id, req.user.role, req.user?.tenant_id);
+    if (!canAccess) throw new ForbiddenException('Sem permissao para comentar neste evento');
     return this.calendarService.addComment(id, req.user.id, text);
   }
 
@@ -123,9 +127,13 @@ export class CalendarController {
     @Query('userId') userId: string,
     @Query('start') start: string,
     @Query('end') end: string,
-    @Query('excludeId') excludeId?: string,
+    @Query('excludeId') excludeId: string | undefined,
+    @Request() req: any,
   ) {
-    return this.calendarService.checkConflicts(userId, start, end, excludeId);
+    // Usuários não-admin só podem checar conflitos da própria agenda
+    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'admin';
+    const effectiveUserId = isAdmin ? (userId || req.user.id) : req.user.id;
+    return this.calendarService.checkConflicts(effectiveUserId, start, end, excludeId);
   }
 
   // ─── Availability ─────────────────────────────────────

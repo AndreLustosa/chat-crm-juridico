@@ -31,7 +31,9 @@ export class CalendarService {
   }) {
     const where: any = {};
 
-    if (query.tenantId) where.tenant_id = query.tenantId;
+    if (query.tenantId) {
+      where.OR = [{ tenant_id: query.tenantId }, { tenant_id: null }];
+    }
     if (query.type) where.type = query.type;
     if (query.leadId) where.lead_id = query.leadId;
     if (query.legalCaseId) where.legal_case_id = query.legalCaseId;
@@ -710,54 +712,61 @@ export class CalendarService {
           select: { minutes_before: true, channel: true },
         });
 
-    const children = await Promise.all(
-      dates.map(async (d) => {
-        const childStart = new Date(d);
-        childStart.setHours(startAt.getHours(), startAt.getMinutes(), startAt.getSeconds());
-        const childEnd = new Date(childStart.getTime() + duration);
+    // Processar em lotes de 20 para não sobrecarregar o pool de conexões do DB
+    const BATCH_SIZE = 20;
+    const children: any[] = [];
+    const createChild = async (d: Date) => {
+      const childStart = new Date(d);
+      childStart.setHours(startAt.getHours(), startAt.getMinutes(), startAt.getSeconds());
+      const childEnd = new Date(childStart.getTime() + duration);
 
-        const child = await this.prisma.calendarEvent.create({
-          data: {
-            type: parentEvent.type,
-            title: parentEvent.title,
-            description: parentEvent.description,
-            start_at: childStart,
-            end_at: childEnd,
-            all_day: parentEvent.all_day,
-            status: parentEvent.status || 'AGENDADO',
-            priority: parentEvent.priority || 'NORMAL',
-            color: parentEvent.color,
-            location: parentEvent.location,
-            lead_id: parentEvent.lead_id,
-            legal_case_id: parentEvent.legal_case_id,
-            assigned_user_id: parentEvent.assigned_user_id,
-            created_by_id: parentEvent.created_by_id,
-            appointment_type_id: parentEvent.appointment_type_id,
-            tenant_id: parentEvent.tenant_id,
-            parent_event_id: parentEvent.id,
-            // Replicar lembretes do pai nos filhos
-            ...(parentReminders.length > 0
-              ? {
-                  reminders: {
-                    create: parentReminders.map((r: any) => ({
-                      minutes_before: r.minutes_before,
-                      channel: r.channel ?? 'PUSH',
-                    })),
-                  },
-                }
-              : {}),
-          },
-          include: { reminders: true },
-        });
+      const child = await this.prisma.calendarEvent.create({
+        data: {
+          type: parentEvent.type,
+          title: parentEvent.title,
+          description: parentEvent.description,
+          start_at: childStart,
+          end_at: childEnd,
+          all_day: parentEvent.all_day,
+          status: parentEvent.status || 'AGENDADO',
+          priority: parentEvent.priority || 'NORMAL',
+          color: parentEvent.color,
+          location: parentEvent.location,
+          lead_id: parentEvent.lead_id,
+          legal_case_id: parentEvent.legal_case_id,
+          assigned_user_id: parentEvent.assigned_user_id,
+          created_by_id: parentEvent.created_by_id,
+          appointment_type_id: parentEvent.appointment_type_id,
+          tenant_id: parentEvent.tenant_id,
+          parent_event_id: parentEvent.id,
+          // Replicar lembretes do pai nos filhos
+          ...(parentReminders.length > 0
+            ? {
+                reminders: {
+                  create: parentReminders.map((r: any) => ({
+                    minutes_before: r.minutes_before,
+                    channel: r.channel ?? 'PUSH',
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: { reminders: true },
+      });
 
-        // Enfileirar lembretes WhatsApp/Email para o filho
-        if (child.reminders?.length) {
-          await this.enqueueReminders(child.id, child.start_at, child.reminders);
-        }
+      // Enfileirar lembretes WhatsApp/Email para o filho
+      if (child.reminders?.length) {
+        await this.enqueueReminders(child.id, child.start_at, child.reminders);
+      }
 
-        return child;
-      }),
-    );
+      return child;
+    };
+
+    for (let i = 0; i < dates.length; i += BATCH_SIZE) {
+      const batch = dates.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(batch.map(createChild));
+      children.push(...batchResults);
+    }
 
     this.logger.log(`Criadas ${children.length} instancias recorrentes (com lembretes) para evento ${parentEvent.id}`);
     return children;

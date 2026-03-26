@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsArray,
   IsIn,
+  IsDateString,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -96,10 +97,10 @@ export class UpdateEventDto {
   @IsOptional() @IsString()
   description?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional() @IsDateString()
   start_at?: string;
 
-  @IsOptional() @IsString()
+  @IsOptional() @IsDateString()
   end_at?: string;
 
   @IsOptional() @IsBoolean()
