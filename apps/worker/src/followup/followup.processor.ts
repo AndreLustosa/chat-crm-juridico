@@ -21,6 +21,51 @@ export class FollowupProcessor extends WorkerHost {
     if (job.name === 'send-message') return this.sendMessage(job.data.message_id);
   }
 
+  // ─── Decision Engine: Horário Comercial ──────────────────────────────────
+
+  private isBusinessHours(): boolean {
+    const now = new Date();
+    const hora = parseInt(
+      now.toLocaleString('pt-BR', { timeZone: 'America/Maceio', hour: '2-digit', hour12: false }),
+    );
+    const diaSemana = now.toLocaleString('pt-BR', { timeZone: 'America/Maceio', weekday: 'short' });
+    // Domingo = não envia. Segunda a Sábado entre 8h e 18h
+    if (diaSemana === 'dom.') return false;
+    return hora >= 8 && hora < 18;
+  }
+
+  private nextBusinessHour(): Date {
+    const now = new Date();
+    const brt = new Date(now.toLocaleString('en-US', { timeZone: 'America/Maceio' }));
+    const hora = brt.getHours();
+    const dia = brt.getDay(); // 0=Dom
+
+    const next = new Date(brt);
+    if (hora >= 18 || dia === 0) {
+      // Após 18h ou domingo → próximo dia útil às 9h
+      next.setDate(next.getDate() + (dia === 6 ? 2 : 1));
+      next.setHours(9, 0, 0, 0);
+    } else if (hora < 8) {
+      next.setHours(8, 0, 0, 0);
+    }
+    return next;
+  }
+
+  // ─── Decision Engine: Rate Limiting — máx 2 mensagens por lead por dia ──
+
+  private async exceedsDailyLimit(leadId: string): Promise<boolean> {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const count = await this.prisma.followupMessage.count({
+      where: {
+        lead_id: leadId,
+        status: { in: ['ENVIADO', 'APROVADO'] },
+        sent_at: { gte: startOfDay },
+      },
+    });
+    return count >= 2;
+  }
+
   private async processStep(enrollmentId: string) {
     const enrollment = await this.prisma.followupEnrollment.findUnique({
       where: { id: enrollmentId },
@@ -42,7 +87,38 @@ export class FollowupProcessor extends WorkerHost {
       return;
     }
 
-    // Anti-spam: não enviar se houve mensagem na conversa nas últimas 12h
+    // ─── Decision Engine ──────────────────────────────────────────────────
+
+    // 1. Verificação de Horário Comercial
+    if (!this.isBusinessHours()) {
+      const nextAt = this.nextBusinessHour();
+      await this.prisma.followupEnrollment.update({
+        where: { id: enrollmentId },
+        data: { next_send_at: nextAt },
+      });
+      this.logger.log(
+        `[FOLLOWUP] Fora do horário comercial — reagendado para ${nextAt.toLocaleString('pt-BR', { timeZone: 'America/Maceio' })}`,
+      );
+      return;
+    }
+
+    // 2. Rate Limiting — máx 2 mensagens por lead por dia
+    if (await this.exceedsDailyLimit(enrollment.lead_id)) {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      await this.prisma.followupEnrollment.update({
+        where: { id: enrollmentId },
+        data: { next_send_at: tomorrow },
+      });
+      this.logger.log(
+        `[FOLLOWUP] Limite diário atingido para lead ${enrollment.lead_id} — reagendado para amanhã`,
+      );
+      return;
+    }
+
+    // ─── Anti-spam: não enviar se houve mensagem na conversa nas últimas 12h ─
+
     const convo = await this.prisma.conversation.findFirst({
       where: { lead_id: enrollment.lead_id, status: 'ABERTO' },
       orderBy: { last_message_at: 'desc' },
@@ -61,7 +137,8 @@ export class FollowupProcessor extends WorkerHost {
       }
     }
 
-    // Gerar mensagem com IA
+    // ─── Gerar mensagem com IA ────────────────────────────────────────────
+
     try {
       const dossie = await this.followupService.buildDossie(enrollment, step, enrollment.lead);
       const generatedText = await this.followupService.generateMessage(dossie, step.custom_prompt);

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -6,7 +7,10 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AutomationsService {
   private readonly logger = new Logger(AutomationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private moduleRef: ModuleRef,
+  ) {}
 
   // ─── CRUD ──────────────────────────────────────────────────────
 
@@ -70,6 +74,19 @@ export class AutomationsService {
           where: { id: context.leadId },
           data: { stage: rule.action_value },
         });
+      }
+
+      // ENROLL_FOLLOWUP — enrola o lead em uma sequência de follow-up pelo ID
+      if (rule.action === 'ENROLL_FOLLOWUP' && context.leadId) {
+        try {
+          const { FollowupService } = await import('../followup/followup.service');
+          const followupService = this.moduleRef.get(FollowupService, { strict: false });
+          if (followupService) {
+            await followupService.enrollLead(context.leadId, rule.action_value);
+          }
+        } catch (e: any) {
+          this.logger.warn(`[AUTO] Falha ao enrolar lead em followup: ${e.message}`);
+        }
       }
 
       // Sprint 5: CREATE_TASK — cria tarefa vinculada ao lead/conversa

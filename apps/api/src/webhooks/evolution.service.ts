@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -80,6 +81,7 @@ export class EvolutionService {
     @InjectQueue('media-jobs') private mediaQueue: Queue,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
     private whatsappService: WhatsappService,
+    private moduleRef: ModuleRef,
   ) {}
 
   async handleMessagesUpsert(payload: EvolutionWebhookPayload) {
@@ -358,6 +360,14 @@ export class EvolutionService {
           conversationId: conv.id,
           contactName: lead.name || lead.phone,
         });
+
+        // ─── Response Listener: verifica se é resposta a um follow-up ─────
+        // Roda de forma assíncrona (fire-and-forget) para não bloquear o webhook
+        if (messageContent && messageContent.length >= 3) {
+          this.checkFollowupResponse(lead.id, messageContent).catch(e =>
+            this.logger.warn(`[FOLLOWUP-LISTENER] ${e.message}`),
+          );
+        }
       }
 
       // 4. Se mídia, enfileira download
@@ -421,6 +431,99 @@ export class EvolutionService {
           });
         }
       }
+    }
+  }
+
+  // ─── Response Listener: analisa respostas de leads em follow-up ──────────
+
+  private async checkFollowupResponse(leadId: string, responseText: string): Promise<void> {
+    if (!responseText || responseText.length < 3) return;
+
+    // Verificar se lead tem enrollment ativo
+    const enrollment = await this.prisma.followupEnrollment.findFirst({
+      where: { lead_id: leadId, status: 'ATIVO' },
+      include: {
+        sequence: { include: { steps: { orderBy: { position: 'asc' } } } },
+        lead: true,
+      },
+      orderBy: { enrolled_at: 'desc' },
+    });
+    if (!enrollment) return;
+
+    this.logger.log(
+      `[FOLLOWUP-LISTENER] Resposta recebida do lead ${leadId} em sequência "${enrollment.sequence.name}"`,
+    );
+
+    // Analisar intenção com IA (lazy load para evitar circular dep)
+    try {
+      const { FollowupService } = await import('../followup/followup.service');
+      const followupSvc = this.moduleRef.get(FollowupService, { strict: false });
+      if (!followupSvc) return;
+
+      const dossie = {
+        pessoa: { nome: enrollment.lead.name, estagio: enrollment.lead.stage },
+        historico: {},
+        tarefa: { categoria: enrollment.sequence.category },
+      };
+      const analise = await followupSvc.analyzeResponse(responseText, dossie);
+
+      this.logger.log(
+        `[FOLLOWUP-LISTENER] Análise: ${analise.intencao} | sentimento: ${analise.sentimento}`,
+      );
+
+      // Pausar sequência se respondeu positivamente (quer contratar) ou negativamente (recusando)
+      if (['quer_contratar', 'confirmando'].includes(analise.intencao)) {
+        await this.prisma.followupEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: 'CONVERTIDO' },
+        });
+        // Criar tarefa urgente para o advogado
+        await this.prisma.task.create({
+          data: {
+            title: `Lead quente respondeu: ${enrollment.lead.name || enrollment.lead.phone}`,
+            description: `Lead respondeu positivamente ao follow-up da sequência "${enrollment.sequence.name}".\n\nResposta: "${responseText}"\n\nAnálise IA: ${analise.resumo}\nPróxima ação sugerida: ${analise.proxima_acao}`,
+            status: 'PENDENTE',
+            priority: 'URGENTE',
+            due_at: new Date(Date.now() + 2 * 3600000), // 2 horas
+            lead_id: leadId,
+            assigned_user_id: null, // será assignado pelo responsável
+          },
+        });
+        this.logger.log(`[FOLLOWUP-LISTENER] Lead convertido! Tarefa urgente criada.`);
+      } else if (['recusando'].includes(analise.intencao)) {
+        await this.prisma.followupEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: 'CANCELADO', paused_reason: `Lead recusou: ${analise.resumo}` },
+        });
+        this.logger.log(`[FOLLOWUP-LISTENER] Lead recusou. Sequência cancelada.`);
+      } else if (analise.requer_humano) {
+        await this.prisma.followupEnrollment.update({
+          where: { id: enrollment.id },
+          data: { status: 'PAUSADO', paused_reason: `Escalado para humano: ${analise.resumo}` },
+        });
+        await this.prisma.task.create({
+          data: {
+            title: `Revisão necessária: ${enrollment.lead.name || enrollment.lead.phone}`,
+            description: `A IA detectou que este lead precisa de atenção humana.\n\nResposta: "${responseText}"\n\nMotivo: ${analise.resumo}`,
+            status: 'PENDENTE',
+            priority: 'ALTA',
+            due_at: new Date(Date.now() + 4 * 3600000),
+            lead_id: leadId,
+            assigned_user_id: null,
+          },
+        });
+        this.logger.log(`[FOLLOWUP-LISTENER] Escalado para humano. Sequência pausada.`);
+      } else if (analise.intencao === 'pedindo_prazo') {
+        // Aguardar 3 dias antes de continuar
+        const resumeAt = new Date(Date.now() + 3 * 24 * 3600000);
+        await this.prisma.followupEnrollment.update({
+          where: { id: enrollment.id },
+          data: { next_send_at: resumeAt, paused_reason: 'Lead pediu prazo para pensar' },
+        });
+        this.logger.log(`[FOLLOWUP-LISTENER] Lead pediu prazo — próximo envio em 3 dias`);
+      }
+    } catch (e: any) {
+      this.logger.error(`[FOLLOWUP-LISTENER] Erro na análise: ${e.message}`);
     }
   }
 

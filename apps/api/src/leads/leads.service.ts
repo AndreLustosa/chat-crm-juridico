@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { Prisma, Lead } from '@crm/shared';
@@ -28,6 +29,7 @@ export class LeadsService {
     private legalCasesService: LegalCasesService,
     private chatGateway: ChatGateway,
     private automationsService: AutomationsService,
+    private moduleRef: ModuleRef,
   ) {}
 
   async create(data: Prisma.LeadCreateInput): Promise<Lead> {
@@ -250,6 +252,20 @@ export class LeadsService {
     this.automationsService.onStageChange(id, stage, tenantId).catch(err =>
       this.logger.warn(`onStageChange automation error for lead ${id}: ${err}`),
     );
+
+    // Auto-enroll em sequências de follow-up configuradas para o novo stage
+    // Lazy-load via ModuleRef para evitar dependência circular (FollowupModule → LeadsModule)
+    try {
+      const { FollowupService } = await import('../followup/followup.service');
+      const followupService = this.moduleRef.get(FollowupService, { strict: false });
+      if (followupService) {
+        followupService.autoEnrollByStage(id, stage).catch((err: Error) =>
+          this.logger.warn(`[FOLLOWUP] Auto-enroll falhou: ${err.message}`),
+        );
+      }
+    } catch {
+      // FollowupModule pode não estar carregado em contextos de teste — ignorar silenciosamente
+    }
 
     // Auto-criacao de LegalCase quando lead atinge FINALIZADO
     if (stage === 'FINALIZADO') {

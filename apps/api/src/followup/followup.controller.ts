@@ -74,4 +74,8 @@ export class FollowupController {
 
   @Post('messages/:id/regenerate')
   regenerateMessage(@Param('id') id: string) { return this.svc.regenerateMessage(id); }
+
+  // ─── Seed ────────────────────────────────────────────────────────────────
+  @Post('seed-defaults')
+  seedDefaultSequences() { return this.svc.seedDefaultSequences(); }
 }

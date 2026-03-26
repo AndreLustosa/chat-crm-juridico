@@ -379,4 +379,143 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
       } catch { /* já enrolled ou outro erro — ignorar */ }
     }
   }
+
+  // ─── Análise de Resposta (Response Listener) — usada pelo API diretamente ─
+
+  async analyzeResponse(text: string, dossie: any): Promise<{
+    sentimento: string; intencao: string; urgencia: string;
+    requer_humano: boolean; resumo: string; proxima_acao: string;
+  }> {
+    const prompt = `Analise esta resposta de um lead/cliente jurídico e retorne JSON.
+
+RESPOSTA DO LEAD: "${text}"
+
+CONTEXTO: Lead "${dossie.pessoa?.nome}" no estágio "${dossie.pessoa?.estagio}".
+
+Retorne APENAS este JSON (sem markdown):
+{
+  "sentimento": "positivo|neutro|negativo",
+  "intencao": "quer_contratar|pedindo_informacao|negociando|recusando|pedindo_prazo|insatisfeito|pedindo_atualizacao|confirmando|incerto",
+  "urgencia": "alta|media|baixa",
+  "requer_humano": true|false,
+  "resumo": "Uma frase resumindo a resposta",
+  "proxima_acao": "O que fazer a seguir"
+}
+
+Considere requer_humano=true se:
+- Menciona trocar de advogado ou insatisfação grave
+- Assunto sensível (luto, separação, prisão de familiar)
+- Negociação de valores ou acordos
+- Reclamação de serviço`;
+
+    try {
+      const r = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 300, temperature: 0.3,
+        response_format: { type: 'json_object' },
+      });
+      const json = JSON.parse(r.choices[0]?.message?.content || '{}');
+      return {
+        sentimento: json.sentimento || 'neutro',
+        intencao: json.intencao || 'incerto',
+        urgencia: json.urgencia || 'media',
+        requer_humano: json.requer_humano || false,
+        resumo: json.resumo || 'Sem resumo',
+        proxima_acao: json.proxima_acao || 'Aguardar próximo passo',
+      };
+    } catch {
+      return { sentimento: 'neutro', intencao: 'incerto', urgencia: 'media', requer_humano: false, resumo: 'Sem análise', proxima_acao: 'Revisar manualmente' };
+    }
+  }
+
+  // ─── Seed de Sequências Padrão ───────────────────────────────────────────
+
+  async seedDefaultSequences() {
+    const sequences = [
+      {
+        name: 'Novo Lead — Captação',
+        description: 'Sequência padrão para novos leads que ainda não contrataram',
+        category: 'LEADS',
+        auto_enroll_stages: ['NOVO', 'QUALIFICANDO'],
+        max_attempts: 9,
+        steps: [
+          { position: 1, delay_hours: 0, channel: 'whatsapp', tone: 'amigavel', objective: 'Apresentar o escritório e entender a necessidade do lead', auto_send: true },
+          { position: 2, delay_hours: 2, channel: 'whatsapp', tone: 'amigavel', objective: 'Complemento com informação útil sobre o tipo de caso', auto_send: true },
+          { position: 3, delay_hours: 48, channel: 'whatsapp', tone: 'profissional', objective: 'Abordagem diferente, oferecer consulta gratuita', auto_send: true },
+          { position: 4, delay_hours: 96, channel: 'whatsapp', tone: 'empatico', objective: 'Demonstrar empatia com a situação do lead', auto_send: false },
+          { position: 5, delay_hours: 168, channel: 'email', tone: 'profissional', objective: 'Email elaborado com credenciais do escritório e casos de sucesso', auto_send: false },
+          { position: 6, delay_hours: 336, channel: 'whatsapp', tone: 'amigavel', objective: 'Última tentativa direta — perguntar se ainda tem interesse', auto_send: false },
+          { position: 7, delay_hours: 720, channel: 'email', tone: 'amigavel', objective: 'Nurturing: conteúdo informativo relevante para o tipo de caso', auto_send: true },
+          { position: 8, delay_hours: 1440, channel: 'email', tone: 'amigavel', objective: 'Nurturing: mudança de lei ou prazo prescricional relevante', auto_send: true },
+          { position: 9, delay_hours: 2160, channel: 'whatsapp', tone: 'amigavel', objective: 'Reengajamento gentil após 3 meses', auto_send: false },
+        ],
+      },
+      {
+        name: 'Pós-Consulta — Não Contratou',
+        description: 'Para leads que fizeram consulta mas ainda não fecharam',
+        category: 'LEADS',
+        auto_enroll_stages: ['QUALIFICANDO'],
+        max_attempts: 6,
+        steps: [
+          { position: 1, delay_hours: 24, channel: 'whatsapp', tone: 'amigavel', objective: 'Agradecer pela consulta e manter o contato aberto', auto_send: true },
+          { position: 2, delay_hours: 72, channel: 'email', tone: 'profissional', objective: 'Resumo do que foi discutido e próximos passos sugeridos', auto_send: false },
+          { position: 3, delay_hours: 168, channel: 'whatsapp', tone: 'amigavel', objective: 'Verificar se conseguiu pensar sobre o que foi discutido', auto_send: false },
+          { position: 4, delay_hours: 336, channel: 'whatsapp', tone: 'empatico', objective: 'Verificar objeções e oferecer soluções', auto_send: false },
+          { position: 5, delay_hours: 720, channel: 'email', tone: 'profissional', objective: 'Caso relevante semelhante ou mudança de cenário favorável', auto_send: false },
+          { position: 6, delay_hours: 1440, channel: 'whatsapp', tone: 'amigavel', objective: 'Reengajamento após 2 meses', auto_send: false },
+        ],
+      },
+      {
+        name: 'Cliente Ativo — Manutenção',
+        description: 'Manutenção de relacionamento com clientes com processos ativos',
+        category: 'CLIENTS',
+        auto_enroll_stages: ['FINALIZADO'],
+        max_attempts: 4,
+        steps: [
+          { position: 1, delay_hours: 360, channel: 'whatsapp', tone: 'profissional', objective: 'Atualização quinzenal do andamento processual em linguagem simples', auto_send: false },
+          { position: 2, delay_hours: 360, channel: 'whatsapp', tone: 'profissional', objective: 'Segunda atualização — informar próximos passos', auto_send: false },
+          { position: 3, delay_hours: 360, channel: 'whatsapp', tone: 'empatico', objective: 'Verificar se cliente tem dúvidas ou preocupações', auto_send: false },
+          { position: 4, delay_hours: 360, channel: 'whatsapp', tone: 'amigavel', objective: 'Check-in de relacionamento — manter cliente informado', auto_send: false },
+        ],
+      },
+      {
+        name: 'Cobrança de Honorários',
+        description: 'Sequência de cobrança de honorários em atraso — escalada gradual',
+        category: 'COBRANCA',
+        auto_enroll_stages: [] as string[],
+        max_attempts: 5,
+        steps: [
+          { position: 1, delay_hours: 24, channel: 'whatsapp', tone: 'amigavel', objective: 'Lembrete amigável de pagamento com dados de PIX', auto_send: true, custom_prompt: undefined as string | undefined },
+          { position: 2, delay_hours: 120, channel: 'whatsapp', tone: 'profissional', objective: 'Segundo lembrete, oferecer parcelamento como alternativa', auto_send: false, custom_prompt: undefined as string | undefined },
+          { position: 3, delay_hours: 240, channel: 'email', tone: 'profissional', objective: 'Notificação formal por email, mencionar prazo para regularizar', auto_send: false, custom_prompt: undefined as string | undefined },
+          { position: 4, delay_hours: 360, channel: 'email', tone: 'firme', objective: 'Aviso de possível suspensão de trabalhos por inadimplência', auto_send: false, custom_prompt: undefined as string | undefined },
+          { position: 5, delay_hours: 1080, channel: 'whatsapp', tone: 'firme', objective: 'Última tentativa antes de medidas administrativas', auto_send: false, custom_prompt: 'Esta é a última mensagem antes de encaminhar para providências administrativas. Seja firme mas profissional. Mencione que o prazo para regularização está se esgotando.' },
+        ],
+      },
+    ];
+
+    const created: string[] = [];
+    for (const seq of sequences) {
+      const existing = await this.prisma.followupSequence.findFirst({ where: { name: seq.name } });
+      if (!existing) {
+        const { steps, ...seqData } = seq;
+        const createdSeq = await this.prisma.followupSequence.create({
+          data: {
+            ...seqData,
+            steps: {
+              create: steps.map(({ custom_prompt, ...rest }) => ({
+                ...rest,
+                ...(custom_prompt ? { custom_prompt } : {}),
+              })),
+            },
+          },
+          include: { steps: true },
+        });
+        created.push(createdSeq.name);
+      }
+    }
+
+    return { created, message: `${created.length} sequência(s) padrão criada(s)` };
+  }
 }
