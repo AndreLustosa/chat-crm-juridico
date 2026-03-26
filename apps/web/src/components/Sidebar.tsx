@@ -27,6 +27,7 @@ export function Sidebar() {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
+  const [overdueCount, setOverdueCount] = useState<number>(0);
   const [mounted, setMounted] = useState(false);
 
   // Fixed-position tooltip state (escapes overflow container)
@@ -102,12 +103,42 @@ export function Sidebar() {
     return () => window.removeEventListener('unread_count_update', handler);
   }, []);
 
+  // Overdue tasks badge (atualiza a cada 5 min)
+  useEffect(() => {
+    const fetchOverdue = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`${API_BASE_URL}/tasks?limit=500`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) return;
+        const data = await res.json();
+        const tasks: any[] = data?.data || data || [];
+        const now = new Date();
+        const count = tasks.filter((t: any) =>
+          t.due_at &&
+          new Date(t.due_at) < now &&
+          (t.status === 'A_FAZER' || t.status === 'EM_PROGRESSO')
+        ).length;
+        setOverdueCount(count);
+      } catch { /* silencioso — não bloqueia o sidebar */ }
+    };
+    fetchOverdue();
+    const interval = setInterval(fetchOverdue, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const navItems = [
     { label: 'Dashboard', href: '/atendimento/dashboard', icon: <LayoutDashboard size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/dashboard') },
     { label: 'Inbox (WhatsApp)', href: '/atendimento', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/atendimento' || p.startsWith('/atendimento/chat'), badge: unreadTotal },
     { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm') },
     { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts') },
-    { label: 'Agenda', href: '/atendimento/agenda', icon: <Calendar size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/agenda') },
+    { label: 'Agenda', href: '/atendimento/agenda', icon: <Calendar size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/agenda'), badge: overdueCount },
     { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: <FileEdit size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/advogado') },
     { label: 'Processos', href: '/atendimento/processos', icon: <BookOpen size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/processos') },
 

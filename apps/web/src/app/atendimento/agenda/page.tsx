@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useNextCalendarApp, ScheduleXCalendar } from '@schedule-x/react';
 import { createViewDay, createViewWeek, createViewMonthGrid } from '@schedule-x/calendar';
@@ -86,6 +87,20 @@ const EVENT_STATUSES = [
   { id: 'CANCELADO', label: 'Cancelado', color: '#ef4444' },
   { id: 'ADIADO', label: 'Adiado', color: '#f59e0b' },
 ];
+
+const PRIORITY_COLORS: Record<string, string> = {
+  BAIXA: '#6b7280',
+  NORMAL: '#3b82f6',
+  ALTA: '#f59e0b',
+  URGENTE: '#ef4444',
+};
+
+const PRIORITY_LABELS: Record<string, string> = {
+  BAIXA: 'Baixa',
+  NORMAL: 'Normal',
+  ALTA: 'Alta',
+  URGENTE: 'Urgente',
+};
 
 const REMINDER_OPTIONS = [
   { value: 15, label: '15 minutos antes' },
@@ -337,6 +352,10 @@ export default function AgendaPage() {
   const [searchResults, setSearchResults] = useState<CalendarEvent[]>([]);
   const [showSearch, setShowSearch] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [hoverTooltip, setHoverTooltip] = useState<{ event: CalendarEvent; x: number; y: number } | null>(null);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -984,22 +1003,41 @@ export default function AgendaPage() {
         <div className="px-3 py-2 flex-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Próximos</p>
           {upcomingEvents.length === 0 ? (
-            <p className="text-xs text-muted-foreground py-1">Nenhum evento futuro</p>
+            <div className="flex flex-col items-center gap-2 py-6 text-center">
+              <div className="w-10 h-10 rounded-full bg-accent/50 flex items-center justify-center">
+                <CalendarIcon size={18} className="text-muted-foreground/50" />
+              </div>
+              <p className="text-xs text-muted-foreground">Nenhum evento futuro</p>
+              <button
+                onClick={() => openCreateModal()}
+                className="text-[11px] font-semibold text-primary hover:underline"
+              >
+                + Criar evento
+              </button>
+            </div>
           ) : (
             <div className="space-y-1.5">
               {upcomingEvents.map(ev => {
                 const d = new Date(ev.start_at);
                 const typeColor = getEventColor(ev.type);
+                const priorityColor = PRIORITY_COLORS[ev.priority] ?? '#6b7280';
+                const isOverdue = new Date(ev.start_at) < new Date() && ev.status === 'AGENDADO';
                 return (
                   <button
                     key={ev.id}
                     onClick={() => openEditModal(ev)}
-                    className="w-full text-left p-2 rounded-xl border border-border/40 hover:bg-accent/50 hover:border-border transition-all group"
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setHoverTooltip({ event: ev, x: rect.right + 8, y: rect.top });
+                    }}
+                    onMouseLeave={() => setHoverTooltip(null)}
+                    className="w-full text-left p-2 rounded-xl border border-border/40 hover:bg-accent/50 hover:border-border transition-all group overflow-hidden relative"
+                    style={{ borderLeft: `3px solid ${priorityColor}` }}
                   >
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: typeColor }} />
-                      <span className="text-[10px] text-muted-foreground">
-                        {d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })}
+                      <span className={`text-[10px] ${isOverdue ? 'text-red-400 font-semibold' : 'text-muted-foreground'}`}>
+                        {isOverdue ? '⚠️ ' : ''}{d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })}
                         {' · '}
                         {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                       </span>
@@ -1009,6 +1047,9 @@ export default function AgendaPage() {
                     </p>
                     {ev.lead && (
                       <p className="text-[10px] text-muted-foreground truncate mt-0.5">{ev.lead.name || ev.lead.phone}</p>
+                    )}
+                    {ev.location && (
+                      <p className="text-[10px] text-muted-foreground/70 truncate mt-0.5">📍 {ev.location}</p>
                     )}
                   </button>
                 );
@@ -1069,6 +1110,32 @@ export default function AgendaPage() {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Quick nav chips */}
+          <div className="hidden sm:flex items-center gap-1">
+            <button
+              onClick={() => {
+                const today = new Date().toISOString().slice(0, 10);
+                try { (calendar as any)?.navigate?.(today); } catch {}
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            >
+              Hoje
+            </button>
+            <button
+              onClick={() => {
+                const now = new Date();
+                const day = now.getDay();
+                const diffToMonday = day === 0 ? -6 : 1 - day;
+                const monday = new Date(now);
+                monday.setDate(now.getDate() + diffToMonday);
+                try { (calendar as any)?.navigate?.(monday.toISOString().slice(0, 10)); } catch {}
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            >
+              Semana
+            </button>
           </div>
 
           <div className="flex-1" />
@@ -1143,6 +1210,29 @@ export default function AgendaPage() {
         </div>
 
       </div>{/* fim área principal */}
+
+      {/* ═══ Tooltip de Evento (hover nos Próximos) ═══ */}
+      {mounted && hoverTooltip && createPortal(
+        <div
+          style={{ position: 'fixed', top: hoverTooltip.y, left: hoverTooltip.x, zIndex: 9998, maxWidth: 240 }}
+          className="bg-card border border-border rounded-xl shadow-2xl p-3 pointer-events-none animate-in fade-in-0 zoom-in-95 duration-150"
+        >
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-base">{EVENT_TYPES.find(t => t.id === hoverTooltip.event.type)?.emoji}</span>
+            <span className="text-xs font-bold text-foreground truncate">{hoverTooltip.event.title}</span>
+          </div>
+          <div className="space-y-0.5 text-[11px] text-muted-foreground">
+            <p>🕐 {new Date(hoverTooltip.event.start_at).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+            {hoverTooltip.event.location && <p>📍 {hoverTooltip.event.location}</p>}
+            {hoverTooltip.event.lead && <p>👤 {hoverTooltip.event.lead.name || hoverTooltip.event.lead.phone}</p>}
+            {hoverTooltip.event.assigned_user && <p>⚖️ {hoverTooltip.event.assigned_user.name}</p>}
+            <p style={{ color: PRIORITY_COLORS[hoverTooltip.event.priority] }}>
+              ● {PRIORITY_LABELS[hoverTooltip.event.priority] ?? hoverTooltip.event.priority}
+            </p>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* ═══ Toast de Lembrete ═══ */}
       {reminderToast && (

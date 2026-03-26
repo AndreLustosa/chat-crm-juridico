@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-  Plus, CheckCircle2, Circle, Clock, Loader2, X, ListTodo,
-  ChevronDown, ChevronRight, User,
+  Plus, CheckCircle2, Circle, Clock, Loader2, ListTodo, User, CalendarDays,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -41,6 +41,7 @@ export default function TabTarefas({
   caseId: string;
   lawyerId: string;
 }) {
+  const router = useRouter();
   const [tasks, setTasks] = useState<CaseTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -237,6 +238,15 @@ export default function TabTarefas({
                     )}
                   </div>
                 </div>
+
+                {/* Ver na Agenda */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); router.push('/atendimento/agenda'); }}
+                  className="shrink-0 p-1.5 rounded-lg text-base-content/30 hover:text-primary hover:bg-primary/10 transition-colors"
+                  title="Ver na Agenda"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                </button>
               </div>
             );
           })}
