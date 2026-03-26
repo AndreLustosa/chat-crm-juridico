@@ -9,10 +9,23 @@ export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
   @Get()
-  findAll(@Query('page') page?: string, @Query('limit') limit?: string, @Request() req?: any) {
+  findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('assignedUserId') assignedUserId?: string,
+    @Query('dueFilter') dueFilter?: string,
+    @Query('search') search?: string,
+    @Request() req?: any,
+  ) {
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.tasksService.findAll(req?.user?.tenant_id, p, l);
+    return this.tasksService.findAll(req?.user?.tenant_id, p, l, {
+      status,
+      assignedUserId,
+      dueFilter,
+      search,
+    });
   }
 
   @Get('legal-case/:caseId')

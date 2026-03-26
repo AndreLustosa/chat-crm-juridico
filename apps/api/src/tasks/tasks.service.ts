@@ -25,8 +25,42 @@ export class TasksService {
     }
   }
 
-  async findAll(tenantId?: string, page?: number, limit?: number) {
-    const where = this.tenantWhere(tenantId);
+  async findAll(
+    tenantId?: string,
+    page?: number,
+    limit?: number,
+    filters?: {
+      status?: string;
+      assignedUserId?: string;
+      dueFilter?: string; // 'today' | 'week' | 'overdue'
+      search?: string;
+    },
+  ) {
+    const baseTenant = this.tenantWhere(tenantId);
+    const andClauses: any[] = [baseTenant];
+
+    if (filters?.status && filters.status !== 'all') {
+      andClauses.push({ status: filters.status });
+    }
+    if (filters?.assignedUserId) {
+      andClauses.push({ assigned_user_id: filters.assignedUserId });
+    }
+    if (filters?.search?.trim()) {
+      andClauses.push({ title: { contains: filters.search.trim(), mode: 'insensitive' } });
+    }
+    if (filters?.dueFilter === 'today') {
+      const start = new Date(); start.setHours(0, 0, 0, 0);
+      const end = new Date(); end.setHours(23, 59, 59, 999);
+      andClauses.push({ due_at: { gte: start, lte: end } });
+    } else if (filters?.dueFilter === 'week') {
+      const end = new Date(); end.setDate(end.getDate() + 7); end.setHours(23, 59, 59, 999);
+      andClauses.push({ due_at: { lte: end } });
+    } else if (filters?.dueFilter === 'overdue') {
+      andClauses.push({ due_at: { lt: new Date() }, status: { notIn: ['CONCLUIDA', 'CANCELADA'] } });
+    }
+
+    const where = andClauses.length === 1 ? baseTenant : { AND: andClauses };
+
     const includeOpts = {
       lead: true,
       assigned_user: true,
@@ -38,7 +72,7 @@ export class TasksService {
         this.prisma.task.findMany({
           where,
           include: includeOpts,
-          orderBy: { created_at: 'desc' },
+          orderBy: [{ due_at: 'asc' }, { created_at: 'desc' }],
           skip: (page - 1) * limit,
           take: limit,
         }),
@@ -50,7 +84,7 @@ export class TasksService {
     const data = await this.prisma.task.findMany({
       where,
       include: includeOpts,
-      orderBy: { created_at: 'desc' },
+      orderBy: [{ due_at: 'asc' }, { created_at: 'desc' }],
     });
     return { data, total: data.length, page: 1, limit: data.length };
   }
