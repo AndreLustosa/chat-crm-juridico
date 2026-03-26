@@ -214,15 +214,15 @@ export class DashboardService {
         : Promise.resolve([]),
       // 18. Conversas encerradas hoje
       this.prisma.conversation.count({
-        where: { status: 'FECHADO', updated_at: { gte: startOfToday }, ...tw },
+        where: { status: 'FECHADO', last_message_at: { gte: startOfToday }, ...tw },
       }),
       // 19. Conversas encerradas esta semana
       this.prisma.conversation.count({
-        where: { status: 'FECHADO', updated_at: { gte: startOfWeek }, ...tw },
+        where: { status: 'FECHADO', last_message_at: { gte: startOfWeek }, ...tw },
       }),
       // 20. Conversas encerradas este mês
       this.prisma.conversation.count({
-        where: { status: 'FECHADO', updated_at: { gte: startOfMonth }, ...tw },
+        where: { status: 'FECHADO', last_message_at: { gte: startOfMonth }, ...tw },
       }),
     ]);
 
