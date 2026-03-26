@@ -58,7 +58,18 @@ jobs:
     needs: build-and-push   # só roda após TODOS os builds da matrix concluírem
 
     steps:
+      - name: ⚠️ Verificar secrets SSH
+        id: check
+        run: |
+          if [ -z "${{ secrets.VPS_HOST }}" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Secret VPS_HOST não configurado — deploy na VPS ignorado. Configure em Settings > Secrets > Actions."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: 🚀 SSH → Pull e atualizar serviços no Swarm
+        if: steps.check.outputs.skip == 'false'
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
