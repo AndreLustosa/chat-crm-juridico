@@ -364,6 +364,64 @@ export default function AgendaPage() {
   const [hoverTooltip, setHoverTooltip] = useState<{ event: CalendarEvent; x: number; y: number } | null>(null);
   const [kanbanView, setKanbanView] = useState(false);
 
+  // ─── openCreateModal — definido ANTES dos useEffects e callbacks que o usam ──
+  // useCallback com [currentUserId] para evitar stale closure no atalho de teclado
+  const openCreateModal = useCallback((dateTime?: string) => {
+    const now = new Date();
+    let date: string;
+    let time: string;
+
+    if (dateTime) {
+      // schedule-x pode enviar "YYYY-MM-DD HH:mm" ao clicar na célula da grid
+      const parts = dateTime.split(' ');
+      date = parts[0] || formatDateInput(now.toISOString());
+      if (parts[1]) {
+        // Arredondar minutos para múltiplo de 30 (grid de 30min)
+        const [hh, mm] = parts[1].substring(0, 5).split(':').map(Number);
+        const roundedMin = Math.round(mm / 30) * 30;
+        const finalH = roundedMin >= 60 ? Math.min(hh + 1, 23) : hh;
+        const finalM = roundedMin >= 60 ? 0 : roundedMin;
+        time = `${String(finalH).padStart(2, '0')}:${String(finalM).padStart(2, '0')}`;
+      } else {
+        time = formatTimeInput(now.toISOString());
+      }
+    } else {
+      date = formatDateInput(now.toISOString());
+      time = formatTimeInput(now.toISOString());
+    }
+
+    const [h, m] = time.split(':').map(Number);
+    // Duração padrão: 30 min (compatível com grid de 30min)
+    const endMinTotal = h * 60 + m + 30;
+    const endH = String(Math.min(Math.floor(endMinTotal / 60), 23)).padStart(2, '0');
+    const endM = String(endMinTotal % 60).padStart(2, '0');
+
+    setFormData({
+      type: 'CONSULTA',
+      title: '',
+      description: '',
+      date,
+      startTime: time,
+      endTime: `${endH}:${endM}`,
+      all_day: false,
+      priority: 'NORMAL',
+      location: '',
+      assigned_user_id: currentUserId,
+      lead_id: '',
+      legal_case_id: '',
+      reminders: [{ minutes_before: 30, channel: 'WHATSAPP' }],
+      recurrence_rule: '',
+      recurrence_end: '',
+      recurrence_days: [],
+    });
+    setEditingEvent(null);
+    setEventComments([]);
+    setNewComment('');
+    setConflictWarning([]);
+    setShowModal(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId]);
+
   useEffect(() => { setMounted(true); }, []);
 
   // Atalho de teclado: 'N' abre modal de criação
@@ -631,62 +689,6 @@ export default function AgendaPage() {
   }, [fetchEvents]);
 
   // ─── Modal Handlers ─────────────────────────────────
-
-  const openCreateModal = useCallback((dateTime?: string) => {
-    const now = new Date();
-    let date: string;
-    let time: string;
-
-    if (dateTime) {
-      // schedule-x pode enviar "YYYY-MM-DD HH:mm" ao clicar na célula da grid
-      const parts = dateTime.split(' ');
-      date = parts[0] || formatDateInput(now.toISOString());
-      if (parts[1]) {
-        // Arredondar minutos para múltiplo de 30 (grid de 30min)
-        const [hh, mm] = parts[1].substring(0, 5).split(':').map(Number);
-        const roundedMin = Math.round(mm / 30) * 30;
-        const finalH = roundedMin >= 60 ? Math.min(hh + 1, 23) : hh;
-        const finalM = roundedMin >= 60 ? 0 : roundedMin;
-        time = `${String(finalH).padStart(2, '0')}:${String(finalM).padStart(2, '0')}`;
-      } else {
-        time = formatTimeInput(now.toISOString());
-      }
-    } else {
-      date = formatDateInput(now.toISOString());
-      time = formatTimeInput(now.toISOString());
-    }
-
-    const [h, m] = time.split(':').map(Number);
-    // Duração padrão: 30 min (compatível com grid de 30min)
-    const endMinTotal = h * 60 + m + 30;
-    const endH = String(Math.min(Math.floor(endMinTotal / 60), 23)).padStart(2, '0');
-    const endM = String(endMinTotal % 60).padStart(2, '0');
-
-    setFormData({
-      type: 'CONSULTA',
-      title: '',
-      description: '',
-      date,
-      startTime: time,
-      endTime: `${endH}:${endM}`,
-      all_day: false,
-      priority: 'NORMAL',
-      location: '',
-      assigned_user_id: currentUserId,
-      lead_id: '',
-      legal_case_id: '',
-      reminders: [{ minutes_before: 30, channel: 'WHATSAPP' }],
-      recurrence_rule: '',
-      recurrence_end: '',
-      recurrence_days: [],
-    });
-    setEditingEvent(null);
-    setEventComments([]);
-    setNewComment('');
-    setConflictWarning([]);
-    setShowModal(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUserId]);
 
   const openEditModal = (ev: CalendarEvent) => {
     setFormData({
