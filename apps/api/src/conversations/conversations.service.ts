@@ -57,7 +57,7 @@ export class ConversationsService {
         where,
         orderBy: { last_message_at: 'desc' },
         include: {
-          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true } },
+          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true } },
           messages: { orderBy: { created_at: 'desc' }, take: 1, include: { media: true } },
           assigned_user: { select: { id: true, name: true } },
           tasks: {
@@ -108,6 +108,7 @@ export class ConversationsService {
       originAssignedUserId: (c as any).origin_assigned_user_id || null,
       originAssignedUserName: (c as any).origin_assigned_user_id ? (userNameMap[(c as any).origin_assigned_user_id] || null) : null,
       leadStage: c.lead?.stage || null,
+      leadTags: (c.lead as any)?.tags || [],
       stageEnteredAt: (c.lead as any)?.stage_entered_at?.toISOString() || null,
       nextStep: (c as any).next_step || null,
       activeTask: (c as any).tasks?.[0] ? {

@@ -26,6 +26,7 @@ export interface ConversationSummary {
   originAssignedUserId?: string | null;
   originAssignedUserName?: string | null;
   leadStage?: string | null;
+  leadTags?: string[];
   stageEnteredAt?: string | null;
   nextStep?: string | null;
   activeTask?: ActiveTask | null;

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, MessageSquare, Bot, ArrowRightLeft, XCircle, Clock } from 'lucide-react';
+import { Search, MessageSquare, Bot, ArrowRightLeft, XCircle, Clock, Kanban, Calendar, Settings, User, Loader2, ExternalLink } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import api from '@/lib/api';
 import type { ConversationSummary } from '../types';
 
 interface CommandPaletteProps {
@@ -15,14 +17,29 @@ interface CommandPaletteProps {
   onCloseConversation: () => void;
 }
 
+interface LeadResult {
+  id: string;
+  name: string | null;
+  phone: string;
+  conversationId?: string | null;
+}
+
 interface PaletteItem {
   id: string;
-  type: 'conversation' | 'action';
+  type: 'conversation' | 'action' | 'lead' | 'nav';
   label: string;
   sublabel?: string;
   icon: React.ReactNode;
   onSelect: () => void;
 }
+
+// ─── Ações de navegação global ───────────────────────────────────────────────
+const NAV_ACTIONS = [
+  { id: 'nav-crm',      label: 'Ir para CRM',       sublabel: 'Pipeline de leads',     href: '/atendimento/crm',      icon: <Kanban size={14} className="text-violet-400" /> },
+  { id: 'nav-agenda',   label: 'Ir para Agenda',    sublabel: 'Compromissos e prazos',  href: '/atendimento/agenda',   icon: <Calendar size={14} className="text-blue-400" /> },
+  { id: 'nav-contacts', label: 'Ir para Contatos',  sublabel: 'Lista de leads',         href: '/atendimento/contacts', icon: <User size={14} className="text-emerald-400" /> },
+  { id: 'nav-settings', label: 'Configurações',     sublabel: 'WhatsApp, IA, CRM...',   href: '/atendimento/settings', icon: <Settings size={14} className="text-muted-foreground" /> },
+];
 
 export function CommandPalette({
   open,
@@ -34,23 +51,59 @@ export function CommandPalette({
   onOpenTransferModal,
   onCloseConversation,
 }: CommandPaletteProps) {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [leadResults, setLeadResults] = useState<LeadResult[]>([]);
+  const [searchingLeads, setSearchingLeads] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Build items list
+  const q = query.toLowerCase().trim();
+
+  // ─── Busca global de leads via API ──────────────────────────────────────────
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (q.length < 3) {
+      setLeadResults([]);
+      setSearchingLeads(false);
+      return;
+    }
+
+    setSearchingLeads(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await api.get('/leads', { params: { search: q, limit: 6 } });
+        const data = res.data?.data ?? res.data ?? [];
+        setLeadResults(
+          data.map((l: any) => ({
+            id: l.id,
+            name: l.name,
+            phone: l.phone,
+            conversationId: l.conversations?.[0]?.id ?? null,
+          }))
+        );
+      } catch {
+        setLeadResults([]);
+      } finally {
+        setSearchingLeads(false);
+      }
+    }, 280);
+
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [q]);
+
+  // ─── Montar lista de itens ────────────────────────────────────────────────
   const items: PaletteItem[] = [];
 
-  // Recent conversations
+  // Recent conversations (when no query)
   const recentIds: string[] = (() => {
     try { return JSON.parse(sessionStorage.getItem('recent_convs') || '[]'); } catch { return []; }
   })();
 
-  const q = query.toLowerCase().trim();
-
   if (!q) {
-    // Show recent conversations when no query
     const recentConvs = recentIds
       .map(id => conversations.find(c => c.id === id))
       .filter((c): c is ConversationSummary => !!c)
@@ -67,11 +120,11 @@ export function CommandPalette({
       });
     });
   } else {
-    // Filter conversations by query
+    // Local conversation search
     const filtered = conversations.filter(c =>
       c.contactName.toLowerCase().includes(q) ||
       c.contactPhone.toLowerCase().includes(q)
-    ).slice(0, 10);
+    ).slice(0, 8);
 
     filtered.forEach(conv => {
       items.push({
@@ -81,6 +134,27 @@ export function CommandPalette({
         sublabel: conv.contactPhone,
         icon: <MessageSquare size={14} className="text-muted-foreground/60" />,
         onSelect: () => onSelectConversation(conv.id),
+      });
+    });
+
+    // Lead results from API (exclude those already in local conversations)
+    const localIds = new Set(conversations.map(c => c.leadId));
+    const uniqueLeads = leadResults.filter(l => !localIds.has(l.id));
+    uniqueLeads.forEach(lead => {
+      items.push({
+        id: `lead-${lead.id}`,
+        type: 'lead',
+        label: lead.name || lead.phone,
+        sublabel: lead.name ? lead.phone : 'Lead sem conversa ativa',
+        icon: <ExternalLink size={14} className="text-amber-400/70" />,
+        onSelect: () => {
+          if (lead.conversationId) {
+            onSelectConversation(lead.conversationId);
+          } else {
+            router.push(`/atendimento/crm`);
+          }
+          onClose();
+        },
       });
     });
   }
@@ -112,29 +186,38 @@ export function CommandPalette({
       },
     ];
 
-    // Filter actions by query if there is one
-    const filteredActions = q
-      ? actions.filter(a => a.label.toLowerCase().includes(q))
-      : actions;
-
+    const filteredActions = q ? actions.filter(a => a.label.toLowerCase().includes(q)) : actions;
     items.push(...filteredActions);
   }
 
-  // Clamp selected index
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [query]);
+  // Navigation actions
+  const filteredNav = q
+    ? NAV_ACTIONS.filter(n => n.label.toLowerCase().includes(q) || n.sublabel.toLowerCase().includes(q))
+    : NAV_ACTIONS;
 
-  // Auto-focus input
+  filteredNav.forEach(n => {
+    items.push({
+      id: n.id,
+      type: 'nav',
+      label: n.label,
+      sublabel: n.sublabel,
+      icon: n.icon,
+      onSelect: () => { router.push(n.href); onClose(); },
+    });
+  });
+
+  // ─── Keyboard & scroll ───────────────────────────────────────────────────
+  useEffect(() => { setSelectedIndex(0); }, [query]);
+
   useEffect(() => {
     if (open) {
       setQuery('');
       setSelectedIndex(0);
+      setLeadResults([]);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
 
-  // Scroll selected item into view
   useEffect(() => {
     if (!listRef.current) return;
     const el = listRef.current.children[selectedIndex] as HTMLElement | undefined;
@@ -160,7 +243,40 @@ export function CommandPalette({
   if (!open) return null;
 
   const convItems = items.filter(i => i.type === 'conversation');
+  const leadItems = items.filter(i => i.type === 'lead');
   const actionItems = items.filter(i => i.type === 'action');
+  const navItems = items.filter(i => i.type === 'nav');
+
+  const renderItem = (item: PaletteItem) => {
+    const globalIdx = items.indexOf(item);
+    return (
+      <button
+        key={item.id}
+        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+          globalIdx === selectedIndex ? 'bg-accent' : 'hover:bg-accent/50'
+        }`}
+        onMouseEnter={() => setSelectedIndex(globalIdx)}
+        onClick={item.onSelect}
+      >
+        {item.icon}
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-medium truncate">{item.label}</p>
+          {item.sublabel && (
+            <p className="text-[11px] text-muted-foreground truncate">{item.sublabel}</p>
+          )}
+        </div>
+        {item.type === 'action' && item.sublabel && (
+          <span className="text-[10px] text-muted-foreground font-mono shrink-0">{item.sublabel}</span>
+        )}
+      </button>
+    );
+  };
+
+  const SectionHeader = ({ label }: { label: string }) => (
+    <div className="px-4 pt-3 pb-1">
+      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{label}</span>
+    </div>
+  );
 
   return (
     <div
@@ -180,81 +296,57 @@ export function CommandPalette({
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Buscar conversa ou acao..."
+            placeholder="Buscar conversa, lead ou ação…"
             className="flex-1 bg-transparent outline-none text-sm text-foreground placeholder:text-muted-foreground/60"
           />
+          {searchingLeads && <Loader2 size={14} className="animate-spin text-muted-foreground/60 shrink-0" />}
           <kbd className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded border border-border font-mono">
             ESC
           </kbd>
         </div>
 
         {/* Results */}
-        <div ref={listRef} className="max-h-[50vh] overflow-y-auto py-1">
-          {items.length === 0 && (
+        <div ref={listRef} className="max-h-[55vh] overflow-y-auto py-1">
+          {items.length === 0 && !searchingLeads && (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               Nenhum resultado encontrado
             </div>
           )}
+          {searchingLeads && leadItems.length === 0 && convItems.length === 0 && (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin" /> Buscando leads…
+            </div>
+          )}
 
-          {/* Conversations section */}
+          {/* Conversas abertas */}
           {convItems.length > 0 && (
             <>
-              <div className="px-4 pt-2 pb-1">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  {q ? 'Conversas' : 'Recentes'}
-                </span>
-              </div>
-              {convItems.map((item) => {
-                const globalIdx = items.indexOf(item);
-                return (
-                  <button
-                    key={item.id}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                      globalIdx === selectedIndex ? 'bg-accent' : 'hover:bg-accent/50'
-                    }`}
-                    onMouseEnter={() => setSelectedIndex(globalIdx)}
-                    onClick={item.onSelect}
-                  >
-                    {item.icon}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium truncate">{item.label}</p>
-                      {item.sublabel && (
-                        <p className="text-[11px] text-muted-foreground truncate">{item.sublabel}</p>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+              <SectionHeader label={q ? 'Conversas abertas' : 'Recentes'} />
+              {convItems.map(renderItem)}
             </>
           )}
 
-          {/* Actions section */}
+          {/* Leads do banco */}
+          {leadItems.length > 0 && (
+            <>
+              <SectionHeader label="Leads encontrados" />
+              {leadItems.map(renderItem)}
+            </>
+          )}
+
+          {/* Ações rápidas */}
           {actionItems.length > 0 && (
             <>
-              <div className="px-4 pt-3 pb-1">
-                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Acoes rapidas
-                </span>
-              </div>
-              {actionItems.map((item) => {
-                const globalIdx = items.indexOf(item);
-                return (
-                  <button
-                    key={item.id}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                      globalIdx === selectedIndex ? 'bg-accent' : 'hover:bg-accent/50'
-                    }`}
-                    onMouseEnter={() => setSelectedIndex(globalIdx)}
-                    onClick={item.onSelect}
-                  >
-                    {item.icon}
-                    <span className="text-[13px] font-medium flex-1">{item.label}</span>
-                    {item.sublabel && (
-                      <span className="text-[10px] text-muted-foreground font-mono">{item.sublabel}</span>
-                    )}
-                  </button>
-                );
-              })}
+              <SectionHeader label="Ações rápidas" />
+              {actionItems.map(renderItem)}
+            </>
+          )}
+
+          {/* Navegação */}
+          {navItems.length > 0 && (
+            <>
+              <SectionHeader label="Navegar para" />
+              {navItems.map(renderItem)}
             </>
           )}
         </div>
@@ -264,6 +356,7 @@ export function CommandPalette({
           <span>↑↓ navegar</span>
           <span>↵ selecionar</span>
           <span>esc fechar</span>
+          <span className="ml-auto">? atalhos</span>
         </div>
       </div>
     </div>

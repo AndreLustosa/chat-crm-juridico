@@ -431,6 +431,22 @@ export function InboxSidebar({
                           )}
                         </div>
                       )}
+                      {/* Etiquetas do lead */}
+                      {conv.leadTags && conv.leadTags.length > 0 && (
+                        <div className="mb-1 flex items-center gap-1 flex-wrap">
+                          {conv.leadTags.slice(0, 3).map(tag => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary/80 border border-primary/20"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          {conv.leadTags.length > 3 && (
+                            <span className="text-[9px] text-muted-foreground/60">+{conv.leadTags.length - 3}</span>
+                          )}
+                        </div>
+                      )}
                       {conv.status === 'ADIADO' && conv.activeTask && (() => {
                         const isOverdue = conv.activeTask.dueAt ? new Date(conv.activeTask.dueAt) < new Date() : false;
                         return (

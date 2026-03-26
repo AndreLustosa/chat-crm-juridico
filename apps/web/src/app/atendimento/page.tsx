@@ -27,6 +27,7 @@ import type { ConversationSummary, MessageItem } from './types';
 import { MessageBubble } from './components/MessageBubble';
 import { TransferModals } from './components/TransferModals';
 import { CommandPalette } from './components/CommandPalette';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import ContratoTrabalhistaModal from '@/components/modals/ContratoTrabalhistaModal';
 import { InboxSidebar } from './components/InboxSidebar';
 import { ChatHeader } from './components/ChatHeader';
@@ -162,8 +163,9 @@ export default function Dashboard() {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const mobileMoreRef = useRef<HTMLDivElement>(null);
-  // Command palette (Ctrl+K)
+  // Command palette (Ctrl+K) e atalhos (?)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Desktop notification banner (show only if permission is 'default' and user hasn't dismissed)
   const [showNotifBanner, setShowNotifBanner] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
@@ -411,8 +413,16 @@ export default function Dashboard() {
         return;
       }
 
+      // ?: abrir overlay de atalhos (apenas fora de inputs)
+      if (e.key === '?' && !isInputFocused && !commandPaletteOpen) {
+        e.preventDefault();
+        setShortcutsOpen(prev => !prev);
+        return;
+      }
+
       // Escape: close modals in cascade
       if (e.key === 'Escape') {
+        if (shortcutsOpen) { setShortcutsOpen(false); return; }
         if (commandPaletteOpen) { setCommandPaletteOpen(false); return; }
         if (lightbox) { setLightbox(null); return; }
         if (docPreview) { setDocPreview(null); return; }
@@ -3075,6 +3085,12 @@ export default function Dashboard() {
           onCloseConversation={handleClose}
         />
       )}
+
+      {/* Overlay de atalhos de teclado (?) */}
+      <KeyboardShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
 
       {/* Slash command picker — portal para evitar clipping por overflow-hidden */}
       {slashMenuPos && typeof document !== 'undefined' && createPortal(
