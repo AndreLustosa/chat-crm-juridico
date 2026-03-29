@@ -231,10 +231,26 @@ export class DjenService {
           const classification = classifyPublication(tipoComunicacao, assunto, conteudo);
           if (classification) {
             try {
+              const taskTitle = `[DJEN] ${classification.taskTitle}`;
+
+              // Evitar duplicatas: verificar se já existe tarefa idêntica nas últimas 48h
+              const recent = await this.prisma.calendarEvent.findFirst({
+                where: {
+                  legal_case_id: legalCase.id,
+                  title: taskTitle,
+                  created_at: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) },
+                },
+                select: { id: true },
+              });
+              if (recent) {
+                this.logger.log(`[DJEN] Tarefa duplicada ignorada: "${taskTitle}" (caso ${legalCase.id})`);
+                continue;
+              }
+
               const dueAt = addBusinessDays(dataDisp, classification.dueDays);
               await this.calendarService.create({
                 type: 'TAREFA',
-                title: `[DJEN] ${classification.taskTitle}`,
+                title: taskTitle,
                 description: classification.taskDescription,
                 start_at: dueAt.toISOString(),
                 end_at: new Date(dueAt.getTime() + 30 * 60000).toISOString(),
