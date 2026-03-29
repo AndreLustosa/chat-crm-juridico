@@ -392,14 +392,18 @@ export class LegalCasesService {
     filed_at?: string;
   }) {
     const VALID_TRACKING = TRACKING_STAGES.map(s => s.id);
-    const trackingStage = data.tracking_stage && VALID_TRACKING.includes(data.tracking_stage)
-      ? data.tracking_stage
-      : 'DISTRIBUIDO';
+    const trackingStage = (
+      data.tracking_stage && VALID_TRACKING.includes(data.tracking_stage)
+        ? data.tracking_stage
+        : 'DISTRIBUIDO'
+    ) as string;
 
     const VALID_PRIORITIES = ['URGENTE', 'NORMAL', 'BAIXA'];
-    const priority = data.priority && VALID_PRIORITIES.includes(data.priority)
-      ? data.priority
-      : 'NORMAL';
+    const priority = (
+      data.priority && VALID_PRIORITIES.includes(data.priority)
+        ? data.priority
+        : 'NORMAL'
+    ) as string;
 
     // Cria ou reutiliza um Lead placeholder baseado na parte contrária
     // Usa um telefone fictício único para não conflitar com @unique
