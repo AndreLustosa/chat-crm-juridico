@@ -169,6 +169,11 @@ export class LegalCasesController {
     return this.service.findEvents(id);
   }
 
+  @Post(':id/briefing')
+  generateBriefing(@Param('id') id: string, @Request() req: any) {
+    return this.service.generateBriefing(id, req.user?.tenant_id);
+  }
+
   @Delete('events/:eventId')
   deleteEvent(@Param('eventId') eventId: string) {
     return this.service.deleteEvent(eventId);

@@ -4,6 +4,7 @@ import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
+import OpenAI from 'openai';
 
 @Injectable()
 export class LegalCasesService {
@@ -513,5 +514,115 @@ export class LegalCasesService {
 
   getTrackingStages() {
     return TRACKING_STAGES;
+  }
+
+  // ─── CASE BRIEFING IA ─────────────────────────────────────────────────────
+
+  async generateBriefing(id: string, tenantId?: string): Promise<{ briefing: string }> {
+    await this.verifyTenantOwnership(id, tenantId);
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new BadRequestException('OPENAI_API_KEY não configurada. Configure a variável de ambiente para usar o Briefing IA.');
+    }
+
+    const legalCase: any = await this.prisma.legalCase.findUnique({
+      where: { id },
+      include: {
+        lead: {
+          include: {
+            memory: { select: { summary: true } },
+            ficha_trabalhista: { select: { completion_pct: true, finalizado: true } },
+          },
+        },
+        lawyer: { select: { name: true } },
+        deadlines: {
+          where: { completed: false },
+          orderBy: { due_at: 'asc' },
+          take: 5,
+          select: { title: true, due_at: true, type: true, completed: true },
+        },
+        tasks: {
+          where: { status: { not: 'CONCLUIDA' } },
+          orderBy: { due_at: 'asc' },
+          take: 5,
+          select: { title: true, due_at: true, status: true },
+        },
+        djen_publications: {
+          orderBy: { data_disponibilizacao: 'desc' },
+          take: 3,
+          select: { tipo_comunicacao: true, data_disponibilizacao: true, assunto: true },
+        },
+        documents: {
+          take: 5,
+          orderBy: { created_at: 'desc' },
+          select: { name: true, created_at: true },
+        },
+      },
+    });
+
+    if (!legalCase) throw new NotFoundException('Caso não encontrado');
+
+    const fmtDate = (d: any) => d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+    const fmtBRL = (v: any) => v != null ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v) : '—';
+
+    const context = `
+CASO JURÍDICO — BRIEFING SOLICITADO EM ${new Date().toLocaleDateString('pt-BR')}
+
+IDENTIFICAÇÃO
+- Cliente: ${legalCase.lead?.name || 'Não informado'}
+- Telefone: ${legalCase.lead?.phone || '—'}
+- Advogado responsável: ${legalCase.lawyer?.name || '—'}
+- Número do processo: ${legalCase.case_number || 'Não distribuído'}
+- Área jurídica: ${legalCase.legal_area || '—'}
+- Tipo de ação: ${legalCase.action_type || '—'}
+- Vara/Tribunal: ${legalCase.court || '—'}
+- Parte contrária: ${legalCase.opposing_party || '—'}
+- Juiz/Desembargador: ${legalCase.judge || '—'}
+- Valor da causa: ${fmtBRL(legalCase.claim_value)}
+- Estágio atual: ${legalCase.stage}
+- Acompanhamento processual: ${legalCase.in_tracking ? `Sim (${legalCase.tracking_stage || '—'})` : 'Não'}
+- Data de abertura: ${fmtDate(legalCase.created_at)}
+
+MEMÓRIA DA IA (histórico de conversas com o cliente):
+${legalCase.lead?.memory?.summary || 'Sem memória registrada'}
+
+NOTAS INTERNAS:
+${legalCase.notes || 'Sem anotações'}
+
+PRAZOS PENDENTES (${legalCase.deadlines?.length || 0}):
+${legalCase.deadlines?.map((d: any) => `- ${d.title} | Vence: ${fmtDate(d.due_at)} | Tipo: ${d.type}`).join('\n') || 'Nenhum prazo pendente'}
+
+TAREFAS ABERTAS (${legalCase.tasks?.length || 0}):
+${legalCase.tasks?.map((t: any) => `- ${t.title} | Status: ${t.status}${t.due_at ? ` | Prazo: ${fmtDate(t.due_at)}` : ''}`).join('\n') || 'Nenhuma tarefa aberta'}
+
+ÚLTIMAS PUBLICAÇÕES DJEN:
+${legalCase.djen_publications?.map((d: any) => `- ${d.tipo_comunicacao || 'Publicação'} | ${fmtDate(d.data_disponibilizacao)}${d.assunto ? ` | ${d.assunto}` : ''}`).join('\n') || 'Nenhuma publicação'}
+
+DOCUMENTOS RECENTES:
+${legalCase.documents?.map((d: any) => `- ${d.name} (${fmtDate(d.created_at)})`).join('\n') || 'Nenhum documento'}
+
+FICHA TRABALHISTA: ${legalCase.lead?.ficha_trabalhista ? `${legalCase.lead.ficha_trabalhista.completion_pct}% preenchida${legalCase.lead.ficha_trabalhista.finalizado ? ' (finalizada)' : ''}` : 'Não aplicável'}
+`.trim();
+
+    const openai = new OpenAI({ apiKey });
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.3,
+      messages: [
+        {
+          role: 'system',
+          content: `Você é um assistente jurídico especializado. Gere briefings de casos concisos e bem estruturados para advogados brasileiros. Use linguagem profissional e direta. Formate em seções claras usando markdown simples (## para títulos, - para listas). Seja objetivo — máximo 400 palavras.`,
+        },
+        {
+          role: 'user',
+          content: `Com base nas informações abaixo, gere um briefing estruturado do caso incluindo: (1) Resumo executivo, (2) Situação atual, (3) Próximos passos prioritários, (4) Pontos de atenção/riscos.\n\n${context}`,
+        },
+      ],
+    });
+
+    const briefing = completion.choices[0]?.message?.content || 'Não foi possível gerar o briefing.';
+    return { briefing };
   }
 }

@@ -1232,8 +1232,28 @@ export default function ProcessosPage() {
         </header>
 
         {loading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-muted-foreground text-sm animate-pulse">Carregando processos…</div>
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="bg-card border border-border rounded-xl p-4 animate-pulse">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-9 h-9 rounded-full bg-muted shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 bg-muted rounded w-3/4" />
+                      <div className="h-2.5 bg-muted rounded w-1/2" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-2.5 bg-muted rounded w-full" />
+                    <div className="h-2.5 bg-muted rounded w-5/6" />
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <div className="h-5 bg-muted rounded-full w-16" />
+                    <div className="h-5 bg-muted rounded-full w-20" />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : view === 'archived' ? (
           /* ─── Archived list ─── */
