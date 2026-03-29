@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
+import { GlobalCommandPalette, useGlobalCommandPalette } from './components/GlobalCommandPalette';
 import {
   MessageSquare, Briefcase, Users, Check, FileEdit, BookOpen,
   Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar,
@@ -22,6 +23,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   const router = useRouter();
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
+  const { open: cmdOpen, setOpen: setCmdOpen } = useGlobalCommandPalette();
 
   // Mobile states
   const [isMobile, setIsMobile] = useState(false);
@@ -139,6 +141,9 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
       <main className="flex-1 overflow-hidden">
         {children}
       </main>
+
+      {/* ─── Global Command Palette (Ctrl+K) ────────────────── */}
+      <GlobalCommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
 
       {/* ─── Mobile Bottom Nav (fixed) ──────────────────────── */}
       {showBottomNav && (
