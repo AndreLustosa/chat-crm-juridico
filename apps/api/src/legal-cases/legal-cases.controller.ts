@@ -104,6 +104,31 @@ export class LegalCasesController {
     });
   }
 
+  /** Cadastro direto de processo já em andamento (sem conversa WhatsApp) */
+  @Post('direct')
+  createDirect(
+    @Body() body: {
+      case_number: string;
+      legal_area?: string;
+      action_type?: string;
+      opposing_party?: string;
+      claim_value?: number;
+      court?: string;
+      judge?: string;
+      tracking_stage?: string;
+      priority?: string;
+      notes?: string;
+      filed_at?: string;
+    },
+    @Request() req: any,
+  ) {
+    return this.service.createDirect({
+      ...body,
+      lawyer_id: req.user.id,
+      tenant_id: req.user.tenant_id,
+    });
+  }
+
   @Patch(':id/stage')
   updateStage(@Param('id') id: string, @Body('stage') stage: string, @Request() req: any) {
     return this.service.updateStage(id, stage, req.user.id, req.user?.tenant_id);
@@ -165,12 +190,12 @@ export class LegalCasesController {
   }
 
   @Get(':id/events')
-  findEvents(@Param('id') id: string) {
-    return this.service.findEvents(id);
+  findEvents(@Param('id') id: string, @Request() req: any) {
+    return this.service.findEvents(id, req.user?.tenant_id);
   }
 
   @Delete('events/:eventId')
-  deleteEvent(@Param('eventId') eventId: string) {
-    return this.service.deleteEvent(eventId);
+  deleteEvent(@Param('eventId') eventId: string, @Request() req: any) {
+    return this.service.deleteEvent(eventId, req.user?.tenant_id);
   }
 }

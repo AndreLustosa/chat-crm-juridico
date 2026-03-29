@@ -6,7 +6,7 @@ import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Clock, Archive, ArchiveRestore, Send,
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, Bell, RefreshCcw, BookOpen,
-  LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown,
+  LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown, FolderPlus,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { TRACKING_STAGES, findTrackingStage } from '@/lib/legalStages';
@@ -328,7 +328,7 @@ function ProcessoDetailPanel({
   const [priority, setPriority] = useState(legalCase.priority || 'NORMAL');
   const [opposingParty, setOpposingParty] = useState(legalCase.opposing_party || '');
   const [actionType, setActionType] = useState(legalCase.action_type || '');
-  const [claimValue, setClaimValue] = useState(legalCase.claim_value || '');
+  const [claimValue, setClaimValue] = useState(legalCase.claim_value ? String(legalCase.claim_value) : '');
   const [judge, setJudge] = useState(legalCase.judge || '');
 
   // Archive
@@ -421,7 +421,7 @@ function ProcessoDetailPanel({
         priority !== (legalCase.priority || 'NORMAL') ||
         opposingParty !== (legalCase.opposing_party || '') ||
         actionType !== (legalCase.action_type || '') ||
-        claimValue !== (legalCase.claim_value || '') ||
+        claimValue !== (legalCase.claim_value ? String(legalCase.claim_value) : '') ||
         judge !== (legalCase.judge || '') ||
         court !== (legalCase.court || '') ||
         notes !== (legalCase.notes || '') ||
@@ -1145,6 +1145,274 @@ function ProcessoDetailPanel({
   );
 }
 
+// ─── Modal Cadastrar Processo Existente ────────────────────────
+
+const LEGAL_AREAS_LIST = [
+  'Trabalhista', 'Cível', 'Criminal', 'Previdenciário',
+  'Tributário', 'Consumidor', 'Família', 'Administrativo',
+];
+
+function CadastrarProcessoModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [caseNumber, setCaseNumber] = useState('');
+  const [legalArea, setLegalArea] = useState('');
+  const [actionType, setActionType] = useState('');
+  const [opposingParty, setOpposingParty] = useState('');
+  const [court, setCourt] = useState('');
+  const [judge, setJudge] = useState('');
+  const [claimValue, setClaimValue] = useState('');
+  const [trackingStage, setTrackingStage] = useState('DISTRIBUIDO');
+  const [priority, setPriority] = useState('NORMAL');
+  const [notes, setNotes] = useState('');
+  const [filedAt, setFiledAt] = useState('');
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Máscara CNJ: 0000000-00.0000.0.00.0000
+  const handleCaseNumberChange = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 20);
+    let masked = digits;
+    if (digits.length > 7)  masked = digits.slice(0,7) + '-' + digits.slice(7);
+    if (digits.length > 9)  masked = masked.slice(0,10) + '.' + digits.slice(9);
+    if (digits.length > 13) masked = masked.slice(0,15) + '.' + digits.slice(13);
+    if (digits.length > 14) masked = masked.slice(0,17) + '.' + digits.slice(14);
+    if (digits.length > 16) masked = masked.slice(0,20) + '.' + digits.slice(16);
+    setCaseNumber(masked);
+  };
+
+  const handleSubmit = async () => {
+    if (!caseNumber.trim()) { setError('Informe o número do processo.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.post('/legal-cases/direct', {
+        case_number: caseNumber.trim(),
+        legal_area: legalArea || undefined,
+        action_type: actionType || undefined,
+        opposing_party: opposingParty || undefined,
+        court: court || undefined,
+        judge: judge || undefined,
+        claim_value: claimValue ? parseFloat(claimValue) : undefined,
+        tracking_stage: trackingStage,
+        priority,
+        notes: notes || undefined,
+        filed_at: filedAt || undefined,
+      });
+      onSuccess();
+      onClose();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao cadastrar processo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full max-w-[640px] mx-4 bg-card border border-border rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-150">
+
+        {/* Header */}
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-border shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+            <FolderPlus size={18} className="text-primary" />
+          </div>
+          <div className="flex-1">
+            <h2 className="text-base font-bold text-foreground">Cadastrar Processo em Andamento</h2>
+            <p className="text-[11px] text-muted-foreground">Para processos que já existem no tribunal</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+
+          {/* Nº Processo */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+              Nº Processo CNJ <span className="text-destructive">*</span>
+            </label>
+            <input
+              type="text"
+              value={caseNumber}
+              onChange={e => handleCaseNumberChange(e.target.value)}
+              className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
+              placeholder="0000000-00.0000.0.00.0000"
+              autoFocus
+            />
+          </div>
+
+          {/* Etapa atual + Prioridade */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Etapa Atual</label>
+              <select
+                value={trackingStage}
+                onChange={e => setTrackingStage(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                {TRACKING_STAGES.map(s => (
+                  <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Prioridade</label>
+              <select
+                value={priority}
+                onChange={e => setPriority(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="URGENTE">🔴 Urgente</option>
+                <option value="NORMAL">🟡 Normal</option>
+                <option value="BAIXA">⬜ Baixa</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Área + Tipo de Ação */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Área Jurídica</label>
+              <select
+                value={legalArea}
+                onChange={e => setLegalArea(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="">Selecionar...</option>
+                {LEGAL_AREAS_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Tipo de Ação</label>
+              <input
+                type="text"
+                value={actionType}
+                onChange={e => setActionType(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                placeholder="Reclamatória, Indenizatória..."
+              />
+            </div>
+          </div>
+
+          {/* Parte Contrária */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+              <Scale size={11} /> Parte Contrária
+            </label>
+            <input
+              type="text"
+              value={opposingParty}
+              onChange={e => setOpposingParty(e.target.value)}
+              className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+              placeholder="Nome do réu / reclamado"
+            />
+          </div>
+
+          {/* Vara + Juiz */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Vara / Tribunal</label>
+              <input
+                type="text"
+                value={court}
+                onChange={e => setCourt(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                placeholder="1ª Vara do Trabalho"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <Gavel size={11} /> Juiz / Relator
+              </label>
+              <input
+                type="text"
+                value={judge}
+                onChange={e => setJudge(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                placeholder="Dr. João Silva"
+              />
+            </div>
+          </div>
+
+          {/* Valor da Causa + Data de Ajuizamento */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <DollarSign size={11} /> Valor da Causa
+              </label>
+              <input
+                type="number"
+                value={claimValue}
+                onChange={e => setClaimValue(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                placeholder="0,00"
+                step="0.01"
+                min="0"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <Calendar size={11} /> Data de Ajuizamento
+              </label>
+              <input
+                type="date"
+                value={filedAt}
+                onChange={e => setFiledAt(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+          </div>
+
+          {/* Notas */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Notas Internas</label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={3}
+              className="mt-1 w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+              placeholder="Observações sobre o processo..."
+            />
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-[12px] text-destructive">
+              <AlertTriangle size={14} /> {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-border shrink-0 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 text-sm font-semibold text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-accent transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving || !caseNumber.trim()}
+            className="flex-1 py-2.5 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <FolderPlus size={14} />}
+            Cadastrar Processo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Tabela View ───────────────────────────────────────────────
 
 type SortField = 'lead' | 'area' | 'stage' | 'priority' | 'days' | 'updated';
@@ -1299,6 +1567,7 @@ export default function ProcessosPage() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState<LegalCase | null>(null);
+  const [showCadastrarModal, setShowCadastrarModal] = useState(false);
 
   // DJEN panel
   const [djenPubs, setDjenPubs] = useState<DjenPublication[]>([]);
@@ -1535,6 +1804,17 @@ export default function ProcessosPage() {
                 className="pl-8 pr-3 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 w-44"
               />
             </div>
+
+            {/* Cadastrar processo existente */}
+            {view === 'active' && (
+              <button
+                onClick={() => setShowCadastrarModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all"
+                title="Cadastrar processo em andamento"
+              >
+                <FolderPlus size={13} /> Cadastrar
+              </button>
+            )}
 
             {/* Refresh */}
             <button
@@ -1780,6 +2060,14 @@ export default function ProcessosPage() {
           </div>
         )}
       </main>
+
+      {/* Modal Cadastrar Processo Existente */}
+      {showCadastrarModal && (
+        <CadastrarProcessoModal
+          onClose={() => setShowCadastrarModal(false)}
+          onSuccess={() => fetchCases(true)}
+        />
+      )}
 
       {/* Case Detail Panel */}
       {selectedCase && (

@@ -105,9 +105,9 @@ const TASK_STATUSES = [
 ];
 
 const PRIORITIES = [
-  { id: 'URGENTE', label: 'Urgente', color: '#ef4444', bg: 'bg-red-500/15',  text: 'text-red-400',  border: 'border-red-500/25'  },
-  { id: 'NORMAL',  label: 'Normal',  color: '#6b7280', bg: 'bg-gray-500/10', text: 'text-gray-400', border: 'border-gray-500/20' },
-  { id: 'BAIXA',   label: 'Baixa',   color: '#3b82f6', bg: 'bg-blue-500/12', text: 'text-blue-400', border: 'border-blue-500/20' },
+  { id: 'URGENTE', label: 'Urgente', color: '#ef4444', bg: 'bg-red-500/12',  text: 'text-red-400',  border: 'border-red-500/20'  },
+  { id: 'NORMAL',  label: 'Normal',  color: '#f59e0b', bg: 'bg-amber-500/12', text: 'text-amber-400', border: 'border-amber-500/20' },
+  { id: 'BAIXA',   label: 'Baixa',   color: '#6b7280', bg: 'bg-gray-500/12', text: 'text-gray-400', border: 'border-gray-500/20' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -400,17 +400,25 @@ function CaseDetailPanel({
         updatedStageChangedAt = new Date().toISOString();
       }
 
-      // Todos os outros campos via /details (um único request)
+      // Número do processo e vara (endpoint dedicado)
+      const caseNumberChanged = caseNumber.trim() !== (legalCase.case_number || '');
+      const courtChangedOnly  = court.trim()       !== (legalCase.court || '');
+      if (caseNumberChanged || courtChangedOnly) {
+        await api.patch(`/legal-cases/${legalCase.id}/case-number`, {
+          caseNumber: caseNumber.trim(),
+          court: court.trim() || undefined,
+        });
+      }
+
+      // Demais campos via /details (um único request)
       const detailsChanged =
         legalArea !== (legalCase.legal_area || '') ||
-        court     !== (legalCase.court || '')     ||
         notes     !== (legalCase.notes || '')     ||
         priority  !== (legalCase.priority || 'NORMAL');
 
       if (detailsChanged) {
         await api.patch(`/legal-cases/${legalCase.id}/details`, {
           legal_area: legalArea || null,
-          court:      court     || null,
           notes:      notes     || null,
           priority,
         });
@@ -420,8 +428,9 @@ function CaseDetailPanel({
       onCaseUpdated({
         ...legalCase,
         stage,
+        case_number:      caseNumber.trim() || null,
         legal_area:       legalArea || null,
-        court:            court     || null,
+        court:            court.trim() || null,
         notes:            notes     || null,
         priority,
         stage_changed_at: updatedStageChangedAt,

@@ -320,14 +320,22 @@ export class LegalCasesService {
     return caseEvent;
   }
 
-  async findEvents(caseId: string) {
+  async findEvents(caseId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(caseId, tenantId);
     return this.prisma.caseEvent.findMany({
       where: { case_id: caseId },
       orderBy: { event_date: 'desc' },
     });
   }
 
-  async deleteEvent(eventId: string) {
+  async deleteEvent(eventId: string, tenantId?: string) {
+    if (tenantId) {
+      const ev = await this.prisma.caseEvent.findUnique({
+        where: { id: eventId },
+        select: { case_id: true },
+      });
+      if (ev) await this.verifyTenantOwnership(ev.case_id, tenantId);
+    }
     return this.prisma.caseEvent.delete({ where: { id: eventId } });
   }
 
@@ -364,6 +372,93 @@ export class LegalCasesService {
     } catch {}
 
     return created;
+  }
+
+  // ─── CADASTRO DIRETO (processo já em andamento, sem WhatsApp) ──
+
+  async createDirect(data: {
+    lawyer_id: string;
+    tenant_id?: string;
+    case_number: string;
+    legal_area?: string;
+    action_type?: string;
+    opposing_party?: string;
+    claim_value?: number;
+    court?: string;
+    judge?: string;
+    tracking_stage?: string;
+    priority?: string;
+    notes?: string;
+    filed_at?: string;
+  }) {
+    const VALID_TRACKING = TRACKING_STAGES.map(s => s.id);
+    const trackingStage = data.tracking_stage && VALID_TRACKING.includes(data.tracking_stage)
+      ? data.tracking_stage
+      : 'DISTRIBUIDO';
+
+    const VALID_PRIORITIES = ['URGENTE', 'NORMAL', 'BAIXA'];
+    const priority = data.priority && VALID_PRIORITIES.includes(data.priority)
+      ? data.priority
+      : 'NORMAL';
+
+    // Cria ou reutiliza um Lead placeholder baseado na parte contrária
+    // Usa um telefone fictício único para não conflitar com @unique
+    const placeholderPhone = `PROC_${data.case_number.replace(/\D/g, '')}`;
+    const leadName = data.opposing_party
+      ? `[Processo] ${data.opposing_party}`
+      : `[Processo] ${data.case_number}`;
+
+    let lead = await this.prisma.lead.findFirst({
+      where: { phone: placeholderPhone },
+      select: { id: true },
+    });
+
+    if (!lead) {
+      lead = await this.prisma.lead.create({
+        data: {
+          phone: placeholderPhone,
+          name: leadName,
+          tenant_id: data.tenant_id,
+          origin: 'CADASTRO_DIRETO',
+        },
+        select: { id: true },
+      });
+    }
+
+    const legalCase = await this.prisma.legalCase.create({
+      data: {
+        lead_id: lead.id,
+        lawyer_id: data.lawyer_id,
+        tenant_id: data.tenant_id,
+        case_number: data.case_number,
+        legal_area: data.legal_area,
+        action_type: data.action_type,
+        opposing_party: data.opposing_party,
+        claim_value: data.claim_value,
+        court: data.court,
+        judge: data.judge,
+        notes: data.notes,
+        priority,
+        stage: 'PROTOCOLO',
+        in_tracking: true,
+        tracking_stage: trackingStage,
+        filed_at: data.filed_at ? new Date(data.filed_at) : new Date(),
+        stage_changed_at: new Date(),
+      },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, profile_picture_url: true, email: true } },
+        _count: { select: { tasks: true, events: true, djen_publications: true } },
+      },
+    });
+
+    try {
+      this.chatGateway.emitNewLegalCase(data.lawyer_id, {
+        caseId: legalCase.id,
+        leadName: leadName,
+      });
+    } catch {}
+
+    return legalCase;
   }
 
   // ─── PROTOCOLO → PROCESSOS ─────────────────────────────────────
@@ -405,7 +500,7 @@ export class LegalCasesService {
 
     return this.prisma.legalCase.update({
       where: { id },
-      data: { tracking_stage: trackingStage },
+      data: { tracking_stage: trackingStage, stage_changed_at: new Date() },
     });
   }
 
