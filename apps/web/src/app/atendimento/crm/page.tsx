@@ -179,6 +179,12 @@ function LeadCard({
   const isNew = (Date.now() - new Date(lead.created_at).getTime()) < 3_600_000;
   const agingBorder = agingBorderClass(days, normalizedStage);
 
+  // Próxima etapa lógica para o botão "Avançar"
+  const stageOrder = CRM_STAGES.filter(s => s.id !== 'PERDIDO').map(s => s.id);
+  const currentIdx = stageOrder.indexOf(normalizedStage as typeof stageOrder[number]);
+  const nextStageId = currentIdx >= 0 && currentIdx < stageOrder.length - 1 ? stageOrder[currentIdx + 1] : null;
+  const nextStageInfo = nextStageId ? CRM_STAGES.find(s => s.id === nextStageId) : null;
+
   // Fechar menu ao clicar fora
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -321,8 +327,8 @@ function LeadCard({
         </p>
       )}
 
-      {/* Footer */}
-      <div className="flex items-center justify-between">
+      {/* Footer — padrão (oculto no hover) */}
+      <div className="flex items-center justify-between group-hover:hidden">
         <button
           onClick={(e) => { e.stopPropagation(); onOpen(); }}
           className="text-[10px] text-muted-foreground hover:text-primary transition-colors flex items-center gap-1"
@@ -332,7 +338,6 @@ function LeadCard({
           Abrir chat
         </button>
         <div className="flex items-center gap-2">
-          {/* Score do lead */}
           {normalizedStage !== 'PERDIDO' && normalizedStage !== 'FINALIZADO' && (
             <span
               className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border cursor-help ${scoreStyle(score)}`}
@@ -341,21 +346,61 @@ function LeadCard({
               {score}
             </span>
           )}
-          {/* Aging indicator */}
           {days > 0 && (
-            <span
-              className={`text-[10px] font-bold ${agingColor(days)}`}
-              title={`${days} dia(s) neste estágio`}
-            >
+            <span className={`text-[10px] font-bold ${agingColor(days)}`} title={`${days} dia(s) neste estágio`}>
               {days}d
             </span>
           )}
           {conv?.last_message_at && (
-            <span className="text-[10px] text-muted-foreground/60">
-              {timeAgo(conv.last_message_at)}
-            </span>
+            <span className="text-[10px] text-muted-foreground/60">{timeAgo(conv.last_message_at)}</span>
           )}
         </div>
+      </div>
+
+      {/* Quick-action bar — visível apenas no hover */}
+      <div className="hidden group-hover:flex items-center justify-between gap-1.5 pt-0.5">
+        {/* Chat */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpen(); }}
+          title="Abrir chat"
+          className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg bg-accent hover:bg-primary/15 hover:text-primary text-muted-foreground text-[10px] font-semibold transition-colors"
+        >
+          <MessageSquare size={11} />
+          Chat
+        </button>
+
+        {/* Reunião rápida */}
+        {normalizedStage !== 'REUNIAO_AGENDADA' && normalizedStage !== 'FINALIZADO' && normalizedStage !== 'PERDIDO' && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onStageChange('REUNIAO_AGENDADA'); }}
+            title="Agendar reunião"
+            className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg bg-accent hover:bg-violet-500/15 hover:text-violet-400 text-muted-foreground text-[10px] font-semibold transition-colors"
+          >
+            <Calendar size={11} />
+            Reunião
+          </button>
+        )}
+
+        {/* Avançar etapa */}
+        {nextStageInfo && normalizedStage !== 'FINALIZADO' && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onStageChange(nextStageInfo.id); }}
+            title={`Avançar para: ${nextStageInfo.label}`}
+            className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg bg-accent hover:bg-emerald-500/15 hover:text-emerald-400 text-muted-foreground text-[10px] font-semibold transition-colors"
+          >
+            <ChevronRight size={11} />
+            {nextStageInfo.emoji} {nextStageInfo.label.split(' ')[0]}
+          </button>
+        )}
+
+        {/* Ver detalhes */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onOpenDetail(); }}
+          title="Ver detalhes"
+          className="p-1.5 rounded-lg bg-accent hover:bg-accent/80 text-muted-foreground transition-colors"
+        >
+          <MoreVertical size={11} />
+        </button>
       </div>
     </div>
   );
