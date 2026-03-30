@@ -1569,12 +1569,7 @@ export default function ProcessosPage() {
   const [selectedCase, setSelectedCase] = useState<LegalCase | null>(null);
   const [showCadastrarModal, setShowCadastrarModal] = useState(false);
 
-  // DJEN panel
-  const [djenPubs, setDjenPubs] = useState<DjenPublication[]>([]);
-  const [loadingDjen, setLoadingDjen] = useState(false);
-  const [syncingDjen, setSyncingDjen] = useState(false);
-  const [showDjen, setShowDjen] = useState(true);
-  const [expandedDjenPub, setExpandedDjenPub] = useState<string | null>(null);
+  // (DJEN movido para /atendimento/djen)
 
   // Board pan
   const boardRef = useRef<HTMLDivElement>(null);
@@ -1619,31 +1614,13 @@ export default function ProcessosPage() {
     }
   }, [view]);
 
-  const fetchDjen = useCallback(async () => {
-    setLoadingDjen(true);
-    try {
-      const res = await api.get('/djen?days=7');
-      setDjenPubs(res.data || []);
-    } catch {} finally { setLoadingDjen(false); }
-  }, []);
-
-  const syncDjen = async () => {
-    setSyncingDjen(true);
-    try {
-      await api.post('/djen/sync');
-      await fetchDjen();
-      fetchCases(true);
-    } catch {} finally { setSyncingDjen(false); }
-  };
-
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) { router.push('/atendimento/login'); return; }
     fetchCases();
-    fetchDjen();
     const interval = setInterval(() => fetchCases(true), 30_000);
     return () => clearInterval(interval);
-  }, [router, fetchCases, fetchDjen]);
+  }, [router, fetchCases]);
 
   const moveCase = async (caseId: string, newTrackingStage: string) => {
     setCases(prev => prev.map(c => c.id === caseId ? { ...c, tracking_stage: newTrackingStage } : c));
@@ -1749,19 +1726,13 @@ export default function ProcessosPage() {
               </button>
             )}
 
-            {/* DJEN toggle */}
-            {view === 'active' && displayView === 'kanban' && (
-              <button
-                onClick={() => setShowDjen(!showDjen)}
-                className={`text-[11px] font-semibold flex items-center gap-1.5 px-3 py-1.5 border rounded-lg transition-colors ${
-                  showDjen
-                    ? 'text-amber-500 border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10'
-                    : 'text-muted-foreground border-border hover:bg-accent'
-                }`}
-              >
-                <Bell size={13} /> DJEN {djenPubs.length > 0 && `(${djenPubs.length})`}
-              </button>
-            )}
+            {/* DJEN link → página dedicada */}
+            <button
+              onClick={() => router.push('/atendimento/djen')}
+              className="text-[11px] font-semibold text-amber-500 hover:text-amber-400 flex items-center gap-1.5 px-3 py-1.5 border border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors"
+            >
+              <Bell size={13} /> DJEN
+            </button>
 
             {/* Priority filter */}
             <div className="relative">
@@ -1982,101 +1953,6 @@ export default function ProcessosPage() {
               </div>
             </div>
 
-            {/* DJEN Side Panel */}
-            {showDjen && (
-              <div className="w-[300px] shrink-0 border-l border-border flex flex-col bg-card/50 overflow-hidden">
-                <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
-                  <div>
-                    <h3 className="text-[12px] font-bold text-foreground flex items-center gap-1.5">
-                      <Bell size={13} className="text-amber-500" />
-                      DJEN — Publicações
-                    </h3>
-                    <p className="text-[10px] text-muted-foreground">Últimos 7 dias</p>
-                  </div>
-                  <button
-                    onClick={syncDjen}
-                    disabled={syncingDjen}
-                    title="Sincronizar DJEN agora"
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 transition-all"
-                  >
-                    <RefreshCcw size={14} className={syncingDjen ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                  {loadingDjen ? (
-                    <div className="text-center py-8 text-muted-foreground text-[11px] animate-pulse">Carregando…</div>
-                  ) : djenPubs.length === 0 ? (
-                    <div className="text-center py-12 px-4 text-muted-foreground text-[11px]">
-                      <Bell size={24} className="mx-auto mb-2 opacity-30" />
-                      Nenhuma publicação nos últimos 7 dias
-                    </div>
-                  ) : (
-                    <div className="p-2 space-y-1.5">
-                      {djenPubs.map(pub => (
-                        <div
-                          key={pub.id}
-                          className={`rounded-xl border overflow-hidden transition-all ${
-                            pub.legal_case_id ? 'border-border bg-card' : 'border-amber-500/30 bg-amber-500/5'
-                          }`}
-                        >
-                          <div
-                            className="p-2.5 cursor-pointer hover:bg-accent/30 transition-colors"
-                            onClick={() => setExpandedDjenPub(expandedDjenPub === pub.id ? null : pub.id)}
-                          >
-                            <div className="flex items-start gap-2">
-                              <ChevronRight
-                                size={12}
-                                className={`text-muted-foreground mt-0.5 shrink-0 transition-transform ${expandedDjenPub === pub.id ? 'rotate-90' : ''}`}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                                  <span className="text-[9px] text-muted-foreground">{formatDate(pub.data_disponibilizacao)}</span>
-                                  {pub.tipo_comunicacao && (
-                                    <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-blue-500/10 text-blue-400">
-                                      {pub.tipo_comunicacao}
-                                    </span>
-                                  )}
-                                  {!pub.legal_case_id && (
-                                    <span className="text-[8px] font-bold px-1 py-0.5 rounded bg-amber-500/10 text-amber-400">
-                                      Não vinculado
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[11px] text-foreground font-mono truncate">{pub.numero_processo}</p>
-                                {pub.assunto && <p className="text-[10px] text-muted-foreground truncate">{pub.assunto}</p>}
-                                {pub.legal_case?.lead?.name && (
-                                  <p className="text-[10px] text-primary truncate">{pub.legal_case.lead.name}</p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {expandedDjenPub === pub.id && (
-                            <div className="border-t border-border p-2.5 bg-accent/10">
-                              <p className="text-[10px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto custom-scrollbar">
-                                {pub.conteudo.slice(0, 500)}{pub.conteudo.length > 500 ? '…' : ''}
-                              </p>
-                              {pub.legal_case_id && (
-                                <button
-                                  onClick={() => {
-                                    const c = cases.find(x => x.id === pub.legal_case_id);
-                                    if (c) setSelectedCase(c);
-                                  }}
-                                  className="mt-2 text-[10px] font-semibold text-primary hover:underline flex items-center gap-1"
-                                >
-                                  <ExternalLink size={9} /> Ver processo
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </main>
@@ -2094,7 +1970,7 @@ export default function ProcessosPage() {
         <ProcessoDetailPanel
           legalCase={selectedCase}
           onClose={() => setSelectedCase(null)}
-          onRefresh={() => { fetchCases(true); fetchDjen(); setSelectedCase(null); }}
+          onRefresh={() => { fetchCases(true); setSelectedCase(null); }}
         />
       )}
     </div>

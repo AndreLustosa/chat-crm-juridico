@@ -537,11 +537,16 @@ model DjenPublication {
   raw_json              Json
   legal_case_id         String?
   legal_case            LegalCase? @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  viewed_at             DateTime?
+  archived              Boolean    @default(false)
+  auto_task_id          String?
   created_at            DateTime   @default(now())
 
   @@index([data_disponibilizacao])
   @@index([numero_processo])
   @@index([legal_case_id])
+  @@index([viewed_at])
+  @@index([archived])
 }
 
 // ===============================================

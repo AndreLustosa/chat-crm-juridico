@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, usePathname } from 'next/navigation';
-import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, FileEdit, BookOpen, Calendar, LayoutDashboard, FileText, CheckSquare, Bot } from 'lucide-react';
+import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Megaphone, FileEdit, BookOpen, Calendar, LayoutDashboard, FileText, CheckSquare, Bot, Gavel } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
 import { NotificationCenter } from '@/app/atendimento/components/NotificationCenter';
@@ -28,6 +28,7 @@ export function Sidebar() {
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   const [overdueCount, setOverdueCount] = useState<number>(0);
+  const [djenUnread, setDjenUnread] = useState<number>(0);
   const [mounted, setMounted] = useState(false);
 
   // Fixed-position tooltip state (escapes overflow container)
@@ -103,6 +104,29 @@ export function Sidebar() {
     return () => window.removeEventListener('unread_count_update', handler);
   }, []);
 
+  // DJEN unread badge (atualiza a cada 5 min)
+  useEffect(() => {
+    const fetchDjenUnread = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(`${API_BASE_URL}/djen/all?viewed=false&archived=false&limit=1`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) return;
+        const data = await res.json();
+        setDjenUnread(data?.unreadCount ?? 0);
+      } catch { /* silencioso */ }
+    };
+    fetchDjenUnread();
+    const interval = setInterval(fetchDjenUnread, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Overdue tasks badge (atualiza a cada 5 min)
   useEffect(() => {
     const fetchOverdue = async () => {
@@ -143,6 +167,7 @@ export function Sidebar() {
     { label: 'Follow-up IA', href: '/atendimento/followup', icon: <Bot size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/followup') },
     { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: <FileEdit size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/advogado') },
     { label: 'Processos', href: '/atendimento/processos', icon: <BookOpen size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/processos') },
+    { label: 'DJEN — Publicações', href: '/atendimento/djen', icon: <Gavel size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/djen'), badge: djenUnread },
 
     { label: 'Analytics', href: '/atendimento/marketing/analytics', icon: <Megaphone size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/marketing') },
     { label: 'Configurações', href: '/atendimento/settings', icon: <Settings size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/settings') },

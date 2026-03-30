@@ -248,7 +248,7 @@ export class DjenService {
               }
 
               const dueAt = addBusinessDays(dataDisp, classification.dueDays);
-              await this.calendarService.create({
+              const task = await this.calendarService.create({
                 type: 'TAREFA',
                 title: taskTitle,
                 description: classification.taskDescription,
@@ -263,6 +263,13 @@ export class DjenService {
                   { minutes_before: 1440, channel: 'PUSH' },
                 ],
               });
+              // Vincular tarefa à publicação
+              if (task?.id) {
+                await this.prisma.djenPublication.update({
+                  where: { id: pub.id },
+                  data: { auto_task_id: task.id },
+                });
+              }
               tasksCreated++;
               this.logger.log(
                 `[DJEN] Tarefa automática criada para processo ${numeroProcesso}: "${classification.taskTitle}"`,
@@ -302,10 +309,149 @@ export class DjenService {
     });
   }
 
+  async findAll(opts: {
+    days?: string;
+    viewed?: string;
+    archived?: string;
+    page?: string;
+    limit?: string;
+  }) {
+    const days = opts.days ? parseInt(opts.days) : 30;
+    const since = subtractDays(new Date(), days);
+    const page = opts.page ? parseInt(opts.page) : 1;
+    const limit = Math.min(opts.limit ? parseInt(opts.limit) : 50, 200);
+    const skip = (page - 1) * limit;
+
+    const where: any = { data_disponibilizacao: { gte: since } };
+
+    if (opts.archived === 'true') {
+      where.archived = true;
+    } else {
+      where.archived = false;
+      if (opts.viewed === 'false') {
+        where.viewed_at = null;
+      } else if (opts.viewed === 'true') {
+        where.viewed_at = { not: null };
+      }
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.djenPublication.findMany({
+        where,
+        include: {
+          legal_case: {
+            select: {
+              id: true,
+              case_number: true,
+              legal_area: true,
+              tracking_stage: true,
+              lead: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { data_disponibilizacao: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.djenPublication.count({ where }),
+    ]);
+
+    const unreadCount = await this.prisma.djenPublication.count({
+      where: { viewed_at: null, archived: false },
+    });
+
+    return { items, total, page, limit, unreadCount };
+  }
+
   async findByCase(legalCaseId: string) {
     return this.prisma.djenPublication.findMany({
       where: { legal_case_id: legalCaseId },
       orderBy: { data_disponibilizacao: 'desc' },
     });
+  }
+
+  async markViewed(id: string) {
+    return this.prisma.djenPublication.update({
+      where: { id },
+      data: { viewed_at: new Date() },
+    });
+  }
+
+  async archive(id: string) {
+    return this.prisma.djenPublication.update({
+      where: { id },
+      data: { archived: true, viewed_at: new Date() },
+    });
+  }
+
+  async unarchive(id: string) {
+    return this.prisma.djenPublication.update({
+      where: { id },
+      data: { archived: false },
+    });
+  }
+
+  async markAllViewed() {
+    const result = await this.prisma.djenPublication.updateMany({
+      where: { viewed_at: null, archived: false },
+      data: { viewed_at: new Date() },
+    });
+    return { updated: result.count };
+  }
+
+  async createProcessFromPublication(
+    id: string,
+    lawyerId: string,
+    tenantId?: string,
+  ) {
+    const pub = await this.prisma.djenPublication.findUniqueOrThrow({ where: { id } });
+
+    const digits = pub.numero_processo.replace(/\D/g, '');
+    const placeholderPhone = `PROC_${digits}`;
+
+    // Cria ou reutiliza lead placeholder
+    let lead = await this.prisma.lead.findFirst({ where: { phone: placeholderPhone } });
+    if (!lead) {
+      lead = await this.prisma.lead.create({
+        data: {
+          name: `[Processo] ${pub.numero_processo}`,
+          phone: placeholderPhone,
+          tenant_id: tenantId,
+        },
+      });
+    }
+
+    // Detecta área pelo tipo_comunicacao / assunto
+    const text = [pub.tipo_comunicacao, pub.assunto, pub.conteudo].join(' ').toLowerCase();
+    let legalArea = 'CIVIL';
+    if (/trabalh/.test(text)) legalArea = 'TRABALHISTA';
+    else if (/previd|inss/.test(text)) legalArea = 'PREVIDENCIARIO';
+    else if (/tribut|fiscal/.test(text)) legalArea = 'TRIBUTARIO';
+    else if (/famil|divórcio|divorcio/.test(text)) legalArea = 'FAMILIA';
+    else if (/crimin/.test(text)) legalArea = 'CRIMINAL';
+
+    const legalCase = await this.prisma.legalCase.create({
+      data: {
+        lead_id: lead.id,
+        lawyer_id: lawyerId,
+        tenant_id: tenantId,
+        case_number: pub.numero_processo,
+        stage: 'PROTOCOLO',
+        tracking_stage: 'DISTRIBUIDO',
+        in_tracking: true,
+        filed_at: pub.data_disponibilizacao,
+        legal_area: legalArea,
+        stage_changed_at: new Date(),
+      },
+    });
+
+    // Vincular publicação ao processo recém criado
+    await this.prisma.djenPublication.update({
+      where: { id },
+      data: { legal_case_id: legalCase.id, viewed_at: new Date() },
+    });
+
+    this.logger.log(`[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id}`);
+    return legalCase;
   }
 }
