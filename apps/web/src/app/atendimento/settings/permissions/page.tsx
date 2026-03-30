@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Shield, Check, X, ChevronDown, Loader2, Users } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -128,8 +129,24 @@ export default function PermissionsSettingsPage() {
   const [loadError, setLoadError] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [dropdownUpward, setDropdownUpward] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'matrix' | 'users'>('matrix');
+
+  // Abre dropdown via portal com posição calculada pelo botão
+  const openDropdownAt = (userId: string, btnEl: HTMLElement) => {
+    if (openDropdown === userId) {
+      setOpenDropdown(null);
+      setDropdownPos(null);
+      return;
+    }
+    const rect = btnEl.getBoundingClientRect();
+    const MENU_H = 4 * 36 + 8; // 4 opções × 36px + padding
+    const top = rect.bottom + MENU_H > window.innerHeight
+      ? rect.top - MENU_H          // abre para cima
+      : rect.bottom + 4;           // abre para baixo
+    setDropdownPos({ top, left: rect.right - 176, width: rect.width });
+    setOpenDropdown(userId);
+  };
 
   useEffect(() => {
     api.get('/users')
@@ -293,11 +310,7 @@ export default function PermissionsSettingsPage() {
                           {/* Role selector */}
                           <div className="relative shrink-0">
                             <button
-                              onClick={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setDropdownUpward(rect.bottom > window.innerHeight * 0.6);
-                                setOpenDropdown(openDropdown === user.id ? null : user.id);
-                              }}
+                              onClick={(e) => openDropdownAt(user.id, e.currentTarget)}
                               disabled={updatingId === user.id}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-accent text-[12px] font-semibold text-foreground transition-colors disabled:opacity-50"
                             >
@@ -308,24 +321,6 @@ export default function PermissionsSettingsPage() {
                               {ROLE_LABELS[user.role as Role] || user.role}
                               <ChevronDown size={12} className="text-muted-foreground" />
                             </button>
-
-                            {openDropdown === user.id && (
-                              <div className={`absolute right-0 w-44 bg-card border border-border rounded-xl shadow-xl z-50 py-1 overflow-hidden ${dropdownUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-                                {ROLES.map(r => (
-                                  <button
-                                    key={r}
-                                    onClick={() => changeRole(user.id, r)}
-                                    className={`w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-semibold transition-colors hover:bg-accent ${
-                                      normalizeRole(user.role) === r ? 'text-primary bg-primary/5' : 'text-foreground'
-                                    }`}
-                                  >
-                                    <span className={`w-2 h-2 rounded-full ${normalizeRole(user.role) === r ? 'bg-primary' : 'bg-muted'}`} />
-                                    {ROLE_LABELS[r]}
-                                    {normalizeRole(user.role) === r && <Check size={12} className="ml-auto text-primary" />}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         </div>
                       ))}
@@ -363,11 +358,7 @@ export default function PermissionsSettingsPage() {
                         {/* Permite corrigir o role direto daqui */}
                         <div className="relative shrink-0">
                           <button
-                            onClick={(e) => {
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              setDropdownUpward(rect.bottom > window.innerHeight * 0.6);
-                              setOpenDropdown(openDropdown === user.id ? null : user.id);
-                            }}
+                            onClick={(e) => openDropdownAt(user.id, e.currentTarget)}
                             disabled={updatingId === user.id}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-destructive/40 bg-background hover:bg-accent text-[12px] font-semibold text-destructive transition-colors disabled:opacity-50"
                           >
@@ -378,20 +369,6 @@ export default function PermissionsSettingsPage() {
                             Atribuir role
                             <ChevronDown size={12} />
                           </button>
-                          {openDropdown === user.id && (
-                            <div className={`absolute right-0 w-44 bg-card border border-border rounded-xl shadow-xl z-50 py-1 overflow-hidden ${dropdownUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-                              {ROLES.map(r => (
-                                <button
-                                  key={r}
-                                  onClick={() => changeRole(user.id, r)}
-                                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-semibold transition-colors hover:bg-accent text-foreground"
-                                >
-                                  <span className="w-2 h-2 rounded-full bg-muted" />
-                                  {ROLE_LABELS[r]}
-                                </button>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       </div>
                     ))}
@@ -404,9 +381,42 @@ export default function PermissionsSettingsPage() {
         )}
       </div>
 
-      {/* Fechar dropdown ao clicar fora */}
-      {openDropdown && (
-        <div className="fixed inset-0 z-40" onClick={() => setOpenDropdown(null)} />
+      {/* ─── Portal: dropdown de role (escapa overflow dos pais) ─── */}
+      {openDropdown && dropdownPos && createPortal(
+        <>
+          {/* overlay transparente fecha ao clicar fora */}
+          <div
+            className="fixed inset-0 z-[9998]"
+            onClick={() => { setOpenDropdown(null); setDropdownPos(null); }}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              top: dropdownPos.top,
+              left: dropdownPos.left,
+              width: 176,
+              zIndex: 9999,
+            }}
+            className="bg-card border border-border rounded-xl shadow-xl py-1 overflow-hidden"
+          >
+            {ROLES.map(r => {
+              const u = users.find(u => u.id === openDropdown);
+              const isActive = u ? normalizeRole(u.role) === r : false;
+              return (
+                <button
+                  key={r}
+                  onClick={() => { changeRole(openDropdown, r); setDropdownPos(null); }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-[13px] font-semibold transition-colors hover:bg-accent ${isActive ? 'text-primary bg-primary/5' : 'text-foreground'}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-primary' : 'bg-muted'}`} />
+                  {ROLE_LABELS[r]}
+                  {isActive && <Check size={12} className="ml-auto text-primary" />}
+                </button>
+              );
+            })}
+          </div>
+        </>,
+        document.body
       )}
     </div>
   );
