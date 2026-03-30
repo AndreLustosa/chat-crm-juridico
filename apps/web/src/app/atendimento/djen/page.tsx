@@ -45,6 +45,7 @@ interface AiAnalysis {
   tarefa_titulo: string;
   tarefa_descricao: string;
   orientacoes: string;
+  model_used?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -367,6 +368,14 @@ function AiPanel({
 
         {analysis && !loading && (
           <div className="p-4 space-y-4">
+
+            {/* Modelo usado */}
+            {analysis.model_used && (
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <Sparkles size={9} className="text-violet-400" />
+                <span>Analisado por <strong className="text-foreground">{analysis.model_used}</strong></span>
+              </div>
+            )}
 
             {/* Urgência */}
             {urgConf && (

@@ -153,6 +153,7 @@ export class SettingsService {
     const adminKey = await this.get('OPENAI_ADMIN_KEY');
     const anthropicKey = await this.get('ANTHROPIC_API_KEY');
     const defaultModel = (await this.get('OPENAI_DEFAULT_MODEL')) || 'gpt-4o-mini';
+    const djenModel = (await this.get('DJEN_AI_MODEL')) || 'gpt-4o-mini';
     const cooldownRaw = await this.get('AI_COOLDOWN_SECONDS');
     const cooldownSeconds = cooldownRaw ? parseInt(cooldownRaw, 10) : 8;
     return {
@@ -161,6 +162,7 @@ export class SettingsService {
       isAdminKeyConfigured: !!adminKey,
       isAnthropicKeyConfigured: !!(anthropicKey || process.env.ANTHROPIC_API_KEY),
       defaultModel,
+      djenModel,
       cooldownSeconds: isNaN(cooldownSeconds) ? 8 : cooldownSeconds,
     };
   }
@@ -183,6 +185,14 @@ export class SettingsService {
 
   async setDefaultModel(model: string): Promise<void> {
     await this.set('OPENAI_DEFAULT_MODEL', model);
+  }
+
+  async getDjenModel(): Promise<string> {
+    return (await this.get('DJEN_AI_MODEL')) || 'gpt-4o-mini';
+  }
+
+  async setDjenModel(model: string): Promise<void> {
+    await this.set('DJEN_AI_MODEL', model);
   }
 
   async getSkills() {
