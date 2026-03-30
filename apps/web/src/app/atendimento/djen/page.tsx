@@ -331,7 +331,7 @@ function AiPanel({
   const urgConf = analysis ? URGENCIA_CONFIG[analysis.urgencia] : null;
 
   return (
-    <div className="h-[50vh] shrink-0 border-t border-border flex flex-col bg-card/60 overflow-hidden w-full">
+    <div className="w-1/2 shrink-0 border-l border-border flex flex-col bg-card/60 overflow-hidden">
       {/* Panel header */}
       <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
@@ -689,11 +689,11 @@ export default function DjenPage() {
         ))}
       </div>
 
-      {/* Main — list + AI panel (vertical split) */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* Main — list + AI panel (horizontal 50/50 split) */}
+      <div className="flex-1 flex overflow-hidden">
 
         {/* Publications list */}
-        <main className={`overflow-y-auto custom-scrollbar transition-all ${selectedPub ? 'flex-1 min-h-0' : 'flex-1'}`}>
+        <main className={`overflow-y-auto custom-scrollbar transition-all ${selectedPub ? 'w-1/2' : 'flex-1'}`}>
           {loading ? (
             <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground text-[13px]">
               <Loader2 size={16} className="animate-spin" />
