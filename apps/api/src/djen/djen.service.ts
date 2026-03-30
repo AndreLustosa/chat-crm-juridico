@@ -507,13 +507,13 @@ CONTEÚDO COMPLETO:
 ${pub.conteudo.slice(0, 2000)}`;
 
     // Resolve modelo configurado
-    const configuredModel = await this.settingsService.getDjenModel();
+    const configuredModel = await this.settings.getDjenModel();
     const isAnthropic = configuredModel.startsWith('claude');
 
     let raw = '{}';
 
     if (isAnthropic) {
-      const anthropicKey = (await this.settingsService['get']('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
+      const anthropicKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
       if (!anthropicKey) throw new BadRequestException('ANTHROPIC_API_KEY não configurada.');
 
       const client = new Anthropic({ apiKey: anthropicKey });
@@ -529,7 +529,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (jsonMatch) raw = jsonMatch[0];
     } else {
-      const openaiKey = (await this.settingsService['get']('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+      const openaiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
       if (!openaiKey) throw new BadRequestException('OPENAI_API_KEY não configurada.');
 
       const openai = new OpenAI({ apiKey: openaiKey });
