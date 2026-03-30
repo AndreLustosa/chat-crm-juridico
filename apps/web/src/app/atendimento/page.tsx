@@ -106,6 +106,8 @@ export default function Dashboard() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [userInboxes, setUserInboxes] = useState<any[]>([]);
   const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
+  const [clientMode, setClientMode] = useState(false); // false = Leads, true = Clientes
+  const clientModeRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [msgTotalPages, setMsgTotalPages] = useState(1);
@@ -262,6 +264,7 @@ export default function Dashboard() {
 
   // Keep refs in sync
   useEffect(() => { selectedInboxIdRef.current = selectedInboxId; }, [selectedInboxId]);
+  useEffect(() => { clientModeRef.current = clientMode; }, [clientMode]);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
 
@@ -560,7 +563,10 @@ export default function Dashboard() {
   const fetchConversations = useCallback(async (inboxId?: string | null, silent = false) => {
     try {
       const res = await api.get('/conversations', {
-        params: { inboxId: inboxId || undefined },
+        params: {
+          inboxId: inboxId || undefined,
+          clientMode: String(clientModeRef.current),
+        },
         // silent=true: chamadas de background (inboxUpdate) não disparam redirect global de 401
         ...( silent ? { _silent401: true } as any : {} ),
       });
@@ -822,14 +828,19 @@ export default function Dashboard() {
     };
   }, [fetchConversations, fetchAdiadoConversations]);
 
-  // Initial data load + refetch on inbox filter change
+  // Initial data load + refetch on inbox filter change or clientMode change
   useEffect(() => {
     fetchInboxes(true);
     fetchConversations(selectedInboxId, true);
     fetchAdiadoConversations(selectedInboxId);
     fetchPendingTransfers(true);
     fetchSpecialists(true);
-  }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId]);
+  }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId, clientMode]);
+
+  // Ao trocar clientMode: deseleciona conversa ativa para evitar contexto errado
+  useEffect(() => {
+    setSelectedId(null);
+  }, [clientMode]);
 
   // Canned responses — fetch once on mount (não depende do inbox)
   useEffect(() => {
@@ -2007,6 +2018,8 @@ export default function Dashboard() {
         onSelectConversation={setSelectedId}
         onSetSearchQuery={setSearchQuery}
         onSetLeadFilter={setLeadFilter}
+        clientMode={clientMode}
+        onSetClientMode={(mode) => { setClientMode(mode); }}
         onSetSelectedInboxId={setSelectedInboxId}
         onSetInboxOpen={setInboxOpen}
         onSetShowNotifBanner={setShowNotifBanner}

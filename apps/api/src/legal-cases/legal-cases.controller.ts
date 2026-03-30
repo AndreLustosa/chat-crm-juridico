@@ -119,6 +119,11 @@ export class LegalCasesController {
       priority?: string;
       notes?: string;
       filed_at?: string;
+      // Integração lead
+      lead_id?: string;
+      lead_name?: string;
+      lead_phone?: string;
+      lead_email?: string;
     },
     @Request() req: any,
   ) {
@@ -127,6 +132,15 @@ export class LegalCasesController {
       lawyer_id: req.user.id,
       tenant_id: req.user.tenant_id,
     });
+  }
+
+  @Patch(':id/lead')
+  updateLead(
+    @Param('id') id: string,
+    @Body() body: { lead_id?: string; lead_phone?: string; lead_name?: string; lead_email?: string },
+    @Request() req: any,
+  ) {
+    return this.service.updateLead(id, { ...body, tenant_id: req.user?.tenant_id });
   }
 
   @Patch(':id/stage')

@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, X, PanelLeftClose, Bell, Clock } from 'lucide-react';
+import { Search, X, PanelLeftClose, Bell, Clock, UserCheck, UserSearch } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import {
   requestNotificationPermission,
@@ -133,6 +133,8 @@ export interface InboxSidebarProps {
   onClearBulk?: () => void;
   onBulkAction?: (action: 'close' | 'assign', ids: string[]) => void;
   // Callbacks
+  clientMode: boolean;
+  onSetClientMode: (mode: boolean) => void;
   onSelectConversation: (id: string) => void;
   onSetSearchQuery: (q: string) => void;
   onSetLeadFilter: (f: string) => void;
@@ -168,6 +170,8 @@ export function InboxSidebar({
   onToggleBulk,
   onClearBulk,
   onBulkAction,
+  clientMode,
+  onSetClientMode,
   onSelectConversation,
   onSetSearchQuery,
   onSetLeadFilter,
@@ -245,6 +249,32 @@ export function InboxSidebar({
             aria-label="Fechar painel de inbox"
           >
             <PanelLeftClose size={18} />
+          </button>
+        </div>
+
+        {/* Toggle Leads / Clientes */}
+        <div className="flex rounded-xl border border-border overflow-hidden">
+          <button
+            onClick={() => onSetClientMode(false)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px] font-semibold transition-colors ${
+              !clientMode
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+            }`}
+          >
+            <UserSearch size={13} />
+            Leads
+          </button>
+          <button
+            onClick={() => onSetClientMode(true)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-[12px] font-semibold transition-colors ${
+              clientMode
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+            }`}
+          >
+            <UserCheck size={13} />
+            Clientes
           </button>
         </div>
 

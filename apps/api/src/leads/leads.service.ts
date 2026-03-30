@@ -226,12 +226,29 @@ export class LeadsService {
     // Captura o stage atual antes de alterar (para o histórico)
     const current = await this.prisma.lead.findUnique({ where: { id }, select: { stage: true } });
 
+    // Ao finalizar: busca o operador que fechou a venda para registrar como CS
+    let csUserId: string | undefined;
+    if (stage === 'FINALIZADO') {
+      const lastConv = await this.prisma.conversation.findFirst({
+        where: { lead_id: id },
+        orderBy: { last_message_at: 'desc' },
+        select: { assigned_user_id: true },
+      });
+      csUserId = lastConv?.assigned_user_id ?? undefined;
+    }
+
     const lead = await this.prisma.lead.update({
       where: { id },
       data: {
         stage,
         stage_entered_at: new Date(),
         ...(stage === 'PERDIDO' && lossReason ? { loss_reason: lossReason } : {}),
+        // Marcar como cliente ao FINALIZAR
+        ...(stage === 'FINALIZADO' ? {
+          is_client: true,
+          became_client_at: new Date(),
+          ...(csUserId ? { cs_user_id: csUserId } : {}),
+        } : {}),
       },
     });
 

@@ -18,7 +18,7 @@ export class ConversationsService {
     return this.prisma.conversation.create({ data });
   }
 
-  async findAll(status?: string, userId?: string, inboxId?: string, tenantId?: string) {
+  async findAll(status?: string, userId?: string, inboxId?: string, tenantId?: string, clientMode?: boolean) {
     const where: any = {};
     if (status) {
       where.status = status;
@@ -27,28 +27,72 @@ export class ConversationsService {
       where.status = { notIn: ['FECHADO', 'ADIADO'] };
     }
 
-    // Sempre excluir conversas de leads arquivados (PERDIDO) do inbox
-    where.lead = { stage: { not: 'PERDIDO' } };
-
     // Tenant isolation
     if (tenantId) {
       where.OR = [{ tenant_id: tenantId }, { tenant_id: null }];
     }
 
-    // Se um inboxId específico foi solicitado, filtramos por ele
-    if (inboxId) {
-      where.inbox_id = inboxId;
-    }
-    // Caso contrário, se o userId estiver presente, filtramos pelos inboxes que o usuário tem acesso
-    else if (userId) {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        include: { inboxes: { select: { id: true } } }
-      });
+    // Carrega dados do usuário para aplicar regras de acesso
+    const user = userId
+      ? await this.prisma.user.findUnique({
+          where: { id: userId },
+          include: { inboxes: { select: { id: true } } },
+        })
+      : null;
 
-      // Se o usuário não for ADMIN e tiver inboxes vinculados, filtramos por eles
-      if (user?.role !== 'ADMIN' && user?.inboxes && user.inboxes.length > 0) {
-        where.inbox_id = { in: user.inboxes.map((i: any) => i.id) };
+    const userRole = user?.role ?? 'OPERADOR';
+    const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
+
+    // ─── Filtro por clientMode (modo Leads vs Clientes) ──────────────────
+    // clientMode=true  → clientes (is_client=true)
+    // clientMode=false → leads em prospecção (is_client=false, excluindo PERDIDO)
+    // clientMode=undefined → comportamento legado (excluir apenas PERDIDO)
+    if (clientMode === true) {
+      where.lead = { is_client: true };
+    } else if (clientMode === false) {
+      where.lead = { is_client: false, stage: { not: 'PERDIDO' } };
+    } else {
+      // Legado: excluir apenas PERDIDO
+      where.lead = { stage: { not: 'PERDIDO' } };
+    }
+
+    // ─── Controle de acesso por role ────────────────────────────────────
+    if (userRole === 'ADMIN') {
+      // Admin vê tudo — apenas filtra por inboxId se explicitamente pedido
+      if (inboxId) where.inbox_id = inboxId;
+
+    } else if (userRole === 'ADVOGADO') {
+      // Advogado vê:
+      // - No modo clientes: conversas onde é advogado atribuído OU responsável por um caso do lead
+      // - No modo leads: conversas onde foi indicado como advogado (triagem/reunião)
+      // - Com inboxId específico: respeita o inbox
+      if (inboxId) {
+        where.inbox_id = inboxId;
+      } else {
+        where.OR = [
+          { assigned_lawyer_id: userId },
+          ...(clientMode === true
+            ? [{ lead: { is_client: true, legal_cases: { some: { lawyer_id: userId } } } }]
+            : []),
+          // Se tiver inboxes vinculados, também vê essas conversas
+          ...(userInboxIds.length > 0 ? [{ inbox_id: { in: userInboxIds } }] : []),
+        ];
+      }
+
+    } else {
+      // OPERADOR / ESTAGIARIO / outros:
+      // - No modo leads: vê conversas do seu inbox (prospecção)
+      // - No modo clientes: vê apenas clientes que ele converteu (cs_user_id)
+      if (inboxId) {
+        where.inbox_id = inboxId;
+      } else if (clientMode === true) {
+        // Modo clientes: só vê os que ele converteu
+        where.lead = { ...(where.lead ?? {}), cs_user_id: userId };
+      } else {
+        // Modo leads (padrão): filtra pelo inbox do operador
+        if (userInboxIds.length > 0) {
+          where.inbox_id = { in: userInboxIds };
+        }
       }
     }
 
@@ -57,7 +101,7 @@ export class ConversationsService {
         where,
         orderBy: { last_message_at: 'desc' },
         include: {
-          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true } },
+          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true, is_client: true, became_client_at: true } },
           messages: { orderBy: { created_at: 'desc' }, take: 1, include: { media: true } },
           assigned_user: { select: { id: true, name: true } },
           tasks: {
@@ -110,6 +154,8 @@ export class ConversationsService {
       leadStage: c.lead?.stage || null,
       leadTags: (c.lead as any)?.tags || [],
       stageEnteredAt: (c.lead as any)?.stage_entered_at?.toISOString() || null,
+      isClient: (c.lead as any)?.is_client ?? false,
+      becameClientAt: (c.lead as any)?.became_client_at?.toISOString() || null,
       nextStep: (c as any).next_step || null,
       activeTask: (c as any).tasks?.[0] ? {
         id: (c as any).tasks[0].id,

@@ -331,6 +331,23 @@ function ProcessoDetailPanel({
   const [claimValue, setClaimValue] = useState(legalCase.claim_value ? String(legalCase.claim_value) : '');
   const [judge, setJudge] = useState(legalCase.judge || '');
 
+  // ── Vinculação de cliente ──────────────────────────────────────
+  const isPlaceholderLead = legalCase.lead?.phone?.startsWith('PROC_') || legalCase.lead?.name?.startsWith('[Processo]');
+  type LeadLinkMode = 'existing' | 'new';
+  const [showLeadSection, setShowLeadSection] = useState(isPlaceholderLead ?? false);
+  const [leadLinkMode, setLeadLinkMode] = useState<LeadLinkMode>('existing');
+  const [leadLinkSearch, setLeadLinkSearch] = useState('');
+  const [leadLinkResults, setLeadLinkResults] = useState<{ id: string; name: string | null; phone: string; email: string | null }[]>([]);
+  const [leadLinkSearching, setLeadLinkSearching] = useState(false);
+  const [leadLinkDropdown, setLeadLinkDropdown] = useState(false);
+  const [selectedLinkLead, setSelectedLinkLead] = useState<{ id: string; name: string | null; phone: string } | null>(null);
+  const [newLinkPhone, setNewLinkPhone] = useState('');
+  const [newLinkName, setNewLinkName] = useState('');
+  const [newLinkEmail, setNewLinkEmail] = useState('');
+  const [linkingLead, setLinkingLead] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const leadLinkRef = useRef<HTMLDivElement>(null);
+
   // Archive
   const [showArchive, setShowArchive] = useState(false);
   const [archiveReason, setArchiveReason] = useState('');
@@ -403,6 +420,52 @@ function ProcessoDetailPanel({
     fetchInterns();
     fetchDjen();
   }, [fetchTasks, fetchEvents, fetchInterns, fetchDjen]);
+
+  // Busca de leads para vinculação (debounce)
+  useEffect(() => {
+    if (leadLinkMode !== 'existing' || !leadLinkSearch.trim()) {
+      setLeadLinkResults([]); setLeadLinkDropdown(false); return;
+    }
+    const t = setTimeout(async () => {
+      setLeadLinkSearching(true);
+      try {
+        const res = await api.get('/leads', { params: { search: leadLinkSearch.trim(), limit: 8 } });
+        setLeadLinkResults(res.data?.data || res.data || []);
+        setLeadLinkDropdown(true);
+      } catch { setLeadLinkResults([]); } finally { setLeadLinkSearching(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [leadLinkSearch, leadLinkMode]);
+
+  // Fechar dropdown ao clicar fora
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (leadLinkRef.current && !leadLinkRef.current.contains(e.target as Node)) {
+        setLeadLinkDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleLinkLead = async () => {
+    setLinkError('');
+    if (leadLinkMode === 'existing' && !selectedLinkLead) { setLinkError('Selecione um cliente.'); return; }
+    if (leadLinkMode === 'new' && !newLinkPhone.replace(/\D/g,'')) { setLinkError('Informe o telefone.'); return; }
+    setLinkingLead(true);
+    try {
+      await api.patch(`/legal-cases/${legalCase.id}/lead`, {
+        lead_id: leadLinkMode === 'existing' ? selectedLinkLead!.id : undefined,
+        lead_phone: leadLinkMode === 'new' ? newLinkPhone : undefined,
+        lead_name: leadLinkMode === 'new' ? newLinkName || undefined : undefined,
+        lead_email: leadLinkMode === 'new' ? newLinkEmail || undefined : undefined,
+      });
+      setShowLeadSection(false);
+      onRefresh();
+    } catch (e: any) {
+      setLinkError(e?.response?.data?.message || 'Erro ao vincular cliente.');
+    } finally { setLinkingLead(false); }
+  };
 
   const saveInfo = async () => {
     setSaving(true);
@@ -613,6 +676,197 @@ function ProcessoDetailPanel({
           {/* ─── INFO TAB ─── */}
           {activeTab === 'info' && (
             <div className="p-5 space-y-4">
+
+              {/* ── Bloco Cliente ─────────────────────────────── */}
+              {isPlaceholderLead && !showLeadSection ? (
+                /* Alerta: processo sem cliente real */
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5 flex items-start gap-3">
+                  <AlertTriangle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-semibold text-amber-400">Processo sem cliente vinculado</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Vinculando um cliente real você poderá abrir o chat e receber notificações.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowLeadSection(true)}
+                    className="shrink-0 flex items-center gap-1 text-[11px] font-semibold text-amber-400 border border-amber-500/30 px-2.5 py-1.5 rounded-lg hover:bg-amber-500/10 transition-colors"
+                  >
+                    <User size={11} /> Vincular cliente
+                  </button>
+                </div>
+              ) : !isPlaceholderLead ? (
+                /* Cliente já vinculado — card informativo */
+                <div className="rounded-xl border border-border bg-accent/20 p-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0 overflow-hidden">
+                    {legalCase.lead?.profile_picture_url
+                      ? <img src={legalCase.lead.profile_picture_url} alt="" className="w-full h-full object-cover" />
+                      : <User size={14} className="text-primary" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-foreground truncate">{legalCase.lead?.name || 'Sem nome'}</p>
+                    <p className="text-[11px] text-muted-foreground font-mono">{legalCase.lead?.phone}</p>
+                  </div>
+                  <button
+                    onClick={() => setShowLeadSection(v => !v)}
+                    className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground border border-border px-2 py-1 rounded-lg hover:bg-accent transition-colors"
+                  >
+                    Trocar
+                  </button>
+                </div>
+              ) : null}
+
+              {/* Formulário de vinculação */}
+              {showLeadSection && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <User size={11} /> Vincular Cliente
+                    </p>
+                    {/* Toggle modo */}
+                    <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-semibold">
+                      <button
+                        onClick={() => { setLeadLinkMode('existing'); setSelectedLinkLead(null); setLeadLinkSearch(''); }}
+                        className={`px-2.5 py-1 transition-colors ${leadLinkMode === 'existing' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
+                      >
+                        Existente
+                      </button>
+                      <button
+                        onClick={() => { setLeadLinkMode('new'); setSelectedLinkLead(null); }}
+                        className={`px-2.5 py-1 transition-colors ${leadLinkMode === 'new' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
+                      >
+                        Novo
+                      </button>
+                    </div>
+                  </div>
+
+                  {leadLinkMode === 'existing' ? (
+                    <div ref={leadLinkRef} className="relative">
+                      {selectedLinkLead ? (
+                        <div className="flex items-center gap-2 px-3 py-2.5 bg-card border border-primary/30 rounded-lg">
+                          <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                            <User size={11} className="text-primary" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[12px] font-semibold truncate">{selectedLinkLead.name || 'Sem nome'}</p>
+                            <p className="text-[10px] text-muted-foreground font-mono">{selectedLinkLead.phone}</p>
+                          </div>
+                          <button onClick={() => setSelectedLinkLead(null)} className="p-0.5 text-muted-foreground hover:text-foreground">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          <input
+                            type="text"
+                            value={leadLinkSearch}
+                            onChange={e => setLeadLinkSearch(e.target.value)}
+                            onFocus={() => leadLinkSearch && setLeadLinkDropdown(true)}
+                            className="w-full pl-8 pr-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            placeholder="Buscar por nome ou telefone..."
+                            autoFocus
+                          />
+                          {leadLinkSearching && <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
+                        </div>
+                      )}
+                      {leadLinkDropdown && !selectedLinkLead && leadLinkResults.length > 0 && (
+                        <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-xl overflow-hidden">
+                          {leadLinkResults.map(lead => (
+                            <button
+                              key={lead.id}
+                              onClick={() => { setSelectedLinkLead(lead); setLeadLinkDropdown(false); setLeadLinkSearch(''); }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent text-left transition-colors"
+                            >
+                              <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0">
+                                <User size={11} className="text-muted-foreground" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[12px] font-semibold truncate">{lead.name || '(sem nome)'}</p>
+                                <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}{lead.email ? ` · ${lead.email}` : ''}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {leadLinkDropdown && !selectedLinkLead && leadLinkResults.length === 0 && leadLinkSearch.length > 1 && !leadLinkSearching && (
+                        <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-xl p-3 text-center">
+                          <p className="text-[12px] text-muted-foreground">Nenhum cliente encontrado.</p>
+                          <button
+                            onClick={() => { setLeadLinkMode('new'); setNewLinkName(leadLinkSearch); setLeadLinkDropdown(false); }}
+                            className="mt-1 text-[12px] font-semibold text-primary hover:underline"
+                          >
+                            + Cadastrar como novo cliente
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Novo cliente */
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Telefone <span className="text-destructive">*</span></label>
+                          <input
+                            type="tel"
+                            value={newLinkPhone}
+                            onChange={e => setNewLinkPhone(e.target.value)}
+                            className="mt-0.5 w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            placeholder="(00) 00000-0000"
+                            autoFocus
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nome</label>
+                          <input
+                            type="text"
+                            value={newLinkName}
+                            onChange={e => setNewLinkName(e.target.value)}
+                            className="mt-0.5 w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            placeholder="Nome completo"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">E-mail</label>
+                        <input
+                          type="email"
+                          value={newLinkEmail}
+                          onChange={e => setNewLinkEmail(e.target.value)}
+                          className="mt-0.5 w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                          placeholder="email@cliente.com"
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">Se o telefone já existir no CRM, o cliente será vinculado automaticamente.</p>
+                    </div>
+                  )}
+
+                  {linkError && (
+                    <div className="flex items-center gap-2 p-2.5 bg-destructive/10 border border-destructive/20 rounded-lg text-[11px] text-destructive">
+                      <AlertTriangle size={12} /> {linkError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    {!isPlaceholderLead && (
+                      <button
+                        onClick={() => setShowLeadSection(false)}
+                        className="flex-1 py-2 text-[12px] font-semibold text-muted-foreground border border-border rounded-lg hover:bg-accent transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                    <button
+                      onClick={handleLinkLead}
+                      disabled={linkingLead}
+                      className="flex-1 py-2 text-[12px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      {linkingLead ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                      Vincular Cliente
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Prioridade + Etapa */}
               <div className="grid grid-cols-2 gap-3">
@@ -1159,6 +1413,24 @@ function CadastrarProcessoModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  // ── Lead ──────────────────────────────────────────────────────
+  type LeadMode = 'existing' | 'new';
+  const [leadMode, setLeadMode] = useState<LeadMode>('existing');
+
+  // modo existente
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadResults, setLeadResults] = useState<{ id: string; name: string | null; phone: string; email: string | null }[]>([]);
+  const [leadSearching, setLeadSearching] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<{ id: string; name: string | null; phone: string } | null>(null);
+  const [showLeadDropdown, setShowLeadDropdown] = useState(false);
+  const leadSearchRef = useRef<HTMLDivElement>(null);
+
+  // modo novo
+  const [newLeadPhone, setNewLeadPhone] = useState('');
+  const [newLeadName, setNewLeadName] = useState('');
+  const [newLeadEmail, setNewLeadEmail] = useState('');
+
+  // ── Processo ──────────────────────────────────────────────────
   const [caseNumber, setCaseNumber] = useState('');
   const [legalArea, setLegalArea] = useState('');
   const [actionType, setActionType] = useState('');
@@ -1174,7 +1446,34 @@ function CadastrarProcessoModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Máscara CNJ: 0000000-00.0000.0.00.0000
+  // Busca de leads com debounce
+  useEffect(() => {
+    if (leadMode !== 'existing') return;
+    if (!leadSearch.trim()) { setLeadResults([]); setShowLeadDropdown(false); return; }
+    const t = setTimeout(async () => {
+      setLeadSearching(true);
+      try {
+        const res = await api.get('/leads', { params: { search: leadSearch.trim(), limit: 8 } });
+        const items = res.data?.data || res.data || [];
+        setLeadResults(items);
+        setShowLeadDropdown(true);
+      } catch { setLeadResults([]); } finally { setLeadSearching(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [leadSearch, leadMode]);
+
+  // Fechar dropdown ao clicar fora
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (leadSearchRef.current && !leadSearchRef.current.contains(e.target as Node)) {
+        setShowLeadDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Máscara CNJ
   const handleCaseNumberChange = (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 20);
     let masked = digits;
@@ -1188,6 +1487,9 @@ function CadastrarProcessoModal({
 
   const handleSubmit = async () => {
     if (!caseNumber.trim()) { setError('Informe o número do processo.'); return; }
+    if (leadMode === 'existing' && !selectedLead) { setError('Selecione o cliente ou escolha "Novo cliente".'); return; }
+    if (leadMode === 'new' && !newLeadPhone.replace(/\D/g,'')) { setError('Informe o telefone do novo cliente.'); return; }
+
     setSaving(true);
     setError('');
     try {
@@ -1203,6 +1505,11 @@ function CadastrarProcessoModal({
         priority,
         notes: notes || undefined,
         filed_at: filedAt || undefined,
+        // Lead integration
+        lead_id: leadMode === 'existing' && selectedLead ? selectedLead.id : undefined,
+        lead_phone: leadMode === 'new' ? newLeadPhone : undefined,
+        lead_name: leadMode === 'new' ? newLeadName || undefined : undefined,
+        lead_email: leadMode === 'new' ? newLeadEmail || undefined : undefined,
       });
       onSuccess();
       onClose();
@@ -1213,10 +1520,13 @@ function CadastrarProcessoModal({
     }
   };
 
+  const inputCls = 'mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40';
+  const labelCls = 'text-[11px] font-bold text-muted-foreground uppercase tracking-wider';
+
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-[640px] mx-4 bg-card border border-border rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-150">
+      <div className="relative w-full max-w-[660px] mx-4 bg-card border border-border rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in zoom-in-95 duration-150">
 
         {/* Header */}
         <div className="flex items-center gap-3 px-6 py-4 border-b border-border shrink-0">
@@ -1233,155 +1543,269 @@ function CadastrarProcessoModal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
 
-          {/* Nº Processo */}
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-              Nº Processo CNJ <span className="text-destructive">*</span>
-            </label>
-            <input
-              type="text"
-              value={caseNumber}
-              onChange={e => handleCaseNumberChange(e.target.value)}
-              className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
-              placeholder="0000000-00.0000.0.00.0000"
-              autoFocus
-            />
+          {/* ── Seção: Cliente ─────────────────────────────────── */}
+          <div className="rounded-xl border border-border bg-accent/20 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <User size={11} /> Cliente / Parte Autora
+              </p>
+              {/* Toggle */}
+              <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-semibold">
+                <button
+                  onClick={() => { setLeadMode('existing'); setSelectedLead(null); setLeadSearch(''); }}
+                  className={`px-3 py-1.5 transition-colors ${leadMode === 'existing' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                >
+                  Cliente existente
+                </button>
+                <button
+                  onClick={() => { setLeadMode('new'); setSelectedLead(null); }}
+                  className={`px-3 py-1.5 transition-colors ${leadMode === 'new' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                >
+                  Novo cliente
+                </button>
+              </div>
+            </div>
+
+            {leadMode === 'existing' ? (
+              <div ref={leadSearchRef} className="relative">
+                {selectedLead ? (
+                  /* Lead selecionado */
+                  <div className="flex items-center gap-3 px-3 py-2.5 bg-primary/5 border border-primary/30 rounded-lg">
+                    <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+                      <User size={13} className="text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{selectedLead.name || 'Sem nome'}</p>
+                      <p className="text-[11px] text-muted-foreground font-mono">{selectedLead.phone}</p>
+                    </div>
+                    <button
+                      onClick={() => { setSelectedLead(null); setLeadSearch(''); }}
+                      className="p-1 text-muted-foreground hover:text-foreground rounded"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  /* Campo de busca */
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      value={leadSearch}
+                      onChange={e => setLeadSearch(e.target.value)}
+                      onFocus={() => leadSearch && setShowLeadDropdown(true)}
+                      className="w-full pl-9 pr-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      placeholder="Buscar por nome, telefone ou e-mail..."
+                      autoFocus
+                    />
+                    {leadSearching && (
+                      <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin" />
+                    )}
+                  </div>
+                )}
+
+                {/* Dropdown de resultados */}
+                {showLeadDropdown && !selectedLead && leadResults.length > 0 && (
+                  <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-xl overflow-hidden">
+                    {leadResults.map(lead => (
+                      <button
+                        key={lead.id}
+                        onClick={() => { setSelectedLead(lead); setShowLeadDropdown(false); setLeadSearch(''); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-accent text-left transition-colors"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0">
+                          <User size={12} className="text-muted-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-semibold text-foreground truncate">{lead.name || '(sem nome)'}</p>
+                          <p className="text-[11px] text-muted-foreground font-mono">{lead.phone}{lead.email ? ` · ${lead.email}` : ''}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {showLeadDropdown && !selectedLead && leadResults.length === 0 && leadSearch.length > 1 && !leadSearching && (
+                  <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-popover border border-border rounded-xl shadow-xl p-3 text-center">
+                    <p className="text-[12px] text-muted-foreground">Nenhum cliente encontrado.</p>
+                    <button
+                      onClick={() => { setLeadMode('new'); setNewLeadName(leadSearch); setShowLeadDropdown(false); }}
+                      className="mt-1.5 text-[12px] font-semibold text-primary hover:underline"
+                    >
+                      + Cadastrar "{leadSearch}" como novo cliente
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Modo novo cliente */
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Telefone <span className="text-destructive">*</span></label>
+                    <input
+                      type="tel"
+                      value={newLeadPhone}
+                      onChange={e => setNewLeadPhone(e.target.value)}
+                      className={inputCls}
+                      placeholder="(00) 00000-0000"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Nome do Cliente</label>
+                    <input
+                      type="text"
+                      value={newLeadName}
+                      onChange={e => setNewLeadName(e.target.value)}
+                      className={inputCls}
+                      placeholder="Nome completo"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>E-mail</label>
+                  <input
+                    type="email"
+                    value={newLeadEmail}
+                    onChange={e => setNewLeadEmail(e.target.value)}
+                    className={inputCls}
+                    placeholder="cliente@email.com"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Se já existir um cliente com esse telefone, ele será vinculado automaticamente.
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* Etapa atual + Prioridade */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Etapa Atual</label>
-              <select
-                value={trackingStage}
-                onChange={e => setTrackingStage(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-              >
-                {TRACKING_STAGES.map(s => (
-                  <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Prioridade</label>
-              <select
-                value={priority}
-                onChange={e => setPriority(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-              >
-                <option value="URGENTE">🔴 Urgente</option>
-                <option value="NORMAL">🟡 Normal</option>
-                <option value="BAIXA">⬜ Baixa</option>
-              </select>
-            </div>
-          </div>
+          {/* ── Seção: Processo ────────────────────────────────── */}
+          <div className="space-y-4">
+            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <BookOpen size={11} /> Dados do Processo
+            </p>
 
-          {/* Área + Tipo de Ação */}
-          <div className="grid grid-cols-2 gap-3">
+            {/* Nº Processo */}
             <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Área Jurídica</label>
-              <select
-                value={legalArea}
-                onChange={e => setLegalArea(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-              >
-                <option value="">Selecionar...</option>
-                {LEGAL_AREAS_LIST.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Tipo de Ação</label>
-              <input
-                type="text"
-                value={actionType}
-                onChange={e => setActionType(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="Reclamatória, Indenizatória..."
-              />
-            </div>
-          </div>
-
-          {/* Parte Contrária */}
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-              <Scale size={11} /> Parte Contrária
-            </label>
-            <input
-              type="text"
-              value={opposingParty}
-              onChange={e => setOpposingParty(e.target.value)}
-              className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-              placeholder="Nome do réu / reclamado"
-            />
-          </div>
-
-          {/* Vara + Juiz */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Vara / Tribunal</label>
-              <input
-                type="text"
-                value={court}
-                onChange={e => setCourt(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="1ª Vara do Trabalho"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                <Gavel size={11} /> Juiz / Relator
+              <label className={labelCls}>
+                Nº Processo CNJ <span className="text-destructive">*</span>
               </label>
               <input
                 type="text"
-                value={judge}
-                onChange={e => setJudge(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="Dr. João Silva"
+                value={caseNumber}
+                onChange={e => handleCaseNumberChange(e.target.value)}
+                className={`${inputCls} font-mono`}
+                placeholder="0000000-00.0000.0.00.0000"
               />
             </div>
-          </div>
 
-          {/* Valor da Causa + Data de Ajuizamento */}
-          <div className="grid grid-cols-2 gap-3">
+            {/* Etapa + Prioridade */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Etapa Atual</label>
+                <select value={trackingStage} onChange={e => setTrackingStage(e.target.value)} className={inputCls}>
+                  {TRACKING_STAGES.map(s => (
+                    <option key={s.id} value={s.id}>{s.emoji} {s.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Prioridade</label>
+                <select value={priority} onChange={e => setPriority(e.target.value)} className={inputCls}>
+                  <option value="URGENTE">🔴 Urgente</option>
+                  <option value="NORMAL">🟡 Normal</option>
+                  <option value="BAIXA">⬜ Baixa</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Área + Tipo de Ação */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Área Jurídica</label>
+                <select value={legalArea} onChange={e => setLegalArea(e.target.value)} className={inputCls}>
+                  <option value="">Selecionar...</option>
+                  {LEGAL_AREAS_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Tipo de Ação</label>
+                <input
+                  type="text"
+                  value={actionType}
+                  onChange={e => setActionType(e.target.value)}
+                  className={inputCls}
+                  placeholder="Reclamatória, Indenizatória..."
+                />
+              </div>
+            </div>
+
+            {/* Parte Contrária */}
             <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                <DollarSign size={11} /> Valor da Causa
+              <label className={`${labelCls} flex items-center gap-1`}>
+                <Scale size={11} /> Parte Contrária
               </label>
               <input
-                type="number"
-                value={claimValue}
-                onChange={e => setClaimValue(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                placeholder="0,00"
-                step="0.01"
-                min="0"
+                type="text"
+                value={opposingParty}
+                onChange={e => setOpposingParty(e.target.value)}
+                className={inputCls}
+                placeholder="Nome do réu / reclamado"
               />
             </div>
-            <div>
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                <Calendar size={11} /> Data de Ajuizamento
-              </label>
-              <input
-                type="date"
-                value={filedAt}
-                onChange={e => setFiledAt(e.target.value)}
-                className="mt-1 w-full px-3 py-2.5 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-            </div>
-          </div>
 
-          {/* Notas */}
-          <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Notas Internas</label>
-            <textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              rows={3}
-              className="mt-1 w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
-              placeholder="Observações sobre o processo..."
-            />
+            {/* Vara + Juiz */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Vara / Tribunal</label>
+                <input type="text" value={court} onChange={e => setCourt(e.target.value)} className={inputCls} placeholder="1ª Vara do Trabalho" />
+              </div>
+              <div>
+                <label className={`${labelCls} flex items-center gap-1`}>
+                  <Gavel size={11} /> Juiz / Relator
+                </label>
+                <input type="text" value={judge} onChange={e => setJudge(e.target.value)} className={inputCls} placeholder="Dr. João Silva" />
+              </div>
+            </div>
+
+            {/* Valor + Data */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={`${labelCls} flex items-center gap-1`}>
+                  <DollarSign size={11} /> Valor da Causa
+                </label>
+                <input
+                  type="number"
+                  value={claimValue}
+                  onChange={e => setClaimValue(e.target.value)}
+                  className={inputCls}
+                  placeholder="0,00"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              <div>
+                <label className={`${labelCls} flex items-center gap-1`}>
+                  <Calendar size={11} /> Data de Ajuizamento
+                </label>
+                <input type="date" value={filedAt} onChange={e => setFiledAt(e.target.value)} className={inputCls} />
+              </div>
+            </div>
+
+            {/* Notas */}
+            <div>
+              <label className={labelCls}>Notas Internas</label>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                rows={3}
+                className="mt-1 w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40 resize-none"
+                placeholder="Observações sobre o processo..."
+              />
+            </div>
           </div>
 
           {error && (

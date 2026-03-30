@@ -64,6 +64,7 @@ model User {
   saved_versions           PetitionVersion[]      @relation("VersionSaver")
   created_templates        LegalTemplate[]        @relation("TemplateCreator")
   ai_chats                 AiChat[]               @relation("AiChatOwner")
+  cs_leads                 Lead[]                 @relation("CSManager")
 }
 
 model Lead {
@@ -80,6 +81,15 @@ model Lead {
   tags                 String[]
   created_at           DateTime             @default(now())
   updated_at           DateTime             @updatedAt
+
+  // ─── Separação Lead vs Cliente ────────────────────────────
+  // Quando true: lead se tornou cliente (contrato assinado/FINALIZADO)
+  is_client            Boolean              @default(false)
+  became_client_at     DateTime?
+  // Operador que fechou a venda — mantém vínculo pós-conversão
+  cs_user_id           String?
+  cs_user              User?                @relation("CSManager", fields: [cs_user_id], references: [id], onDelete: SetNull)
+
   memory               AiMemory?
   conversations        Conversation[]
   tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -95,6 +105,7 @@ model Lead {
 
   @@index([tenant_id, phone])
   @@index([stage])
+  @@index([is_client])
 }
 
 model Conversation {

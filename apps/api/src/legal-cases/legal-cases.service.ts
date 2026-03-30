@@ -391,6 +391,11 @@ export class LegalCasesService {
     priority?: string;
     notes?: string;
     filed_at?: string;
+    // Integração lead: informar lead_id existente OU dados para criar novo lead real
+    lead_id?: string;
+    lead_name?: string;
+    lead_phone?: string;
+    lead_email?: string;
   }) {
     const VALID_TRACKING = TRACKING_STAGES.map(s => s.id) as string[];
     const trackingStage = (
@@ -406,33 +411,76 @@ export class LegalCasesService {
         : 'NORMAL'
     ) as string;
 
-    // Cria ou reutiliza um Lead placeholder baseado na parte contrária
-    // Usa um telefone fictício único para não conflitar com @unique
-    const placeholderPhone = `PROC_${data.case_number.replace(/\D/g, '')}`;
-    const leadName = data.opposing_party
-      ? `[Processo] ${data.opposing_party}`
-      : `[Processo] ${data.case_number}`;
+    let leadId: string;
+    let leadDisplayName: string;
 
-    let lead = await this.prisma.lead.findFirst({
-      where: { phone: placeholderPhone },
-      select: { id: true },
-    });
+    if (data.lead_id) {
+      // Caminho A: lead existente informado pelo usuário
+      const existing = await this.prisma.lead.findUnique({
+        where: { id: data.lead_id },
+        select: { id: true, name: true },
+      });
+      if (!existing) throw new BadRequestException('Lead informado não encontrado.');
+      leadId = existing.id;
+      leadDisplayName = existing.name || data.lead_id;
 
-    if (!lead) {
-      lead = await this.prisma.lead.create({
-        data: {
-          phone: placeholderPhone,
-          name: leadName,
-          tenant_id: data.tenant_id,
-          origin: 'CADASTRO_DIRETO',
-        },
+    } else if (data.lead_phone) {
+      // Caminho B: criar novo lead real com telefone/nome fornecidos
+      const normalizedPhone = data.lead_phone.replace(/\D/g, '');
+      if (!normalizedPhone) throw new BadRequestException('Telefone inválido para o cliente.');
+
+      // Verifica se já existe lead com esse telefone
+      const byPhone = await this.prisma.lead.findFirst({
+        where: { phone: { contains: normalizedPhone } },
+        select: { id: true, name: true },
+      });
+
+      if (byPhone) {
+        leadId = byPhone.id;
+        leadDisplayName = byPhone.name || normalizedPhone;
+      } else {
+        const newLead = await this.prisma.lead.create({
+          data: {
+            phone: normalizedPhone,
+            name: data.lead_name || null,
+            email: data.lead_email || null,
+            tenant_id: data.tenant_id,
+            origin: 'CADASTRO_PROCESSO',
+          },
+          select: { id: true, name: true },
+        });
+        leadId = newLead.id;
+        leadDisplayName = newLead.name || normalizedPhone;
+      }
+
+    } else {
+      // Caminho C: fallback — lead placeholder (retrocompatibilidade)
+      const placeholderPhone = `PROC_${data.case_number.replace(/\D/g, '')}`;
+      leadDisplayName = data.opposing_party
+        ? `[Processo] ${data.opposing_party}`
+        : `[Processo] ${data.case_number}`;
+
+      let lead = await this.prisma.lead.findFirst({
+        where: { phone: placeholderPhone },
         select: { id: true },
       });
+      if (!lead) {
+        lead = await this.prisma.lead.create({
+          data: {
+            phone: placeholderPhone,
+            name: leadDisplayName,
+            tenant_id: data.tenant_id,
+            origin: 'CADASTRO_DIRETO',
+          },
+          select: { id: true },
+        });
+      }
+      leadId = lead.id;
     }
 
     const legalCase = await this.prisma.legalCase.create({
       data: {
-        lead_id: lead.id,
+        lead_id: leadId,
         lawyer_id: data.lawyer_id,
         tenant_id: data.tenant_id,
         case_number: data.case_number,
@@ -459,11 +507,87 @@ export class LegalCasesService {
     try {
       this.chatGateway.emitNewLegalCase(data.lawyer_id, {
         caseId: legalCase.id,
-        leadName: leadName,
+        leadName: leadDisplayName,
       });
     } catch {}
 
     return legalCase;
+  }
+
+  // ─── VINCULAR / CRIAR CLIENTE (LEAD) ──────────────────────────
+
+  async updateLead(id: string, data: {
+    lead_id?: string;
+    lead_phone?: string;
+    lead_name?: string;
+    lead_email?: string;
+    tenant_id?: string;
+  }) {
+    await this.verifyTenantOwnership(id, data.tenant_id);
+
+    const lc = await this.prisma.legalCase.findUnique({
+      where: { id },
+      select: { id: true, lead_id: true, lead: { select: { phone: true, name: true } } },
+    });
+    if (!lc) throw new NotFoundException('Processo não encontrado');
+
+    let finalLeadId: string;
+
+    if (data.lead_id) {
+      const existing = await this.prisma.lead.findUnique({ where: { id: data.lead_id }, select: { id: true } });
+      if (!existing) throw new BadRequestException('Lead informado não encontrado.');
+      finalLeadId = data.lead_id;
+
+    } else if (data.lead_phone) {
+      const normalizedPhone = data.lead_phone.replace(/\D/g, '');
+      if (!normalizedPhone) throw new BadRequestException('Telefone inválido.');
+
+      // Verifica se já existe lead com esse telefone
+      const byPhone = await this.prisma.lead.findFirst({
+        where: { phone: { contains: normalizedPhone } },
+        select: { id: true },
+      });
+
+      if (byPhone) {
+        finalLeadId = byPhone.id;
+      } else {
+        const newLead = await this.prisma.lead.create({
+          data: {
+            phone: normalizedPhone,
+            name: data.lead_name || null,
+            email: data.lead_email || null,
+            tenant_id: data.tenant_id,
+            origin: 'CADASTRO_PROCESSO',
+          },
+          select: { id: true },
+        });
+        finalLeadId = newLead.id;
+      }
+    } else {
+      throw new BadRequestException('Informe lead_id ou lead_phone.');
+    }
+
+    // Atualiza o lead_id PRIMEIRO (antes de qualquer deleção) para evitar cascade delete no LegalCase
+    const updated = await this.prisma.legalCase.update({
+      where: { id },
+      data: { lead_id: finalLeadId },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
+        _count: { select: { tasks: true, events: true, djen_publications: true } },
+      },
+    });
+
+    // Após atualizar, remove o lead placeholder antigo se era PROC_xxx e não tem outros processos
+    // (o LegalCase já aponta pro novo lead, então o cascade delete não afeta mais este processo)
+    const oldIsPlaceholder = lc.lead?.phone?.startsWith('PROC_') || lc.lead?.name?.startsWith('[Processo]');
+    if (oldIsPlaceholder && lc.lead_id !== finalLeadId) {
+      const otherCases = await this.prisma.legalCase.count({ where: { lead_id: lc.lead_id } });
+      if (otherCases === 0) {
+        await this.prisma.lead.delete({ where: { id: lc.lead_id } }).catch(() => {});
+      }
+    }
+
+    return updated;
   }
 
   // ─── PROTOCOLO → PROCESSOS ─────────────────────────────────────
