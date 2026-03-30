@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
@@ -408,11 +408,21 @@ export class DjenService {
   ) {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({ where: { id } });
 
+    // Impede criação duplicada para a mesma publicação
+    if (pub.legal_case_id) {
+      const existing = await this.prisma.legalCase.findUnique({ where: { id: pub.legal_case_id } });
+      if (existing) throw new ConflictException('Processo já criado para esta publicação.');
+    }
+
     const digits = pub.numero_processo.replace(/\D/g, '');
     const placeholderPhone = `PROC_${digits}`;
 
-    // Cria ou reutiliza lead placeholder
-    let lead = await this.prisma.lead.findFirst({ where: { phone: placeholderPhone } });
+    // Cria ou reutiliza lead placeholder — filtra por tenant para evitar reutilização entre tenants
+    const leadWhere: any = { phone: placeholderPhone };
+    if (tenantId) leadWhere.tenant_id = tenantId;
+    else leadWhere.tenant_id = null;
+
+    let lead = await this.prisma.lead.findFirst({ where: leadWhere });
     if (!lead) {
       lead = await this.prisma.lead.create({
         data: {

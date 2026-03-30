@@ -1984,6 +1984,7 @@ function ProcessosPageContent() {
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
@@ -2031,8 +2032,10 @@ function ProcessosPageContent() {
       const archivedParam = view === 'archived' ? 'true' : 'false';
       const res = await api.get(`/legal-cases?archived=${archivedParam}&inTracking=true`);
       setCases(res.data || []);
+      setFetchError(false);
     } catch (e: any) {
       console.warn('Erro ao buscar processos', e);
+      if (!silent) setFetchError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -2224,7 +2227,18 @@ function ProcessosPageContent() {
           </div>
         </header>
 
-        {loading ? (
+        {fetchError ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-6">
+            <p className="text-sm text-destructive font-medium">Erro ao carregar processos.</p>
+            <p className="text-xs text-muted-foreground">Verifique sua conexão ou tente novamente.</p>
+            <button
+              onClick={() => fetchCases()}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border hover:bg-accent transition-colors"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : loading ? (
           <div className="flex-1 overflow-y-auto p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {[...Array(6)].map((_, i) => (

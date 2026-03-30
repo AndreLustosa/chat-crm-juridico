@@ -582,9 +582,14 @@ function DjenPageContent() {
   };
 
   const handleCreateProcess = async (id: string) => {
-    await api.post(`/djen/${id}/create-process`);
-    await fetchPubs(true);
-    router.push('/atendimento/processos');
+    try {
+      await api.post(`/djen/${id}/create-process`);
+      await fetchPubs(true);
+      router.push('/atendimento/processos');
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || 'Erro ao criar processo. Tente novamente.';
+      alert(msg);
+    }
   };
 
   const handleMoveStage = async (caseId: string, stage: string) => {
