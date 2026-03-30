@@ -10,6 +10,7 @@ import {
   LayoutDashboard, FileText, Gavel,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { useRole } from '@/lib/useRole';
 
 const THEMES = [
   { id: 'logo-dark', name: 'Dark (Logo)', color: '#000000' },
@@ -24,6 +25,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
   const { open: cmdOpen, setOpen: setCmdOpen } = useGlobalCommandPalette();
+  const perms = useRole();
 
   // Mobile states
   const [isMobile, setIsMobile] = useState(false);
@@ -117,16 +119,16 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
     { label: 'Contatos', href: '/atendimento/contacts', icon: Users, match: (p: string) => p.startsWith('/atendimento/contacts') },
   ];
 
-  const moreItems = [
-    { label: 'Dashboard', href: '/atendimento/dashboard', icon: LayoutDashboard, match: (p: string) => p.startsWith('/atendimento/dashboard') },
-    { label: 'Agenda', href: '/atendimento/agenda', icon: Calendar, match: (p: string) => p.startsWith('/atendimento/agenda') },
-    { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: FileEdit, match: (p: string) => p.startsWith('/atendimento/advogado') },
-    { label: 'Processos', href: '/atendimento/processos', icon: BookOpen, match: (p: string) => p.startsWith('/atendimento/processos') },
-    { label: 'DJEN', href: '/atendimento/djen', icon: Gavel, match: (p: string) => p.startsWith('/atendimento/djen') },
-
-    { label: 'Marketing', href: '/atendimento/marketing/analytics', icon: Megaphone, match: (p: string) => p.startsWith('/atendimento/marketing') },
-    { label: 'Ajustes', href: '/atendimento/settings', icon: Settings, match: (p: string) => p.startsWith('/atendimento/settings') },
+  const allMoreItems = [
+    { label: 'Dashboard', href: '/atendimento/dashboard', icon: LayoutDashboard, match: (p: string) => p.startsWith('/atendimento/dashboard'), show: perms.canViewDashboard },
+    { label: 'Agenda', href: '/atendimento/agenda', icon: Calendar, match: (p: string) => p.startsWith('/atendimento/agenda'), show: true },
+    { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: FileEdit, match: (p: string) => p.startsWith('/atendimento/advogado'), show: perms.canViewAdvogado },
+    { label: 'Processos', href: '/atendimento/processos', icon: BookOpen, match: (p: string) => p.startsWith('/atendimento/processos'), show: perms.canViewLegalCases },
+    { label: 'DJEN', href: '/atendimento/djen', icon: Gavel, match: (p: string) => p.startsWith('/atendimento/djen'), show: perms.canViewDjen },
+    { label: 'Marketing', href: '/atendimento/marketing/analytics', icon: Megaphone, match: (p: string) => p.startsWith('/atendimento/marketing'), show: perms.canViewAnalytics },
+    { label: 'Ajustes', href: '/atendimento/settings', icon: Settings, match: (p: string) => p.startsWith('/atendimento/settings'), show: perms.canManageSettings },
   ];
+  const moreItems = allMoreItems.filter(item => item.show);
 
   const showBottomNav = isMobile && !mobileChatOpen;
   const isMoreActive = moreItems.some(item => item.match(pathname));

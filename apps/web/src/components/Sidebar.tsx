@@ -7,6 +7,7 @@ import { LogOut, Users, Briefcase, Settings, Palette, Check, MessageSquare, Mega
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
 import { NotificationCenter } from '@/app/atendimento/components/NotificationCenter';
+import { useRole } from '@/lib/useRole';
 
 const THEMES = [
   { id: 'logo-dark', name: 'Dark (Logo)', color: '#000000' },
@@ -24,6 +25,7 @@ export function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
+  const perms = useRole();
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
@@ -157,21 +159,21 @@ export function Sidebar() {
     return () => clearInterval(interval);
   }, []);
 
-  const navItems = [
-    { label: 'Dashboard', href: '/atendimento/dashboard', icon: <LayoutDashboard size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/dashboard') },
-    { label: 'Inbox (WhatsApp)', href: '/atendimento', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/atendimento' || p.startsWith('/atendimento/chat'), badge: unreadTotal },
-    { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm') },
-    { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts') },
-    { label: 'Tarefas', href: '/atendimento/tasks', icon: <CheckSquare size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/tasks'), badge: overdueCount },
-    { label: 'Agenda', href: '/atendimento/agenda', icon: <Calendar size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/agenda') },
-    { label: 'Follow-up IA', href: '/atendimento/followup', icon: <Bot size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/followup') },
-    { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: <FileEdit size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/advogado') },
-    { label: 'Processos', href: '/atendimento/processos', icon: <BookOpen size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/processos') },
-    { label: 'DJEN — Publicações', href: '/atendimento/djen', icon: <Gavel size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/djen'), badge: djenUnread },
-
-    { label: 'Analytics', href: '/atendimento/marketing/analytics', icon: <Megaphone size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/marketing') },
-    { label: 'Configurações', href: '/atendimento/settings', icon: <Settings size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/settings') },
+  const allNavItems = [
+    { label: 'Dashboard', href: '/atendimento/dashboard', icon: <LayoutDashboard size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/dashboard'), show: perms.canViewDashboard },
+    { label: 'Inbox (WhatsApp)', href: '/atendimento', icon: <MessageSquare size={22} strokeWidth={2} />, match: (p: string) => p === '/atendimento' || p.startsWith('/atendimento/chat'), badge: unreadTotal, show: true },
+    { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm'), show: true },
+    { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts'), show: true },
+    { label: 'Tarefas', href: '/atendimento/tasks', icon: <CheckSquare size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/tasks'), badge: overdueCount, show: true },
+    { label: 'Agenda', href: '/atendimento/agenda', icon: <Calendar size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/agenda'), show: true },
+    { label: 'Follow-up IA', href: '/atendimento/followup', icon: <Bot size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/followup'), show: perms.isAdmin || perms.isAdvogado || perms.isOperador },
+    { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: <FileEdit size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/advogado'), show: perms.canViewAdvogado },
+    { label: 'Processos', href: '/atendimento/processos', icon: <BookOpen size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/processos'), show: perms.canViewLegalCases },
+    { label: 'DJEN — Publicações', href: '/atendimento/djen', icon: <Gavel size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/djen'), badge: djenUnread, show: perms.canViewDjen },
+    { label: 'Analytics', href: '/atendimento/marketing/analytics', icon: <Megaphone size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/marketing'), show: perms.canViewAnalytics },
+    { label: 'Configurações', href: '/atendimento/settings', icon: <Settings size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/settings'), show: perms.canManageSettings },
   ];
+  const navItems = allNavItems.filter(item => item.show);
 
   // ─── Tooltip helpers ──────────────────────────────────────────────
   const showTooltip = (e: React.MouseEvent, label: React.ReactNode) => {
