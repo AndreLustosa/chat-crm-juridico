@@ -2,6 +2,7 @@
 
 import { useRouter, usePathname } from 'next/navigation';
 import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch } from 'lucide-react';
+import { useRole } from '@/lib/useRole';
 
 type MenuItem = {
   label: string;
@@ -36,6 +37,21 @@ const settingsMenu: MenuItem[] = [
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { isAdmin } = useRole();
+
+  // Filtra o menu: itens sensíveis só para ADMIN
+  const adminOnlyItems = [
+    '/atendimento/settings/users',
+    '/atendimento/settings/ai',
+    '/atendimento/settings/costs',
+    '/atendimento/settings/whatsapp',
+    '/atendimento/settings/permissions',
+    '/atendimento/settings/automations',
+    '/atendimento/settings/mcp',
+  ];
+  const visibleMenu = settingsMenu.filter(
+    item => isAdmin || !adminOnlyItems.includes(item.href)
+  );
 
   return (
     <div className="flex h-full bg-background overflow-hidden">
@@ -55,7 +71,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           </div>
         </div>
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {settingsMenu.map((item) => {
+          {visibleMenu.map((item) => {
             const isActive = pathname === item.href;
             const isParentOfActive = item.submenu?.some((s) => pathname === s.href) ?? false;
             const showSubmenu = isActive || isParentOfActive;
