@@ -331,7 +331,7 @@ function AiPanel({
   const urgConf = analysis ? URGENCIA_CONFIG[analysis.urgencia] : null;
 
   return (
-    <div className="w-[340px] shrink-0 border-l border-border flex flex-col bg-card/60 overflow-hidden">
+    <div className="h-[50vh] shrink-0 border-t border-border flex flex-col bg-card/60 overflow-hidden w-full">
       {/* Panel header */}
       <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
@@ -350,9 +350,10 @@ function AiPanel({
         </button>
       </div>
 
+      {/* Content: scrollable grid */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {loading && (
-          <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
             <div className="w-8 h-8 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
             <p className="text-[12px]">Analisando publicação…</p>
           </div>
@@ -367,139 +368,136 @@ function AiPanel({
         )}
 
         {analysis && !loading && (
-          <div className="p-4 space-y-4">
+          <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
 
-            {/* Modelo usado */}
-            {analysis.model_used && (
-              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                <Sparkles size={9} className="text-violet-400" />
-                <span>Analisado por <strong className="text-foreground">{analysis.model_used}</strong></span>
-              </div>
-            )}
-
-            {/* Urgência */}
-            {urgConf && (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
-                <urgConf.icon size={14} className={urgConf.text} />
-                <span className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label}</span>
-                <span className="text-[10px] text-muted-foreground ml-auto">{analysis.prazo_dias} dias úteis</span>
-              </div>
-            )}
-
-            {/* Resumo */}
-            <div>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Resumo</p>
-              <p className="text-[12px] text-foreground leading-relaxed">{analysis.resumo}</p>
-            </div>
-
-            {/* Ação necessária */}
-            <div>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ação Necessária</p>
-              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-accent/40 border border-border">
-                <ArrowRight size={13} className="text-primary mt-0.5 shrink-0" />
-                <p className="text-[12px] text-foreground font-medium">{analysis.tipo_acao}</p>
-              </div>
-            </div>
-
-            {/* Tarefa sugerida */}
-            <div>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tarefa Sugerida</p>
-              <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                <p className="text-[12px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
-                {analysis.tarefa_descricao && (
-                  <p className="text-[11px] text-muted-foreground">{analysis.tarefa_descricao}</p>
-                )}
-                <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                  <Clock size={10} />
-                  Prazo: {analysis.prazo_dias} dias úteis
+            {/* Col 1: Resumo + Urgência + Ação */}
+            <div className="space-y-3">
+              {analysis.model_used && (
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <Sparkles size={9} className="text-violet-400" />
+                  <span>Analisado por <strong className="text-foreground">{analysis.model_used}</strong></span>
                 </div>
-                <button
-                  onClick={handleCreateTask}
-                  disabled={creatingTask || taskCreated}
-                  className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
-                    taskCreated
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
-                  }`}
-                >
-                  {creatingTask ? (
-                    <><Loader2 size={11} className="animate-spin" /> Criando…</>
-                  ) : taskCreated ? (
-                    <><CheckCircle2 size={11} /> Tarefa criada!</>
-                  ) : (
-                    <><CheckSquare size={11} /> Criar esta tarefa</>
-                  )}
-                </button>
+              )}
+              {urgConf && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
+                  <urgConf.icon size={14} className={urgConf.text} />
+                  <span className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label}</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto">{analysis.prazo_dias} dias úteis</span>
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Resumo</p>
+                <p className="text-[12px] text-foreground leading-relaxed">{analysis.resumo}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ação Necessária</p>
+                <div className="flex items-start gap-2 p-2.5 rounded-xl bg-accent/40 border border-border">
+                  <ArrowRight size={13} className="text-primary mt-0.5 shrink-0" />
+                  <p className="text-[12px] text-foreground font-medium">{analysis.tipo_acao}</p>
+                </div>
               </div>
             </div>
 
-            {/* Estágio sugerido */}
-            {analysis.estagio_sugerido && pub.legal_case_id && (
+            {/* Col 2: Tarefa sugerida */}
+            <div className="space-y-3">
               <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Mover Processo</p>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tarefa Sugerida</p>
                 <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                  <p className="text-[11px] text-muted-foreground">
-                    Mover para o estágio:
-                  </p>
-                  <p className="text-[13px] font-bold text-foreground">
-                    {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
-                  </p>
-                  {pub.legal_case && (
-                    <p className="text-[10px] text-muted-foreground">
-                      Processo: {pub.legal_case.lead?.name || pub.legal_case.case_number}
-                    </p>
+                  <p className="text-[12px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
+                  {analysis.tarefa_descricao && (
+                    <p className="text-[11px] text-muted-foreground">{analysis.tarefa_descricao}</p>
                   )}
+                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Clock size={10} />
+                    Prazo: {analysis.prazo_dias} dias úteis
+                  </div>
                   <button
-                    onClick={handleMoveStage}
-                    disabled={movingStage || stageMoved}
+                    onClick={handleCreateTask}
+                    disabled={creatingTask || taskCreated}
                     className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
-                      stageMoved
+                      taskCreated
                         ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        : 'bg-card border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
+                        : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
                     }`}
                   >
-                    {movingStage ? (
-                      <><Loader2 size={11} className="animate-spin" /> Movendo…</>
-                    ) : stageMoved ? (
-                      <><CheckCircle2 size={11} /> Processo movido!</>
+                    {creatingTask ? (
+                      <><Loader2 size={11} className="animate-spin" /> Criando…</>
+                    ) : taskCreated ? (
+                      <><CheckCircle2 size={11} /> Tarefa criada!</>
                     ) : (
-                      <><ArrowRight size={11} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido]}</>
+                      <><CheckSquare size={11} /> Criar esta tarefa</>
                     )}
                   </button>
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Se não vinculado — criar processo */}
-            {analysis.estagio_sugerido && !pub.legal_case_id && (
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Cadastrar Processo</p>
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
-                  <p className="text-[11px] text-muted-foreground">
-                    Publicação não vinculada. Sugerido cadastrar no estágio:
-                  </p>
-                  <p className="text-[12px] font-bold text-amber-400">
-                    {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
-                  </p>
-                  <button
-                    onClick={() => onCreateProcess(pub.id)}
-                    className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15 transition-colors"
-                  >
-                    <Plus size={11} /> Criar Processo
-                  </button>
+            {/* Col 3: Processo + Orientações */}
+            <div className="space-y-3">
+              {analysis.estagio_sugerido && pub.legal_case_id && (
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Mover Processo</p>
+                  <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                    <p className="text-[11px] text-muted-foreground">Mover para o estágio:</p>
+                    <p className="text-[13px] font-bold text-foreground">
+                      {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
+                    </p>
+                    {pub.legal_case && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Processo: {pub.legal_case.lead?.name || pub.legal_case.case_number}
+                      </p>
+                    )}
+                    <button
+                      onClick={handleMoveStage}
+                      disabled={movingStage || stageMoved}
+                      className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
+                        stageMoved
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : 'bg-card border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
+                      }`}
+                    >
+                      {movingStage ? (
+                        <><Loader2 size={11} className="animate-spin" /> Movendo…</>
+                      ) : stageMoved ? (
+                        <><CheckCircle2 size={11} /> Processo movido!</>
+                      ) : (
+                        <><ArrowRight size={11} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido]}</>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Orientações */}
-            {analysis.orientacoes && (
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Orientações</p>
-                <div className="rounded-xl border border-border bg-accent/20 p-3">
-                  <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.orientacoes}</p>
+              {analysis.estagio_sugerido && !pub.legal_case_id && (
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Cadastrar Processo</p>
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      Publicação não vinculada. Sugerido cadastrar no estágio:
+                    </p>
+                    <p className="text-[12px] font-bold text-amber-400">
+                      {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
+                    </p>
+                    <button
+                      onClick={() => onCreateProcess(pub.id)}
+                      className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15 transition-colors"
+                    >
+                      <Plus size={11} /> Criar Processo
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+
+              {analysis.orientacoes && (
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Orientações</p>
+                  <div className="rounded-xl border border-border bg-accent/20 p-3">
+                    <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.orientacoes}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         )}
       </div>
@@ -691,11 +689,11 @@ export default function DjenPage() {
         ))}
       </div>
 
-      {/* Main — list + AI panel */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main — list + AI panel (vertical split) */}
+      <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Publications list */}
-        <main className="flex-1 overflow-y-auto custom-scrollbar">
+        <main className={`overflow-y-auto custom-scrollbar transition-all ${selectedPub ? 'flex-1 min-h-0' : 'flex-1'}`}>
           {loading ? (
             <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground text-[13px]">
               <Loader2 size={16} className="animate-spin" />
