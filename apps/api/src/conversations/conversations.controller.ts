@@ -14,10 +14,12 @@ export class ConversationsController {
   async findAll(
     @Query('inboxId') inboxId: string | undefined,
     @Query('status') status: string | undefined,
+    @Query('clientMode') clientMode: string | undefined,
     @Request() req?: any,
   ) {
     const userId = req?.user?.id;
-    return this.conversationsService.findAll(status, userId, inboxId, req?.user?.tenant_id);
+    const clientModeBool = clientMode === 'true' ? true : clientMode === 'false' ? false : undefined;
+    return this.conversationsService.findAll(status, userId, inboxId, req?.user?.tenant_id, clientModeBool);
   }
 
   @Get('pending-transfers')
