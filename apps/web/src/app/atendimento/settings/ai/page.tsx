@@ -111,6 +111,7 @@ export default function AiSettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [adminKey, setAdminKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
+  const [djenModel, setDjenModel] = useState('gpt-4o-mini');
   const [cooldownSeconds, setCooldownSeconds] = useState(8);
   const [isConfigured, setIsConfigured] = useState(false);
   const [isAdminKeyConfigured, setIsAdminKeyConfigured] = useState(false);
@@ -158,6 +159,7 @@ export default function AiSettingsPage() {
       setIsAdminKeyConfigured(configRes.data.isAdminKeyConfigured ?? false);
       setIsAnthropicKeyConfigured(configRes.data.isAnthropicKeyConfigured ?? false);
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
+      setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
       setSkills(skillsRes.data);
       setTtsEnabled(ttsRes.data.enabled ?? false);
@@ -176,7 +178,7 @@ export default function AiSettingsPage() {
   const handleSaveConfig = async () => {
     setSavingConfig(true);
     try {
-      const payload: any = { defaultModel, cooldownSeconds };
+      const payload: any = { defaultModel, djenModel, cooldownSeconds };
       if (apiKey.trim())       payload.apiKey         = apiKey.trim();
       if (adminKey.trim())     payload.adminKey       = adminKey.trim();
       if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
@@ -368,7 +370,7 @@ export default function AiSettingsPage() {
             <div className="p-5 space-y-4">
               {/* Modelo padrão (sempre visível) */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Modelo padrão</label>
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Modelo padrão (Chat / Skills)</label>
                 <select
                   value={defaultModel}
                   onChange={(e) => setDefaultModel(e.target.value)}
@@ -379,6 +381,42 @@ export default function AiSettingsPage() {
                   ))}
                 </select>
                 <p className="text-[11px] text-muted-foreground">Modelo usado quando a skill não define um modelo específico.</p>
+              </div>
+
+              {/* Modelo DJEN */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                  <span>⚖️</span> Modelo para análise DJEN
+                </label>
+                <select
+                  value={djenModel}
+                  onChange={(e) => setDjenModel(e.target.value)}
+                  className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+                >
+                  <optgroup label="OpenAI">
+                    {[
+                      { value: 'gpt-4o-mini',  label: 'GPT-4o Mini — rápido, econômico (recomendado)' },
+                      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado' },
+                      { value: 'gpt-4.1',      label: 'GPT-4.1 — analítico avançado' },
+                      { value: 'gpt-4o',       label: 'GPT-4o — alta precisão' },
+                    ].map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Anthropic (requer API Key Anthropic)">
+                    {[
+                      { value: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5 — rápido, econômico' },
+                      { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 — balanceado, preciso' },
+                      { value: 'claude-opus-4-6',   label: 'Claude Opus 4.6 — máxima capacidade' },
+                    ].map((m) => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </optgroup>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  Modelo usado pelo botão <strong>Analisar IA</strong> na página de publicações DJEN.
+                  Modelos Anthropic exigem a API Key Anthropic configurada abaixo.
+                </p>
               </div>
 
               {/* Cooldown entre respostas da IA */}

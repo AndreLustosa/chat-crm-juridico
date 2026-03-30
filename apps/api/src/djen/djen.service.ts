@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 function toDateStr(date: Date): string {
   return date.toISOString().slice(0, 10); // yyyy-MM-dd
@@ -465,12 +466,8 @@ export class DjenService {
     tarefa_titulo: string;
     tarefa_descricao: string;
     orientacoes: string;
+    model_used: string;
   }> {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new BadRequestException('OPENAI_API_KEY não configurada.');
-    }
-
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({
       where: { id },
       include: {
@@ -480,34 +477,12 @@ export class DjenService {
       },
     });
 
-    const context = `
-PUBLICAÇÃO DO DJEN
-Data: ${new Date(pub.data_disponibilizacao).toLocaleDateString('pt-BR')}
-Tipo: ${pub.tipo_comunicacao || 'Não informado'}
-Número do processo: ${pub.numero_processo}
-Assunto: ${pub.assunto || 'Não informado'}
-Classe processual: ${pub.classe_processual || 'Não informado'}
-${pub.legal_case ? `Processo vinculado: ${pub.legal_case.lead?.name || ''} — ${pub.legal_case.legal_area || ''} — Estágio atual: ${pub.legal_case.tracking_stage || ''}` : 'Processo: Não vinculado'}
-
-CONTEÚDO COMPLETO:
-${pub.conteudo.slice(0, 2000)}
-`.trim();
-
     const STAGES = [
       'DISTRIBUIDO', 'CITACAO', 'CONTESTACAO', 'INSTRUCAO',
       'JULGAMENTO', 'RECURSO', 'TRANSITADO', 'EXECUCAO', 'ENCERRADO',
     ];
 
-    const openai = new OpenAI({ apiKey });
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos:
+    const systemPrompt = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos:
 - resumo: string (máx 3 frases, PT-BR, linguagem direta)
 - urgencia: "URGENTE" | "NORMAL" | "BAIXA"
 - tipo_acao: string (o que o advogado precisa fazer)
@@ -518,16 +493,58 @@ ${pub.conteudo.slice(0, 2000)}
 - orientacoes: string (observações estratégicas para o advogado, máx 300 chars)
 
 Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência. NORMAL = contestação, manifestação, despacho. BAIXA = distribuição, informativo.
-Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO.`,
-        },
-        {
-          role: 'user',
-          content: context,
-        },
-      ],
-    });
+Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO.`;
 
-    const raw = completion.choices[0]?.message?.content || '{}';
+    const userPrompt = `PUBLICAÇÃO DO DJEN
+Data: ${new Date(pub.data_disponibilizacao).toLocaleDateString('pt-BR')}
+Tipo: ${pub.tipo_comunicacao || 'Não informado'}
+Número do processo: ${pub.numero_processo}
+Assunto: ${pub.assunto || 'Não informado'}
+Classe processual: ${pub.classe_processual || 'Não informado'}
+${pub.legal_case ? `Processo vinculado: ${pub.legal_case.lead?.name || ''} — ${pub.legal_case.legal_area || ''} — Estágio atual: ${pub.legal_case.tracking_stage || ''}` : 'Processo: Não vinculado'}
+
+CONTEÚDO COMPLETO:
+${pub.conteudo.slice(0, 2000)}`;
+
+    // Resolve modelo configurado
+    const configuredModel = await this.settingsService.getDjenModel();
+    const isAnthropic = configuredModel.startsWith('claude');
+
+    let raw = '{}';
+
+    if (isAnthropic) {
+      const anthropicKey = (await this.settingsService['get']('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
+      if (!anthropicKey) throw new BadRequestException('ANTHROPIC_API_KEY não configurada.');
+
+      const client = new Anthropic({ apiKey: anthropicKey });
+      const message = await client.messages.create({
+        model: configuredModel,
+        max_tokens: 1024,
+        temperature: 0.2,
+        system: systemPrompt + '\n\nResponda APENAS com JSON válido, sem markdown ou explicações extras.',
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+      raw = (message.content[0] as any)?.text || '{}';
+      // Extrai JSON de possível markdown
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) raw = jsonMatch[0];
+    } else {
+      const openaiKey = (await this.settingsService['get']('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+      if (!openaiKey) throw new BadRequestException('OPENAI_API_KEY não configurada.');
+
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const completion = await openai.chat.completions.create({
+        model: configuredModel,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      raw = completion.choices[0]?.message?.content || '{}';
+    }
+
     let parsed: any = {};
     try { parsed = JSON.parse(raw); } catch { parsed = {}; }
 
@@ -540,6 +557,7 @@ Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, audiê
       tarefa_titulo: parsed.tarefa_titulo || 'Verificar publicação DJEN',
       tarefa_descricao: parsed.tarefa_descricao || '',
       orientacoes: parsed.orientacoes || '',
+      model_used: configuredModel,
     };
   }
 }
