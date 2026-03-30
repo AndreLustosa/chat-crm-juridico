@@ -567,16 +567,7 @@ export class LegalCasesService {
       throw new BadRequestException('Informe lead_id ou lead_phone.');
     }
 
-    // Remove o lead placeholder antigo se era PROC_xxx e não tem outros processos
-    const oldIsPlaceholder = lc.lead?.phone?.startsWith('PROC_') || lc.lead?.name?.startsWith('[Processo]');
-    if (oldIsPlaceholder && lc.lead_id !== finalLeadId) {
-      const otherCases = await this.prisma.legalCase.count({ where: { lead_id: lc.lead_id, id: { not: id } } });
-      if (otherCases === 0) {
-        // Deleta o placeholder (não tem outros processos vinculados)
-        await this.prisma.lead.delete({ where: { id: lc.lead_id } }).catch(() => {});
-      }
-    }
-
+    // Atualiza o lead_id PRIMEIRO (antes de qualquer deleção) para evitar cascade delete no LegalCase
     const updated = await this.prisma.legalCase.update({
       where: { id },
       data: { lead_id: finalLeadId },
@@ -585,6 +576,16 @@ export class LegalCasesService {
         _count: { select: { tasks: true, events: true, djen_publications: true } },
       },
     });
+
+    // Após atualizar, remove o lead placeholder antigo se era PROC_xxx e não tem outros processos
+    // (o LegalCase já aponta pro novo lead, então o cascade delete não afeta mais este processo)
+    const oldIsPlaceholder = lc.lead?.phone?.startsWith('PROC_') || lc.lead?.name?.startsWith('[Processo]');
+    if (oldIsPlaceholder && lc.lead_id !== finalLeadId) {
+      const otherCases = await this.prisma.legalCase.count({ where: { lead_id: lc.lead_id } });
+      if (otherCases === 0) {
+        await this.prisma.lead.delete({ where: { id: lc.lead_id } }).catch(() => {});
+      }
+    }
 
     return updated;
   }
