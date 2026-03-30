@@ -4,8 +4,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Bell, RefreshCw, Archive, ArchiveRestore, CheckCheck, ExternalLink,
-  ChevronDown, ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
-  Gavel, FileText, AlertTriangle, Calendar,
+  ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
+  Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
+  ArrowRight, CheckSquare, AlertCircle, ChevronDown,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -35,6 +36,17 @@ interface DjenPublication {
   created_at: string;
 }
 
+interface AiAnalysis {
+  resumo: string;
+  urgencia: 'URGENTE' | 'NORMAL' | 'BAIXA';
+  tipo_acao: string;
+  prazo_dias: number;
+  estagio_sugerido: string | null;
+  tarefa_titulo: string;
+  tarefa_descricao: string;
+  orientacoes: string;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────
 
 function formatDate(iso: string) {
@@ -42,11 +54,11 @@ function formatDate(iso: string) {
 }
 
 const TIPO_COLORS: Record<string, { bg: string; text: string }> = {
-  'Intimação':        { bg: 'bg-blue-500/10',   text: 'text-blue-400' },
-  'Citação':          { bg: 'bg-red-500/10',     text: 'text-red-400' },
-  'Sentença':         { bg: 'bg-purple-500/10',  text: 'text-purple-400' },
-  'Despacho':         { bg: 'bg-amber-500/10',   text: 'text-amber-400' },
-  'Acórdão':          { bg: 'bg-violet-500/10',  text: 'text-violet-400' },
+  'Intimação':        { bg: 'bg-blue-500/10',    text: 'text-blue-400' },
+  'Citação':          { bg: 'bg-red-500/10',      text: 'text-red-400' },
+  'Sentença':         { bg: 'bg-purple-500/10',   text: 'text-purple-400' },
+  'Despacho':         { bg: 'bg-amber-500/10',    text: 'text-amber-400' },
+  'Acórdão':          { bg: 'bg-violet-500/10',   text: 'text-violet-400' },
   'Lista de distribuição': { bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
 };
 
@@ -58,22 +70,36 @@ function getTipoColor(tipo: string | null) {
   return { bg: 'bg-slate-500/10', text: 'text-slate-400' };
 }
 
+const URGENCIA_CONFIG = {
+  URGENTE: { label: 'URGENTE', bg: 'bg-red-500/10',   text: 'text-red-400',   border: 'border-red-500/30',   icon: AlertCircle },
+  NORMAL:  { label: 'NORMAL',  bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/30', icon: Clock },
+  BAIXA:   { label: 'BAIXA',   bg: 'bg-gray-500/10',  text: 'text-gray-400',  border: 'border-gray-500/30',  icon: CheckCircle2 },
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  DISTRIBUIDO: 'Distribuído', CITACAO: 'Citação/Intimação', CONTESTACAO: 'Contestação',
+  INSTRUCAO: 'Instrução', JULGAMENTO: 'Julgamento', RECURSO: 'Recurso',
+  TRANSITADO: 'Transitado em Julgado', EXECUCAO: 'Execução', ENCERRADO: 'Encerrado',
+};
+
 // ─── PublicationCard ──────────────────────────────────────────
 
 function PublicationCard({
   pub,
+  isSelected,
+  onSelect,
   onMarkViewed,
   onArchive,
   onUnarchive,
   onCreateProcess,
-  onViewProcess,
 }: {
   pub: DjenPublication;
+  isSelected: boolean;
+  onSelect: (pub: DjenPublication) => void;
   onMarkViewed: (id: string) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onUnarchive: (id: string) => Promise<void>;
   onCreateProcess: (id: string) => Promise<void>;
-  onViewProcess: (caseId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
@@ -88,160 +114,386 @@ function PublicationCard({
   return (
     <div
       className={`rounded-xl border overflow-hidden transition-all ${
-        isUnread
+        isSelected
+          ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
+          : isUnread
           ? 'border-amber-500/30 bg-amber-500/[0.03]'
           : pub.archived
-          ? 'border-border/50 bg-card/30 opacity-70'
-          : 'border-border bg-card'
+          ? 'border-border/50 bg-card/30 opacity-60'
+          : 'border-border bg-card hover:border-border/80'
       }`}
     >
       {/* Header row */}
-      <div
-        className="flex items-start gap-3 p-4 cursor-pointer hover:bg-accent/20 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
+      <div className="flex items-start gap-3 p-3.5">
         {/* Unread dot */}
         <div className="pt-1 shrink-0">
-          {isUnread ? (
-            <div className="w-2 h-2 rounded-full bg-amber-500" />
-          ) : (
-            <div className="w-2 h-2 rounded-full bg-transparent border border-muted-foreground/30" />
-          )}
+          {isUnread
+            ? <div className="w-2 h-2 rounded-full bg-amber-500" />
+            : <div className="w-2 h-2 rounded-full border border-muted-foreground/30" />
+          }
         </div>
 
-        <div className="flex-1 min-w-0">
-          {/* Top row: date + tipo + status */}
-          <div className="flex items-center gap-2 flex-wrap mb-1.5">
-            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-              <Calendar size={10} />
-              {formatDate(pub.data_disponibilizacao)}
+        {/* Content */}
+        <div
+          className="flex-1 min-w-0 cursor-pointer"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+              <Calendar size={9} /> {formatDate(pub.data_disponibilizacao)}
             </span>
             {pub.tipo_comunicacao && (
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${tipoColor.bg} ${tipoColor.text}`}>
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${tipoColor.bg} ${tipoColor.text}`}>
                 {pub.tipo_comunicacao}
               </span>
             )}
             {!pub.legal_case_id && !pub.archived && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 flex items-center gap-0.5">
-                <AlertTriangle size={9} /> Não vinculado
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 flex items-center gap-0.5">
+                <AlertTriangle size={8} /> Não vinculado
               </span>
             )}
-            {pub.archived && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted/50 text-muted-foreground">
-                Arquivado
+            {pub.auto_task_id && (
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 flex items-center gap-0.5">
+                <CheckCircle2 size={8} /> Tarefa criada
               </span>
             )}
           </div>
-
-          {/* Process number */}
-          <p className="text-[13px] font-mono font-semibold text-foreground truncate">
+          <p className="text-[12px] font-mono font-semibold text-foreground truncate">
             {pub.numero_processo || '(sem número)'}
           </p>
-
-          {/* Subject */}
           {pub.assunto && (
-            <p className="text-[11px] text-muted-foreground truncate mt-0.5">{pub.assunto}</p>
+            <p className="text-[10px] text-muted-foreground truncate mt-0.5">{pub.assunto}</p>
           )}
-
-          {/* Linked case */}
           {pub.legal_case && (
-            <p className="text-[11px] text-primary mt-0.5 flex items-center gap-1">
-              <Link2 size={9} />
-              {pub.legal_case.lead?.name || pub.legal_case.case_number || 'Processo vinculado'}
-              {pub.legal_case.legal_area && (
-                <span className="text-muted-foreground">· {pub.legal_case.legal_area}</span>
-              )}
-            </p>
-          )}
-
-          {/* Auto task created */}
-          {pub.auto_task_id && (
-            <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-              <CheckCircle2 size={10} />
-              Tarefa criada automaticamente
+            <p className="text-[10px] text-primary truncate mt-0.5 flex items-center gap-1">
+              <Link2 size={8} />
+              {pub.legal_case.lead?.name || pub.legal_case.case_number}
             </p>
           )}
         </div>
 
-        <ChevronRight
-          size={14}
-          className={`text-muted-foreground shrink-0 mt-0.5 transition-transform ${expanded ? 'rotate-90' : ''}`}
-        />
+        {/* Analisar IA + expand */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => onSelect(pub)}
+            title="Analisar com IA"
+            className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg border transition-colors ${
+              isSelected
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'text-violet-400 border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10'
+            }`}
+          >
+            <Sparkles size={10} />
+            {isSelected ? 'IA' : 'IA'}
+          </button>
+          <button onClick={() => setExpanded(!expanded)} className="p-1 text-muted-foreground hover:text-foreground">
+            <ChevronRight size={13} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Expanded content */}
       {expanded && (
-        <div className="border-t border-border px-4 py-3 bg-accent/5">
+        <div className="border-t border-border px-3.5 py-3 bg-accent/5">
           {pub.conteudo && (
-            <div className="mb-3">
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
-                Conteúdo da Publicação
-              </p>
-              <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto custom-scrollbar">
-                {pub.conteudo.slice(0, 1000)}{pub.conteudo.length > 1000 ? '…' : ''}
-              </p>
-            </div>
+            <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto custom-scrollbar mb-3">
+              {pub.conteudo.slice(0, 600)}{pub.conteudo.length > 600 ? '…' : ''}
+            </p>
           )}
-
-          {/* Actions */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Ver processo */}
             {pub.legal_case_id && (
               <button
-                onClick={() => onViewProcess(pub.legal_case_id!)}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-primary hover:text-primary/80 px-2.5 py-1.5 rounded-lg border border-primary/30 hover:bg-primary/5 transition-colors"
+                onClick={() => window.open('/atendimento/processos', '_self')}
+                className="flex items-center gap-1 text-[10px] font-semibold text-primary px-2 py-1 rounded border border-primary/30 hover:bg-primary/5 transition-colors"
               >
-                <ExternalLink size={11} /> Ver Processo
+                <ExternalLink size={10} /> Ver Processo
               </button>
             )}
-
-            {/* Criar processo (se não vinculado) */}
             {!pub.legal_case_id && !pub.archived && (
               <button
                 disabled={loading === 'create'}
                 onClick={() => handle('create', () => onCreateProcess(pub.id))}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 px-2.5 py-1.5 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/5 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 hover:bg-emerald-500/5 transition-colors disabled:opacity-50"
               >
-                {loading === 'create' ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                {loading === 'create' ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
                 Criar Processo
               </button>
             )}
-
-            {/* Marcar como visto */}
             {isUnread && (
               <button
                 disabled={loading === 'viewed'}
                 onClick={() => handle('viewed', () => onMarkViewed(pub.id))}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-lg border border-border hover:bg-accent transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground px-2 py-1 rounded border border-border hover:bg-accent transition-colors disabled:opacity-50"
               >
-                {loading === 'viewed' ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />}
+                {loading === 'viewed' ? <Loader2 size={10} className="animate-spin" /> : <Eye size={10} />}
                 Marcar como visto
               </button>
             )}
-
-            {/* Arquivar / Desarquivar */}
             {!pub.archived ? (
               <button
                 disabled={loading === 'archive'}
                 onClick={() => handle('archive', () => onArchive(pub.id))}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-lg border border-border hover:bg-accent transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground px-2 py-1 rounded border border-border hover:bg-accent transition-colors disabled:opacity-50"
               >
-                {loading === 'archive' ? <Loader2 size={11} className="animate-spin" /> : <Archive size={11} />}
+                {loading === 'archive' ? <Loader2 size={10} className="animate-spin" /> : <Archive size={10} />}
                 Arquivar
               </button>
             ) : (
               <button
                 disabled={loading === 'unarchive'}
                 onClick={() => handle('unarchive', () => onUnarchive(pub.id))}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-400 hover:text-amber-300 px-2.5 py-1.5 rounded-lg border border-amber-500/30 hover:bg-amber-500/5 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1 text-[10px] font-semibold text-amber-400 px-2 py-1 rounded border border-amber-500/30 hover:bg-amber-500/5 transition-colors disabled:opacity-50"
               >
-                {loading === 'unarchive' ? <Loader2 size={11} className="animate-spin" /> : <ArchiveRestore size={11} />}
+                {loading === 'unarchive' ? <Loader2 size={10} className="animate-spin" /> : <ArchiveRestore size={10} />}
                 Restaurar
               </button>
             )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── AI Analysis Panel ────────────────────────────────────────
+
+function AiPanel({
+  pub,
+  onClose,
+  onCreateProcess,
+  onMoveStage,
+}: {
+  pub: DjenPublication;
+  onClose: () => void;
+  onCreateProcess: (id: string) => Promise<void>;
+  onMoveStage: (caseId: string, stage: string) => Promise<void>;
+}) {
+  const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [taskCreated, setTaskCreated] = useState(false);
+  const [movingStage, setMovingStage] = useState(false);
+  const [stageMoved, setStageMoved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setAnalysis(null);
+    setTaskCreated(false);
+    setStageMoved(false);
+
+    api.post(`/djen/${pub.id}/analyze`)
+      .then(res => { if (!cancelled) setAnalysis(res.data); })
+      .catch(() => { if (!cancelled) setError('Erro ao analisar. Verifique se a OPENAI_API_KEY está configurada.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [pub.id]);
+
+  const handleCreateTask = async () => {
+    if (!analysis) return;
+    setCreatingTask(true);
+    try {
+      // Calcular prazo em dias úteis a partir de hoje
+      const today = new Date();
+      let due = new Date(today);
+      let added = 0;
+      while (added < analysis.prazo_dias) {
+        due.setDate(due.getDate() + 1);
+        const dow = due.getDay();
+        if (dow !== 0 && dow !== 6) added++;
+      }
+      await api.post('/calendar/events', {
+        type: 'TAREFA',
+        title: `[DJEN] ${analysis.tarefa_titulo}`,
+        description: analysis.tarefa_descricao,
+        start_at: due.toISOString(),
+        end_at: new Date(due.getTime() + 30 * 60000).toISOString(),
+        legal_case_id: pub.legal_case_id || undefined,
+        priority: analysis.urgencia,
+      });
+      setTaskCreated(true);
+    } catch { /* silencioso */ } finally { setCreatingTask(false); }
+  };
+
+  const handleMoveStage = async () => {
+    if (!analysis?.estagio_sugerido || !pub.legal_case_id) return;
+    setMovingStage(true);
+    try {
+      await onMoveStage(pub.legal_case_id, analysis.estagio_sugerido);
+      setStageMoved(true);
+    } catch { /* silencioso */ } finally { setMovingStage(false); }
+  };
+
+  const urgConf = analysis ? URGENCIA_CONFIG[analysis.urgencia] : null;
+
+  return (
+    <div className="w-[340px] shrink-0 border-l border-border flex flex-col bg-card/60 overflow-hidden">
+      {/* Panel header */}
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-violet-500/15 flex items-center justify-center">
+            <Sparkles size={13} className="text-violet-400" />
+          </div>
+          <div>
+            <p className="text-[12px] font-bold text-foreground">Análise IA</p>
+            <p className="text-[10px] text-muted-foreground font-mono truncate max-w-[200px]">
+              {pub.numero_processo}
+            </p>
+          </div>
+        </div>
+        <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {loading && (
+          <div className="flex flex-col items-center justify-center h-48 gap-3 text-muted-foreground">
+            <div className="w-8 h-8 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+            <p className="text-[12px]">Analisando publicação…</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="p-4">
+            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
+              <p className="text-[12px] text-red-400">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {analysis && !loading && (
+          <div className="p-4 space-y-4">
+
+            {/* Urgência */}
+            {urgConf && (
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
+                <urgConf.icon size={14} className={urgConf.text} />
+                <span className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label}</span>
+                <span className="text-[10px] text-muted-foreground ml-auto">{analysis.prazo_dias} dias úteis</span>
+              </div>
+            )}
+
+            {/* Resumo */}
+            <div>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Resumo</p>
+              <p className="text-[12px] text-foreground leading-relaxed">{analysis.resumo}</p>
+            </div>
+
+            {/* Ação necessária */}
+            <div>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ação Necessária</p>
+              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-accent/40 border border-border">
+                <ArrowRight size={13} className="text-primary mt-0.5 shrink-0" />
+                <p className="text-[12px] text-foreground font-medium">{analysis.tipo_acao}</p>
+              </div>
+            </div>
+
+            {/* Tarefa sugerida */}
+            <div>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tarefa Sugerida</p>
+              <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                <p className="text-[12px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
+                {analysis.tarefa_descricao && (
+                  <p className="text-[11px] text-muted-foreground">{analysis.tarefa_descricao}</p>
+                )}
+                <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Clock size={10} />
+                  Prazo: {analysis.prazo_dias} dias úteis
+                </div>
+                <button
+                  onClick={handleCreateTask}
+                  disabled={creatingTask || taskCreated}
+                  className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
+                    taskCreated
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+                  }`}
+                >
+                  {creatingTask ? (
+                    <><Loader2 size={11} className="animate-spin" /> Criando…</>
+                  ) : taskCreated ? (
+                    <><CheckCircle2 size={11} /> Tarefa criada!</>
+                  ) : (
+                    <><CheckSquare size={11} /> Criar esta tarefa</>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Estágio sugerido */}
+            {analysis.estagio_sugerido && pub.legal_case_id && (
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Mover Processo</p>
+                <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Mover para o estágio:
+                  </p>
+                  <p className="text-[13px] font-bold text-foreground">
+                    {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
+                  </p>
+                  {pub.legal_case && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Processo: {pub.legal_case.lead?.name || pub.legal_case.case_number}
+                    </p>
+                  )}
+                  <button
+                    onClick={handleMoveStage}
+                    disabled={movingStage || stageMoved}
+                    className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
+                      stageMoved
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-card border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
+                    }`}
+                  >
+                    {movingStage ? (
+                      <><Loader2 size={11} className="animate-spin" /> Movendo…</>
+                    ) : stageMoved ? (
+                      <><CheckCircle2 size={11} /> Processo movido!</>
+                    ) : (
+                      <><ArrowRight size={11} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido]}</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Se não vinculado — criar processo */}
+            {analysis.estagio_sugerido && !pub.legal_case_id && (
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Cadastrar Processo</p>
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Publicação não vinculada. Sugerido cadastrar no estágio:
+                  </p>
+                  <p className="text-[12px] font-bold text-amber-400">
+                    {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
+                  </p>
+                  <button
+                    onClick={() => onCreateProcess(pub.id)}
+                    className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15 transition-colors"
+                  >
+                    <Plus size={11} /> Criar Processo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Orientações */}
+            {analysis.orientacoes && (
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Orientações</p>
+                <div className="rounded-xl border border-border bg-accent/20 p-3">
+                  <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.orientacoes}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -260,6 +512,7 @@ export default function DjenPage() {
   const [syncing, setSyncing] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
   const [days, setDays] = useState(30);
+  const [selectedPub, setSelectedPub] = useState<DjenPublication | null>(null);
 
   const fetchPubs = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -312,6 +565,7 @@ export default function DjenPage() {
     await api.patch(`/djen/${id}/archive`);
     setPubs(prev => prev.filter(p => p.id !== id));
     setTotal(c => Math.max(0, c - 1));
+    if (selectedPub?.id === id) setSelectedPub(null);
   };
 
   const handleUnarchive = async (id: string) => {
@@ -320,20 +574,34 @@ export default function DjenPage() {
   };
 
   const handleCreateProcess = async (id: string) => {
-    const res = await api.post(`/djen/${id}/create-process`);
+    await api.post(`/djen/${id}/create-process`);
     await fetchPubs(true);
-    if (res.data?.id) {
-      router.push(`/atendimento/processos`);
+    router.push('/atendimento/processos');
+  };
+
+  const handleMoveStage = async (caseId: string, stage: string) => {
+    await api.patch(`/legal-cases/${caseId}/tracking-stage`, { trackingStage: stage });
+    await fetchPubs(true);
+  };
+
+  const handleSelectForAnalysis = (pub: DjenPublication) => {
+    if (selectedPub?.id === pub.id) {
+      setSelectedPub(null);
+    } else {
+      setSelectedPub(pub);
+      // Auto-mark as viewed when analyzing
+      if (!pub.viewed_at) {
+        api.patch(`/djen/${pub.id}/viewed`).then(() => {
+          setPubs(prev => prev.map(p => p.id === pub.id ? { ...p, viewed_at: new Date().toISOString() } : p));
+          setUnreadCount(c => Math.max(0, c - 1));
+        }).catch(() => {});
+      }
     }
   };
 
-  const handleViewProcess = (caseId: string) => {
-    router.push(`/atendimento/processos`);
-  };
-
   const tabs: { id: Tab; label: string; badge?: number }[] = [
-    { id: 'unread', label: 'Não visualizadas', badge: unreadCount },
-    { id: 'all',    label: 'Todas' },
+    { id: 'unread',   label: 'Não visualizadas', badge: unreadCount },
+    { id: 'all',      label: 'Todas' },
     { id: 'archived', label: 'Arquivadas' },
   ];
 
@@ -358,7 +626,6 @@ export default function DjenPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Days filter */}
           <select
             value={days}
             onChange={e => setDays(Number(e.target.value))}
@@ -371,7 +638,6 @@ export default function DjenPage() {
             <option value={90}>Últimos 90 dias</option>
           </select>
 
-          {/* Mark all viewed */}
           {unreadCount > 0 && (
             <button
               onClick={handleMarkAllViewed}
@@ -383,7 +649,6 @@ export default function DjenPage() {
             </button>
           )}
 
-          {/* Sync */}
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -417,44 +682,59 @@ export default function DjenPage() {
         ))}
       </div>
 
-      {/* Content */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar">
-        {loading ? (
-          <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground text-[13px]">
-            <Loader2 size={16} className="animate-spin" />
-            Carregando publicações…
-          </div>
-        ) : pubs.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-52 text-muted-foreground">
-            <Bell size={32} className="mb-3 opacity-25" />
-            <p className="text-[14px] font-semibold">
-              {tab === 'unread' ? 'Nenhuma publicação não lida' :
-               tab === 'archived' ? 'Nenhuma publicação arquivada' :
-               'Nenhuma publicação encontrada'}
-            </p>
-            <p className="text-[12px] mt-1 opacity-70">
-              {tab === 'unread' ? 'Tudo em dia!' : 'Tente sincronizar ou ampliar o período'}
-            </p>
-          </div>
-        ) : (
-          <div className="px-6 py-5 space-y-3 max-w-3xl">
-            <p className="text-[11px] text-muted-foreground mb-1">
-              {total} publicação{total !== 1 ? 'ões' : ''} encontrada{total !== 1 ? 's' : ''}
-            </p>
-            {pubs.map(pub => (
-              <PublicationCard
-                key={pub.id}
-                pub={pub}
-                onMarkViewed={handleMarkViewed}
-                onArchive={handleArchive}
-                onUnarchive={handleUnarchive}
-                onCreateProcess={handleCreateProcess}
-                onViewProcess={handleViewProcess}
-              />
-            ))}
-          </div>
+      {/* Main — list + AI panel */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* Publications list */}
+        <main className="flex-1 overflow-y-auto custom-scrollbar">
+          {loading ? (
+            <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground text-[13px]">
+              <Loader2 size={16} className="animate-spin" />
+              Carregando publicações…
+            </div>
+          ) : pubs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-52 text-muted-foreground">
+              <Bell size={32} className="mb-3 opacity-25" />
+              <p className="text-[14px] font-semibold">
+                {tab === 'unread' ? 'Nenhuma publicação não lida' :
+                 tab === 'archived' ? 'Nenhuma publicação arquivada' :
+                 'Nenhuma publicação encontrada'}
+              </p>
+              <p className="text-[12px] mt-1 opacity-70">
+                {tab === 'unread' ? 'Tudo em dia!' : 'Tente sincronizar ou ampliar o período'}
+              </p>
+            </div>
+          ) : (
+            <div className="px-4 py-4 space-y-2 max-w-2xl">
+              <p className="text-[10px] text-muted-foreground mb-2">
+                {total} publicação{total !== 1 ? 'ões' : ''}
+              </p>
+              {pubs.map(pub => (
+                <PublicationCard
+                  key={pub.id}
+                  pub={pub}
+                  isSelected={selectedPub?.id === pub.id}
+                  onSelect={handleSelectForAnalysis}
+                  onMarkViewed={handleMarkViewed}
+                  onArchive={handleArchive}
+                  onUnarchive={handleUnarchive}
+                  onCreateProcess={handleCreateProcess}
+                />
+              ))}
+            </div>
+          )}
+        </main>
+
+        {/* AI Analysis Panel */}
+        {selectedPub && (
+          <AiPanel
+            pub={selectedPub}
+            onClose={() => setSelectedPub(null)}
+            onCreateProcess={handleCreateProcess}
+            onMoveStage={handleMoveStage}
+          />
         )}
-      </main>
+      </div>
     </div>
   );
 }

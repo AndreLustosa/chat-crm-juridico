@@ -67,4 +67,10 @@ export class DjenController {
   createProcess(@Param('id') id: string, @Request() req: any) {
     return this.djenService.createProcessFromPublication(id, req.user.id, req.user?.tenant_id);
   }
+
+  /** Análise por IA da publicação */
+  @Post(':id/analyze')
+  analyze(@Param('id') id: string) {
+    return this.djenService.analyzePublication(id);
+  }
 }

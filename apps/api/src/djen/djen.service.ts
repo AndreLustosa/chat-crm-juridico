@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
+import OpenAI from 'openai';
 
 function toDateStr(date: Date): string {
   return date.toISOString().slice(0, 10); // yyyy-MM-dd
@@ -453,5 +454,92 @@ export class DjenService {
 
     this.logger.log(`[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id}`);
     return legalCase;
+  }
+
+  async analyzePublication(id: string): Promise<{
+    resumo: string;
+    urgencia: 'URGENTE' | 'NORMAL' | 'BAIXA';
+    tipo_acao: string;
+    prazo_dias: number;
+    estagio_sugerido: string | null;
+    tarefa_titulo: string;
+    tarefa_descricao: string;
+    orientacoes: string;
+  }> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new BadRequestException('OPENAI_API_KEY não configurada.');
+    }
+
+    const pub = await this.prisma.djenPublication.findUniqueOrThrow({
+      where: { id },
+      include: {
+        legal_case: {
+          select: { case_number: true, legal_area: true, tracking_stage: true, lead: { select: { name: true } } },
+        },
+      },
+    });
+
+    const context = `
+PUBLICAÇÃO DO DJEN
+Data: ${new Date(pub.data_disponibilizacao).toLocaleDateString('pt-BR')}
+Tipo: ${pub.tipo_comunicacao || 'Não informado'}
+Número do processo: ${pub.numero_processo}
+Assunto: ${pub.assunto || 'Não informado'}
+Classe processual: ${pub.classe_processual || 'Não informado'}
+${pub.legal_case ? `Processo vinculado: ${pub.legal_case.lead?.name || ''} — ${pub.legal_case.legal_area || ''} — Estágio atual: ${pub.legal_case.tracking_stage || ''}` : 'Processo: Não vinculado'}
+
+CONTEÚDO COMPLETO:
+${pub.conteudo.slice(0, 2000)}
+`.trim();
+
+    const STAGES = [
+      'DISTRIBUIDO', 'CITACAO', 'CONTESTACAO', 'INSTRUCAO',
+      'JULGAMENTO', 'RECURSO', 'TRANSITADO', 'EXECUCAO', 'ENCERRADO',
+    ];
+
+    const openai = new OpenAI({ apiKey });
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos:
+- resumo: string (máx 3 frases, PT-BR, linguagem direta)
+- urgencia: "URGENTE" | "NORMAL" | "BAIXA"
+- tipo_acao: string (o que o advogado precisa fazer)
+- prazo_dias: number (prazo em dias ÚTEIS para a ação)
+- estagio_sugerido: string | null (um dos estágios: ${STAGES.join(', ')} — ou null se não se aplica)
+- tarefa_titulo: string (título curto da tarefa a ser criada)
+- tarefa_descricao: string (descrição detalhada da tarefa, máx 200 chars)
+- orientacoes: string (observações estratégicas para o advogado, máx 300 chars)
+
+Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência. NORMAL = contestação, manifestação, despacho. BAIXA = distribuição, informativo.
+Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO.`,
+        },
+        {
+          role: 'user',
+          content: context,
+        },
+      ],
+    });
+
+    const raw = completion.choices[0]?.message?.content || '{}';
+    let parsed: any = {};
+    try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+
+    return {
+      resumo: parsed.resumo || 'Não foi possível gerar o resumo.',
+      urgencia: (['URGENTE', 'NORMAL', 'BAIXA'].includes(parsed.urgencia) ? parsed.urgencia : 'NORMAL') as any,
+      tipo_acao: parsed.tipo_acao || 'Verificar publicação',
+      prazo_dias: typeof parsed.prazo_dias === 'number' ? parsed.prazo_dias : 15,
+      estagio_sugerido: STAGES.includes(parsed.estagio_sugerido) ? parsed.estagio_sugerido : null,
+      tarefa_titulo: parsed.tarefa_titulo || 'Verificar publicação DJEN',
+      tarefa_descricao: parsed.tarefa_descricao || '',
+      orientacoes: parsed.orientacoes || '',
+    };
   }
 }
