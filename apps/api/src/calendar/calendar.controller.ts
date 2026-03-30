@@ -32,7 +32,7 @@ export class CalendarController {
   ) {
     // Default: mostra apenas eventos do usuario logado
     // showAll=true: mostra todos (apenas ADMIN pode ver todos os eventos)
-    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'admin';
+    const isAdmin = req.user?.role === 'ADMIN';
     const effectiveUserId = (showAll === 'true' && isAdmin) ? userId : (userId || req.user.id);
     return this.calendarService.findAll({
       start,
@@ -131,7 +131,7 @@ export class CalendarController {
     @Request() req: any,
   ) {
     // Usuários não-admin só podem checar conflitos da própria agenda
-    const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'admin';
+    const isAdmin = req.user?.role === 'ADMIN';
     const effectiveUserId = isAdmin ? (userId || req.user.id) : req.user.id;
     return this.calendarService.checkConflicts(effectiveUserId, start, end, excludeId, req.user?.tenant_id);
   }

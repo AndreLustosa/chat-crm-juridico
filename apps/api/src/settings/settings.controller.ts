@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Patch, Delete, Body, UseGuards, Request, ForbiddenException, Param, Put, Logger, UseInterceptors, UploadedFile, Res, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, UseGuards, Request, Param, Put, Logger, UseInterceptors, UploadedFile, Res, NotFoundException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { S3Service } from '../s3/s3.service';
 import { CreateSkillDto, UpdateSkillDto, CreateSkillToolDto, UpdateSkillToolDto } from './dto/settings.dto';
@@ -28,25 +29,21 @@ export class SettingsController {
   // ─── Generic Settings ─────────────────────────────────
 
   @Get()
-  async getAll(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async getAll() {
     return this.settingsService.getAll();
   }
 
   @Put()
-  async upsert(@Request() req: any, @Body() data: { key: string; value: string }) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async upsert(@Body() data: { key: string; value: string }) {
     return this.settingsService.upsert(data.key, data.value);
   }
 
   @Get('whatsapp-config/health')
-  async checkHealth(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem testar a conexão');
-    }
-    
+  @Roles('ADMIN')
+  async checkHealth() {
     try {
-      // Tenta listar instâncias como um teste de fumaça para a API e Key
       await this.whatsappService.listInstances();
       return { status: 'online' };
     } catch (error) {
@@ -55,23 +52,15 @@ export class SettingsController {
   }
 
   @Get('whatsapp-config')
-  async getWhatsAppConfig(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem ver configurações de API');
-    }
+  @Roles('ADMIN')
+  async getWhatsAppConfig() {
     const config = await this.settingsService.getWhatsAppConfig();
     return { ...config, apiKey: maskApiKey(config.apiKey) };
   }
 
   @Post('whatsapp-config')
-  async setWhatsAppConfig(
-    @Request() req: any,
-    @Body() data: { apiUrl: string; apiKey?: string; webhookUrl?: string }
-  ) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem alterar configurações de API');
-    }
-
+  @Roles('ADMIN')
+  async setWhatsAppConfig(@Body() data: { apiUrl: string; apiKey?: string; webhookUrl?: string }) {
     await this.settingsService.setWhatsAppConfig(data.apiUrl, data.apiKey, data.webhookUrl);
 
     // Reaplicar webhook em todas as instâncias existentes
@@ -92,22 +81,15 @@ export class SettingsController {
   }
 
   @Get('ai-config')
-  async getAiConfig(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem ver configurações de IA');
-    }
+  @Roles('ADMIN')
+  async getAiConfig() {
     const config = await this.settingsService.getAiConfig();
     return { ...config, apiKey: maskApiKey(config.apiKey) };
   }
 
   @Post('ai-config')
-  async setAiConfig(
-    @Request() req: any,
-    @Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; cooldownSeconds?: number }
-  ) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem alterar configurações de IA');
-    }
+  @Roles('ADMIN')
+  async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; cooldownSeconds?: number }) {
     if (data.apiKey)    await this.settingsService.setAiConfig(data.apiKey);
     if (data.adminKey)  await this.settingsService.setAdminKey(data.adminKey);
     if (data.anthropicApiKey) await this.settingsService.upsert('ANTHROPIC_API_KEY', data.anthropicApiKey);
@@ -123,48 +105,34 @@ export class SettingsController {
   }
 
   @Patch('skills/:id/toggle')
-  async toggleSkill(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() data: { isActive: boolean }
-  ) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem gerenciar skills');
-    }
+  @Roles('ADMIN')
+  async toggleSkill(@Param('id') id: string, @Body() data: { isActive: boolean }) {
     await this.settingsService.toggleSkill(id, data.isActive);
     return { message: 'Skill atualizada com sucesso' };
   }
 
+  @Post('skills/reset-defaults')
+  @Roles('ADMIN')
+  async resetSkillsToDefaults() {
+    return this.settingsService.resetSkillsToDefaults();
+  }
+
   @Post('skills')
-  async createSkill(@Request() req: any, @Body() data: CreateSkillDto) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem criar skills');
-    }
+  @Roles('ADMIN')
+  async createSkill(@Body() data: CreateSkillDto) {
     return this.settingsService.createSkill(data);
   }
 
   @Patch('skills/:id')
-  async updateSkill(@Request() req: any, @Param('id') id: string, @Body() data: UpdateSkillDto) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem editar skills');
-    }
+  @Roles('ADMIN')
+  async updateSkill(@Param('id') id: string, @Body() data: UpdateSkillDto) {
     return this.settingsService.updateSkill(id, data);
   }
 
   @Delete('skills/:id')
-  async deleteSkill(@Request() req: any, @Param('id') id: string) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem excluir skills');
-    }
+  @Roles('ADMIN')
+  async deleteSkill(@Param('id') id: string) {
     return this.settingsService.deleteSkill(id);
-  }
-
-  @Post('skills/reset-defaults')
-  async resetSkillsToDefaults(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores');
-    }
-    return this.settingsService.resetSkillsToDefaults();
   }
 
   // ─── Skill Tools CRUD ─────────────────────────────────
@@ -175,28 +143,20 @@ export class SettingsController {
   }
 
   @Post('skills/:skillId/tools')
-  async createSkillTool(
-    @Request() req: any,
-    @Param('skillId') skillId: string,
-    @Body() data: CreateSkillToolDto,
-  ) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async createSkillTool(@Param('skillId') skillId: string, @Body() data: CreateSkillToolDto) {
     return this.settingsService.createSkillTool(skillId, data);
   }
 
   @Patch('skills/tools/:toolId')
-  async updateSkillTool(
-    @Request() req: any,
-    @Param('toolId') toolId: string,
-    @Body() data: UpdateSkillToolDto,
-  ) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async updateSkillTool(@Param('toolId') toolId: string, @Body() data: UpdateSkillToolDto) {
     return this.settingsService.updateSkillTool(toolId, data);
   }
 
   @Delete('skills/tools/:toolId')
-  async deleteSkillTool(@Request() req: any, @Param('toolId') toolId: string) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async deleteSkillTool(@Param('toolId') toolId: string) {
     return this.settingsService.deleteSkillTool(toolId);
   }
 
@@ -208,14 +168,13 @@ export class SettingsController {
   }
 
   @Post('skills/:skillId/assets')
+  @Roles('ADMIN')
   @UseInterceptors(FileInterceptor('file'))
   async uploadSkillAsset(
-    @Request() req: any,
     @Param('skillId') skillId: string,
     @UploadedFile() file: any,
     @Body() body: { asset_type?: string; inject_mode?: string },
   ) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
     if (!file) throw new NotFoundException('Nenhum arquivo enviado');
 
     const ext = file.originalname.split('.').pop() || 'bin';
@@ -224,7 +183,6 @@ export class SettingsController {
 
     await this.s3Service.uploadBuffer(s3Key, file.buffer, file.mimetype);
 
-    // Extract text content for references (.md, .txt)
     let contentText: string | null = null;
     const assetType = body.asset_type || 'asset';
     const injectMode = body.inject_mode || (assetType === 'reference' ? 'full_text' : 'none');
@@ -233,7 +191,6 @@ export class SettingsController {
       if (file.mimetype === 'text/markdown' || file.mimetype === 'text/plain' || ext === 'md' || ext === 'txt') {
         contentText = file.buffer.toString('utf-8');
       }
-      // TODO: Add PDF/DOCX text extraction with mammoth/pdf-parse
     }
 
     return this.settingsService.createSkillAsset(skillId, {
@@ -248,18 +205,14 @@ export class SettingsController {
   }
 
   @Patch('skills/assets/:assetId')
-  async updateSkillAsset(
-    @Request() req: any,
-    @Param('assetId') assetId: string,
-    @Body() body: { inject_mode?: string; asset_type?: string },
-  ) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async updateSkillAsset(@Param('assetId') assetId: string, @Body() body: { inject_mode?: string; asset_type?: string }) {
     return this.settingsService.updateSkillAsset(assetId, body);
   }
 
   @Delete('skills/assets/:assetId')
-  async deleteSkillAsset(@Request() req: any, @Param('assetId') assetId: string) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async deleteSkillAsset(@Param('assetId') assetId: string) {
     const asset = await this.settingsService.deleteSkillAsset(assetId);
     if (asset?.s3_key) {
       try { await this.s3Service.deleteObject(asset.s3_key); } catch {}
@@ -282,18 +235,16 @@ export class SettingsController {
   }
 
   @Get('ai-costs')
-  async getAiCosts(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Apenas administradores podem ver custos de IA');
-    }
+  @Roles('ADMIN')
+  async getAiCosts() {
     return this.settingsService.getAiCosts();
   }
 
   // ─── Clicksign ────────────────────────────────────────
 
   @Get('clicksign')
-  async getClicksign(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async getClicksign() {
     const cfg = await this.settingsService.getClicksignConfig();
     return {
       ...cfg,
@@ -303,8 +254,8 @@ export class SettingsController {
   }
 
   @Patch('clicksign')
-  async setClicksign(@Request() req: any, @Body() body: { baseUrl?: string; apiToken?: string; webhookToken?: string }) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async setClicksign(@Body() body: { baseUrl?: string; apiToken?: string; webhookToken?: string }) {
     await this.settingsService.setClicksignConfig(body);
     return { ok: true };
   }
@@ -317,8 +268,8 @@ export class SettingsController {
   }
 
   @Patch('contract')
-  async setContract(@Request() req: any, @Body() body: Record<string, string>) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async setContract(@Body() body: Record<string, string>) {
     await this.settingsService.setContractConfig(body);
     return { ok: true };
   }
@@ -331,8 +282,8 @@ export class SettingsController {
   }
 
   @Patch('crm-config')
-  async setCrmConfig(@Request() req: any, @Body() body: { stagnationDays?: number }) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async setCrmConfig(@Body() body: { stagnationDays?: number }) {
     await this.settingsService.setCrmConfig(body);
     return { ok: true };
   }
@@ -345,11 +296,8 @@ export class SettingsController {
   }
 
   @Patch('canned-responses')
-  async setCannedResponses(
-    @Request() req: any,
-    @Body() body: { responses: { id: string; label: string; text: string }[] },
-  ) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async setCannedResponses(@Body() body: { responses: { id: string; label: string; text: string }[] }) {
     await this.settingsService.setCannedResponses(body.responses || []);
     return { ok: true };
   }
@@ -357,17 +305,14 @@ export class SettingsController {
   // ─── TTS (Text-to-Speech) ─────────────────────────────
 
   @Get('tts')
-  async getTtsConfig(@Request() req: any) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async getTtsConfig() {
     return this.settingsService.getTtsConfig();
   }
 
   @Patch('tts')
-  async setTtsConfig(
-    @Request() req: any,
-    @Body() body: { enabled?: boolean; googleApiKey?: string; voice?: string; language?: string },
-  ) {
-    if (req.user.role !== 'ADMIN') throw new ForbiddenException('Apenas administradores');
+  @Roles('ADMIN')
+  async setTtsConfig(@Body() body: { enabled?: boolean; googleApiKey?: string; voice?: string; language?: string }) {
     await this.settingsService.setTtsConfig(body);
     return { ok: true };
   }

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { LegalCasesService } from './legal-cases.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @UseGuards(JwtAuthGuard)
 @Controller('legal-cases')
@@ -34,6 +35,7 @@ export class LegalCasesController {
   }
 
   @Get()
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   findAll(
     @Request() req: any,
     @Query('stage') stage?: string,
@@ -94,6 +96,7 @@ export class LegalCasesController {
   }
 
   @Post()
+  @Roles('ADMIN', 'ADVOGADO')
   create(@Body() body: { lead_id: string; conversation_id?: string; legal_area?: string }, @Request() req: any) {
     return this.service.create({
       lead_id: body.lead_id,
@@ -106,6 +109,7 @@ export class LegalCasesController {
 
   /** Cadastro direto de processo já em andamento (sem conversa WhatsApp) */
   @Post('direct')
+  @Roles('ADMIN', 'ADVOGADO')
   createDirect(
     @Body() body: {
       case_number: string;
@@ -149,6 +153,7 @@ export class LegalCasesController {
   }
 
   @Patch(':id/archive')
+  @Roles('ADMIN', 'ADVOGADO')
   archive(
     @Param('id') id: string,
     @Body() body: { reason: string; notifyLead?: boolean },
@@ -158,6 +163,7 @@ export class LegalCasesController {
   }
 
   @Patch(':id/unarchive')
+  @Roles('ADMIN', 'ADVOGADO')
   unarchive(@Param('id') id: string, @Request() req: any) {
     return this.service.unarchive(id, req.user?.tenant_id);
   }
