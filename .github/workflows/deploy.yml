@@ -85,20 +85,42 @@ jobs:
             docker pull andreflustosa/chat-crm-juridico-web:latest
             docker pull andreflustosa/chat-crm-juridico-worker:latest
 
+            # Limpa imagens antigas para liberar espaço em disco antes do deploy
+            echo "🧹 Limpando imagens Docker não utilizadas..."
+            docker image prune -f
+
             # Detecta modo: Swarm ou Compose
             if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
-              echo "🔄 Modo Swarm — atualizando services..."
+              echo "🔄 Modo Swarm — atualizando services sequencialmente..."
+
+              # Atualiza um serviço por vez (--detach=false aguarda conclusão antes do próximo)
+              # --update-parallelism 1 garante rolling update de 1 container por vez
               docker service update \
                 --image andreflustosa/chat-crm-juridico-api:latest \
-                --with-registry-auth --force ${STACK}_api
+                --with-registry-auth --force \
+                --update-parallelism 1 \
+                --update-delay 5s \
+                --detach=false \
+                ${STACK}_api
 
               docker service update \
                 --image andreflustosa/chat-crm-juridico-web:latest \
-                --with-registry-auth --force ${STACK}_web
+                --with-registry-auth --force \
+                --update-parallelism 1 \
+                --update-delay 5s \
+                --detach=false \
+                ${STACK}_web
 
               docker service update \
                 --image andreflustosa/chat-crm-juridico-worker:latest \
-                --with-registry-auth --force ${STACK}_worker
+                --with-registry-auth --force \
+                --update-parallelism 1 \
+                --update-delay 5s \
+                --detach=false \
+                ${STACK}_worker
+
+              # Limpeza pós-deploy: remove imagens antigas que não são mais usadas
+              docker image prune -f
 
               echo "✅ Swarm atualizado!"
               docker service ls --format "table {{.Name}}\t{{.Image}}\t{{.Replicas}}" \
