@@ -5,12 +5,14 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+  private readonly auditLogger = new Logger('AccessAudit');
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -30,6 +32,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof exResponse === 'string'
           ? exResponse
           : (exResponse as any).message || exception.message;
+    }
+
+    // ─── Audit log: registra tentativas de acesso negado (403) ───────────
+    if (status === HttpStatus.FORBIDDEN) {
+      const user = (request as any).user;
+      this.auditLogger.warn(
+        `ACESSO_NEGADO | ` +
+        `user=${user?.id ?? 'anon'} | ` +
+        `role=${user?.role ?? '-'} | ` +
+        `${request.method} ${request.url} | ` +
+        `ip=${request.ip ?? request.headers['x-forwarded-for'] ?? '-'} | ` +
+        `motivo="${message}"`,
+      );
     }
 
     // Log apenas erros 5xx (não polui log com 4xx intencionais)

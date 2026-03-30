@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { RouteGuard } from '@/components/RouteGuard';
 import {
   Bell, RefreshCw, Archive, ArchiveRestore, CheckCheck, ExternalLink,
   ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
@@ -509,7 +510,7 @@ function AiPanel({
 
 type Tab = 'unread' | 'all' | 'archived';
 
-export default function DjenPage() {
+function DjenPageContent() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('unread');
   const [pubs, setPubs] = useState<DjenPublication[]>([]);
@@ -743,5 +744,13 @@ export default function DjenPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function DjenPage() {
+  return (
+    <RouteGuard allowedRoles={['ADMIN', 'ADVOGADO', 'ESTAGIARIO']}>
+      <DjenPageContent />
+    </RouteGuard>
   );
 }

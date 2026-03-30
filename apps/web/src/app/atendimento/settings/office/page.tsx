@@ -83,7 +83,7 @@ export default function OfficeSettingsPage() {
       const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       if (payload?.sub) {
         const role = payload?.role || '';
-        const isAdminUser = role === 'ADMIN' || role === 'admin';
+        const isAdminUser = role === 'ADMIN';
         setUserId(payload.sub);
         setIsAdmin(isAdminUser);
         setSelectedUserId(payload.sub);
@@ -103,7 +103,7 @@ export default function OfficeSettingsPage() {
       // Mostrar apenas advogados e admins (não atendentes comerciais)
       const lawyers = data
         .map((u: any) => ({ id: u.id, name: u.name, role: u.role }))
-        .filter((u) => u.role === 'Advogados' || u.role === 'ADMIN' || u.role === 'admin');
+        .filter((u) => u.role === 'ADVOGADO' || u.role === 'ADMIN');
       setUsers(lawyers);
     } catch {}
   };

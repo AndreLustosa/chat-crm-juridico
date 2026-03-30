@@ -3,6 +3,7 @@
 import { useRouter, usePathname } from 'next/navigation';
 import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch } from 'lucide-react';
 import { useRole } from '@/lib/useRole';
+import { RouteGuard } from '@/components/RouteGuard';
 
 type MenuItem = {
   label: string;
@@ -118,9 +119,11 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </nav>
       </aside>
 
-      {/* Conteúdo Principal */}
+      {/* Conteúdo Principal — protegido: apenas ADMIN acessa configurações */}
       <main className="flex-1 overflow-auto">
-        {children}
+        <RouteGuard allowedRoles={['ADMIN']}>
+          {children}
+        </RouteGuard>
       </main>
     </div>
   );

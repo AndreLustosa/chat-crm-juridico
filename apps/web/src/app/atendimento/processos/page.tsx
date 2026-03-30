@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { RouteGuard } from '@/components/RouteGuard';
 import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Clock, Archive, ArchiveRestore, Send,
@@ -1978,7 +1979,7 @@ function TabelaView({
 
 // ─── Main Page ─────────────────────────────────────────────────
 
-export default function ProcessosPage() {
+function ProcessosPageContent() {
   const router = useRouter();
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2398,5 +2399,13 @@ export default function ProcessosPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function ProcessosPage() {
+  return (
+    <RouteGuard allowedRoles={['ADMIN', 'ADVOGADO', 'ESTAGIARIO']}>
+      <ProcessosPageContent />
+    </RouteGuard>
   );
 }

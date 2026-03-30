@@ -548,7 +548,7 @@ export default function AgendaPage() {
       if (payload?.role) {
         setCurrentUserRole(payload.role);
         // Admin visualiza todos os advogados por padrão
-        if (payload.role === 'ADMIN' || payload.role === 'admin') {
+        if (payload.role === 'ADMIN') {
           setShowAllUsers(true);
         }
       }
@@ -557,7 +557,7 @@ export default function AgendaPage() {
     api.get('/users?limit=100').then(r => {
       const data: any[] = r.data?.data || r.data?.users || r.data || [];
       const lawyers = data.filter((u: any) =>
-        u.role === 'Advogados' || u.role === 'ADMIN' || u.role === 'admin'
+        u.role === 'ADVOGADO' || u.role === 'ADMIN'
       );
       setUsers(lawyers.map((u: any) => ({ id: u.id, name: u.name })));
     }).catch(() => {});
