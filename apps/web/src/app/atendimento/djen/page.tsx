@@ -11,6 +11,7 @@ import {
   Search, User, UserCheck, Scale,
 } from 'lucide-react';
 import api from '@/lib/api';
+import { useRole } from '@/lib/useRole';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -62,6 +63,10 @@ interface Lead {
   phone: string;
   email?: string | null;
   profile_picture_url?: string | null;
+  conversations?: {
+    legal_area: string | null;
+    assigned_lawyer?: { id: string; name: string | null } | null;
+  }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -226,6 +231,7 @@ function CreateProcessModal({
   onSuccess: () => void;
 }) {
   const router = useRouter();
+  const { isAdmin } = useRole();
 
   // Modo do cliente: buscar existente ou cadastrar novo
   const [clientMode, setClientMode] = useState<'search' | 'new'>('search');
@@ -258,6 +264,10 @@ function CreateProcessModal({
     preloadedAnalysis?.area_juridica ? normalizeArea(preloadedAnalysis.area_juridica) : ''
   );
 
+  // Advogado (ADMIN only)
+  const [lawyers, setLawyers] = useState<{ id: string; name: string | null }[]>([]);
+  const [selectedLawyerId, setSelectedLawyerId] = useState('');
+
   // Submitting
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -267,6 +277,12 @@ function CreateProcessModal({
     clientMode === 'search'
       ? selectedLead !== null
       : newName.trim().length > 0 && newPhone.trim().length > 0;
+
+  // Carrega lista de advogados (ADMIN only)
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get('/users/lawyers').then(res => setLawyers(res.data || [])).catch(() => {});
+  }, [isAdmin]);
 
   // Auto-analyze se não tiver preloadedAnalysis
   useEffect(() => {
@@ -308,6 +324,17 @@ function CreateProcessModal({
     setLeadSearch(lead.name);
     setShowLeadDropdown(false);
     setLeadResults([]);
+
+    // Aproveita dados da última conversa do lead ──────────────
+    const conv = lead.conversations?.[0];
+    // Área jurídica: só preenche se ainda não identificada pela IA da publicação
+    if (conv?.legal_area && !legalArea) {
+      setLegalArea(normalizeArea(conv.legal_area));
+    }
+    // Advogado: pré-seleciona o advogado atribuído na conversa (ADMIN pode mudar)
+    if (isAdmin && conv?.assigned_lawyer?.id && !selectedLawyerId) {
+      setSelectedLawyerId(conv.assigned_lawyer.id);
+    }
   };
 
   const clearLead = () => {
@@ -315,6 +342,9 @@ function CreateProcessModal({
     setLeadSearch('');
     setLeadResults([]);
     setShowLeadDropdown(false);
+    // Reseta para valores da IA (ou vazio se IA também não identificou)
+    setLegalArea(analysis?.area_juridica ? normalizeArea(analysis.area_juridica) : '');
+    setSelectedLawyerId('');
     setTimeout(() => leadInputRef.current?.focus(), 50);
   };
 
@@ -343,6 +373,7 @@ function CreateProcessModal({
         leadPhone: clientMode === 'new' ? newPhone.trim() : undefined,
         trackingStage: selectedStage,
         legalArea: legalArea.trim() || undefined,
+        lawyerId: isAdmin && selectedLawyerId ? selectedLawyerId : undefined,
       });
       onSuccess();
       router.push('/atendimento/processos');
@@ -529,6 +560,33 @@ function CreateProcessModal({
             )}
           </div>
 
+          {/* ── Advogado Responsável (ADMIN only) ─────────────────── */}
+          {isAdmin && lawyers.length > 0 && (
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                👨‍⚖️ Advogado Responsável
+              </label>
+              {selectedLead?.conversations?.[0]?.assigned_lawyer && (
+                <p className="text-[10px] text-emerald-400 mb-2 flex items-center gap-1">
+                  <UserCheck size={9} /> Do atendimento: <strong>{selectedLead.conversations[0].assigned_lawyer.name}</strong>
+                </p>
+              )}
+              <select
+                value={selectedLawyerId}
+                onChange={e => setSelectedLawyerId(e.target.value)}
+                className="w-full text-[12px] bg-accent/40 border border-border rounded-xl px-3 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="">Atribuir automaticamente (padrão)</option>
+                {lawyers.map(l => (
+                  <option key={l.id} value={l.id}>{l.name || l.id}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                Se não selecionado, o processo será atribuído ao usuário logado.
+              </p>
+            </div>
+          )}
+
           {/* AI Analysis + Tarefa sugerida */}
           <div>
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -655,11 +713,15 @@ function CreateProcessModal({
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Scale size={11} /> Área Jurídica
             </label>
-            {analysis?.area_juridica && (
+            {analysis?.area_juridica ? (
               <p className="text-[10px] text-violet-400 mb-2 flex items-center gap-1">
-                <Sparkles size={9} /> IA identificou: <strong>{analysis.area_juridica}</strong>
+                <Sparkles size={9} /> IA identificou na publicação: <strong>{analysis.area_juridica}</strong>
               </p>
-            )}
+            ) : selectedLead?.conversations?.[0]?.legal_area ? (
+              <p className="text-[10px] text-emerald-400 mb-2 flex items-center gap-1">
+                <UserCheck size={9} /> Do atendimento do cliente: <strong>{selectedLead.conversations[0].legal_area}</strong>
+              </p>
+            ) : null}
             <select
               value={legalArea}
               onChange={e => setLegalArea(e.target.value)}
