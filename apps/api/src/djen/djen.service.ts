@@ -571,9 +571,20 @@ export class DjenService {
       data: { legal_case_id: legalCase.id, viewed_at: new Date() },
     });
 
+    // Converter lead em cliente: sai da lista de leads e passa a constar como cliente
+    await this.prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        is_client: true,
+        became_client_at: new Date(),
+        stage: 'FINALIZADO',
+        stage_entered_at: new Date(),
+      },
+    });
+
     this.logger.log(
       `[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id} | ` +
-      `lead=${lead.id} | stage=${finalTrackingStage}`,
+      `lead=${lead.id} convertido em cliente | stage=${finalTrackingStage}`,
     );
     return legalCase;
   }
