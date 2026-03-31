@@ -304,41 +304,59 @@ export class CalendarReminderWorker extends WorkerHost {
         clientMsg = templateCliente(event, minutesBefore);
       }
 
+      // Busca a conversa ativa antes de enviar
+      const lastConvo = await this.prisma.conversation.findFirst({
+        where: { lead_id: event.lead.id, status: { not: 'ENCERRADO' } },
+        orderBy: { last_message_at: 'desc' },
+        select: { id: true, instance_name: true },
+      }).catch(() => null);
+
+      let reminderSendResult: any;
       try {
-        await this.whatsapp.sendText(clientPhone, clientMsg);
+        reminderSendResult = await this.whatsapp.sendText(
+          clientPhone,
+          clientMsg,
+          lastConvo?.instance_name ?? undefined,
+        );
         this.logger.log(`[REMINDER] WhatsApp enviado para cliente ${clientPhone}`);
       } catch (e: any) {
         this.logger.warn(`[REMINDER] Erro ao enviar para cliente ${clientPhone}: ${e.message}`);
       }
 
-      // ── Salva contexto do lembrete na conversa ativa do cliente ──────
-      // Permite que a IA saiba que o cliente está respondendo ao lembrete
-      try {
-        const lastConvo = await this.prisma.conversation.findFirst({
-          where: { lead_id: event.lead.id, status: { not: 'ENCERRADO' } },
-          orderBy: { last_message_at: 'desc' },
-          select: { id: true },
-        });
-        if (lastConvo) {
+      // ── Salva mensagem e contexto na conversa (visível para operador) ──
+      if (lastConvo && reminderSendResult !== undefined) {
+        try {
+          const evolutionMsgId = reminderSendResult?.data?.key?.id || `sys_reminder_${Date.now()}`;
+          await this.prisma.message.create({
+            data: {
+              conversation_id: lastConvo.id,
+              direction: 'out',
+              type: 'text',
+              text: clientMsg,
+              external_message_id: evolutionMsgId,
+              status: 'enviado',
+            },
+          });
           await this.prisma.conversation.update({
             where: { id: lastConvo.id },
             data: {
+              last_message_at: new Date(),
               reminder_context: {
                 type: event.type,
                 event_title: event.title,
                 event_date: formatDateTime(event.start_at),
                 event_date_iso: event.start_at.toISOString(),
                 location: event.location || null,
-                message_sent: clientMsg.slice(0, 800), // limite de tamanho
+                message_sent: clientMsg.slice(0, 800),
                 minutes_before: minutesBefore,
                 sent_at: new Date().toISOString(),
               },
             },
           });
-          this.logger.log(`[REMINDER] Contexto salvo na conversa ${lastConvo.id}`);
+          this.logger.log(`[REMINDER] Mensagem salva na conversa ${lastConvo.id}`);
+        } catch (e: any) {
+          this.logger.warn(`[REMINDER] Falha ao salvar mensagem na conversa: ${e.message}`);
         }
-      } catch (e: any) {
-        this.logger.warn(`[REMINDER] Falha ao salvar reminder_context: ${e.message}`);
       }
     }
   }
@@ -394,25 +412,45 @@ export class CalendarReminderWorker extends WorkerHost {
       msg = this.templateHearingScheduled(event, firstName);
     }
 
+    // Busca a conversa ativa antes de enviar (precisamos do ID para salvar a mensagem)
+    const lastConvo = await this.prisma.conversation.findFirst({
+      where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
+      orderBy: { last_message_at: 'desc' },
+      select: { id: true, ai_mode: true, instance_name: true },
+    });
+
+    let sendResult: any;
     try {
-      await this.whatsapp.sendText(clientPhone, msg);
+      sendResult = await this.whatsapp.sendText(
+        clientPhone,
+        msg,
+        lastConvo?.instance_name ?? undefined,
+      );
       this.logger.log(`[HEARING-NOTIFY] WhatsApp enviado para ${clientPhone} sobre audiência ${eventId}`);
     } catch (e: any) {
       this.logger.warn(`[HEARING-NOTIFY] Erro ao enviar para ${clientPhone}: ${e.message}`);
       return;
     }
 
-    // Salva contexto na conversa para a IA saber do agendamento
-    try {
-      const lastConvo = await this.prisma.conversation.findFirst({
-        where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
-        orderBy: { last_message_at: 'desc' },
-        select: { id: true },
-      });
-      if (lastConvo) {
+    // Salva mensagem na conversa (visível para o operador no chat)
+    // e atualiza reminder_context para a IA/operador saberem o contexto
+    if (lastConvo) {
+      try {
+        const evolutionMsgId = sendResult?.data?.key?.id || `sys_hearing_${Date.now()}`;
+        await this.prisma.message.create({
+          data: {
+            conversation_id: lastConvo.id,
+            direction: 'out',
+            type: 'text',
+            text: msg,
+            external_message_id: evolutionMsgId,
+            status: 'enviado',
+          },
+        });
         await this.prisma.conversation.update({
           where: { id: lastConvo.id },
           data: {
+            last_message_at: new Date(),
             reminder_context: {
               type: 'AUDIENCIA_AGENDADA',
               event_title: event.title,
@@ -424,9 +462,10 @@ export class CalendarReminderWorker extends WorkerHost {
             },
           },
         });
+        this.logger.log(`[HEARING-NOTIFY] Mensagem salva na conversa ${lastConvo.id}`);
+      } catch (e: any) {
+        this.logger.warn(`[HEARING-NOTIFY] Falha ao salvar mensagem na conversa: ${e.message}`);
       }
-    } catch (e: any) {
-      this.logger.warn(`[HEARING-NOTIFY] Falha ao salvar contexto: ${e.message}`);
     }
   }
 
