@@ -407,6 +407,8 @@ export class DjenService {
     tenantId?: string,
     leadId?: string,
     trackingStage?: string,
+    leadName?: string,
+    leadPhone?: string,
   ) {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({ where: { id } });
 
@@ -416,32 +418,34 @@ export class DjenService {
       if (existing) throw new ConflictException('Processo já criado para esta publicação.');
     }
 
+    // Obrigatoriedade de cliente: leadId, leadName+leadPhone, ou nenhum (placeholder)
+    if (!leadId && (!leadName?.trim() || !leadPhone?.trim())) {
+      throw new BadRequestException('Informe o cliente (leadId ou nome + telefone) para criar o processo.');
+    }
+
     // ─── Resolve o Lead ──────────────────────────────────────────────────────
-    // Se um lead real foi informado, usa ele. Caso contrário, cria/reutiliza placeholder.
     let lead: { id: string };
 
     if (leadId) {
+      // Opção A: lead existente informado por ID
       const realLead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { id: true } });
       if (!realLead) throw new BadRequestException('Contato informado não encontrado.');
       lead = realLead;
     } else {
-      const digits = pub.numero_processo.replace(/\D/g, '');
-      const placeholderPhone = `PROC_${digits}`;
-      const leadWhere: any = { phone: placeholderPhone };
-      if (tenantId) leadWhere.tenant_id = tenantId;
-      else leadWhere.tenant_id = null;
-
-      let placeholder = await this.prisma.lead.findFirst({ where: leadWhere });
-      if (!placeholder) {
-        placeholder = await this.prisma.lead.create({
-          data: {
-            name: `[Processo] ${pub.numero_processo}`,
-            phone: placeholderPhone,
-            tenant_id: tenantId,
-          },
-        });
-      }
-      lead = placeholder;
+      // Opção B: cadastrar novo cliente com nome + telefone
+      const phone = leadPhone!.trim();
+      const name = leadName!.trim();
+      // Verifica se já existe lead com esse telefone no mesmo tenant para evitar duplicatas
+      const existingByPhone = await this.prisma.lead.findFirst({
+        where: {
+          phone: { contains: phone.replace(/\D/g, '') },
+          ...(tenantId ? { tenant_id: tenantId } : { tenant_id: null }),
+        },
+        select: { id: true },
+      });
+      lead = existingByPhone ?? await this.prisma.lead.create({
+        data: { name, phone, tenant_id: tenantId },
+      });
     }
 
     // ─── Detecta área jurídica pelo conteúdo da publicação ───────────────────

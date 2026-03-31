@@ -67,7 +67,7 @@ export class DjenController {
   createProcess(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { leadId?: string; trackingStage?: string },
+    @Body() body: { leadId?: string; leadName?: string; leadPhone?: string; trackingStage?: string },
   ) {
     return this.djenService.createProcessFromPublication(
       id,
@@ -75,6 +75,8 @@ export class DjenController {
       req.user?.tenant_id,
       body?.leadId,
       body?.trackingStage,
+      body?.leadName,
+      body?.leadPhone,
     );
   }
 

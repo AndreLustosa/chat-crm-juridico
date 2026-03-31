@@ -105,6 +105,88 @@ const TRACKING_STAGES_DJEN = [
   { id: 'ENCERRADO',    label: 'Encerrado',             color: '#6b7280', emoji: '🏁' },
 ] as const;
 
+// ─── TaskSuggestion (sub-componente usado dentro do modal) ────
+
+function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: string }) {
+  const [creating, setCreating] = useState(false);
+  const [done, setDone] = useState(false);
+  const [skipped, setSkipped] = useState(false);
+  const [err, setErr] = useState(false);
+
+  if (skipped) return null;
+
+  const createTask = async () => {
+    setCreating(true);
+    setErr(false);
+    try {
+      const today = new Date();
+      let due = new Date(today);
+      let added = 0;
+      while (added < analysis.prazo_dias) {
+        due.setDate(due.getDate() + 1);
+        const dow = due.getDay();
+        if (dow !== 0 && dow !== 6) added++;
+      }
+      await api.post('/calendar/events', {
+        type: 'TAREFA',
+        title: `[DJEN] ${analysis.tarefa_titulo}`,
+        description: analysis.tarefa_descricao,
+        start_at: due.toISOString(),
+        end_at: new Date(due.getTime() + 30 * 60_000).toISOString(),
+        priority: analysis.urgencia,
+      });
+      setDone(true);
+    } catch { setErr(true); }
+    finally { setCreating(false); }
+  };
+
+  return (
+    <div className={`rounded-xl border p-3 space-y-2 ${
+      done ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-card/60'
+    }`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+            <CheckSquare size={9} /> Tarefa sugerida pela IA
+          </p>
+          <p className="text-[12px] font-semibold text-foreground truncate">{analysis.tarefa_titulo}</p>
+          {analysis.tarefa_descricao && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{analysis.tarefa_descricao}</p>
+          )}
+          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+            <Clock size={9} /> Prazo: {analysis.prazo_dias} dias úteis
+          </p>
+        </div>
+      </div>
+
+      {done ? (
+        <p className="text-[11px] text-emerald-400 flex items-center gap-1">
+          <CheckCircle2 size={11} /> Tarefa criada com sucesso!
+        </p>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            onClick={createTask}
+            disabled={creating}
+            className="flex-1 flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-primary hover:bg-primary/15 transition-colors disabled:opacity-50"
+          >
+            {creating ? <Loader2 size={10} className="animate-spin" /> : <CheckSquare size={10} />}
+            {creating ? 'Criando…' : 'Criar esta tarefa'}
+          </button>
+          <button
+            onClick={() => setSkipped(true)}
+            className="px-3 text-[11px] font-semibold text-muted-foreground hover:text-foreground py-1.5 rounded-lg border border-border hover:bg-accent transition-colors"
+            title="Pular tarefa"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
+      {err && <p className="text-[10px] text-red-400">Erro ao criar tarefa. Tente novamente.</p>}
+    </div>
+  );
+}
+
 // ─── Modal: Criar Processo ────────────────────────────────────
 
 function CreateProcessModal({
@@ -120,7 +202,10 @@ function CreateProcessModal({
 }) {
   const router = useRouter();
 
-  // Lead search
+  // Modo do cliente: buscar existente ou cadastrar novo
+  const [clientMode, setClientMode] = useState<'search' | 'new'>('search');
+
+  // Busca de cliente existente
   const [leadSearch, setLeadSearch] = useState('');
   const [leadResults, setLeadResults] = useState<Lead[]>([]);
   const [searchingLead, setSearchingLead] = useState(false);
@@ -128,6 +213,10 @@ function CreateProcessModal({
   const [showLeadDropdown, setShowLeadDropdown] = useState(false);
   const leadDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leadInputRef = useRef<HTMLInputElement>(null);
+
+  // Dados de novo cliente
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
 
   // AI analysis
   const [analysis, setAnalysis] = useState<AiAnalysis | null>(preloadedAnalysis || null);
@@ -142,6 +231,12 @@ function CreateProcessModal({
   // Submitting
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Validação: cliente é obrigatório
+  const hasValidClient =
+    clientMode === 'search'
+      ? selectedLead !== null
+      : newName.trim().length > 0 && newPhone.trim().length > 0;
 
   // Auto-analyze se não tiver preloadedAnalysis
   useEffect(() => {
@@ -162,6 +257,7 @@ function CreateProcessModal({
 
   // Debounce lead search
   useEffect(() => {
+    if (clientMode !== 'search') return;
     if (leadDebounce.current) clearTimeout(leadDebounce.current);
     if (!leadSearch.trim()) { setLeadResults([]); setShowLeadDropdown(false); return; }
     leadDebounce.current = setTimeout(async () => {
@@ -174,7 +270,7 @@ function CreateProcessModal({
       } catch { setLeadResults([]); }
       finally { setSearchingLead(false); }
     }, 300);
-  }, [leadSearch]);
+  }, [leadSearch, clientMode]);
 
   const selectLead = (lead: Lead) => {
     setSelectedLead(lead);
@@ -191,12 +287,29 @@ function CreateProcessModal({
     setTimeout(() => leadInputRef.current?.focus(), 50);
   };
 
+  const switchMode = (mode: 'search' | 'new') => {
+    setClientMode(mode);
+    setSelectedLead(null);
+    setLeadSearch('');
+    setLeadResults([]);
+    setShowLeadDropdown(false);
+    setNewName('');
+    setNewPhone('');
+    setSubmitError(null);
+  };
+
   const handleSubmit = async () => {
+    if (!hasValidClient) {
+      setSubmitError('Informe o cliente para continuar.');
+      return;
+    }
     setSubmitError(null);
     setSubmitting(true);
     try {
       await api.post(`/djen/${pub.id}/create-process`, {
-        leadId: selectedLead?.id,
+        leadId: clientMode === 'search' ? selectedLead?.id : undefined,
+        leadName: clientMode === 'new' ? newName.trim() : undefined,
+        leadPhone: clientMode === 'new' ? newPhone.trim() : undefined,
         trackingStage: selectedStage,
       });
       onSuccess();
@@ -252,74 +365,130 @@ function CreateProcessModal({
             )}
           </div>
 
-          {/* Lead search */}
+          {/* ── Cliente (obrigatório) ─────────────────────────────── */}
           <div>
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <User size={11} /> Vincular a um Contato
-              <span className="font-normal text-muted-foreground/60 lowercase tracking-normal">(opcional)</span>
-            </label>
-            <div className="relative">
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors ${
-                selectedLead ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border bg-background'
-              }`}>
-                {selectedLead ? (
-                  <>
-                    <UserCheck size={14} className="text-emerald-400 shrink-0" />
-                    <span className="flex-1 text-[12px] font-semibold text-foreground truncate">{selectedLead.name}</span>
-                    <span className="text-[10px] text-muted-foreground font-mono truncate">{selectedLead.phone}</span>
-                    <button onClick={clearLead} className="ml-1 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
-                      <X size={12} />
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {searchingLead
-                      ? <Loader2 size={13} className="text-muted-foreground shrink-0 animate-spin" />
-                      : <Search size={13} className="text-muted-foreground shrink-0" />
-                    }
-                    <input
-                      ref={leadInputRef}
-                      type="text"
-                      value={leadSearch}
-                      onChange={e => setLeadSearch(e.target.value)}
-                      onFocus={() => leadResults.length > 0 && setShowLeadDropdown(true)}
-                      placeholder="Buscar cliente pelo nome ou telefone…"
-                      className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
-                    />
-                  </>
+            {/* Label + toggle de modo */}
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <User size={11} />
+                Cliente
+                <span className="text-red-400">*</span>
+              </label>
+              <div className="flex rounded-lg border border-border overflow-hidden text-[10px] font-semibold">
+                <button
+                  onClick={() => switchMode('search')}
+                  className={`px-2.5 py-1 transition-colors ${clientMode === 'search' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
+                >
+                  <Search size={10} className="inline mr-1" />
+                  Buscar existente
+                </button>
+                <button
+                  onClick={() => switchMode('new')}
+                  className={`px-2.5 py-1 transition-colors border-l border-border ${clientMode === 'new' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
+                >
+                  <Plus size={10} className="inline mr-1" />
+                  Novo cliente
+                </button>
+              </div>
+            </div>
+
+            {/* Modo: busca de existente */}
+            {clientMode === 'search' && (
+              <div className="relative">
+                <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-colors ${
+                  selectedLead ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border bg-background'
+                }`}>
+                  {selectedLead ? (
+                    <>
+                      <UserCheck size={14} className="text-emerald-400 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-semibold text-foreground truncate">{selectedLead.name}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">{selectedLead.phone}</p>
+                      </div>
+                      <button onClick={clearLead} className="p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors shrink-0">
+                        <X size={12} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {searchingLead
+                        ? <Loader2 size={13} className="text-muted-foreground shrink-0 animate-spin" />
+                        : <Search size={13} className="text-muted-foreground shrink-0" />
+                      }
+                      <input
+                        ref={leadInputRef}
+                        type="text"
+                        value={leadSearch}
+                        onChange={e => setLeadSearch(e.target.value)}
+                        onFocus={() => leadResults.length > 0 && setShowLeadDropdown(true)}
+                        placeholder="Digite o nome ou telefone do cliente…"
+                        className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
+                      />
+                    </>
+                  )}
+                </div>
+                {showLeadDropdown && leadResults.length > 0 && (
+                  <div className="absolute top-full mt-1 left-0 right-0 z-20 bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+                    {leadResults.map(lead => (
+                      <button
+                        key={lead.id}
+                        onClick={() => selectLead(lead)}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-accent transition-colors text-left"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-accent border border-border flex items-center justify-center shrink-0 overflow-hidden">
+                          {lead.profile_picture_url
+                            ? <img src={lead.profile_picture_url} alt="" className="w-full h-full object-cover" />
+                            : <User size={12} className="text-muted-foreground" />
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-semibold text-foreground truncate">{lead.name}</p>
+                          <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!selectedLead && !leadSearch && (
+                  <p className="text-[10px] text-muted-foreground mt-1.5">
+                    Busque pelo nome ou número de telefone do cliente cadastrado.
+                  </p>
                 )}
               </div>
-              {showLeadDropdown && leadResults.length > 0 && (
-                <div className="absolute top-full mt-1 left-0 right-0 z-20 bg-card border border-border rounded-xl shadow-xl overflow-hidden">
-                  {leadResults.map(lead => (
-                    <button
-                      key={lead.id}
-                      onClick={() => selectLead(lead)}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-accent transition-colors text-left"
-                    >
-                      <div className="w-7 h-7 rounded-full bg-accent border border-border flex items-center justify-center shrink-0 overflow-hidden">
-                        {lead.profile_picture_url
-                          ? <img src={lead.profile_picture_url} alt="" className="w-full h-full object-cover" />
-                          : <User size={12} className="text-muted-foreground" />
-                        }
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[12px] font-semibold text-foreground truncate">{lead.name}</p>
-                        <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
-                      </div>
-                    </button>
-                  ))}
+            )}
+
+            {/* Modo: cadastrar novo */}
+            {clientMode === 'new' && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-background">
+                  <User size={13} className="text-muted-foreground shrink-0" />
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={e => setNewName(e.target.value)}
+                    placeholder="Nome completo do cliente *"
+                    className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
+                    autoFocus
+                  />
                 </div>
-              )}
-            </div>
-            {!selectedLead && (
-              <p className="text-[10px] text-muted-foreground mt-1.5">
-                Se não vincular, um contato provisório será criado automaticamente com o número do processo.
-              </p>
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-background">
+                  <Search size={13} className="text-muted-foreground shrink-0" />
+                  <input
+                    type="tel"
+                    value={newPhone}
+                    onChange={e => setNewPhone(e.target.value)}
+                    placeholder="Telefone com DDD (ex: 82 99999-9999) *"
+                    className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  O cliente será cadastrado e vinculado ao processo automaticamente.
+                </p>
+              </div>
             )}
           </div>
 
-          {/* AI Analysis */}
+          {/* AI Analysis + Tarefa sugerida */}
           <div>
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Sparkles size={11} className="text-violet-400" /> Análise IA
@@ -335,13 +504,20 @@ function CreateProcessModal({
                 <p className="text-[11px] text-amber-400">Análise IA indisponível — selecione a etapa manualmente.</p>
               </div>
             )}
-            {analysis && !analyzingAi && urgConf && (
-              <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
-                <urgConf.icon size={14} className={`${urgConf.text} shrink-0`} />
-                <div className="flex-1 min-w-0">
-                  <p className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label} · {analysis.prazo_dias} dias úteis</p>
-                  <p className="text-[11px] text-foreground/80 mt-0.5 line-clamp-2">{analysis.resumo}</p>
-                </div>
+            {analysis && !analyzingAi && (
+              <div className="space-y-2">
+                {/* Urgência + Resumo */}
+                {urgConf && (
+                  <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
+                    <urgConf.icon size={14} className={`${urgConf.text} shrink-0`} />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label} · {analysis.prazo_dias} dias úteis</p>
+                      <p className="text-[11px] text-foreground/80 mt-0.5 line-clamp-2">{analysis.resumo}</p>
+                    </div>
+                  </div>
+                )}
+                {/* Tarefa sugerida */}
+                <TaskSuggestion analysis={analysis} pubId={pub.id} />
               </div>
             )}
           </div>
@@ -408,8 +584,9 @@ function CreateProcessModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={submitting}
-            className="flex-1 flex items-center justify-center gap-1.5 text-[12px] font-bold px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-500/90 text-white transition-colors disabled:opacity-60"
+            disabled={submitting || !hasValidClient}
+            title={!hasValidClient ? 'Informe o cliente para continuar' : undefined}
+            className="flex-1 flex items-center justify-center gap-1.5 text-[12px] font-bold px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-500/90 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting
               ? <><Loader2 size={13} className="animate-spin" /> Criando…</>
