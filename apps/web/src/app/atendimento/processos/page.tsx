@@ -12,6 +12,7 @@ import {
 import api from '@/lib/api';
 import { TRACKING_STAGES, findTrackingStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
+import { ClientPanel } from '@/components/ClientPanel';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -320,10 +321,12 @@ function ProcessoDetailPanel({
   legalCase,
   onClose,
   onRefresh,
+  onOpenClientPanel,
 }: {
   legalCase: LegalCase;
   onClose: () => void;
   onRefresh: () => void;
+  onOpenClientPanel: (leadId: string) => void;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'info' | 'djen' | 'events' | 'tasks'>('info');
@@ -680,6 +683,13 @@ function ProcessoDetailPanel({
             >
               {stageInfo.emoji} {stageInfo.label}
             </span>
+            <button
+              onClick={() => onOpenClientPanel(legalCase.lead_id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
+              title="Abrir Painel do Cliente"
+            >
+              <User size={16} />
+            </button>
             <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
               <X size={18} />
             </button>
@@ -745,6 +755,13 @@ function ProcessoDetailPanel({
                     <p className="text-[13px] font-semibold text-foreground truncate">{legalCase.lead?.name || 'Sem nome'}</p>
                     <p className="text-[11px] text-muted-foreground font-mono">{legalCase.lead?.phone}</p>
                   </div>
+                  <button
+                    onClick={() => onOpenClientPanel(legalCase.lead_id)}
+                    className="shrink-0 text-[10px] font-semibold text-primary border border-primary/30 px-2 py-1 rounded-lg hover:bg-primary/10 transition-colors flex items-center gap-1"
+                    title="Abrir Painel do Cliente"
+                  >
+                    <User size={10} /> Ver perfil
+                  </button>
                   <button
                     onClick={() => setShowLeadSection(v => !v)}
                     className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground border border-border px-2 py-1 rounded-lg hover:bg-accent transition-colors"
@@ -2112,6 +2129,9 @@ function ProcessosPageContent() {
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState<LegalCase | null>(null);
   const [showCadastrarModal, setShowCadastrarModal] = useState(false);
+  const [clientPanelLeadId, setClientPanelLeadId] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const { isAdmin: currentUserIsAdmin } = useRole();
 
   // (DJEN movido para /atendimento/djen)
 
@@ -2529,7 +2549,36 @@ function ProcessosPageContent() {
           legalCase={selectedCase}
           onClose={() => setSelectedCase(null)}
           onRefresh={() => { fetchCases(true); setSelectedCase(null); }}
+          onOpenClientPanel={(leadId) => setClientPanelLeadId(leadId)}
         />
+      )}
+
+      {/* Painel do Cliente — sobreposto ao painel de processo (zBase=200) */}
+      {clientPanelLeadId && (
+        <ClientPanel
+          leadId={clientPanelLeadId}
+          onClose={() => setClientPanelLeadId(null)}
+          onLightbox={(url) => setLightboxUrl(url)}
+          isAdmin={currentUserIsAdmin}
+          zBase={200}
+        />
+      )}
+
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 bg-black/90 flex items-center justify-center"
+          style={{ zIndex: 300 }}
+          onClick={() => setLightboxUrl(null)}
+        >
+          <img src={lightboxUrl} alt="" className="max-w-[90vw] max-h-[90vh] rounded-xl shadow-2xl" />
+          <button
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
       )}
     </div>
   );

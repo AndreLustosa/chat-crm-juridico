@@ -156,12 +156,15 @@ export function ClientPanel({
   onLightbox,
   isAdmin = false,
   onDeleteSuccess,
+  zBase = 100,
 }: {
   leadId: string;
   onClose: () => void;
   onLightbox: (url: string) => void;
   isAdmin?: boolean;
   onDeleteSuccess?: (id: string) => void;
+  /** Z-index base do modal (backdrop usa zBase-10). Padrão: 100 */
+  zBase?: number;
 }) {
   const router = useRouter();
   const [lead, setLead] = useState<LeadDetail | null>(null);
@@ -368,10 +371,10 @@ export function ClientPanel({
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-[3px]" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-[3px]" style={{ zIndex: zBase - 10 }} onClick={onClose} />
 
       {/* Modal grande */}
-      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[780px] max-w-[95vw] max-h-[90vh] z-[100] bg-card border border-border rounded-2xl shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
+      <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[780px] max-w-[95vw] max-h-[90vh] bg-card border border-border rounded-2xl shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200" style={{ zIndex: zBase }}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
           <h2 className="text-[15px] font-bold text-foreground">Painel do Cliente</h2>
@@ -1065,8 +1068,8 @@ export function ClientPanel({
       {/* Modal de nova tarefa */}
       {taskModal && (
         <>
-          <div className="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm" onClick={() => setTaskModal(false)} />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[130] w-[440px] max-w-[95vw] bg-card border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" style={{ zIndex: zBase + 10 }} onClick={() => setTaskModal(false)} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[440px] max-w-[95vw] bg-card border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4" style={{ zIndex: zBase + 20 }}>
             <div className="flex items-center justify-between">
               <h3 className="text-[15px] font-bold text-foreground flex items-center gap-2">
                 <CheckSquare size={16} className="text-emerald-400" />
