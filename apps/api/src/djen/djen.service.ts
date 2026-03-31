@@ -122,6 +122,35 @@ function classifyPublication(
 
 // ─────────────────────────────────────────────────────────────────
 
+// ─── Extração de data/hora de audiência do texto ───────────────────────────
+
+function extractHearingDateTime(text: string): Date | null {
+  // Busca a data próxima à palavra "audiência" para evitar false-positives
+  const audiIdx = text.toLowerCase().search(/audiênc|audienc/);
+  const slice = audiIdx >= 0
+    ? text.slice(Math.max(0, audiIdx - 100), audiIdx + 300)
+    : text.slice(0, 600);
+
+  // Tenta formato DD/MM/YYYY
+  const dateMatch = slice.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (!dateMatch) return null;
+
+  const day = parseInt(dateMatch[1]);
+  const month = parseInt(dateMatch[2]) - 1; // 0-indexed
+  const year = parseInt(dateMatch[3]);
+
+  // Sanidade: ano entre 2020 e 2040
+  if (year < 2020 || year > 2040 || month < 0 || month > 11 || day < 1 || day > 31) return null;
+
+  // Tenta extrair hora — "às 14h00", "às 14:00", "14h00"
+  const timeMatch = slice.match(/(?:às\s+)?(\d{1,2})[h:](\d{2})?\s*(?:horas?)?/i);
+  const hour = timeMatch ? Math.min(23, parseInt(timeMatch[1])) : 9;
+  const minute = timeMatch ? Math.min(59, parseInt(timeMatch[2] || '0')) : 0;
+
+  const d = new Date(year, month, day, hour, minute);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 @Injectable()
 export class DjenService {
   private readonly logger = new Logger(DjenService.name);
@@ -228,7 +257,7 @@ export class DjenService {
         });
         saved++;
 
-        // ─── Auto-criar tarefa ao vincular publicação a um processo ───────
+        // ─── Auto-criar tarefa/audiência ao vincular publicação a um processo ─────
         if (legalCase && pub) {
           const classification = classifyPublication(tipoComunicacao, assunto, conteudo);
           if (classification) {
@@ -276,6 +305,52 @@ export class DjenService {
               this.logger.log(
                 `[DJEN] Tarefa automática criada para processo ${numeroProcesso}: "${classification.taskTitle}"`,
               );
+
+              // ── Se for publicação de audiência, tentar criar evento no calendário ──
+              if (/audiência|audiencia|designada|designando/.test(text)) {
+                try {
+                  const hearingDate = extractHearingDateTime(conteudo);
+                  if (hearingDate) {
+                    // Verificar se já existe AUDIENCIA nessa data para o mesmo processo
+                    const existingAudiencia = await this.prisma.calendarEvent.findFirst({
+                      where: {
+                        legal_case_id: legalCase.id,
+                        type: 'AUDIENCIA',
+                        start_at: {
+                          gte: new Date(hearingDate.getTime() - 86400000), // ±1 dia
+                          lte: new Date(hearingDate.getTime() + 86400000),
+                        },
+                      },
+                      select: { id: true },
+                    });
+
+                    if (!existingAudiencia) {
+                      const endDate = new Date(hearingDate.getTime() + 60 * 60000); // +1h
+                      await this.calendarService.create({
+                        type: 'AUDIENCIA',
+                        title: `[DJEN] Audiência — ${numeroProcesso}`,
+                        description: `Audiência detectada automaticamente via DJEN.\n${assunto || ''}`,
+                        start_at: hearingDate.toISOString(),
+                        end_at: endDate.toISOString(),
+                        assigned_user_id: legalCase.lawyer_id,
+                        legal_case_id: legalCase.id,
+                        created_by_id: legalCase.lawyer_id,
+                        tenant_id: legalCase.tenant_id || undefined,
+                        priority: 'URGENTE',
+                        reminders: [
+                          { minutes_before: 1440, channel: 'PUSH' },
+                          { minutes_before: 60, channel: 'PUSH' },
+                        ],
+                      });
+                      this.logger.log(
+                        `[DJEN] Audiência automática criada: ${hearingDate.toISOString()} (caso ${legalCase.id})`,
+                      );
+                    }
+                  }
+                } catch (e: any) {
+                  this.logger.warn(`[DJEN] Falha ao criar audiência automática: ${e.message}`);
+                }
+              }
             } catch (e: any) {
               this.logger.warn(`[DJEN] Falha ao criar tarefa automática: ${e.message}`);
             }
@@ -518,6 +593,7 @@ export class DjenService {
     juizo: string | null;
     area_juridica: string | null;
     valor_causa: string | null;
+    data_audiencia: string | null;
   }> {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({
       where: { id },
@@ -551,6 +627,7 @@ Campos de extração (null se não encontrado no texto):
 - juizo: string | null (vara, juízo ou tribunal onde tramita)
 - area_juridica: string | null (ex: "Trabalhista", "Cível", "Previdenciário", "Criminal", "Consumidor", "Família", "Tributário")
 - valor_causa: string | null (valor da causa se mencionado, formato "R$ X.XXX,XX")
+- data_audiencia: string | null (data e hora da audiência se mencionada, formato ISO "YYYY-MM-DDTHH:MM:00", null se não for publicação de audiência)
 
 Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
 Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.`;
@@ -624,6 +701,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       juizo: parsed.juizo || null,
       area_juridica: parsed.area_juridica || null,
       valor_causa: parsed.valor_causa || null,
+      data_audiencia: parsed.data_audiencia || null,
     };
   }
 }

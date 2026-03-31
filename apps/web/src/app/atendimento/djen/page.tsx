@@ -55,6 +55,7 @@ interface AiAnalysis {
   juizo?: string | null;
   area_juridica?: string | null;
   valor_causa?: string | null;
+  data_audiencia?: string | null;
 }
 
 interface Lead {
@@ -622,7 +623,7 @@ function CreateProcessModal({
                 )}
 
                 {/* Dados extraídos da publicação */}
-                {(analysis.parte_autora || analysis.parte_rea || analysis.juizo || analysis.area_juridica || analysis.valor_causa) && (
+                {(analysis.parte_autora || analysis.parte_rea || analysis.juizo || analysis.area_juridica || analysis.valor_causa || analysis.data_audiencia) && (
                   <div className="rounded-xl border border-border bg-accent/20 px-3 py-2.5 space-y-1.5">
                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
                       Dados identificados
@@ -655,6 +656,17 @@ function CreateProcessModal({
                       <div className="flex items-start gap-2 text-[11px]">
                         <span className="text-muted-foreground shrink-0 w-20">Valor:</span>
                         <span className="text-foreground font-medium">{analysis.valor_causa}</span>
+                      </div>
+                    )}
+                    {analysis.data_audiencia && (
+                      <div className="flex items-start gap-2 text-[11px] mt-1 pt-1.5 border-t border-border/50">
+                        <span className="text-amber-400 shrink-0 w-20 font-semibold">📅 Audiência:</span>
+                        <span className="text-amber-300 font-semibold">
+                          {new Date(analysis.data_audiencia).toLocaleString('pt-BR', {
+                            day: '2-digit', month: '2-digit', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                          })}
+                        </span>
                       </div>
                     )}
                   </div>

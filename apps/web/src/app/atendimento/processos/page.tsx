@@ -285,6 +285,16 @@ function ProcessoCard({
         )}
       </div>
 
+      {/* Aviso: trabalhista em contestação — juntada = data da audiência */}
+      {legalCase.legal_area?.toUpperCase().includes('TRABALHIST') && legalCase.tracking_stage === 'CONTESTACAO' && (
+        <div className="mt-1.5 flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25">
+          <AlertTriangle size={9} className="text-amber-400 shrink-0 mt-0.5" />
+          <span className="text-[9px] text-amber-400 font-semibold leading-tight">
+            Atenção: juntada da contestação ocorre na data da audiência
+          </span>
+        </div>
+      )}
+
       {/* Footer */}
       <div className="flex items-center justify-between text-[10px] text-muted-foreground/70">
         <div className="flex items-center gap-2.5">
@@ -310,6 +320,186 @@ function ProcessoCard({
         >
           <Clock size={9} /> {days}d
         </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── AgendarAudienciaModal ────────────────────────────────────
+// Exibido quando o usuário tenta mover um card para INSTRUCAO sem
+// ter cadastrado uma audiência para esse processo.
+
+function AgendarAudienciaModal({
+  legalCase,
+  suggestedDate,
+  onScheduled,
+  onSkip,
+  onCancel,
+}: {
+  legalCase: LegalCase;
+  suggestedDate?: string | null;
+  onScheduled: () => void;
+  onSkip: () => void;
+  onCancel: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(suggestedDate ? suggestedDate.slice(0, 10) : '');
+  const [time, setTime] = useState(suggestedDate ? (suggestedDate.slice(11, 16) || '09:00') : '09:00');
+  const [title, setTitle] = useState('Audiência de Instrução e Julgamento');
+  const [location, setLocation] = useState(legalCase.court || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!date) { setError('Informe a data da audiência para continuar.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const startAt = `${date}T${time || '09:00'}:00`;
+      const h = parseInt((time || '09:00').split(':')[0]);
+      const m = parseInt((time || '09:00').split(':')[1] || '0');
+      const endH = String(h + 1 < 24 ? h + 1 : h).padStart(2, '0');
+      const endAt = `${date}T${endH}:${String(m).padStart(2, '0')}:00`;
+
+      await api.post('/calendar/events', {
+        type: 'AUDIENCIA',
+        title: title.trim() || 'Audiência',
+        start_at: startAt,
+        end_at: endAt,
+        legal_case_id: legalCase.id,
+        lead_id: legalCase.lead_id,
+        location: location.trim() || undefined,
+        priority: 'URGENTE',
+        reminders: [
+          { minutes_before: 1440, channel: 'PUSH' },
+          { minutes_before: 60, channel: 'PUSH' },
+        ],
+      });
+      onScheduled();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao agendar. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative z-10 w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border bg-amber-500/5">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+            <Calendar size={16} className="text-amber-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-bold text-foreground">Cadastrar Data da Audiência</p>
+            <p className="text-[11px] text-amber-400/80 mt-0.5">
+              Obrigatório para mover para Audiência/Instrução
+            </p>
+          </div>
+          <button onClick={onCancel} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+          {/* Info do processo */}
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-muted-foreground">
+            <Scale size={12} className="shrink-0" />
+            <span className="truncate font-mono">{legalCase.case_number || 'Processo sem número'}</span>
+            <span className="shrink-0">·</span>
+            <span className="truncate">{legalCase.lead?.name || 'Sem cliente'}</span>
+          </div>
+
+          {/* Título */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+              Tipo de Audiência
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full text-[12px] bg-background border border-border rounded-xl px-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              placeholder="Audiência de Instrução e Julgamento"
+            />
+          </div>
+
+          {/* Data + Hora */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                Data *
+              </label>
+              <input
+                type="date"
+                value={date}
+                min={today}
+                onChange={e => setDate(e.target.value)}
+                className="w-full text-[12px] bg-background border border-border rounded-xl px-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                Hora
+              </label>
+              <input
+                type="time"
+                value={time}
+                onChange={e => setTime(e.target.value)}
+                className="w-full text-[12px] bg-background border border-border rounded-xl px-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+            </div>
+          </div>
+
+          {/* Local */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+              Local / Vara
+            </label>
+            <input
+              type="text"
+              value={location}
+              onChange={e => setLocation(e.target.value)}
+              placeholder={legalCase.court || 'Ex: 1ª Vara do Trabalho'}
+              className="w-full text-[12px] bg-background border border-border rounded-xl px-3 py-2.5 text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+            />
+          </div>
+
+          {error && (
+            <p className="text-[12px] text-red-400 flex items-center gap-1.5">
+              <AlertTriangle size={11} /> {error}
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-2 px-5 py-4 border-t border-border">
+          <button
+            onClick={onSkip}
+            className="text-[11px] font-medium text-muted-foreground hover:text-foreground px-3 py-2 rounded-xl border border-border hover:bg-accent transition-colors"
+            title="Mover sem agendar audiência"
+          >
+            Pular por agora
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={onCancel}
+            className="text-[12px] font-semibold px-4 py-2 rounded-xl border border-border text-muted-foreground hover:bg-accent transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !date}
+            className="flex items-center gap-1.5 text-[12px] font-bold px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-500/90 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Calendar size={12} />}
+            {saving ? 'Agendando…' : 'Agendar e Mover'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2133,6 +2323,13 @@ function ProcessosPageContent() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const { isAdmin: currentUserIsAdmin } = useRole();
 
+  // Mover para INSTRUCAO requer audiência agendada
+  const [pendingMoveToInstrucao, setPendingMoveToInstrucao] = useState<{
+    legalCase: LegalCase;
+    targetStage: string;
+    suggestedDate?: string | null;
+  } | null>(null);
+
   // (DJEN movido para /atendimento/djen)
 
   // Board pan
@@ -2188,13 +2385,37 @@ function ProcessosPageContent() {
     return () => clearInterval(interval);
   }, [router, fetchCases]);
 
-  const moveCase = async (caseId: string, newTrackingStage: string) => {
+  const executeMoveCase = async (caseId: string, newTrackingStage: string) => {
     setCases(prev => prev.map(c => c.id === caseId ? { ...c, tracking_stage: newTrackingStage } : c));
     try {
       await api.patch(`/legal-cases/${caseId}/tracking-stage`, { trackingStage: newTrackingStage });
     } catch {
       fetchCases(true);
     }
+  };
+
+  const moveCase = async (caseId: string, newTrackingStage: string) => {
+    // INSTRUCAO exige audiência cadastrada no calendário
+    if (newTrackingStage === 'INSTRUCAO') {
+      const lc = cases.find(c => c.id === caseId);
+      // Verificar se já existe audiência para o processo
+      let hasAudiencia = false;
+      let suggestedDate: string | null = null;
+      try {
+        const res = await api.get('/calendar/events', {
+          params: { type: 'AUDIENCIA', legalCaseId: caseId, showAll: 'true' },
+        });
+        const events: any[] = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+        hasAudiencia = events.length > 0;
+        if (hasAudiencia && events[0]?.start_at) suggestedDate = events[0].start_at;
+      } catch { /* se falhar, permite mover */ hasAudiencia = true; }
+
+      if (!hasAudiencia && lc) {
+        setPendingMoveToInstrucao({ legalCase: lc, targetStage: newTrackingStage, suggestedDate });
+        return; // bloqueia — aguarda modal
+      }
+    }
+    await executeMoveCase(caseId, newTrackingStage);
   };
 
   // Filters
@@ -2534,6 +2755,25 @@ function ProcessosPageContent() {
           </div>
         )}
       </main>
+
+      {/* Modal: Agendar Audiência (bloqueio ao mover para INSTRUCAO) */}
+      {pendingMoveToInstrucao && (
+        <AgendarAudienciaModal
+          legalCase={pendingMoveToInstrucao.legalCase}
+          suggestedDate={pendingMoveToInstrucao.suggestedDate}
+          onScheduled={() => {
+            const { legalCase: lc, targetStage } = pendingMoveToInstrucao;
+            setPendingMoveToInstrucao(null);
+            executeMoveCase(lc.id, targetStage);
+          }}
+          onSkip={() => {
+            const { legalCase: lc, targetStage } = pendingMoveToInstrucao;
+            setPendingMoveToInstrucao(null);
+            executeMoveCase(lc.id, targetStage);
+          }}
+          onCancel={() => setPendingMoveToInstrucao(null)}
+        />
+      )}
 
       {/* Modal Cadastrar Processo Existente */}
       {showCadastrarModal && (
