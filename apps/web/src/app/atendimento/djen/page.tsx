@@ -89,14 +89,15 @@ const URGENCIA_CONFIG = {
 
 const STAGE_LABELS: Record<string, string> = {
   DISTRIBUIDO: 'Distribuído', CITACAO: 'Citação/Intimação', CONTESTACAO: 'Contestação',
-  INSTRUCAO: 'Audiência/Instrução', JULGAMENTO: 'Julgamento', RECURSO: 'Recurso',
-  TRANSITADO: 'Transitado em Julgado', EXECUCAO: 'Execução', ENCERRADO: 'Encerrado',
+  REPLICA: 'Réplica', INSTRUCAO: 'Audiência/Instrução', JULGAMENTO: 'Julgamento',
+  RECURSO: 'Recurso', TRANSITADO: 'Transitado em Julgado', EXECUCAO: 'Execução', ENCERRADO: 'Encerrado',
 };
 
 const TRACKING_STAGES_DJEN = [
   { id: 'DISTRIBUIDO',  label: 'Distribuído',           color: '#6366f1', emoji: '📬' },
   { id: 'CITACAO',      label: 'Citação/Intimação',     color: '#f59e0b', emoji: '📨' },
   { id: 'CONTESTACAO',  label: 'Contestação',           color: '#ef4444', emoji: '⚔️' },
+  { id: 'REPLICA',      label: 'Réplica',               color: '#06b6d4', emoji: '↩️' },
   { id: 'INSTRUCAO',    label: 'Audiência/Instrução',   color: '#8b5cf6', emoji: '🎙️' },
   { id: 'JULGAMENTO',   label: 'Julgamento/Sentença',   color: '#8b5cf6', emoji: '⚖️' },
   { id: 'RECURSO',      label: 'Recurso',               color: '#ec4899', emoji: '📤' },

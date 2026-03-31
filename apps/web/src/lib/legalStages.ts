@@ -12,6 +12,7 @@ export const TRACKING_STAGES = [
   { id: 'DISTRIBUIDO',  label: 'Distribuído',          color: '#6366f1', emoji: '📬' },
   { id: 'CITACAO',      label: 'Citação/Intimação',    color: '#f59e0b', emoji: '📩' },
   { id: 'CONTESTACAO',  label: 'Contestação',          color: '#3b82f6', emoji: '🛡️' },
+  { id: 'REPLICA',      label: 'Réplica',              color: '#06b6d4', emoji: '↩️' },
   { id: 'INSTRUCAO',    label: 'Audiência/Instrução',  color: '#8b5cf6', emoji: '🎙️' },
   { id: 'JULGAMENTO',   label: 'Julgamento/Sentença',  color: '#ec4899', emoji: '⚖️' },
   { id: 'RECURSO',      label: 'Recurso',              color: '#f97316', emoji: '📜' },

@@ -86,6 +86,7 @@ const TRACKING_STAGES = [
   { id: 'DISTRIBUIDO', label: 'Distribuído' },
   { id: 'CITACAO', label: 'Citação/Intimação' },
   { id: 'CONTESTACAO', label: 'Contestação' },
+  { id: 'REPLICA', label: 'Réplica' },
   { id: 'INSTRUCAO', label: 'Audiência/Instrução' },
   { id: 'JULGAMENTO', label: 'Julgamento/Sentença' },
   { id: 'RECURSO', label: 'Recurso' },
