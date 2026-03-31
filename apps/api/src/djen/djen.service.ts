@@ -504,6 +504,12 @@ export class DjenService {
     tarefa_descricao: string;
     orientacoes: string;
     model_used: string;
+    // Dados extraídos da publicação
+    parte_autora: string | null;
+    parte_rea: string | null;
+    juizo: string | null;
+    area_juridica: string | null;
+    valor_causa: string | null;
   }> {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({
       where: { id },
@@ -515,22 +521,31 @@ export class DjenService {
     });
 
     const STAGES = [
-      'DISTRIBUIDO', 'CITACAO', 'CONTESTACAO', 'INSTRUCAO',
+      'DISTRIBUIDO', 'CITACAO', 'CONTESTACAO', 'REPLICA', 'INSTRUCAO',
       'JULGAMENTO', 'RECURSO', 'TRANSITADO', 'EXECUCAO', 'ENCERRADO',
     ];
 
-    const systemPrompt = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos:
-- resumo: string (máx 3 frases, PT-BR, linguagem direta)
-- urgencia: "URGENTE" | "NORMAL" | "BAIXA"
-- tipo_acao: string (o que o advogado precisa fazer)
-- prazo_dias: number (prazo em dias ÚTEIS para a ação)
-- estagio_sugerido: string | null (um dos estágios: ${STAGES.join(', ')} — ou null se não se aplica)
-- tarefa_titulo: string (título curto da tarefa a ser criada)
-- tarefa_descricao: string (descrição detalhada da tarefa, máx 200 chars)
-- orientacoes: string (observações estratégicas para o advogado, máx 300 chars)
+    const systemPrompt = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos abaixo. Extraia as informações DIRETAMENTE do texto da publicação quando disponíveis — não invente dados.
 
-Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência. NORMAL = contestação, manifestação, despacho. BAIXA = distribuição, informativo.
-Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO.`;
+Campos obrigatórios:
+- resumo: string (máx 3 frases, PT-BR, linguagem direta para o advogado)
+- urgencia: "URGENTE" | "NORMAL" | "BAIXA"
+- tipo_acao: string (ação concreta que o advogado deve tomar)
+- prazo_dias: number (prazo em dias ÚTEIS)
+- estagio_sugerido: string | null (um de: ${STAGES.join(', ')})
+- tarefa_titulo: string (título curto da tarefa)
+- tarefa_descricao: string (descrição da tarefa, máx 200 chars)
+- orientacoes: string (observações estratégicas, máx 300 chars)
+
+Campos de extração (null se não encontrado no texto):
+- parte_autora: string | null (nome do autor/requerente/exequente)
+- parte_rea: string | null (nome do réu/requerido/executado)
+- juizo: string | null (vara, juízo ou tribunal onde tramita)
+- area_juridica: string | null (ex: "Trabalhista", "Cível", "Previdenciário", "Criminal", "Consumidor", "Família", "Tributário")
+- valor_causa: string | null (valor da causa se mencionado, formato "R$ X.XXX,XX")
+
+Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
+Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.`;
 
     const userPrompt = `PUBLICAÇÃO DO DJEN
 Data: ${new Date(pub.data_disponibilizacao).toLocaleDateString('pt-BR')}
@@ -595,6 +610,12 @@ ${pub.conteudo.slice(0, 2000)}`;
       tarefa_descricao: parsed.tarefa_descricao || '',
       orientacoes: parsed.orientacoes || '',
       model_used: configuredModel,
+      // Dados extraídos
+      parte_autora: parsed.parte_autora || null,
+      parte_rea: parsed.parte_rea || null,
+      juizo: parsed.juizo || null,
+      area_juridica: parsed.area_juridica || null,
+      valor_causa: parsed.valor_causa || null,
     };
   }
 }

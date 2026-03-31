@@ -48,6 +48,12 @@ interface AiAnalysis {
   tarefa_descricao: string;
   orientacoes: string;
   model_used?: string;
+  // Dados extraídos da publicação
+  parte_autora?: string | null;
+  parte_rea?: string | null;
+  juizo?: string | null;
+  area_juridica?: string | null;
+  valor_causa?: string | null;
 }
 
 interface Lead {
@@ -518,16 +524,55 @@ function CreateProcessModal({
               <div className="space-y-2">
                 {/* Urgência + Resumo */}
                 {urgConf && (
-                  <div className={`px-3 py-2.5 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
-                    <div className="flex items-center gap-2 mb-1.5">
+                  <div className={`px-3 py-3 rounded-xl border ${urgConf.bg} ${urgConf.border} space-y-2`}>
+                    <div className="flex items-center gap-2">
                       <urgConf.icon size={13} className={`${urgConf.text} shrink-0`} />
                       <p className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label} · {analysis.prazo_dias} dias úteis</p>
                     </div>
                     <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.resumo}</p>
                     {analysis.tipo_acao && (
-                      <p className="text-[10px] text-muted-foreground mt-1.5 font-medium">
-                        Tipo de ação: <span className="text-foreground/70">{analysis.tipo_acao}</span>
+                      <p className="text-[10px] text-muted-foreground font-medium border-t border-white/10 pt-2">
+                        Ação: <span className="text-foreground/70">{analysis.tipo_acao}</span>
                       </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Dados extraídos da publicação */}
+                {(analysis.parte_autora || analysis.parte_rea || analysis.juizo || analysis.area_juridica || analysis.valor_causa) && (
+                  <div className="rounded-xl border border-border bg-accent/20 px-3 py-2.5 space-y-1.5">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                      Dados identificados
+                    </p>
+                    {analysis.parte_autora && (
+                      <div className="flex items-start gap-2 text-[11px]">
+                        <span className="text-muted-foreground shrink-0 w-20">Autor:</span>
+                        <span className="text-foreground font-medium">{analysis.parte_autora}</span>
+                      </div>
+                    )}
+                    {analysis.parte_rea && (
+                      <div className="flex items-start gap-2 text-[11px]">
+                        <span className="text-muted-foreground shrink-0 w-20">Réu:</span>
+                        <span className="text-foreground font-medium">{analysis.parte_rea}</span>
+                      </div>
+                    )}
+                    {analysis.juizo && (
+                      <div className="flex items-start gap-2 text-[11px]">
+                        <span className="text-muted-foreground shrink-0 w-20">Juízo:</span>
+                        <span className="text-foreground font-medium">{analysis.juizo}</span>
+                      </div>
+                    )}
+                    {analysis.area_juridica && (
+                      <div className="flex items-start gap-2 text-[11px]">
+                        <span className="text-muted-foreground shrink-0 w-20">Área:</span>
+                        <span className="text-foreground font-medium">{analysis.area_juridica}</span>
+                      </div>
+                    )}
+                    {analysis.valor_causa && (
+                      <div className="flex items-start gap-2 text-[11px]">
+                        <span className="text-muted-foreground shrink-0 w-20">Valor:</span>
+                        <span className="text-foreground font-medium">{analysis.valor_causa}</span>
+                      </div>
                     )}
                   </div>
                 )}
