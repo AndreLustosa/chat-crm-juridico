@@ -64,8 +64,18 @@ export class DjenController {
 
   /** Criar processo a partir de uma publicação */
   @Post(':id/create-process')
-  createProcess(@Param('id') id: string, @Request() req: any) {
-    return this.djenService.createProcessFromPublication(id, req.user.id, req.user?.tenant_id);
+  createProcess(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { leadId?: string; trackingStage?: string },
+  ) {
+    return this.djenService.createProcessFromPublication(
+      id,
+      req.user.id,
+      req.user?.tenant_id,
+      body?.leadId,
+      body?.trackingStage,
+    );
   }
 
   /** Análise por IA da publicação */

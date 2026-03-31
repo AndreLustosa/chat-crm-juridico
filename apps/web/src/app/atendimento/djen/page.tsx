@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { RouteGuard } from '@/components/RouteGuard';
 import {
@@ -8,6 +8,7 @@ import {
   ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
   ArrowRight, CheckSquare, AlertCircle, ChevronDown,
+  Search, User, UserCheck,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -49,6 +50,14 @@ interface AiAnalysis {
   model_used?: string;
 }
 
+interface Lead {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  profile_picture_url?: string | null;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────
 
 function formatDate(iso: string) {
@@ -84,6 +93,335 @@ const STAGE_LABELS: Record<string, string> = {
   TRANSITADO: 'Transitado em Julgado', EXECUCAO: 'Execução', ENCERRADO: 'Encerrado',
 };
 
+const TRACKING_STAGES_DJEN = [
+  { id: 'DISTRIBUIDO',  label: 'Distribuído',           color: '#6366f1', emoji: '📬' },
+  { id: 'CITACAO',      label: 'Citação/Intimação',     color: '#f59e0b', emoji: '📨' },
+  { id: 'CONTESTACAO',  label: 'Contestação',           color: '#ef4444', emoji: '⚔️' },
+  { id: 'INSTRUCAO',    label: 'Instrução',             color: '#3b82f6', emoji: '🔍' },
+  { id: 'JULGAMENTO',   label: 'Julgamento/Sentença',   color: '#8b5cf6', emoji: '⚖️' },
+  { id: 'RECURSO',      label: 'Recurso',               color: '#ec4899', emoji: '📤' },
+  { id: 'TRANSITADO',   label: 'Trânsito em Julgado',   color: '#10b981', emoji: '✅' },
+  { id: 'EXECUCAO',     label: 'Execução',              color: '#f97316', emoji: '⚡' },
+  { id: 'ENCERRADO',    label: 'Encerrado',             color: '#6b7280', emoji: '🏁' },
+] as const;
+
+// ─── Modal: Criar Processo ────────────────────────────────────
+
+function CreateProcessModal({
+  pub,
+  preloadedAnalysis,
+  onClose,
+  onSuccess,
+}: {
+  pub: DjenPublication;
+  preloadedAnalysis?: AiAnalysis | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const router = useRouter();
+
+  // Lead search
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadResults, setLeadResults] = useState<Lead[]>([]);
+  const [searchingLead, setSearchingLead] = useState(false);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [showLeadDropdown, setShowLeadDropdown] = useState(false);
+  const leadDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leadInputRef = useRef<HTMLInputElement>(null);
+
+  // AI analysis
+  const [analysis, setAnalysis] = useState<AiAnalysis | null>(preloadedAnalysis || null);
+  const [analyzingAi, setAnalyzingAi] = useState(!preloadedAnalysis);
+  const [aiError, setAiError] = useState(false);
+
+  // Kanban stage
+  const [selectedStage, setSelectedStage] = useState<string>(
+    preloadedAnalysis?.estagio_sugerido || 'DISTRIBUIDO'
+  );
+
+  // Submitting
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Auto-analyze se não tiver preloadedAnalysis
+  useEffect(() => {
+    if (preloadedAnalysis) return;
+    let cancelled = false;
+    setAnalyzingAi(true);
+    api.post(`/djen/${pub.id}/analyze`)
+      .then(res => {
+        if (cancelled) return;
+        const data: AiAnalysis = res.data;
+        setAnalysis(data);
+        if (data.estagio_sugerido) setSelectedStage(data.estagio_sugerido);
+      })
+      .catch(() => { if (!cancelled) setAiError(true); })
+      .finally(() => { if (!cancelled) setAnalyzingAi(false); });
+    return () => { cancelled = true; };
+  }, [pub.id, preloadedAnalysis]);
+
+  // Debounce lead search
+  useEffect(() => {
+    if (leadDebounce.current) clearTimeout(leadDebounce.current);
+    if (!leadSearch.trim()) { setLeadResults([]); setShowLeadDropdown(false); return; }
+    leadDebounce.current = setTimeout(async () => {
+      setSearchingLead(true);
+      try {
+        const res = await api.get('/leads', { params: { search: leadSearch.trim(), limit: 6 } });
+        const items: Lead[] = Array.isArray(res.data) ? res.data : (res.data?.items || res.data?.data || []);
+        setLeadResults(items);
+        setShowLeadDropdown(items.length > 0);
+      } catch { setLeadResults([]); }
+      finally { setSearchingLead(false); }
+    }, 300);
+  }, [leadSearch]);
+
+  const selectLead = (lead: Lead) => {
+    setSelectedLead(lead);
+    setLeadSearch(lead.name);
+    setShowLeadDropdown(false);
+    setLeadResults([]);
+  };
+
+  const clearLead = () => {
+    setSelectedLead(null);
+    setLeadSearch('');
+    setLeadResults([]);
+    setShowLeadDropdown(false);
+    setTimeout(() => leadInputRef.current?.focus(), 50);
+  };
+
+  const handleSubmit = async () => {
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      await api.post(`/djen/${pub.id}/create-process`, {
+        leadId: selectedLead?.id,
+        trackingStage: selectedStage,
+      });
+      onSuccess();
+      router.push('/atendimento/processos');
+    } catch (e: any) {
+      setSubmitError(e?.response?.data?.message || 'Erro ao criar processo. Tente novamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const urgConf = analysis ? URGENCIA_CONFIG[analysis.urgencia] : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Modal */}
+      <div className="relative z-10 w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
+            <Gavel size={15} className="text-emerald-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-bold text-foreground">Criar Processo</p>
+            <p className="text-[11px] text-muted-foreground font-mono truncate">{pub.numero_processo}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4 space-y-5">
+
+          {/* Publicação info */}
+          <div className="rounded-xl bg-accent/30 border border-border p-3 space-y-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                <Calendar size={9} /> {formatDate(pub.data_disponibilizacao)}
+              </span>
+              {pub.tipo_comunicacao && (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${getTipoColor(pub.tipo_comunicacao).bg} ${getTipoColor(pub.tipo_comunicacao).text}`}>
+                  {pub.tipo_comunicacao}
+                </span>
+              )}
+            </div>
+            {pub.assunto && (
+              <p className="text-[11px] text-foreground/80 line-clamp-2">{pub.assunto}</p>
+            )}
+          </div>
+
+          {/* Lead search */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <User size={11} /> Vincular a um Contato
+              <span className="font-normal text-muted-foreground/60 lowercase tracking-normal">(opcional)</span>
+            </label>
+            <div className="relative">
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors ${
+                selectedLead ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border bg-background'
+              }`}>
+                {selectedLead ? (
+                  <>
+                    <UserCheck size={14} className="text-emerald-400 shrink-0" />
+                    <span className="flex-1 text-[12px] font-semibold text-foreground truncate">{selectedLead.name}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono truncate">{selectedLead.phone}</span>
+                    <button onClick={clearLead} className="ml-1 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors">
+                      <X size={12} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {searchingLead
+                      ? <Loader2 size={13} className="text-muted-foreground shrink-0 animate-spin" />
+                      : <Search size={13} className="text-muted-foreground shrink-0" />
+                    }
+                    <input
+                      ref={leadInputRef}
+                      type="text"
+                      value={leadSearch}
+                      onChange={e => setLeadSearch(e.target.value)}
+                      onFocus={() => leadResults.length > 0 && setShowLeadDropdown(true)}
+                      placeholder="Buscar cliente pelo nome ou telefone…"
+                      className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
+                    />
+                  </>
+                )}
+              </div>
+              {showLeadDropdown && leadResults.length > 0 && (
+                <div className="absolute top-full mt-1 left-0 right-0 z-20 bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+                  {leadResults.map(lead => (
+                    <button
+                      key={lead.id}
+                      onClick={() => selectLead(lead)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-accent transition-colors text-left"
+                    >
+                      <div className="w-7 h-7 rounded-full bg-accent border border-border flex items-center justify-center shrink-0 overflow-hidden">
+                        {lead.profile_picture_url
+                          ? <img src={lead.profile_picture_url} alt="" className="w-full h-full object-cover" />
+                          : <User size={12} className="text-muted-foreground" />
+                        }
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-semibold text-foreground truncate">{lead.name}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {!selectedLead && (
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                Se não vincular, um contato provisório será criado automaticamente com o número do processo.
+              </p>
+            )}
+          </div>
+
+          {/* AI Analysis */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Sparkles size={11} className="text-violet-400" /> Análise IA
+            </label>
+            {analyzingAi && (
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-violet-500/5 border border-violet-500/20">
+                <div className="w-4 h-4 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin shrink-0" />
+                <p className="text-[11px] text-violet-300">Analisando publicação com IA…</p>
+              </div>
+            )}
+            {aiError && !analyzingAi && (
+              <div className="px-3 py-2 rounded-xl bg-amber-500/5 border border-amber-500/20">
+                <p className="text-[11px] text-amber-400">Análise IA indisponível — selecione a etapa manualmente.</p>
+              </div>
+            )}
+            {analysis && !analyzingAi && urgConf && (
+              <div className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
+                <urgConf.icon size={14} className={`${urgConf.text} shrink-0`} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label} · {analysis.prazo_dias} dias úteis</p>
+                  <p className="text-[11px] text-foreground/80 mt-0.5 line-clamp-2">{analysis.resumo}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Kanban stage selector */}
+          <div>
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <ArrowRight size={11} /> Etapa de Entrada no Kanban
+            </label>
+            {analysis?.estagio_sugerido && (
+              <p className="text-[10px] text-violet-400 mb-2 flex items-center gap-1">
+                <Sparkles size={9} /> IA sugere: <strong>{STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}</strong>
+              </p>
+            )}
+            <div className="grid grid-cols-3 gap-1.5">
+              {TRACKING_STAGES_DJEN.map(s => {
+                const isSelected = selectedStage === s.id;
+                const isSuggested = analysis?.estagio_sugerido === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => setSelectedStage(s.id)}
+                    className={`relative flex flex-col items-center gap-1 px-2 py-2 rounded-xl border text-center transition-all ${
+                      isSelected
+                        ? 'border-2 bg-card shadow-sm'
+                        : 'border-border bg-accent/20 hover:bg-accent/40'
+                    }`}
+                    style={isSelected ? { borderColor: s.color, boxShadow: `0 0 0 2px ${s.color}22` } : undefined}
+                  >
+                    <span className="text-base leading-none">{s.emoji}</span>
+                    <span
+                      className="text-[9px] font-semibold leading-tight"
+                      style={{ color: isSelected ? s.color : undefined }}
+                    >
+                      {s.label}
+                    </span>
+                    {isSuggested && (
+                      <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-violet-500 flex items-center justify-center">
+                        <Sparkles size={7} className="text-white" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Error message */}
+          {submitError && (
+            <div className="px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+              <p className="text-[12px] text-red-400">{submitError}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-3 px-5 py-4 border-t border-border shrink-0">
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            className="flex-1 text-[12px] font-semibold px-4 py-2 rounded-xl border border-border text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
+            className="flex-1 flex items-center justify-center gap-1.5 text-[12px] font-bold px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-500/90 text-white transition-colors disabled:opacity-60"
+          >
+            {submitting
+              ? <><Loader2 size={13} className="animate-spin" /> Criando…</>
+              : <><Plus size={13} /> Criar Processo</>
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── PublicationCard ──────────────────────────────────────────
 
 function PublicationCard({
@@ -101,7 +439,7 @@ function PublicationCard({
   onMarkViewed: (id: string) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onUnarchive: (id: string) => Promise<void>;
-  onCreateProcess: (id: string) => Promise<void>;
+  onCreateProcess: (id: string, analysis?: AiAnalysis | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
@@ -213,11 +551,10 @@ function PublicationCard({
             )}
             {!pub.legal_case_id && !pub.archived && (
               <button
-                disabled={loading === 'create'}
-                onClick={() => handle('create', () => onCreateProcess(pub.id))}
-                className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 hover:bg-emerald-500/5 transition-colors disabled:opacity-50"
+                onClick={() => onCreateProcess(pub.id, null)}
+                className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 hover:bg-emerald-500/5 transition-colors"
               >
-                {loading === 'create' ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+                <Plus size={10} />
                 Criar Processo
               </button>
             )}
@@ -267,7 +604,7 @@ function AiPanel({
 }: {
   pub: DjenPublication;
   onClose: () => void;
-  onCreateProcess: (id: string) => Promise<void>;
+  onCreateProcess: (id: string, analysis?: AiAnalysis | null) => void;
   onMoveStage: (caseId: string, stage: string) => Promise<void>;
 }) {
   const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
@@ -480,7 +817,7 @@ function AiPanel({
                       {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
                     </p>
                     <button
-                      onClick={() => onCreateProcess(pub.id)}
+                      onClick={() => onCreateProcess(pub.id, analysis)}
                       className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15 transition-colors"
                     >
                       <Plus size={11} /> Criar Processo
@@ -521,6 +858,10 @@ function DjenPageContent() {
   const [markingAll, setMarkingAll] = useState(false);
   const [days, setDays] = useState(30);
   const [selectedPub, setSelectedPub] = useState<DjenPublication | null>(null);
+
+  // Modal de criação de processo
+  const [createModalPub, setCreateModalPub] = useState<DjenPublication | null>(null);
+  const [createModalAnalysis, setCreateModalAnalysis] = useState<AiAnalysis | null>(null);
 
   const fetchPubs = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -581,15 +922,12 @@ function DjenPageContent() {
     setPubs(prev => prev.filter(p => p.id !== id));
   };
 
-  const handleCreateProcess = async (id: string) => {
-    try {
-      await api.post(`/djen/${id}/create-process`);
-      await fetchPubs(true);
-      router.push('/atendimento/processos');
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || 'Erro ao criar processo. Tente novamente.';
-      alert(msg);
-    }
+  // Abre o modal de criação, com análise IA opcional já carregada (do AiPanel)
+  const handleOpenCreateModal = (id: string, analysis?: AiAnalysis | null) => {
+    const pub = pubs.find(p => p.id === id);
+    if (!pub) return;
+    setCreateModalPub(pub);
+    setCreateModalAnalysis(analysis ?? null);
   };
 
   const handleMoveStage = async (caseId: string, stage: string) => {
@@ -731,7 +1069,7 @@ function DjenPageContent() {
                   onMarkViewed={handleMarkViewed}
                   onArchive={handleArchive}
                   onUnarchive={handleUnarchive}
-                  onCreateProcess={handleCreateProcess}
+                  onCreateProcess={handleOpenCreateModal}
                 />
               ))}
             </div>
@@ -743,11 +1081,25 @@ function DjenPageContent() {
           <AiPanel
             pub={selectedPub}
             onClose={() => setSelectedPub(null)}
-            onCreateProcess={handleCreateProcess}
+            onCreateProcess={handleOpenCreateModal}
             onMoveStage={handleMoveStage}
           />
         )}
       </div>
+
+      {/* Modal: Criar Processo */}
+      {createModalPub && (
+        <CreateProcessModal
+          pub={createModalPub}
+          preloadedAnalysis={createModalAnalysis}
+          onClose={() => { setCreateModalPub(null); setCreateModalAnalysis(null); }}
+          onSuccess={() => {
+            setCreateModalPub(null);
+            setCreateModalAnalysis(null);
+            fetchPubs(true);
+          }}
+        />
+      )}
     </div>
   );
 }

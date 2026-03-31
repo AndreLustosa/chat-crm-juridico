@@ -405,6 +405,8 @@ export class DjenService {
     id: string,
     lawyerId: string,
     tenantId?: string,
+    leadId?: string,
+    trackingStage?: string,
   ) {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({ where: { id } });
 
@@ -414,26 +416,35 @@ export class DjenService {
       if (existing) throw new ConflictException('Processo já criado para esta publicação.');
     }
 
-    const digits = pub.numero_processo.replace(/\D/g, '');
-    const placeholderPhone = `PROC_${digits}`;
+    // ─── Resolve o Lead ──────────────────────────────────────────────────────
+    // Se um lead real foi informado, usa ele. Caso contrário, cria/reutiliza placeholder.
+    let lead: { id: string };
 
-    // Cria ou reutiliza lead placeholder — filtra por tenant para evitar reutilização entre tenants
-    const leadWhere: any = { phone: placeholderPhone };
-    if (tenantId) leadWhere.tenant_id = tenantId;
-    else leadWhere.tenant_id = null;
+    if (leadId) {
+      const realLead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+      if (!realLead) throw new BadRequestException('Contato informado não encontrado.');
+      lead = realLead;
+    } else {
+      const digits = pub.numero_processo.replace(/\D/g, '');
+      const placeholderPhone = `PROC_${digits}`;
+      const leadWhere: any = { phone: placeholderPhone };
+      if (tenantId) leadWhere.tenant_id = tenantId;
+      else leadWhere.tenant_id = null;
 
-    let lead = await this.prisma.lead.findFirst({ where: leadWhere });
-    if (!lead) {
-      lead = await this.prisma.lead.create({
-        data: {
-          name: `[Processo] ${pub.numero_processo}`,
-          phone: placeholderPhone,
-          tenant_id: tenantId,
-        },
-      });
+      let placeholder = await this.prisma.lead.findFirst({ where: leadWhere });
+      if (!placeholder) {
+        placeholder = await this.prisma.lead.create({
+          data: {
+            name: `[Processo] ${pub.numero_processo}`,
+            phone: placeholderPhone,
+            tenant_id: tenantId,
+          },
+        });
+      }
+      lead = placeholder;
     }
 
-    // Detecta área pelo tipo_comunicacao / assunto
+    // ─── Detecta área jurídica pelo conteúdo da publicação ───────────────────
     const text = [pub.tipo_comunicacao, pub.assunto, pub.conteudo].join(' ').toLowerCase();
     let legalArea = 'CIVIL';
     if (/trabalh/.test(text)) legalArea = 'TRABALHISTA';
@@ -442,6 +453,15 @@ export class DjenService {
     else if (/famil|divórcio|divorcio/.test(text)) legalArea = 'FAMILIA';
     else if (/crimin/.test(text)) legalArea = 'CRIMINAL';
 
+    // ─── Valida e resolve o estágio de entrada no kanban ─────────────────────
+    const VALID_TRACKING = [
+      'DISTRIBUIDO', 'CITACAO', 'CONTESTACAO', 'INSTRUCAO',
+      'JULGAMENTO', 'RECURSO', 'TRANSITADO', 'EXECUCAO', 'ENCERRADO',
+    ];
+    const finalTrackingStage = (trackingStage && VALID_TRACKING.includes(trackingStage))
+      ? trackingStage
+      : 'DISTRIBUIDO';
+
     const legalCase = await this.prisma.legalCase.create({
       data: {
         lead_id: lead.id,
@@ -449,7 +469,7 @@ export class DjenService {
         tenant_id: tenantId,
         case_number: pub.numero_processo,
         stage: 'PROTOCOLO',
-        tracking_stage: 'DISTRIBUIDO',
+        tracking_stage: finalTrackingStage,
         in_tracking: true,
         filed_at: pub.data_disponibilizacao,
         legal_area: legalArea,
@@ -463,7 +483,10 @@ export class DjenService {
       data: { legal_case_id: legalCase.id, viewed_at: new Date() },
     });
 
-    this.logger.log(`[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id}`);
+    this.logger.log(
+      `[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id} | ` +
+      `lead=${lead.id} | stage=${finalTrackingStage}`,
+    );
     return legalCase;
   }
 
