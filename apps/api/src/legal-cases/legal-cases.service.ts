@@ -780,6 +780,15 @@ export class LegalCasesService {
       },
     });
 
+    // Reatribui todos os eventos do processo que ainda não foram concluídos/cancelados
+    await this.prisma.calendarEvent.updateMany({
+      where: {
+        legal_case_id: id,
+        status: { notIn: ['CONCLUIDO', 'CANCELADO'] },
+      },
+      data: { assigned_user_id: lawyerId },
+    });
+
     try {
       this.chatGateway.emitLegalCaseUpdate(lawyerId, {
         caseId: id,

@@ -258,6 +258,21 @@ export class ConversationsService {
       }
     }
 
+    // Reatribui todos os eventos da conversa que ainda não foram concluídos/cancelados
+    if (lawyerId) {
+      try {
+        await (this.prisma as any).calendarEvent.updateMany({
+          where: {
+            conversation_id: id,
+            status: { notIn: ['CONCLUIDO', 'CANCELADO'] },
+          },
+          data: { assigned_user_id: lawyerId },
+        });
+      } catch (err: any) {
+        this.logger.warn(`[Assign] Falha ao reatribuir eventos do calendário: ${err.message}`);
+      }
+    }
+
     return updated;
   }
 
