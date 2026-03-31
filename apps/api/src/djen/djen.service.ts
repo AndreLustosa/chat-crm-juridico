@@ -291,7 +291,7 @@ export class DjenService {
                 tenant_id: legalCase.tenant_id || undefined,
                 priority: classification.priority,
                 reminders: [
-                  { minutes_before: 1440, channel: 'PUSH' },
+                  { minutes_before: 1440, channel: 'WHATSAPP' },
                 ],
               });
               // Vincular tarefa à publicação
@@ -339,8 +339,8 @@ export class DjenService {
                         tenant_id: legalCase.tenant_id || undefined,
                         priority: 'URGENTE',
                         reminders: [
-                          { minutes_before: 1440, channel: 'PUSH' },
-                          { minutes_before: 60, channel: 'PUSH' },
+                          { minutes_before: 1440, channel: 'WHATSAPP' },
+                          { minutes_before: 60, channel: 'WHATSAPP' },
                         ],
                       });
                       this.logger.log(

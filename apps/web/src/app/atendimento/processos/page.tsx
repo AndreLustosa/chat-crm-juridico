@@ -402,8 +402,8 @@ function AgendarAudienciaModal({
         location: location.trim() || undefined,
         priority: 'URGENTE',
         reminders: [
-          { minutes_before: 1440, channel: 'PUSH' },
-          { minutes_before: 60, channel: 'PUSH' },
+          { minutes_before: 1440, channel: 'WHATSAPP' },
+          { minutes_before: 60, channel: 'WHATSAPP' },
         ],
       });
       onScheduled();
