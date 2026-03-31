@@ -341,6 +341,7 @@ export class CalendarReminderWorker extends WorkerHost {
             where: { id: lastConvo.id },
             data: {
               last_message_at: new Date(),
+              ai_mode: true, // reativa IA para responder dúvidas do cliente
               reminder_context: {
                 type: event.type,
                 event_title: event.title,
@@ -353,7 +354,7 @@ export class CalendarReminderWorker extends WorkerHost {
               },
             },
           });
-          this.logger.log(`[REMINDER] Mensagem salva na conversa ${lastConvo.id}`);
+          this.logger.log(`[REMINDER] Mensagem salva e IA reativada na conversa ${lastConvo.id}`);
         } catch (e: any) {
           this.logger.warn(`[REMINDER] Falha ao salvar mensagem na conversa: ${e.message}`);
         }
@@ -451,6 +452,7 @@ export class CalendarReminderWorker extends WorkerHost {
           where: { id: lastConvo.id },
           data: {
             last_message_at: new Date(),
+            ai_mode: true, // reativa IA para responder dúvidas do cliente
             reminder_context: {
               type: 'AUDIENCIA_AGENDADA',
               event_title: event.title,
@@ -462,7 +464,7 @@ export class CalendarReminderWorker extends WorkerHost {
             },
           },
         });
-        this.logger.log(`[HEARING-NOTIFY] Mensagem salva na conversa ${lastConvo.id}`);
+        this.logger.log(`[HEARING-NOTIFY] Mensagem salva e IA reativada na conversa ${lastConvo.id}`);
       } catch (e: any) {
         this.logger.warn(`[HEARING-NOTIFY] Falha ao salvar mensagem na conversa: ${e.message}`);
       }
