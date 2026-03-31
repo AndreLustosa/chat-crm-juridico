@@ -1022,7 +1022,7 @@ function AiPanel({
 
 // ─── Main Page ────────────────────────────────────────────────
 
-type Tab = 'unread' | 'all' | 'archived';
+type Tab = 'unread' | 'viewed' | 'archived';
 
 function DjenPageContent() {
   const router = useRouter();
@@ -1044,9 +1044,9 @@ function DjenPageContent() {
     if (!silent) setLoading(true);
     try {
       const params: Record<string, string> = { days: String(days), limit: '100' };
-      if (tab === 'unread') { params.viewed = 'false'; params.archived = 'false'; }
+      if (tab === 'unread')   { params.viewed = 'false'; params.archived = 'false'; }
+      else if (tab === 'viewed')   { params.viewed = 'true';  params.archived = 'false'; }
       else if (tab === 'archived') { params.archived = 'true'; }
-      else { params.archived = 'false'; }
 
       const res = await api.get('/djen/all', { params });
       setPubs(res.data.items || []);
@@ -1129,7 +1129,7 @@ function DjenPageContent() {
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: 'unread',   label: 'Não visualizadas', badge: unreadCount },
-    { id: 'all',      label: 'Todas' },
+    { id: 'viewed',   label: 'Visualizadas' },
     { id: 'archived', label: 'Arquivadas' },
   ];
 
@@ -1224,12 +1224,13 @@ function DjenPageContent() {
             <div className="flex flex-col items-center justify-center h-52 text-muted-foreground">
               <Bell size={32} className="mb-3 opacity-25" />
               <p className="text-[14px] font-semibold">
-                {tab === 'unread' ? 'Nenhuma publicação não lida' :
+                {tab === 'unread'   ? 'Nenhuma publicação não lida' :
+                 tab === 'viewed'   ? 'Nenhuma publicação visualizada' :
                  tab === 'archived' ? 'Nenhuma publicação arquivada' :
                  'Nenhuma publicação encontrada'}
               </p>
               <p className="text-[12px] mt-1 opacity-70">
-                {tab === 'unread' ? 'Tudo em dia!' : 'Tente sincronizar ou ampliar o período'}
+                {tab === 'unread' ? 'Tudo em dia!' : tab === 'viewed' ? 'Nenhuma publicação foi visualizada ainda' : 'Tente sincronizar ou ampliar o período'}
               </p>
             </div>
           ) : (
