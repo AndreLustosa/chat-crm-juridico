@@ -71,6 +71,12 @@ export class LegalCasesService {
           stage: true,
         },
       },
+      lawyer: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
       _count: {
         select: {
           tasks: true,
@@ -379,6 +385,7 @@ export class LegalCasesService {
 
   async createDirect(data: {
     lawyer_id: string;
+    override_lawyer_id?: string; // ADMIN pode escolher outro advogado
     tenant_id?: string;
     case_number: string;
     legal_area?: string;
@@ -478,10 +485,13 @@ export class LegalCasesService {
       leadId = lead.id;
     }
 
+    // Se ADMIN passou override_lawyer_id, usa ele; caso contrário usa o usuário logado
+    const effectiveLawyerId = data.override_lawyer_id || data.lawyer_id;
+
     const legalCase = await this.prisma.legalCase.create({
       data: {
         lead_id: leadId,
-        lawyer_id: data.lawyer_id,
+        lawyer_id: effectiveLawyerId,
         tenant_id: data.tenant_id,
         case_number: data.case_number,
         legal_area: data.legal_area,
@@ -505,7 +515,7 @@ export class LegalCasesService {
     });
 
     try {
-      this.chatGateway.emitNewLegalCase(data.lawyer_id, {
+      this.chatGateway.emitNewLegalCase(effectiveLawyerId, {
         caseId: legalCase.id,
         leadName: leadDisplayName,
       });
@@ -727,6 +737,41 @@ export class LegalCasesService {
     ]);
 
     return { data, total, page, limit };
+  }
+
+  // ─── ADVOGADO RESPONSÁVEL ──────────────────────────────────────
+
+  async updateLawyer(id: string, lawyerId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(id, tenantId);
+
+    const lawyer = await this.prisma.user.findUnique({
+      where: { id: lawyerId },
+      select: { id: true, name: true, role: true },
+    });
+    if (!lawyer) throw new BadRequestException('Advogado não encontrado.');
+    if (!['ADMIN', 'ADVOGADO'].includes(lawyer.role)) {
+      throw new BadRequestException('Usuário não tem perfil de advogado.');
+    }
+
+    const updated = await this.prisma.legalCase.update({
+      where: { id },
+      data: { lawyer_id: lawyerId },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
+        lawyer: { select: { id: true, name: true } },
+        _count: { select: { tasks: true, events: true, djen_publications: true } },
+      },
+    });
+
+    try {
+      this.chatGateway.emitLegalCaseUpdate(lawyerId, {
+        caseId: id,
+        action: 'lawyer_changed',
+        lawyerName: lawyer.name,
+      });
+    } catch {}
+
+    return updated;
   }
 
   // ─── STAGES LIST ────────────────────────────────────────────────

@@ -128,14 +128,28 @@ export class LegalCasesController {
       lead_name?: string;
       lead_phone?: string;
       lead_email?: string;
+      // ADMIN pode escolher o advogado responsável
+      lawyer_id?: string;
     },
     @Request() req: any,
   ) {
+    const isAdmin = req.user.role === 'ADMIN';
     return this.service.createDirect({
       ...body,
       lawyer_id: req.user.id,
+      override_lawyer_id: isAdmin && body.lawyer_id ? body.lawyer_id : undefined,
       tenant_id: req.user.tenant_id,
     });
+  }
+
+  @Patch(':id/lawyer')
+  @Roles('ADMIN', 'ADVOGADO')
+  updateLawyer(
+    @Param('id') id: string,
+    @Body('lawyerId') lawyerId: string,
+    @Request() req: any,
+  ) {
+    return this.service.updateLawyer(id, lawyerId, req.user?.tenant_id);
   }
 
   @Patch(':id/lead')

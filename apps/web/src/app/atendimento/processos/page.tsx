@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { TRACKING_STAGES, findTrackingStage } from '@/lib/legalStages';
+import { useRole } from '@/lib/useRole';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -44,6 +45,10 @@ interface LegalCase {
     email: string | null;
     profile_picture_url: string | null;
   };
+  lawyer?: {
+    id: string;
+    name: string | null;
+  } | null;
   _count?: { tasks: number; events: number; djen_publications: number };
 }
 
@@ -272,6 +277,11 @@ function ProcessoCard({
             🏛️ {legalCase.court}
           </span>
         )}
+        {legalCase.lawyer?.name && (
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-500/12 text-emerald-400 text-[9px] font-bold border border-emerald-500/20 truncate max-w-[120px]">
+            👨‍⚖️ {legalCase.lawyer.name.split(' ')[0]}
+          </span>
+        )}
       </div>
 
       {/* Footer */}
@@ -317,8 +327,15 @@ function ProcessoDetailPanel({
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'info' | 'djen' | 'events' | 'tasks'>('info');
+  const { isAdmin } = useRole();
   const [saving, setSaving] = useState(false);
   const [savedFeedback, setSavedFeedback] = useState(false);
+
+  // Advogado responsável
+  const [lawyers, setLawyers] = useState<{ id: string; name: string | null }[]>([]);
+  const [lawyerSelectId, setLawyerSelectId] = useState(legalCase.lawyer?.id || '');
+  const [changingLawyer, setChangingLawyer] = useState(false);
+  const [lawyerError, setLawyerError] = useState('');
 
   // Info fields
   const [trackingStage, setTrackingStage] = useState(legalCase.tracking_stage || 'DISTRIBUIDO');
@@ -422,6 +439,12 @@ function ProcessoDetailPanel({
     fetchDjen();
   }, [fetchTasks, fetchEvents, fetchInterns, fetchDjen]);
 
+  // Busca lista de advogados (apenas para ADMIN)
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get('/users/lawyers').then(res => setLawyers(res.data || [])).catch(() => {});
+  }, [isAdmin]);
+
   // Busca de leads para vinculação (debounce)
   useEffect(() => {
     if (leadLinkMode !== 'existing' || !leadLinkSearch.trim()) {
@@ -448,6 +471,20 @@ function ProcessoDetailPanel({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  const handleUpdateLawyer = async () => {
+    if (!lawyerSelectId) return;
+    setLawyerError('');
+    setChangingLawyer(true);
+    try {
+      await api.patch(`/legal-cases/${legalCase.id}/lawyer`, { lawyerId: lawyerSelectId });
+      onRefresh();
+    } catch (e: any) {
+      setLawyerError(e?.response?.data?.message || 'Erro ao atualizar advogado.');
+    } finally {
+      setChangingLawyer(false);
+    }
+  };
 
   const handleLinkLead = async () => {
     setLinkError('');
@@ -868,6 +905,44 @@ function ProcessoDetailPanel({
                   </div>
                 </div>
               )}
+
+              {/* ── Bloco Advogado Responsável ───────────────────── */}
+              <div className="rounded-xl border border-border bg-accent/20 p-3 space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  👨‍⚖️ Advogado Responsável
+                </p>
+                {isAdmin ? (
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={lawyerSelectId}
+                      onChange={e => setLawyerSelectId(e.target.value)}
+                      className="flex-1 px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    >
+                      <option value="">Selecionar advogado…</option>
+                      {lawyers.map(l => (
+                        <option key={l.id} value={l.id}>{l.name || l.id}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleUpdateLawyer}
+                      disabled={changingLawyer || !lawyerSelectId || lawyerSelectId === legalCase.lawyer?.id}
+                      className="px-3 py-2 text-[12px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center gap-1.5 transition-all shrink-0"
+                    >
+                      {changingLawyer ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                      Salvar
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[13px] font-semibold text-foreground">
+                    {legalCase.lawyer?.name || <span className="text-muted-foreground italic text-sm">Não atribuído</span>}
+                  </p>
+                )}
+                {lawyerError && (
+                  <p className="text-[11px] text-destructive flex items-center gap-1">
+                    <AlertTriangle size={11} /> {lawyerError}
+                  </p>
+                )}
+              </div>
 
               {/* Prioridade + Etapa */}
               <div className="grid grid-cols-2 gap-3">
@@ -1414,6 +1489,17 @@ function CadastrarProcessoModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { isAdmin } = useRole();
+
+  // ── Advogado (ADMIN only) ─────────────────────────────────────
+  const [lawyers, setLawyers] = useState<{ id: string; name: string | null }[]>([]);
+  const [selectedLawyerId, setSelectedLawyerId] = useState('');
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get('/users/lawyers').then(res => setLawyers(res.data || [])).catch(() => {});
+  }, [isAdmin]);
+
   // ── Lead ──────────────────────────────────────────────────────
   type LeadMode = 'existing' | 'new';
   const [leadMode, setLeadMode] = useState<LeadMode>('existing');
@@ -1511,6 +1597,8 @@ function CadastrarProcessoModal({
         lead_phone: leadMode === 'new' ? newLeadPhone : undefined,
         lead_name: leadMode === 'new' ? newLeadName || undefined : undefined,
         lead_email: leadMode === 'new' ? newLeadEmail || undefined : undefined,
+        // Advogado (ADMIN pode escolher; demais usam o próprio user via req.user.id no backend)
+        lawyer_id: isAdmin && selectedLawyerId ? selectedLawyerId : undefined,
       });
       onSuccess();
       onClose();
@@ -1682,6 +1770,28 @@ function CadastrarProcessoModal({
               </div>
             )}
           </div>
+
+          {/* ── Seção: Advogado Responsável (ADMIN only) ─────── */}
+          {isAdmin && lawyers.length > 0 && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-3">
+                👨‍⚖️ Advogado Responsável
+              </p>
+              <select
+                value={selectedLawyerId}
+                onChange={e => setSelectedLawyerId(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">Atribuir automaticamente (padrão)</option>
+                {lawyers.map(l => (
+                  <option key={l.id} value={l.id}>{l.name || l.id}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                Se não selecionado, o processo será atribuído a você.
+              </p>
+            </div>
+          )}
 
           {/* ── Seção: Processo ────────────────────────────────── */}
           <div className="space-y-4">
@@ -1893,6 +2003,7 @@ function TabelaView({
             <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nº Processo</th>
             <SortHeader field="area">Área</SortHeader>
             <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vara</th>
+            <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Advogado</th>
             <SortHeader field="stage">Etapa</SortHeader>
             <SortHeader field="days">Dias</SortHeader>
             <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Tarefas</th>
@@ -1935,6 +2046,13 @@ function TabelaView({
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="text-[11px] text-muted-foreground truncate max-w-[100px] block">{c.court || '—'}</span>
+                </td>
+                <td className="px-3 py-2.5">
+                  {c.lawyer?.name ? (
+                    <span className="text-[11px] text-emerald-400 font-semibold truncate max-w-[100px] block">
+                      {c.lawyer.name.split(' ')[0]}
+                    </span>
+                  ) : <span className="text-[11px] text-muted-foreground">—</span>}
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="text-[11px] font-semibold" style={{ color: stageInfo.color }}>

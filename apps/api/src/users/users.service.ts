@@ -157,11 +157,17 @@ export class UsersService {
 
   // ─── Lawyer / Intern helpers ──────────────────────────────────
 
-  /** Lista advogados (users com specialties não-vazio) */
+  /** Lista advogados (role ADVOGADO ou ADMIN com specialties) */
   async findLawyers(tenantId?: string) {
     return this.prisma.user.findMany({
-      where: { specialties: { isEmpty: false }, ...this.tenantWhere(tenantId) },
-      select: { id: true, name: true, specialties: true },
+      where: {
+        OR: [
+          { role: 'ADVOGADO' },
+          { role: 'ADMIN', specialties: { isEmpty: false } },
+        ],
+        ...this.tenantWhere(tenantId),
+      },
+      select: { id: true, name: true, role: true, specialties: true },
       orderBy: { name: 'asc' },
     });
   }
