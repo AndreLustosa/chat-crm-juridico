@@ -149,12 +149,13 @@ function getSocketPath(): string {
 }
 
 function toLocalDateTime(isoStr: string): string {
+  // App usa UTC "naive" — horários salvos como UTC = horário local de Maceió
   const d = new Date(isoStr);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const h = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const h = String(d.getUTCHours()).padStart(2, '0');
+  const min = String(d.getUTCMinutes()).padStart(2, '0');
   return `${y}-${m}-${day} ${h}:${min}`;
 }
 
@@ -208,18 +209,24 @@ function temporalToLocalStr(dt: any): string {
 }
 
 function toISOFromLocal(localStr: string): string {
-  // "2026-03-07 14:00" → ISO string
-  return new Date(localStr.replace(' ', 'T')).toISOString();
+  // App usa UTC "naive": trata o horário digitado como UTC direto (= horário de Maceió)
+  // "2026-06-03 09:05" → "2026-06-03T09:05:00.000Z" (sem converter fuso)
+  const [datePart, timePart = '00:00'] = localStr.replace('T', ' ').split(' ');
+  const [y, mo, d] = datePart.split('-').map(Number);
+  const [h, mi] = timePart.split(':').map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, mi, 0)).toISOString();
 }
 
 function formatDateInput(isoStr: string): string {
+  // Lê data em UTC (horário naive = horário local de Maceió)
   const d = new Date(isoStr);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 function formatTimeInput(isoStr: string): string {
+  // Lê hora em UTC (horário naive = horário local de Maceió)
   const d = new Date(isoStr);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 // ─── Mini Calendário (sidebar) ────────────────────────
@@ -1426,7 +1433,7 @@ export default function AgendaPage() {
       {/* ═══ Modal de Criacao/Edicao ═══ */}
       {showModal && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
             {/* Modal header */}
             {(() => {
               const canEdit = !editingEvent || currentUserRole === 'ADMIN'
@@ -1790,8 +1797,8 @@ export default function AgendaPage() {
                 </div>
               )}
 
-            {/* Modal footer */}
-            <div className="flex items-center justify-between px-5 py-4 border-t border-border">
+            {/* Modal footer — sticky no rodapé do modal */}
+            <div className="sticky bottom-0 flex items-center justify-between px-5 py-4 border-t border-border bg-card rounded-b-2xl">
               <div className="flex items-center gap-1">
                 {editingEvent && canEdit && (
                   <>
@@ -1837,7 +1844,6 @@ export default function AgendaPage() {
                   </button>
                 )}
               </div>
-            </div>
               </>); // end canEdit IIFE
             })()}
           </div>
