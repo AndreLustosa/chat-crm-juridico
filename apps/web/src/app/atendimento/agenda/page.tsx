@@ -1844,6 +1844,7 @@ export default function AgendaPage() {
                   </button>
                 )}
               </div>
+            </div>
               </>); // end canEdit IIFE
             })()}
           </div>
