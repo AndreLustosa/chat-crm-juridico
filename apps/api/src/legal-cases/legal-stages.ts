@@ -12,7 +12,7 @@ export const TRACKING_STAGES = [
   { id: 'DISTRIBUIDO',  label: 'Distribuído',          order: 1 },
   { id: 'CITACAO',      label: 'Citação/Intimação',    order: 2 },
   { id: 'CONTESTACAO',  label: 'Contestação',          order: 3 },
-  { id: 'INSTRUCAO',    label: 'Instrução',            order: 4 },
+  { id: 'INSTRUCAO',    label: 'Audiência/Instrução',  order: 4 },
   { id: 'JULGAMENTO',   label: 'Julgamento/Sentença',  order: 5 },
   { id: 'RECURSO',      label: 'Recurso',              order: 6 },
   { id: 'TRANSITADO',   label: 'Trânsito em Julgado',  order: 7 },
