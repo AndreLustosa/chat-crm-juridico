@@ -159,13 +159,19 @@ export class UsersService {
 
   /** Lista advogados (role ADVOGADO ou ADMIN com specialties) */
   async findLawyers(tenantId?: string) {
+    const tenantFilter = this.tenantWhere(tenantId);
     return this.prisma.user.findMany({
       where: {
-        OR: [
-          { role: 'ADVOGADO' },
-          { role: 'ADMIN', specialties: { isEmpty: false } },
+        AND: [
+          {
+            OR: [
+              { role: 'ADVOGADO' },
+              { role: 'ADMIN', specialties: { isEmpty: false } },
+            ],
+          },
+          // Isolamento multi-tenant combinado via AND para não sobrescrever o OR acima
+          ...(Object.keys(tenantFilter).length > 0 ? [tenantFilter] : []),
         ],
-        ...this.tenantWhere(tenantId),
       },
       select: { id: true, name: true, role: true, specialties: true },
       orderBy: { name: 'asc' },
