@@ -249,8 +249,23 @@ export class LegalCasesService {
       }
     }
 
-    // Cliente permanece como cliente mesmo sem processos ativos —
-    // histórico preservado e facilita retorno futuro.
+    // Ao arquivar: reverter lead para não-cliente (processo encerrado definitivamente)
+    const activeCases = await this.prisma.legalCase.count({
+      where: { lead_id: legalCase.lead_id, archived: false },
+    });
+
+    if (activeCases === 0 && legalCase.lead?.is_client) {
+      await this.prisma.lead.update({
+        where: { id: legalCase.lead_id },
+        data: {
+          is_client: false,
+          stage: 'ENCERRADO',
+          stage_entered_at: new Date(),
+          loss_reason: `Processo arquivado: ${reason}`,
+        },
+      });
+      this.logger.log(`[ARCHIVE] Lead ${legalCase.lead_id} marcado como encerrado`);
+    }
 
     return legalCase;
   }
@@ -279,6 +294,23 @@ export class LegalCasesService {
     }
 
     return legalCase;
+  }
+
+  async findPendingClosure(tenantId?: string) {
+    return this.prisma.legalCase.findMany({
+      where: {
+        tracking_stage: 'ENCERRADO',
+        archived: false,
+        in_tracking: true,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, profile_picture_url: true } },
+        lawyer: { select: { id: true, name: true } },
+        _count: { select: { tasks: true, events: true } },
+      },
+      orderBy: { stage_changed_at: 'asc' },
+    });
   }
 
   // ─── CASE NUMBER ────────────────────────────────────────────────

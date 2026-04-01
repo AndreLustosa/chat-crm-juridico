@@ -55,6 +55,12 @@ export class LegalCasesController {
     return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool, p, l, req.user?.tenant_id, leadId, caseNumber);
   }
 
+  @Get('encerrados-pendentes')
+  @Roles('ADMIN')
+  findPendingClosure(@Request() req: any) {
+    return this.service.findPendingClosure(req.user?.tenant_id);
+  }
+
   @Get(':id/workspace')
   getWorkspace(@Param('id') id: string, @Request() req: any) {
     return this.service.getWorkspaceData(id, req.user?.tenant_id);
@@ -167,7 +173,7 @@ export class LegalCasesController {
   }
 
   @Patch(':id/archive')
-  @Roles('ADMIN', 'ADVOGADO')
+  @Roles('ADMIN')
   archive(
     @Param('id') id: string,
     @Body() body: { reason: string; notifyLead?: boolean },
@@ -177,7 +183,7 @@ export class LegalCasesController {
   }
 
   @Patch(':id/unarchive')
-  @Roles('ADMIN', 'ADVOGADO')
+  @Roles('ADMIN')
   unarchive(@Param('id') id: string, @Request() req: any) {
     return this.service.unarchive(id, req.user?.tenant_id);
   }

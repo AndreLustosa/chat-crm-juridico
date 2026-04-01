@@ -1398,47 +1398,123 @@ function ProcessoDetailPanel({
               )}
 
               {legalCase.archived ? (
-                <button
-                  onClick={handleUnarchive}
-                  className="w-full py-2 text-sm text-blue-500 hover:text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-500/10 transition-colors flex items-center justify-center gap-2"
-                >
-                  <ArchiveRestore size={14} /> Desarquivar Processo
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setShowArchive(!showArchive)}
-                    className="w-full py-2 text-sm text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Archive size={14} /> Encerrar / Arquivar
+                isAdmin && (
+                  <button onClick={handleUnarchive} className="w-full py-2 text-sm text-blue-500 hover:text-blue-400 border border-blue-500/30 rounded-lg hover:bg-blue-500/10 transition-colors flex items-center justify-center gap-2">
+                    <ArchiveRestore size={14} /> Reativar Processo
                   </button>
-                  {showArchive && (
-                    <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-3">
-                      <div className="flex items-center gap-2 text-amber-500 text-[12px] font-bold">
-                        <AlertTriangle size={14} /> Arquivar processo
-                      </div>
-                      <textarea
-                        value={archiveReason}
-                        onChange={e => setArchiveReason(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none"
-                        placeholder="Motivo do arquivamento..."
-                      />
-                      <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
-                        <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
-                        Notificar cliente via WhatsApp
-                      </label>
-                      <button
-                        onClick={handleArchive}
-                        disabled={archiving}
-                        className="w-full py-2 text-sm font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-                        Confirmar Arquivamento
-                      </button>
+                )
+              ) : legalCase.tracking_stage === 'ENCERRADO' ? (
+                isAdmin ? (
+                  <>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <AlertTriangle size={13} className="text-amber-500 shrink-0" />
+                      <p className="text-[11px] text-amber-500 font-semibold">Processo aguardando arquivamento</p>
                     </div>
-                  )}
-                </>
+                    <button
+                      onClick={() => setShowArchive(!showArchive)}
+                      className="w-full py-2 text-sm text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Archive size={14} /> Arquivar Processo
+                    </button>
+                    {showArchive && (
+                      <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-3">
+                        <div className="flex items-center gap-2 text-amber-500 text-[12px] font-bold">
+                          <AlertTriangle size={14} /> Confirmar arquivamento
+                        </div>
+                        <textarea
+                          value={archiveReason}
+                          onChange={e => setArchiveReason(e.target.value)}
+                          rows={2}
+                          className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none"
+                          placeholder="Motivo do arquivamento..."
+                        />
+                        <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
+                          <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
+                          Notificar cliente via WhatsApp
+                        </label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await api.patch(`/legal-cases/${legalCase.id}/tracking-stage`, { trackingStage: 'TRANSITADO' });
+                                onRefresh();
+                                setShowArchive(false);
+                              } catch {}
+                            }}
+                            className="flex-1 py-2 text-sm font-semibold border border-border rounded-lg hover:bg-accent transition-colors text-muted-foreground"
+                          >
+                            Reativar
+                          </button>
+                          <button
+                            onClick={handleArchive}
+                            disabled={archiving}
+                            className="flex-1 py-2 text-sm font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                            Arquivar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <Clock size={13} className="text-amber-500 shrink-0" />
+                    <div>
+                      <p className="text-[11px] text-amber-500 font-semibold">Aguardando revisão do administrador</p>
+                      <p className="text-[10px] text-muted-foreground">Solicitação de encerramento enviada</p>
+                    </div>
+                  </div>
+                )
+              ) : (
+                !isAdmin ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.patch(`/legal-cases/${legalCase.id}/tracking-stage`, { trackingStage: 'ENCERRADO' });
+                        onRefresh();
+                      } catch {}
+                    }}
+                    className="w-full py-2 text-sm text-muted-foreground hover:text-amber-400 border border-border rounded-lg hover:border-amber-500/30 hover:bg-amber-500/5 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Archive size={14} /> Solicitar Encerramento
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setShowArchive(!showArchive)}
+                      className="w-full py-2 text-sm text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Archive size={14} /> Encerrar / Arquivar
+                    </button>
+                    {showArchive && (
+                      <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-3">
+                        <div className="flex items-center gap-2 text-amber-500 text-[12px] font-bold">
+                          <AlertTriangle size={14} /> Arquivar processo
+                        </div>
+                        <textarea
+                          value={archiveReason}
+                          onChange={e => setArchiveReason(e.target.value)}
+                          rows={2}
+                          className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none"
+                          placeholder="Motivo do arquivamento..."
+                        />
+                        <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
+                          <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
+                          Notificar cliente via WhatsApp
+                        </label>
+                        <button
+                          onClick={handleArchive}
+                          disabled={archiving}
+                          className="w-full py-2 text-sm font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                          Confirmar Arquivamento
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )
               )}
             </div>
           )}
@@ -2570,6 +2646,15 @@ function ProcessosPageContent() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const { isAdmin: currentUserIsAdmin } = useRole();
 
+  const [pendingClosure, setPendingClosure] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!currentUserIsAdmin) return;
+    api.get('/legal-cases/encerrados-pendentes')
+      .then(r => setPendingClosure(r.data || []))
+      .catch(() => {});
+  }, [currentUserIsAdmin, cases]); // refresh when cases change
+
   // Mover para INSTRUCAO requer audiência agendada
   const [pendingMoveToInstrucao, setPendingMoveToInstrucao] = useState<{
     legalCase: LegalCase;
@@ -2728,6 +2813,15 @@ function ProcessosPageContent() {
               {filteredCases.length} processo{filteredCases.length !== 1 ? 's' : ''}{' '}
               {searchQuery || areaFilter || priorityFilter ? 'filtrados' : 'em acompanhamento'}
             </p>
+            {currentUserIsAdmin && pendingClosure.length > 0 && (
+              <div className="mt-1.5 flex items-center gap-3 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/5">
+                <AlertTriangle size={13} className="text-amber-500 shrink-0" />
+                <p className="text-[11px] text-amber-400 font-semibold flex-1">
+                  {pendingClosure.length} processo{pendingClosure.length > 1 ? 's' : ''} aguardando arquivamento
+                  {' '}— {pendingClosure.map((c: any) => c.lead?.name || c.case_number || '').filter(Boolean).join(', ')}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
