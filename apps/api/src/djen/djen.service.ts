@@ -657,6 +657,7 @@ export class DjenService {
     tarefa_titulo: string;
     tarefa_descricao: string;
     orientacoes: string;
+    event_type: 'AUDIENCIA' | 'PRAZO' | 'TAREFA';
     model_used: string;
     // Dados extraídos da publicação
     parte_autora: string | null;
@@ -665,6 +666,7 @@ export class DjenService {
     area_juridica: string | null;
     valor_causa: string | null;
     data_audiencia: string | null;
+    data_prazo: string | null;
   }> {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({
       where: { id },
@@ -674,6 +676,13 @@ export class DjenService {
         },
       },
     });
+
+    // Bloquear análise se publicação não está vinculada a nenhum processo
+    if (!pub.legal_case_id) {
+      throw new BadRequestException(
+        'Esta publicação não está vinculada a nenhum processo. Vincule-a a um processo antes de criar eventos.'
+      );
+    }
 
     const STAGES = [
       'DISTRIBUIDO', 'CITACAO', 'CONTESTACAO', 'REPLICA', 'INSTRUCAO',
@@ -691,6 +700,7 @@ Campos obrigatórios:
 - tarefa_titulo: string (título curto da tarefa)
 - tarefa_descricao: string (descrição da tarefa, máx 200 chars)
 - orientacoes: string (observações estratégicas, máx 300 chars)
+- event_type: "AUDIENCIA" | "PRAZO" | "TAREFA" (AUDIENCIA se há audiência/sessão/julgamento com data marcada no texto; PRAZO se há prazo processual para o advogado cumprir; TAREFA para outros casos)
 
 Campos de extração (null se não encontrado no texto):
 - parte_autora: string | null (nome do autor/requerente/exequente)
@@ -698,7 +708,8 @@ Campos de extração (null se não encontrado no texto):
 - juizo: string | null (vara, juízo ou tribunal onde tramita)
 - area_juridica: string | null (ex: "Trabalhista", "Cível", "Previdenciário", "Criminal", "Consumidor", "Família", "Tributário")
 - valor_causa: string | null (valor da causa se mencionado, formato "R$ X.XXX,XX")
-- data_audiencia: string | null (data e hora da audiência se mencionada, formato ISO "YYYY-MM-DDTHH:MM:00", null se não for publicação de audiência)
+- data_audiencia: string | null (data e hora da audiência/sessão se mencionada NO TEXTO, formato ISO "YYYY-MM-DDTHH:MM:00", null se não for publicação de audiência — EXTRAIA DO TEXTO, não invente)
+- data_prazo: string | null (data limite do prazo processual se mencionada NO TEXTO, formato ISO "YYYY-MM-DDTHH:MM:00", null se não houver prazo com data explícita)
 
 Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
 Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.`;
@@ -765,6 +776,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       tarefa_titulo: parsed.tarefa_titulo || 'Verificar publicação DJEN',
       tarefa_descricao: parsed.tarefa_descricao || '',
       orientacoes: parsed.orientacoes || '',
+      event_type: (['AUDIENCIA', 'PRAZO', 'TAREFA'].includes(parsed.event_type) ? parsed.event_type : 'TAREFA') as 'AUDIENCIA' | 'PRAZO' | 'TAREFA',
       model_used: configuredModel,
       // Dados extraídos
       parte_autora: parsed.parte_autora || null,
@@ -773,6 +785,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       area_juridica: parsed.area_juridica || null,
       valor_causa: parsed.valor_causa || null,
       data_audiencia: parsed.data_audiencia || null,
+      data_prazo: parsed.data_prazo || null,
     };
   }
 }

@@ -85,6 +85,9 @@ interface AiAnalysis {
   tarefa_titulo: string;
   tarefa_descricao: string;
   orientacoes: string;
+  event_type: 'AUDIENCIA' | 'PRAZO' | 'TAREFA';
+  data_audiencia: string | null;
+  data_prazo: string | null;
 }
 
 interface CaseTask {
@@ -651,6 +654,9 @@ function ProcessoDetailPanel({
   const [djenAnalyses, setDjenAnalyses] = useState<Record<string, AiAnalysis>>({});
   const [djenTaskCreated, setDjenTaskCreated] = useState<Record<string, boolean>>({});
   const [creatingDjenTask, setCreatingDjenTask] = useState<string | null>(null);
+  const [djenEventPreview, setDjenEventPreview] = useState<Record<string, {
+    type: string; title: string; date: string; time: string; description: string; priority: string;
+  }>>({});
 
   const fetchTasks = useCallback(async () => {
     setLoadingTasks(true);
@@ -1593,9 +1599,10 @@ function ProcessoDetailPanel({
                               <p className="text-[11px] text-muted-foreground truncate">{pub.classe_processual}</p>
                             )}
                           </div>
-                          {/* Botão IA */}
+                          {/* Botão IA — bloqueado se não há processo vinculado */}
                           <button
                             onClick={async () => {
+                              if (!pub.legal_case_id) return;
                               if (analysis || isAnalyzing) {
                                 setExpandedDjen(isExpanded ? null : pub.id);
                                 return;
@@ -1607,12 +1614,15 @@ function ProcessoDetailPanel({
                                 setDjenAnalyses(prev => ({ ...prev, [pub.id]: res.data }));
                               } catch {} finally { setAnalyzingDjen(null); }
                             }}
+                            disabled={!pub.legal_case_id}
                             className={`shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg border transition-colors ${
-                              analysis
+                              !pub.legal_case_id
+                                ? 'opacity-40 cursor-not-allowed border-border text-muted-foreground'
+                                : analysis
                                 ? 'bg-violet-500/15 text-violet-300 border-violet-500/30'
                                 : 'text-violet-400 border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10'
                             }`}
-                            title="Analisar com IA"
+                            title={!pub.legal_case_id ? 'Vincule ao processo antes de analisar' : 'Analisar com IA'}
                           >
                             {isAnalyzing ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
                             IA
@@ -1657,44 +1667,150 @@ function ProcessoDetailPanel({
                                     <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.orientacoes}</p>
                                   </div>
                                 )}
-                                {/* Criar Tarefa sugerida */}
-                                {analysis.tarefa_titulo && (
-                                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2.5 space-y-1">
-                                    <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Tarefa sugerida</p>
-                                    <p className="text-[11px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
-                                    {analysis.tarefa_descricao && (
-                                      <p className="text-[10px] text-muted-foreground">{analysis.tarefa_descricao}</p>
-                                    )}
-                                    <button
-                                      disabled={!!djenTaskCreated[pub.id] || creatingDjenTask === pub.id}
-                                      onClick={async () => {
-                                        setCreatingDjenTask(pub.id);
-                                        try {
-                                          const due = new Date();
-                                          if (analysis.prazo_dias > 0) due.setDate(due.getDate() + analysis.prazo_dias);
-                                          await api.post('/calendar/events', {
-                                            type: 'TAREFA',
-                                            title: analysis.tarefa_titulo,
-                                            description: analysis.tarefa_descricao || undefined,
-                                            legal_case_id: legalCase.id,
-                                            start_at: due.toISOString(),
-                                            end_at: new Date(due.getTime() + 30 * 60000).toISOString(),
-                                            priority: analysis.urgencia === 'URGENTE' ? 'ALTA' : analysis.urgencia === 'BAIXA' ? 'BAIXA' : 'NORMAL',
-                                          });
-                                          setDjenTaskCreated(prev => ({ ...prev, [pub.id]: true }));
-                                          fetchTasks();
-                                        } catch {} finally { setCreatingDjenTask(null); }
-                                      }}
-                                      className="mt-1 w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                      {creatingDjenTask === pub.id ? (
-                                        <><Loader2 size={11} className="animate-spin" /> Criando…</>
-                                      ) : djenTaskCreated[pub.id] ? (
-                                        <><CheckCircle2 size={11} /> Tarefa criada</>
-                                      ) : (
-                                        <><Plus size={11} /> Criar Tarefa</>
+                                {/* Evento sugerido — com preview antes de criar */}
+                                {analysis.tarefa_titulo && !djenTaskCreated[pub.id] && (() => {
+                                  const preview = djenEventPreview[pub.id];
+                                  const eventTypeLabels: Record<string, string> = { AUDIENCIA: '⚖️ Audiência', PRAZO: '🕐 Prazo', TAREFA: '✅ Tarefa' };
+                                  // Calcula data sugerida pela IA
+                                  const suggestedDate = (() => {
+                                    if (analysis.event_type === 'AUDIENCIA' && analysis.data_audiencia) {
+                                      const d = new Date(analysis.data_audiencia);
+                                      return isNaN(d.getTime()) ? null : d;
+                                    }
+                                    if (analysis.event_type === 'PRAZO' && analysis.data_prazo) {
+                                      const d = new Date(analysis.data_prazo);
+                                      return isNaN(d.getTime()) ? null : d;
+                                    }
+                                    // fallback: data da publicação + prazo_dias úteis
+                                    const base = new Date(pub.data_disponibilizacao);
+                                    let days = analysis.prazo_dias > 0 ? analysis.prazo_dias : 0;
+                                    while (days > 0) { base.setUTCDate(base.getUTCDate() + 1); if (base.getUTCDay() !== 0 && base.getUTCDay() !== 6) days--; }
+                                    return base;
+                                  })();
+                                  const pad = (n: number) => String(n).padStart(2, '0');
+                                  const defaultDate = suggestedDate ? `${suggestedDate.getUTCFullYear()}-${pad(suggestedDate.getUTCMonth()+1)}-${pad(suggestedDate.getUTCDate())}` : '';
+                                  const defaultTime = suggestedDate ? `${pad(suggestedDate.getUTCHours())}:${pad(suggestedDate.getUTCMinutes())}` : '09:00';
+                                  const defaultPriority = analysis.urgencia === 'URGENTE' ? 'ALTA' : analysis.urgencia === 'BAIXA' ? 'BAIXA' : 'NORMAL';
+                                  return (
+                                    <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2.5 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                                          {eventTypeLabels[analysis.event_type] || '✅ Tarefa'} sugerida
+                                        </p>
+                                        {!preview && (
+                                          <button
+                                            onClick={() => setDjenEventPreview(prev => ({ ...prev, [pub.id]: {
+                                              type: analysis.event_type || 'TAREFA',
+                                              title: analysis.tarefa_titulo,
+                                              date: defaultDate,
+                                              time: defaultTime,
+                                              description: analysis.tarefa_descricao || '',
+                                              priority: defaultPriority,
+                                            }}))}
+                                            className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 underline"
+                                          >
+                                            Revisar e criar
+                                          </button>
+                                        )}
+                                      </div>
+                                      <p className="text-[11px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
+                                      {analysis.tarefa_descricao && !preview && (
+                                        <p className="text-[10px] text-muted-foreground">{analysis.tarefa_descricao}</p>
                                       )}
-                                    </button>
+
+                                      {/* Preview editável */}
+                                      {preview && (
+                                        <div className="space-y-2 border-t border-emerald-500/20 pt-2">
+                                          <p className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-wider">Confirme antes de criar</p>
+                                          {/* Tipo */}
+                                          <div>
+                                            <label className="text-[10px] text-muted-foreground mb-0.5 block">Tipo</label>
+                                            <select
+                                              value={preview.type}
+                                              onChange={e => setDjenEventPreview(prev => ({ ...prev, [pub.id]: { ...prev[pub.id], type: e.target.value } }))}
+                                              className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                                            >
+                                              <option value="AUDIENCIA">⚖️ Audiência</option>
+                                              <option value="PRAZO">🕐 Prazo</option>
+                                              <option value="TAREFA">✅ Tarefa</option>
+                                              <option value="OUTRO">📌 Outro</option>
+                                            </select>
+                                          </div>
+                                          {/* Título */}
+                                          <div>
+                                            <label className="text-[10px] text-muted-foreground mb-0.5 block">Título</label>
+                                            <input
+                                              value={preview.title}
+                                              onChange={e => setDjenEventPreview(prev => ({ ...prev, [pub.id]: { ...prev[pub.id], title: e.target.value } }))}
+                                              className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                                            />
+                                          </div>
+                                          {/* Data e hora */}
+                                          <div className="flex gap-2">
+                                            <div className="flex-1">
+                                              <label className="text-[10px] text-muted-foreground mb-0.5 block">Data</label>
+                                              <input
+                                                type="date"
+                                                value={preview.date}
+                                                onChange={e => setDjenEventPreview(prev => ({ ...prev, [pub.id]: { ...prev[pub.id], date: e.target.value } }))}
+                                                className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                                              />
+                                            </div>
+                                            <div className="w-24">
+                                              <label className="text-[10px] text-muted-foreground mb-0.5 block">Hora</label>
+                                              <input
+                                                type="time"
+                                                value={preview.time}
+                                                onChange={e => setDjenEventPreview(prev => ({ ...prev, [pub.id]: { ...prev[pub.id], time: e.target.value } }))}
+                                                className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                                              />
+                                            </div>
+                                          </div>
+                                          {/* Botões */}
+                                          <div className="flex gap-2 pt-1">
+                                            <button
+                                              onClick={() => setDjenEventPreview(prev => { const n = { ...prev }; delete n[pub.id]; return n; })}
+                                              className="flex-1 py-1.5 text-xs font-semibold border border-border rounded-lg text-muted-foreground hover:bg-accent transition-colors"
+                                            >
+                                              Cancelar
+                                            </button>
+                                            <button
+                                              disabled={!preview.title || !preview.date || creatingDjenTask === pub.id}
+                                              onClick={async () => {
+                                                setCreatingDjenTask(pub.id);
+                                                try {
+                                                  const [y, m, d] = preview.date.split('-').map(Number);
+                                                  const [h, mi] = preview.time.split(':').map(Number);
+                                                  const start = new Date(Date.UTC(y, m-1, d, h, mi, 0));
+                                                  const dur = preview.type === 'AUDIENCIA' ? 60 : 30;
+                                                  await api.post('/calendar/events', {
+                                                    type: preview.type,
+                                                    title: preview.title,
+                                                    description: preview.description || undefined,
+                                                    legal_case_id: legalCase.id,
+                                                    start_at: start.toISOString(),
+                                                    end_at: new Date(start.getTime() + dur * 60000).toISOString(),
+                                                    priority: preview.priority,
+                                                  });
+                                                  setDjenTaskCreated(prev => ({ ...prev, [pub.id]: true }));
+                                                  setDjenEventPreview(prev => { const n = { ...prev }; delete n[pub.id]; return n; });
+                                                  fetchTasks();
+                                                } catch {} finally { setCreatingDjenTask(null); }
+                                              }}
+                                              className="flex-1 py-1.5 text-xs font-semibold bg-emerald-500/80 text-white rounded-lg hover:bg-emerald-500 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                                            >
+                                              {creatingDjenTask === pub.id ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                                              Confirmar
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                                {djenTaskCreated[pub.id] && (
+                                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold">
+                                    <CheckCircle2 size={13} /> Evento criado no calendário
                                   </div>
                                 )}
                               </div>
