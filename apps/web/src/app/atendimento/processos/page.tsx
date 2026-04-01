@@ -2900,12 +2900,22 @@ function ProcessosPageContent() {
     filteredCases
       .filter(c => (c.tracking_stage || 'DISTRIBUIDO') === stageId)
       .sort((a, b) => {
-        // Sort: URGENTE first, then by days in stage desc
+        // URGENTE sempre primeiro
         const PORD = { URGENTE: 0, NORMAL: 1, BAIXA: 2 };
         const pa = PORD[a.priority as keyof typeof PORD] ?? 1;
         const pb = PORD[b.priority as keyof typeof PORD] ?? 1;
         if (pa !== pb) return pa - pb;
-        return daysInStage(b.stage_changed_at) - daysInStage(a.stage_changed_at);
+        // Dentro da mesma prioridade: evento mais próximo primeiro
+        const now = Date.now();
+        const aEvent = a.calendar_events?.find(e => new Date(e.start_at).getTime() >= now - 3600000);
+        const bEvent = b.calendar_events?.find(e => new Date(e.start_at).getTime() >= now - 3600000);
+        if (aEvent && bEvent) return new Date(aEvent.start_at).getTime() - new Date(bEvent.start_at).getTime();
+        if (aEvent) return -1;
+        if (bEvent) return 1;
+        // Sem eventos: mais antigo na etapa primeiro
+        const ta = a.stage_changed_at ? new Date(a.stage_changed_at).getTime() : now;
+        const tb = b.stage_changed_at ? new Date(b.stage_changed_at).getTime() : now;
+        return ta - tb;
       });
 
   const urgentCount = cases.filter(c => c.priority === 'URGENTE').length;
