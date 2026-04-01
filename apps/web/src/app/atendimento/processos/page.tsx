@@ -8,6 +8,7 @@ import {
   Plus, X, Calendar, FileText, Clock, Archive, ArchiveRestore, Send,
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, Bell, RefreshCcw, BookOpen,
   LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown, FolderPlus, Pencil, Trash2,
+  Sparkles, AlertCircle,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { TRACKING_STAGES, findTrackingStage } from '@/lib/legalStages';
@@ -72,6 +73,17 @@ interface DjenPublication {
   legal_case_id: string | null;
   legal_case?: { id: string; lead: { name: string | null } } | null;
   created_at: string;
+}
+
+interface AiAnalysis {
+  resumo: string;
+  urgencia: 'URGENTE' | 'NORMAL' | 'BAIXA';
+  tipo_acao: string;
+  prazo_dias: number;
+  estagio_sugerido: string | null;
+  tarefa_titulo: string;
+  tarefa_descricao: string;
+  orientacoes: string;
 }
 
 interface CaseTask {
@@ -637,6 +649,8 @@ function ProcessoDetailPanel({
   const [djenPubs, setDjenPubs] = useState<DjenPublication[]>([]);
   const [loadingDjen, setLoadingDjen] = useState(false);
   const [expandedDjen, setExpandedDjen] = useState<string | null>(null);
+  const [analyzingDjen, setAnalyzingDjen] = useState<string | null>(null);
+  const [djenAnalyses, setDjenAnalyses] = useState<Record<string, AiAnalysis>>({});
 
   const fetchTasks = useCallback(async () => {
     setLoadingTasks(true);
@@ -1466,44 +1480,128 @@ function ProcessoDetailPanel({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {djenPubs.map(pub => (
-                    <div key={pub.id} className="border border-border rounded-xl overflow-hidden">
-                      <div
-                        className="p-3 flex items-start gap-3 cursor-pointer hover:bg-accent/30 transition-colors"
-                        onClick={() => setExpandedDjen(expandedDjen === pub.id ? null : pub.id)}
-                      >
-                        <ChevronRight
-                          size={14}
-                          className={`text-muted-foreground mt-0.5 shrink-0 transition-transform ${expandedDjen === pub.id ? 'rotate-90' : ''}`}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            {pub.tipo_comunicacao && (
-                              <span className="px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-bold border border-blue-500/20">
-                                {pub.tipo_comunicacao}
+                  {djenPubs.map(pub => {
+                    const analysis = djenAnalyses[pub.id];
+                    const isAnalyzing = analyzingDjen === pub.id;
+                    const isExpanded = expandedDjen === pub.id;
+                    const URGENCIA_CFG = {
+                      URGENTE: { bg: 'bg-red-500/10', text: 'text-red-400', Icon: AlertCircle },
+                      NORMAL:  { bg: 'bg-amber-500/10', text: 'text-amber-400', Icon: Clock },
+                      BAIXA:   { bg: 'bg-gray-500/10', text: 'text-gray-400', Icon: CheckCircle2 },
+                    };
+                    return (
+                      <div key={pub.id} className="border border-border rounded-xl overflow-hidden">
+                        {/* Header row */}
+                        <div className="p-3 flex items-start gap-2">
+                          <button
+                            className="mt-0.5 shrink-0"
+                            onClick={() => setExpandedDjen(isExpanded ? null : pub.id)}
+                          >
+                            <ChevronRight
+                              size={14}
+                              className={`text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                            />
+                          </button>
+                          <div
+                            className="flex-1 min-w-0 cursor-pointer"
+                            onClick={() => setExpandedDjen(isExpanded ? null : pub.id)}
+                          >
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              {pub.tipo_comunicacao && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] font-bold border border-blue-500/20">
+                                  {pub.tipo_comunicacao}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                <Calendar size={9} /> {formatDate(pub.data_disponibilizacao)}
                               </span>
+                              {analysis && (() => {
+                                const cfg = URGENCIA_CFG[analysis.urgencia];
+                                return (
+                                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded flex items-center gap-0.5 ${cfg.bg} ${cfg.text}`}>
+                                    <cfg.Icon size={8} /> {analysis.urgencia}
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                            {pub.assunto && (
+                              <p className="text-[12px] font-semibold text-foreground line-clamp-1">{pub.assunto}</p>
                             )}
-                            <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                              <Calendar size={9} /> {formatDate(pub.data_disponibilizacao)}
-                            </span>
+                            {pub.classe_processual && (
+                              <p className="text-[11px] text-muted-foreground truncate">{pub.classe_processual}</p>
+                            )}
                           </div>
-                          {pub.assunto && (
-                            <p className="text-[12px] font-semibold text-foreground line-clamp-1">{pub.assunto}</p>
-                          )}
-                          {pub.classe_processual && (
-                            <p className="text-[11px] text-muted-foreground truncate">{pub.classe_processual}</p>
-                          )}
+                          {/* Botão IA */}
+                          <button
+                            onClick={async () => {
+                              if (analysis || isAnalyzing) {
+                                setExpandedDjen(isExpanded ? null : pub.id);
+                                return;
+                              }
+                              setAnalyzingDjen(pub.id);
+                              setExpandedDjen(pub.id);
+                              try {
+                                const res = await api.post(`/djen/${pub.id}/analyze`);
+                                setDjenAnalyses(prev => ({ ...prev, [pub.id]: res.data }));
+                              } catch {} finally { setAnalyzingDjen(null); }
+                            }}
+                            className={`shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg border transition-colors ${
+                              analysis
+                                ? 'bg-violet-500/15 text-violet-300 border-violet-500/30'
+                                : 'text-violet-400 border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10'
+                            }`}
+                            title="Analisar com IA"
+                          >
+                            {isAnalyzing ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                            IA
+                          </button>
                         </div>
+
+                        {/* Conteúdo expandido */}
+                        {isExpanded && (
+                          <div className="border-t border-border bg-accent/10 p-3 space-y-3">
+                            {/* Texto bruto */}
+                            <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto custom-scrollbar">
+                              {pub.conteudo}
+                            </p>
+
+                            {/* Análise IA */}
+                            {isAnalyzing && (
+                              <div className="flex items-center gap-2 text-[11px] text-violet-400 animate-pulse">
+                                <Loader2 size={12} className="animate-spin" /> Analisando com IA…
+                              </div>
+                            )}
+                            {analysis && (
+                              <div className="space-y-2 border-t border-border/50 pt-3">
+                                <div className="flex items-center gap-1 text-[10px] font-bold text-violet-400 uppercase tracking-wider">
+                                  <Sparkles size={10} /> Análise IA
+                                </div>
+                                <p className="text-[11px] text-foreground/90 leading-relaxed">{analysis.resumo}</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {analysis.tipo_acao && (
+                                    <span className="text-[10px] bg-card border border-border px-2 py-0.5 rounded-full text-foreground/70">
+                                      {analysis.tipo_acao}
+                                    </span>
+                                  )}
+                                  {analysis.prazo_dias > 0 && (
+                                    <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full text-amber-400 flex items-center gap-0.5">
+                                      <Clock size={9} /> Prazo: {analysis.prazo_dias}d
+                                    </span>
+                                  )}
+                                </div>
+                                {analysis.orientacoes && (
+                                  <div className="bg-card border border-border rounded-lg p-2.5">
+                                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">Orientações</p>
+                                    <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.orientacoes}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      {expandedDjen === pub.id && (
-                        <div className="border-t border-border bg-accent/10 p-3">
-                          <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto custom-scrollbar">
-                            {pub.conteudo}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
