@@ -249,25 +249,8 @@ export class LegalCasesService {
       }
     }
 
-    // ── Reverter lead para não-cliente se todos os processos foram arquivados ──
-    // Verifica se restam processos ativos (não arquivados) para este lead
-    const activeCases = await this.prisma.legalCase.count({
-      where: { lead_id: legalCase.lead_id, archived: false },
-    });
-
-    if (activeCases === 0 && legalCase.lead?.is_client) {
-      await this.prisma.lead.update({
-        where: { id: legalCase.lead_id },
-        data: {
-          is_client: false,
-          became_client_at: null,
-          stage: 'PERDIDO',
-          stage_entered_at: new Date(),
-          loss_reason: `Processo arquivado: ${reason}`,
-        },
-      });
-      this.logger.log(`[ARCHIVE] Lead ${legalCase.lead_id} revertido para não-cliente (sem processos ativos)`);
-    }
+    // Cliente permanece como cliente mesmo sem processos ativos —
+    // histórico preservado e facilita retorno futuro.
 
     return legalCase;
   }
