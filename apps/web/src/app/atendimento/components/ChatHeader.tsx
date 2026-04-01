@@ -68,10 +68,10 @@ export interface ChatHeaderProps {
   onCreateTask: () => void;
   onSyncHistory?: () => void;
   contactPresence?: string;
-  // Task management (ADIADO)
+  // Task management
   activeTask?: ActiveTask | null;
-  onCompleteTask?: () => void;
-  onRescheduleTask?: (newDate: string) => void;
+  onCompleteTask?: (note: string) => void;
+  onPostponeTask?: (newDate: string, reason: string) => void;
   onNewTask?: () => void;
   leadTags?: string[];
   onUpdateTags?: (tags: string[]) => void;
@@ -116,14 +116,18 @@ export function ChatHeader({
   contactPresence,
   activeTask,
   onCompleteTask,
-  onRescheduleTask,
+  onPostponeTask,
   onNewTask,
   leadTags,
   onUpdateTags,
 }: ChatHeaderProps) {
-  const [showReschedule, setShowReschedule] = useState(false);
-  const [rescheduleDate, setRescheduleDate] = useState('');
   const [copiedPhone, setCopiedPhone] = useState(false);
+  // Modais de tarefa
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [completeNote, setCompleteNote] = useState('');
+  const [showPostponeModal, setShowPostponeModal] = useState(false);
+  const [postponeDate, setPostponeDate] = useState('');
+  const [postponeReason, setPostponeReason] = useState('');
   const [tagInput, setTagInput] = useState('');
   const [showTagInput, setShowTagInput] = useState(false);
   const tagInputRef = useRef<HTMLInputElement>(null);
@@ -484,70 +488,171 @@ export function ChatHeader({
       </div>
     </header>
 
-    {/* Barra de gestão de tarefa — só para conversas ADIADO */}
-    {isAdiado && activeTask && (
-      <div className="flex items-center gap-2 px-3 md:px-8 py-2 bg-amber-500/5 border-b border-amber-500/20 relative">
-        <Clock size={14} className={`shrink-0 ${isOverdue ? 'text-red-400' : 'text-amber-400'}`} />
-        <span className={`text-xs font-medium truncate flex-1 ${isOverdue ? 'text-red-400' : 'text-amber-300'}`}>
-          {activeTask.title}
-          {activeTask.dueAt && (
-            <span className={`ml-2 ${isOverdue ? 'font-bold' : 'opacity-70'}`}>
-              {formatTaskDate(activeTask.dueAt)}
-            </span>
+    {/* ── Barra de tarefa ativa — aparece sempre que houver activeTask ── */}
+    {activeTask && (
+      <div className={`flex items-center gap-2 px-3 md:px-6 py-2 border-b ${
+        isOverdue ? 'bg-red-500/5 border-red-500/20' : 'bg-amber-500/5 border-amber-500/20'
+      }`}>
+        <Clock size={13} className={`shrink-0 ${isOverdue ? 'text-red-400 animate-pulse' : 'text-amber-400'}`} />
+        <div className="flex-1 min-w-0">
+          <p className={`text-xs font-semibold truncate ${isOverdue ? 'text-red-400' : 'text-amber-300'}`}>
+            {activeTask.title}
+            {activeTask.dueAt && (
+              <span className={`ml-2 text-[10px] font-bold ${isOverdue ? 'text-red-500' : 'opacity-60'}`}>
+                {formatTaskDate(activeTask.dueAt)}
+              </span>
+            )}
+          </p>
+          {(activeTask.postponeCount ?? 0) > 0 && (
+            <p className="text-[9px] text-amber-500/60 font-medium">
+              {activeTask.postponeCount}ª vez adiando
+            </p>
           )}
-        </span>
+        </div>
+
+        {/* Concluir */}
         <button
-          onClick={onCompleteTask}
+          onClick={() => { setCompleteNote(''); setShowCompleteModal(true); }}
           className="px-2.5 py-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20 transition-colors whitespace-nowrap"
         >
           ✓ Concluir
         </button>
-        <div className="relative">
-          <button
-            onClick={() => { setShowReschedule(!showReschedule); setRescheduleDate(''); }}
-            className="px-2.5 py-1 text-[11px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-lg hover:bg-sky-500/20 transition-colors whitespace-nowrap"
-          >
-            Reagendar
-          </button>
-          {showReschedule && (
-            <div className="absolute top-full right-0 mt-1 bg-card border border-border rounded-xl shadow-xl p-3 z-50 w-64">
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Novo prazo</p>
-              <input
-                type="datetime-local"
-                value={rescheduleDate}
-                onChange={e => setRescheduleDate(e.target.value)}
-                className="w-full px-2.5 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground [color-scheme:dark] mb-2"
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={() => setShowReschedule(false)}
-                  className="px-3 py-1.5 text-[11px] rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => {
-                    if (rescheduleDate && onRescheduleTask) {
-                      onRescheduleTask(rescheduleDate);
-                      setShowReschedule(false);
-                      setRescheduleDate('');
-                    }
-                  }}
-                  disabled={!rescheduleDate}
-                  className="px-3 py-1.5 text-[11px] font-bold rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400 hover:bg-sky-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Salvar
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+
+        {/* Adiar */}
+        <button
+          onClick={() => { setPostponeDate(''); setPostponeReason(''); setShowPostponeModal(true); }}
+          className="px-2.5 py-1 text-[11px] font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-lg hover:bg-sky-500/20 transition-colors whitespace-nowrap"
+        >
+          ⏰ Adiar
+        </button>
+
+        {/* Nova tarefa */}
         <button
           onClick={onNewTask}
           className="px-2.5 py-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+          title="Criar nova tarefa para este contato"
         >
           + Nova
         </button>
+      </div>
+    )}
+
+    {/* ── Modal: Concluir tarefa ── */}
+    {showCompleteModal && activeTask && (
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setShowCompleteModal(false)}
+      >
+        <div
+          className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">✅</span>
+            <h3 className="font-bold text-sm">Concluir tarefa</h3>
+          </div>
+          <p className="text-xs text-amber-400/80 mb-4 truncate font-medium">{activeTask.title}</p>
+
+          <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+            Como foi? <span className="text-muted-foreground/40 font-normal normal-case">(opcional)</span>
+          </label>
+          <textarea
+            value={completeNote}
+            onChange={e => setCompleteNote(e.target.value)}
+            rows={3}
+            autoFocus
+            placeholder="Ex: Cliente confirmou que vai enviar os documentos amanhã"
+            className="w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 resize-none text-foreground placeholder:text-muted-foreground/40"
+          />
+
+          <div className="flex gap-2 mt-4 justify-end">
+            <button
+              onClick={() => setShowCompleteModal(false)}
+              className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                onCompleteTask?.(completeNote.trim());
+                setShowCompleteModal(false);
+                setCompleteNote('');
+              }}
+              className="px-4 py-2 text-sm font-bold rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+            >
+              ✓ Confirmar conclusão
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Modal: Adiar tarefa ── */}
+    {showPostponeModal && activeTask && (
+      <div
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={() => setShowPostponeModal(false)}
+      >
+        <div
+          className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4"
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xl">⏰</span>
+            <h3 className="font-bold text-sm">Adiar tarefa</h3>
+          </div>
+          <p className="text-xs text-amber-400/80 mb-1 truncate font-medium">{activeTask.title}</p>
+          {(activeTask.postponeCount ?? 0) > 0 && (
+            <p className="text-[10px] text-amber-500 font-semibold mb-3">
+              {activeTask.postponeCount}ª vez adiando esta tarefa
+            </p>
+          )}
+
+          <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+            Nova data e hora
+          </label>
+          <input
+            type="datetime-local"
+            value={postponeDate}
+            onChange={e => setPostponeDate(e.target.value)}
+            className="w-full mb-4 px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 text-foreground [color-scheme:dark]"
+          />
+
+          <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+            Motivo <span className="text-red-400">*</span>
+          </label>
+          <textarea
+            value={postponeReason}
+            onChange={e => setPostponeReason(e.target.value)}
+            rows={2}
+            autoFocus
+            placeholder="Ex: Cliente não atendeu, ligarei novamente amanhã"
+            className="w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 resize-none text-foreground placeholder:text-muted-foreground/40"
+          />
+
+          <div className="flex gap-2 mt-4 justify-end">
+            <button
+              onClick={() => setShowPostponeModal(false)}
+              className="px-4 py-2 text-sm rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => {
+                if (postponeDate && postponeReason.trim()) {
+                  onPostponeTask?.(postponeDate, postponeReason.trim());
+                  setShowPostponeModal(false);
+                  setPostponeDate('');
+                  setPostponeReason('');
+                }
+              }}
+              disabled={!postponeDate || !postponeReason.trim()}
+              className="px-4 py-2 text-sm font-bold rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400 hover:bg-sky-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ⏰ Confirmar adiamento
+            </button>
+          </div>
+        </div>
       </div>
     )}
     </div>

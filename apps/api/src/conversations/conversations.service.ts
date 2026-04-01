@@ -165,6 +165,7 @@ export class ConversationsService {
         dueAt: (c as any).tasks[0].due_at?.toISOString() || null,
         status: (c as any).tasks[0].status,
         assignedUserId: (c as any).tasks[0].assigned_user_id || null,
+        postponeCount: (c as any).tasks[0].postpone_count || 0,
       } : null,
     }));
 

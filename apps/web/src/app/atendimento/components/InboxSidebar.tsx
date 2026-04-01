@@ -628,17 +628,22 @@ export function InboxSidebar({
                           )}
                         </div>
                       )}
-                      {conv.status === 'ADIADO' && conv.activeTask && (() => {
+                      {conv.activeTask && (() => {
                         const isOverdue = conv.activeTask.dueAt ? new Date(conv.activeTask.dueAt) < new Date() : false;
                         return (
                           <div className="flex items-center gap-1.5 mb-0.5">
-                            <Clock size={11} className={isOverdue ? 'text-red-400' : 'text-amber-400'} />
+                            <Clock size={11} className={isOverdue ? 'text-red-400 animate-pulse' : 'text-amber-400'} />
                             <span className={`text-[10px] font-medium truncate max-w-[120px] ${isOverdue ? 'text-red-400' : 'text-amber-400'}`}>
                               {conv.activeTask.title}
                             </span>
                             {conv.activeTask.dueAt && (
                               <span className={`text-[9px] font-bold whitespace-nowrap ${isOverdue ? 'text-red-500' : 'text-muted-foreground'}`}>
                                 {formatTaskDate(conv.activeTask.dueAt)}
+                              </span>
+                            )}
+                            {(conv.activeTask.postponeCount ?? 0) > 0 && (
+                              <span className="text-[9px] text-amber-500/70 font-semibold whitespace-nowrap">
+                                ×{conv.activeTask.postponeCount}
                               </span>
                             )}
                           </div>

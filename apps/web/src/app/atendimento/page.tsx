@@ -1566,11 +1566,11 @@ export default function Dashboard() {
     }
   };
 
-  const handleCompleteTask = async () => {
+  const handleCompleteTask = async (note: string) => {
     const conv = conversations.find(c => c.id === selectedId) ?? adiadoConversations.find(c => c.id === selectedId);
     if (!conv?.activeTask) return;
     try {
-      await api.post(`/tasks/${conv.activeTask.id}/complete-reopen`);
+      await api.post(`/tasks/${conv.activeTask.id}/complete`, { note });
       showSuccess('✅ Tarefa concluída! Conversa reaberta.');
       fetchConversations(selectedInboxIdRef.current, true);
       fetchAdiadoConversations(selectedInboxIdRef.current);
@@ -1620,15 +1620,16 @@ export default function Dashboard() {
     }
   };
 
-  const handleRescheduleTask = async (newDate: string) => {
+  const handlePostponeTask = async (newDate: string, reason: string) => {
     const conv = conversations.find(c => c.id === selectedId) ?? adiadoConversations.find(c => c.id === selectedId);
     if (!conv?.activeTask) return;
     try {
-      await api.patch(`/tasks/${conv.activeTask.id}`, { due_at: newDate });
-      showSuccess('📅 Prazo atualizado!');
+      await api.post(`/tasks/${conv.activeTask.id}/postpone`, { new_due_at: newDate, reason });
+      showSuccess('⏰ Tarefa adiada!');
+      fetchConversations(selectedInboxIdRef.current, true);
       fetchAdiadoConversations(selectedInboxIdRef.current);
     } catch {
-      showError('Erro ao reagendar');
+      showError('Erro ao adiar tarefa');
     }
   };
 
@@ -2181,7 +2182,7 @@ export default function Dashboard() {
               contactPresence={contactPresence}
               activeTask={selected?.activeTask}
               onCompleteTask={handleCompleteTask}
-              onRescheduleTask={handleRescheduleTask}
+              onPostponeTask={handlePostponeTask}
               onNewTask={openTaskModal}
               leadTags={selected?.leadTags ?? []}
               onUpdateTags={async (tags) => {

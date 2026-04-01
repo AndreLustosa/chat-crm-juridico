@@ -4,6 +4,7 @@ export interface ActiveTask {
   dueAt: string | null;
   status: string;
   assignedUserId: string | null;
+  postponeCount?: number;
 }
 
 export interface ConversationSummary {

@@ -253,33 +253,95 @@ export class TasksService {
     return task;
   }
 
-  // ─── Complete Task & Reopen Conversation ───────────────────────
+  // ─── Complete Task & Reopen Conversation (legado) ─────────────
 
   async completeAndReopen(taskId: string, tenantId?: string) {
+    return this.complete(taskId, '', 'system', tenantId);
+  }
+
+  // ─── Complete com nota de resultado ───────────────────────────
+
+  async complete(taskId: string, note: string, userId: string, tenantId?: string) {
     await this.verifyTenantOwnership(taskId, tenantId);
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
-    const [updatedTask] = await this.prisma.$transaction([
-      this.prisma.task.update({ where: { id: taskId }, data: { status: 'CONCLUIDA' } }),
-      ...(task.conversation_id ? [
+    const ops: any[] = [
+      this.prisma.task.update({
+        where: { id: taskId },
+        data: { status: 'CONCLUIDA', completion_note: note?.trim() || null },
+      }),
+    ];
+    if (task.conversation_id) {
+      ops.push(
         this.prisma.conversation.update({ where: { id: task.conversation_id }, data: { status: 'ABERTO' } }),
-      ] : []),
-    ]);
-
-    // Sync calendar event status
-    if (updatedTask.calendar_event_id) {
-      try {
-        await this.calendarService.updateStatus(updatedTask.calendar_event_id, 'CONCLUIDO');
-      } catch (e: any) {
-        this.logger.warn(`Erro ao sync calendario para task ${taskId}: ${e.message}`);
-      }
+      );
+    }
+    if (note?.trim() && userId !== 'system') {
+      ops.push(
+        this.prisma.taskComment.create({
+          data: { task_id: taskId, user_id: userId, text: `✅ Concluída: ${note.trim()}` },
+        }),
+      );
     }
 
-    // Emit socket update para atualizar sidebar em tempo real
-    this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
+    const [updatedTask] = await this.prisma.$transaction(ops);
 
+    if (updatedTask.calendar_event_id) {
+      try { await this.calendarService.updateStatus(updatedTask.calendar_event_id, 'CONCLUIDO'); } catch {}
+    }
+
+    this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
     return { task: updatedTask, conversationId: task.conversation_id };
+  }
+
+  // ─── Adiar com motivo + histórico de adiamentos ───────────────
+
+  async postpone(taskId: string, newDueAt: string, reason: string, userId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) throw new NotFoundException('Tarefa não encontrada');
+
+    const newDate = new Date(newDueAt);
+    const dateLabel = newDate.toLocaleDateString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+
+    await this.prisma.$transaction([
+      this.prisma.task.update({
+        where: { id: taskId },
+        data: { due_at: newDate, postpone_count: { increment: 1 } },
+      }),
+      (this.prisma as any).taskPostponement.create({
+        data: {
+          task_id: taskId,
+          old_due_at: task.due_at ?? new Date(),
+          new_due_at: newDate,
+          reason: reason.trim(),
+          created_by_id: userId,
+        },
+      }),
+      this.prisma.taskComment.create({
+        data: {
+          task_id: taskId,
+          user_id: userId,
+          text: `⏰ Adiada para ${dateLabel}: ${reason.trim()}`,
+        },
+      }),
+    ]);
+
+    if (task.calendar_event_id) {
+      try {
+        await this.calendarService.update(task.calendar_event_id, {
+          start_at: newDate.toISOString(),
+          end_at: new Date(newDate.getTime() + 30 * 60000).toISOString(),
+        });
+      } catch {}
+    }
+
+    this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
+    return { ok: true, conversationId: task.conversation_id };
   }
 
   // ─── Find Active Task by Conversation ─────────────────────────

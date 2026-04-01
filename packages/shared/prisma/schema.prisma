@@ -219,6 +219,11 @@ model Task {
   status            String              @default("A_FAZER")
   assigned_user_id  String?
   created_at        DateTime            @default(now())
+  // Conclusão
+  completion_note   String?
+  // Adiamentos
+  postpone_count    Int                 @default(0)
+  created_by_id     String?
   assigned_user     User?               @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
   conversation      Conversation?       @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
   lead              Lead?               @relation(fields: [lead_id], references: [id], onDelete: SetNull)
@@ -228,12 +233,26 @@ model Task {
   calendar_event    CalendarEvent?      @relation(fields: [calendar_event_id], references: [id], onDelete: SetNull)
   comments          TaskComment[]
   checklist_items   TaskChecklistItem[]
+  postponements     TaskPostponement[]
 
   @@index([assigned_user_id, due_at])
   @@index([status])
   @@index([legal_case_id])
   @@index([tenant_id])
   @@index([lead_id])
+}
+
+model TaskPostponement {
+  id            String   @id @default(uuid())
+  task_id       String
+  task          Task     @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  old_due_at    DateTime
+  new_due_at    DateTime
+  reason        String
+  created_by_id String?
+  created_at    DateTime @default(now())
+
+  @@index([task_id])
 }
 
 model AiMemory {

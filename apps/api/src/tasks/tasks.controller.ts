@@ -72,6 +72,22 @@ export class TasksController {
     return this.tasksService.completeAndReopen(id, req.user?.tenant_id);
   }
 
+  @Post(':id/complete')
+  @HttpCode(HttpStatus.OK)
+  complete(@Param('id') id: string, @Body() body: { note?: string }, @Request() req: any) {
+    return this.tasksService.complete(id, body.note || '', req.user?.id, req.user?.tenant_id);
+  }
+
+  @Post(':id/postpone')
+  @HttpCode(HttpStatus.OK)
+  postpone(
+    @Param('id') id: string,
+    @Body() body: { new_due_at: string; reason: string },
+    @Request() req: any,
+  ) {
+    return this.tasksService.postpone(id, body.new_due_at, body.reason, req.user?.id, req.user?.tenant_id);
+  }
+
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: any) {
     return this.tasksService.updateStatus(id, status, req.user?.tenant_id);
