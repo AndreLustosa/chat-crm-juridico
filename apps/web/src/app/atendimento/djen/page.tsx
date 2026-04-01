@@ -856,6 +856,11 @@ function PublicationCard({
                 <AlertTriangle size={8} /> Não vinculado
               </span>
             )}
+            {pub.legal_case_id && (
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 flex items-center gap-0.5">
+                <Link2 size={8} /> Vinculado
+              </span>
+            )}
             {pub.auto_task_id && (
               <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 flex items-center gap-0.5">
                 <CheckCircle2 size={8} /> Tarefa criada
@@ -869,10 +874,17 @@ function PublicationCard({
             <p className="text-[10px] text-muted-foreground truncate mt-0.5">{pub.assunto}</p>
           )}
           {pub.legal_case && (
-            <p className="text-[10px] text-primary truncate mt-0.5 flex items-center gap-1">
-              <Link2 size={8} />
-              {pub.legal_case.lead?.name || pub.legal_case.case_number}
-            </p>
+            <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium">
+                <Link2 size={8} />
+                {pub.legal_case.lead?.name || '—'}
+              </span>
+              {pub.legal_case.case_number && (
+                <span className="text-[9px] font-mono text-muted-foreground bg-muted/50 px-1 py-0.5 rounded">
+                  {pub.legal_case.case_number}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
