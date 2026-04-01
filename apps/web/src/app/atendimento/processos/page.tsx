@@ -352,7 +352,7 @@ function ProcessoCard({
       <div className="flex items-center justify-between text-[10px] text-muted-foreground/70">
         <div className="flex items-center gap-2.5">
           {taskCount > 0 && (
-            <span className="flex items-center gap-0.5" title={`${taskCount} tarefas`}>
+            <span className="flex items-center gap-0.5" title={`${taskCount} eventos`}>
               <CheckCircle2 size={10} /> {taskCount}
             </span>
           )}
@@ -989,7 +989,7 @@ function ProcessoDetailPanel({
             { id: 'info', label: 'Processo' },
             { id: 'djen', label: `DJEN (${djenPubs.length})` },
             { id: 'events', label: `Movim. (${events.length})` },
-            { id: 'tasks', label: `Tarefas (${tasks.length})` },
+            { id: 'tasks', label: `Eventos (${tasks.length})` },
           ] as const).map(tab => (
             <button
               key={tab.id}
@@ -1756,9 +1756,9 @@ function ProcessoDetailPanel({
           {activeTab === 'tasks' && (
             <div className="p-5 space-y-3">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider">Tarefas</h3>
+                <h3 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider">Eventos</h3>
                 <button onClick={() => setShowNewTask(!showNewTask)} className="text-[11px] font-semibold text-primary hover:text-primary/80 flex items-center gap-1">
-                  <Plus size={12} /> Nova Tarefa
+                  <Plus size={12} /> Novo Evento
                 </button>
               </div>
 
@@ -1769,7 +1769,7 @@ function ProcessoDetailPanel({
                     value={newTaskTitle}
                     onChange={e => setNewTaskTitle(e.target.value)}
                     className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    placeholder="Título da tarefa"
+                    placeholder="Título do evento"
                   />
                   <textarea
                     value={newTaskDesc}
@@ -1802,9 +1802,9 @@ function ProcessoDetailPanel({
               )}
 
               {loadingTasks ? (
-                <div className="text-center py-8 text-muted-foreground text-sm animate-pulse">Carregando tarefas…</div>
+                <div className="text-center py-8 text-muted-foreground text-sm animate-pulse">Carregando eventos…</div>
               ) : tasks.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-[12px]">Nenhuma tarefa criada</div>
+                <div className="text-center py-8 text-muted-foreground text-[12px]">Nenhum evento criado</div>
               ) : (
                 tasks.map(task => {
                   const statusInfo = TASK_STATUSES.find(s => s.id === task.status) ?? TASK_STATUSES[0];

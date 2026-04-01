@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft, FileText, ListTodo, Clock, MessageSquare, Activity,
+  ArrowLeft, FileText, CalendarDays, Clock, MessageSquare, Activity,
   Loader2, AlertTriangle, ClipboardList, FileSignature, BookOpen,
   DollarSign, Archive, ArchiveRestore, Send,
 } from 'lucide-react';
@@ -100,7 +100,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'documentos', label: 'Documentos', icon: FileText },
   { id: 'peticoes', label: 'Petições', icon: FileSignature },
   { id: 'banco', label: 'Peças', icon: BookOpen },
-  { id: 'tarefas', label: 'Tarefas', icon: ListTodo },
+  { id: 'tarefas', label: 'Eventos', icon: CalendarDays },
   { id: 'prazos', label: 'Prazos', icon: Clock },
   { id: 'honorarios', label: 'Honorários', icon: DollarSign },
   { id: 'comunicacoes', label: 'Comunicações', icon: MessageSquare },
