@@ -447,7 +447,7 @@ export class LeadsService {
       }
     }
 
-    const [stageHistory, notes] = await Promise.all([
+    const [stageHistory, notes, memory] = await Promise.all([
       this.prisma.leadStageHistory.findMany({
         where: { lead_id: leadId },
         orderBy: { created_at: 'desc' },
@@ -460,11 +460,15 @@ export class LeadsService {
         take: 100,
         include: { user: { select: { id: true, name: true } } },
       }),
+      this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }),
     ]);
 
-    const items = [
+    let facts: any = {};
+    try { facts = memory?.facts_json ? (typeof memory.facts_json === 'string' ? JSON.parse(memory.facts_json as string) : memory.facts_json) : {}; } catch { facts = {}; }
+
+    const items: any[] = [
       ...stageHistory.map(h => ({
-        type: 'stage_change' as const,
+        type: 'stage_change',
         id: h.id,
         from_stage: h.from_stage,
         to_stage: h.to_stage,
@@ -473,11 +477,41 @@ export class LeadsService {
         created_at: h.created_at,
       })),
       ...notes.map(n => ({
-        type: 'note' as const,
+        type: 'note',
         id: n.id,
         text: n.text,
         author: (n as any).user ?? null,
         created_at: n.created_at,
+      })),
+      // Etapas do processo judicial (de AiMemory)
+      ...(facts.case_timeline || []).map((e: any, i: number) => ({
+        type: 'case_stage',
+        id: `case_${i}`,
+        from_stage: e.from,
+        to_stage: e.to,
+        case_number: e.case_number,
+        legal_area: e.legal_area,
+        created_at: new Date(e.date + 'T12:00:00Z'),
+      })),
+      // Petições aprovadas/protocoladas (de AiMemory)
+      ...(facts.petitions || []).map((p: any, i: number) => ({
+        type: 'petition',
+        id: `petition_${i}`,
+        petition_type: p.type,
+        title: p.title,
+        status: p.status,
+        case_number: p.case_number,
+        created_at: new Date(p.date + 'T12:00:00Z'),
+      })),
+      // Publicações DJEN analisadas (de AiMemory)
+      ...(facts.djen_publications || []).map((d: any, i: number) => ({
+        type: 'djen',
+        id: `djen_${i}`,
+        djen_tipo: d.tipo,
+        djen_assunto: d.assunto,
+        resumo: d.resumo,
+        urgencia: d.urgencia,
+        created_at: new Date(d.date + 'T12:00:00Z'),
       })),
     ];
 

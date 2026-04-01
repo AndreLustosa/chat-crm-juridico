@@ -475,6 +475,30 @@ function LeadDetailPanel({
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
 
+  const [timeline, setTimeline] = useState<any[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+
+  useEffect(() => {
+    setTimeline([]);
+    setTimelineOpen(false);
+  }, [lead.id]);
+
+  const loadTimeline = async () => {
+    if (timeline.length > 0) { setTimelineOpen(o => !o); return; }
+    setTimelineLoading(true);
+    setTimelineOpen(true);
+    try {
+      const res = await api.get<any[]>(`/leads/${lead.id}/timeline`);
+      setTimeline(res.data);
+    } catch {
+      showError('Não foi possível carregar o histórico.');
+      setTimelineOpen(false);
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
+
   const handleSummarize = async () => {
     setSummarizing(true);
     try {
@@ -663,6 +687,84 @@ function LeadDetailPanel({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Histórico da Jornada */}
+          <div className="border-t border-border pt-3">
+            <button
+              onClick={loadTimeline}
+              className="flex items-center justify-between w-full text-[10px] font-bold text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors"
+            >
+              <span>Histórico da Jornada</span>
+              <ChevronDown size={13} className={`transition-transform ${timelineOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {timelineOpen && (
+              <div className="mt-3">
+                {timelineLoading ? (
+                  <p className="text-[11px] text-muted-foreground/50 italic">Carregando…</p>
+                ) : timeline.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground/50 italic">Nenhum histórico registrado ainda.</p>
+                ) : (
+                  <div className="relative">
+                    {/* vertical line */}
+                    <div className="absolute left-[11px] top-0 bottom-0 w-px bg-border" />
+                    <div className="space-y-3">
+                      {timeline.map((item, i) => {
+                        const date = new Date(item.created_at);
+                        const dateStr = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+
+                        let icon = '📌';
+                        let label = '';
+                        let sub = '';
+                        let iconBg = 'bg-accent';
+
+                        if (item.type === 'stage_change') {
+                          icon = '🏷️';
+                          iconBg = 'bg-blue-500/15';
+                          label = item.to_stage || '';
+                          sub = item.actor?.name ? `por ${item.actor.name}` : '';
+                        } else if (item.type === 'case_stage') {
+                          icon = '⚖️';
+                          iconBg = 'bg-violet-500/15';
+                          label = item.to_stage || item.from_stage || '';
+                          sub = item.case_number ? `processo #${item.case_number}` : item.legal_area || '';
+                        } else if (item.type === 'petition') {
+                          icon = '📄';
+                          iconBg = 'bg-emerald-500/15';
+                          label = item.title || item.petition_type || '';
+                          sub = item.status || '';
+                        } else if (item.type === 'djen') {
+                          icon = '📰';
+                          iconBg = 'bg-orange-500/15';
+                          label = item.djen_assunto || item.djen_tipo || 'Publicação DJEN';
+                          sub = item.urgencia ? `urgência: ${item.urgencia}` : '';
+                        } else if (item.type === 'note') {
+                          icon = '📝';
+                          iconBg = 'bg-gray-500/15';
+                          const noteText = item.text || '';
+                          label = noteText.slice(0, 60) + (noteText.length > 60 ? '…' : '');
+                          sub = item.author?.name || '';
+                        }
+
+                        return (
+                          <div key={item.id || i} className="flex items-start gap-2.5 pl-0.5">
+                            <div className={`w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 z-10 border border-border ${iconBg} text-[11px]`}>
+                              {icon}
+                            </div>
+                            <div className="flex-1 min-w-0 pt-0.5">
+                              <p className="text-[11px] text-foreground/90 font-medium leading-snug truncate">{label}</p>
+                              {sub && <p className="text-[10px] text-muted-foreground/60 leading-snug truncate">{sub}</p>}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground/40 shrink-0 pt-0.5">{dateStr}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Datas */}
