@@ -104,6 +104,17 @@ export class MessagesService {
     }
 
     const remoteJid = `${convo.lead.phone}@s.whatsapp.net`;
+
+    // Refresh da foto de perfil em background (URLs WhatsApp expiram em ~24-48h)
+    this.whatsapp.fetchProfilePicture(convo.instance_name, convo.lead.phone).then(async (freshUrl) => {
+      if (freshUrl && freshUrl !== convo.lead.profile_picture_url) {
+        await this.prisma.lead.update({
+          where: { id: convo.lead.id },
+          data: { profile_picture_url: freshUrl },
+        }).catch(() => {/* best-effort */});
+      }
+    }).catch(() => {/* best-effort */});
+
     const rawMessages = await this.whatsapp.fetchMessages(convo.instance_name, remoteJid);
 
     if (!rawMessages.length) return { imported: 0, total: 0 };

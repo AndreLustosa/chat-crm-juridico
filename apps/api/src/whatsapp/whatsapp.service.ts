@@ -310,13 +310,20 @@ export class WhatsappService {
 
   async fetchProfilePicture(instanceName: string, number: string) {
     try {
+      // Evolution API aceita tanto "5511999..." quanto "5511999...@s.whatsapp.net"
+      const cleanNumber = number.replace(/@s\.whatsapp\.net$/, '');
       const data = await this.request(
         'POST',
         `chat/fetchProfilePictureUrl/${instanceName}`,
-        { number },
+        { number: cleanNumber },
       );
-      return data?.profilePictureUrl || data?.profile_picture || data?.data?.profile_picture || data?.url || null;
-    } catch (e) {
+      const url = data?.profilePictureUrl || data?.profile_picture || data?.data?.profile_picture || data?.url || null;
+      if (!url) {
+        this.logger.debug(`[fetchProfilePicture] Sem foto para ${cleanNumber} na instância ${instanceName}. Resposta: ${JSON.stringify(data)}`);
+      }
+      return url;
+    } catch (e: any) {
+      this.logger.debug(`[fetchProfilePicture] Erro ao buscar foto de ${number}: ${e?.message}`);
       return null;
     }
   }

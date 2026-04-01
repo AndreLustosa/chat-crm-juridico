@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Bot, BotOff, UserCheck, CornerDownLeft, Inbox, Eye, ClipboardList, ArrowLeft, ChevronDown, ChevronRight, MoreVertical, Clock, Copy, Check, Tag, Plus, X as XIcon, RefreshCw } from 'lucide-react';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import type { ConversationSummary, ActiveTask } from '../types';
+import { ContactAvatar } from './ContactAvatar';
 
 const LEGAL_AREAS = [
   'Trabalhista', 'Consumidor', 'Família', 'Previdenciário',
@@ -159,17 +160,12 @@ export function ChatHeader({
             <ArrowLeft size={20} />
           </button>
         )}
-        <div
-          className={`w-10 h-10 md:w-12 md:h-12 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm shrink-0 ${selected.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-          onClick={() => selected.profile_picture_url && onLightbox(selected.profile_picture_url)}
-          title={selected.profile_picture_url ? 'Ver foto ampliada' : undefined}
-        >
-          {selected.profile_picture_url ? (
-            <img src={selected.profile_picture_url} alt={selected.contactName} className="w-full h-full object-cover" loading="lazy" />
-          ) : (
-            <span className="text-foreground font-bold text-lg md:text-xl">{getInitial(selected.contactName)}</span>
-          )}
-        </div>
+        <ContactAvatar
+          src={selected.profile_picture_url}
+          name={selected.contactName}
+          sizeClass="w-10 h-10 md:w-12 md:h-12"
+          onClick={(url) => onLightbox(url)}
+        />
         <div
           className="min-w-0 flex-1 cursor-pointer active:opacity-70 transition-opacity"
           onClick={() => {

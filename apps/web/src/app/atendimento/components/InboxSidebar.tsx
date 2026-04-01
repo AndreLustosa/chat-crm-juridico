@@ -9,6 +9,7 @@ import {
 import { showSuccess } from '@/lib/toast';
 import { normalizeStage } from '@/lib/crmStages';
 import type { ConversationSummary } from '../types';
+import { ContactAvatar } from './ContactAvatar';
 
 // ─── Saved Filters Type ──────────────────────────────────────
 
@@ -535,17 +536,12 @@ export function InboxSidebar({
                           aria-label={`Selecionar ${conv.contactName || conv.contactPhone}`}
                         />
                       </div>
-                      <div
-                        className={`w-11 h-11 rounded-full bg-accent border border-border flex items-center justify-center overflow-hidden shadow-sm ${conv.profile_picture_url ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-                        onClick={conv.profile_picture_url ? (e) => { e.stopPropagation(); onLightbox(conv.profile_picture_url!); } : undefined}
-                        title={conv.profile_picture_url ? 'Ver foto ampliada' : undefined}
-                      >
-                        {conv.profile_picture_url ? (
-                          <img src={conv.profile_picture_url} alt={conv.contactName} className="w-full h-full object-cover" loading="lazy" />
-                        ) : (
-                          <span className="text-foreground font-bold text-lg">{getInitial(conv.contactName)}</span>
-                        )}
-                      </div>
+                      <ContactAvatar
+                        src={conv.profile_picture_url}
+                        name={conv.contactName}
+                        sizeClass="w-11 h-11"
+                        onClick={(url) => { onLightbox(url); }}
+                      />
                       {(() => {
                         const stage = normalizeStage(conv.leadStage || '');
                         if (stage === 'PERDIDO' || stage === 'FINALIZADO' || !conv.leadStage) return null;
