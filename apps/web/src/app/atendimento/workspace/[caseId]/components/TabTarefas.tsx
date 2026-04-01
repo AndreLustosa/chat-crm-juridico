@@ -54,8 +54,8 @@ function typeInfo(type: string) {
 
 function formatDateTime(iso: string, allDay: boolean) {
   const d = new Date(iso);
-  if (allDay) return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit' });
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (allDay) return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'UTC' });
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 }
 
 // ─── Componente Principal ────────────────────────────────────────────────────────

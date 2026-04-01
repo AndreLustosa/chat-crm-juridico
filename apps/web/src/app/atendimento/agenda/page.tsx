@@ -627,7 +627,7 @@ export default function AgendaPage() {
               const [hour, minute] = timePart.split(':').map(Number);
               return T.ZonedDateTime.from({
                 year, month, day, hour, minute, second: 0,
-                timeZone: tz,
+                timeZone: 'UTC',
               });
             };
             try { startSx = parseLocalToZDT(startLocal); } catch { /* manter string */ }
@@ -1157,9 +1157,9 @@ export default function AgendaPage() {
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: typeColor }} />
                       <span className={`text-[10px] ${isOverdue ? 'text-red-400 font-semibold' : 'text-muted-foreground'}`}>
-                        {isOverdue ? '⚠️ ' : ''}{d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })}
+                        {isOverdue ? '⚠️ ' : ''}{d.toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}
                         {' · '}
-                        {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        {d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                       </span>
                     </div>
                     <p className={`text-xs font-semibold truncate ${ev.status === 'ADIADO' ? 'text-amber-400/70 line-through' : 'text-foreground'}`}>
@@ -1231,7 +1231,7 @@ export default function AgendaPage() {
                       {EVENT_TYPES.find(t => t.id === ev.type)?.emoji} {ev.title}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {new Date(ev.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {new Date(ev.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}
                       {ev.assigned_user ? ` · ${ev.assigned_user.name}` : ''}
                     </p>
                   </button>
@@ -1383,7 +1383,7 @@ export default function AgendaPage() {
                             <div className="flex flex-wrap gap-x-2 text-[10px] text-muted-foreground mb-2">
                               <span className="flex items-center gap-0.5">
                                 <Clock size={9} />
-                                {new Date(ev.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                                {new Date(ev.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', timeZone: 'UTC' })}
                               </span>
                               {ev.assigned_user && <span>· {ev.assigned_user.name}</span>}
                               {ev.lead && <span>· {ev.lead.name || ev.lead.phone}</span>}
@@ -1458,7 +1458,7 @@ export default function AgendaPage() {
             <span className="text-xs font-bold text-foreground truncate">{hoverTooltip.event.title}</span>
           </div>
           <div className="space-y-0.5 text-[11px] text-muted-foreground">
-            <p>🕐 {new Date(hoverTooltip.event.start_at).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
+            <p>🕐 {new Date(hoverTooltip.event.start_at).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}</p>
             {hoverTooltip.event.location && <p>📍 {hoverTooltip.event.location}</p>}
             {hoverTooltip.event.lead && <p>👤 {hoverTooltip.event.lead.name || hoverTooltip.event.lead.phone}</p>}
             {hoverTooltip.event.assigned_user && <p>⚖️ {hoverTooltip.event.assigned_user.name}</p>}
@@ -1485,9 +1485,9 @@ export default function AgendaPage() {
                 {EVENT_TYPES.find(t => t.id === reminderToast.type)?.emoji} {reminderToast.title}
               </p>
               <p className="text-[11px] text-muted-foreground">
-                {new Date(reminderToast.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                {new Date(reminderToast.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                 {' - '}
-                {new Date(reminderToast.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}
+                {new Date(reminderToast.start_at).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', timeZone: 'UTC' })}
               </p>
             </div>
             <button onClick={() => setReminderToast(null)} className="p-1 text-muted-foreground hover:text-foreground">
@@ -1562,7 +1562,7 @@ export default function AgendaPage() {
                   </div>
                   {conflictWarning.map(c => (
                     <p key={c.id} className="text-xs text-amber-400 ml-5">
-                      {c.title} ({new Date(c.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - {new Date(c.end_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})
+                      {c.title} ({new Date(c.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} - {new Date(c.end_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })})
                     </p>
                   ))}
                   <button
