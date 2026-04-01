@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useNextCalendarApp, ScheduleXCalendar } from '@schedule-x/react';
 import { createViewDay, createViewWeek, createViewMonthGrid } from '@schedule-x/calendar';
 import { createEventsServicePlugin } from '@schedule-x/events-service';
@@ -317,8 +317,19 @@ function MiniCalendar({ onDateSelect }: { onDateSelect: (dateStr: string) => voi
 
 export default function AgendaPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const activeTab = (searchParams.get('tab') as 'calendar' | 'tasks') || 'calendar';
+
+  // Lê o tab da URL no client side sem useSearchParams (evita prerender error do Next.js)
+  const [activeTab, setActiveTab] = useState<'calendar' | 'tasks'>('calendar');
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'tasks') setActiveTab('tasks');
+  }, []);
+
+  const switchTab = (tab: 'calendar' | 'tasks') => {
+    setActiveTab(tab);
+    const url = tab === 'calendar' ? '/atendimento/agenda' : '/atendimento/agenda?tab=tasks';
+    router.push(url, { scroll: false });
+  };
 
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -962,14 +973,14 @@ export default function AgendaPage() {
         {/* Barra de abas */}
         <div className="shrink-0 flex items-center gap-1 px-4 pt-3 pb-0 border-b border-border bg-card/30">
           <button
-            onClick={() => router.push('/atendimento/agenda')}
+            onClick={() => switchTab('calendar')}
             className="flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-sm font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/60"
           >
             <CalendarViewIcon size={14} />
             Calendário
           </button>
           <button
-            onClick={() => router.push('/atendimento/agenda?tab=tasks')}
+            onClick={() => switchTab('tasks')}
             className="flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-sm font-medium transition-colors border-b-2 border-primary text-primary"
           >
             <CheckSquare size={14} />
@@ -990,14 +1001,14 @@ export default function AgendaPage() {
       {/* Barra de abas */}
       <div className="shrink-0 flex items-center gap-1 px-4 pt-3 pb-0 border-b border-border bg-card/30">
         <button
-          onClick={() => router.push('/atendimento/agenda')}
+          onClick={() => switchTab('calendar')}
           className="flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-sm font-medium transition-colors border-b-2 border-primary text-primary"
         >
           <CalendarViewIcon size={14} />
           Calendário
         </button>
         <button
-          onClick={() => router.push('/atendimento/agenda?tab=tasks')}
+          onClick={() => switchTab('tasks')}
           className="flex items-center gap-1.5 px-3 py-2 rounded-t-lg text-sm font-medium transition-colors text-muted-foreground hover:text-foreground hover:bg-accent/60"
         >
           <CheckSquare size={14} />
