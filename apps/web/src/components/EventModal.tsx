@@ -172,7 +172,7 @@ export function EventModal({ caseId, lawyerId = '', users, interns = [], onClose
 
   const handleSave = async () => {
     if (!title.trim() || !date) return;
-    if (!allDay && (!startTime || !endTime)) {
+    if (!allDay && (!startTime || (!isPrazo && !endTime))) {
       setTimeError(true);
       return;
     }
@@ -188,7 +188,11 @@ export function EventModal({ caseId, lawyerId = '', users, interns = [], onClose
       const startISO = allDay
         ? new Date(Date.UTC(...(date.split('-').map(Number) as [number, number, number]), 0, 0, 0)).toISOString()
         : localInputToISO(`${date} ${startTime}`);
-      const endISO = allDay ? undefined : localInputToISO(`${date} ${endTime}`);
+      const endISO = allDay
+        ? undefined
+        : isPrazo
+          ? new Date(new Date(startISO).getTime() + 30 * 60000).toISOString()
+          : localInputToISO(`${date} ${endTime}`);
 
       // ── Evento principal — advogado / responsável ──
       await api.post('/calendar/events', {
@@ -352,19 +356,23 @@ export function EventModal({ caseId, lawyerId = '', users, interns = [], onClose
                       onChange={e => { setStartTime(e.target.value); if (e.target.value) setTimeError(false); }}
                       className={`w-28 px-3 py-2 rounded-xl border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/25 ${timeError && !startTime ? 'border-red-400 ring-2 ring-red-400/25' : 'border-border'}`}
                     />
-                    <span className="flex items-center text-muted-foreground text-xs">até</span>
-                    <input
-                      type="time"
-                      value={endTime}
-                      onChange={e => { setEndTime(e.target.value); if (e.target.value) setTimeError(false); }}
-                      className={`w-28 px-3 py-2 rounded-xl border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/25 ${timeError && !endTime ? 'border-red-400 ring-2 ring-red-400/25' : 'border-border'}`}
-                    />
+                    {!isPrazo && (
+                      <>
+                        <span className="flex items-center text-muted-foreground text-xs">até</span>
+                        <input
+                          type="time"
+                          value={endTime}
+                          onChange={e => { setEndTime(e.target.value); if (e.target.value) setTimeError(false); }}
+                          className={`w-28 px-3 py-2 rounded-xl border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/25 ${timeError && !endTime ? 'border-red-400 ring-2 ring-red-400/25' : 'border-border'}`}
+                        />
+                      </>
+                    )}
                   </>
                 )}
               </div>
               {timeError && !allDay && (
                 <p className="text-xs text-red-400 flex items-center gap-1">
-                  <AlertTriangle size={11} /> Horário de início e fim são obrigatórios
+                  <AlertTriangle size={11} /> {isPrazo ? 'Horário de início é obrigatório' : 'Horário de início e fim são obrigatórios'}
                 </p>
               )}
             </div>
