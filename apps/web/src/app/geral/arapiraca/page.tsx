@@ -15,7 +15,6 @@ const staticContent: LPTemplateContent = {
     mobileSubtitle: "Atendimento jurídico em Arapiraca e online para todo Brasil. Analisamos seu caso sem compromisso.",
     ctaText: "Falar com advogado",
     ctaLink: "https://wa.me/5582996390799",
-    secondarySubtitle: "+10 anos de experiência · Atendimento presencial em Arapiraca e digital em todo o Brasil",
   },
   steps: [
     {
