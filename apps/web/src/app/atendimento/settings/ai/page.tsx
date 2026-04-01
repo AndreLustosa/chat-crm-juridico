@@ -114,6 +114,7 @@ export default function AiSettingsPage() {
   const [djenModel, setDjenModel] = useState('gpt-4o-mini');
   const [djenPrompt, setDjenPrompt] = useState('');
   const [showDjenPrompt, setShowDjenPrompt] = useState(false);
+  const [adminBotEnabled, setAdminBotEnabled] = useState(true);
   const [cooldownSeconds, setCooldownSeconds] = useState(8);
   const [isConfigured, setIsConfigured] = useState(false);
   const [isAdminKeyConfigured, setIsAdminKeyConfigured] = useState(false);
@@ -163,6 +164,7 @@ export default function AiSettingsPage() {
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
       setDjenPrompt(configRes.data.djenPrompt || '');
+      setAdminBotEnabled(configRes.data.adminBotEnabled ?? true);
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
       setSkills(skillsRes.data);
       setTtsEnabled(ttsRes.data.enabled ?? false);
@@ -181,7 +183,7 @@ export default function AiSettingsPage() {
   const handleSaveConfig = async () => {
     setSavingConfig(true);
     try {
-      const payload: any = { defaultModel, djenModel, djenPrompt, cooldownSeconds };
+      const payload: any = { defaultModel, djenModel, djenPrompt, adminBotEnabled, cooldownSeconds };
       if (apiKey.trim())       payload.apiKey         = apiKey.trim();
       if (adminKey.trim())     payload.adminKey       = adminKey.trim();
       if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
@@ -458,6 +460,26 @@ export default function AiSettingsPage() {
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Admin Command Bot */}
+              <div className="flex items-center justify-between py-1">
+                <div className="space-y-0.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <span>🤖</span> Bot de Comando Admin (WhatsApp)
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Permite controlar o CRM enviando mensagens para o número do escritório.
+                    {!adminBotEnabled && <span className="text-amber-500 font-semibold ml-1">Desativado — admins serão atendidos como clientes normais.</span>}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAdminBotEnabled((v) => !v)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${adminBotEnabled ? 'bg-primary' : 'bg-muted'}`}
+                >
+                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${adminBotEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
               </div>
 
               {/* Cooldown entre respostas da IA */}

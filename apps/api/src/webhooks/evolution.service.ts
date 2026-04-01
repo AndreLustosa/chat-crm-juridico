@@ -171,7 +171,7 @@ export class EvolutionService {
       // ── Admin Command Bot ──────────────────────────────────────────────────
       // Mensagens vindas de um admin/advogado do sistema são interceptadas aqui
       // para serem processadas como comandos CRM via IA (function calling).
-      if (!isFromMe && messageContentCheck) {
+      if (!isFromMe && messageContentCheck && await this.adminBotService.isEnabled()) {
         const sessionKey = `${instanceName}:${phone}`;
         if (this.adminBotService.isAdminCommand(sessionKey, messageContentCheck)) {
           const adminUser = await this.adminBotService.findAdminByPhone(phone);

@@ -29,6 +29,7 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
   private readonly sessions = new Map<string, AdminBotSession>();
   private openai: OpenAI | null = null;
   private cleanupTimer: NodeJS.Timeout | null = null;
+  private enabledCache: { value: boolean; expiry: number } | null = null;
 
   /** Palavras-chave que identificam intenção de comando admin */
   private static readonly COMMAND_KEYWORDS = [
@@ -91,6 +92,23 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
    * Detecta se o texto parece ser um comando administrativo.
    * Retorna true se já há sessão ativa (conversa em andamento) ou se contém palavras-chave.
    */
+  /** Verifica se o Admin Bot está habilitado no banco (cache de 60s) */
+  async isEnabled(): Promise<boolean> {
+    const now = Date.now();
+    if (this.enabledCache && now < this.enabledCache.expiry) {
+      return this.enabledCache.value;
+    }
+    const row = await this.prisma.globalSetting.findUnique({ where: { key: 'ADMIN_BOT_ENABLED' } });
+    const value = row?.value !== 'false'; // padrão: habilitado
+    this.enabledCache = { value, expiry: now + 60_000 };
+    return value;
+  }
+
+  /** Invalida o cache de enabled (usado ao salvar a config) */
+  clearEnabledCache() {
+    this.enabledCache = null;
+  }
+
   isAdminCommand(sessionKey: string, text: string): boolean {
     // Bot desativado (OPENAI_API_KEY ausente no ambiente) — não interceptar
     if (!this.openai) return false;
