@@ -8,6 +8,7 @@ import { LeadsService } from '../leads/leads.service';
 import { InboxesService } from '../inboxes/inboxes.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { FollowupService } from '../followup/followup.service';
+import { AdminBotService } from '../admin-bot/admin-bot.service';
 
 interface EvolutionWebhookPayload {
   event: string;
@@ -83,6 +84,7 @@ export class EvolutionService {
     @InjectQueue('ai-jobs') private aiQueue: Queue,
     private whatsappService: WhatsappService,
     private moduleRef: ModuleRef,
+    private adminBotService: AdminBotService,
   ) {}
 
   async handleMessagesUpsert(payload: EvolutionWebhookPayload) {
@@ -160,6 +162,33 @@ export class EvolutionService {
       // Only use it as the contact name for incoming messages.
       const isFromMe = key.fromMe === true;
       const pushName = !isFromMe ? ((data.pushName as string) || null) : null;
+      const externalMessageIdCheck = key.id as string;
+      const messageContentCheck =
+        (data.message?.conversation as string) ||
+        (data.message?.extendedTextMessage?.text as string) ||
+        '';
+
+      // ── Admin Command Bot ──────────────────────────────────────────────────
+      // Mensagens vindas de um admin/advogado do sistema são interceptadas aqui
+      // para serem processadas como comandos CRM via IA (function calling).
+      if (!isFromMe && messageContentCheck) {
+        const sessionKey = `${instanceName}:${phone}`;
+        if (this.adminBotService.isAdminCommand(sessionKey, messageContentCheck)) {
+          const adminUser = await this.adminBotService.findAdminByPhone(phone);
+          if (adminUser && instanceName) {
+            this.logger.log(`[ADMIN-BOT] Comando do admin ${phone} interceptado: "${messageContentCheck.substring(0, 60)}"`);
+            await this.adminBotService.handle(
+              instanceName,
+              phone,
+              messageContentCheck,
+              adminUser.id,
+              adminUser.tenant_id,
+            ).catch((err) => this.logger.error(`[ADMIN-BOT] Erro ao processar comando: ${err.message}`));
+            continue; // Não processar como mensagem de cliente
+          }
+        }
+      }
+      // ── Fim Admin Command Bot ──────────────────────────────────────────────
       const externalMessageId = key.id as string;
       const messageContent =
         (data.message?.conversation as string) ||
