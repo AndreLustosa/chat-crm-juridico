@@ -112,6 +112,8 @@ export default function AiSettingsPage() {
   const [adminKey, setAdminKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
   const [djenModel, setDjenModel] = useState('gpt-4o-mini');
+  const [djenPrompt, setDjenPrompt] = useState('');
+  const [showDjenPrompt, setShowDjenPrompt] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(8);
   const [isConfigured, setIsConfigured] = useState(false);
   const [isAdminKeyConfigured, setIsAdminKeyConfigured] = useState(false);
@@ -160,6 +162,7 @@ export default function AiSettingsPage() {
       setIsAnthropicKeyConfigured(configRes.data.isAnthropicKeyConfigured ?? false);
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
+      setDjenPrompt(configRes.data.djenPrompt || '');
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
       setSkills(skillsRes.data);
       setTtsEnabled(ttsRes.data.enabled ?? false);
@@ -178,7 +181,7 @@ export default function AiSettingsPage() {
   const handleSaveConfig = async () => {
     setSavingConfig(true);
     try {
-      const payload: any = { defaultModel, djenModel, cooldownSeconds };
+      const payload: any = { defaultModel, djenModel, djenPrompt, cooldownSeconds };
       if (apiKey.trim())       payload.apiKey         = apiKey.trim();
       if (adminKey.trim())     payload.adminKey       = adminKey.trim();
       if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
@@ -417,6 +420,44 @@ export default function AiSettingsPage() {
                   Modelo usado pelo botão <strong>Analisar IA</strong> na página de publicações DJEN.
                   Modelos Anthropic exigem a API Key Anthropic configurada abaixo.
                 </p>
+              </div>
+
+              {/* Prompt DJEN */}
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowDjenPrompt((v) => !v)}
+                  className="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors w-full text-left"
+                >
+                  <span>⚖️</span> Prompt de análise DJEN
+                  <span className="ml-auto text-[10px] font-normal text-primary">
+                    {showDjenPrompt ? '▲ fechar' : '▼ editar'}
+                  </span>
+                </button>
+                {showDjenPrompt && (
+                  <div className="space-y-1.5">
+                    <textarea
+                      value={djenPrompt}
+                      onChange={(e) => setDjenPrompt(e.target.value)}
+                      rows={14}
+                      placeholder="Deixe vazio para usar o prompt padrão do sistema."
+                      className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-xs font-mono outline-none focus:border-primary/50 transition-all resize-y"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Prompt do sistema enviado à IA ao analisar publicações DJEN. Deixe vazio para usar o prompt padrão.<br />
+                      <strong>Atenção:</strong> o retorno deve ser sempre um JSON com os campos obrigatórios (resumo, urgencia, event_type, data_audiencia, data_prazo, etc.).
+                    </p>
+                    {djenPrompt && (
+                      <button
+                        type="button"
+                        onClick={() => setDjenPrompt('')}
+                        className="text-[11px] text-destructive hover:underline"
+                      >
+                        Restaurar prompt padrão
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Cooldown entre respostas da IA */}

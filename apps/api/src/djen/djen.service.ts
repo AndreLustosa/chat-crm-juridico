@@ -689,7 +689,7 @@ export class DjenService {
       'JULGAMENTO', 'RECURSO', 'TRANSITADO', 'EXECUCAO', 'ENCERRADO',
     ];
 
-    const systemPrompt = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos abaixo. Extraia as informações DIRETAMENTE do texto da publicação quando disponíveis — não invente dados.
+    const DEFAULT_DJEN_PROMPT = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos abaixo. Extraia as informações DIRETAMENTE do texto da publicação quando disponíveis — não invente dados.
 
 Campos obrigatórios:
 - resumo: string (máx 3 frases, PT-BR, linguagem direta para o advogado)
@@ -713,6 +713,10 @@ Campos de extração (null se não encontrado no texto):
 
 Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
 Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.`;
+
+    // Usa prompt customizado do banco (se existir) ou o prompt padrão
+    const customPrompt = await this.settings.getDjenPrompt();
+    const systemPrompt = customPrompt || DEFAULT_DJEN_PROMPT;
 
     const userPrompt = `PUBLICAÇÃO DO DJEN
 Data: ${new Date(pub.data_disponibilizacao).toLocaleDateString('pt-BR')}

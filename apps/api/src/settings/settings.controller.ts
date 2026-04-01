@@ -89,12 +89,13 @@ export class SettingsController {
 
   @Post('ai-config')
   @Roles('ADMIN')
-  async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; cooldownSeconds?: number }) {
+  async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; djenPrompt?: string; cooldownSeconds?: number }) {
     if (data.apiKey)    await this.settingsService.setAiConfig(data.apiKey);
     if (data.adminKey)  await this.settingsService.setAdminKey(data.adminKey);
     if (data.anthropicApiKey) await this.settingsService.upsert('ANTHROPIC_API_KEY', data.anthropicApiKey);
     if (data.defaultModel) await this.settingsService.setDefaultModel(data.defaultModel);
     if (data.djenModel)    await this.settingsService.setDjenModel(data.djenModel);
+    if (data.djenPrompt !== undefined) await this.settingsService.setDjenPrompt(data.djenPrompt);
     if (data.cooldownSeconds !== undefined) await this.settingsService.setCooldownSeconds(Number(data.cooldownSeconds));
     return { message: 'Configurações de IA salvas com sucesso' };
   }
