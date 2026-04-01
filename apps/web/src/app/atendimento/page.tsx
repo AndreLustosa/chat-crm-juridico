@@ -985,7 +985,9 @@ export default function Dashboard() {
               const res = await api.get(`/messages/conversation/${data.conversationId}`, {
                 params: { page: 1, limit: 100 },
               });
-              const fresh = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+              const rawFresh = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+              // API retorna DESC; revertemos para exibir em ordem cronológica
+              const fresh = [...rawFresh].reverse();
               setMessages(prev => {
                 // Preserva mensagens otimistas pendentes e mescla com as novas do banco
                 const optimistic = prev.filter(m => typeof m.id === 'string' && m.id.startsWith('optimistic_'));
@@ -1018,7 +1020,9 @@ export default function Dashboard() {
         const msgRes = await api.get(`/messages/conversation/${selectedId}`, {
           params: { page: 1, limit: 100 },
         });
-        const apiMessages = Array.isArray(msgRes.data) ? msgRes.data : (msgRes.data?.data || []);
+        // API retorna DESC (mais recentes primeiro); revertemos para exibir em ordem cronológica
+        const rawMessages = Array.isArray(msgRes.data) ? msgRes.data : (msgRes.data?.data || []);
+        const apiMessages = [...rawMessages].reverse();
 
         // Mescla mensagens da API com as que chegaram via socket durante o carregamento
         setMessages(prev => {
@@ -1099,7 +1103,9 @@ export default function Dashboard() {
       const res = await api.get(`/messages/conversation/${convId}`, {
         params: { page: nextPage, limit: 100 },
       });
-      const olderMsgs = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      const rawOlder = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      // API retorna DESC; revertemos para manter ordem cronológica ao fazer prepend
+      const olderMsgs = [...rawOlder].reverse();
       const scrollEl = scrollRef.current;
       const prevScrollHeight = scrollEl?.scrollHeight || 0;
       setMessages(prev => {

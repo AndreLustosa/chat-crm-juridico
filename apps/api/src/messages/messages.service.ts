@@ -77,7 +77,7 @@ export class MessagesService {
     const [data, total] = await Promise.all([
       this.prisma.message.findMany({
         where,
-        orderBy: { created_at: 'asc' },
+        orderBy: { created_at: 'desc' },
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,
         include: { media: true, reactions: true, skill: { select: { id: true, name: true, area: true } } },
