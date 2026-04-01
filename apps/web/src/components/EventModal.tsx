@@ -3,21 +3,28 @@
 /**
  * EventModal — Modal completo de criação de evento de calendário vinculado a um processo.
  * Compartilhado entre TabTarefas (workspace) e processos/page.tsx (painel lateral).
+ *
+ * Lógica especial para PRAZO:
+ * - Responsável padrão = advogado do processo (lawyerId)
+ * - Opção de delegar execução a outro usuário (estagiário, etc.)
+ * - Ao delegar, cria DOIS eventos:
+ *     1. Estagiário — prazo interno: 2 dias úteis ANTES do prazo real
+ *     2. Advogado   — prazo real (data original)
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   X, MapPin, User, Bell, ChevronDown, AlertTriangle, Flag,
-  Loader2, Calendar as CalendarIcon,
+  Loader2, Calendar as CalendarIcon, UserPlus, Lock,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 
-// ─── Tipos ──────────────────────────────────────────────────────────────────
+// ─── Tipos ───────────────────────────────────────────────────────────────────
 
-export interface UserOption { id: string; name: string; }
+export interface UserOption { id: string; name: string; role?: string; }
 
-// ─── Constantes ─────────────────────────────────────────────────────────────
+// ─── Constantes ──────────────────────────────────────────────────────────────
 
 export const EVENT_TYPES = [
   { id: 'TAREFA',    label: 'Tarefa',    emoji: '✅', color: 'text-green-400',  bg: 'bg-green-400/10'  },
@@ -41,7 +48,7 @@ const REMINDER_OPTIONS = [
   { value: 1440, label: '1 dia antes'  },
 ];
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function typeInfo(type: string) {
   return EVENT_TYPES.find(t => t.id === type) ?? EVENT_TYPES[4];
@@ -52,6 +59,25 @@ function localInputToISO(local: string): string {
   const [y, mo, d] = datePart.split('-').map(Number);
   const [h, mi] = timePart.split(':').map(Number);
   return new Date(Date.UTC(y, mo - 1, d, h, mi, 0)).toISOString();
+}
+
+/** Subtrai N dias úteis (seg–sex) de uma data ISO. Retorna nova data ISO. */
+function subtractBusinessDays(isoDate: string, days: number): string {
+  const d = new Date(isoDate);
+  let subtracted = 0;
+  while (subtracted < days) {
+    d.setUTCDate(d.getUTCDate() - 1);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) subtracted++;
+  }
+  return d.toISOString();
+}
+
+/** Formata ISO → "dd/mm/aaaa HH:MM" para exibição */
+function formatISO(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -68,24 +94,63 @@ interface EventModalProps {
 
 export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }: EventModalProps) {
   const now = new Date();
-  const padded = (n: number) => String(n).padStart(2, '0');
-  const todayLocal = `${now.getUTCFullYear()}-${padded(now.getUTCMonth() + 1)}-${padded(now.getUTCDate())}`;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const todayLocal = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
 
-  const [type, setType] = useState<string>('TAREFA');
-  const [title, setTitle] = useState('');
+  const [type, setType]               = useState<string>('TAREFA');
+  const [title, setTitle]             = useState('');
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState(todayLocal);
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [timeError, setTimeError] = useState(false);
-  const [allDay, setAllDay] = useState(false);
-  const [location, setLocation] = useState('');
-  const [priority, setPriority] = useState('NORMAL');
+  const [date, setDate]               = useState(todayLocal);
+  const [startTime, setStartTime]     = useState('');
+  const [endTime, setEndTime]         = useState('');
+  const [timeError, setTimeError]     = useState(false);
+  const [allDay, setAllDay]           = useState(false);
+  const [location, setLocation]       = useState('');
+  const [priority, setPriority]       = useState<string>('NORMAL');
   const [assignedUserId, setAssignedUserId] = useState(lawyerId);
-  const [reminders, setReminders] = useState<{ minutes_before: number; channel: string }[]>([
+  const [reminders, setReminders]     = useState<{ minutes_before: number; channel: string }[]>([
     { minutes_before: 30, channel: 'WHATSAPP' },
   ]);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]           = useState(false);
+
+  // ── Delegação (só para PRAZO) ──────────────────────────────────
+  const [delegate, setDelegate]           = useState(false);
+  const [delegateUserId, setDelegateUserId] = useState('');
+
+  // Quando tipo muda para PRAZO: força responsável = advogado e reseta delegação
+  useEffect(() => {
+    if (type === 'PRAZO') {
+      setAssignedUserId(lawyerId);
+      setDelegate(false);
+      setDelegateUserId('');
+      setPriority('ALTA');
+    }
+  }, [type, lawyerId]);
+
+  // Quando desativa delegação, reseta o delegado
+  useEffect(() => {
+    if (!delegate) setDelegateUserId('');
+  }, [delegate]);
+
+  const isPrazo = type === 'PRAZO';
+
+  // Nome do advogado do processo
+  const lawyerName = users.find(u => u.id === lawyerId)?.name ?? 'Advogado responsável';
+
+  // Usuários delegáveis: todos exceto o próprio advogado
+  const delegableUsers = users.filter(u => u.id !== lawyerId);
+
+  // Preview do prazo interno do delegado (2 dias úteis antes)
+  const delegateDuePreview = (() => {
+    if (!delegate || !delegateUserId || !date) return null;
+    try {
+      const realISO = allDay
+        ? new Date(Date.UTC(...(date.split('-').map(Number) as [number, number, number]), 0, 0, 0)).toISOString()
+        : startTime ? localInputToISO(`${date} ${startTime}`) : null;
+      if (!realISO) return null;
+      return formatISO(subtractBusinessDays(realISO, 2));
+    } catch { return null; }
+  })();
 
   const toggleReminder = (minutes: number, channel: string) => {
     const key = `${minutes}-${channel}`;
@@ -102,14 +167,21 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
       setTimeError(true);
       return;
     }
+    if (isPrazo && delegate && !delegateUserId) {
+      showError('Selecione o usuário para delegar o prazo');
+      return;
+    }
     setTimeError(false);
     setSaving(true);
+
     try {
+      // ── Data/hora principal (prazo real) ──
       const startISO = allDay
         ? new Date(Date.UTC(...(date.split('-').map(Number) as [number, number, number]), 0, 0, 0)).toISOString()
         : localInputToISO(`${date} ${startTime}`);
       const endISO = allDay ? undefined : localInputToISO(`${date} ${endTime}`);
 
+      // ── Evento principal — advogado / responsável ──
       await api.post('/calendar/events', {
         type,
         title: title.trim(),
@@ -124,7 +196,38 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
         reminders: reminders.length > 0 ? reminders : undefined,
       });
 
-      showSuccess('Evento criado');
+      // ── Evento interno do delegado (2 dias úteis antes) ──
+      if (isPrazo && delegate && delegateUserId) {
+        const delegateStartISO = subtractBusinessDays(startISO, 2);
+        const delegateEndISO   = endISO
+          ? subtractBusinessDays(endISO, 2)
+          : new Date(new Date(delegateStartISO).getTime() + 30 * 60000).toISOString();
+
+        const delegateName = users.find(u => u.id === delegateUserId)?.name ?? 'Delegado';
+
+        await api.post('/calendar/events', {
+          type: 'PRAZO',
+          title: `[Delegado] ${title.trim()}`,
+          description: `Prazo interno para entrega ao advogado ${lawyerName}.\nPrazo final do processo: ${formatISO(startISO)}.\n\n${description.trim()}`.trim(),
+          start_at: delegateStartISO,
+          end_at: delegateEndISO,
+          all_day: allDay,
+          location: location.trim() || undefined,
+          priority: 'URGENTE',
+          assigned_user_id: delegateUserId,
+          legal_case_id: caseId,
+          reminders: [
+            { minutes_before: 1440, channel: 'WHATSAPP' },
+            { minutes_before: 1440, channel: 'PUSH' },
+            { minutes_before: 60,   channel: 'PUSH' },
+          ],
+        });
+
+        showSuccess(`✅ Prazo criado! Evento delegado a ${delegateName} (2 dias úteis antes).`);
+      } else {
+        showSuccess('Evento criado');
+      }
+
       onCreated();
       onClose();
     } catch {
@@ -272,7 +375,7 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
               />
             </div>
 
-            {/* Prioridade e Responsável */}
+            {/* Prioridade + Responsável */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1">
@@ -295,22 +398,103 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1">
                   <User size={11} /> Responsável
+                  {isPrazo && <Lock size={9} className="text-muted-foreground/50 ml-0.5" title="Auto-atribuído ao advogado do processo" />}
                 </label>
-                <div className="relative">
-                  <select
-                    value={assignedUserId}
-                    onChange={e => setAssignedUserId(e.target.value)}
-                    className="w-full pl-3 pr-7 py-2 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/25 appearance-none"
-                  >
-                    <option value="">Nenhum</option>
-                    {users.map(u => (
-                      <option key={u.id} value={u.id}>{u.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                </div>
+
+                {isPrazo ? (
+                  /* PRAZO: responsável fixo = advogado do processo */
+                  <div className="w-full px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/5 text-sm text-amber-300 flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded-full bg-amber-500/20 flex items-center justify-center text-[10px] font-bold text-amber-400 shrink-0">
+                      {lawyerName.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="truncate">{lawyerName}</span>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <select
+                      value={assignedUserId}
+                      onChange={e => setAssignedUserId(e.target.value)}
+                      className="w-full pl-3 pr-7 py-2 rounded-xl border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/25 appearance-none"
+                    >
+                      <option value="">Nenhum</option>
+                      {users.map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* ── Seção de delegação — exclusiva para PRAZO ── */}
+            {isPrazo && (
+              <div className={`rounded-xl border transition-all ${
+                delegate ? 'border-sky-500/30 bg-sky-500/5' : 'border-border bg-accent/20'
+              }`}>
+                {/* Toggle de delegação */}
+                <button
+                  type="button"
+                  onClick={() => setDelegate(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-2">
+                    <UserPlus size={13} className={delegate ? 'text-sky-400' : 'text-muted-foreground'} />
+                    <span className={`text-xs font-semibold ${delegate ? 'text-sky-300' : 'text-muted-foreground'}`}>
+                      Delegar execução a outro usuário
+                    </span>
+                  </div>
+                  {/* Toggle pill */}
+                  <div className={`w-8 h-4 rounded-full transition-colors relative ${delegate ? 'bg-sky-500' : 'bg-muted'}`}>
+                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${delegate ? 'left-4' : 'left-0.5'}`} />
+                  </div>
+                </button>
+
+                {/* Corpo da delegação */}
+                {delegate && (
+                  <div className="px-3 pb-3 space-y-2.5 border-t border-sky-500/20 pt-2.5">
+                    <div>
+                      <label className="text-[10px] font-bold text-sky-400/80 uppercase tracking-wider mb-1 block">
+                        Delegar para
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={delegateUserId}
+                          onChange={e => setDelegateUserId(e.target.value)}
+                          className="w-full pl-3 pr-7 py-2 rounded-xl border border-sky-500/30 bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-sky-500/25 appearance-none"
+                        >
+                          <option value="">Selecionar usuário…</option>
+                          {delegableUsers.map(u => (
+                            <option key={u.id} value={u.id}>{u.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      </div>
+                    </div>
+
+                    {/* Aviso de prazo interno */}
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 space-y-0.5">
+                      <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                        Prazo interno (2 dias úteis antes)
+                      </p>
+                      {delegateDuePreview ? (
+                        <p className="text-xs text-amber-300 font-semibold">
+                          📅 {delegateDuePreview}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground/60">
+                          Defina a data e hora do prazo para ver o prazo interno
+                        </p>
+                      )}
+                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                        Será criado um evento separado com prazo URGENTE para o usuário delegado.
+                        O advogado mantém o prazo real.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Lembretes */}
             <div>
@@ -348,21 +532,30 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
           </div>
 
           {/* Footer */}
-          <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:bg-accent transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!title.trim() || !date || saving}
-              className="px-5 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center gap-1.5"
-            >
-              {saving ? <Loader2 size={13} className="animate-spin" /> : <CalendarIcon size={13} />}
-              Criar evento
-            </button>
+          <div className="shrink-0 flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
+            {/* Resumo quando há delegação */}
+            {isPrazo && delegate && delegateUserId && (
+              <p className="text-[10px] text-sky-400/80 flex items-center gap-1">
+                <UserPlus size={10} />
+                Serão criados <strong>2 eventos</strong>
+              </p>
+            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:bg-accent transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={!title.trim() || !date || saving}
+                className="px-5 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {saving ? <Loader2 size={13} className="animate-spin" /> : <CalendarIcon size={13} />}
+                Criar evento
+              </button>
+            </div>
           </div>
         </div>
       </div>
