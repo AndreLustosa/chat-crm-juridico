@@ -9,6 +9,8 @@ import Anthropic from '@anthropic-ai/sdk';
 
 // ─── Formatação de datas em pt-BR ────────────────────────────────────────────
 
+// App usa UTC "naive" — horários salvos no banco como UTC = horário local de Maceió.
+// Por isso exibimos em UTC puro (sem conversão de fuso) para não subtrair 3h.
 function formatDateTime(date: Date): string {
   return date.toLocaleString('pt-BR', {
     weekday: 'long',
@@ -17,7 +19,7 @@ function formatDateTime(date: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'America/Maceio',
+    timeZone: 'UTC',
   });
 }
 
