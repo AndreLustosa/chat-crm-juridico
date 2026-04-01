@@ -92,6 +92,8 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
    * Retorna true se já há sessão ativa (conversa em andamento) ou se contém palavras-chave.
    */
   isAdminCommand(sessionKey: string, text: string): boolean {
+    // Bot desativado (OPENAI_API_KEY ausente no ambiente) — não interceptar
+    if (!this.openai) return false;
     // Se há sessão ativa, qualquer mensagem é parte do comando
     if (this.sessions.has(sessionKey)) return true;
     // Verifica palavras-chave de comando

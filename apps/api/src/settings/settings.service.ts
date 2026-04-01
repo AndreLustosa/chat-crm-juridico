@@ -641,6 +641,7 @@ Você prepara o caso. O advogado decide.
       }
       skills = await (this.prisma as any).promptSkill.findMany({
         orderBy: [{ order: 'asc' }, { id: 'asc' }],
+        include: { tools: { where: { active: true } }, assets: true },
       });
     }
 
