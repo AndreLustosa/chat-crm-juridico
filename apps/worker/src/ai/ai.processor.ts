@@ -931,6 +931,28 @@ export class AiProcessor extends WorkerHost {
         return;
       }
 
+      // 3c. Operador humano check — se um humano respondeu nas últimas 4 horas,
+      // a IA cede o atendimento e desativa ai_mode para não interferir.
+      // Mensagens de IA/sistema têm external_message_id com prefixo "sys_".
+      // Mensagens de operador humano são outbound SEM prefixo "sys_".
+      const fourHoursAgo = Date.now() - 4 * 3_600_000;
+      const humanRecentlyReplied = convo.messages.some(
+        (m: any) =>
+          m.direction === 'out' &&
+          !m.external_message_id?.startsWith('sys_') &&
+          new Date(m.created_at).getTime() > fourHoursAgo,
+      );
+      if (humanRecentlyReplied) {
+        this.logger.log(
+          `[AI] Operador humano respondeu recentemente — IA cedendo atendimento e desativando ai_mode para conv ${conversation_id}`,
+        );
+        await this.prisma.conversation.update({
+          where: { id: conversation_id },
+          data: { ai_mode: false },
+        });
+        return;
+      }
+
       // 4. (Debounce gerenciado no enqueue — evolution.service.ts)
       // O job só chega aqui após o silêncio do lead (delay configurável em Ajustes IA).
       // Não há mais cooldown guard aqui; o processor simplesmente processa todas as
