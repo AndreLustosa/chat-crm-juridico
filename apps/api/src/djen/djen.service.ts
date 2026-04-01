@@ -672,7 +672,7 @@ export class DjenService {
       where: { id },
       include: {
         legal_case: {
-          select: { case_number: true, legal_area: true, tracking_stage: true, lead: { select: { name: true } } },
+          select: { case_number: true, legal_area: true, tracking_stage: true, lead: { select: { id: true, name: true } } },
         },
       },
     });
@@ -771,7 +771,7 @@ ${pub.conteudo.slice(0, 2000)}`;
     let parsed: any = {};
     try { parsed = JSON.parse(raw); } catch { parsed = {}; }
 
-    return {
+    const result = {
       resumo: parsed.resumo || 'Não foi possível gerar o resumo.',
       urgencia: (['URGENTE', 'NORMAL', 'BAIXA'].includes(parsed.urgencia) ? parsed.urgencia : 'NORMAL') as any,
       tipo_acao: parsed.tipo_acao || 'Verificar publicação',
@@ -791,5 +791,66 @@ ${pub.conteudo.slice(0, 2000)}`;
       data_audiencia: parsed.data_audiencia || null,
       data_prazo: parsed.data_prazo || null,
     };
+
+    // Salva insights da análise na memória do lead para enriquecer contexto futuro da IA
+    const leadId = (pub.legal_case as any)?.lead?.id;
+    if (leadId) {
+      this.saveAnalysisToMemory(leadId, pub, result).catch(e =>
+        this.logger.warn(`[DJEN] Falha ao salvar análise na memória do lead ${leadId}: ${e.message}`),
+      );
+    }
+
+    return result;
+  }
+
+  /** Salva os insights da análise DJEN na AiMemory do lead */
+  private async saveAnalysisToMemory(leadId: string, pub: any, analysis: any): Promise<void> {
+    const pubDate = new Date(pub.data_disponibilizacao).toISOString().slice(0, 10);
+    const pubEntry = {
+      date: pubDate,
+      tipo: pub.tipo_comunicacao || 'Publicação',
+      assunto: pub.assunto || null,
+      resumo: analysis.resumo,
+      estagio: analysis.estagio_sugerido || null,
+      juizo: analysis.juizo || null,
+      parte_autora: analysis.parte_autora || null,
+      parte_rea: analysis.parte_rea || null,
+      urgencia: analysis.urgencia,
+    };
+
+    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } });
+    let facts: any = {};
+    try {
+      facts = existing?.facts_json
+        ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json)
+        : {};
+    } catch { facts = {}; }
+
+    const djenHistory: any[] = facts.djen_publications || [];
+    // Evitar duplicata (mesmo dia + mesmo tipo + mesmo assunto)
+    const isDuplicate = djenHistory.some(
+      d => d.date === pubEntry.date && d.tipo === pubEntry.tipo && d.assunto === pubEntry.assunto,
+    );
+    if (!isDuplicate) {
+      djenHistory.unshift(pubEntry); // mais recente primeiro
+      if (djenHistory.length > 15) djenHistory.splice(15);
+    }
+    facts.djen_publications = djenHistory;
+
+    const summaryLine = `[${pubDate}] ${pubEntry.tipo}${pubEntry.assunto ? ` — ${pubEntry.assunto}` : ''}: ${analysis.resumo}`;
+    const prevSummary = existing?.summary || '';
+    const newSummary = (summaryLine + (prevSummary ? '\n\n' + prevSummary : '')).slice(0, 2000);
+
+    if (existing) {
+      await this.prisma.aiMemory.update({
+        where: { lead_id: leadId },
+        data: { summary: newSummary, facts_json: facts, last_updated_at: new Date() },
+      });
+    } else {
+      await this.prisma.aiMemory.create({
+        data: { lead_id: leadId, summary: newSummary, facts_json: facts },
+      });
+    }
+    this.logger.log(`[DJEN] Análise salva na memória do lead ${leadId}`);
   }
 }

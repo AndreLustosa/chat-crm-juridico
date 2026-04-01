@@ -82,7 +82,7 @@ function templateAdvogado(event: any, minutesBefore: number): string {
 
 // ─── Montagem do contexto para a IA ──────────────────────────────────────────
 
-function buildContext(event: any, memory: any, legalCase: any, ficha: any): string {
+function buildContext(event: any, memory: any, legalCase: any, ficha: any, djenPubs?: any[]): string {
   const lines: string[] = [];
 
   // Evento
@@ -168,6 +168,19 @@ function buildContext(event: any, memory: any, legalCase: any, ficha: any): stri
       lines.push(`\n## FICHA TRABALHISTA`);
       fichaLines.forEach(l => lines.push(l));
     }
+  }
+
+  // Publicações DJEN (histórico das movimentações do processo)
+  if (djenPubs && djenPubs.length > 0) {
+    lines.push(`\n## HISTÓRICO DJEN (${djenPubs.length} publicação(ões) recente(s))`);
+    djenPubs.forEach((pub, idx) => {
+      const date = new Date(pub.data_disponibilizacao).toLocaleDateString('pt-BR');
+      lines.push(`\nPublicação ${idx + 1} — ${date}:`);
+      if (pub.tipo_comunicacao) lines.push(`  Tipo: ${pub.tipo_comunicacao}`);
+      if (pub.assunto) lines.push(`  Assunto: ${pub.assunto}`);
+      const snippet = (pub.conteudo || '').slice(0, 400);
+      if (snippet) lines.push(`  Conteúdo: ${snippet}${pub.conteudo?.length > 400 ? '…' : ''}`);
+    });
   }
 
   return lines.join('\n');
@@ -270,18 +283,27 @@ export class CalendarReminderWorker extends WorkerHost {
   private async sendWhatsAppReminders(event: any, minutesBefore: number) {
     const isAudiencia = event.type === 'AUDIENCIA';
 
-    // Carrega contexto adicional do cliente (memória + ficha)
+    // Carrega contexto adicional do cliente (memória + ficha + publicações DJEN)
     const leadId = event.lead?.id;
-    const [memory, ficha] = await Promise.all([
+    const legalCaseId = event.legal_case?.id;
+    const [memory, ficha, djenPubs] = await Promise.all([
       leadId
         ? this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }).catch(() => null)
         : null,
       leadId && (event.legal_case?.legal_area?.toUpperCase().includes('TRABALHIST'))
         ? this.prisma.fichaTrabalhista.findUnique({ where: { lead_id: leadId } }).catch(() => null)
         : null,
+      legalCaseId
+        ? (this.prisma as any).djenPublication.findMany({
+            where: { legal_case_id: legalCaseId },
+            orderBy: { data_disponibilizacao: 'desc' },
+            take: 5,
+            select: { tipo_comunicacao: true, assunto: true, conteudo: true, data_disponibilizacao: true },
+          }).catch(() => [])
+        : Promise.resolve([]),
     ]);
 
-    const context = buildContext(event, memory, event.legal_case, ficha);
+    const context = buildContext(event, memory, event.legal_case, ficha, djenPubs);
 
     // ── 1. Mensagem para o Advogado (sempre) ─────────────────────────
     if (event.assigned_user?.phone) {
@@ -398,14 +420,23 @@ export class CalendarReminderWorker extends WorkerHost {
     }
 
     const leadId = event.lead.id;
-    const [memory, ficha] = await Promise.all([
+    const legalCaseId = event.legal_case?.id;
+    const [memory, ficha, djenPubs] = await Promise.all([
       this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }).catch(() => null),
       event.legal_case?.legal_area?.toUpperCase().includes('TRABALHIST')
         ? this.prisma.fichaTrabalhista.findUnique({ where: { lead_id: leadId } }).catch(() => null)
         : null,
+      legalCaseId
+        ? (this.prisma as any).djenPublication.findMany({
+            where: { legal_case_id: legalCaseId },
+            orderBy: { data_disponibilizacao: 'desc' },
+            take: 5,
+            select: { tipo_comunicacao: true, assunto: true, conteudo: true, data_disponibilizacao: true },
+          }).catch(() => [])
+        : Promise.resolve([]),
     ]);
 
-    const context = buildContext(event, memory, event.legal_case, ficha);
+    const context = buildContext(event, memory, event.legal_case, ficha, djenPubs);
     const clientPhone = event.lead.phone.replace(/\D/g, '');
     const firstName = (event.lead.name || 'Cliente').split(' ')[0];
 
