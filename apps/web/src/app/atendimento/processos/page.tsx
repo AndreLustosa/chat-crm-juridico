@@ -1788,6 +1788,7 @@ function ProcessoDetailPanel({
                                                     title: preview.title,
                                                     description: preview.description || undefined,
                                                     legal_case_id: legalCase.id,
+                                                    lead_id: legalCase.lead?.id || undefined,
                                                     start_at: start.toISOString(),
                                                     end_at: new Date(start.getTime() + dur * 60000).toISOString(),
                                                     priority: preview.priority,
