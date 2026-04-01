@@ -1688,8 +1688,8 @@ function ProcessoDetailPanel({
                                     return base;
                                   })();
                                   const pad = (n: number) => String(n).padStart(2, '0');
-                                  const defaultDate = suggestedDate ? `${suggestedDate.getUTCFullYear()}-${pad(suggestedDate.getUTCMonth()+1)}-${pad(suggestedDate.getUTCDate())}` : '';
-                                  const defaultTime = suggestedDate ? `${pad(suggestedDate.getUTCHours())}:${pad(suggestedDate.getUTCMinutes())}` : '09:00';
+                                  const defaultDate = suggestedDate ? `${suggestedDate.getFullYear()}-${pad(suggestedDate.getMonth()+1)}-${pad(suggestedDate.getDate())}` : '';
+                                  const defaultTime = suggestedDate ? `${pad(suggestedDate.getHours())}:${pad(suggestedDate.getMinutes())}` : '09:00';
                                   const defaultPriority = analysis.urgencia === 'URGENTE' ? 'ALTA' : analysis.urgencia === 'BAIXA' ? 'BAIXA' : 'NORMAL';
                                   return (
                                     <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2.5 space-y-2">
@@ -1781,7 +1781,7 @@ function ProcessoDetailPanel({
                                                 try {
                                                   const [y, m, d] = preview.date.split('-').map(Number);
                                                   const [h, mi] = preview.time.split(':').map(Number);
-                                                  const start = new Date(Date.UTC(y, m-1, d, h, mi, 0));
+                                                  const start = new Date(y, m-1, d, h, mi, 0);
                                                   const dur = preview.type === 'AUDIENCIA' ? 60 : 30;
                                                   await api.post('/calendar/events', {
                                                     type: preview.type,
