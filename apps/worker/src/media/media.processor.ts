@@ -114,24 +114,33 @@ export class MediaProcessor extends WorkerHost {
 
     const remoteJid = `${phone}@s.whatsapp.net`;
 
-    // Busca com paginação — Evolution API v2 tem limite padrão por página
-    const PAGE_SIZE = 500;
-    const MAX_PAGES = 20;
+    // Evolution API v2.3+ retorna { messages: { total, pages, currentPage, records: [] } }
     let rawMessages: any[] = [];
     try {
-      for (let page = 1; page <= MAX_PAGES; page++) {
+      let currentPage = 1;
+      let totalPages = 1;
+      do {
         const response = await axios.post(
           `${apiUrl}/chat/findMessages/${instance_name}`,
-          { where: { key: { remoteJid } }, limit: PAGE_SIZE, page, offset: (page - 1) * PAGE_SIZE },
+          { where: { key: { remoteJid } }, page: currentPage },
           { headers: { apikey: apiKey } },
         );
-        const list: any[] = Array.isArray(response.data)
-          ? response.data
-          : response.data?.messages || response.data?.data || [];
-        if (!list.length) break;
-        rawMessages = rawMessages.concat(list);
-        if (list.length < PAGE_SIZE) break;
-      }
+        const data = response.data;
+        let records: any[];
+        if (Array.isArray(data)) {
+          records = data; totalPages = 1;
+        } else if (data?.messages?.records) {
+          records = data.messages.records;
+          totalPages = data.messages.pages ?? 1;
+        } else if (Array.isArray(data?.messages)) {
+          records = data.messages; totalPages = 1;
+        } else {
+          records = data?.data || []; totalPages = 1;
+        }
+        if (!records.length) break;
+        rawMessages = rawMessages.concat(records);
+        currentPage++;
+      } while (currentPage <= totalPages);
     } catch (e: any) {
       this.logger.warn(`[RESYNC] Falha ao buscar mensagens para ${phone}: ${e.message}`);
       return { imported: 0 };

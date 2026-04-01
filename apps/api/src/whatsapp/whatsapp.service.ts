@@ -322,52 +322,67 @@ export class WhatsappService {
   }
 
   async fetchMessages(instanceName: string, remoteJid: string): Promise<any[]> {
-    const PAGE_SIZE = 500; // Evolution API v2 aceita até ~1000 por página
-    const MAX_PAGES = 20;  // teto de segurança: até 10.000 mensagens por conversa
+    // Evolution API v2.3+ retorna: { messages: { total, pages, currentPage, records: [...] } }
+    // Versões mais antigas retornam um array direto — tratamos os dois formatos.
     let allMessages: any[] = [];
 
     try {
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const data = await this.request(
+      let currentPage = 1;
+      let totalPages = 1;
+
+      do {
+        const data: any = await this.request(
           'POST',
           `chat/findMessages/${instanceName}`,
-          {
-            where: { key: { remoteJid } },
-            limit: PAGE_SIZE,
-            page,
-            offset: (page - 1) * PAGE_SIZE,
-          },
+          { where: { key: { remoteJid } }, page: currentPage },
         );
 
-        if ((data as any)?.error || (data as any)?.statusCode >= 400) {
+        if (data?.error || data?.statusCode >= 400) {
           this.logger.warn(`fetchMessages error for ${remoteJid}: ${JSON.stringify(data)}`);
           break;
         }
 
-        const list: any[] = Array.isArray(data)
-          ? data
-          : (data as any)?.messages || (data as any)?.data || [];
+        // Normaliza os dois formatos de resposta
+        let records: any[];
+        if (Array.isArray(data)) {
+          // Formato antigo: array direto
+          records = data;
+          totalPages = 1; // sem paginação neste formato
+        } else if (data?.messages?.records) {
+          // Formato v2.3+: { messages: { total, pages, currentPage, records } }
+          records = data.messages.records;
+          totalPages = data.messages.pages ?? 1;
+        } else if (Array.isArray(data?.messages)) {
+          // Formato intermediário: { messages: [...] }
+          records = data.messages;
+          totalPages = 1;
+        } else {
+          records = data?.data || [];
+          totalPages = 1;
+        }
 
-        if (list.length === 0) break;
+        if (records.length === 0) break;
 
-        allMessages = allMessages.concat(list);
-        this.logger.log(`fetchMessages ${instanceName}/${remoteJid} page ${page}: ${list.length} msgs (total: ${allMessages.length})`);
+        allMessages = allMessages.concat(records);
+        this.logger.log(
+          `fetchMessages ${instanceName}/${remoteJid} page ${currentPage}/${totalPages}: ${records.length} msgs (total: ${allMessages.length})`,
+        );
 
-        // Última página — menos registros que o tamanho da página
-        if (list.length < PAGE_SIZE) break;
-      }
+        currentPage++;
+      } while (currentPage <= totalPages);
 
-      // Ordena cronologicamente pelo timestamp (mais antigo primeiro)
+      // Ordena cronologicamente (mais antigo primeiro)
       allMessages.sort((a, b) => {
         const ta = Number(a.messageTimestamp ?? a.key?.timestamp ?? 0);
         const tb = Number(b.messageTimestamp ?? b.key?.timestamp ?? 0);
         return ta - tb;
       });
 
+      this.logger.log(`fetchMessages ${instanceName}/${remoteJid}: ${allMessages.length} msgs totais`);
       return allMessages;
     } catch (e) {
       this.logger.error(`Erro ao buscar mensagens para ${remoteJid}: ${e}`);
-      return allMessages; // retorna o que conseguiu antes do erro
+      return allMessages;
     }
   }
 
