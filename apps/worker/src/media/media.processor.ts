@@ -20,7 +20,12 @@ export class MediaProcessor extends WorkerHost {
   }
 
   async process(job: Job<any, any, string>): Promise<any> {
-    this.logger.log(`Iniciando job de mídia: ${job.id}`);
+    this.logger.log(`Iniciando job de mídia: ${job.id} (name=${job.name})`);
+
+    // ── Resync de mensagens perdidas após reconexão da instância ──────────────
+    if (job.name === 'sync_missed_messages') {
+      return this.syncMissedMessages(job.data);
+    }
 
     const { message_id, conversation_id, remote_jid, msg_id, media_data, instance_name } = job.data;
 
@@ -91,5 +96,89 @@ export class MediaProcessor extends WorkerHost {
       this.logger.error(`Erro ao processar mídia: ${e.message}`);
       throw e;
     }
+  }
+
+  /**
+   * Busca mensagens recentes da Evolution API para uma conversa e importa
+   * as que ainda não estão no banco. Usado após reconexão da instância WhatsApp
+   * para recuperar mensagens perdidas durante a queda.
+   */
+  private async syncMissedMessages(data: { conversation_id: string; instance_name: string; phone: string }): Promise<{ imported: number }> {
+    const { conversation_id, instance_name, phone } = data;
+    const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
+
+    if (!apiUrl) {
+      this.logger.warn('[RESYNC] EVOLUTION_API_URL não configurada — abortando resync');
+      return { imported: 0 };
+    }
+
+    const remoteJid = `${phone}@s.whatsapp.net`;
+
+    let rawMessages: any[] = [];
+    try {
+      const response = await axios.post(
+        `${apiUrl}/chat/findMessages/${instance_name}`,
+        { where: { key: { remoteJid } }, sort: 'asc' },
+        { headers: { apikey: apiKey } },
+      );
+      rawMessages = Array.isArray(response.data)
+        ? response.data
+        : response.data?.messages || response.data?.data || [];
+    } catch (e: any) {
+      this.logger.warn(`[RESYNC] Falha ao buscar mensagens para ${phone}: ${e.message}`);
+      return { imported: 0 };
+    }
+
+    if (!rawMessages.length) return { imported: 0 };
+
+    let imported = 0;
+    for (const msg of rawMessages) {
+      try {
+        const externalId: string | undefined = msg.key?.id || msg.id;
+        if (!externalId) continue;
+
+        const exists = await this.prisma.message.findUnique({
+          where: { external_message_id: externalId },
+        });
+        if (exists) continue;
+
+        const text: string =
+          msg.message?.conversation ||
+          msg.message?.extendedTextMessage?.text ||
+          msg.message?.imageMessage?.caption ||
+          (msg.messageType && msg.messageType !== 'conversation' ? `[${msg.messageType}]` : '') ||
+          '';
+
+        const fromMe: boolean = msg.key?.fromMe === true;
+        const ts: Date = msg.messageTimestamp
+          ? new Date(Number(msg.messageTimestamp) * 1000)
+          : new Date();
+
+        await this.prisma.message.create({
+          data: {
+            conversation_id,
+            direction: fromMe ? 'out' : 'in',
+            type: 'text',
+            text,
+            external_message_id: externalId,
+            status: fromMe ? 'enviado' : 'recebido',
+            created_at: ts,
+          },
+        });
+        imported++;
+      } catch (e: any) {
+        this.logger.warn(`[RESYNC] Erro ao importar msg: ${e.message}`);
+      }
+    }
+
+    if (imported > 0) {
+      this.logger.log(`[RESYNC] ${imported}/${rawMessages.length} mensagens importadas para conversa ${conversation_id}`);
+      await this.prisma.conversation.update({
+        where: { id: conversation_id },
+        data: { last_message_at: new Date() },
+      });
+    }
+
+    return { imported };
   }
 }

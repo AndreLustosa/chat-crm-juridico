@@ -223,7 +223,7 @@ export class EvolutionService {
               lead_id: lead.id,
               channel: 'whatsapp',
               status: 'ABERTO',
-              external_id: remoteJid,
+              external_id: `${phone}@s.whatsapp.net`,
               inbox_id: inboxId,
               instance_name: instanceName,
               tenant_id: inbox?.tenant_id || lead.tenant_id,
@@ -622,10 +622,11 @@ export class EvolutionService {
           this.logger.log(`Nova conversa criada via chat webhook: ${phone} no setor ${inbox?.inbox?.name || 'Nenhum'}`);
         }
       } else {
+        // Só atualiza inbox_id se tiver valor — evita apagar o setor da conversa
         conv = await this.prisma.conversation.update({
           where: { id: conv.id },
           data: {
-            inbox_id: inboxId,
+            ...(inboxId ? { inbox_id: inboxId } : {}),
             instance_name: instanceName,
             tenant_id: inbox?.tenant_id || conv.tenant_id || lead.tenant_id
           }
@@ -663,6 +664,38 @@ export class EvolutionService {
             data: { last_message_at: lm.messageTimestamp ? new Date(lm.messageTimestamp * 1000) : new Date() }
           });
         }
+      }
+    }
+  }
+
+  // ─── chats.delete ────────────────────────────────────────────
+  // Quando o contato deleta o chat no WhatsApp, arquivamos a conversa no CRM
+  // (status FECHADO) para não poluir o inbox. As mensagens são preservadas.
+  async handleChatsDelete(payload: EvolutionWebhookPayload) {
+    this.logger.log(`[WEBHOOK] chats.delete received`);
+    const data = payload?.data;
+    const chats = Array.isArray(data) ? data : [data];
+
+    for (const chat of chats) {
+      if (!chat) continue;
+      const remoteJid = chat.remoteJid || chat.id;
+      if (!remoteJid || remoteJid.includes('@g.us')) continue;
+
+      const phone = extractPhone(remoteJid, chat.remoteJidAlt);
+      if (!phone || phone.length > 13) continue;
+
+      const lead = await this.prisma.lead.findFirst({ where: { phone } });
+      if (!lead) continue;
+
+      // Fechar apenas conversas abertas — não alterar conversas já fechadas/adiadas
+      const updated = await this.prisma.conversation.updateMany({
+        where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' },
+        data: { status: 'FECHADO' },
+      });
+
+      if (updated.count > 0) {
+        this.chatGateway.emitConversationsUpdate(null);
+        this.logger.log(`[WEBHOOK] chats.delete: ${updated.count} conversa(s) de ${phone} arquivadas`);
       }
     }
   }
@@ -794,9 +827,14 @@ export class EvolutionService {
 
       const updates: Record<string, string> = {};
 
-      // Atualizar nome se mudou
+      // Atualizar nome apenas se:
+      // 1. O contato tem nome
+      // 2. O nome mudou em relação ao registrado
+      // 3. O lead ainda não tem nome (null) OU o novo nome não parece ser nome do escritório.
+      //    contacts.update pode disparar após msgs enviadas trazendo o pushName do escritório —
+      //    para evitar sobrescrita, só aceita nome do webhook se o lead já não tiver nome.
       const newName = contact.pushName || contact.name || contact.verifiedName;
-      if (newName && newName !== lead.name) {
+      if (newName && newName !== lead.name && !lead.name) {
         updates.name = newName;
       }
 
@@ -839,6 +877,38 @@ export class EvolutionService {
     });
 
     this.logger.log(`[WEBHOOK] Instance ${instanceName} connection: ${state}`);
+
+    // Quando a instância reconecta, agenda resync das mensagens perdidas durante a queda.
+    // Limitamos às 50 conversas mais recentes para não sobrecarregar.
+    if (state === 'open' && instanceName) {
+      this.logger.log(`[RESYNC] Instância ${instanceName} reconectou — agendando resync de mensagens`);
+      this.scheduleResyncAfterReconnect(instanceName).catch(e =>
+        this.logger.warn(`[RESYNC] Erro ao agendar resync: ${e.message}`),
+      );
+    }
+  }
+
+  private async scheduleResyncAfterReconnect(instanceName: string): Promise<void> {
+    // Aguarda 5 segundos para a instância estabilizar antes de buscar mensagens
+    const STABILIZE_DELAY = 5000;
+
+    const conversations = await this.prisma.conversation.findMany({
+      where: { instance_name: instanceName, status: 'ABERTO' },
+      include: { lead: { select: { phone: true } } },
+      orderBy: { last_message_at: 'desc' },
+      take: 50,
+    });
+
+    this.logger.log(`[RESYNC] ${conversations.length} conversas ativas para resync na instância ${instanceName}`);
+
+    for (const conv of conversations) {
+      if (!conv.lead?.phone) continue;
+      await this.mediaQueue.add(
+        'sync_missed_messages',
+        { conversation_id: conv.id, instance_name: instanceName, phone: conv.lead.phone },
+        { delay: STABILIZE_DELAY, removeOnComplete: true, removeOnFail: false },
+      );
+    }
   }
 
   // ─── presence.update ──────────────────────────────────────────
@@ -856,7 +926,7 @@ export class EvolutionService {
     if (!lead) return;
 
     const conversation = await this.prisma.conversation.findFirst({
-      where: { lead_id: lead.id, status: { in: ['ABERTO', 'WAITING', 'MONITORING'] } },
+      where: { lead_id: lead.id, status: { in: ['ABERTO', 'ADIADO'] } },
       orderBy: { last_message_at: 'desc' },
     });
     if (!conversation) return;

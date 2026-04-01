@@ -27,6 +27,10 @@ export class EvolutionController {
       await this.evolutionService.handleContactsUpsert(payload);
     } else if (eventType === 'chats.upsert' || eventType === 'chats.set') {
       await this.evolutionService.handleChatsUpsert(payload);
+    } else if (eventType === 'chats.update') {
+      await this.evolutionService.handleChatsUpsert(payload);
+    } else if (eventType === 'chats.delete') {
+      await this.evolutionService.handleChatsDelete(payload);
     } else if (eventType === 'messages.delete') {
       await this.evolutionService.handleMessagesDelete(payload);
     } else if (eventType === 'contacts.update') {

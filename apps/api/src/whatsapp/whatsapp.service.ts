@@ -200,6 +200,8 @@ export class WhatsappService {
         url: config.webhookUrl,
         byEvents: false,
         base64: false,
+        retryDelay: 5000,
+        maxRetries: 5,
         events: [
           'APPLICATION_STARTUP',
           'QRCODE_UPDATED',
@@ -256,6 +258,10 @@ export class WhatsappService {
       url,
       enabled: true,
       webhook_by_events: false,
+      // Retry automático: tenta reenviar até 5 vezes com intervalo de 5s
+      // Garante entrega mesmo se o CRM estiver temporariamente indisponível
+      retryDelay: 5000,
+      maxRetries: 5,
       events: [
         'MESSAGES_UPSERT',
         'MESSAGES_UPDATE',
@@ -306,7 +312,7 @@ export class WhatsappService {
     try {
       const data = await this.request(
         'POST',
-        `chat/fetchProfilePicture/${instanceName}`,
+        `chat/fetchProfilePictureUrl/${instanceName}`,
         { number },
       );
       return data?.profilePictureUrl || data?.profile_picture || data?.data?.profile_picture || data?.url || null;
@@ -376,8 +382,8 @@ export class WhatsappService {
           try {
             const moreData = await this.request(
               'POST',
-              `chat/findChats/${instanceName}?page=${page}&limit=${pageSize}`,
-              { where: {} },
+              `chat/findChats/${instanceName}`,
+              { where: {}, page, limit: pageSize },
             );
             const moreList = Array.isArray(moreData) ? moreData : (moreData as any)?.data || [];
             if (moreList.length === 0) break;

@@ -159,11 +159,20 @@ export class LeadsService {
   async upsert(data: Prisma.LeadCreateInput): Promise<Lead> {
     const phone = to12Digits(data.phone);
     // No UPDATE nunca sobrescreve nome nem stage:
-    // - nome: pushName do WhatsApp é placeholder; o real é capturado pela IA.
+    // - nome: só atualiza se o lead ainda não tem nome (null/vazio) E veio um nome no payload.
+    //   Evita sobrescrever o nome real do cliente com o pushName do escritório.
     // - stage: webhook sempre envia 'NOVO', mas o stage é gerenciado pela IA.
-    const { phone: _phone, name: _name, stage: _stage, ...updateData } = data as any;
+    const { phone: _phone, name: incomingName, stage: _stage, ...updateData } = data as any;
 
     this.logger.debug(`Upsert lead: raw=${data.phone} → stored=${phone}`);
+
+    // Tenta atualizar o nome apenas se o lead existente não tiver nome
+    if (incomingName) {
+      await this.prisma.lead.updateMany({
+        where: { phone, name: null },
+        data: { name: incomingName },
+      });
+    }
 
     return this.prisma.lead.upsert({
       where: { phone },
