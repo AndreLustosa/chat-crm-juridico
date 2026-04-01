@@ -407,7 +407,7 @@ export function EventModal({ caseId, lawyerId = '', users, interns = [], onClose
               <div>
                 <label className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1">
                   <User size={11} /> Responsável
-                  {isPrazo && <Lock size={9} className="text-muted-foreground/50 ml-0.5" title="Auto-atribuído ao advogado do processo" />}
+                  {isPrazo ? <Lock size={9} className="text-muted-foreground/50 ml-0.5" /> : null}
                 </label>
 
                 {isPrazo ? (
