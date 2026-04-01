@@ -85,14 +85,15 @@ function formatISO(iso: string): string {
 interface EventModalProps {
   caseId: string;
   lawyerId?: string;
-  users: UserOption[];
+  users: UserOption[];          // todos os usuários (para campo Responsável genérico)
+  interns?: UserOption[];       // apenas estagiários do advogado (para delegação de prazo)
   onClose: () => void;
   onCreated: () => void;
 }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }: EventModalProps) {
+export function EventModal({ caseId, lawyerId = '', users, interns = [], onClose, onCreated }: EventModalProps) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const todayLocal = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
@@ -114,8 +115,11 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
   const [saving, setSaving]           = useState(false);
 
   // ── Delegação (só para PRAZO) ──────────────────────────────────
-  const [delegate, setDelegate]           = useState(false);
+  const [delegate, setDelegate]             = useState(false);
   const [delegateUserId, setDelegateUserId] = useState('');
+  const [delegateDate, setDelegateDate]     = useState('');
+  const [delegateTime, setDelegateTime]     = useState('');
+  const [autoCalcDeadline, setAutoCalcDeadline] = useState(true); // toggle auto/manual
 
   // Quando tipo muda para PRAZO: força responsável = advogado e reseta delegação
   useEffect(() => {
@@ -127,9 +131,9 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
     }
   }, [type, lawyerId]);
 
-  // Quando desativa delegação, reseta o delegado
+  // Quando desativa delegação, reseta campos de delegação
   useEffect(() => {
-    if (!delegate) setDelegateUserId('');
+    if (!delegate) { setDelegateUserId(''); setDelegateDate(''); setDelegateTime(''); setAutoCalcDeadline(true); }
   }, [delegate]);
 
   const isPrazo = type === 'PRAZO';
@@ -137,20 +141,25 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
   // Nome do advogado do processo
   const lawyerName = users.find(u => u.id === lawyerId)?.name ?? 'Advogado responsável';
 
-  // Usuários delegáveis: todos exceto o próprio advogado
-  const delegableUsers = users.filter(u => u.id !== lawyerId);
+  // Apenas estagiários vinculados ao advogado
+  const delegableUsers = interns;
 
-  // Preview do prazo interno do delegado (2 dias úteis antes)
-  const delegateDuePreview = (() => {
-    if (!delegate || !delegateUserId || !date) return null;
+  // Prazo interno calculado automaticamente (2 dias úteis antes do prazo real)
+  const autoCalcISO = (() => {
+    if (!date) return null;
     try {
       const realISO = allDay
         ? new Date(Date.UTC(...(date.split('-').map(Number) as [number, number, number]), 0, 0, 0)).toISOString()
         : startTime ? localInputToISO(`${date} ${startTime}`) : null;
       if (!realISO) return null;
-      return formatISO(subtractBusinessDays(realISO, 2));
+      return subtractBusinessDays(realISO, 2);
     } catch { return null; }
   })();
+
+  // Preview legível para exibição
+  const delegateDuePreview = autoCalcDeadline
+    ? (autoCalcISO ? formatISO(autoCalcISO) : null)
+    : (delegateDate ? formatISO(localInputToISO(`${delegateDate} ${delegateTime || '00:00'}`)) : null);
 
   const toggleReminder = (minutes: number, channel: string) => {
     const key = `${minutes}-${channel}`;
@@ -196,12 +205,12 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
         reminders: reminders.length > 0 ? reminders : undefined,
       });
 
-      // ── Evento interno do delegado (2 dias úteis antes) ──
+      // ── Evento interno do delegado ──
       if (isPrazo && delegate && delegateUserId) {
-        const delegateStartISO = subtractBusinessDays(startISO, 2);
-        const delegateEndISO   = endISO
-          ? subtractBusinessDays(endISO, 2)
-          : new Date(new Date(delegateStartISO).getTime() + 30 * 60000).toISOString();
+        const delegateStartISO = autoCalcDeadline
+          ? subtractBusinessDays(startISO, 2)
+          : localInputToISO(`${delegateDate} ${delegateTime || '00:00'}`);
+        const delegateEndISO = new Date(new Date(delegateStartISO).getTime() + 30 * 60000).toISOString();
 
         const delegateName = users.find(u => u.id === delegateUserId)?.name ?? 'Delegado';
 
@@ -472,25 +481,59 @@ export function EventModal({ caseId, lawyerId = '', users, onClose, onCreated }:
                       </div>
                     </div>
 
-                    {/* Aviso de prazo interno */}
-                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 space-y-0.5">
-                      <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
-                        Prazo interno (2 dias úteis antes)
-                      </p>
-                      {delegateDuePreview ? (
-                        <p className="text-xs text-amber-300 font-semibold">
-                          📅 {delegateDuePreview}
+                    {/* Prazo interno — auto ou manual */}
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                          Prazo interno do estagiário
                         </p>
+                        {/* Toggle auto / escolher data */}
+                        <button
+                          type="button"
+                          onClick={() => setAutoCalcDeadline(v => !v)}
+                          className="text-[10px] font-semibold text-sky-400 hover:text-sky-300 transition-colors"
+                        >
+                          {autoCalcDeadline ? '✏️ Escolher data' : '⟳ Calcular auto'}
+                        </button>
+                      </div>
+
+                      {autoCalcDeadline ? (
+                        /* Cálculo automático */
+                        delegateDuePreview ? (
+                          <p className="text-xs text-amber-300 font-semibold">📅 {delegateDuePreview}</p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground/60">Preencha a data do prazo para calcular</p>
+                        )
                       ) : (
-                        <p className="text-xs text-muted-foreground/60">
-                          Defina a data e hora do prazo para ver o prazo interno
-                        </p>
+                        /* Data manual */
+                        <div className="flex gap-2">
+                          <input
+                            type="date"
+                            value={delegateDate}
+                            onChange={e => setDelegateDate(e.target.value)}
+                            className="flex-1 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-amber-500/25"
+                          />
+                          <input
+                            type="time"
+                            value={delegateTime}
+                            onChange={e => setDelegateTime(e.target.value)}
+                            className="w-24 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-amber-500/25"
+                          />
+                        </div>
                       )}
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                        Será criado um evento separado com prazo URGENTE para o usuário delegado.
-                        O advogado mantém o prazo real.
+
+                      <p className="text-[10px] text-muted-foreground/60">
+                        Evento separado URGENTE para o estagiário. Advogado mantém o prazo real.
                       </p>
                     </div>
+
+                    {/* Aviso se não há estagiários */}
+                    {delegableUsers.length === 0 && (
+                      <p className="text-[11px] text-amber-500/70 flex items-center gap-1">
+                        <AlertTriangle size={10} />
+                        Nenhum estagiário vinculado a este advogado no sistema.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

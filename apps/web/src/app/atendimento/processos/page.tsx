@@ -623,7 +623,8 @@ function ProcessoDetailPanel({
   const [tasks, setTasks] = useState<CaseTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
-  const [interns, setInterns] = useState<Intern[]>([]);
+  const [interns, setInterns] = useState<Intern[]>([]);       // estagiários do advogado
+  const [allUsers, setAllUsers] = useState<Intern[]>([]);      // todos os usuários do sistema
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<string | null>(null);
   const [editTaskForm, setEditTaskForm] = useState({ title: '', description: '', date: '', assignee: '' });
@@ -669,11 +670,17 @@ function ProcessoDetailPanel({
 
   const fetchInterns = useCallback(async () => {
     try {
-      const res = await api.get('/users?limit=100');
-      const data = res.data?.data || res.data?.users || res.data || [];
-      setInterns(data.filter((u: any) => u.role));
+      // Estagiários vinculados ao advogado responsável pelo processo
+      const res = await api.get(`/users/${legalCase.lawyer_id}/interns`);
+      setInterns(res.data || []);
     } catch {}
-  }, []);
+    try {
+      // Todos os usuários com perfil (para campo Responsável em eventos não-prazo)
+      const res2 = await api.get('/users?limit=100');
+      const data = res2.data?.data || res2.data?.users || res2.data || [];
+      setAllUsers(data.filter((u: any) => u.role));
+    } catch {}
+  }, [legalCase.lawyer_id]);
 
   const fetchDjen = useCallback(async () => {
     setLoadingDjen(true);
@@ -1743,7 +1750,8 @@ function ProcessoDetailPanel({
                 <EventModal
                   caseId={legalCase.id}
                   lawyerId={legalCase.lawyer_id}
-                  users={interns}
+                  users={allUsers}
+                  interns={interns}
                   onClose={() => setShowEventModal(false)}
                   onCreated={fetchTasks}
                 />

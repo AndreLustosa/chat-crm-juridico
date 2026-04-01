@@ -69,7 +69,8 @@ export default function TabTarefas({
 }) {
   const router = useRouter();
   const [events, setEvents] = useState<CaseEvent[]>([]);
-  const [users, setUsers] = useState<UserOption[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);     // todos os usuários
+  const [interns, setInterns] = useState<UserOption[]>([]); // estagiários do advogado
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [filter, setFilter] = useState<'all' | 'pending' | 'done'>('all');
@@ -92,7 +93,12 @@ export default function TabTarefas({
       const data = r.data?.data || r.data?.users || r.data || [];
       setUsers(data.filter((u: any) => u.role));
     }).catch(() => {});
-  }, [fetchEvents]);
+    if (lawyerId) {
+      api.get(`/users/${lawyerId}/interns`).then(r => {
+        setInterns(r.data || []);
+      }).catch(() => {});
+    }
+  }, [fetchEvents, lawyerId]);
 
   const handleToggle = async (ev: CaseEvent) => {
     const newStatus = ev.status === 'CONCLUIDO' ? 'AGENDADO' : 'CONCLUIDO';
@@ -264,6 +270,7 @@ export default function TabTarefas({
           caseId={caseId}
           lawyerId={lawyerId}
           users={users}
+          interns={interns}
           onClose={() => setShowModal(false)}
           onCreated={fetchEvents}
         />
