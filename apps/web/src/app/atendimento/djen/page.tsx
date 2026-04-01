@@ -368,7 +368,7 @@ function CreateProcessModal({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await api.post(`/djen/${pub.id}/create-process`, {
+      const res = await api.post(`/djen/${pub.id}/create-process`, {
         leadId: clientMode === 'search' ? selectedLead?.id : undefined,
         leadName: clientMode === 'new' ? newName.trim() : undefined,
         leadPhone: clientMode === 'new' ? newPhone.trim() : undefined,
@@ -377,7 +377,8 @@ function CreateProcessModal({
         lawyerId: isAdmin && selectedLawyerId ? selectedLawyerId : undefined,
       });
       onSuccess();
-      router.push('/atendimento/processos');
+      const caseId = res?.data?.id;
+      router.push(caseId ? `/atendimento/processos?openCase=${caseId}` : '/atendimento/processos');
     } catch (e: any) {
       setSubmitError(e?.response?.data?.message || 'Erro ao criar processo. Tente novamente.');
     } finally {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { RouteGuard } from '@/components/RouteGuard';
 import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
@@ -2456,6 +2456,7 @@ function TabelaView({
 
 function ProcessosPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -2534,6 +2535,18 @@ function ProcessosPageContent() {
     const interval = setInterval(() => fetchCases(true), 30_000);
     return () => clearInterval(interval);
   }, [router, fetchCases]);
+
+  // Abre painel automaticamente quando redirecionado do DJEN com ?openCase=ID
+  useEffect(() => {
+    const openCaseId = searchParams.get('openCase');
+    if (!openCaseId || cases.length === 0) return;
+    const target = cases.find(c => c.id === openCaseId);
+    if (target) {
+      setSelectedCase(target);
+      // Remove o param da URL sem recarregar a página
+      router.replace('/atendimento/processos', { scroll: false });
+    }
+  }, [searchParams, cases, router]);
 
   const executeMoveCase = async (caseId: string, newTrackingStage: string) => {
     setCases(prev => prev.map(c => c.id === caseId ? { ...c, tracking_stage: newTrackingStage } : c));

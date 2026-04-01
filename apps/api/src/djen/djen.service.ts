@@ -555,9 +555,16 @@ export class DjenService {
         },
         select: { id: true },
       });
-      lead = existingByPhone ?? await this.prisma.lead.create({
-        data: { name, phone, tenant_id: tenantId },
-      });
+      if (existingByPhone) {
+        // Se lead já existe mas não tem nome, atualiza com o nome fornecido
+        const existing = await this.prisma.lead.findUnique({ where: { id: existingByPhone.id }, select: { id: true, name: true } });
+        if (existing && !existing.name?.trim()) {
+          await this.prisma.lead.update({ where: { id: existing.id }, data: { name } });
+        }
+        lead = existingByPhone;
+      } else {
+        lead = await this.prisma.lead.create({ data: { name, phone, tenant_id: tenantId } });
+      }
     }
 
     // ─── Resolve área jurídica: usa valor do frontend (IA) se disponível ─────
