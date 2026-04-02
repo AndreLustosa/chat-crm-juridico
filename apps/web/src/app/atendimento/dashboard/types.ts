@@ -163,14 +163,94 @@ export interface ConversionVelocityData {
   byMonth: { month: string; avgDays: number; count: number }[];
 }
 
-export interface TeamPerformanceMember {
-  userId: string;
-  name: string;
-  closedPerDay: { date: string; count: number }[];
-  casesAdvancedPerWeek: number;
-  collectionRate: number;
+/* ─── Team Performance (comparacoes agressivas) ─── */
+
+export type Quartile = 'TOP' | 'MID' | 'LOW';
+
+export interface AdvogadoKPIs {
+  activeCases: number;
+  casesFiledThisPeriod: number;
+  avgDaysToFile: number;
+  caseWinRate: number; // 0-100
+  totalSentenced: number;
+  wonAndPartial: number;
+  deadlinesCreated: number;
+  deadlinesCompleted: number;
+  deadlinesMissed: number;
+  deadlineCompletionRate: number; // 0-100
+  petitionsDrafted: number;
+  petitionsApproved: number;
+  petitionsProtocoled: number;
+  petitionApprovalRate: number; // 0-100
+  totalContracted: number;
+  totalCollected: number;
+  totalReceivable: number;
+  collectionRate: number; // 0-100
 }
 
-export interface TeamPerformanceData {
-  members: TeamPerformanceMember[];
+export interface OperadorKPIs {
+  openConversations: number;
+  closedConversations: number;
+  avgResponseTimeMinutes: number;
+  medianResponseTimeMinutes: number;
+  leadsHandled: number;
+  leadsConverted: number;
+  conversionRate: number; // 0-100
+  avgConversionDays: number;
+  stagesAdvanced: number;
+  leadsLost: number;
+  tasksCompleted: number;
+  taskCompletionRate: number; // 0-100
+}
+
+export interface EstagiarioKPIs {
+  tasksCompleted: number;
+  tasksPending: number;
+  tasksOverdue: number;
+  taskCompletionRate: number; // 0-100
+  avgTaskCompletionDays: number;
+  petitionsDrafted: number;
+  petitionsInReview: number;
+  petitionsApproved: number;
+  petitionApprovalRate: number; // 0-100
+  deadlinesManaged: number;
+  deadlinesCompletedOnTime: number;
+  documentsUploaded: number;
+}
+
+export interface SharedTaskKPIs {
+  tasksCompleted: number;
+  tasksPending: number;
+  tasksOverdue: number;
+  taskCompletionRate: number;
+}
+
+export interface TeamPerformanceEntry {
+  userId: string;
+  name: string;
+  role: string;
+  compositeScore: number; // 0-100
+  previousScore: number;
+  scoreDelta: number; // current - previous
+  rank: number; // 1-based within role
+  quartile: Quartile;
+  advogadoKPIs?: AdvogadoKPIs;
+  operadorKPIs?: OperadorKPIs;
+  estagiarioKPIs?: EstagiarioKPIs;
+  sharedTasks: SharedTaskKPIs;
+  dailyActivity: { date: string; value: number }[]; // 7 points for sparkline
+}
+
+export interface TeamAverages {
+  advogado: Partial<AdvogadoKPIs>;
+  operador: Partial<OperadorKPIs>;
+  estagiario: Partial<EstagiarioKPIs>;
+  tasks: Partial<SharedTaskKPIs>;
+}
+
+export interface TeamPerformanceResponse {
+  period: { startDate: string; endDate: string };
+  previousPeriod: { startDate: string; endDate: string };
+  members: TeamPerformanceEntry[];
+  teamAverages: TeamAverages;
 }

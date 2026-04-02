@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards, Request, Query } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { DashboardAnalyticsService } from './dashboard-analytics.service';
+import { TeamPerformanceService } from './team-performance.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -9,6 +10,7 @@ export class DashboardController {
   constructor(
     private readonly service: DashboardService,
     private readonly analytics: DashboardAnalyticsService,
+    private readonly teamPerformance: TeamPerformanceService,
   ) {}
 
   @Get()
@@ -112,6 +114,18 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
   ) {
     return this.analytics.responseTime(
+      req.user.id, req.user.role, req.user.tenant_id,
+      startDate, endDate,
+    );
+  }
+
+  @Get('team-performance')
+  getTeamPerformance(
+    @Request() req: any,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.teamPerformance.getPerformance(
       req.user.id, req.user.role, req.user.tenant_id,
       startDate, endDate,
     );

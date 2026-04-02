@@ -3,6 +3,7 @@
 import { useRole } from '@/lib/useRole';
 import { useDashboardData } from './hooks/useDashboardData';
 import { usePeriodFilter } from './hooks/usePeriodFilter';
+import { useTeamPerformance } from './hooks/useTeamPerformance';
 import { MotionWidget } from './components/MotionWidget';
 import {
   useRevenueTrend, useLeadFunnel, useTaskCompletion,
@@ -18,6 +19,7 @@ import { FinancialStats } from './components/FinancialStats';
 import { LeadPipeline } from './components/LeadPipeline';
 import { LegalCasesPipeline } from './components/LegalCasesPipeline';
 import { TeamMetrics } from './components/TeamMetrics';
+import { TeamPerformanceBoard } from './components/TeamPerformanceBoard';
 import { UpcomingEvents } from './components/UpcomingEvents';
 import { DjenPublications } from './components/DjenPublications';
 import { QuickActions } from './components/QuickActions';
@@ -52,6 +54,7 @@ export default function DashboardPage() {
   const sources = useLeadSources(period);
   const responseTime = useResponseTime(period);
   const velocity = useConversionVelocity(period);
+  const teamPerf = useTeamPerformance(period, isAdmin);
 
   // Visibility per role
   const showInbox = isAdmin || isOperador;
@@ -189,10 +192,10 @@ export default function DashboardPage() {
           </MotionWidget>
         )}
 
-        {/* Row 11: Team Metrics (admin) */}
+        {/* Row 11: Team Performance (admin) — comparacoes agressivas */}
         {showTeam && (
           <MotionWidget delay={0.5}>
-            <TeamMetrics members={data.teamMetrics} />
+            <TeamPerformanceBoard data={teamPerf.data} loading={teamPerf.loading} />
           </MotionWidget>
         )}
 
