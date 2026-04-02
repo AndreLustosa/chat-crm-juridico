@@ -207,7 +207,7 @@ export class PaymentAlertsCronService {
     const cutoff = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
     const existing = await this.prisma.auditLog.findFirst({
       where: {
-        entity_type: 'PAYMENT_ALERT',
+        entity: 'PAYMENT_ALERT',
         entity_id: referenceId,
         action: type,
         created_at: { gte: cutoff },
@@ -220,10 +220,10 @@ export class PaymentAlertsCronService {
     try {
       await this.prisma.auditLog.create({
         data: {
-          entity_type: 'PAYMENT_ALERT',
+          entity: 'PAYMENT_ALERT',
           entity_id: referenceId,
           action: type,
-          details: { lead_id: leadId, sent_at: new Date().toISOString() },
+          meta_json: { lead_id: leadId, sent_at: new Date().toISOString() },
         },
       });
     } catch {}
