@@ -13,6 +13,8 @@ import { playNotificationSound } from '@/lib/notificationSounds';
 import api from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
 import { formatPhone } from '@/lib/utils';
+import { showError } from '@/lib/toast';
+import { getDateKey, formatDateLabel, formatTime as formatTimeUtil, getInitial as getInitialUtil, isEmojiOnly, extractFirstUrl, getDocLabel } from '@/lib/chatUtils';
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
@@ -39,19 +41,7 @@ function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   return <Check size={12} className="text-primary-foreground/60" />;
 }
 
-function getDateKey(dateStr: string): string {
-  return new Date(dateStr).toDateString();
-}
-
-function formatDateLabel(dateStr: string): string {
-  const date = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return 'Hoje';
-  if (date.toDateString() === yesterday.toDateString()) return 'Ontem';
-  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-}
+// getDateKey, formatDateLabel — importados de @/lib/chatUtils
 
 // Tipo declarado fora do componente para evitar problemas com Turbopack
 type ChatRenderItem =
@@ -103,28 +93,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  const getDocLabel = (mime: string, name?: string) => {
-    if (name) { const p = name.split('.'); if (p.length > 1) return p.pop()!.toUpperCase(); }
-    const map: Record<string, string> = {
-      'application/pdf': 'PDF',
-      'application/msword': 'DOC',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
-      'application/vnd.ms-excel': 'XLS',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
-    };
-    return map[mime] || 'FILE';
-  };
-
-  const isEmojiOnly = (text: string): boolean => {
-    const t = text.trim();
-    if (!t) return false;
-    return /^(\p{Emoji_Presentation}|\p{Extended_Pictographic}|\s)+$/u.test(t);
-  };
-
-  const extractFirstUrl = (text: string): string | null => {
-    const match = text.match(/https?:\/\/[^\s]+/);
-    return match ? match[0] : null;
-  };
+  // getDocLabel, isEmojiOnly, extractFirstUrl — importados de @/lib/chatUtils
 
   const handleDocDownload = async (url: string, name: string) => {
     try {
@@ -183,6 +152,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, text: res.data.transcription } : m));
     } catch (e) {
       console.error('Erro ao transcrever áudio', e);
+      showError('Não foi possível transcrever o áudio. Tente novamente.');
     } finally {
       setTranscribing(prev => ({ ...prev, [msgId]: false }));
     }
@@ -228,6 +198,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       }
     } catch (e) {
       console.error('Falha ao enviar arquivo', e);
+      showError('Falha ao enviar arquivo. Verifique o tamanho e tente novamente.');
     } finally {
       setUploadingFile(false);
     }
@@ -272,6 +243,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, ...res.data } : m));
     } catch (e) {
       console.error('Erro ao apagar mensagem', e);
+      showError('Não foi possível apagar a mensagem.');
     }
   };
 
@@ -283,6 +255,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       setEditingMsg(null);
     } catch (e) {
       console.error('Erro ao editar mensagem', e);
+      showError('Não foi possível editar a mensagem.');
     }
   };
 
@@ -444,6 +417,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       }
     } catch (e) {
       console.error('Falha ao enviar mensagem', e);
+      showError('Falha ao enviar mensagem. Tente novamente.');
       setText(msgText);
     } finally {
       setSending(false);
@@ -510,9 +484,12 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             if (currentUserId) socketRef.current?.emit('join_user', currentUserId);
           });
 
-          // Sound: only plays when the backend targets this specific operator
-          socketRef.current.on('incoming_message_notification', () => {
-            playNotificationSound();
+          // Som de notificacao apenas para mensagens de OUTRAS conversas.
+          // Mensagens da conversa atual ja tocam som no listener 'newMessage'.
+          socketRef.current.on('incoming_message_notification', (data: any) => {
+            if (data?.conversationId !== convo.id) {
+              playNotificationSound();
+            }
           });
 
           socketRef.current.on('newMessage', (msg: any) => {
@@ -567,20 +544,25 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     };
   }, [params.id, router]);
 
+  // Smart scroll: so auto-scroll se o usuario esta perto do final (< 150px).
+  // Evita perder posicao ao ler mensagens antigas quando chega uma nova.
+  const prevMessagesLenRef = useRef(0);
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+    const isInitialLoad = prevMessagesLenRef.current === 0 && messages.length > 0;
+    if (isNearBottom || isInitialLoad) {
+      el.scrollTop = el.scrollHeight;
     }
+    prevMessagesLenRef.current = messages.length;
   }, [messages]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const formatTime = (dateStr?: string) => {
-    if (!dateStr) return '';
-    return new Date(dateStr).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const getInitial = (name?: string) => (name || 'V')[0].toUpperCase();
+  // formatTime, getInitial — importados de @/lib/chatUtils (como formatTimeUtil, getInitialUtil)
+  const formatTime = formatTimeUtil;
+  const getInitial = getInitialUtil;
   const isClosed = convoStatus === 'FECHADO';
 
   // Lista plana: separa mensagens e separadores de data (type declarado fora do componente)

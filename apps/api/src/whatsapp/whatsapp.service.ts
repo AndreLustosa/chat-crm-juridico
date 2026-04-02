@@ -27,6 +27,7 @@ export class WhatsappService {
     method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body?: any,
+    timeoutMs = 15000,
   ) {
     const config = await this.settingsService.getWhatsAppConfig();
     const baseUrl = this.normalizeUrl(config.apiUrl || '');
@@ -39,6 +40,7 @@ export class WhatsappService {
           apikey: config.apiKey || '',
         },
         body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) {
@@ -50,7 +52,11 @@ export class WhatsappService {
       }
 
       return await response.json();
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+        this.logger.error(`Timeout na requisição Evolution API (${path}) após ${timeoutMs}ms`);
+        return { statusCode: 408, error: `Request timeout after ${timeoutMs}ms` };
+      }
       this.logger.error(`Exceção na requisição Evolution API (${path}): ${e}`);
       throw e;
     }
@@ -342,6 +348,7 @@ export class WhatsappService {
           'POST',
           `chat/findMessages/${instanceName}`,
           { where: { key: { remoteJid } }, page: currentPage },
+          30000, // fetchMessages pode ser lento com historicos grandes
         );
 
         if (data?.error || data?.statusCode >= 400) {

@@ -111,9 +111,14 @@ export class ChatGateway {
       this.logger.log(`[SOCKET] Emitting inboxUpdate to tenant:${tenantId}`);
       this.server.to(`tenant:${tenantId}`).emit('inboxUpdate');
     } else {
-      // Fallback global para single-tenant (sem tenant_id) — broadcast para todos
-      this.logger.log(`[SOCKET] Emitting inboxUpdate to all clients (no tenant)`);
-      this.server.emit('inboxUpdate');
+      // SEGURANCA: sem tenantId, busca o tenant padrao em vez de broadcast global.
+      // Isso evita vazamento de dados entre tenants em ambiente multi-tenant.
+      this.logger.warn(`[SOCKET] inboxUpdate sem tenantId — resolvendo tenant padrao`);
+      this.prisma.tenant.findFirst().then((t) => {
+        if (t) {
+          this.server.to(`tenant:${t.id}`).emit('inboxUpdate');
+        }
+      }).catch(() => {});
     }
   }
 

@@ -140,6 +140,25 @@ async function bootstrap() {
     return true;
   }
 
+  // Limpeza periodica: remove timestamps expirados a cada 5 minutos
+  // Previne memory leak em conexoes de longa duracao
+  setInterval(() => {
+    const now = Date.now();
+    for (const [socketId, events] of socketRateLimits) {
+      for (const [event, timestamps] of events) {
+        const recent = timestamps.filter(t => now - t < 60000);
+        if (recent.length === 0) {
+          events.delete(event);
+        } else {
+          events.set(event, recent);
+        }
+      }
+      if (events.size === 0) {
+        socketRateLimits.delete(socketId);
+      }
+    }
+  }, 5 * 60 * 1000);
+
   io.on('connection', (socket) => {
     chatGateway.handleConnection(socket);
 

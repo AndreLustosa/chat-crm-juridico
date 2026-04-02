@@ -8,6 +8,7 @@ import {
 } from '@/lib/desktopNotifications';
 import { showSuccess } from '@/lib/toast';
 import { normalizeStage } from '@/lib/crmStages';
+import { getDateKey, formatDateLabel, formatTime, getInitial } from '@/lib/chatUtils';
 import type { ConversationSummary } from '../types';
 import { ContactAvatar } from './ContactAvatar';
 
@@ -32,29 +33,7 @@ function DateSeparator({ label }: { label: string }) {
   );
 }
 
-function getDateKey(dateStr: string): string {
-  return new Date(dateStr).toDateString();
-}
-
-function formatDateLabel(dateStr: string): string {
-  const date = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === today.toDateString()) return 'Hoje';
-  if (date.toDateString() === yesterday.toDateString()) return 'Ontem';
-  return date.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
-function formatTime(dateStr?: string) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
-
-function getInitial(name?: string) {
-  return (name || 'V')[0].toUpperCase();
-}
+// getDateKey, formatDateLabel, formatTime, getInitial — importados de @/lib/chatUtils
 
 // ─── Lead Score ──────────────────────────────────────────────────
 

@@ -346,7 +346,7 @@ export class ConversationsService {
     const { fromUser, conv } = await this.prisma.$transaction(async (tx) => {
       const existing = await (tx as any).conversation.findUnique({
         where: { id },
-        select: { assigned_user_id: true, pending_transfer_to_id: true },
+        select: { assigned_user_id: true, pending_transfer_to_id: true, tenant_id: true },
       });
       if (!existing || existing.assigned_user_id !== fromUserId) {
         throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
@@ -381,9 +381,8 @@ export class ConversationsService {
       audioIds: audioIds?.length ? audioIds : undefined,
     });
 
-    // Broadcast para todos os clientes: garante que o destino atualize
-    // a lista "Aguardando você" mesmo se o evento direto for perdido
-    this.chatGateway.emitConversationsUpdate(null);
+    // Broadcast escopado por tenant para atualizar a lista "Aguardando você"
+    this.chatGateway.emitConversationsUpdate((conv as any).tenant_id ?? null);
 
     return conv;
   }
@@ -393,7 +392,7 @@ export class ConversationsService {
     const { current, acceptingUser, conv } = await this.prisma.$transaction(async (tx) => {
       const current = await (tx as any).conversation.findUnique({
         where: { id },
-        select: { pending_transfer_to_id: true, pending_transfer_from_id: true, lead: { select: { name: true, phone: true } } },
+        select: { pending_transfer_to_id: true, pending_transfer_from_id: true, tenant_id: true, lead: { select: { name: true, phone: true } } },
       });
 
       if (!current?.pending_transfer_to_id || current.pending_transfer_to_id !== userId) {
@@ -425,7 +424,7 @@ export class ConversationsService {
         contactName: current.lead?.name || current.lead?.phone || 'Contato',
       });
     }
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(current?.tenant_id ?? null);
     return conv;
   }
 
@@ -497,12 +496,13 @@ export class ConversationsService {
 
   async returnToOrigin(id: string, reason?: string, audioIds?: string[], returningUserId?: string) {
     // Transação atômica: ler estado + lookup user + atualizar conversa
-    const { originUserId, returningUserName, contactName } = await this.prisma.$transaction(async (tx) => {
+    const { originUserId, returningUserName, contactName, tenantId } = await this.prisma.$transaction(async (tx) => {
       const conv = await (tx as any).conversation.findUnique({
         where: { id },
         select: {
           origin_assigned_user_id: true,
           assigned_user_id: true,
+          tenant_id: true,
           lead: { select: { name: true, phone: true } },
         },
       });
@@ -529,6 +529,7 @@ export class ConversationsService {
         originUserId: conv.origin_assigned_user_id,
         returningUserName: returningUser?.name || 'Advogado',
         contactName: conv.lead?.name || conv.lead?.phone || 'Contato',
+        tenantId: conv.tenant_id as string | null,
       };
     });
 
@@ -541,7 +542,7 @@ export class ConversationsService {
       audioIds: audioIds?.length ? audioIds : undefined,
     });
 
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(tenantId ?? null);
     return { success: true };
   }
 
@@ -562,7 +563,7 @@ export class ConversationsService {
   async keepInInbox(id: string) {
     const conv = await (this.prisma as any).conversation.findUnique({
       where: { id },
-      select: { origin_assigned_user_id: true, assigned_user_id: true },
+      select: { origin_assigned_user_id: true, assigned_user_id: true, tenant_id: true },
     });
 
     const linkedIds = [...new Set([conv?.assigned_user_id, conv?.origin_assigned_user_id].filter(Boolean) as string[])];
@@ -574,7 +575,7 @@ export class ConversationsService {
       },
     });
 
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(conv?.tenant_id ?? null);
     return { success: true };
   }
 
