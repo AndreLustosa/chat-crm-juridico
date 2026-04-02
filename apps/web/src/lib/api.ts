@@ -69,24 +69,37 @@ api.interceptors.response.use(
     const isSilent = (error.config as any)?._silent401 === true;
 
     if (error.response?.status === 401 && !isSilent) {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const expired = token ? isTokenExpired(token) : true;
+
+      // Se o token NÃO expirou localmente mas o servidor deu 401,
+      // é provável que o servidor está reiniciando — NÃO contar para logout
+      if (token && !expired) {
+        const url = (error.config as any)?.url || 'unknown';
+        console.warn(`[api] 401 transiente em ${url} (token local válido — servidor pode estar reiniciando)`);
+        // Não incrementa o contador — retorna o erro normalmente e a página pode tentar de novo
+        return Promise.reject(error);
+      }
+
+      // Token expirado ou ausente — contar para logout
       _consecutive401Count++;
 
-      // Log para diagnóstico — ajuda a identificar qual endpoint está retornando 401
       const url = (error.config as any)?.url || 'unknown';
-      console.warn(`[api] 401 em ${url} (consecutivo: ${_consecutive401Count})`);
+      console.warn(`[api] 401 em ${url} (consecutivo: ${_consecutive401Count}, tokenExpirado: ${expired})`);
 
-      // Resetar o contador após 15s sem 401 (janela maior para evitar falsos positivos)
+      // Resetar o contador após 30s sem 401
       if (_last401ResetTimer) clearTimeout(_last401ResetTimer);
-      _last401ResetTimer = setTimeout(() => { _consecutive401Count = 0; }, 15_000);
+      _last401ResetTimer = setTimeout(() => { _consecutive401Count = 0; }, 30_000);
 
-      // Só desloga após 5 erros 401 consecutivos — threshold maior para suportar páginas
-      // com múltiplas requests simultâneas (ex: workspace com vários widgets)
-      if (_consecutive401Count >= 5) {
-        // Verifica se o token está realmente expirado antes de deslogar
-        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-        const reason = token && isTokenExpired(token) ? 'expired' : 'unauthorized';
-        console.error(`[api] ${_consecutive401Count} erros 401 consecutivos — logout (${reason})`);
-        triggerLogout(reason);
+      // Se o token está expirado, deslogar imediatamente
+      if (expired) {
+        console.error(`[api] Token expirado — logout`);
+        triggerLogout('expired');
+      }
+      // Se acumulou muitos 401 sem token válido — logout
+      else if (_consecutive401Count >= 10) {
+        console.error(`[api] ${_consecutive401Count} erros 401 consecutivos — logout`);
+        triggerLogout('unauthorized');
       }
     }
 
