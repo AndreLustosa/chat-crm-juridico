@@ -188,6 +188,7 @@ export class PaymentGatewayService {
       data: {
         tenant_id: tenantId || legalCase.tenant_id,
         honorario_payment_id: honorarioPaymentId,
+        legal_case_id: legalCase?.id || null,
         gateway: 'ASAAS',
         external_id: asaasCharge.id,
         customer_external_id: customer.external_id,

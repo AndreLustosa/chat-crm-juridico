@@ -505,6 +505,7 @@ model LegalCase {
   petitions         CasePetition[]
   honorarios             CaseHonorario[]
   financial_transactions FinancialTransaction[]
+  gateway_charges        PaymentGatewayCharge[]
 
   @@index([lawyer_id, stage])
   @@index([lead_id])
@@ -1176,6 +1177,7 @@ model PaymentGatewayCharge {
   tenant_id            String?
   honorario_payment_id String?   @unique
   transaction_id       String?   @unique
+  legal_case_id        String?
   gateway              String    @default("ASAAS")
   external_id          String    @unique // ID da cobrança no gateway
   customer_external_id String // ID do cliente no gateway
@@ -1207,11 +1209,13 @@ model PaymentGatewayCharge {
 
   honorario_payment    HonorarioPayment?    @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
   transaction          FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  legal_case           LegalCase?           @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
   tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, status])
   @@index([customer_external_id])
   @@index([due_date, status])
+  @@index([legal_case_id])
 }
 
 // ===============================================
