@@ -45,6 +45,14 @@ export function TaskAlertPopup() {
         auth: { token },
       });
 
+      // Entrar no room do usuário para receber alertas
+      s.on('connect', () => {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          if (payload?.sub) s.emit('join_user', payload.sub);
+        } catch {}
+      });
+
       s.on('task_overdue_alert', (data: any) => {
         setAlerts(prev => {
           // Evitar duplicata do mesmo task

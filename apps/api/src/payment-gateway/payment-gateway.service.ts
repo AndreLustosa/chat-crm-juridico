@@ -778,7 +778,9 @@ export class PaymentGatewayService {
       select: { id: true, instance_name: true },
     }).catch(() => null);
 
-    const clientPhone = lead.phone.replace(/\D/g, '');
+    let clientPhone = lead.phone.replace(/\D/g, '');
+    // Garantir código do país (55 para Brasil)
+    if (clientPhone.length <= 11) clientPhone = '55' + clientPhone;
     try {
       const sendResult = await this.whatsapp.sendText(
         clientPhone,
