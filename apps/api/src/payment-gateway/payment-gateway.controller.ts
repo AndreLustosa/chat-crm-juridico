@@ -159,8 +159,11 @@ export class PaymentGatewayController {
   @Post('charges/asaas/:chargeId/receive-in-cash')
   async receiveInCash(@Param('chargeId') chargeId: string) {
     this.logger.log(`[POST /charges/asaas/${chargeId}/receive-in-cash] Confirmando pagamento em dinheiro`);
-    const result = await this.asaasClient.receiveInCash(chargeId);
-    // Notificar cliente via webhook (o Asaas vai enviar PAYMENT_RECEIVED automaticamente)
+    // Buscar dados da cobrança para obter o valor
+    const charge = await this.asaasClient.getCharge(chargeId);
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const value = charge?.value || 1;
+    const result = await this.asaasClient.receiveInCash(chargeId, today, value);
     return result;
   }
 

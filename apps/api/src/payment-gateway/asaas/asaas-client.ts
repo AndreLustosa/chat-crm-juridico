@@ -152,8 +152,11 @@ export class AsaasClient {
     return this.request<any>('PUT', `/payments/${chargeId}`, data);
   }
 
-  async receiveInCash(chargeId: string): Promise<any> {
-    return this.request<any>('POST', `/payments/${chargeId}/receiveInCash`, {});
+  async receiveInCash(chargeId: string, paymentDate: string, value: number): Promise<any> {
+    return this.request<any>('POST', `/payments/${chargeId}/receiveInCash`, {
+      paymentDate,
+      value,
+    });
   }
 
   async deleteCharge(chargeId: string): Promise<any> {
