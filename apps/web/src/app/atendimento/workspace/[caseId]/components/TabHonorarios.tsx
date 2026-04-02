@@ -38,6 +38,7 @@ const HONORARIO_TYPES = [
   { id: 'FIXO', label: 'Fixo' },
   { id: 'EXITO', label: 'Êxito' },
   { id: 'MISTO', label: 'Misto' },
+  { id: 'ENTRADA', label: 'Entrada/Sinal' },
 ];
 
 const PAYMENT_METHODS = [
@@ -218,6 +219,7 @@ function CreateHonorarioForm({
   const [saving, setSaving] = useState(false);
 
   const isExito = type === 'EXITO' || type === 'MISTO';
+  const isEntrada = type === 'ENTRADA';
 
   const handleCreate = async () => {
     const value = parseFloat(totalValue);
@@ -252,7 +254,7 @@ function CreateHonorarioForm({
           <label className="label text-xs">Tipo</label>
           <select
             value={type}
-            onChange={e => setType(e.target.value)}
+            onChange={e => { setType(e.target.value); if (e.target.value === 'ENTRADA') setInstallmentCount('1'); }}
             className="select select-bordered select-sm w-full"
           >
             {HONORARIO_TYPES.map(t => (
@@ -276,7 +278,7 @@ function CreateHonorarioForm({
           </div>
         )}
         <div>
-          <label className="label text-xs">{isExito ? 'Valor Fixo/Entrada (R$)' : 'Valor Total (R$)'}</label>
+          <label className="label text-xs">{isEntrada ? 'Valor da Entrada (R$)' : isExito ? 'Valor Fixo/Entrada (R$)' : 'Valor Total (R$)'}</label>
           <input
             type="number"
             step="0.01"
@@ -288,6 +290,7 @@ function CreateHonorarioForm({
             autoFocus
           />
         </div>
+        {!isEntrada && (
         <div>
           <label className="label text-xs">N. de Parcelas</label>
           <input
@@ -299,10 +302,11 @@ function CreateHonorarioForm({
             className="input input-bordered input-sm w-full"
           />
         </div>
+        )}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="label text-xs">Data do Contrato</label>
+          <label className="label text-xs">{isEntrada ? 'Data do Pagamento' : 'Data do Contrato'}</label>
           <input
             type="date"
             value={contractDate}
@@ -429,6 +433,7 @@ function HonorarioCard({
   const typeBadgeColor =
     honorario.type === 'FIXO' ? 'badge-primary' :
     honorario.type === 'EXITO' ? 'badge-secondary' :
+    honorario.type === 'ENTRADA' ? 'badge-warning' :
     'badge-accent';
 
   return (

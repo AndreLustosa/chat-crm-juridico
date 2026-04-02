@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { FinanceiroService } from '../financeiro/financeiro.service';
 
-const HONORARIO_TYPES = ['FIXO', 'EXITO', 'MISTO'] as const;
+const HONORARIO_TYPES = ['FIXO', 'EXITO', 'MISTO', 'ENTRADA'] as const;
 const PAYMENT_STATUSES = ['PENDENTE', 'PAGO', 'ATRASADO'] as const;
 
 @Injectable()
