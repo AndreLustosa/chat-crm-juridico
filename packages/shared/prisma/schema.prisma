@@ -113,9 +113,11 @@ model Lead {
   financial_transactions    FinancialTransaction[]
   payment_gateway_customers PaymentGatewayCustomer[]
   notas_fiscais             NotaFiscal[]
+  cpf_cnpj                  String? // CPF ou CNPJ — facilita match com Asaas
 
   @@index([tenant_id, phone])
   @@index([stage])
+  @@index([cpf_cnpj])
   @@index([is_client])
 }
 

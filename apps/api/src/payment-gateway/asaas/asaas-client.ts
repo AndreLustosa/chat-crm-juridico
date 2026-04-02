@@ -152,7 +152,20 @@ export class AsaasClient {
     return this.request<any>('DELETE', `/payments/${chargeId}`);
   }
 
-  async listCharges(params?: ListChargesParams): Promise<any> {
+  async listCharges(params?: any): Promise<any> {
     return this.request<any>('GET', '/payments', undefined, params);
+  }
+
+  // ─── Customers List ───────────────────────────────────────
+
+  async listCustomers(params?: {
+    name?: string;
+    email?: string;
+    cpfCnpj?: string;
+    externalReference?: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<any> {
+    return this.request<any>('GET', '/customers', undefined, params);
   }
 }

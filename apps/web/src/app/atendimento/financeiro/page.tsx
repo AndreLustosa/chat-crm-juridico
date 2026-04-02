@@ -6,7 +6,7 @@ import {
   DollarSign, TrendingUp, TrendingDown, AlertTriangle, Clock,
   Plus, X, Search, Loader2, Phone, MessageSquare,
   ArrowUpDown, ChevronDown, Trash2, Pencil, Check,
-  BarChart3, Receipt, CreditCard, Ban,
+  BarChart3, Receipt, CreditCard, Ban, Users, Link2, Unlink,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -41,7 +41,7 @@ interface Transaction {
 /* ──────────────────────────────────────────────────────────────
    Constants
 ────────────────────────────────────────────────────────────── */
-const TABS = ['Resumo', 'Receitas', 'Despesas', 'Cobrancas', 'Inadimplencia'] as const;
+const TABS = ['Resumo', 'Receitas', 'Despesas', 'Cobrancas', 'Clientes', 'Inadimplencia'] as const;
 type Tab = typeof TABS[number];
 
 const PERIODS = [
@@ -472,6 +472,7 @@ export default function FinanceiroPage() {
     Receitas: TrendingUp,
     Despesas: TrendingDown,
     Cobrancas: CreditCard,
+    Clientes: Users,
     Inadimplencia: AlertTriangle,
   };
 
@@ -681,6 +682,9 @@ export default function FinanceiroPage() {
 
         {/* ─── TAB: Cobrancas (Asaas) ─── */}
         {tab === 'Cobrancas' && <CobrancasAsaasTab />}
+
+        {/* ─── TAB: Clientes (CRM ↔ Asaas) ─── */}
+        {tab === 'Clientes' && <ClientesSyncTab />}
 
         {/* ─── TAB: Inadimplencia ─── */}
         {tab === 'Inadimplencia' && (
@@ -1043,6 +1047,221 @@ function CobrancasAsaasTab() {
             <span className="font-semibold text-foreground">Total: {fmt(totalValue)}</span>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Componente: Clientes CRM ↔ Asaas
+══════════════════════════════════════════════════════════════ */
+
+function ClientesSyncTab() {
+  const [linked, setLinked] = useState<any[]>([]);
+  const [asaasCustomers, setAsaasCustomers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
+  const [view, setView] = useState<'linked' | 'asaas' | 'unlinked'>('linked');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [linking, setLinking] = useState<string | null>(null); // asaas customer ID being linked
+  const [leadSearch, setLeadSearch] = useState('');
+  const [leadResults, setLeadResults] = useState<any[]>([]);
+
+  const fetchLinked = useCallback(async () => {
+    try {
+      const res = await api.get('/payment-gateway/customers/linked');
+      setLinked(res.data || []);
+    } catch { setLinked([]); }
+  }, []);
+
+  const fetchAsaas = useCallback(async () => {
+    try {
+      const res = await api.get('/payment-gateway/customers/asaas', { params: { limit: '100' } });
+      setAsaasCustomers(res.data?.data || []);
+    } catch { setAsaasCustomers([]); }
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([fetchLinked(), fetchAsaas()]).finally(() => setLoading(false));
+  }, [fetchLinked, fetchAsaas]);
+
+  const handleImport = async () => {
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const res = await api.post('/payment-gateway/customers/import');
+      setImportResult(res.data);
+      await Promise.all([fetchLinked(), fetchAsaas()]);
+      showSuccess(`${res.data.linked} cliente(s) vinculado(s) automaticamente!`);
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao importar');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleLink = async (asaasId: string, leadId: string) => {
+    try {
+      await api.post('/payment-gateway/customers/link', { asaasCustomerId: asaasId, leadId });
+      showSuccess('Cliente vinculado!');
+      setLinking(null);
+      setLeadSearch('');
+      setLeadResults([]);
+      await fetchLinked();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao vincular');
+    }
+  };
+
+  const handleUnlink = async (id: string) => {
+    if (!confirm('Desvincular este cliente?')) return;
+    try {
+      await api.delete(`/payment-gateway/customers/${id}`);
+      showSuccess('Desvinculado');
+      await fetchLinked();
+    } catch { showError('Erro ao desvincular'); }
+  };
+
+  const searchLeads = async (q: string) => {
+    setLeadSearch(q);
+    if (q.length < 2) { setLeadResults([]); return; }
+    try {
+      const res = await api.get('/leads', { params: { search: q, limit: 5 } });
+      setLeadResults(res.data?.data || res.data || []);
+    } catch { setLeadResults([]); }
+  };
+
+  const linkedIds = new Set(linked.map(l => l.external_id));
+  const unlinkedAsaas = asaasCustomers.filter(c => !linkedIds.has(c.id) && !c.deleted);
+
+  const q = searchQuery.toLowerCase();
+  const filteredLinked = q ? linked.filter(l => (l.lead?.name || '').toLowerCase().includes(q) || (l.cpf_cnpj || '').includes(q)) : linked;
+  const filteredAsaas = q ? asaasCustomers.filter(c => (c.name || '').toLowerCase().includes(q) || (c.cpfCnpj || '').includes(q)) : asaasCustomers;
+
+  const displayList = view === 'linked' ? filteredLinked : view === 'asaas' ? filteredAsaas : unlinkedAsaas;
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+          <Users size={15} className="text-primary" />
+          Clientes CRM x Asaas
+          <span className="text-xs text-muted-foreground font-normal">({linked.length} vinculados)</span>
+        </h2>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Buscar por nome ou CPF..."
+              className="pl-9 pr-3 py-1.5 text-xs bg-background border border-border rounded-lg focus:outline-none w-48" />
+          </div>
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            {(['linked', 'asaas', 'unlinked'] as const).map(v => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/30'}`}>
+                {v === 'linked' ? `Vinculados (${linked.length})` : v === 'asaas' ? `Asaas (${asaasCustomers.length})` : `Sem vinculo (${unlinkedAsaas.length})`}
+              </button>
+            ))}
+          </div>
+          <button onClick={handleImport} disabled={importing}
+            className="px-4 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+            {importing ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />}
+            Importar e Vincular
+          </button>
+        </div>
+      </div>
+
+      {/* Import result */}
+      {importResult && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-xs">
+          <p className="font-semibold text-emerald-400">Importacao concluida: {importResult.total} clientes no Asaas</p>
+          <p className="text-muted-foreground mt-1">{importResult.linked} vinculados automaticamente | {importResult.alreadyLinked} ja vinculados | {importResult.unlinked?.length || 0} sem match</p>
+        </div>
+      )}
+
+      {/* Table */}
+      {loading ? (
+        <div className="text-center py-16"><Loader2 size={24} className="animate-spin text-muted-foreground mx-auto" /></div>
+      ) : displayList.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Users size={40} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">Nenhum cliente {view === 'linked' ? 'vinculado' : view === 'asaas' ? 'no Asaas' : 'sem vinculo'}</p>
+        </div>
+      ) : (
+        <div className="border border-border rounded-xl overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-card/80 border-b border-border">
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Nome</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">CPF/CNPJ</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Email</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Telefone</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">ID Asaas</th>
+                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Acao</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayList.map((item: any, i: number) => {
+                const isLinkedView = view === 'linked';
+                const name = isLinkedView ? item.lead?.name : item.name;
+                const cpf = isLinkedView ? item.cpf_cnpj : item.cpfCnpj?.replace(/\D/g, '');
+                const email = isLinkedView ? item.lead?.email : item.email;
+                const phone = isLinkedView ? item.lead?.phone : (item.phone || item.mobilePhone);
+                const asaasId = isLinkedView ? item.external_id : item.id;
+                const isAlreadyLinked = linkedIds.has(item.id);
+
+                return (
+                  <tr key={asaasId || i} className="border-b border-border/40 hover:bg-accent/10 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[10px] font-bold shrink-0">
+                          {(name || '?')[0]?.toUpperCase()}
+                        </div>
+                        <span className="font-medium text-foreground truncate max-w-[160px]">{name || '--'}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-muted-foreground">{cpf || '--'}</td>
+                    <td className="px-4 py-3 text-muted-foreground truncate max-w-[150px]">{email || '--'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{phone || '--'}</td>
+                    <td className="px-4 py-3 font-mono text-[10px] text-muted-foreground">{asaasId?.slice(-10)}</td>
+                    <td className="px-4 py-3">
+                      {isLinkedView ? (
+                        <button onClick={() => handleUnlink(item.id)}
+                          className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 flex items-center gap-1">
+                          <Unlink size={10} /> Desvincular
+                        </button>
+                      ) : isAlreadyLinked ? (
+                        <span className="px-2 py-1 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-md">Vinculado</span>
+                      ) : linking === item.id ? (
+                        <div className="space-y-1">
+                          <input type="text" value={leadSearch} onChange={e => searchLeads(e.target.value)}
+                            placeholder="Buscar lead por nome..."
+                            className="w-full px-2 py-1 text-[10px] bg-background border border-border rounded-md focus:outline-none" autoFocus />
+                          {leadResults.map(l => (
+                            <button key={l.id} onClick={() => handleLink(item.id, l.id)}
+                              className="w-full text-left px-2 py-1 text-[10px] hover:bg-accent/30 rounded-md flex items-center gap-1">
+                              <Check size={10} className="text-emerald-400" /> {l.name || l.phone}
+                            </button>
+                          ))}
+                          <button onClick={() => { setLinking(null); setLeadSearch(''); setLeadResults([]); }}
+                            className="text-[10px] text-muted-foreground hover:text-foreground">Cancelar</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setLinking(item.id)}
+                          className="px-2 py-1 text-[10px] font-semibold text-primary border border-primary/20 rounded-md hover:bg-primary/10 flex items-center gap-1">
+                          <Link2 size={10} /> Vincular
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

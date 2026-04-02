@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Param,
   Query,
@@ -153,6 +154,51 @@ export class PaymentGatewayController {
     return this.service.reconcile(tenantId);
   }
 
+  // ─── Customers ─────────────────────────────────────────
+
+  /** Lista clientes vinculados (CRM ↔ Asaas) */
+  @Get('customers/linked')
+  async listLinkedCustomers(@Req() req: any) {
+    return this.service.listLinkedCustomers(req.user?.tenant_id);
+  }
+
+  /** Lista clientes direto do Asaas */
+  @Get('customers/asaas')
+  async listAsaasCustomers(
+    @Query('name') name: string | undefined,
+    @Query('cpfCnpj') cpfCnpj: string | undefined,
+    @Query('offset') offset: string | undefined,
+    @Query('limit') limit: string | undefined,
+  ) {
+    return this.asaasClient.listCustomers({
+      name: name || undefined,
+      cpfCnpj: cpfCnpj || undefined,
+      offset: offset ? parseInt(offset) : 0,
+      limit: limit ? parseInt(limit) : 100,
+    });
+  }
+
+  /** Importa e vincula automaticamente (match CPF/nome) */
+  @Post('customers/import')
+  async importCustomers(@Req() req: any) {
+    this.logger.log('[POST /customers/import] Importando e vinculando clientes');
+    return this.service.importAsaasCustomers(req.user?.tenant_id);
+  }
+
+  /** Vinculação manual */
+  @Post('customers/link')
+  async linkCustomer(@Body() body: { asaasCustomerId: string; leadId: string }, @Req() req: any) {
+    this.logger.log(`[POST /customers/link] ${body.asaasCustomerId} → ${body.leadId}`);
+    return this.service.linkCustomerToLead(body.asaasCustomerId, body.leadId, req.user?.tenant_id);
+  }
+
+  /** Desvincular */
+  @Delete('customers/:id')
+  async unlinkCustomer(@Param('id') id: string) {
+    return this.service.unlinkCustomer(id);
+  }
+
+  /** Sync individual */
   @Post('customers/sync/:leadId')
   async ensureCustomer(@Param('leadId') leadId: string, @Req() req: any) {
     const tenantId = req.user?.tenantId;

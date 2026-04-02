@@ -487,6 +487,180 @@ export class PaymentGatewayService {
 
   // ─── Helpers ───────────────────────────────────────────
 
+  // ─── Customer Sync (CRM ↔ Asaas) ──────────────────────
+
+  /**
+   * Importa clientes do Asaas e tenta vincular automaticamente aos leads do CRM.
+   * Match por: 1) externalReference (lead_id), 2) CPF/CNPJ, 3) nome exato
+   */
+  async importAsaasCustomers(tenantId?: string): Promise<{
+    total: number; linked: number; alreadyLinked: number; unlinked: any[];
+  }> {
+    this.logger.log('[CUSTOMER-SYNC] Importando clientes do Asaas...');
+    let allCustomers: any[] = [];
+    let offset = 0;
+    const limit = 100;
+
+    // Paginar todos os clientes do Asaas
+    while (true) {
+      const page = await this.asaas.listCustomers({ offset, limit });
+      const items = page?.data || [];
+      allCustomers = [...allCustomers, ...items];
+      if (!page?.hasMore || items.length === 0) break;
+      offset += limit;
+    }
+
+    this.logger.log(`[CUSTOMER-SYNC] ${allCustomers.length} clientes encontrados no Asaas`);
+
+    let linked = 0;
+    let alreadyLinked = 0;
+    const unlinked: any[] = [];
+
+    for (const cust of allCustomers) {
+      if (cust.deleted) continue;
+
+      // Ja vinculado?
+      const existing = await this.prisma.paymentGatewayCustomer.findFirst({
+        where: { gateway: 'ASAAS', external_id: cust.id },
+      });
+      if (existing) { alreadyLinked++; continue; }
+
+      // Match 1: externalReference = lead_id
+      let leadId: string | null = null;
+      if (cust.externalReference) {
+        const lead = await this.prisma.lead.findUnique({
+          where: { id: cust.externalReference },
+          select: { id: true },
+        });
+        if (lead) leadId = lead.id;
+      }
+
+      // Match 2: CPF/CNPJ
+      if (!leadId && cust.cpfCnpj) {
+        const cpfClean = cust.cpfCnpj.replace(/\D/g, '');
+        // Busca no campo cpf_cnpj do Lead
+        const lead = await this.prisma.lead.findFirst({
+          where: {
+            cpf_cnpj: cpfClean,
+            ...(tenantId ? { tenant_id: tenantId } : {}),
+          },
+          select: { id: true },
+        });
+        if (lead) leadId = lead.id;
+
+        // Fallback: busca na ficha trabalhista
+        if (!leadId) {
+          const fichas = await this.prisma.fichaTrabalhista.findMany({
+            where: { data: { path: ['cpf'], equals: cpfClean } },
+            select: { lead_id: true },
+            take: 1,
+          });
+          if (fichas.length > 0) leadId = fichas[0].lead_id;
+        }
+      }
+
+      // Match 3: nome exato (case insensitive)
+      if (!leadId && cust.name) {
+        const lead = await this.prisma.lead.findFirst({
+          where: {
+            name: { equals: cust.name, mode: 'insensitive' },
+            ...(tenantId ? { tenant_id: tenantId } : {}),
+          },
+          select: { id: true },
+        });
+        if (lead) leadId = lead.id;
+      }
+
+      if (leadId) {
+        // Vincular
+        try {
+          await this.prisma.paymentGatewayCustomer.create({
+            data: {
+              tenant_id: tenantId || null,
+              lead_id: leadId,
+              gateway: 'ASAAS',
+              external_id: cust.id,
+              cpf_cnpj: cust.cpfCnpj?.replace(/\D/g, '') || null,
+              sync_status: 'SYNCED',
+              last_synced_at: new Date(),
+            },
+          });
+          // Atualizar cpf_cnpj no Lead se vazio
+          if (cust.cpfCnpj) {
+            await this.prisma.lead.updateMany({
+              where: { id: leadId, cpf_cnpj: null },
+              data: { cpf_cnpj: cust.cpfCnpj.replace(/\D/g, '') },
+            });
+          }
+          linked++;
+        } catch (e: any) {
+          this.logger.warn(`[CUSTOMER-SYNC] Erro ao vincular ${cust.id}: ${e.message}`);
+        }
+      } else {
+        unlinked.push({
+          asaasId: cust.id,
+          name: cust.name,
+          cpfCnpj: cust.cpfCnpj,
+          email: cust.email,
+          phone: cust.phone || cust.mobilePhone,
+        });
+      }
+    }
+
+    this.logger.log(`[CUSTOMER-SYNC] Resultado: ${linked} vinculados, ${alreadyLinked} ja vinculados, ${unlinked.length} sem match`);
+    return { total: allCustomers.length, linked, alreadyLinked, unlinked };
+  }
+
+  /** Vinculacao manual: conecta um cliente Asaas a um lead do CRM */
+  async linkCustomerToLead(asaasCustomerId: string, leadId: string, tenantId?: string) {
+    // Buscar dados do cliente no Asaas
+    const cust = await this.asaas.getCustomer(asaasCustomerId);
+    if (!cust) throw new NotFoundException('Cliente nao encontrado no Asaas');
+
+    // Verificar se lead existe
+    const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+    if (!lead) throw new NotFoundException('Lead nao encontrado');
+
+    // Criar vinculo
+    const record = await this.prisma.paymentGatewayCustomer.create({
+      data: {
+        tenant_id: tenantId || null,
+        lead_id: leadId,
+        gateway: 'ASAAS',
+        external_id: asaasCustomerId,
+        cpf_cnpj: cust.cpfCnpj?.replace(/\D/g, '') || null,
+        sync_status: 'SYNCED',
+        last_synced_at: new Date(),
+      },
+    });
+
+    // Atualizar cpf_cnpj no Lead
+    if (cust.cpfCnpj) {
+      await this.prisma.lead.updateMany({
+        where: { id: leadId, cpf_cnpj: null },
+        data: { cpf_cnpj: cust.cpfCnpj.replace(/\D/g, '') },
+      });
+    }
+
+    return record;
+  }
+
+  /** Desvincular um cliente */
+  async unlinkCustomer(id: string) {
+    return this.prisma.paymentGatewayCustomer.delete({ where: { id } });
+  }
+
+  /** Lista clientes vinculados (local) */
+  async listLinkedCustomers(tenantId?: string) {
+    return this.prisma.paymentGatewayCustomer.findMany({
+      where: { gateway: 'ASAAS', ...(tenantId ? { tenant_id: tenantId } : {}) },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, email: true, cpf_cnpj: true } },
+      },
+      orderBy: { last_synced_at: 'desc' },
+    });
+  }
+
   private emitFinancialUpdate(tenantId: string | null, data: any) {
     try {
       if (this.chatGateway?.server && tenantId) {
