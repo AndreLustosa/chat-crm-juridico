@@ -94,6 +94,17 @@ export class LegalCasesService {
           location: true,
         },
       },
+      // Resumo financeiro para badge no kanban
+      honorarios: {
+        where: { status: 'ATIVO' },
+        select: {
+          total_value: true,
+          type: true,
+          payments: {
+            select: { amount: true, status: true },
+          },
+        },
+      },
       _count: {
         select: {
           tasks: true,

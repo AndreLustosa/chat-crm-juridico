@@ -59,6 +59,11 @@ interface LegalCase {
     title: string;
     location: string | null;
   }[];
+  honorarios?: {
+    total_value: string;
+    type: string;
+    payments: { amount: string; status: string }[];
+  }[];
   _count?: { tasks: number; events: number; djen_publications: number };
 }
 
@@ -217,6 +222,18 @@ function ProcessoCard({
   const djenCount = legalCase._count?.djen_publications ?? 0;
   const taskCount = legalCase._count?.tasks ?? 0;
   const eventCount = legalCase._count?.events ?? 0;
+
+  // Resumo financeiro
+  const fin = (legalCase.honorarios || []).reduce((acc, h) => {
+    acc.contracted += parseFloat(h.total_value) || 0;
+    h.payments.forEach(p => {
+      const amt = parseFloat(p.amount) || 0;
+      if (p.status === 'PAGO') acc.received += amt;
+      else if (p.status === 'ATRASADO') acc.overdue += amt;
+      else acc.pending += amt;
+    });
+    return acc;
+  }, { contracted: 0, received: 0, pending: 0, overdue: 0 });
   const days = daysInStage(legalCase.stage_changed_at || legalCase.updated_at);
   const priority = PRIORITY_CONFIG[legalCase.priority] ?? PRIORITY_CONFIG.NORMAL;
   const isUrgente = legalCase.priority === 'URGENTE';
@@ -356,6 +373,31 @@ function ProcessoCard({
           <span className="text-[9px] text-amber-400 font-semibold leading-tight">
             Atenção: juntada da contestação ocorre na data da audiência
           </span>
+        </div>
+      )}
+
+      {/* Badge financeiro */}
+      {fin.contracted > 0 && (
+        <div className="mt-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/15">
+          <DollarSign size={9} className="text-emerald-400 shrink-0" />
+          <div className="flex items-center gap-2 text-[9px] font-semibold overflow-hidden">
+            <span className="text-blue-400" title="Contratado">
+              {fin.contracted.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+            </span>
+            <span className="text-emerald-400" title="Recebido">
+              ✅ {fin.received.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+            </span>
+            {fin.overdue > 0 && (
+              <span className="text-red-400" title="Atrasado">
+                🔴 {fin.overdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+              </span>
+            )}
+            {fin.pending > 0 && fin.overdue === 0 && (
+              <span className="text-amber-400" title="Pendente">
+                ⏰ {fin.pending.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
