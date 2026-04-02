@@ -148,6 +148,10 @@ export class AsaasClient {
     return this.request<any>('GET', `/payments/${chargeId}/pixQrCode`);
   }
 
+  async updateCharge(chargeId: string, data: { value?: number; dueDate?: string; description?: string }): Promise<any> {
+    return this.request<any>('PUT', `/payments/${chargeId}`, data);
+  }
+
   async deleteCharge(chargeId: string): Promise<any> {
     return this.request<any>('DELETE', `/payments/${chargeId}`);
   }

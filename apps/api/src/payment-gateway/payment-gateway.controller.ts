@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
@@ -116,6 +117,16 @@ export class PaymentGatewayController {
   }
 
   // ─── ROTAS COM PARÂMETROS (depois das fixas) ──────────────
+
+  /** Editar cobrança no Asaas */
+  @Put('charges/asaas/:chargeId')
+  async updateAsaasCharge(
+    @Param('chargeId') chargeId: string,
+    @Body() body: { value?: number; dueDate?: string; description?: string },
+  ) {
+    this.logger.log(`[PUT /charges/asaas/${chargeId}] Atualizando cobranca`);
+    return this.asaasClient.updateCharge(chargeId, body);
+  }
 
   /** Excluir cobrança no Asaas */
   @Delete('charges/asaas/:chargeId')

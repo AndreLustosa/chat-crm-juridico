@@ -793,6 +793,9 @@ function CobrancasAsaasTab() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingCharge, setEditingCharge] = useState<any>(null);
+  const [editForm, setEditForm] = useState({ value: '', dueDate: '', description: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Filtros
   const [showFilters, setShowFilters] = useState(false);
@@ -828,6 +831,34 @@ function CobrancasAsaasTab() {
   }, [statusFilters, billingTypeFilter, dateFrom, dateTo]);
 
   useEffect(() => { fetchCharges(); }, [fetchCharges]);
+
+  const openEdit = (charge: any) => {
+    setEditingCharge(charge);
+    setEditForm({
+      value: String(charge.value || ''),
+      dueDate: charge.dueDate || '',
+      description: charge.description || '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingCharge) return;
+    setSavingEdit(true);
+    try {
+      const updates: any = {};
+      if (editForm.value) updates.value = parseFloat(editForm.value);
+      if (editForm.dueDate) updates.dueDate = editForm.dueDate;
+      if (editForm.description !== undefined) updates.description = editForm.description;
+      await api.put(`/payment-gateway/charges/asaas/${editingCharge.id}`, updates);
+      showSuccess('Cobranca atualizada!');
+      setEditingCharge(null);
+      await fetchCharges();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao atualizar');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const handleDeleteCharge = async (chargeId: string) => {
     if (!confirm('Excluir esta cobranca no Asaas? Esta acao nao pode ser desfeita.')) return;
@@ -993,6 +1024,52 @@ function CobrancasAsaasTab() {
         </div>
       )}
 
+      {/* ── Modal Editar Cobranca ── */}
+      {editingCharge && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setEditingCharge(null)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+              <Pencil size={16} className="text-primary" /> Editar Cobranca
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Cliente: {editingCharge.customerName || editingCharge.customer} | ID: {editingCharge.id?.slice(-8)}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Valor (R$)</label>
+                <input type="number" step="0.01" min="0" value={editForm.value}
+                  onChange={e => setEditForm(f => ({ ...f, value: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Data de Vencimento</label>
+                <input type="date" value={editForm.dueDate}
+                  onChange={e => setEditForm(f => ({ ...f, dueDate: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Descricao</label>
+                <input type="text" value={editForm.description}
+                  onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                  placeholder="Descricao da cobranca"
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={handleSaveEdit} disabled={savingEdit}
+                className="flex-1 py-2.5 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
+                {savingEdit ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                Salvar
+              </button>
+              <button onClick={() => setEditingCharge(null)}
+                className="px-4 py-2.5 text-sm font-medium text-muted-foreground border border-border rounded-lg hover:bg-accent/30">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Tabela ── */}
       {loading ? (
         <div className="text-center py-16"><Loader2 size={24} className="animate-spin text-muted-foreground mx-auto" /></div>
@@ -1051,17 +1128,27 @@ function CobrancasAsaasTab() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {c.status !== 'RECEIVED' && c.status !== 'CONFIRMED' && c.status !== 'RECEIVED_IN_CASH' && (
-                          <button
-                            onClick={() => handleDeleteCharge(c.id)}
-                            disabled={deletingId === c.id}
-                            className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 transition-colors disabled:opacity-50 inline-flex items-center gap-1"
-                            title="Excluir cobranca"
-                          >
-                            {deletingId === c.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
-                            Excluir
-                          </button>
-                        )}
+                        <div className="flex items-center justify-end gap-1">
+                          {c.status !== 'RECEIVED' && c.status !== 'CONFIRMED' && c.status !== 'RECEIVED_IN_CASH' && (
+                            <>
+                              <button
+                                onClick={() => openEdit(c)}
+                                className="px-2 py-1 text-[10px] font-semibold text-primary border border-primary/20 rounded-md hover:bg-primary/10 transition-colors inline-flex items-center gap-1"
+                                title="Editar cobranca"
+                              >
+                                <Pencil size={10} /> Editar
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCharge(c.id)}
+                                disabled={deletingId === c.id}
+                                className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                                title="Excluir cobranca"
+                              >
+                                {deletingId === c.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
