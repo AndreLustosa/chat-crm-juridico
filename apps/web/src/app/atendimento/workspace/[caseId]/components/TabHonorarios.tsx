@@ -24,6 +24,9 @@ interface CaseHonorarioItem {
   id: string;
   type: string;
   total_value: string; // Decimal comes as string
+  success_percentage: string | null; // Percentual de êxito
+  calculated_value: string | null; // Valor calculado do êxito
+  status: string;
   installment_count: number;
   contract_date: string | null;
   notes: string | null;
@@ -208,10 +211,13 @@ function CreateHonorarioForm({
 }) {
   const [type, setType] = useState('FIXO');
   const [totalValue, setTotalValue] = useState('');
+  const [successPercentage, setSuccessPercentage] = useState('');
   const [installmentCount, setInstallmentCount] = useState('1');
   const [contractDate, setContractDate] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const isExito = type === 'EXITO' || type === 'MISTO';
 
   const handleCreate = async () => {
     const value = parseFloat(totalValue);
@@ -224,6 +230,7 @@ function CreateHonorarioForm({
       await api.post(`/honorarios/case/${caseId}`, {
         type,
         total_value: value,
+        success_percentage: isExito && successPercentage ? parseFloat(successPercentage) : undefined,
         installment_count: parseInt(installmentCount) || 1,
         contract_date: contractDate || undefined,
         notes: notes.trim() || undefined,
@@ -240,7 +247,7 @@ function CreateHonorarioForm({
   return (
     <div className="rounded-lg border border-primary/30 bg-base-200/50 p-4 space-y-3">
       <h3 className="text-sm font-semibold">Novo Contrato de Honorários</h3>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className={`grid grid-cols-1 ${isExito ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-3`}>
         <div>
           <label className="label text-xs">Tipo</label>
           <select
@@ -253,8 +260,23 @@ function CreateHonorarioForm({
             ))}
           </select>
         </div>
+        {isExito && (
+          <div>
+            <label className="label text-xs">Percentual de Êxito (%)</label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="100"
+              placeholder="30"
+              value={successPercentage}
+              onChange={e => setSuccessPercentage(e.target.value)}
+              className="input input-bordered input-sm w-full"
+            />
+          </div>
+        )}
         <div>
-          <label className="label text-xs">Valor Total (R$)</label>
+          <label className="label text-xs">{isExito ? 'Valor Fixo/Entrada (R$)' : 'Valor Total (R$)'}</label>
           <input
             type="number"
             step="0.01"
@@ -398,9 +420,19 @@ function HonorarioCard({
           <span className={`badge badge-xs ${typeBadgeColor}`}>
             {HONORARIO_TYPES.find(t => t.id === honorario.type)?.label || honorario.type}
           </span>
+          {honorario.success_percentage && (
+            <span className="badge badge-xs badge-outline text-[10px]">
+              {parseFloat(honorario.success_percentage)}% êxito
+            </span>
+          )}
           <span className="font-semibold text-sm">
             {formatCurrency(honorario.total_value)}
           </span>
+          {honorario.calculated_value && (
+            <span className="text-xs text-emerald-500 font-medium">
+              (Êxito: {formatCurrency(honorario.calculated_value)})
+            </span>
+          )}
           <span className="text-xs text-base-content/50">
             ({paidCount}/{totalPayments} parcelas)
           </span>
