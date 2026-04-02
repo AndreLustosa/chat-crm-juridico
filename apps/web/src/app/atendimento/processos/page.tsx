@@ -1884,7 +1884,7 @@ function ProcessoDetailPanel({
                                 {/* Evento sugerido — com preview antes de criar */}
                                 {analysis.tarefa_titulo && !djenTaskCreated[pub.id] && (() => {
                                   const preview = djenEventPreview[pub.id];
-                                  const eventTypeLabels: Record<string, string> = { AUDIENCIA: '⚖️ Audiência', PRAZO: '🕐 Prazo', TAREFA: '✅ Tarefa' };
+                                  const eventTypeLabels: Record<string, string> = { AUDIENCIA: '⚖️ Audiência', PERICIA: '🔬 Perícia', PRAZO: '🕐 Prazo', TAREFA: '✅ Tarefa' };
                                   // Calcula data/hora sugerida pela IA
                                   // IMPORTANTE: extraímos data e hora diretamente da string ISO da IA,
                                   // sem criar objetos Date — assim evitamos conversão de fuso (UTC-3 do browser).
@@ -1944,6 +1944,7 @@ function ProcessoDetailPanel({
                                               className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
                                             >
                                               <option value="AUDIENCIA">⚖️ Audiência</option>
+                                              <option value="PERICIA">🔬 Perícia</option>
                                               <option value="PRAZO">🕐 Prazo</option>
                                               <option value="TAREFA">✅ Tarefa</option>
                                               <option value="OUTRO">📌 Outro</option>
@@ -1995,7 +1996,7 @@ function ProcessoDetailPanel({
                                                   const [y, m, d] = preview.date.split('-').map(Number);
                                                   const [h, mi] = preview.time.split(':').map(Number);
                                                   const start = new Date(Date.UTC(y, m-1, d, h, mi, 0));
-                                                  const dur = preview.type === 'AUDIENCIA' ? 60 : 30;
+                                                  const dur = preview.type === 'AUDIENCIA' ? 60 : preview.type === 'PERICIA' ? 120 : 30;
                                                   await api.post('/calendar/events', {
                                                     type: preview.type,
                                                     title: preview.title,
