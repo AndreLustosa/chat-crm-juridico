@@ -199,8 +199,21 @@ export class LegalCasesController {
   }
 
   @Patch(':id/tracking-stage')
-  updateTrackingStage(@Param('id') id: string, @Body('trackingStage') trackingStage: string, @Request() req: any) {
-    return this.service.updateTrackingStage(id, trackingStage, req.user?.tenant_id);
+  updateTrackingStage(
+    @Param('id') id: string,
+    @Body() body: {
+      trackingStage: string;
+      sentence_value?: number;
+      sentence_date?: string;
+      sentence_type?: string;
+    },
+    @Request() req: any,
+  ) {
+    return this.service.updateTrackingStage(id, body.trackingStage, req.user?.tenant_id, {
+      sentence_value: body.sentence_value,
+      sentence_date: body.sentence_date,
+      sentence_type: body.sentence_type,
+    });
   }
 
   @Patch(':id/notes')

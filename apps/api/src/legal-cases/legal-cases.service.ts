@@ -747,7 +747,12 @@ export class LegalCasesService {
     return updated;
   }
 
-  async updateTrackingStage(id: string, trackingStage: string, tenantId?: string) {
+  async updateTrackingStage(
+    id: string,
+    trackingStage: string,
+    tenantId?: string,
+    sentenceData?: { sentence_value?: number; sentence_date?: string; sentence_type?: string },
+  ) {
     await this.verifyTenantOwnership(id, tenantId);
     const valid = TRACKING_STAGES.find(s => s.id === trackingStage);
     if (!valid) throw new BadRequestException(`Stage inválido: ${trackingStage}`);
@@ -757,10 +762,44 @@ export class LegalCasesService {
       select: { tracking_stage: true, lead_id: true, case_number: true, legal_area: true },
     });
 
+    // Dados adicionais para EXECUCAO: valor da condenação + sentença
+    const extraData: any = {};
+    if (trackingStage === 'EXECUCAO' && sentenceData) {
+      if (sentenceData.sentence_value !== undefined && sentenceData.sentence_value !== null) {
+        extraData.sentence_value = sentenceData.sentence_value;
+      }
+      if (sentenceData.sentence_date) {
+        extraData.sentence_date = new Date(sentenceData.sentence_date);
+      }
+      if (sentenceData.sentence_type) {
+        extraData.sentence_type = sentenceData.sentence_type;
+      }
+    }
+
     const result = await this.prisma.legalCase.update({
       where: { id },
-      data: { tracking_stage: trackingStage, stage_changed_at: new Date() },
+      data: { tracking_stage: trackingStage, stage_changed_at: new Date(), ...extraData },
     });
+
+    // Recalcular honorários de êxito quando sentence_value é preenchido
+    if (extraData.sentence_value) {
+      try {
+        const { HonorariosService } = await import('../honorarios/honorarios.service');
+        // Dynamic import para evitar circular dependency — recalcula no próprio Prisma
+        const exitoHonorarios = await this.prisma.caseHonorario.findMany({
+          where: { legal_case_id: id, type: { in: ['EXITO', 'MISTO'] }, success_percentage: { not: null }, status: 'ATIVO' },
+        });
+        const sentenceValue = Number(extraData.sentence_value);
+        for (const h of exitoHonorarios) {
+          const percentage = Number(h.success_percentage);
+          const calculatedValue = Math.round(sentenceValue * percentage) / 100;
+          await this.prisma.caseHonorario.update({ where: { id: h.id }, data: { calculated_value: calculatedValue } });
+          this.logger.log(`[EXECUCAO] Êxito recalculado: ${h.id} | ${percentage}% de R$ ${sentenceValue} = R$ ${calculatedValue}`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`[EXECUCAO] Falha ao recalcular êxito: ${e.message}`);
+      }
+    }
 
     if (current?.lead_id) {
       this.appendCaseStageToMemory(current.lead_id, current.tracking_stage, trackingStage, valid.label, current.case_number, current.legal_area).catch(err =>

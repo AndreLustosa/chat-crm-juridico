@@ -569,6 +569,108 @@ function AgendarAudienciaModal({
   );
 }
 
+// ─── SentencaModal ──────────────────────────────────────────────
+// Exibido quando o usuário move um card para EXECUCAO.
+// Coleta valor da condenação, data e tipo da sentença.
+
+function SentencaModal({
+  legalCase,
+  onConfirm,
+  onSkip,
+  onCancel,
+}: {
+  legalCase: LegalCase;
+  onConfirm: (data: { sentence_value?: number; sentence_date?: string; sentence_type?: string }) => void;
+  onSkip: () => void;
+  onCancel: () => void;
+}) {
+  const [sentenceValue, setSentenceValue] = useState('');
+  const [sentenceDate, setSentenceDate] = useState('');
+  const [sentenceType, setSentenceType] = useState('PROCEDENTE');
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 text-lg">💰</div>
+          <div>
+            <h3 className="text-base font-bold text-foreground">Execução — Dados da Sentença</h3>
+            <p className="text-xs text-muted-foreground">
+              {legalCase.lead?.name} • {legalCase.case_number || 'Sem número'}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">Valor da Condenação (R$)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={sentenceValue}
+              onChange={e => setSentenceValue(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              placeholder="Ex: 50000.00"
+              autoFocus
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Data da Sentença</label>
+              <input
+                type="date"
+                value={sentenceDate}
+                onChange={e => setSentenceDate(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Resultado</label>
+              <select
+                value={sentenceType}
+                onChange={e => setSentenceType(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              >
+                <option value="PROCEDENTE">Procedente</option>
+                <option value="PARCIAL">Parcialmente Procedente</option>
+                <option value="IMPROCEDENTE">Improcedente</option>
+                <option value="ACORDO">Acordo</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          <button
+            onClick={() => onConfirm({
+              sentence_value: sentenceValue ? parseFloat(sentenceValue) : undefined,
+              sentence_date: sentenceDate || undefined,
+              sentence_type: sentenceType,
+            })}
+            className="flex-1 py-2.5 text-sm font-semibold bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"
+          >
+            Confirmar e Mover
+          </button>
+          <button
+            onClick={onSkip}
+            className="px-4 py-2.5 text-sm font-medium text-muted-foreground border border-border rounded-lg hover:bg-accent transition-colors"
+          >
+            Pular
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2.5 text-sm font-medium text-muted-foreground border border-border rounded-lg hover:bg-accent transition-colors"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── AgendarPericiaModal ──────────────────────────────────────
 // Exibido quando o usuário move um card para PERICIA_AGENDADA.
 
@@ -3018,6 +3120,11 @@ function ProcessosPageContent() {
     suggestedDate?: string | null;
   } | null>(null);
 
+  // Mover para EXECUCAO abre modal de sentença (obrigatório)
+  const [pendingMoveToExecucao, setPendingMoveToExecucao] = useState<{
+    legalCase: LegalCase;
+  } | null>(null);
+
   // (DJEN movido para /atendimento/djen)
 
   // Board pan
@@ -3085,10 +3192,10 @@ function ProcessosPageContent() {
     }
   }, [searchParams, cases, router]);
 
-  const executeMoveCase = async (caseId: string, newTrackingStage: string) => {
+  const executeMoveCase = async (caseId: string, newTrackingStage: string, extra?: { sentence_value?: number; sentence_date?: string; sentence_type?: string }) => {
     setCases(prev => prev.map(c => c.id === caseId ? { ...c, tracking_stage: newTrackingStage } : c));
     try {
-      await api.patch(`/legal-cases/${caseId}/tracking-stage`, { trackingStage: newTrackingStage });
+      await api.patch(`/legal-cases/${caseId}/tracking-stage`, { trackingStage: newTrackingStage, ...extra });
     } catch {
       fetchCases(true);
     }
@@ -3108,6 +3215,15 @@ function ProcessosPageContent() {
       } catch { /* permite mover mesmo sem eventos */ }
       if (lc) {
         setPendingMoveToPericia({ legalCase: lc, targetStage: newTrackingStage, suggestedDate });
+        return;
+      }
+    }
+
+    // EXECUCAO — abre modal para informar valor da condenação
+    if (newTrackingStage === 'EXECUCAO') {
+      const lc = cases.find(c => c.id === caseId);
+      if (lc) {
+        setPendingMoveToExecucao({ legalCase: lc });
         return;
       }
     }
@@ -3508,6 +3624,24 @@ function ProcessosPageContent() {
             executeMoveCase(lc.id, targetStage);
           }}
           onCancel={() => setPendingMoveToPericia(null)}
+        />
+      )}
+
+      {/* Modal: Sentença (ao mover para EXECUCAO) */}
+      {pendingMoveToExecucao && (
+        <SentencaModal
+          legalCase={pendingMoveToExecucao.legalCase}
+          onConfirm={(data) => {
+            const lc = pendingMoveToExecucao.legalCase;
+            setPendingMoveToExecucao(null);
+            executeMoveCase(lc.id, 'EXECUCAO', data);
+          }}
+          onSkip={() => {
+            const lc = pendingMoveToExecucao.legalCase;
+            setPendingMoveToExecucao(null);
+            executeMoveCase(lc.id, 'EXECUCAO');
+          }}
+          onCancel={() => setPendingMoveToExecucao(null)}
         />
       )}
 
