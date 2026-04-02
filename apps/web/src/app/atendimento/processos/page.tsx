@@ -85,7 +85,7 @@ interface AiAnalysis {
   tarefa_titulo: string;
   tarefa_descricao: string;
   orientacoes: string;
-  event_type: 'AUDIENCIA' | 'PRAZO' | 'TAREFA';
+  event_type: 'AUDIENCIA' | 'PERICIA' | 'PRAZO' | 'TAREFA';
   data_audiencia: string | null;
   data_prazo: string | null;
 }
