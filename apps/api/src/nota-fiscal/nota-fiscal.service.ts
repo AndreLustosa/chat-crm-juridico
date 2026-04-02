@@ -104,7 +104,6 @@ export class NotaFiscalService {
             name: true,
             phone: true,
             email: true,
-            cpf: true,
           },
         },
       },
@@ -146,7 +145,7 @@ export class NotaFiscalService {
     const resolvedIss = issRate || '5.00';
     const resolvedDescricao = servicoDescricao || 'Servicos advocaticios';
 
-    const lead = transaction.lead as any;
+    const lead = (transaction as any).lead;
     const valor = Number(transaction.amount);
     const aliquotaIss = parseFloat(resolvedIss);
     const valorIss = Math.round(valor * (aliquotaIss / 100) * 100) / 100;
@@ -335,9 +334,9 @@ export class NotaFiscalService {
       numero: mockNumero,
       codigo_verificacao: mockVerificacao,
       external_id: `mock_${provider.toLowerCase()}_${Date.now()}`,
-      xml_url: null,
-      pdf_url: null,
-      error_message: null,
+      xml_url: undefined,
+      pdf_url: undefined,
+      error_message: undefined,
     };
   }
 }
