@@ -2788,17 +2788,7 @@ export default function Dashboard() {
                       🔒
                     </button>
                   )}
-                  {/* Desktop: botão busca dentro da conversa */}
-                  {!isMobile && isRealConvo && (
-                    <button
-                      onClick={() => setMsgSearchOpen(v => !v)}
-                      title="Buscar nas mensagens (Ctrl+F)"
-                      className={`p-2.5 md:p-3 rounded-xl border transition-colors shrink-0 mb-0.5 ${msgSearchOpen ? 'bg-primary/10 border-primary/30 text-primary' : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted/50'}`}
-                    >
-                      <Search size={20} />
-                    </button>
-                  )}
-                  {/* Quick snooze removido — funcionalidade de adiar acessível pelo botão "Adiar" no header */}
+                  {/* Busca e quick snooze removidos da toolbar — acessíveis via Ctrl+F e botão Adiar no header */}
 
                   {/* Hidden file input */}
                   <input
