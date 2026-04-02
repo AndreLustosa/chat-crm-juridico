@@ -680,12 +680,7 @@ export default function FinanceiroPage() {
         )}
 
         {/* ─── TAB: Receitas ─── */}
-        {tab === 'Receitas' && (
-          <div className="space-y-4">
-            <QuickAddForm type="RECEITA" categories={RECEITA_CATEGORIES} onCreated={fetchData} />
-            <TransactionTable rows={receitas} onRefresh={fetchData} />
-          </div>
-        )}
+        {tab === 'Receitas' && <ReceitasTab receitas={receitas} onRefresh={fetchData} />}
 
         {/* ─── TAB: Despesas ─── */}
         {tab === 'Despesas' && (
@@ -1564,6 +1559,332 @@ function ClientesSyncTab() {
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Componente: Receitas aprimorada com cadastro + cobrança Asaas
+══════════════════════════════════════════════════════════════ */
+
+const RECEITA_CAT_ICONS: Record<string, string> = {
+  HONORARIO: '⚖️', CONSULTA: '📞', ACORDO: '🤝', OUTRO: '📋',
+};
+
+function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefresh: () => void }) {
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Form fields
+  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState('');
+  const [category, setCategory] = useState('HONORARIO');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [status, setStatus] = useState('PENDENTE');
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientResults, setClientResults] = useState<any[]>([]);
+  const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [generateCharge, setGenerateCharge] = useState(false);
+  const [chargeType, setChargeType] = useState('BOLETO');
+  const [notes, setNotes] = useState('');
+
+  const fmt = (v: number | string) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(typeof v === 'string' ? parseFloat(v) : v);
+  const fmtDate = (d: string) => { if (!d) return '--'; const dt = new Date(d); return `${String(dt.getUTCDate()).padStart(2,'0')}/${String(dt.getUTCMonth()+1).padStart(2,'0')}/${dt.getUTCFullYear()}`; };
+
+  const resetForm = () => {
+    setDesc(''); setAmount(''); setCategory('HONORARIO'); setDate(new Date().toISOString().slice(0,10));
+    setDueDate(''); setPaymentMethod(''); setStatus('PENDENTE'); setClientSearch('');
+    setClientResults([]); setSelectedClient(null); setGenerateCharge(false); setNotes('');
+  };
+
+  const searchClients = async (q: string) => {
+    setClientSearch(q);
+    if (q.length < 2) { setClientResults([]); return; }
+    try {
+      const res = await api.get('/leads', { params: { search: q, limit: 5 } });
+      setClientResults(res.data?.data || res.data || []);
+    } catch { setClientResults([]); }
+  };
+
+  const handleSubmit = async () => {
+    if (!desc.trim() || !amount) { showError('Preencha descricao e valor'); return; }
+    const numVal = parseFloat(amount.replace(',', '.'));
+    if (isNaN(numVal) || numVal <= 0) { showError('Valor invalido'); return; }
+    setSaving(true);
+    try {
+      // 1. Criar transacao financeira
+      await api.post('/financeiro/transactions', {
+        type: 'RECEITA',
+        category,
+        description: desc.trim(),
+        amount: numVal,
+        date: new Date(date + 'T12:00:00Z').toISOString(),
+        due_date: dueDate ? new Date(dueDate + 'T12:00:00Z').toISOString() : undefined,
+        payment_method: paymentMethod || undefined,
+        status,
+        lead_id: selectedClient?.id || undefined,
+        notes: notes.trim() || undefined,
+      });
+
+      // 2. Se gerar cobranca no Asaas
+      if (generateCharge && selectedClient?.id) {
+        try {
+          await api.post('/payment-gateway/customers/sync/' + selectedClient.id);
+          showSuccess('Receita criada! Cobranca Asaas sera gerada via honorarios.');
+        } catch {
+          showSuccess('Receita criada (cobranca Asaas nao gerada — vincule o cliente primeiro)');
+        }
+      } else {
+        showSuccess('Receita cadastrada!');
+      }
+
+      resetForm();
+      setShowForm(false);
+      onRefresh();
+    } catch { showError('Erro ao criar receita'); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Excluir esta receita?')) return;
+    setDeletingId(id);
+    try { await api.delete(`/financeiro/transactions/${id}`); showSuccess('Removida'); onRefresh(); }
+    catch { showError('Erro'); }
+    finally { setDeletingId(null); }
+  };
+
+  const handleToggle = async (t: Transaction) => {
+    const ns = t.status === 'PAGO' ? 'PENDENTE' : 'PAGO';
+    try {
+      await api.patch(`/financeiro/transactions/${t.id}`, { status: ns, paid_at: ns === 'PAGO' ? new Date().toISOString() : null });
+      showSuccess(ns === 'PAGO' ? 'Marcado como recebido' : 'Revertido');
+      onRefresh();
+    } catch { showError('Erro'); }
+  };
+
+  // Filtros
+  const filtered = receitas.filter(r => {
+    if (statusFilter && r.status !== statusFilter) return false;
+    if (searchQ) {
+      const q = searchQ.toLowerCase();
+      return (r.description || '').toLowerCase().includes(q) || (r.lead?.name || '').toLowerCase().includes(q) || (r.category || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const totalFiltered = filtered.reduce((s, r) => s + parseFloat(String(r.amount)), 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar receita..."
+              className="pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none w-52" />
+          </div>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+            className="px-3 py-2 text-xs bg-background border border-border rounded-lg">
+            <option value="">Todos</option>
+            <option value="PAGO">Recebido</option>
+            <option value="PENDENTE">Pendente</option>
+          </select>
+        </div>
+        <button onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90">
+          <Plus size={14} /> Nova Receita
+        </button>
+      </div>
+
+      {/* Formulario completo */}
+      {showForm && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-foreground">Cadastrar Receita</h3>
+            <button onClick={() => { setShowForm(false); resetForm(); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Descricao *</label>
+              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Ex: Honorarios processo 0001234"
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Valor (R$) *</label>
+              <input value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000.00"
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Categoria</label>
+              <select value={category} onChange={e => setCategory(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
+                {RECEITA_CATEGORIES.map(c => <option key={c} value={c}>{RECEITA_CAT_ICONS[c] || ''} {c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Data</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Vencimento</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Forma de pagamento</label>
+              <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
+                <option value="">Nao informado</option>
+                <option value="PIX">PIX</option>
+                <option value="BOLETO">Boleto</option>
+                <option value="CARTAO">Cartao</option>
+                <option value="DINHEIRO">Dinheiro</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Status</label>
+              <select value={status} onChange={e => setStatus(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
+                <option value="PENDENTE">Pendente</option>
+                <option value="PAGO">Recebido</option>
+              </select>
+            </div>
+
+            {/* Cliente */}
+            <div className="md:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Cliente (opcional)</label>
+              {selectedClient ? (
+                <div className="flex items-center gap-2 px-3 py-2 bg-background border border-border rounded-lg">
+                  <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[9px] font-bold">
+                    {selectedClient.name?.[0]?.toUpperCase() || '?'}
+                  </div>
+                  <span className="text-sm font-medium text-foreground flex-1">{selectedClient.name || selectedClient.phone}</span>
+                  <button onClick={() => setSelectedClient(null)} className="text-muted-foreground hover:text-foreground"><X size={14} /></button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input value={clientSearch} onChange={e => searchClients(e.target.value)} placeholder="Buscar cliente por nome..."
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+                  {clientResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl z-10 max-h-40 overflow-y-auto">
+                      {clientResults.map(l => (
+                        <button key={l.id} onClick={() => { setSelectedClient(l); setClientSearch(''); setClientResults([]); }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-accent/30 flex items-center gap-2">
+                          <span className="font-medium">{l.name || l.phone}</span>
+                          <span className="text-xs text-muted-foreground">{l.phone}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Observacoes */}
+            <div className="md:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Observacoes</label>
+              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notas internas..."
+                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+            </div>
+
+            {/* Gerar cobranca Asaas */}
+            {selectedClient && status === 'PENDENTE' && (
+              <div className="md:col-span-2">
+                <button onClick={() => setGenerateCharge(!generateCharge)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border w-full transition-colors ${
+                    generateCharge ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-accent/30'
+                  }`}>
+                  <CreditCard size={14} />
+                  <div className="text-left flex-1">
+                    <p className="text-sm font-medium">Gerar cobranca no Asaas</p>
+                    <p className="text-[10px] text-muted-foreground">Sincroniza cliente e gera cobranca automaticamente</p>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={() => { setShowForm(false); resetForm(); }}
+              className="px-4 py-2 text-sm text-muted-foreground border border-border rounded-lg hover:bg-accent/30">Cancelar</button>
+            <button onClick={handleSubmit} disabled={saving}
+              className="px-6 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Receita
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tabela */}
+      {filtered.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl p-12 text-center">
+          <TrendingUp size={40} className="mx-auto text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground font-medium">Nenhuma receita encontrada</p>
+          <p className="text-xs text-muted-foreground mt-1">Clique em "Nova Receita" para cadastrar</p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-card/80">
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Data</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Descricao</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Categoria</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Vencimento</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Status</th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Acoes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id} className="border-b border-border/40 hover:bg-accent/10 transition-colors">
+                    <td className="px-4 py-3 text-muted-foreground">{fmtDate(r.date)}</td>
+                    <td className="px-4 py-3 font-medium text-foreground truncate max-w-[200px]">{r.description}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-muted-foreground">{RECEITA_CAT_ICONS[r.category] || ''} {r.category}</span>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{r.lead?.name || '--'}</td>
+                    <td className="px-4 py-3 text-right font-bold text-emerald-400">{fmt(r.amount)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{r.due_date ? fmtDate(r.due_date) : '--'}</td>
+                    <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => handleToggle(r)} title={r.status === 'PAGO' ? 'Reverter' : 'Marcar recebido'}
+                          className={`px-2 py-1 text-[10px] font-semibold rounded-md inline-flex items-center gap-1 transition-colors ${
+                            r.status === 'PAGO' ? 'text-amber-400 border border-amber-400/20 hover:bg-amber-400/10' : 'text-emerald-400 border border-emerald-400/20 hover:bg-emerald-400/10'
+                          }`}>
+                          {r.status === 'PAGO' ? <ArrowUpDown size={10} /> : <Check size={10} />}
+                          {r.status === 'PAGO' ? 'Reverter' : 'Recebido'}
+                        </button>
+                        <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id}
+                          className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 disabled:opacity-50 inline-flex items-center gap-1">
+                          {deletingId === r.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+            <span>{filtered.length} receita(s)</span>
+            <span className="font-semibold text-emerald-400">Total: {fmt(totalFiltered)}</span>
+          </div>
+        </>
       )}
     </div>
   );
