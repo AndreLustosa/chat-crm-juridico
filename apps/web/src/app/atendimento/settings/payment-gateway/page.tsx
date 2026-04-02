@@ -38,8 +38,8 @@ export default function PaymentGatewaySettingsPage() {
     if (!apiKey.trim()) return;
     setSaving(true);
     try {
-      await api.post('/settings', { key: 'asaas_api_key', value: apiKey.trim() });
-      await api.post('/settings', { key: 'asaas_sandbox', value: sandbox ? 'true' : 'false' });
+      await api.put('/settings', { key: 'asaas_api_key', value: apiKey.trim() });
+      await api.put('/settings', { key: 'asaas_sandbox', value: sandbox ? 'true' : 'false' });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
       // Refresh status

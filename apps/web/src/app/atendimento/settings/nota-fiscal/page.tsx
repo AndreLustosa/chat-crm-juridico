@@ -55,7 +55,7 @@ export default function NotaFiscalSettingsPage() {
       if (apiKey.trim()) settings.nfse_api_key = apiKey.trim();
 
       for (const [key, value] of Object.entries(settings)) {
-        await api.post('/settings', { key, value });
+        await api.put('/settings', { key, value });
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
