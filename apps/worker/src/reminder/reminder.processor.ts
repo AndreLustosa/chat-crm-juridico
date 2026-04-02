@@ -6,15 +6,32 @@ import { SettingsService } from '../settings/settings.service';
 import axios from 'axios';
 import * as nodemailer from 'nodemailer';
 
-const TZ = 'America/Sao_Paulo';
-
+// App usa UTC "naive" — horários salvos no banco como UTC = horário local de Maceió.
+// Por isso exibimos em UTC puro (sem conversão de fuso) para não subtrair 3h.
 function formatDate(d: Date): string {
-  return d.toLocaleDateString('pt-BR', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('pt-BR', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function formatTime(d: Date): string {
-  return d.toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleTimeString('pt-BR', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
 }
+
+function formatDateTime(d: Date): string {
+  return d.toLocaleString('pt-BR', {
+    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+    timeZone: 'UTC',
+  });
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  AUDIENCIA: 'Audiência', PERICIA: 'Perícia', PRAZO: 'Prazo',
+  TAREFA: 'Tarefa', CONSULTA: 'Consulta', OUTRO: 'Evento',
+};
+const TYPE_EMOJI: Record<string, string> = {
+  AUDIENCIA: '⚖️', PERICIA: '🔬', PRAZO: '⏰',
+  TAREFA: '✅', CONSULTA: '🟣', OUTRO: '📅',
+};
 
 @Processor('calendar-reminders')
 export class ReminderProcessor extends WorkerHost {
@@ -28,7 +45,7 @@ export class ReminderProcessor extends WorkerHost {
   }
 
   async process(job: Job<any>): Promise<any> {
-    // ── Notificações de audiência (geradas por CalendarService) ──────────────
+    // ── Notificações imediatas de audiência/perícia agendada ──────────────
     if (job.name === 'notify-hearing-scheduled') {
       return this.processHearingNotification(job.data.eventId, false);
     }
@@ -103,7 +120,7 @@ export class ReminderProcessor extends WorkerHost {
     }
 
     const instance = process.env.EVOLUTION_INSTANCE_NAME || '';
-    const typeEmoji = event.type === 'CONSULTA' ? '🟣' : event.type === 'AUDIENCIA' ? '🔴' : event.type === 'PRAZO' ? '🟠' : '📅';
+    const typeEmoji = TYPE_EMOJI[event.type] || '📅';
 
     // Destinatarios: lead (cliente) e/ou advogado responsavel
     const recipients: { phone: string; name: string }[] = [];
@@ -120,17 +137,19 @@ export class ReminderProcessor extends WorkerHost {
       return false;
     }
 
+    const label = TYPE_LABEL[event.type] || 'Evento';
+
     let anySent = false;
     for (const recipient of recipients) {
       const msg = [
-        `${typeEmoji} *Lembrete de Evento*`,
+        `${typeEmoji} *Lembrete de ${label}*`,
         '',
         `📋 *${event.title}*`,
         `📆 ${formatDate(event.start_at)}`,
         `⏰ ${formatTime(event.start_at)}`,
         event.location ? `📍 ${event.location}` : '',
         '',
-        `Ola ${recipient.name}, este e um lembrete do seu compromisso agendado.`,
+        `Olá ${recipient.name}, este é um lembrete do seu compromisso agendado.`,
       ].filter(Boolean).join('\n');
 
       try {
@@ -148,10 +167,11 @@ export class ReminderProcessor extends WorkerHost {
     return anySent;
   }
 
-  // ─── Notificação de audiência agendada / remarcada ─────────────────────────
+  // ─── Notificação imediata de audiência/perícia agendada ou remarcada ─────
 
   private async processHearingNotification(eventId: string, isRescheduled: boolean): Promise<void> {
-    this.logger.log(`[HEARING-NOTIFY] Processando notificação de audiência: ${eventId} (remarcação=${isRescheduled})`);
+    const eventType = isRescheduled ? 'remarcação' : 'agendamento';
+    this.logger.log(`[HEARING-NOTIFY] Processando notificação de ${eventType}: ${eventId}`);
 
     const event = await this.prisma.calendarEvent.findUnique({
       where: { id: eventId },
@@ -176,32 +196,37 @@ export class ReminderProcessor extends WorkerHost {
     }
 
     const firstName = (event.lead.name || 'Cliente').split(' ')[0];
-    const dateStr = event.start_at.toLocaleString('pt-BR', {
-      weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZone: 'America/Maceio',
-    });
+    const dateStr = formatDateTime(event.start_at);
+    const isPericia = event.type === 'PERICIA';
+    const label = isPericia ? 'Perícia' : (TYPE_LABEL[event.type] || 'Audiência');
+    const emoji = isPericia ? '🔬' : (TYPE_EMOJI[event.type] || '⚖️');
 
-    const msg = isRescheduled
-      ? (
-        `📅 *Audiência Remarcada*\n\n` +
+    let msg: string;
+    if (isRescheduled) {
+      msg =
+        `${emoji} *${label} Remarcada*\n\n` +
         `Olá, ${firstName}!\n\n` +
-        `Sua audiência foi *remarcada* para uma nova data:\n\n` +
+        `Sua ${label.toLowerCase()} foi *remarcada* para uma nova data:\n\n` +
         `📅 *Nova Data/Hora:* ${dateStr}\n` +
         (event.location ? `📍 *Local:* ${event.location}\n` : '') +
-        `\nPor favor, anote a nova data. Chegue com *30 minutos de antecedência*.\n` +
+        (isPericia
+          ? `\nLembre-se de levar documentos pessoais e laudos médicos, se houver.\n`
+          : `\nPor favor, anote a nova data. Chegue com *30 minutos de antecedência*.\n`) +
         `Qualquer dúvida, é só responder esta mensagem.\n\n` +
-        `_André Lustosa Advogados_`
-      )
-      : (
-        `⚖️ *Audiência Agendada*\n\n` +
+        `_André Lustosa Advogados_`;
+    } else {
+      msg =
+        `${emoji} *${label} Agendada*\n\n` +
         `Olá, ${firstName}!\n\n` +
-        `Sua audiência foi agendada:\n\n` +
+        `Sua ${label.toLowerCase()} foi agendada:\n\n` +
         `📅 *Data/Hora:* ${dateStr}\n` +
         (event.location ? `📍 *Local:* ${event.location}\n` : '') +
-        `\nRecomendamos chegar com *30 minutos de antecedência*.\n` +
+        (isPericia
+          ? `\nLembre-se de levar documentos pessoais e laudos médicos, se houver. Chegue com *15 minutos de antecedência* e coopere plenamente com o perito.\n`
+          : `\nRecomendamos chegar com *30 minutos de antecedência*.\n`) +
         `Qualquer dúvida, estamos à disposição.\n\n` +
-        `_André Lustosa Advogados_`
-      );
+        `_André Lustosa Advogados_`;
+    }
 
     const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
     if (!apiUrl) {
@@ -253,7 +278,7 @@ export class ReminderProcessor extends WorkerHost {
             last_message_at: new Date(),
             ai_mode: true,
             reminder_context: {
-              type: 'AUDIENCIA_AGENDADA',
+              type: isPericia ? 'PERICIA_AGENDADA' : 'AUDIENCIA_AGENDADA',
               event_title: event.title,
               event_date: dateStr,
               event_date_iso: event.start_at.toISOString(),
@@ -271,7 +296,6 @@ export class ReminderProcessor extends WorkerHost {
   }
 
   private async sendEmailReminder(event: any, _reminder: any): Promise<boolean> {
-    // Coletar todos os destinatarios com email (lead + advogado), igual ao WhatsApp
     const recipients: { email: string; name: string }[] = [];
     if (event.lead?.email) {
       recipients.push({ email: event.lead.email, name: event.lead.name || event.lead.email });
@@ -298,7 +322,8 @@ export class ReminderProcessor extends WorkerHost {
       auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
     });
 
-    const typeEmoji = event.type === 'CONSULTA' ? '🟣' : event.type === 'AUDIENCIA' ? '🔴' : event.type === 'PRAZO' ? '🟠' : '📅';
+    const typeEmoji = TYPE_EMOJI[event.type] || '📅';
+    const label = TYPE_LABEL[event.type] || 'Evento';
     const dateStr = formatDate(event.start_at);
     const timeStr = formatTime(event.start_at);
 
@@ -308,7 +333,7 @@ export class ReminderProcessor extends WorkerHost {
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
           <div style="background: #1a1a2e; border-radius: 16px; padding: 24px; color: #e0e0e0;">
             <h2 style="margin: 0 0 16px; color: #fff; font-size: 18px;">
-              ${typeEmoji} Lembrete de Evento
+              ${typeEmoji} Lembrete de ${label}
             </h2>
             <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
               <p style="margin: 0 0 8px; font-weight: bold; font-size: 16px; color: #fff;">${event.title}</p>

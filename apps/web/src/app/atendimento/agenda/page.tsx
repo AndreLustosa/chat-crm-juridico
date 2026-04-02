@@ -72,7 +72,8 @@ interface LeadOption {
 const EVENT_TYPES = [
   { id: 'CONSULTA', label: 'Consulta', emoji: '🟣', color: '#8b5cf6' },
   { id: 'TAREFA', label: 'Tarefa', emoji: '🟢', color: '#22c55e' },
-  { id: 'AUDIENCIA', label: 'Audiencia', emoji: '🔴', color: '#ef4444' },
+  { id: 'AUDIENCIA', label: 'Audiência', emoji: '🔴', color: '#ef4444' },
+  { id: 'PERICIA', label: 'Perícia', emoji: '🔬', color: '#0ea5e9' },
   { id: 'PRAZO', label: 'Prazo', emoji: '🟠', color: '#f59e0b' },
   { id: 'OUTRO', label: 'Outro', emoji: '⚪', color: '#6b7280' },
 ] as const;
