@@ -509,9 +509,8 @@ export class CalendarService {
     if (isNaN(date.getTime())) {
       throw new BadRequestException('Data inválida');
     }
-    // Use America/Sao_Paulo timezone to determine day of week correctly
-    const saoPauloDate = new Date(new Date(dateStr).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const dayOfWeek = saoPauloDate.getDay(); // 0=dom..6=sab
+    // UTC naive: datas armazenadas como horário local em UTC — usar getUTCDay()
+    const dayOfWeek = date.getUTCDay(); // 0=dom..6=sab
 
     // 0. Verificar se e feriado (com filtro de tenant)
     const isHoliday = await this.isHoliday(date, tenantId);
@@ -550,10 +549,9 @@ export class CalendarService {
     const workStart = startH * 60 + startM;
     const workEnd = endH * 60 + endM;
 
-    // Helper: extrair hora/minuto no fuso correto (America/Sao_Paulo)
+    // UTC naive: extrair hora/minuto direto em UTC (datas armazenadas como horário local)
     const toLocalMinutes = (d: Date): number => {
-      const parts = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).split(':');
-      return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+      return d.getUTCHours() * 60 + d.getUTCMinutes();
     };
 
     const busy = events.map((e) => {
@@ -896,15 +894,16 @@ export class CalendarService {
       },
     });
 
-    // Formatar data no fuso America/Sao_Paulo para ICS (TZID)
+    // UTC naive: datas armazenadas como horário local em UTC — extrair componentes UTC
+    // O TZID no ICS é America/Sao_Paulo, então os valores devem ser horário local (= UTC raw)
     const formatIcsLocalDate = (d: Date) => {
-      const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Sao_Paulo',
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-      }).formatToParts(d);
-      const get = (t: string) => parts.find(p => p.type === t)?.value || '00';
-      return `${get('year')}${get('month')}${get('day')}T${get('hour')}${get('minute')}${get('second')}`;
+      const y = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const da = String(d.getUTCDate()).padStart(2, '0');
+      const h = String(d.getUTCHours()).padStart(2, '0');
+      const mi = String(d.getUTCMinutes()).padStart(2, '0');
+      const s = String(d.getUTCSeconds()).padStart(2, '0');
+      return `${y}${mo}${da}T${h}${mi}${s}`;
     };
 
     const lines = [

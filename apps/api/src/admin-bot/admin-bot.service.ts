@@ -470,7 +470,7 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
               id: task.id,
               title: task.title,
               due_at: task.due_at
-                ? new Date(task.due_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+                ? new Date(task.due_at).toLocaleString('pt-BR', { timeZone: 'UTC' })
                 : null,
             },
           };
@@ -498,7 +498,7 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
             event: {
               id: event.id,
               title: event.title,
-              start_at: new Date(event.start_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+              start_at: new Date(event.start_at).toLocaleString('pt-BR', { timeZone: 'UTC' }),
             },
           };
         }
@@ -522,7 +522,7 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
               title: t.title,
               client: t.lead?.name || null,
               due_at: t.due_at
-                ? new Date(t.due_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+                ? new Date(t.due_at).toLocaleString('pt-BR', { timeZone: 'UTC' })
                 : 'Sem prazo',
               status: t.status,
             })),
