@@ -78,10 +78,9 @@ export class LegalCasesService {
           name: true,
         },
       },
-      // Audiências (próximas ou até 30 dias no passado)
+      // Próximos eventos (audiências, perícias, prazos, tarefas — últimos 30d ou futuros)
       calendar_events: {
         where: {
-          type: 'AUDIENCIA',
           start_at: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
           status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
         },
@@ -89,6 +88,7 @@ export class LegalCasesService {
         take: 5,
         select: {
           id: true,
+          type: true,
           start_at: true,
           title: true,
           location: true,

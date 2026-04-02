@@ -54,6 +54,7 @@ interface LegalCase {
   } | null;
   calendar_events?: {
     id: string;
+    type: string;
     start_at: string;
     title: string;
     location: string | null;
@@ -308,7 +309,7 @@ function ProcessoCard({
         )}
       </div>
 
-      {/* Próxima audiência */}
+      {/* Próximo evento (audiência, perícia, prazo, tarefa) */}
       {legalCase.calendar_events && legalCase.calendar_events.length > 0 && (() => {
         const nowCard = new Date();
         // Prefere o próximo evento futuro; se todos forem passados, mostra o mais recente
@@ -320,7 +321,16 @@ function ProcessoCard({
         const isPast = diffDias < 0;
         const isProxima = !isPast && diffDias <= 7;
         const isHoje = diffDias <= 0 && diffDias > -1;
-        const dateLabel = `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')}`;
+        const dateLabel = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')} às ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')}`;
+        const typeLabel: Record<string, string> = {
+          AUDIENCIA: 'Audiência', PERICIA: 'Perícia', PRAZO: 'Prazo', TAREFA: 'Tarefa',
+          CONSULTA: 'Consulta', OUTRO: 'Evento',
+        };
+        const typeEmoji: Record<string, string> = {
+          AUDIENCIA: '⚖️', PERICIA: '🔬', PRAZO: '⏰', TAREFA: '✅', CONSULTA: '📞', OUTRO: '📅',
+        };
+        const label = typeLabel[ev.type] ?? ev.type;
+        const emoji = typeEmoji[ev.type] ?? '📅';
         return (
           <div className={`mt-1.5 flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${
             isHoje
@@ -334,10 +344,10 @@ function ProcessoCard({
             <Calendar size={9} className={isHoje ? 'text-red-400 shrink-0' : isPast ? 'text-gray-400 shrink-0' : isProxima ? 'text-amber-400 shrink-0' : 'text-blue-400 shrink-0'} />
             <span className={`text-[9px] font-semibold leading-tight ${isHoje ? 'text-red-400' : isPast ? 'text-gray-400' : isProxima ? 'text-amber-400' : 'text-blue-400'}`}>
               {isHoje
-                ? '🔴 Audiência HOJE'
+                ? `🔴 ${label} HOJE`
                 : isPast
-                ? `✅ Realizada: ${dateLabel}`
-                : `Audiência: ${dateLabel}${isProxima ? ` (em ${diffDias}d)` : ''}`}
+                ? `✅ ${label} realizada: ${dateLabel}`
+                : `${emoji} ${label}: ${dateLabel}${isProxima ? ` (em ${diffDias}d)` : ''}`}
             </span>
           </div>
         );
