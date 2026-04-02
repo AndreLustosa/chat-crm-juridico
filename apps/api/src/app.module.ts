@@ -37,6 +37,7 @@ import { AutomationsModule } from './automations/automations.module';
 import { FollowupModule } from './followup/followup.module';
 import { AdminBotModule } from './admin-bot/admin-bot.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
+import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -97,6 +98,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     FollowupModule,
     AdminBotModule,
     FinanceiroModule,
+    PaymentGatewayModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

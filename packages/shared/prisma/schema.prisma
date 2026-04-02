@@ -27,8 +27,10 @@ model Tenant {
   case_honorarios        CaseHonorario[]
   ai_chats               AiChat[]
   followup_sequences     FollowupSequence[]
-  financial_transactions FinancialTransaction[]
-  financial_categories   FinancialCategory[]
+  financial_transactions    FinancialTransaction[]
+  financial_categories      FinancialCategory[]
+  payment_gateway_customers PaymentGatewayCustomer[]
+  payment_gateway_charges   PaymentGatewayCharge[]
 }
 
 model User {
@@ -104,8 +106,9 @@ model Lead {
   notes                LeadNote[]
   stage_history        LeadStageHistory[]
   contract_signatures  ContractSignature[]
-  followup_enrollments   FollowupEnrollment[]
-  financial_transactions FinancialTransaction[]
+  followup_enrollments      FollowupEnrollment[]
+  financial_transactions    FinancialTransaction[]
+  payment_gateway_customers PaymentGatewayCustomer[]
 
   @@index([tenant_id, phone])
   @@index([stage])
@@ -985,8 +988,9 @@ model HonorarioPayment {
   notes          String?
   created_at     DateTime  @default(now())
 
-  honorario             CaseHonorario         @relation(fields: [honorario_id], references: [id], onDelete: Cascade)
+  honorario             CaseHonorario          @relation(fields: [honorario_id], references: [id], onDelete: Cascade)
   financial_transaction FinancialTransaction?
+  gateway_charge        PaymentGatewayCharge?
 
   @@index([honorario_id, due_date])
   @@index([status])
@@ -1109,7 +1113,8 @@ model FinancialTransaction {
   legal_case        LegalCase?        @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
   lead              Lead?             @relation(fields: [lead_id], references: [id], onDelete: SetNull)
   lawyer            User?             @relation("FinancialLawyer", fields: [lawyer_id], references: [id], onDelete: SetNull)
-  honorario_payment HonorarioPayment? @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
+  honorario_payment HonorarioPayment?  @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
+  gateway_charge    PaymentGatewayCharge?
 
   @@index([tenant_id, date])
   @@index([type, status])
@@ -1134,4 +1139,70 @@ model FinancialCategory {
 
   @@unique([tenant_id, name, type])
   @@index([tenant_id, type])
+}
+
+// ===============================================
+// Payment Gateway — Asaas / EfiBank
+// ===============================================
+
+model PaymentGatewayCustomer {
+  id             String    @id @default(uuid())
+  tenant_id      String?
+  lead_id        String
+  gateway        String    @default("ASAAS") // ASAAS, EFIBANK
+  external_id    String // ID do cliente no gateway
+  cpf_cnpj       String?
+  sync_status    String    @default("SYNCED") // SYNCED, ERROR
+  last_synced_at DateTime  @default(now())
+  created_at     DateTime  @default(now())
+
+  lead   Lead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, lead_id, gateway])
+  @@unique([gateway, external_id])
+  @@index([lead_id])
+}
+
+model PaymentGatewayCharge {
+  id                   String    @id @default(uuid())
+  tenant_id            String?
+  honorario_payment_id String?   @unique
+  transaction_id       String?   @unique
+  gateway              String    @default("ASAAS")
+  external_id          String    @unique // ID da cobrança no gateway
+  customer_external_id String // ID do cliente no gateway
+  billing_type         String // PIX, BOLETO, CREDIT_CARD
+  amount               Decimal
+  due_date             DateTime
+  status               String    @default("PENDING") // PENDING, RECEIVED, CONFIRMED, OVERDUE, REFUNDED, DELETED, CANCELLED
+  description          String?
+
+  // PIX
+  pix_qr_code          String?
+  pix_copy_paste       String?
+  pix_expiration_date  DateTime?
+
+  // Boleto
+  boleto_url           String?
+  boleto_barcode       String?
+
+  // Resultado
+  invoice_url          String?
+  paid_at              DateTime?
+  payment_date         DateTime?
+  net_value            Decimal?
+  webhook_payload      Json?
+
+  idempotency_key      String?   @unique
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  honorario_payment    HonorarioPayment?    @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
+  transaction          FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, status])
+  @@index([customer_external_id])
+  @@index([due_date, status])
 }
