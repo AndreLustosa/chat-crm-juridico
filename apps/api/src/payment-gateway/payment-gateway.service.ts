@@ -608,12 +608,59 @@ export class PaymentGatewayService {
           this.logger.warn(`[CUSTOMER-SYNC] Erro ao vincular ${cust.id}: ${e.message}`);
         }
       } else {
+        // Match 4: se tem telefone, criar lead automaticamente e vincular
+        const phone = (cust.mobilePhone || cust.phone || '').replace(/\D/g, '');
+        if (phone && phone.length >= 10) {
+          try {
+            // Verificar se já existe lead com esse telefone
+            let existingLead = await this.prisma.lead.findFirst({
+              where: { phone: { contains: phone.slice(-10) } },
+              select: { id: true },
+            });
+
+            if (!existingLead) {
+              // Criar lead a partir dos dados do Asaas
+              existingLead = await this.prisma.lead.create({
+                data: {
+                  tenant_id: tenantId || null,
+                  name: cust.name || null,
+                  phone: phone,
+                  email: cust.email || null,
+                  cpf_cnpj: cust.cpfCnpj?.replace(/\D/g, '') || null,
+                  stage: 'FINALIZADO',
+                  is_client: true,
+                  became_client_at: new Date(),
+                  origin: 'asaas_import',
+                },
+              });
+              this.logger.log(`[CUSTOMER-SYNC] Lead criado a partir do Asaas: ${existingLead.id} (${cust.name})`);
+            }
+
+            // Vincular
+            await this.prisma.paymentGatewayCustomer.create({
+              data: {
+                tenant_id: tenantId || null,
+                lead_id: existingLead.id,
+                gateway: 'ASAAS',
+                external_id: cust.id,
+                cpf_cnpj: cust.cpfCnpj?.replace(/\D/g, '') || null,
+                sync_status: 'SYNCED',
+                last_synced_at: new Date(),
+              },
+            });
+            linked++;
+            continue;
+          } catch (e: any) {
+            this.logger.warn(`[CUSTOMER-SYNC] Erro ao criar lead para ${cust.name}: ${e.message}`);
+          }
+        }
+
         unlinked.push({
           asaasId: cust.id,
           name: cust.name,
           cpfCnpj: cust.cpfCnpj,
           email: cust.email,
-          phone: cust.phone || cust.mobilePhone,
+          phone: phone || null,
         });
       }
     }
