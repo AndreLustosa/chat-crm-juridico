@@ -12,6 +12,7 @@ export default function PaymentGatewaySettingsPage() {
   const [saved, setSaved] = useState(false);
 
   const [apiKey, setApiKey] = useState('');
+  const [webhookToken, setWebhookToken] = useState('');
   const [sandbox, setSandbox] = useState(true);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [status, setStatus] = useState<{ configured: boolean; sandbox: boolean; provider: string } | null>(null);
@@ -35,10 +36,10 @@ export default function PaymentGatewaySettingsPage() {
   }, [router]);
 
   const handleSave = async () => {
-    if (!apiKey.trim()) return;
     setSaving(true);
     try {
-      await api.put('/settings', { key: 'asaas_api_key', value: apiKey.trim() });
+      if (apiKey.trim()) await api.put('/settings', { key: 'asaas_api_key', value: apiKey.trim() });
+      if (webhookToken.trim()) await api.put('/settings', { key: 'asaas_webhook_token', value: webhookToken.trim() });
       await api.put('/settings', { key: 'asaas_sandbox', value: sandbox ? 'true' : 'false' });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -126,6 +127,20 @@ export default function PaymentGatewaySettingsPage() {
               </p>
             </div>
           </button>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-foreground block mb-1.5">Token do Webhook (Asaas)</label>
+          <input
+            type="text"
+            value={webhookToken}
+            onChange={e => setWebhookToken(e.target.value)}
+            placeholder={status?.configured ? '••••••••••• (já configurado)' : 'Cole o token do webhook do Asaas (whsec_...)'}
+            className="w-full px-4 py-2.5 text-sm bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Token gerado no painel Asaas ao configurar o webhook. Usado para validar a autenticidade dos eventos.
+          </p>
         </div>
 
         <div>
