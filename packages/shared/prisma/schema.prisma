@@ -31,6 +31,7 @@ model Tenant {
   financial_categories      FinancialCategory[]
   payment_gateway_customers PaymentGatewayCustomer[]
   payment_gateway_charges   PaymentGatewayCharge[]
+  notas_fiscais             NotaFiscal[]
 }
 
 model User {
@@ -109,6 +110,7 @@ model Lead {
   followup_enrollments      FollowupEnrollment[]
   financial_transactions    FinancialTransaction[]
   payment_gateway_customers PaymentGatewayCustomer[]
+  notas_fiscais             NotaFiscal[]
 
   @@index([tenant_id, phone])
   @@index([stage])
@@ -1115,6 +1117,7 @@ model FinancialTransaction {
   lawyer            User?             @relation("FinancialLawyer", fields: [lawyer_id], references: [id], onDelete: SetNull)
   honorario_payment HonorarioPayment?  @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
   gateway_charge    PaymentGatewayCharge?
+  nota_fiscal       NotaFiscal?
 
   @@index([tenant_id, date])
   @@index([type, status])
@@ -1205,4 +1208,51 @@ model PaymentGatewayCharge {
   @@index([tenant_id, status])
   @@index([customer_external_id])
   @@index([due_date, status])
+}
+
+// ===============================================
+// Nota Fiscal Eletrônica (NFS-e)
+// ===============================================
+
+model NotaFiscal {
+  id                   String    @id @default(uuid())
+  tenant_id            String?
+  transaction_id       String?   @unique // 1:1 com FinancialTransaction
+  honorario_payment_id String?
+  lead_id              String?
+
+  // NFS-e data
+  numero               String?
+  codigo_verificacao   String?
+  status               String    @default("PENDENTE") // PENDENTE, EMITIDA, CANCELADA, ERRO
+  servico_codigo       String?   // Código CNAE ou LC 116
+  servico_descricao    String    @default("Serviços advocatícios")
+  valor                Decimal
+  aliquota_iss         Decimal?  @default(5.00)
+  valor_iss            Decimal?
+
+  // Tomador (cliente)
+  tomador_cpf_cnpj     String?
+  tomador_nome         String?
+  tomador_email        String?
+
+  // Integração com agregador
+  provider             String?   // ENOTAS, NFEIO, FOCUSNFE
+  external_id          String?   @unique
+  xml_url              String?
+  pdf_url              String?
+  error_message        String?
+
+  emitida_em           DateTime?
+  cancelada_em         DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  transaction          FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  lead                 Lead?                @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, status])
+  @@index([lead_id])
+  @@index([emitida_em])
 }
