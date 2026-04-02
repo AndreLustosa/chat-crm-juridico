@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch } from 'lucide-react';
+import { UserCog, Bot, Building2, Shield, ChevronLeft, MessageSquare, Layout, Briefcase, Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch, CreditCard, FileText } from 'lucide-react';
 import { useRole } from '@/lib/useRole';
 import { RouteGuard } from '@/components/RouteGuard';
 
@@ -32,6 +32,8 @@ const settingsMenu: MenuItem[] = [
   { label: 'Respostas Rápidas', href: '/atendimento/settings/canned-responses', icon: Zap },
   { label: 'Automações', href: '/atendimento/settings/automations', icon: GitBranch },
   { label: 'CRM Pipeline', href: '/atendimento/settings/crm', icon: Kanban },
+  { label: 'Gateway de Pagamento', href: '/atendimento/settings/payment-gateway', icon: CreditCard },
+  { label: 'Nota Fiscal (NFS-e)', href: '/atendimento/settings/nota-fiscal', icon: FileText },
   { label: 'Integração MCP', href: '/atendimento/settings/mcp', icon: Plug },
 ];
 
@@ -49,6 +51,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     '/atendimento/settings/permissions',
     '/atendimento/settings/automations',
     '/atendimento/settings/mcp',
+    '/atendimento/settings/payment-gateway',
+    '/atendimento/settings/nota-fiscal',
   ];
   const visibleMenu = settingsMenu.filter(
     item => isAdmin || !adminOnlyItems.includes(item.href)
