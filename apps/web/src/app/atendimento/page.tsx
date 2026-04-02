@@ -195,9 +195,6 @@ export default function Dashboard() {
   const [slashMenuPos, setSlashMenuPos] = useState<{ bottom: number; left: number } | null>(null);
   // Respostas rápidas (canned responses) carregadas do servidor
   const [cannedResponses, setCannedResponsesState] = useState<{ id: string; label: string; text: string }[]>([]);
-  // Quick snooze dropdown (atalho sem abrir o modal completo)
-  const [quickSnoozeOpen, setQuickSnoozeOpen] = useState(false);
-  const quickSnoozeRef = useRef<HTMLDivElement>(null);
   // Busca dentro da conversa
   const [msgSearchOpen, setMsgSearchOpen] = useState(false);
   const [msgSearchQuery, setMsgSearchQuery] = useState('');
@@ -506,20 +503,7 @@ export default function Dashboard() {
     setShowDetailsPanel(false);
     setMsgSearchOpen(false);
     setMsgSearchQuery('');
-    setQuickSnoozeOpen(false);
   }, [selectedId]);
-
-  // Quick snooze: fechar ao clicar fora
-  useEffect(() => {
-    if (!quickSnoozeOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (quickSnoozeRef.current && !quickSnoozeRef.current.contains(e.target as Node)) {
-        setQuickSnoozeOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [quickSnoozeOpen]);
 
   // Busca: focar input ao abrir
   useEffect(() => {
@@ -1576,32 +1560,6 @@ export default function Dashboard() {
       fetchAdiadoConversations(selectedInboxIdRef.current);
     } catch {
       showError('Erro ao concluir tarefa');
-    }
-  };
-
-  const handleQuickSnooze = async (taskTitle: string, dueAt: string) => {
-    const conv = conversations.find(c => c.id === selectedId) ?? adiadoConversations.find(c => c.id === selectedId);
-    if (!conv?.leadId || !selectedId) return;
-    setQuickSnoozeOpen(false);
-    try {
-      if (conv.activeTask) {
-        await api.patch(`/tasks/${conv.activeTask.id}/status`, { status: 'CANCELADA' });
-      }
-      await api.post('/tasks', {
-        title: taskTitle,
-        lead_id: conv.leadId,
-        conversation_id: selectedId,
-        due_at: dueAt,
-      });
-      if (conv.status !== 'ADIADO') {
-        await api.patch(`/conversations/${selectedId}/defer`);
-      }
-      setSelectedId(null);
-      showSuccess('⏰ Atendimento adiado!');
-      fetchConversations(selectedInboxIdRef.current, true);
-      fetchAdiadoConversations(selectedInboxIdRef.current);
-    } catch {
-      showError('Erro ao adiar atendimento');
     }
   };
 
@@ -2840,45 +2798,7 @@ export default function Dashboard() {
                       <Search size={20} />
                     </button>
                   )}
-                  {/* Desktop: botão adiar atendimento com quick snooze dropdown */}
-                  {!isMobile && selected?.leadId && (
-                    <div className="relative shrink-0 mb-0.5" ref={quickSnoozeRef}>
-                      <button
-                        onClick={() => setQuickSnoozeOpen(v => !v)}
-                        title="Adiar atendimento — clique para presets rápidos"
-                        className={`p-2.5 md:p-3 rounded-xl border transition-colors ${quickSnoozeOpen ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-card border-border text-muted-foreground hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10'}`}
-                      >
-                        <Clock size={20} />
-                      </button>
-                      {quickSnoozeOpen && (
-                        <div className="absolute bottom-full mb-2 left-0 bg-card border border-border rounded-xl shadow-2xl w-48 py-1 z-50 text-sm">
-                          <p className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Adiar por</p>
-                          {[
-                            { label: '1 hora', getDate: () => { const d = new Date(); d.setHours(d.getHours() + 1); return d.toISOString(); } },
-                            { label: '3 horas', getDate: () => { const d = new Date(); d.setHours(d.getHours() + 3); return d.toISOString(); } },
-                            { label: 'Amanhã 9h', getDate: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.toISOString(); } },
-                            { label: 'Próxima semana', getDate: () => { const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(9, 0, 0, 0); return d.toISOString(); } },
-                          ].map(p => (
-                            <button
-                              key={p.label}
-                              onClick={() => handleQuickSnooze(`Retornar — ${p.label}`, p.getDate())}
-                              className="w-full text-left px-3 py-2 hover:bg-accent transition-colors text-foreground flex items-center gap-2"
-                            >
-                              ⏰ {p.label}
-                            </button>
-                          ))}
-                          <div className="border-t border-border mt-1 pt-1">
-                            <button
-                              onClick={() => { setQuickSnoozeOpen(false); openTaskModal(); }}
-                              className="w-full text-left px-3 py-2 hover:bg-accent transition-colors text-muted-foreground text-[12px] flex items-center gap-2"
-                            >
-                              📅 Personalizado...
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* Quick snooze removido — funcionalidade de adiar acessível pelo botão "Adiar" no header */}
 
                   {/* Hidden file input */}
                   <input
