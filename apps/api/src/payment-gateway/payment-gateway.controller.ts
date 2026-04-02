@@ -23,56 +23,35 @@ export class PaymentGatewayController {
     private prisma: PrismaService,
   ) {}
 
-  @Post('charges')
-  async createCharge(@Body() dto: CreateChargeDto, @Req() req: any) {
+  // ─── ROTAS FIXAS PRIMEIRO (antes de :param) ─────────────
+
+  @Get('settings')
+  async getSettings(@Req() req: any) {
     const tenantId = req.user?.tenantId;
-    this.logger.log(
-      `[POST /charges] billingType=${dto.billingType} paymentId=${dto.honorarioPaymentId}`,
-    );
-    return this.service.createCharge(
-      dto.honorarioPaymentId,
-      dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
-      tenantId,
-    );
+    return this.service.getSettings(tenantId);
   }
 
-  @Post('charges/batch')
-  async createBatchCharges(@Body() dto: CreateBatchChargesDto, @Req() req: any) {
-    const tenantId = req.user?.tenantId;
-    this.logger.log(
-      `[POST /charges/batch] honorarioId=${dto.honorarioId} billingType=${dto.billingType}`,
-    );
-    return this.service.createBatchCharges(
-      dto.honorarioId,
-      dto.billingType,
-      tenantId,
-    );
-  }
-
-  @Get('charges/:honorarioPaymentId')
-  async getChargeDetails(
-    @Param('honorarioPaymentId') honorarioPaymentId: string,
-    @Req() req: any,
+  /** Lista cobranças direto da API do Asaas */
+  @Get('charges/asaas')
+  async listAsaasCharges(
+    @Query('status') status: string | undefined,
+    @Query('offset') offset: string | undefined,
+    @Query('limit') limit: string | undefined,
   ) {
-    const tenantId = req.user?.tenantId;
-    return this.service.getChargeDetails(honorarioPaymentId, tenantId);
+    this.logger.log('[GET /charges/asaas] Buscando cobranças direto do Asaas...');
+    try {
+      const result = await this.asaasClient.listCharges({
+        status: status || undefined,
+        offset: offset ? parseInt(offset) : 0,
+        limit: limit ? parseInt(limit) : 50,
+      });
+      this.logger.log(`[GET /charges/asaas] Retornadas ${result?.totalCount ?? result?.data?.length ?? 0} cobranças`);
+      return result;
+    } catch (e: any) {
+      this.logger.error(`[GET /charges/asaas] Erro: ${e.message}`);
+      return { data: [], totalCount: 0, error: e.message };
+    }
   }
-
-  @Post('customers/sync/:leadId')
-  async ensureCustomer(@Param('leadId') leadId: string, @Req() req: any) {
-    const tenantId = req.user?.tenantId;
-    this.logger.log(`[POST /customers/sync] leadId=${leadId}`);
-    return this.service.ensureCustomer(leadId, tenantId);
-  }
-
-  @Post('reconcile')
-  async reconcile(@Req() req: any) {
-    const tenantId = req.user?.tenantId;
-    this.logger.log('[POST /reconcile] Iniciando reconciliacao');
-    return this.service.reconcile(tenantId);
-  }
-
-  // ─── Listagem de cobranças ─────────────────────────────
 
   /** Lista cobranças locais (armazenadas no sistema) */
   @Get('charges')
@@ -107,29 +86,38 @@ export class PaymentGatewayController {
     });
   }
 
-  /** Lista cobranças direto da API do Asaas */
-  @Get('charges/asaas')
-  async listAsaasCharges(
-    @Query('status') status: string | undefined,
-    @Query('offset') offset: string | undefined,
-    @Query('limit') limit: string | undefined,
+  // ─── ROTAS COM PARÂMETROS (depois das fixas) ──────────────
+
+  /** Detalhes de uma cobrança por honorarioPaymentId */
+  @Get('charges/:honorarioPaymentId')
+  async getChargeDetails(
+    @Param('honorarioPaymentId') honorarioPaymentId: string,
+    @Req() req: any,
   ) {
-    this.logger.log('[GET /charges/asaas] Buscando cobranças direto do Asaas...');
-    try {
-      const result = await this.asaasClient.listCharges({
-        status: status || undefined,
-        offset: offset ? parseInt(offset) : 0,
-        limit: limit ? parseInt(limit) : 50,
-      });
-      this.logger.log(`[GET /charges/asaas] Retornadas ${result?.totalCount ?? result?.data?.length ?? 0} cobranças`);
-      return result;
-    } catch (e: any) {
-      this.logger.error(`[GET /charges/asaas] Erro: ${e.message}`);
-      return { data: [], totalCount: 0, error: e.message };
-    }
+    const tenantId = req.user?.tenantId;
+    return this.service.getChargeDetails(honorarioPaymentId, tenantId);
   }
 
-  /** Sincroniza cobranças do Asaas para o banco local */
+  // ─── POST ACTIONS ─────────────────────────────────────────
+
+  @Post('charges')
+  async createCharge(@Body() dto: CreateChargeDto, @Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    this.logger.log(`[POST /charges] billingType=${dto.billingType} paymentId=${dto.honorarioPaymentId}`);
+    return this.service.createCharge(
+      dto.honorarioPaymentId,
+      dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+      tenantId,
+    );
+  }
+
+  @Post('charges/batch')
+  async createBatchCharges(@Body() dto: CreateBatchChargesDto, @Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    this.logger.log(`[POST /charges/batch] honorarioId=${dto.honorarioId} billingType=${dto.billingType}`);
+    return this.service.createBatchCharges(dto.honorarioId, dto.billingType, tenantId);
+  }
+
   @Post('charges/sync')
   async syncCharges(@Req() req: any) {
     const tenantId = req.user?.tenant_id;
@@ -137,9 +125,17 @@ export class PaymentGatewayController {
     return this.service.reconcile(tenantId);
   }
 
-  @Get('settings')
-  async getSettings(@Req() req: any) {
+  @Post('customers/sync/:leadId')
+  async ensureCustomer(@Param('leadId') leadId: string, @Req() req: any) {
     const tenantId = req.user?.tenantId;
-    return this.service.getSettings(tenantId);
+    this.logger.log(`[POST /customers/sync] leadId=${leadId}`);
+    return this.service.ensureCustomer(leadId, tenantId);
+  }
+
+  @Post('reconcile')
+  async reconcile(@Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    this.logger.log('[POST /reconcile] Iniciando reconciliacao');
+    return this.service.reconcile(tenantId);
   }
 }
