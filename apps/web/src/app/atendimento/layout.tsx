@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { GlobalCommandPalette, useGlobalCommandPalette } from './components/GlobalCommandPalette';
+import { TaskAlertPopup } from './components/TaskAlertPopup';
 import {
   MessageSquare, Briefcase, Users, Check, FileEdit, BookOpen,
   Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar,
@@ -172,6 +173,9 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
       <main className="flex-1 overflow-hidden">
         {children}
       </main>
+
+      {/* ─── Popup de alertas de tarefas (tempo real) ──────── */}
+      <TaskAlertPopup />
 
       {/* ─── Global Command Palette (Ctrl+K) ────────────────── */}
       <GlobalCommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
