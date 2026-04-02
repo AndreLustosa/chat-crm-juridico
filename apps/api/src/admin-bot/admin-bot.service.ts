@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CalendarService } from '../calendar/calendar.service';
+import { FinanceiroService } from '../financeiro/financeiro.service';
+import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
 import OpenAI from 'openai';
 
 // ─── Session Types ────────────────────────────────────────────────────────────
@@ -39,6 +41,10 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
     'listar tarefas', 'minhas tarefas', 'tarefas pendentes', 'ver tarefas',
     'buscar cliente', 'procurar cliente', 'listar clientes',
     'ajuda', 'help', 'comandos',
+    // Financeiro
+    'cobrança', 'cobrar', 'gerar pix', 'gerar boleto', 'pagamento',
+    'despesa', 'receita', 'financeiro', 'inadimplente', 'atrasado',
+    'quanto', 'saldo', 'faturamento', 'recebido', 'pendente',
   ];
 
   constructor(
@@ -46,6 +52,8 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
     private whatsapp: WhatsappService,
     private tasksService: TasksService,
     private calendarService: CalendarService,
+    private financeiroService: FinanceiroService,
+    private paymentGatewayService: PaymentGatewayService,
   ) {}
 
   onModuleInit() {
@@ -258,6 +266,11 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
 - Agendar eventos: consultas, audiências, prazos, reuniões
 - Listar tarefas pendentes do usuário
 - Buscar clientes e processos
+- 💰 Resumo financeiro (receitas, despesas, saldo, atrasados)
+- 💰 Gerar cobranças PIX/Boleto/Cartão via Asaas
+- 💰 Cadastrar despesas e receitas avulsas
+- 💰 Listar inadimplentes (pagamentos atrasados)
+- 💰 Marcar pagamentos como recebidos
 
 ## Regras de Resposta
 - Português brasileiro, linguagem direta
@@ -290,6 +303,27 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
 3. Buscar processos se aplicável
 4. Perguntar data e hora
 5. Criar o evento (create_calendar_event) e confirmar com ✅
+
+## Fluxo Gerar Cobrança
+1. Perguntar nome do cliente
+2. Buscar lead (search_leads)
+3. Perguntar valor e tipo (PIX, boleto, cartão)
+4. Gerar cobrança (create_charge) e enviar código PIX ou link do boleto ✅
+
+## Fluxo Registrar Despesa
+1. Perguntar descrição e valor
+2. Perguntar categoria (custas, perícia, deslocamento, escritório)
+3. Opcionalmente vincular a processo
+4. Criar despesa (create_expense) e confirmar ✅
+
+## Fluxo Resumo Financeiro
+1. Perguntar período se não especificado
+2. Consultar resumo (financial_summary) e apresentar KPIs
+
+## Fluxo Marcar Pagamento
+1. Perguntar nome do cliente
+2. Buscar parcela pendente mais antiga
+3. Confirmar valor e marcar como pago (mark_payment_received) ✅
 
 ## Exemplo de resposta de lista
 Encontrei 3 processos de Beatriz:
@@ -393,6 +427,104 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
             properties: {
               limit: { type: 'number', description: 'Máximo de tarefas (padrão: 10)' },
             },
+          },
+        },
+      },
+      // ─── Tools Financeiras ─────────────────────────────────
+      {
+        type: 'function',
+        function: {
+          name: 'financial_summary',
+          description: 'Retorna resumo financeiro do escritório: receitas, despesas, saldo, atrasados. Use quando perguntarem "quanto temos", "saldo", "faturamento", "resumo financeiro".',
+          parameters: {
+            type: 'object',
+            properties: {
+              period: { type: 'string', enum: ['hoje', 'semana', 'mes', 'trimestre', 'ano'], description: 'Período do resumo (padrão: mes)' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_overdue_payments',
+          description: 'Lista pagamentos de honorários em atraso. Use quando perguntarem "inadimplentes", "atrasados", "quem deve".',
+          parameters: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Máximo de registros (padrão: 10)' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'create_charge',
+          description: 'Gera uma cobrança (PIX, boleto ou cartão) via Asaas para um cliente. Use SOMENTE após ter o nome do cliente e valor confirmados.',
+          parameters: {
+            type: 'object',
+            properties: {
+              lead_id: { type: 'string', description: 'ID do lead/cliente (buscar com search_leads primeiro)' },
+              honorario_payment_id: { type: 'string', description: 'ID da parcela do honorário (opcional — se não informado, cria cobrança avulsa)' },
+              billing_type: { type: 'string', enum: ['PIX', 'BOLETO', 'CREDIT_CARD'], description: 'Tipo de cobrança' },
+              amount: { type: 'number', description: 'Valor em reais (obrigatório se não vinculado a parcela)' },
+              description: { type: 'string', description: 'Descrição da cobrança' },
+            },
+            required: ['lead_id', 'billing_type'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'create_expense',
+          description: 'Cadastra uma despesa no sistema financeiro. Use quando disserem "despesa de", "gastei", "paguei".',
+          parameters: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', description: 'Descrição da despesa' },
+              amount: { type: 'number', description: 'Valor em reais' },
+              category: { type: 'string', enum: ['CUSTAS_JUDICIAIS', 'PERICIA', 'DESLOCAMENTO', 'ESCRITORIO', 'CARTORIO', 'CORREIOS', 'OUTRO'], description: 'Categoria' },
+              date: { type: 'string', description: 'Data (ISO 8601, opcional — padrão: hoje)' },
+              legal_case_id: { type: 'string', description: 'ID do processo (opcional)' },
+            },
+            required: ['description', 'amount', 'category'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'create_revenue',
+          description: 'Registra uma receita avulsa (consulta, acordo extrajudicial, etc). Use quando disserem "recebi", "entrada de", "consulta de".',
+          parameters: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', description: 'Descrição da receita' },
+              amount: { type: 'number', description: 'Valor em reais' },
+              category: { type: 'string', enum: ['HONORARIO', 'CONSULTA', 'ACORDO', 'OUTRO'], description: 'Categoria' },
+              date: { type: 'string', description: 'Data (ISO 8601, opcional — padrão: hoje)' },
+              lead_id: { type: 'string', description: 'ID do cliente (opcional)' },
+              legal_case_id: { type: 'string', description: 'ID do processo (opcional)' },
+            },
+            required: ['description', 'amount', 'category'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'mark_payment_received',
+          description: 'Marca uma parcela de honorário como paga. Use quando disserem "pagamento confirmado", "fulano pagou".',
+          parameters: {
+            type: 'object',
+            properties: {
+              lead_name: { type: 'string', description: 'Nome do cliente (para buscar a parcela pendente)' },
+              amount: { type: 'number', description: 'Valor pago (para confirmar qual parcela)' },
+              payment_method: { type: 'string', enum: ['PIX', 'BOLETO', 'CARTAO', 'DINHEIRO', 'TRANSFERENCIA'], description: 'Método de pagamento' },
+            },
+            required: ['lead_name'],
           },
         },
       },
@@ -526,6 +658,146 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
                 : 'Sem prazo',
               status: t.status,
             })),
+          };
+        }
+
+        // ─── Tools Financeiras ─────────────────────────────────
+        case 'financial_summary': {
+          const period = args.period || 'mes';
+          const now = new Date();
+          let startDate: string | undefined;
+          if (period === 'hoje') startDate = now.toISOString().slice(0, 10);
+          else if (period === 'semana') { const d = new Date(now); d.setDate(d.getDate() - 7); startDate = d.toISOString().slice(0, 10); }
+          else if (period === 'mes') { const d = new Date(now); d.setMonth(d.getMonth() - 1); startDate = d.toISOString().slice(0, 10); }
+          else if (period === 'trimestre') { const d = new Date(now); d.setMonth(d.getMonth() - 3); startDate = d.toISOString().slice(0, 10); }
+          else if (period === 'ano') { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); startDate = d.toISOString().slice(0, 10); }
+          const summary = await this.financeiroService.getSummary(tenantId || undefined, startDate, now.toISOString().slice(0, 10));
+          return {
+            periodo: period,
+            receita_total: `R$ ${Number(summary.totalRevenue || 0).toFixed(2)}`,
+            despesas_total: `R$ ${Number(summary.totalExpenses || 0).toFixed(2)}`,
+            a_receber: `R$ ${Number(summary.totalReceivable || 0).toFixed(2)}`,
+            atrasado: `R$ ${Number(summary.totalOverdue || 0).toFixed(2)}`,
+            saldo: `R$ ${Number(summary.balance || 0).toFixed(2)}`,
+          };
+        }
+
+        case 'list_overdue_payments': {
+          const limit = Math.min(args.limit || 10, 20);
+          const overdue = await this.prisma.honorarioPayment.findMany({
+            where: { status: { in: ['ATRASADO', 'PENDENTE'] }, due_date: { lt: new Date() } },
+            include: {
+              honorario: { include: { legal_case: { select: { case_number: true, lead: { select: { name: true, phone: true } } } } } },
+            },
+            orderBy: { due_date: 'asc' },
+            take: limit,
+          });
+          return {
+            count: overdue.length,
+            inadimplentes: overdue.map(p => ({
+              parcela_id: p.id,
+              cliente: (p as any).honorario?.legal_case?.lead?.name || 'Desconhecido',
+              telefone: (p as any).honorario?.legal_case?.lead?.phone || '',
+              processo: (p as any).honorario?.legal_case?.case_number || 'Sem número',
+              valor: `R$ ${Number(p.amount).toFixed(2)}`,
+              vencimento: new Date(p.due_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
+              dias_atraso: Math.ceil((Date.now() - new Date(p.due_date).getTime()) / 86400000),
+            })),
+          };
+        }
+
+        case 'create_charge': {
+          if (args.honorario_payment_id) {
+            const charge = await this.paymentGatewayService.createCharge(args.honorario_payment_id, args.billing_type, tenantId || undefined);
+            return {
+              success: true,
+              tipo: args.billing_type,
+              pix_copia_cola: charge.pix_copy_paste || null,
+              boleto_url: charge.boleto_url || null,
+              fatura_url: charge.invoice_url || null,
+              mensagem: `Cobrança ${args.billing_type} gerada com sucesso!`,
+            };
+          }
+          // Cobrança avulsa — ensure customer + create via Asaas
+          await this.paymentGatewayService.ensureCustomer(args.lead_id, tenantId || undefined);
+          return { success: true, mensagem: 'Cliente sincronizado. Para gerar cobrança vinculada a parcela, use create_charge com honorario_payment_id.' };
+        }
+
+        case 'create_expense': {
+          const tx = await this.financeiroService.createTransaction({
+            type: 'DESPESA',
+            category: args.category,
+            description: args.description,
+            amount: args.amount,
+            date: args.date || new Date().toISOString(),
+            status: 'PAGO',
+            paid_at: args.date || new Date().toISOString(),
+            legal_case_id: args.legal_case_id,
+            tenant_id: tenantId || undefined,
+          });
+          return {
+            success: true,
+            despesa: { id: tx.id, descricao: tx.description, valor: `R$ ${Number(tx.amount).toFixed(2)}`, categoria: tx.category },
+          };
+        }
+
+        case 'create_revenue': {
+          const tx = await this.financeiroService.createTransaction({
+            type: 'RECEITA',
+            category: args.category,
+            description: args.description,
+            amount: args.amount,
+            date: args.date || new Date().toISOString(),
+            status: 'PAGO',
+            paid_at: args.date || new Date().toISOString(),
+            lead_id: args.lead_id,
+            legal_case_id: args.legal_case_id,
+            tenant_id: tenantId || undefined,
+          });
+          return {
+            success: true,
+            receita: { id: tx.id, descricao: tx.description, valor: `R$ ${Number(tx.amount).toFixed(2)}`, categoria: tx.category },
+          };
+        }
+
+        case 'mark_payment_received': {
+          // Buscar lead pelo nome
+          const leads = await this.prisma.lead.findMany({
+            where: { name: { contains: args.lead_name, mode: 'insensitive' }, ...(tenantId ? { tenant_id: tenantId } : {}) },
+            select: { id: true, name: true },
+            take: 3,
+          });
+          if (!leads.length) return { error: `Nenhum cliente encontrado com nome "${args.lead_name}"` };
+
+          // Buscar parcelas pendentes do lead
+          const payments = await this.prisma.honorarioPayment.findMany({
+            where: {
+              status: { in: ['PENDENTE', 'ATRASADO'] },
+              honorario: { legal_case: { lead_id: { in: leads.map(l => l.id) } } },
+              ...(args.amount ? { amount: args.amount } : {}),
+            },
+            include: { honorario: { select: { legal_case: { select: { case_number: true } } } } },
+            orderBy: { due_date: 'asc' },
+            take: 1,
+          });
+          if (!payments.length) return { error: `Nenhuma parcela pendente encontrada para "${args.lead_name}"${args.amount ? ` no valor de R$ ${args.amount}` : ''}` };
+
+          const payment = payments[0];
+          await this.prisma.honorarioPayment.update({
+            where: { id: payment.id },
+            data: { status: 'PAGO', paid_at: new Date(), payment_method: args.payment_method || null },
+          });
+          // Auto-criar transação financeira
+          try { await this.financeiroService.createFromHonorarioPayment(payment.id, tenantId || undefined); } catch {}
+
+          return {
+            success: true,
+            pagamento: {
+              cliente: leads[0].name,
+              valor: `R$ ${Number(payment.amount).toFixed(2)}`,
+              processo: (payment as any).honorario?.legal_case?.case_number || 'N/A',
+              metodo: args.payment_method || 'Não informado',
+            },
           };
         }
 
