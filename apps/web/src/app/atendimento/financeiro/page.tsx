@@ -793,6 +793,8 @@ function CobrancasAsaasTab() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [detailCharge, setDetailCharge] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [editingCharge, setEditingCharge] = useState<any>(null);
   const [editForm, setEditForm] = useState({ value: '', dueDate: '', description: '' });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -831,6 +833,16 @@ function CobrancasAsaasTab() {
   }, [statusFilters, billingTypeFilter, dateFrom, dateTo]);
 
   useEffect(() => { fetchCharges(); }, [fetchCharges]);
+
+  const openDetail = async (chargeId: string) => {
+    setDetailLoading(true);
+    setDetailCharge(null);
+    try {
+      const res = await api.get(`/payment-gateway/charges/asaas/detail/${chargeId}`);
+      setDetailCharge(res.data);
+    } catch { showError('Erro ao carregar detalhes'); }
+    finally { setDetailLoading(false); }
+  };
 
   const openEdit = (charge: any) => {
     setEditingCharge(charge);
@@ -1070,6 +1082,141 @@ function CobrancasAsaasTab() {
         </div>
       )}
 
+      {/* ── Modal Detalhes da Cobranca ── */}
+      {(detailCharge || detailLoading) && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => { setDetailCharge(null); setDetailLoading(false); }}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {detailLoading ? (
+              <div className="p-12 text-center"><Loader2 size={24} className="animate-spin text-muted-foreground mx-auto" /></div>
+            ) : detailCharge && (
+              <div className="p-6 space-y-4">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-foreground">Detalhes da Cobranca</h3>
+                  <button onClick={() => setDetailCharge(null)} className="p-1 text-muted-foreground hover:text-foreground"><X size={16} /></button>
+                </div>
+
+                {/* Cliente */}
+                <div className="bg-background rounded-xl p-4 space-y-2">
+                  <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Cliente</p>
+                  <p className="text-sm font-semibold text-foreground">{detailCharge.customerName || detailCharge.customer}</p>
+                  {detailCharge.customerCpfCnpj && <p className="text-xs text-muted-foreground font-mono">{detailCharge.customerCpfCnpj}</p>}
+                  {detailCharge.customerEmail && <p className="text-xs text-muted-foreground">{detailCharge.customerEmail}</p>}
+                  {detailCharge.customerPhone && <p className="text-xs text-muted-foreground">{detailCharge.customerPhone}</p>}
+                </div>
+
+                {/* Dados da cobranca */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Valor</p>
+                    <p className="text-lg font-bold text-foreground">{fmt(detailCharge.value || 0)}</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Valor Liquido</p>
+                    <p className="text-lg font-bold text-emerald-400">{fmt(detailCharge.netValue || 0)}</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Status</p>
+                    <p className="text-sm font-semibold">{(CHARGE_STATUS_MAP[detailCharge.status] || { label: detailCharge.status }).label}</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Forma de Pagamento</p>
+                    <p className="text-sm">{(BILLING_ICONS[detailCharge.billingType] || {}).label || detailCharge.billingType}</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Vencimento</p>
+                    <p className="text-sm">{fmtDate(detailCharge.dueDate)}</p>
+                  </div>
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Criada em</p>
+                    <p className="text-sm">{fmtDate(detailCharge.dateCreated)}</p>
+                  </div>
+                </div>
+
+                {/* Descricao */}
+                {detailCharge.description && (
+                  <div className="bg-background rounded-xl p-3">
+                    <p className="text-[10px] text-muted-foreground uppercase">Descricao</p>
+                    <p className="text-sm text-foreground">{detailCharge.description}</p>
+                  </div>
+                )}
+
+                {/* Juros e Multa */}
+                {(detailCharge.interest?.value > 0 || detailCharge.fine?.value > 0) && (
+                  <div className="bg-background rounded-xl p-3 grid grid-cols-2 gap-2">
+                    {detailCharge.interest?.value > 0 && (
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase">Juros ao mes</p>
+                        <p className="text-sm">{detailCharge.interest.value}%</p>
+                      </div>
+                    )}
+                    {detailCharge.fine?.value > 0 && (
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase">Multa por atraso</p>
+                        <p className="text-sm">{detailCharge.fine.value}%</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Numero da fatura / Nosso Numero */}
+                <div className="bg-background rounded-xl p-3 grid grid-cols-2 gap-2">
+                  {detailCharge.invoiceNumber && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">N. Fatura</p>
+                      <p className="text-sm font-mono">{detailCharge.invoiceNumber}</p>
+                    </div>
+                  )}
+                  {detailCharge.nossoNumero && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">Nosso Numero</p>
+                      <p className="text-sm font-mono">{detailCharge.nossoNumero}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* PIX QR Code */}
+                {detailCharge.pixCopyPaste && (
+                  <div className="bg-background rounded-xl p-3 space-y-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">PIX Copia e Cola</p>
+                    <div className="flex gap-2">
+                      <input readOnly value={detailCharge.pixCopyPaste} className="flex-1 px-3 py-1.5 text-xs bg-card border border-border rounded-lg font-mono truncate" />
+                      <button onClick={() => { navigator.clipboard.writeText(detailCharge.pixCopyPaste); showSuccess('Copiado!'); }}
+                        className="px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg">Copiar</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Botoes de acao */}
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {detailCharge.bankSlipUrl && (
+                    <a href={detailCharge.bankSlipUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex-1 py-2.5 text-sm font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/20 rounded-lg hover:bg-blue-500/25 flex items-center justify-center gap-2 transition-colors">
+                      <Receipt size={14} /> Boleto (PDF)
+                    </a>
+                  )}
+                  {detailCharge.invoiceUrl && (
+                    <a href={detailCharge.invoiceUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex-1 py-2.5 text-sm font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 flex items-center justify-center gap-2 transition-colors">
+                      <CreditCard size={14} /> Fatura Online
+                    </a>
+                  )}
+                  {detailCharge.transactionReceiptUrl && (
+                    <a href={detailCharge.transactionReceiptUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex-1 py-2.5 text-sm font-semibold bg-purple-500/15 text-purple-400 border border-purple-500/20 rounded-lg hover:bg-purple-500/25 flex items-center justify-center gap-2 transition-colors">
+                      <Receipt size={14} /> Comprovante
+                    </a>
+                  )}
+                </div>
+
+                {/* ID da cobranca */}
+                <p className="text-[10px] text-muted-foreground text-center font-mono">ID: {detailCharge.id}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Tabela ── */}
       {loading ? (
         <div className="text-center py-16"><Loader2 size={24} className="animate-spin text-muted-foreground mx-auto" /></div>
@@ -1099,13 +1246,13 @@ function CobrancasAsaasTab() {
                   const st = CHARGE_STATUS_MAP[c.status] || { label: c.status, color: 'text-gray-400 bg-gray-400/10 border-gray-400/20', dot: 'bg-gray-500' };
                   const bt = BILLING_ICONS[c.billingType] || BILLING_ICONS.UNDEFINED;
                   return (
-                    <tr key={c.id || i} className="border-b border-border/40 hover:bg-accent/10 transition-colors">
+                    <tr key={c.id || i} className="border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer" onClick={() => openDetail(c.id)}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[10px] font-bold shrink-0">
                             {(c.customerName || c.customer || '?')[0]?.toUpperCase()}
                           </div>
-                          <span className="font-medium text-foreground truncate max-w-[180px]">
+                          <span className="font-medium text-foreground truncate max-w-[180px] hover:text-primary transition-colors">
                             {c.customerName || c.customer || '--'}
                           </span>
                         </div>
@@ -1127,7 +1274,7 @@ function CobrancasAsaasTab() {
                           {st.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           {c.status !== 'RECEIVED' && c.status !== 'CONFIRMED' && c.status !== 'RECEIVED_IN_CASH' && (
                             <>

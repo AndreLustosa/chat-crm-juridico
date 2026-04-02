@@ -118,6 +118,33 @@ export class PaymentGatewayController {
 
   // ─── ROTAS COM PARÂMETROS (depois das fixas) ──────────────
 
+  /** Detalhes completos de uma cobrança no Asaas */
+  @Get('charges/asaas/detail/:chargeId')
+  async getAsaasChargeDetail(@Param('chargeId') chargeId: string) {
+    this.logger.log(`[GET /charges/asaas/detail/${chargeId}]`);
+    const charge = await this.asaasClient.getCharge(chargeId);
+    // Enriquecer com nome do cliente
+    if (charge?.customer) {
+      try {
+        const cust = await this.asaasClient.getCustomer(charge.customer);
+        charge.customerName = cust?.name;
+        charge.customerEmail = cust?.email;
+        charge.customerPhone = cust?.mobilePhone || cust?.phone;
+        charge.customerCpfCnpj = cust?.cpfCnpj;
+      } catch {}
+    }
+    // Se PIX, buscar QR code
+    if (charge?.billingType === 'PIX' && charge?.status === 'PENDING') {
+      try {
+        const pix = await this.asaasClient.getPixQrCode(chargeId);
+        charge.pixQrCode = pix?.encodedImage;
+        charge.pixCopyPaste = pix?.payload;
+        charge.pixExpirationDate = pix?.expirationDate;
+      } catch {}
+    }
+    return charge;
+  }
+
   /** Editar cobrança no Asaas */
   @Put('charges/asaas/:chargeId')
   async updateAsaasCharge(
