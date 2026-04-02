@@ -619,17 +619,25 @@ export class PaymentGatewayService {
         }
       } else {
         // Match 4: se tem telefone, criar lead automaticamente e vincular
-        const phone = (cust.mobilePhone || cust.phone || '').replace(/\D/g, '');
-        if (phone && phone.length >= 10) {
+        const rawPhone = (cust.mobilePhone || cust.phone || '').replace(/\D/g, '');
+        if (rawPhone && rawPhone.length >= 10) {
+          // Normalizar telefone para formato do sistema (55+DD+8dig, sem 9 extra)
+          let phone = rawPhone;
+          if (phone.length <= 11) phone = '55' + phone;
+          // Remover 9 extra: 5582999867111 (13dig) → 558299867111 (12dig)
+          if (phone.length === 13 && phone.startsWith('55') && phone[4] === '9') {
+            phone = phone.slice(0, 4) + phone.slice(5);
+          }
+
           try {
-            // Verificar se já existe lead com esse telefone
+            // Verificar se já existe lead com esse telefone (busca exata + parcial)
             let existingLead = await this.prisma.lead.findFirst({
-              where: { phone: { contains: phone.slice(-10) } },
+              where: { OR: [{ phone }, { phone: rawPhone }, { phone: { contains: rawPhone.slice(-10) } }] },
               select: { id: true },
             });
 
             if (!existingLead) {
-              // Criar lead a partir dos dados do Asaas
+              // Criar lead a partir dos dados do Asaas com telefone normalizado
               existingLead = await this.prisma.lead.create({
                 data: {
                   tenant_id: tenantId || null,
@@ -771,11 +779,15 @@ export class PaymentGatewayService {
         `_André Lustosa Advogados_`
       );
 
-    // Garantir que o telefone do lead está normalizado com 55
+    // Normalizar telefone: 55+DD+8dig (sem 9 extra) — mesmo formato do to12Digits
     let clientPhone = lead.phone.replace(/\D/g, '');
     if (clientPhone.length <= 11) clientPhone = '55' + clientPhone;
+    // Remover 9 extra: 5582999867111 (13dig) → 558299867111 (12dig)
+    if (clientPhone.length === 13 && clientPhone.startsWith('55') && clientPhone[4] === '9') {
+      clientPhone = clientPhone.slice(0, 4) + clientPhone.slice(5);
+    }
 
-    // Atualizar telefone do lead para o formato correto (evita duplicatas)
+    // Atualizar telefone do lead para o formato normalizado (evita duplicatas)
     if (lead.phone !== clientPhone) {
       await this.prisma.lead.update({ where: { id: lead.id }, data: { phone: clientPhone } }).catch(() => {});
     }
