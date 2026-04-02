@@ -29,6 +29,7 @@ export interface UserOption { id: string; name: string; role?: string; }
 export const EVENT_TYPES = [
   { id: 'TAREFA',    label: 'Tarefa',    emoji: '✅', color: 'text-green-400',  bg: 'bg-green-400/10'  },
   { id: 'AUDIENCIA', label: 'Audiência', emoji: '⚖️', color: 'text-red-400',    bg: 'bg-red-400/10'    },
+  { id: 'PERICIA',   label: 'Perícia',   emoji: '🔬', color: 'text-sky-400',    bg: 'bg-sky-400/10'    },
   { id: 'PRAZO',     label: 'Prazo',     emoji: '🕐', color: 'text-amber-400',  bg: 'bg-amber-400/10'  },
   { id: 'CONSULTA',  label: 'Consulta',  emoji: '🟣', color: 'text-purple-400', bg: 'bg-purple-400/10' },
   { id: 'OUTRO',     label: 'Outro',     emoji: '📌', color: 'text-muted-foreground', bg: 'bg-accent/50' },
