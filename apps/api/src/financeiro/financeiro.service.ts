@@ -90,7 +90,7 @@ export class FinanceiroService {
             select: { id: true, name: true, phone: true },
           },
           legal_case: {
-            select: { id: true, title: true, case_number: true },
+            select: { id: true, case_number: true, legal_area: true },
           },
           lawyer: {
             select: { id: true, name: true, email: true },
@@ -128,7 +128,7 @@ export class FinanceiroService {
       },
       include: {
         lead: { select: { id: true, name: true } },
-        legal_case: { select: { id: true, title: true, case_number: true } },
+        legal_case: { select: { id: true, case_number: true, legal_area: true } },
         lawyer: { select: { id: true, name: true } },
       },
     });
@@ -160,7 +160,7 @@ export class FinanceiroService {
       data: updateData,
       include: {
         lead: { select: { id: true, name: true } },
-        legal_case: { select: { id: true, title: true, case_number: true } },
+        legal_case: { select: { id: true, case_number: true, legal_area: true } },
         lawyer: { select: { id: true, name: true } },
       },
     });
@@ -193,7 +193,7 @@ export class FinanceiroService {
         honorario: {
           include: {
             legal_case: {
-              select: { id: true, title: true, case_number: true, lead_id: true, tenant_id: true },
+              select: { id: true, case_number: true, legal_area: true, lead_id: true, tenant_id: true, lawyer_id: true },
             },
           },
         },
@@ -202,14 +202,14 @@ export class FinanceiroService {
 
     if (!payment) throw new NotFoundException('Pagamento de honorario nao encontrado');
 
-    const legalCase = payment.honorario.legal_case;
+    const legalCase = (payment as any).honorario?.legal_case;
 
     return this.prisma.financialTransaction.create({
       data: {
         tenant_id: tenantId || legalCase?.tenant_id || null,
         type: 'RECEITA',
         category: 'HONORARIO',
-        description: `Honorario - ${legalCase?.title || 'Caso'} ${legalCase?.case_number ? `(${legalCase.case_number})` : ''}`.trim(),
+        description: `Honorário - ${legalCase?.case_number || 'Processo'} ${legalCase?.legal_area ? `(${legalCase.legal_area})` : ''}`.trim(),
         amount: payment.amount,
         date: payment.paid_at || new Date(),
         paid_at: payment.paid_at,
