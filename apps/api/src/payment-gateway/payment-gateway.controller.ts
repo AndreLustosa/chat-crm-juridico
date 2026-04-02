@@ -45,7 +45,27 @@ export class PaymentGatewayController {
         offset: offset ? parseInt(offset) : 0,
         limit: limit ? parseInt(limit) : 50,
       });
-      this.logger.log(`[GET /charges/asaas] Retornadas ${result?.totalCount ?? result?.data?.length ?? 0} cobranças`);
+
+      // Enriquecer com nomes dos clientes (cache para não repetir chamadas)
+      const customerCache = new Map<string, string>();
+      const charges = result?.data || [];
+      for (const charge of charges) {
+        if (!charge.customer) continue;
+        if (customerCache.has(charge.customer)) {
+          charge.customerName = customerCache.get(charge.customer);
+          continue;
+        }
+        try {
+          const cust = await this.asaasClient.getCustomer(charge.customer);
+          const name = cust?.name || charge.customer;
+          customerCache.set(charge.customer, name);
+          charge.customerName = name;
+        } catch {
+          charge.customerName = charge.customer;
+        }
+      }
+
+      this.logger.log(`[GET /charges/asaas] Retornadas ${result?.totalCount ?? charges.length} cobranças (${customerCache.size} clientes)`);
       return result;
     } catch (e: any) {
       this.logger.error(`[GET /charges/asaas] Erro: ${e.message}`);

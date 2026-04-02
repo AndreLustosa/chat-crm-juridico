@@ -894,7 +894,7 @@ function CobrancasAsaasTab() {
                 const value = isAsaas ? c.value : c.amount;
                 const dueDate = isAsaas ? c.dueDate : c.due_date;
                 const clientName = isAsaas
-                  ? (c.customer || c.externalReference || '--')
+                  ? (c.customerName || c.customer || '--')
                   : ((c as any).honorario_payment?.honorario?.legal_case?.lead?.name || '--');
                 const chargeId = isAsaas ? c.id : c.external_id;
 
