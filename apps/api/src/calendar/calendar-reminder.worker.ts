@@ -212,9 +212,12 @@ export class CalendarReminderWorker extends WorkerHost {
     private readonly settings: SettingsService,
   ) {
     super();
+    this.logger.log('✅ CalendarReminderWorker registrado na fila calendar-reminders (API container)');
   }
 
   async process(job: Job<any>) {
+    this.logger.log(`[WORKER-API] Processando job ${job.name} (id: ${job.id})`);
+
     // ── Notificação imediata de audiência agendada ────────────────────────────
     if (job.name === 'notify-hearing-scheduled') {
       return this.processHearingScheduled(job.data.eventId, false);

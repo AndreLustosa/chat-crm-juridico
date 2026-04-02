@@ -42,9 +42,11 @@ export class ReminderProcessor extends WorkerHost {
     private settings: SettingsService,
   ) {
     super();
+    this.logger.log('✅ ReminderProcessor registrado na fila calendar-reminders (Worker container)');
   }
 
   async process(job: Job<any>): Promise<any> {
+    this.logger.log(`[WORKER] Processando job ${job.name} (id: ${job.id})`);
     // ── Notificações imediatas de audiência/perícia agendada ──────────────
     if (job.name === 'notify-hearing-scheduled') {
       return this.processHearingNotification(job.data.eventId, false);

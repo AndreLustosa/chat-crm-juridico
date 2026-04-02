@@ -228,9 +228,9 @@ export class CalendarService {
             removeOnFail: 50,
           },
         );
-        this.logger.log(`[AUDIENCIA] Notificação agendada ao cliente em 1 min (evento ${event.id})`);
+        this.logger.log(`[NOTIFY] Notificação ${data.type} agendada ao cliente em 1 min (evento ${event.id}, lead: ${event.lead?.phone})`);
       } catch (e: any) {
-        this.logger.error(`[AUDIENCIA] Erro ao enfileirar notificação: ${e.message}`);
+        this.logger.error(`[NOTIFY] Erro ao enfileirar notificação ${data.type}: ${e.message}`);
       }
     }
 
