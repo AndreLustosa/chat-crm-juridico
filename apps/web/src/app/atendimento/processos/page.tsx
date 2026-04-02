@@ -309,19 +309,9 @@ function ProcessoCard({
         )}
       </div>
 
-      {/* Próximo evento (audiência, perícia, prazo, tarefa) */}
+      {/* Todos os eventos (audiências, perícias, prazos, tarefas) */}
       {legalCase.calendar_events && legalCase.calendar_events.length > 0 && (() => {
         const nowCard = new Date();
-        // Prefere o próximo evento futuro; se todos forem passados, mostra o mais recente
-        const ev = legalCase.calendar_events!.find(e => new Date(e.start_at) >= nowCard)
-          ?? legalCase.calendar_events![legalCase.calendar_events!.length - 1];
-        const d = new Date(ev.start_at);
-        const hoje = new Date();
-        const diffDias = Math.ceil((d.getTime() - hoje.getTime()) / 86400000);
-        const isPast = diffDias < 0;
-        const isProxima = !isPast && diffDias <= 7;
-        const isHoje = diffDias <= 0 && diffDias > -1;
-        const dateLabel = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')} às ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')}`;
         const typeLabel: Record<string, string> = {
           AUDIENCIA: 'Audiência', PERICIA: 'Perícia', PRAZO: 'Prazo', TAREFA: 'Tarefa',
           CONSULTA: 'Consulta', OUTRO: 'Evento',
@@ -329,26 +319,32 @@ function ProcessoCard({
         const typeEmoji: Record<string, string> = {
           AUDIENCIA: '⚖️', PERICIA: '🔬', PRAZO: '⏰', TAREFA: '✅', CONSULTA: '📞', OUTRO: '📅',
         };
-        const label = typeLabel[ev.type] ?? ev.type;
-        const emoji = typeEmoji[ev.type] ?? '📅';
         return (
-          <div className={`mt-1.5 flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${
-            isHoje
-              ? 'bg-red-500/12 border-red-500/30'
-              : isPast
-              ? 'bg-gray-500/8 border-gray-500/20'
-              : isProxima
-              ? 'bg-amber-500/10 border-amber-500/25'
-              : 'bg-blue-500/8 border-blue-500/20'
-          }`}>
-            <Calendar size={9} className={isHoje ? 'text-red-400 shrink-0' : isPast ? 'text-gray-400 shrink-0' : isProxima ? 'text-amber-400 shrink-0' : 'text-blue-400 shrink-0'} />
-            <span className={`text-[9px] font-semibold leading-tight ${isHoje ? 'text-red-400' : isPast ? 'text-gray-400' : isProxima ? 'text-amber-400' : 'text-blue-400'}`}>
-              {isHoje
-                ? `🔴 ${label} HOJE`
-                : isPast
-                ? `✅ ${label} realizada: ${dateLabel}`
-                : `${emoji} ${label}: ${dateLabel}${isProxima ? ` (em ${diffDias}d)` : ''}`}
-            </span>
+          <div className="mt-1.5 flex flex-col gap-1">
+            {legalCase.calendar_events!.map(ev => {
+              const d = new Date(ev.start_at);
+              const diffDias = Math.ceil((d.getTime() - nowCard.getTime()) / 86400000);
+              const isPast = diffDias < 0;
+              const isProxima = !isPast && diffDias <= 7;
+              const isHoje = diffDias <= 0 && diffDias > -1;
+              const dateLabel = `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')} às ${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')}`;
+              const label = typeLabel[ev.type] ?? ev.type;
+              const emoji = typeEmoji[ev.type] ?? '📅';
+              const colorBg = isHoje ? 'bg-red-500/12 border-red-500/30' : isPast ? 'bg-gray-500/8 border-gray-500/20' : isProxima ? 'bg-amber-500/10 border-amber-500/25' : 'bg-blue-500/8 border-blue-500/20';
+              const colorText = isHoje ? 'text-red-400' : isPast ? 'text-gray-400' : isProxima ? 'text-amber-400' : 'text-blue-400';
+              return (
+                <div key={ev.id} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${colorBg}`}>
+                  <Calendar size={9} className={`${colorText} shrink-0`} />
+                  <span className={`text-[9px] font-semibold leading-tight ${colorText}`}>
+                    {isHoje
+                      ? `🔴 ${label} HOJE`
+                      : isPast
+                      ? `${label} realizada: ${dateLabel}`
+                      : `${emoji} ${label}: ${dateLabel}${isProxima ? ` (em ${diffDias}d)` : ''}`}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         );
       })()}
