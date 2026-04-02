@@ -8,6 +8,7 @@ import { MediaModule } from './media/media.module';
 import { AiModule } from './ai/ai.module';
 import { ReminderModule } from './reminder/reminder.module';
 import { FollowupModule } from './followup/followup.module';
+import { PaymentAlertsModule } from './payment/payment-alerts.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { FollowupModule } from './followup/followup.module';
     AiModule,
     ReminderModule,
     FollowupModule,
+    PaymentAlertsModule,
   ],
 })
 export class AppModule {}
