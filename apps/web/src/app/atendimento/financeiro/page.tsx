@@ -41,7 +41,7 @@ interface Transaction {
 /* ──────────────────────────────────────────────────────────────
    Constants
 ────────────────────────────────────────────────────────────── */
-const TABS = ['Resumo', 'Receitas', 'Despesas', 'Inadimplencia'] as const;
+const TABS = ['Resumo', 'Receitas', 'Despesas', 'Cobrancas', 'Inadimplencia'] as const;
 type Tab = typeof TABS[number];
 
 const PERIODS = [
@@ -471,6 +471,7 @@ export default function FinanceiroPage() {
     Resumo: BarChart3,
     Receitas: TrendingUp,
     Despesas: TrendingDown,
+    Cobrancas: CreditCard,
     Inadimplencia: AlertTriangle,
   };
 
@@ -557,7 +558,7 @@ export default function FinanceiroPage() {
                 }`}
               >
                 <Icon size={14} />
-                {t === 'Inadimplencia' ? 'Inadimplencia' : t}
+                {t === 'Inadimplencia' ? 'Inadimplencia' : t === 'Cobrancas' ? 'Cobrancas' : t}
               </button>
             );
           })}
@@ -678,6 +679,9 @@ export default function FinanceiroPage() {
           </div>
         )}
 
+        {/* ─── TAB: Cobrancas (Asaas) ─── */}
+        {tab === 'Cobrancas' && <CobrancasAsaasTab />}
+
         {/* ─── TAB: Inadimplencia ─── */}
         {tab === 'Inadimplencia' && (
           <div className="space-y-4">
@@ -745,6 +749,182 @@ export default function FinanceiroPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Componente: Cobranças Asaas
+══════════════════════════════════════════════════════════════ */
+
+const CHARGE_STATUS_MAP: Record<string, { label: string; color: string }> = {
+  PENDING: { label: 'Pendente', color: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
+  RECEIVED: { label: 'Recebido', color: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' },
+  CONFIRMED: { label: 'Confirmado', color: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' },
+  OVERDUE: { label: 'Vencido', color: 'text-red-400 bg-red-400/10 border-red-400/20' },
+  REFUNDED: { label: 'Devolvido', color: 'text-purple-400 bg-purple-400/10 border-purple-400/20' },
+  DELETED: { label: 'Excluído', color: 'text-gray-400 bg-gray-400/10 border-gray-400/20' },
+  CANCELLED: { label: 'Cancelado', color: 'text-gray-400 bg-gray-400/10 border-gray-400/20' },
+};
+
+const BILLING_TYPE_LABEL: Record<string, string> = {
+  PIX: 'PIX',
+  BOLETO: 'Boleto',
+  CREDIT_CARD: 'Cartao',
+  UNDEFINED: 'Indefinido',
+};
+
+function CobrancasAsaasTab() {
+  const [charges, setCharges] = useState<any[]>([]);
+  const [asaasCharges, setAsaasCharges] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [view, setView] = useState<'local' | 'asaas'>('asaas');
+  const [statusFilter, setStatusFilter] = useState('');
+
+  const fmt = (v: number | string) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
+      typeof v === 'string' ? parseFloat(v) : v,
+    );
+
+  const fmtDate = (d: string) => {
+    if (!d) return '--';
+    const dt = new Date(d);
+    return `${String(dt.getUTCDate()).padStart(2, '0')}/${String(dt.getUTCMonth() + 1).padStart(2, '0')}/${dt.getUTCFullYear()}`;
+  };
+
+  const fetchLocal = useCallback(async () => {
+    try {
+      const params: any = { limit: '100' };
+      if (statusFilter) params.status = statusFilter;
+      const res = await api.get('/payment-gateway/charges', { params });
+      setCharges(res.data || []);
+    } catch { setCharges([]); }
+  }, [statusFilter]);
+
+  const fetchAsaas = useCallback(async () => {
+    try {
+      const params: any = { limit: '50' };
+      if (statusFilter) params.status = statusFilter;
+      const res = await api.get('/payment-gateway/charges/asaas', { params });
+      setAsaasCharges(res.data);
+    } catch { setAsaasCharges(null); }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([fetchLocal(), fetchAsaas()]).finally(() => setLoading(false));
+  }, [fetchLocal, fetchAsaas]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await api.post('/payment-gateway/charges/sync');
+      await Promise.all([fetchLocal(), fetchAsaas()]);
+      showSuccess('Cobrancas sincronizadas!');
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao sincronizar');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const asaasList = asaasCharges?.data || asaasCharges || [];
+  const displayList = view === 'asaas' ? (Array.isArray(asaasList) ? asaasList : []) : charges;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+          <CreditCard size={15} className="text-primary" />
+          Cobrancas Asaas
+        </h2>
+        <div className="flex items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="px-3 py-1.5 text-xs bg-background border border-border rounded-lg focus:outline-none"
+          >
+            <option value="">Todos os status</option>
+            <option value="PENDING">Pendente</option>
+            <option value="RECEIVED">Recebido</option>
+            <option value="CONFIRMED">Confirmado</option>
+            <option value="OVERDUE">Vencido</option>
+          </select>
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            <button onClick={() => setView('asaas')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === 'asaas' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/30'}`}>
+              Asaas
+            </button>
+            <button onClick={() => setView('local')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === 'local' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/30'}`}>
+              Local
+            </button>
+          </div>
+          <button onClick={handleSync} disabled={syncing} className="px-3 py-1.5 text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/25 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+            {syncing ? <Loader2 size={12} className="animate-spin" /> : <ArrowUpDown size={12} />}
+            Sincronizar
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12"><Loader2 size={20} className="animate-spin text-muted-foreground mx-auto" /></div>
+      ) : displayList.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">
+          Nenhuma cobranca {view === 'asaas' ? 'encontrada no Asaas' : 'registrada localmente'}
+        </div>
+      ) : (
+        <div className="border border-border rounded-xl overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-card border-b border-border text-muted-foreground">
+                <th className="px-3 py-2.5 text-left font-semibold">Cliente</th>
+                <th className="px-3 py-2.5 text-left font-semibold">Tipo</th>
+                <th className="px-3 py-2.5 text-left font-semibold">Valor</th>
+                <th className="px-3 py-2.5 text-left font-semibold">Vencimento</th>
+                <th className="px-3 py-2.5 text-left font-semibold">Status</th>
+                <th className="px-3 py-2.5 text-left font-semibold">ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayList.map((c: any, i: number) => {
+                const isAsaas = view === 'asaas';
+                const status = c.status;
+                const statusInfo = CHARGE_STATUS_MAP[status] || { label: status, color: 'text-gray-400 bg-gray-400/10 border-gray-400/20' };
+                const billingType = isAsaas ? c.billingType : c.billing_type;
+                const value = isAsaas ? c.value : c.amount;
+                const dueDate = isAsaas ? c.dueDate : c.due_date;
+                const clientName = isAsaas
+                  ? (c.customer || c.externalReference || '--')
+                  : ((c as any).honorario_payment?.honorario?.legal_case?.lead?.name || '--');
+                const chargeId = isAsaas ? c.id : c.external_id;
+
+                return (
+                  <tr key={chargeId || i} className="border-b border-border/50 hover:bg-accent/20 transition-colors">
+                    <td className="px-3 py-2.5 font-medium text-foreground truncate max-w-[180px]">{clientName}</td>
+                    <td className="px-3 py-2.5">{BILLING_TYPE_LABEL[billingType] || billingType}</td>
+                    <td className="px-3 py-2.5 font-semibold text-foreground">{fmt(value || 0)}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{fmtDate(dueDate)}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusInfo.color}`}>
+                        {statusInfo.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 font-mono text-[10px] text-muted-foreground truncate max-w-[120px]" title={chargeId}>
+                      {chargeId?.slice(-8) || '--'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && displayList.length > 0 && (
+        <p className="text-xs text-muted-foreground text-right">
+          {displayList.length} cobranca(s) — Total: {fmt(displayList.reduce((s: number, c: any) => s + Number(view === 'asaas' ? c.value : c.amount || 0), 0))}
+        </p>
+      )}
     </div>
   );
 }
