@@ -7,6 +7,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { GatewayModule } from '../gateway/gateway.module';
 import { HonorariosModule } from '../honorarios/honorarios.module';
 import { FinanceiroModule } from '../financeiro/financeiro.module';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { FinanceiroModule } from '../financeiro/financeiro.module';
     GatewayModule,
     forwardRef(() => HonorariosModule),
     forwardRef(() => FinanceiroModule),
+    forwardRef(() => WhatsappModule),
   ],
   controllers: [PaymentGatewayController, PaymentGatewayWebhookController],
   providers: [PaymentGatewayService, AsaasClient],

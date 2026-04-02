@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AsaasClient } from './asaas/asaas-client';
 import { FinanceiroService } from '../financeiro/financeiro.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 // Mapeamento de status Asaas → interno
 const ASAAS_STATUS_MAP: Record<string, string> = {
@@ -27,6 +28,7 @@ export class PaymentGatewayService {
   constructor(
     private prisma: PrismaService,
     private asaas: AsaasClient,
+    private whatsapp: WhatsappService,
     private financeiroService: FinanceiroService,
     private chatGateway: ChatGateway,
   ) {}
@@ -420,6 +422,15 @@ export class PaymentGatewayService {
       }
     }
 
+    // Se cobrança DELETADA ou REFUNDED, notificar cliente via WhatsApp
+    if (mappedStatus === 'DELETED' || mappedStatus === 'REFUNDED') {
+      try {
+        await this.notifyClientChargeDeleted(paymentData, charge, mappedStatus);
+      } catch (e: any) {
+        this.logger.warn(`[WEBHOOK] Falha ao notificar cliente sobre exclusão: ${e.message}`);
+      }
+    }
+
     // Emitir update generico de status
     this.emitFinancialUpdate(charge.tenant_id, {
       type: 'charge_status_update',
@@ -659,6 +670,87 @@ export class PaymentGatewayService {
       },
       orderBy: { last_synced_at: 'desc' },
     });
+  }
+
+  /**
+   * Notifica o cliente via WhatsApp quando uma cobrança é excluída/estornada.
+   * Busca o lead vinculado ao customer do Asaas para enviar a mensagem.
+   */
+  private async notifyClientChargeDeleted(paymentData: any, charge: any, status: string) {
+    // Buscar o cliente Asaas → Lead
+    const customerId = paymentData.customer;
+    if (!customerId) return;
+
+    const gatewayCustomer = await this.prisma.paymentGatewayCustomer.findFirst({
+      where: { external_id: customerId, gateway: 'ASAAS' },
+      include: { lead: { select: { id: true, name: true, phone: true } } },
+    });
+
+    if (!gatewayCustomer?.lead?.phone) {
+      this.logger.warn(`[WEBHOOK] Sem telefone do cliente para notificar (customer: ${customerId})`);
+      return;
+    }
+
+    const lead = gatewayCustomer.lead;
+    const firstName = (lead.name || 'Cliente').split(' ')[0];
+    const valor = Number(paymentData.value || charge.amount || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const descricao = paymentData.description || '';
+    const isEstorno = status === 'REFUNDED';
+
+    const msg = isEstorno
+      ? (
+        `💰 *Estorno de Cobrança*\n\n` +
+        `Olá, ${firstName}!\n\n` +
+        `Informamos que a cobrança no valor de *${valor}*${descricao ? ` (${descricao})` : ''} foi *estornada*.\n\n` +
+        `O valor será devolvido conforme a forma de pagamento utilizada.\n` +
+        `Qualquer dúvida, estamos à disposição.\n\n` +
+        `_André Lustosa Advogados_`
+      )
+      : (
+        `📋 *Cobrança Cancelada*\n\n` +
+        `Olá, ${firstName}!\n\n` +
+        `Informamos que a cobrança no valor de *${valor}*${descricao ? ` (${descricao})` : ''} foi *cancelada*.\n\n` +
+        `Caso tenha dúvidas sobre o motivo ou precise de uma nova cobrança, responda esta mensagem.\n\n` +
+        `_André Lustosa Advogados_`
+      );
+
+    // Buscar conversa ativa para enviar na instância correta
+    const lastConvo = await this.prisma.conversation.findFirst({
+      where: { lead_id: lead.id, status: { not: 'ENCERRADO' } },
+      orderBy: { last_message_at: 'desc' },
+      select: { id: true, instance_name: true },
+    }).catch(() => null);
+
+    const clientPhone = lead.phone.replace(/\D/g, '');
+    try {
+      const sendResult = await this.whatsapp.sendText(
+        clientPhone,
+        msg,
+        lastConvo?.instance_name ?? undefined,
+      );
+      this.logger.log(`[WEBHOOK] Notificação de ${status} enviada para ${clientPhone}`);
+
+      // Salvar mensagem na conversa (visível para o operador)
+      if (lastConvo) {
+        const evolutionMsgId = sendResult?.data?.key?.id || `sys_charge_${Date.now()}`;
+        await this.prisma.message.create({
+          data: {
+            conversation_id: lastConvo.id,
+            direction: 'out',
+            type: 'text',
+            text: msg,
+            external_message_id: evolutionMsgId,
+            status: 'enviado',
+          },
+        });
+        await this.prisma.conversation.update({
+          where: { id: lastConvo.id },
+          data: { last_message_at: new Date() },
+        });
+      }
+    } catch (e: any) {
+      this.logger.warn(`[WEBHOOK] Falha ao enviar WhatsApp para ${clientPhone}: ${e.message}`);
+    }
   }
 
   private emitFinancialUpdate(tenantId: string | null, data: any) {
