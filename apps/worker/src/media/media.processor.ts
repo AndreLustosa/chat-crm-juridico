@@ -148,11 +148,24 @@ export class MediaProcessor extends WorkerHost {
 
     if (!rawMessages.length) return { imported: 0 };
 
+    // Cutoff: só importar mensagens posteriores à criação do lead atual.
+    // Evita reimportar histórico de leads excluídos (a Evolution mantém o chat).
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversation_id },
+      include: { lead: { select: { created_at: true } } },
+    });
+    const cutoffTs = conv?.lead?.created_at
+      ? Math.floor(new Date(conv.lead.created_at).getTime() / 1000)
+      : 0;
+
     let imported = 0;
     for (const msg of rawMessages) {
       try {
         const externalId: string | undefined = msg.key?.id || msg.id;
         if (!externalId) continue;
+
+        const msgTs = Number(msg.messageTimestamp || 0);
+        if (cutoffTs > 0 && msgTs > 0 && msgTs < cutoffTs) continue;
 
         const exists = await this.prisma.message.findUnique({
           where: { external_message_id: externalId },
