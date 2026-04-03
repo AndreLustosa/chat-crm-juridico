@@ -44,7 +44,15 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [showThemes, setShowThemes] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  const [unreadTotal, setUnreadTotal] = useState(0);
+  const [unreadTotal, setUnreadTotal] = useState(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const raw = sessionStorage.getItem('unreadCounts');
+      if (!raw) return 0;
+      const counts: Record<string, number> = JSON.parse(raw);
+      return Object.values(counts).reduce((s, n) => s + n, 0);
+    } catch { return 0; }
+  });
   const [overdueCount, setOverdueCount] = useState(0);
   const pathnameRef = useRef(pathname);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
@@ -120,12 +128,27 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
     // Backend envia incoming_message_notification para user:${assignedUserId}
     // (ou tenant se sem atribuição). Se chegou, é para mim.
     // Na tela de chat, page.tsx já cuida → evita som duplo.
-    socket.on('incoming_message_notification', (data: { contactName?: string }) => {
+    socket.on('incoming_message_notification', (data: { conversationId?: string; contactName?: string }) => {
       const onChatPage = pathnameRef.current === '/atendimento' ||
         pathnameRef.current.startsWith('/atendimento/chat');
       if (onChatPage) return;
+
       playNotificationSound();
-      setUnreadTotal(prev => prev + 1);
+
+      // Persiste unreadCounts em sessionStorage para page.tsx ler ao montar
+      if (data?.conversationId) {
+        try {
+          const raw = sessionStorage.getItem('unreadCounts');
+          const counts: Record<string, number> = raw ? JSON.parse(raw) : {};
+          counts[data.conversationId] = (counts[data.conversationId] || 0) + 1;
+          sessionStorage.setItem('unreadCounts', JSON.stringify(counts));
+          const total = Object.values(counts).reduce((s, n) => s + n, 0);
+          setUnreadTotal(total);
+        } catch {
+          setUnreadTotal(prev => prev + 1);
+        }
+      }
+
       // Desktop notification (browser nativo)
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && !document.hasFocus()) {
         const n = new Notification(data?.contactName || 'Nova mensagem', {
