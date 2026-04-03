@@ -126,6 +126,13 @@ export class FichaTrabalhistaService {
       this.logger.warn(`[Ficha] Falha ao sincronizar memória: ${err.message}`),
     );
 
+    // Se ficha já finalizada e edição veio do lead, notificar via WhatsApp (debounce 1 por ficha)
+    if (existing.finalizado && filledBy === 'lead') {
+      this.notifyFichaEdited(leadId).catch((err) =>
+        this.logger.warn(`[Ficha] Falha ao notificar edição: ${err.message}`),
+      );
+    }
+
     return updated;
   }
 
@@ -293,6 +300,11 @@ export class FichaTrabalhistaService {
     // 6. Emitir inboxUpdate para atualizar o CRM/Kanban
     this.gateway.emitConversationsUpdate(null);
 
+    // 7. Registrar na AiMemory que a ficha foi finalizada
+    this.syncFichaStatusToMemory(leadId, 'finalizada').catch((err) =>
+      this.logger.warn(`[Ficha] Falha ao registrar finalização na memória: ${err.message}`),
+    );
+
     return ficha;
   }
 
@@ -344,5 +356,99 @@ export class FichaTrabalhistaService {
       return this.updatePartial(leadId, mappedData, 'ai');
     }
     return null;
+  }
+
+  /** Registra na AiMemory o status da ficha (finalizada/editada) */
+  private async syncFichaStatusToMemory(leadId: string, status: string) {
+    const existing = await this.prisma.aiMemory.findUnique({
+      where: { lead_id: leadId },
+    });
+
+    let facts: any = {};
+    try {
+      facts = existing?.facts_json
+        ? typeof existing.facts_json === 'string'
+          ? JSON.parse(existing.facts_json as string)
+          : existing.facts_json
+        : {};
+    } catch {
+      facts = {};
+    }
+
+    // Registrar status da ficha
+    facts.ficha_trabalhista = {
+      ...(facts.ficha_trabalhista || {}),
+      status,
+      updated_at: new Date().toISOString(),
+    };
+
+    const today = new Date().toISOString().slice(0, 10);
+    const summaryLine = `[FICHA ${today}] Ficha trabalhista ${status}`;
+    const newSummary = (
+      summaryLine + (existing?.summary ? '\n' + existing.summary : '')
+    ).slice(0, 2000);
+
+    if (existing) {
+      await this.prisma.aiMemory.update({
+        where: { lead_id: leadId },
+        data: {
+          facts_json: facts,
+          summary: newSummary,
+          last_updated_at: new Date(),
+          version: { increment: 1 },
+        },
+      });
+    } else {
+      await this.prisma.aiMemory.create({
+        data: { lead_id: leadId, summary: newSummary, facts_json: facts },
+      });
+    }
+
+    this.logger.log(`[Ficha] Status "${status}" registrado na memória do lead ${leadId}`);
+  }
+
+  /** Envia WhatsApp informando que a edição foi recebida (debounce por lead) */
+  private editNotifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  private async notifyFichaEdited(leadId: string) {
+    // Debounce de 30s — evita spam se o lead editar vários campos seguidos
+    if (this.editNotifyTimers.has(leadId)) {
+      clearTimeout(this.editNotifyTimers.get(leadId)!);
+    }
+
+    this.editNotifyTimers.set(
+      leadId,
+      setTimeout(async () => {
+        this.editNotifyTimers.delete(leadId);
+        try {
+          const lead = await this.prisma.lead.findUnique({
+            where: { id: leadId },
+            include: {
+              conversations: {
+                where: { status: 'ABERTO' },
+                orderBy: { last_message_at: 'desc' },
+                take: 1,
+              },
+            },
+          });
+          if (!lead) return;
+
+          const conv = lead.conversations?.[0];
+          if (conv) {
+            await this.whatsapp.sendText(
+              lead.phone,
+              'Recebemos a atualização da sua ficha trabalhista. Nosso advogado será informado das alterações.',
+              (conv as any).instance_name || undefined,
+            );
+            this.logger.log(`[Ficha] Notificação de edição enviada para ${lead.phone}`);
+          }
+
+          // Registrar na memória
+          this.syncFichaStatusToMemory(leadId, 'editada após finalização').catch(() => {});
+        } catch (e: any) {
+          this.logger.warn(`[Ficha] Falha ao notificar edição: ${e.message}`);
+        }
+      }, 30_000),
+    );
   }
 }

@@ -184,7 +184,7 @@ export default function FichaTrabalhista({
 
   const handleAutoSave = useCallback(
     async (field: string, value: string) => {
-      if (readOnly || finalizado) return;
+      if (readOnly) return;
       // Don't auto-save CEP (handled by lookup)
       if (field === 'cep') return;
 
@@ -358,7 +358,7 @@ export default function FichaTrabalhista({
   const renderField = (field: FichaField) => {
     const value = formData[field.key] || '';
     const isAiFilled = aiFilledFields.has(field.key) && value !== '';
-    const disabled = readOnly || finalizado;
+    const disabled = readOnly;
 
     const baseClasses =
       'w-full bg-background border border-border rounded-lg px-3 text-foreground focus:border-amber-500 outline-none transition-colors placeholder-muted-foreground text-sm';
@@ -585,7 +585,15 @@ export default function FichaTrabalhista({
       </div>
 
       {/* Finalized banner */}
-      {finalizado && (
+      {finalizado && !readOnly && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+          <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+          <span className="text-[13px] font-semibold text-emerald-500">
+            Ficha finalizada — você pode editar os campos se necessário
+          </span>
+        </div>
+      )}
+      {finalizado && readOnly && (
         <div className="flex items-center gap-2 px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
           <CheckCircle2 size={16} className="text-emerald-500" />
           <span className="text-[13px] font-semibold text-emerald-500">
