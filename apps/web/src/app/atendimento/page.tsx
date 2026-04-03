@@ -229,7 +229,9 @@ export default function Dashboard() {
     const token = localStorage.getItem('token');
     if (!token) return null;
     try {
-      return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub || null;
+      let b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      return JSON.parse(atob(b64)).sub || null;
     } catch { return null; }
   });
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -730,11 +732,13 @@ export default function Dashboard() {
       });
     });
 
-    // Incoming message notification — broadcast to all; each client filters by assignedUserId
+    // Incoming message notification — scoped ao tenant; cada cliente filtra por assignedUserId
     socket.on('incoming_message_notification', (data: { conversationId: string; contactName?: string; assignedUserId?: string | null }) => {
       const myId = currentUserIdRef.current;
-      // Ignora se a conversa está atribuída a outro atendente
-      if (myId && data?.assignedUserId && data.assignedUserId !== myId) return;
+      // Sem myId → não notifica (fail closed, evita vazar para todos)
+      if (!myId) return;
+      // Conversa atribuída a outro atendente → ignora
+      if (data?.assignedUserId && data.assignedUserId !== myId) return;
       playNotificationSound();
       showDesktopNotification({
         title: data?.contactName || 'Nova mensagem',

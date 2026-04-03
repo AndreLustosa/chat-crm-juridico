@@ -132,10 +132,20 @@ export class ChatGateway {
     }
   }
 
-  /** Broadcast incoming message notification to all clients; each client filters by assignedUserId */
-  emitIncomingMessageNotification(assignedUserId: string | null, data: { conversationId: string; contactName?: string }) {
-    this.logger.log(`[SOCKET] Emitting incoming_message_notification (assignedUserId: ${assignedUserId ?? 'none'})`);
-    this.server.emit('incoming_message_notification', { ...data, assignedUserId });
+  /** Emit incoming message notification scoped to tenant room */
+  emitIncomingMessageNotification(tenantId: string | null, assignedUserId: string | null, data: { conversationId: string; contactName?: string }) {
+    this.logger.log(`[SOCKET] Emitting incoming_message_notification (tenant: ${tenantId ?? 'default'}, assignedUserId: ${assignedUserId ?? 'none'})`);
+    const payload = { ...data, assignedUserId };
+    if (tenantId) {
+      this.server.to(`tenant:${tenantId}`).emit('incoming_message_notification', payload);
+    } else {
+      // Fallback: resolve default tenant
+      this.prisma.tenant.findFirst().then((t) => {
+        if (t) {
+          this.server.to(`tenant:${t.id}`).emit('incoming_message_notification', payload);
+        }
+      }).catch(() => {});
+    }
   }
 
   // ─── Legal Cases ────────────────────────────────────────────────

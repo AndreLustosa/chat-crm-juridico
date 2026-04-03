@@ -415,7 +415,7 @@ export class EvolutionService {
 
       // Notify operator(s) about incoming message (sound + unread badge)
       if (!isOutgoing) {
-        this.chatGateway.emitIncomingMessageNotification(conv.assigned_user_id || null, {
+        this.chatGateway.emitIncomingMessageNotification(conv.tenant_id ?? null, conv.assigned_user_id || null, {
           conversationId: conv.id,
           contactName: lead.name || lead.phone,
         });
