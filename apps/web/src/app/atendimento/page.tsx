@@ -733,19 +733,16 @@ export default function Dashboard() {
     // Incoming message notification — broadcast to all; each client filters by assignedUserId
     socket.on('incoming_message_notification', (data: { conversationId: string; contactName?: string; assignedUserId?: string | null }) => {
       const myId = currentUserIdRef.current;
-      // Sound/desktop-notification: play only if assigned to me, unassigned, or user unknown
-      const isForMe = !myId || !data?.assignedUserId || data.assignedUserId === myId;
-      if (isForMe) {
-        playNotificationSound();
-        showDesktopNotification({
-          title: data?.contactName || 'Nova mensagem',
-          body: 'Nova mensagem recebida',
-          tag: `msg-${data.conversationId}`,
-          onClick: () => setSelectedId(data.conversationId),
-        });
-      }
-      // Badge: always update unread count for conversations not currently open,
-      // regardless of assignment (admin/supervisor views benefit from this).
+      // Ignora se a conversa está atribuída a outro atendente
+      if (myId && data?.assignedUserId && data.assignedUserId !== myId) return;
+      playNotificationSound();
+      showDesktopNotification({
+        title: data?.contactName || 'Nova mensagem',
+        body: 'Nova mensagem recebida',
+        tag: `msg-${data.conversationId}`,
+        onClick: () => setSelectedId(data.conversationId),
+      });
+      // Badge: só incrementa se não está visualizando a conversa agora
       if (data?.conversationId && data.conversationId !== selectedIdRef.current) {
         setUnreadCounts(prev => ({
           ...prev,

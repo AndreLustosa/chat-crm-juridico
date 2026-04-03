@@ -113,9 +113,10 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
       const onChatPage = pathnameRef.current === '/atendimento' ||
         pathnameRef.current.startsWith('/atendimento/chat');
       if (!onChatPage) {
+        // Ignora se atribuído a outro atendente
         const isForMe = !myId || !data?.assignedUserId || data.assignedUserId === myId;
-        if (isForMe) playNotificationSound();
-        // Incrementa badge do ícone de chat na nav
+        if (!isForMe) return;
+        playNotificationSound();
         setUnreadTotal(prev => prev + 1);
       }
     });
