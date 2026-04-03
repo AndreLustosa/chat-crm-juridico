@@ -83,18 +83,14 @@ export class ConversationsService {
 
     } else {
       // OPERADOR / ESTAGIARIO / outros:
-      // - No modo leads: vê conversas do seu inbox (prospecção)
-      // - No modo clientes: vê apenas clientes que ele converteu (cs_user_id)
-      if (inboxId) {
-        where.inbox_id = inboxId;
-      } else if (clientMode === true) {
-        // Modo clientes: só vê os que ele converteu
+      // - Modo leads: só vê conversas atribuídas a ele (assigned_user_id)
+      // - Modo clientes: só vê clientes que ele converteu (cs_user_id)
+      // - Transferências pendentes não aparecem até serem aceitas
+      if (clientMode === true) {
         where.lead = { ...(where.lead ?? {}), cs_user_id: userId };
       } else {
-        // Modo leads (padrão): filtra pelo inbox do operador
-        if (userInboxIds.length > 0) {
-          where.inbox_id = { in: userInboxIds };
-        }
+        where.assigned_user_id = userId;
+        if (inboxId) where.inbox_id = inboxId;
       }
     }
 

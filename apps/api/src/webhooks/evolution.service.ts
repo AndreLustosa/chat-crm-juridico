@@ -300,8 +300,18 @@ export class EvolutionService {
       // ──────────────────────────────────────────────────────────────────────
 
       // Auto-assign via round-robin se conversa sem operador atribuído
-      if (inboxId && !conv.assigned_user_id) {
-        const nextUserId = await this.inboxesService.getNextAssignee(inboxId);
+      if (!conv.assigned_user_id) {
+        let nextUserId: string | null = inboxId
+          ? await this.inboxesService.getNextAssignee(inboxId)
+          : null;
+        // Fallback: atribui ao admin do tenant se nenhum operador disponível
+        if (!nextUserId) {
+          const admin = await this.prisma.user.findFirst({
+            where: { tenant_id: conv.tenant_id ?? undefined, role: 'ADMIN' },
+            select: { id: true },
+          });
+          nextUserId = admin?.id || null;
+        }
         if (nextUserId) {
           conv = await this.prisma.conversation.update({
             where: { id: conv.id },
