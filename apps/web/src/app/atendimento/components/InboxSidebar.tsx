@@ -168,6 +168,10 @@ export function InboxSidebar({
   const myActiveConvs = (c: ConversationSummary) =>
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
 
+  // Contadores de nao-lidos por modo (Leads vs Clientes)
+  const unreadLeadsCount = conversations.filter(c => !c.isClient && (unreadCounts[c.id] ?? 0) > 0).reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
+  const unreadClientsCount = conversations.filter(c => c.isClient && (unreadCounts[c.id] ?? 0) > 0).reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
+
   // ─── Saved Filters ────────────────────────────────────────────
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const [showSaveInput, setShowSaveInput] = useState(false);
@@ -244,6 +248,12 @@ export function InboxSidebar({
           >
             <UserSearch size={13} />
             Leads
+            {unreadLeadsCount > 0 && !clientMode && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center text-[9px] font-bold rounded-full bg-primary-foreground/20 text-primary-foreground">{unreadLeadsCount > 99 ? '99+' : unreadLeadsCount}</span>
+            )}
+            {unreadLeadsCount > 0 && clientMode && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center text-[9px] font-bold rounded-full bg-red-500 text-white">{unreadLeadsCount > 99 ? '99+' : unreadLeadsCount}</span>
+            )}
           </button>
           <button
             onClick={() => onSetClientMode(true)}
@@ -255,6 +265,12 @@ export function InboxSidebar({
           >
             <UserCheck size={13} />
             Clientes
+            {unreadClientsCount > 0 && clientMode && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center text-[9px] font-bold rounded-full bg-primary-foreground/20 text-primary-foreground">{unreadClientsCount > 99 ? '99+' : unreadClientsCount}</span>
+            )}
+            {unreadClientsCount > 0 && !clientMode && (
+              <span className="ml-1 min-w-[18px] h-[18px] flex items-center justify-center text-[9px] font-bold rounded-full bg-red-500 text-white">{unreadClientsCount > 99 ? '99+' : unreadClientsCount}</span>
+            )}
           </button>
         </div>
 

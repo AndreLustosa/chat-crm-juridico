@@ -32,6 +32,7 @@ export interface ConversationSummary {
   nextStep?: string | null;
   activeTask?: ActiveTask | null;
   hasNotes?: boolean;
+  isClient?: boolean;
 }
 
 export interface MessageReaction {
