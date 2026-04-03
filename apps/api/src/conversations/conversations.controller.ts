@@ -90,6 +90,11 @@ export class ConversationsController {
     return this.conversationsService.declineTransfer(id, reason || null);
   }
 
+  @Patch(':id/transfer-cancel')
+  transferCancel(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.cancelTransfer(id, req.user.id);
+  }
+
   @Patch(':id/close')
   close(@Param('id') id: string) {
     return this.conversationsService.close(id);

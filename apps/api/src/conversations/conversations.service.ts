@@ -471,6 +471,27 @@ export class ConversationsService {
     return { success: true };
   }
 
+  async cancelTransfer(id: string, userId: string) {
+    const conv = await (this.prisma as any).conversation.findUnique({
+      where: { id },
+      select: { pending_transfer_from_id: true, pending_transfer_to_id: true, tenant_id: true },
+    });
+    if (!conv?.pending_transfer_from_id || conv.pending_transfer_from_id !== userId) {
+      throw new ForbiddenException('Só quem enviou a transferência pode cancelá-la.');
+    }
+    await (this.prisma as any).conversation.update({
+      where: { id },
+      data: {
+        pending_transfer_to_id: null,
+        pending_transfer_from_id: null,
+        pending_transfer_reason: null,
+        pending_transfer_audio_ids: [],
+      },
+    });
+    this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
+    return { success: true };
+  }
+
   async transferToAssignedLawyer(id: string, fromUserId: string, reason?: string, audioIds?: string[]) {
     // Transação atômica: ler + validar ownership + definir origin em uma operação
     const conv = await this.prisma.$transaction(async (tx) => {

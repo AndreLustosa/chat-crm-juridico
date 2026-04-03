@@ -56,6 +56,7 @@ export interface TransferModalsProps {
   // Banners
   transferSentMsg: string | null;
   onClearTransferSentMsg: () => void;
+  onCancelTransfer?: () => void;
   transferResponseMsg: string | null;
   onClearTransferResponseMsg: () => void;
 }
@@ -70,7 +71,7 @@ export function TransferModals({
   onReturnWithReason, onTransfer, onSetTransferAudioIds, selectedConversationId,
   incomingTransfer, onCloseIncomingTransfer, showDeclineInput, onSetShowDeclineInput,
   declineReason, onSetDeclineReason, processingTransfer, onAcceptTransfer, onDeclineTransfer,
-  transferSentMsg, onClearTransferSentMsg, transferResponseMsg, onClearTransferResponseMsg,
+  transferSentMsg, onClearTransferSentMsg, onCancelTransfer, transferResponseMsg, onClearTransferResponseMsg,
 }: TransferModalsProps) {
   return (
     <>
@@ -382,11 +383,16 @@ export function TransferModals({
         </div>
       )}
 
-      {/* Transfer Sent Banner */}
+      {/* Transfer Sent Banner — fixo no topo */}
       {transferSentMsg && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-card border border-sky-500/30 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium flex items-center gap-3">
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[90] bg-card border border-sky-500/30 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium flex items-center gap-3 animate-pulse">
+          <span className="text-sky-400">📨</span>
           {transferSentMsg}
-          <button onClick={onClearTransferSentMsg} className="text-muted-foreground hover:text-foreground ml-2" aria-label="Fechar aviso"><X size={14} /></button>
+          {onCancelTransfer && (
+            <button onClick={onCancelTransfer} className="ml-2 px-3 py-1 text-xs font-bold text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors">
+              Cancelar
+            </button>
+          )}
         </div>
       )}
 

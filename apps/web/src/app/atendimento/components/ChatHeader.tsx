@@ -56,6 +56,7 @@ export interface ChatHeaderProps {
   onToggleAiMode: () => void;
   onAccept: () => void;
   onOpenTransferModal: () => void;
+  hasPendingTransfer?: boolean;
   onOpenReasonPopup: (ctx: 'lawyer' | 'operator' | 'return', name: string) => void;
   onKeepInInbox: () => void;
   onToggleStage: () => void;
@@ -101,7 +102,7 @@ export function ChatHeader({
   onAssignLawyer,
   onToggleAiMode,
   onAccept,
-  onOpenTransferModal,
+  onOpenTransferModal, hasPendingTransfer,
   onOpenReasonPopup,
   onKeepInInbox,
   onToggleStage,
@@ -367,11 +368,16 @@ export function ChatHeader({
           {!isClosed && isRealConvo && (
             <button
               onClick={onOpenTransferModal}
-              title="Transferir conversa para outro operador"
-              className="px-3 py-2 text-sm font-semibold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-xl hover:bg-sky-500/20 transition-colors flex items-center gap-2"
+              disabled={hasPendingTransfer}
+              title={hasPendingTransfer ? 'Transferência pendente — aguardando resposta' : 'Transferir conversa para outro operador'}
+              className={`px-3 py-2 text-sm font-semibold border rounded-xl transition-colors flex items-center gap-2 ${
+                hasPendingTransfer
+                  ? 'text-muted-foreground bg-muted/30 border-border cursor-not-allowed opacity-50'
+                  : 'text-sky-400 bg-sky-500/10 border-sky-500/20 hover:bg-sky-500/20'
+              }`}
             >
               <UserCheck size={16} />
-              Transferir
+              {hasPendingTransfer ? 'Aguardando...' : 'Transferir'}
             </button>
           )}
           {selected?.originAssignedUserId && selected?.assignedAgentId === currentUserId && !isClosed && (

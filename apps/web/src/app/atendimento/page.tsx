@@ -160,6 +160,8 @@ export default function Dashboard() {
   const [transferResponseMsg, setTransferResponseMsg] = useState<string | null>(null);
   // Sent confirmation banner
   const [transferSentMsg, setTransferSentMsg] = useState<string | null>(null);
+  // Map de transferências pendentes por conversationId (para banner fixo + desabilitar botão)
+  const [pendingTransferMap, setPendingTransferMap] = useState<Record<string, string>>({});
   // Pending transfers waiting for current user to accept/decline
   const [pendingTransfers, setPendingTransfers] = useState<{ conversationId: string; contactName: string; fromUserName: string; reason: string | null; audioIds?: string[] }[]>([]);
   const [inboxOpen, setInboxOpen] = useState(true);
@@ -768,6 +770,9 @@ export default function Dashboard() {
 
     // Transfer response: notification for the sender
     socket.on('transfer_response', (data: { accepted: boolean; userName?: string; reason?: string; contactName: string }) => {
+      // Limpa estado de transferência pendente
+      setPendingTransferMap({});
+      setTransferSentMsg(null);
       if (data.accepted) {
         setTransferResponseMsg(`✅ ${data.userName} aceitou a transferência de "${data.contactName}"`);
       } else {
@@ -1389,8 +1394,9 @@ export default function Dashboard() {
         audioIds: transferAudioIds.length > 0 ? transferAudioIds : undefined,
       });
       const destUser = transferGroups.flatMap(g => g.users).find(u => u.id === selectedTransferUserId);
-      setTransferSentMsg(`📨 Solicitação enviada para ${destUser?.name || 'operador'}. Aguardando resposta...`);
-      setTimeout(() => setTransferSentMsg(null), 6000);
+      const destName = destUser?.name || 'operador';
+      setPendingTransferMap(prev => ({ ...prev, [selectedId]: destName }));
+      setTransferSentMsg(`📨 Aguardando ${destName} aceitar a transferência...`);
       setShowReasonPopup(false);
       setTransferModal(false);
       setSelectedTransferUserId(null);
@@ -1417,12 +1423,24 @@ export default function Dashboard() {
       setTransferModal(false);
       setTransferReason('');
       setTransferAudioIds([]);
-      setTransferSentMsg(`⚖️ Solicitação enviada para o advogado especialista. Aguardando resposta...`);
-      setTimeout(() => setTransferSentMsg(null), 6000);
+      setPendingTransferMap(prev => ({ ...prev, [selectedId!]: 'advogado especialista' }));
+      setTransferSentMsg(`⚖️ Aguardando advogado especialista aceitar...`);
     } catch (e: any) {
       setTransferError(e?.response?.data?.message || 'Erro ao transferir para advogado.');
     } finally {
       setTransferring(false);
+    }
+  };
+
+  const handleCancelTransfer = async () => {
+    if (!selectedId) return;
+    try {
+      await api.patch(`/conversations/${selectedId}/transfer-cancel`);
+      setPendingTransferMap(prev => { const n = { ...prev }; delete n[selectedId]; return n; });
+      setTransferSentMsg(null);
+      showSuccess('Transferência cancelada');
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao cancelar transferência');
     }
   };
 
@@ -2137,6 +2155,7 @@ export default function Dashboard() {
               onToggleAiMode={handleToggleAiMode}
               onAccept={handleAccept}
               onOpenTransferModal={handleOpenTransferModal}
+              hasPendingTransfer={!!selectedId && !!pendingTransferMap[selectedId]}
               onOpenReasonPopup={openReasonPopup}
               onKeepInInbox={handleKeepInInbox}
               onToggleStage={() => setShowStageDropdown(v => !v)}
@@ -3123,8 +3142,9 @@ export default function Dashboard() {
         processingTransfer={processingTransfer}
         onAcceptTransfer={handleAcceptTransfer}
         onDeclineTransfer={handleDeclineTransfer}
-        transferSentMsg={transferSentMsg}
+        transferSentMsg={selectedId && pendingTransferMap[selectedId] ? `📨 Aguardando ${pendingTransferMap[selectedId]} aceitar a transferência...` : transferSentMsg}
         onClearTransferSentMsg={() => setTransferSentMsg(null)}
+        onCancelTransfer={selectedId && pendingTransferMap[selectedId] ? handleCancelTransfer : undefined}
         transferResponseMsg={transferResponseMsg}
         onClearTransferResponseMsg={() => setTransferResponseMsg(null)}
       />
