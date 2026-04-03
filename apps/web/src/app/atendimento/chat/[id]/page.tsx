@@ -503,13 +503,16 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               // Auto mark-read since operator is viewing the chat
               api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
             }
-            // Refetch memória quando IA responde (memória atualizada após cada mensagem processada)
-            if (msg.direction === 'out' && msg.external_message_id?.startsWith('sys_')) {
-              api.get(`/leads/${convo.lead.id}`).then((r) => {
-                if (r.data?.memory?.facts_json) {
-                  setLead((prev: any) => ({ ...prev, memory: r.data.memory }));
-                }
-              }).catch(() => {});
+            // Refetch memória quando IA responde (skill_id/skill indica msg da IA).
+            // Delay de 3s para dar tempo do updateLongMemory gravar no banco.
+            if (msg.skill_id || msg.skill) {
+              setTimeout(() => {
+                api.get(`/leads/${convo.lead.id}`).then((r) => {
+                  if (r.data?.memory) {
+                    setLead((prev: any) => ({ ...prev, memory: r.data.memory }));
+                  }
+                }).catch(() => {});
+              }, 3000);
             }
           });
 
