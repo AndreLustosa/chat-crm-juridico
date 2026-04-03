@@ -23,6 +23,7 @@ export class UpdateFichaDto {
   // Contrato
   @IsOptional() @IsString() nome_empregador?: string;
   @IsOptional() @IsString() cnpjcpf_empregador?: string;
+  @IsOptional() @IsString() cidade_trabalho?: string;
   @IsOptional() @IsString() data_admissao?: string;
   @IsOptional() @IsString() data_saida?: string;
   @IsOptional() @IsString() situacao_atual?: string;

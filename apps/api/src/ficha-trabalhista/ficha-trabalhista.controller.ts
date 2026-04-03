@@ -5,9 +5,8 @@ import {
   Post,
   Param,
   Body,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../auth/decorators/public.decorator';
 import { FichaTrabalhistaService } from './ficha-trabalhista.service';
 import { UpdateFichaDto } from './dto/update-ficha.dto';
 
@@ -16,14 +15,13 @@ export class FichaTrabalhistaController {
   constructor(private readonly service: FichaTrabalhistaService) {}
 
   // ─── Endpoints autenticados (painel admin) ────────────────────
+  // JwtAuthGuard é global (APP_GUARD) — não precisa de @UseGuards(JwtAuthGuard)
 
-  @UseGuards(JwtAuthGuard)
   @Get(':leadId')
   async findOrCreate(@Param('leadId') leadId: string) {
     return this.service.findOrCreate(leadId);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Patch(':leadId')
   async updatePartial(
     @Param('leadId') leadId: string,
@@ -32,13 +30,11 @@ export class FichaTrabalhistaController {
     return this.service.updatePartial(leadId, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post(':leadId/finalize')
   async finalize(@Param('leadId') leadId: string) {
     return this.service.finalize(leadId);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post(':leadId/fill-from-memory')
   async fillFromMemory(@Param('leadId') leadId: string) {
     return this.service.fillFromMemory(leadId);
@@ -46,10 +42,10 @@ export class FichaTrabalhistaController {
 
   // ─── Endpoints públicos (formulário externo via link WhatsApp) ─
 
+  @Public()
   @Get(':leadId/public')
   async publicGet(@Param('leadId') leadId: string) {
     const ficha = await this.service.findOrCreate(leadId);
-    // Retornar dados mínimos necessários para o formulário público
     return {
       id: ficha.id,
       lead_id: ficha.lead_id,
@@ -59,6 +55,7 @@ export class FichaTrabalhistaController {
     };
   }
 
+  @Public()
   @Patch(':leadId/public')
   async publicUpdate(
     @Param('leadId') leadId: string,
@@ -67,6 +64,7 @@ export class FichaTrabalhistaController {
     return this.service.updatePartial(leadId, dto, 'lead');
   }
 
+  @Public()
   @Post(':leadId/public/finalize')
   async publicFinalize(@Param('leadId') leadId: string) {
     return this.service.finalize(leadId);

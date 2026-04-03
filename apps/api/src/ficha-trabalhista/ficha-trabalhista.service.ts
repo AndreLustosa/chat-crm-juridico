@@ -5,7 +5,7 @@ import { ChatGateway } from '../gateway/chat.gateway';
 import { UpdateFichaDto } from './dto/update-ficha.dto';
 
 // Total de campos úteis do formulário (para cálculo de %)
-const TOTAL_FIELDS = 75;
+const TOTAL_FIELDS = 76;
 
 @Injectable()
 export class FichaTrabalhistaService {
