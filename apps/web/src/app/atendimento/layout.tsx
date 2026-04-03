@@ -144,6 +144,8 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
           sessionStorage.setItem('unreadCounts', JSON.stringify(counts));
           const total = Object.values(counts).reduce((s, n) => s + n, 0);
           setUnreadTotal(total);
+          // Propaga para o Sidebar (que ouve este evento para atualizar o badge)
+          window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
         } catch {
           setUnreadTotal(prev => prev + 1);
         }
