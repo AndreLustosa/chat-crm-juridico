@@ -488,6 +488,10 @@ export class ConversationsService {
         pending_transfer_audio_ids: [],
       },
     });
+    // Notifica o destinatário para fechar o popup de transferência
+    if (conv.pending_transfer_to_id) {
+      this.chatGateway.emitTransferCancelled(conv.pending_transfer_to_id, { conversationId: id });
+    }
     this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
     return { success: true };
   }

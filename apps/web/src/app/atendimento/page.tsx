@@ -768,6 +768,13 @@ export default function Dashboard() {
       fetchPendingTransfers(true);
     });
 
+    // Transfer cancelled by sender: close popup on recipient's screen
+    socket.on('transfer_cancelled', (data: { conversationId: string }) => {
+      setIncomingTransfer(prev => prev?.conversationId === data.conversationId ? null : prev);
+      setPendingTransfers(prev => prev.filter(pt => pt.conversationId !== data.conversationId));
+      fetchPendingTransfers(true);
+    });
+
     // Transfer response: notification for the sender
     socket.on('transfer_response', (data: { accepted: boolean; userName?: string; reason?: string; contactName: string }) => {
       // Limpa estado de transferência pendente

@@ -91,6 +91,11 @@ export class ChatGateway {
     this.server.to(`user:${fromUserId}`).emit('transfer_response', data);
   }
 
+  emitTransferCancelled(toUserId: string, data: { conversationId: string }) {
+    this.logger.log(`[SOCKET] Emitting transfer_cancelled to user:${toUserId}`);
+    this.server.to(`user:${toUserId}`).emit('transfer_cancelled', data);
+  }
+
   emitTransferReturned(toUserId: string, data: any) {
     this.logger.log(`[SOCKET] Emitting transfer_returned to user:${toUserId}`);
     this.server.to(`user:${toUserId}`).emit('transfer_returned', data);
