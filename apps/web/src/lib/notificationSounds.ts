@@ -25,14 +25,39 @@ export function setNotificationSoundId(id: SoundId): void {
   localStorage.setItem(STORAGE_KEY, id);
 }
 
-function getAudioContext(): AudioContext | null {
-  try {
-    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-    return new AC() as AudioContext;
-  } catch {
-    return null;
+// ─── Singleton AudioContext ───────────────────────────────────────
+// Browsers block audio until a user gesture. Creating a new AudioContext per
+// call means it always starts in "suspended" state when triggered by a socket
+// event (no gesture). We keep one instance and resume it when needed.
+
+let _audioCtx: AudioContext | null = null;
+
+function getOrCreateAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  if (!_audioCtx) {
+    try {
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AC) return null;
+      _audioCtx = new AC() as AudioContext;
+    } catch {
+      return null;
+    }
+  }
+  return _audioCtx;
+}
+
+/**
+ * Call this on the first user interaction (click, keydown) to unlock the
+ * AudioContext so that subsequent notification sounds play without a gesture.
+ */
+export function unlockAudioContext(): void {
+  const ctx = getOrCreateAudioContext();
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
   }
 }
+
+// ─── Sound generators ────────────────────────────────────────────
 
 function playDing(ctx: AudioContext) {
   const t = ctx.currentTime;
@@ -122,11 +147,7 @@ function playBell(ctx: AudioContext) {
   });
 }
 
-export function playNotificationSound(soundId?: SoundId | string): void {
-  if (typeof window === 'undefined') return;
-  const id: string = soundId ?? getNotificationSoundId();
-  const ctx = getAudioContext();
-  if (!ctx) return;
+function _doPlay(ctx: AudioContext, id: string) {
   try {
     switch (id) {
       case 'chime':  playChime(ctx);  break;
@@ -137,5 +158,20 @@ export function playNotificationSound(soundId?: SoundId | string): void {
     }
   } catch (e) {
     console.warn('[NotificationSound] Falha ao reproduzir som:', e);
+  }
+}
+
+export function playNotificationSound(soundId?: SoundId | string): void {
+  if (typeof window === 'undefined') return;
+  const id: string = soundId ?? getNotificationSoundId();
+  const ctx = getOrCreateAudioContext();
+  if (!ctx) return;
+
+  if (ctx.state === 'suspended') {
+    // Resume then play — Promise resolves async but scheduling is relative to
+    // ctx.currentTime so timing stays accurate after resume.
+    ctx.resume().then(() => _doPlay(ctx, id)).catch(() => {});
+  } else {
+    _doPlay(ctx, id);
   }
 }

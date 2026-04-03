@@ -11,7 +11,7 @@ import { AuthAudioPlayer } from '@/components/AuthAudioPlayer';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
 import { ClientPanel } from '@/components/ClientPanel';
-import { playNotificationSound } from '@/lib/notificationSounds';
+import { playNotificationSound, unlockAudioContext } from '@/lib/notificationSounds';
 import {
   isDesktopNotifSupported,
   getDesktopNotifPermission,
@@ -267,6 +267,17 @@ export default function Dashboard() {
   useEffect(() => { clientModeRef.current = clientMode; }, [clientMode]);
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
+
+  // Unlock AudioContext on first user gesture so notification sounds play from inbox view
+  useEffect(() => {
+    const unlock = () => unlockAudioContext();
+    document.addEventListener('click', unlock, { once: true });
+    document.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+  }, []);
 
   // Detect mobile (<768px) for responsive layout
   useEffect(() => {
@@ -722,17 +733,19 @@ export default function Dashboard() {
     // Incoming message notification — broadcast to all; each client filters by assignedUserId
     socket.on('incoming_message_notification', (data: { conversationId: string; contactName?: string; assignedUserId?: string | null }) => {
       const myId = currentUserIdRef.current;
-      // Skip if assigned to someone else. Play if: assigned to me, unassigned, or can't determine current user
-      if (myId && data?.assignedUserId && data.assignedUserId !== myId) return;
-      playNotificationSound();
-      // Desktop notification (only when tab is not focused)
-      showDesktopNotification({
-        title: data?.contactName || 'Nova mensagem',
-        body: 'Nova mensagem recebida',
-        tag: `msg-${data.conversationId}`,
-        onClick: () => setSelectedId(data.conversationId),
-      });
-      // Only mark unread when the user is NOT currently viewing that conversation
+      // Sound/desktop-notification: play only if assigned to me, unassigned, or user unknown
+      const isForMe = !myId || !data?.assignedUserId || data.assignedUserId === myId;
+      if (isForMe) {
+        playNotificationSound();
+        showDesktopNotification({
+          title: data?.contactName || 'Nova mensagem',
+          body: 'Nova mensagem recebida',
+          tag: `msg-${data.conversationId}`,
+          onClick: () => setSelectedId(data.conversationId),
+        });
+      }
+      // Badge: always update unread count for conversations not currently open,
+      // regardless of assignment (admin/supervisor views benefit from this).
       if (data?.conversationId && data.conversationId !== selectedIdRef.current) {
         setUnreadCounts(prev => ({
           ...prev,
