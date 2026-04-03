@@ -503,6 +503,14 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               // Auto mark-read since operator is viewing the chat
               api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
             }
+            // Refetch memória quando IA responde (memória atualizada após cada mensagem processada)
+            if (msg.direction === 'out' && msg.external_message_id?.startsWith('sys_')) {
+              api.get(`/leads/${convo.lead.id}`).then((r) => {
+                if (r.data?.memory?.facts_json) {
+                  setLead((prev: any) => ({ ...prev, memory: r.data.memory }));
+                }
+              }).catch(() => {});
+            }
           });
 
           socketRef.current.on('messageUpdate', (updatedMsg: any) => {
@@ -742,6 +750,22 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             )}
           </div>
         </header>
+
+        {/* Banner de perguntas em aberto — orienta o operador */}
+        {(() => {
+          const openQ = (lead?.memory?.facts_json as any)?.open_questions;
+          return openQ?.length > 0 ? (
+            <div className="px-4 py-2.5 border-b border-amber-500/20 bg-amber-500/5 flex gap-3 items-start">
+              <span className="text-amber-400 text-xs font-bold mt-0.5 shrink-0">?</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-amber-400/90">
+                {openQ.slice(0, 6).map((q: string, i: number) => (
+                  <span key={i} className="whitespace-nowrap">{q}</span>
+                ))}
+                {openQ.length > 6 && <span className="text-amber-400/50">+{openQ.length - 6} mais</span>}
+              </div>
+            </div>
+          ) : null;
+        })()}
 
         {/* Messages — click em área vazia foca o textarea (UX WhatsApp Web) */}
         <div className="flex-1 p-8 overflow-y-auto custom-scrollbar" ref={scrollRef} onClick={handleChatAreaClick}>

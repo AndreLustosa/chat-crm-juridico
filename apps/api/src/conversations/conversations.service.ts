@@ -210,7 +210,7 @@ export class ConversationsService {
       where: { lead_id },
       orderBy: { last_message_at: 'desc' },
       include: {
-        lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true } },
+        lead: { select: { id: true, name: true, phone: true, email: true, profile_picture_url: true, memory: { select: { facts_json: true } } } },
         messages: { orderBy: { created_at: 'asc' }, take: 100, include: { media: true, skill: { select: { id: true, name: true, area: true } } } },
         assigned_user: { select: { id: true, name: true } },
       },
