@@ -322,7 +322,7 @@ export class EvolutionService {
         // Re-emite WebSocket para cobrir o caso em que o BullMQ QueueEvents perdeu o evento
         // (mensagem já está no banco mas o frontend pode não ter sido notificado em tempo real)
         this.chatGateway.emitNewMessage(existingMsg.conversation_id, existingMsg);
-        this.chatGateway.emitConversationsUpdate(null);
+        this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
         continue;
       }
 
@@ -411,7 +411,7 @@ export class EvolutionService {
 
       // Emit real-time events via WebSocket
       this.chatGateway.emitNewMessage(conv.id, msg);
-      this.chatGateway.emitConversationsUpdate(null);
+      this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
 
       // Notify operator(s) about incoming message (sound + unread badge)
       if (!isOutgoing) {
@@ -776,7 +776,7 @@ export class EvolutionService {
       });
 
       if (updated.count > 0) {
-        this.chatGateway.emitConversationsUpdate(null);
+        this.chatGateway.emitConversationsUpdate(lead.tenant_id ?? null);
         this.logger.log(`[WEBHOOK] chats.delete: ${updated.count} conversa(s) de ${phone} arquivadas`);
       }
     }
@@ -947,7 +947,7 @@ export class EvolutionService {
         data: updates,
       });
 
-      this.chatGateway.emitConversationsUpdate(null);
+      this.chatGateway.emitConversationsUpdate(lead.tenant_id ?? null);
       this.logger.log(`[WEBHOOK] Lead ${lead.id} updated: ${JSON.stringify(updates)}`);
     }
   }
