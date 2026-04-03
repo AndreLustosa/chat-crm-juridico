@@ -148,6 +148,8 @@ export default function Dashboard() {
   const [showLawyerDropdown, setShowLawyerDropdown] = useState(false);
   // CRM stage do lead da conversa selecionada
   const [leadStage, setLeadStage] = useState<string | null>(null);
+  // Perguntas em aberto da memória do lead (exibidas no topo do chat)
+  const [openQuestions, setOpenQuestions] = useState<string[]>([]);
   const [showStageDropdown, setShowStageDropdown] = useState(false);
   // Incoming transfer popup (for receiving operator)
   const [incomingTransfer, setIncomingTransfer] = useState<{
@@ -886,13 +888,16 @@ export default function Dashboard() {
 
   // Buscar stage do lead ao selecionar conversa
   useEffect(() => {
-    if (!selectedId) { setLeadStage(null); return; }
+    if (!selectedId) { setLeadStage(null); setOpenQuestions([]); return; }
     setShowStageDropdown(false);
     const conv = conversations.find(c => c.id === selectedId);
     if (conv?.leadId) {
       api.get(`/leads/${conv.leadId}`, { _silent401: true } as any)
-        .then(r => setLeadStage(r.data?.stage || null))
-        .catch(() => setLeadStage(null));
+        .then(r => {
+          setLeadStage(r.data?.stage || null);
+          setOpenQuestions(r.data?.memory?.facts_json?.open_questions || []);
+        })
+        .catch(() => { setLeadStage(null); setOpenQuestions([]); });
     } else {
       setLeadStage(null);
     }
@@ -987,6 +992,19 @@ export default function Dashboard() {
               return [...prev, msg];
             });
             if (msg.direction === 'in') playNotificationSound();
+            // Refetch memória quando IA responde (skill presente = msg da IA)
+            if ((msg as any).skill_id || (msg as any).skill) {
+              setTimeout(() => {
+                api.get(`/conversations/${msg.conversation_id}`, { _silent401: true } as any).then(r => {
+                  const leadId = r.data?.lead_id || r.data?.lead?.id;
+                  if (leadId) {
+                    api.get(`/leads/${leadId}`, { _silent401: true } as any).then(lr => {
+                      setOpenQuestions(lr.data?.memory?.facts_json?.open_questions || []);
+                    }).catch(() => {});
+                  }
+                }).catch(() => {});
+              }, 3000);
+            }
           });
           socketRef.current.off('mediaReady');
           socketRef.current.on('mediaReady', (updatedMsg: MessageItem) => {
@@ -2316,7 +2334,19 @@ export default function Dashboard() {
                   ↓ {newMsgsWhileScrolled} nova{newMsgsWhileScrolled > 1 ? 's' : ''} mensagem{newMsgsWhileScrolled > 1 ? 's' : ''}
                 </button>
               )}
-            <div className="absolute inset-0 px-1 sm:px-6 md:px-8 py-3 sm:py-5 md:py-8 overflow-y-auto custom-scrollbar" ref={scrollRef} onClick={handleChatAreaClick}>
+            {/* Banner de perguntas em aberto — orienta o operador */}
+            {openQuestions.length > 0 && (
+              <div className="absolute top-0 left-0 right-0 z-20 px-4 py-2 border-b border-amber-500/20 bg-card/95 backdrop-blur-sm flex gap-3 items-start">
+                <span className="text-amber-400 text-xs font-bold mt-0.5 shrink-0">?</span>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-400/90">
+                  {openQuestions.slice(0, 6).map((q: string, i: number) => (
+                    <span key={i}>{q}</span>
+                  ))}
+                  {openQuestions.length > 6 && <span className="text-amber-400/50">+{openQuestions.length - 6} mais</span>}
+                </div>
+              </div>
+            )}
+            <div className={`absolute inset-0 px-1 sm:px-6 md:px-8 py-3 sm:py-5 md:py-8 overflow-y-auto custom-scrollbar ${openQuestions.length > 0 ? 'pt-12' : ''}`} ref={scrollRef} onClick={handleChatAreaClick}>
               <div className="flex flex-col gap-3 md:gap-4 max-w-4xl mx-auto pb-4 relative z-10">
                 {/* Skeleton de carregamento de mensagens */}
                 {loadingMessages && (
