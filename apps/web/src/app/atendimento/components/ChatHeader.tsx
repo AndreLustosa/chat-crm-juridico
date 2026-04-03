@@ -312,35 +312,36 @@ export function ChatHeader({
             )}
           </div>
         )}
-        {/* Linha de botões de ação — desktop only */}
-        <div className="hidden md:flex gap-2 items-center flex-wrap justify-end">
-          {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
-            <>
-              {!isClosed && (
-                <button
-                  onClick={onSendFormLink}
-                  title="Enviar link do formulário trabalhista ao lead"
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold border border-amber-500/20 hover:bg-amber-500/25 transition-colors"
-                >
-                  <ClipboardList size={10} />
-                  Enviar Formulário
-                </button>
-              )}
+        {/* Badges informativos — ficha trabalhista (desktop only) */}
+        {selected?.legalArea?.toLowerCase().includes('trabalhist') && (
+          <div className="hidden md:flex gap-1.5 items-center justify-end">
+            {!isClosed && (
               <button
-                onClick={onShowFicha}
-                title="Visualizar ficha trabalhista"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20 hover:bg-violet-500/25 transition-colors"
+                onClick={onSendFormLink}
+                title="Enviar link do formulário trabalhista ao lead"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold border border-amber-500/20 hover:bg-amber-500/25 transition-colors"
               >
-                <Eye size={10} />
-                Visualizar Ficha
+                <ClipboardList size={10} />
+                Enviar Formulário
               </button>
-              {fichaFinalizada && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
-                  ✅ Ficha Finalizada
-                </span>
-              )}
-            </>
-          )}
+            )}
+            <button
+              onClick={onShowFicha}
+              title="Visualizar ficha trabalhista"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10px] font-bold border border-violet-500/20 hover:bg-violet-500/25 transition-colors"
+            >
+              <Eye size={10} />
+              Visualizar Ficha
+            </button>
+            {fichaFinalizada && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                ✅ Finalizada
+              </span>
+            )}
+          </div>
+        )}
+        {/* Botões de ação — desktop only */}
+        <div className="hidden md:flex gap-2 items-center flex-wrap justify-end">
           {isRealConvo && (
             <button
               onClick={onToggleAiMode}
