@@ -17,6 +17,7 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
   const [current, setCurrent] = useState(0);
   const [total, setTotal] = useState(duration || 0);
   const [speedIdx, setSpeedIdx] = useState(0);
+  const [error, setError] = useState(false);
 
   const fmt = (secs: number) => {
     const s = Math.floor(secs || 0);
@@ -30,8 +31,7 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
       a.pause();
       setPlaying(false);
     } else {
-      a.play().catch(() => {});
-      setPlaying(true);
+      a.play().then(() => setPlaying(true)).catch(() => setError(true));
     }
   }, [playing]);
 
@@ -45,17 +45,38 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
     const a = audioRef.current;
     if (!a) return;
     const onTime = () => setCurrent(a.currentTime);
-    const onLoad = () => setTotal(a.duration || duration || 0);
+    const onLoad = () => {
+      const d = a.duration;
+      if (d && isFinite(d) && d > 0) setTotal(d);
+    };
     const onEnd = () => { setPlaying(false); setCurrent(0); };
+    const onError = () => setError(true);
+    // Tambem captura duracao no canplaythrough (fallback para browsers que nao emitem loadedmetadata corretamente)
+    const onCanPlay = () => {
+      const d = a.duration;
+      if (d && isFinite(d) && d > 0 && total === 0) setTotal(d);
+    };
     a.addEventListener('timeupdate', onTime);
     a.addEventListener('loadedmetadata', onLoad);
+    a.addEventListener('canplaythrough', onCanPlay);
     a.addEventListener('ended', onEnd);
+    a.addEventListener('error', onError);
     return () => {
       a.removeEventListener('timeupdate', onTime);
       a.removeEventListener('loadedmetadata', onLoad);
+      a.removeEventListener('canplaythrough', onCanPlay);
       a.removeEventListener('ended', onEnd);
+      a.removeEventListener('error', onError);
     };
-  }, [duration]);
+  }, [duration, total]);
+
+  // Quando o audio comeca a tocar, captura duracao (ultimo fallback)
+  useEffect(() => {
+    if (playing && audioRef.current) {
+      const d = audioRef.current.duration;
+      if (d && isFinite(d) && d > 0 && total === 0) setTotal(d);
+    }
+  }, [playing, total]);
 
   const progress = total > 0 ? (current / total) * 100 : 0;
   const speed = SPEEDS[speedIdx];
@@ -72,11 +93,11 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
 
   return (
     <div className="flex items-center gap-3 min-w-[200px] max-w-[300px]">
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio ref={audioRef} src={src} preload="auto" />
       <button
         onClick={toggle}
         className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${btnClass}`}
-        title={playing ? 'Pausar' : 'Reproduzir'}
+        title={error ? 'Erro ao carregar áudio' : playing ? 'Pausar' : 'Reproduzir'}
       >
         {playing ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
       </button>
@@ -96,7 +117,7 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
         </div>
         <div className="flex items-center justify-between">
           <span className={`text-[10px] ${timeClass}`}>
-            {fmt(current)} / {fmt(total)}
+            {fmt(current)} / {total > 0 ? fmt(total) : '--:--'}
           </span>
           <div className="flex items-center gap-1">
             <button
