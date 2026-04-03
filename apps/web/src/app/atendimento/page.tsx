@@ -1667,11 +1667,12 @@ export default function Dashboard() {
           }).catch(() => {});
       }
       showSuccess('Transferência aceita');
+      // Remove da lista local imediatamente (evita auto-popup re-exibir)
+      setPendingTransfers(prev => prev.filter(pt => pt.conversationId !== convId));
     } catch (e: any) {
       console.error('Failed to accept transfer', e);
       showError(e?.response?.data?.message || 'Erro ao aceitar transferência');
     } finally {
-      // Sempre fecha o modal e navega, mesmo em erro (evita ficar preso)
       setProcessingTransfer(false);
       setIncomingTransfer(null);
       fetchPendingTransfers(true);
