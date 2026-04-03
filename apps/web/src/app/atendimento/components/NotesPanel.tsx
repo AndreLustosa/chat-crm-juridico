@@ -62,6 +62,14 @@ export function NotesPanel({ conversationId, currentUserId, onClose, socketRef }
     return () => { socket.off('newNote', onNew); socket.off('noteUpdated', onUpdated); };
   }, [conversationId, socketRef]);
 
+  // Auto-resize textarea quando texto muda (inclui speech-to-text que nao dispara onChange)
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [text]);
+
   // Auto-scroll
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -144,8 +152,8 @@ export function NotesPanel({ conversationId, currentUserId, onClose, socketRef }
     if (!text.trim() || correcting) return;
     setCorrecting(true);
     try {
-      const res = await api.post('/messages/ai-correct', { text: text.replace(/\u200B/g, '').trim(), action: 'profissional' });
-      if (res.data?.result) { setText(res.data.result); showSuccess('Texto corrigido pela IA.'); }
+      const res = await api.post('/messages/ai-correct', { text: text.replace(/\u200B/g, '').trim(), action: 'corrigir' });
+      if (res.data?.result) { setText(res.data.result); showSuccess('Ortografia corrigida.'); }
     } catch { showError('Erro ao corrigir com IA.'); }
     finally { setCorrecting(false); requestAnimationFrame(() => inputRef.current?.focus()); }
   };
