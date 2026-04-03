@@ -128,6 +128,7 @@ export function NotesPanel({ conversationId, currentUserId, onClose, socketRef }
     const noteText = text.replace(/\u200B/g, '').trim();
     setSending(true);
     setText('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
     try {
       await api.post(`/conversations/${conversationId}/notes`, { text: noteText });
     } catch {
@@ -231,10 +232,14 @@ export function NotesPanel({ conversationId, currentUserId, onClose, socketRef }
                     <textarea
                       ref={editInputRef}
                       value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
+                      onChange={(e) => {
+                        setEditText(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+                      }}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSaveEdit(); } if (e.key === 'Escape') setEditingId(null); }}
                       rows={2}
-                      className="w-full resize-none rounded-lg bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-sm text-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                      className="w-full resize-none rounded-lg bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-sm text-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-500/40 overflow-hidden"
                     />
                     <div className="flex justify-end gap-2">
                       <button onClick={() => setEditingId(null)} className="px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:text-foreground transition-colors">
@@ -264,11 +269,15 @@ export function NotesPanel({ conversationId, currentUserId, onClose, socketRef }
             <textarea
               ref={inputRef}
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`;
+              }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder="Escreva uma nota para a equipe..."
               rows={2}
-              className={`w-full resize-none rounded-xl border px-3 py-2 pr-10 text-sm placeholder:text-amber-400/40 focus:outline-none focus:ring-1 ${
+              className={`w-full resize-none rounded-xl border px-3 py-2 pr-10 text-sm placeholder:text-amber-400/40 focus:outline-none focus:ring-1 overflow-hidden ${
                 listening
                   ? 'bg-red-500/10 border-red-500/40 focus:ring-red-500/30 text-red-100'
                   : 'bg-amber-500/10 border-amber-500/30 focus:ring-amber-500/30 text-amber-100'
