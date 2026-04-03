@@ -166,6 +166,15 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
       }
     });
 
+    // Transferências: toast + som em qualquer rota (page.tsx cuida do popup no chat)
+    socket.on('transfer_request', (data: { contactName?: string; fromUserName?: string }) => {
+      const onChatPage = pathnameRef.current === '/atendimento' ||
+        pathnameRef.current.startsWith('/atendimento/chat');
+      if (onChatPage) return; // page.tsx já exibe o popup
+      playNotificationSound();
+      toast(`Transferência de ${data?.fromUserName || 'Operador'}: ${data?.contactName || 'Contato'}`, { icon: '📨', duration: 6000 });
+    });
+
     return () => { socket.disconnect(); };
   }, [authToken]);
 

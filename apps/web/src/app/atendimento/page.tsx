@@ -842,6 +842,12 @@ export default function Dashboard() {
     fetchSpecialists(true);
   }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId, clientMode]);
 
+  // Polling de transferências pendentes (30s) — resiliência caso o socket perca o evento
+  useEffect(() => {
+    const interval = setInterval(() => fetchPendingTransfers(true), 30_000);
+    return () => clearInterval(interval);
+  }, [fetchPendingTransfers]);
+
   // Ao trocar clientMode: deseleciona conversa ativa para evitar contexto errado
   useEffect(() => {
     setSelectedId(null);
