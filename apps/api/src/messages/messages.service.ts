@@ -122,11 +122,22 @@ export class MessagesService {
 
     if (!rawMessages.length) return { imported: 0, total: 0 };
 
+    // Filtrar mensagens anteriores à criação do lead — evita reimportar
+    // histórico de leads excluídos (a Evolution mantém o chat mesmo após
+    // exclusão no CRM).
+    const leadCreatedAt = convo.lead.created_at
+      ? new Date(convo.lead.created_at).getTime() / 1000
+      : 0;
+
     let imported = 0;
     for (const msg of rawMessages) {
       try {
         const externalId: string | undefined = msg.key?.id || msg.id;
         if (!externalId) continue;
+
+        // Ignorar mensagens anteriores ao lead atual
+        const msgTimestamp = Number(msg.messageTimestamp || 0);
+        if (leadCreatedAt > 0 && msgTimestamp > 0 && msgTimestamp < leadCreatedAt) continue;
 
         const exists = await this.prisma.message.findUnique({
           where: { external_message_id: externalId },
