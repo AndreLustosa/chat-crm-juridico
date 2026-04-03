@@ -170,45 +170,6 @@ export default function FichaTrabalhista({
     return () => { recognitionRef.current?.stop(); };
   }, []);
 
-  // ─── Correção automática por IA ──────────────────────────────
-  const correctWithAI = useCallback(async (fieldKey: string) => {
-    const raw = (formData[fieldKey] || '').replace(/\u200B/g, '').trim();
-    if (!raw || raw.length < 10) return; // texto muito curto, não corrige
-
-    setCorrectingField(fieldKey);
-    try {
-      const endpoint = isPublic
-        ? `${API_BASE_URL}/ficha-trabalhista/${leadId}/public/correct`
-        : `/ficha-trabalhista/${leadId}/correct`;
-
-      const body = { field: fieldKey, text: raw };
-      let corrected: string;
-
-      if (isPublic) {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error('Erro na correção');
-        const data = await res.json();
-        corrected = data.corrected;
-      } else {
-        const res = await api.post(endpoint, body);
-        corrected = res.data.corrected;
-      }
-
-      if (corrected && corrected !== raw) {
-        handleChange(fieldKey, corrected);
-        handleAutoSave(fieldKey, corrected);
-      }
-    } catch {
-      // Silencioso — não bloqueia o uso se a correção falhar
-    } finally {
-      setCorrectingField(null);
-    }
-  }, [formData, leadId, isPublic, handleChange, handleAutoSave]);
-
   // ─── Fetch initial data ───────────────────────────────────────
 
   useEffect(() => {
@@ -327,6 +288,45 @@ export default function FichaTrabalhista({
     },
     [leadId, isPublic, readOnly, finalizado, completionPct],
   );
+
+  // ─── Correção automática por IA ──────────────────────────────
+  const correctWithAI = useCallback(async (fieldKey: string) => {
+    const raw = (formData[fieldKey] || '').replace(/\u200B/g, '').trim();
+    if (!raw || raw.length < 10) return;
+
+    setCorrectingField(fieldKey);
+    try {
+      const endpoint = isPublic
+        ? `${API_BASE_URL}/ficha-trabalhista/${leadId}/public/correct`
+        : `/ficha-trabalhista/${leadId}/correct`;
+
+      const body = { field: fieldKey, text: raw };
+      let corrected: string;
+
+      if (isPublic) {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Erro na correção');
+        const data = await res.json();
+        corrected = data.corrected;
+      } else {
+        const res = await api.post(endpoint, body);
+        corrected = res.data.corrected;
+      }
+
+      if (corrected && corrected !== raw) {
+        handleChange(fieldKey, corrected);
+        handleAutoSave(fieldKey, corrected);
+      }
+    } catch {
+      // Silencioso — não bloqueia o uso se a correção falhar
+    } finally {
+      setCorrectingField(null);
+    }
+  }, [formData, leadId, isPublic, handleChange, handleAutoSave]);
 
   // ─── CEP Lookup ───────────────────────────────────────────────
 
