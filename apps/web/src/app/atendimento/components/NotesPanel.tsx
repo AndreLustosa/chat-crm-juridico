@@ -92,20 +92,21 @@ export function NotesPanel({ conversationId, currentUserId, onClose, socketRef }
     recognition.lang = 'pt-BR';
     recognition.continuous = true;
     recognition.interimResults = true;
-    let finalTranscript = '';
     recognition.onresult = (event: any) => {
       let interim = '';
+      let newFinal = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript + ' ';
+          newFinal += event.results[i][0].transcript + ' ';
         } else {
           interim += event.results[i][0].transcript;
         }
       }
       setText(prev => {
+        // Remove interim anterior (tudo após \u200B) e adiciona apenas o novo final + interim
         const base = prev.replace(/\u200B.*$/, '').trimEnd();
-        const combined = (base ? base + ' ' : '') + finalTranscript + (interim ? '\u200B' + interim : '');
-        return combined;
+        const withFinal = newFinal ? (base ? base + ' ' : '') + newFinal.trimEnd() : base;
+        return interim ? withFinal + '\u200B' + interim : withFinal;
       });
     };
     recognition.onerror = () => { setListening(false); };
