@@ -91,10 +91,10 @@ const LOSS_REASONS = [
 
 function DateSeparator({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2 select-none sticky top-0 z-10 bg-card/80 backdrop-blur-sm">
-      <div className="flex-1 h-px bg-border/60" />
-      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap">{label}</span>
-      <div className="flex-1 h-px bg-border/60" />
+    <div className="flex items-center gap-3 px-3 py-1.5 select-none sticky top-0 z-20 bg-background/95 backdrop-blur-md shadow-sm">
+      <div className="flex-1 h-px bg-border/40" />
+      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap px-2">{label}</span>
+      <div className="flex-1 h-px bg-border/40" />
     </div>
   );
 }
