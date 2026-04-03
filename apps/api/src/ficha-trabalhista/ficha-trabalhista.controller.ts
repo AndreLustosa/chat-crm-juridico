@@ -69,4 +69,21 @@ export class FichaTrabalhistaController {
   async publicFinalize(@Param('leadId') leadId: string) {
     return this.service.finalize(leadId);
   }
+
+  @Public()
+  @Post(':leadId/public/correct')
+  async publicCorrect(
+    @Param('leadId') leadId: string,
+    @Body() body: { field: string; text: string },
+  ) {
+    return this.service.correctField(body.field, body.text);
+  }
+
+  @Post(':leadId/correct')
+  async correct(
+    @Param('leadId') leadId: string,
+    @Body() body: { field: string; text: string },
+  ) {
+    return this.service.correctField(body.field, body.text);
+  }
 }

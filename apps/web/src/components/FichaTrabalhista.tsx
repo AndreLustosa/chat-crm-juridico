@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -18,6 +18,9 @@ import {
   FileText,
   Bot,
   Search,
+  Mic,
+  MicOff,
+  Sparkles,
 } from 'lucide-react';
 import Image from 'next/image';
 import { FICHA_SECTIONS, REQUIRED_FIELD_KEYS, type FichaField, getEmptyFormData } from '@/lib/fichaTrabalhistaFields';
@@ -106,6 +109,105 @@ export default function FichaTrabalhista({
   const [loadingCep, setLoadingCep] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // ─── Speech-to-text (por campo) ──────────────────────────────
+  const [listeningField, setListeningField] = useState<string | null>(null);
+  const [correctingField, setCorrectingField] = useState<string | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // Campos que aceitam ditado por voz
+  const VOICE_FIELDS = new Set([
+    'motivo_saida', 'atividades_realizadas', 'detalhes_acidente',
+    'detalhes_assedio_moral', 'detalhes_verbas_pendentes',
+    'detalhes_testemunhas', 'detalhes_provas_documentais', 'motivos_reclamacao',
+  ]);
+
+  const toggleFieldListening = useCallback((fieldKey: string) => {
+    // Se já está gravando este campo, para
+    if (listeningField === fieldKey) {
+      recognitionRef.current?.stop();
+      setListeningField(null);
+      return;
+    }
+    // Se está gravando outro campo, para antes
+    if (listeningField) {
+      recognitionRef.current?.stop();
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { setSaveError('Seu navegador não suporta reconhecimento de voz.'); return; }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      let newFinal = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          newFinal += event.results[i][0].transcript + ' ';
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      setFormData(prev => {
+        const base = (prev[fieldKey] || '').replace(/\u200B.*$/, '').trimEnd();
+        const withFinal = newFinal ? (base ? base + ' ' : '') + newFinal.trimEnd() : base;
+        return { ...prev, [fieldKey]: interim ? withFinal + '\u200B' + interim : withFinal };
+      });
+    };
+    recognition.onerror = () => setListeningField(null);
+    recognition.onend = () => setListeningField(null);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListeningField(fieldKey);
+  }, [listeningField]);
+
+  // Cleanup recognition on unmount
+  useEffect(() => {
+    return () => { recognitionRef.current?.stop(); };
+  }, []);
+
+  // ─── Correção automática por IA ──────────────────────────────
+  const correctWithAI = useCallback(async (fieldKey: string) => {
+    const raw = (formData[fieldKey] || '').replace(/\u200B/g, '').trim();
+    if (!raw || raw.length < 10) return; // texto muito curto, não corrige
+
+    setCorrectingField(fieldKey);
+    try {
+      const endpoint = isPublic
+        ? `${API_BASE_URL}/ficha-trabalhista/${leadId}/public/correct`
+        : `/ficha-trabalhista/${leadId}/correct`;
+
+      const body = { field: fieldKey, text: raw };
+      let corrected: string;
+
+      if (isPublic) {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Erro na correção');
+        const data = await res.json();
+        corrected = data.corrected;
+      } else {
+        const res = await api.post(endpoint, body);
+        corrected = res.data.corrected;
+      }
+
+      if (corrected && corrected !== raw) {
+        handleChange(fieldKey, corrected);
+        handleAutoSave(fieldKey, corrected);
+      }
+    } catch {
+      // Silencioso — não bloqueia o uso se a correção falhar
+    } finally {
+      setCorrectingField(null);
+    }
+  }, [formData, leadId, isPublic, handleChange, handleAutoSave]);
 
   // ─── Fetch initial data ───────────────────────────────────────
 
@@ -393,19 +495,66 @@ export default function FichaTrabalhista({
         );
         break;
 
-      case 'textarea':
+      case 'textarea': {
+        const hasVoice = VOICE_FIELDS.has(field.key);
+        const isFieldListening = listeningField === field.key;
+        const isCorrecting = correctingField === field.key;
         input = (
-          <textarea
-            value={value}
-            onChange={(e) => handleChange(field.key, e.target.value)}
-            onBlur={onBlur}
-            disabled={disabled}
-            rows={3}
-            placeholder={field.placeholder}
-            className={`${baseClasses} py-2 resize-none`}
-          />
+          <div className="relative">
+            <textarea
+              value={value.replace(/\u200B/g, '')}
+              onChange={(e) => handleChange(field.key, e.target.value)}
+              onBlur={() => {
+                const clean = value.replace(/\u200B/g, '').trim();
+                handleAutoSave(field.key, clean);
+                // Corrigir automaticamente com IA ao sair do campo (se tiver conteúdo ditado)
+                if (hasVoice && clean.length >= 10) {
+                  correctWithAI(field.key);
+                }
+              }}
+              disabled={disabled}
+              rows={3}
+              placeholder={isFieldListening ? 'Fale agora...' : field.placeholder}
+              className={`${baseClasses} py-2 resize-none ${hasVoice ? 'pr-20' : ''} ${
+                isFieldListening ? 'border-red-500/50 bg-red-500/5' : ''
+              }`}
+            />
+            {hasVoice && !disabled && (
+              <div className="absolute right-2 top-2 flex items-center gap-1">
+                {isCorrecting && (
+                  <span className="flex items-center gap-1 text-[10px] text-blue-400 mr-1">
+                    <Sparkles size={10} className="animate-pulse" />
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => toggleFieldListening(field.key)}
+                  title={isFieldListening ? 'Parar gravação' : 'Ditar por voz'}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    isFieldListening
+                      ? 'text-red-400 bg-red-500/20 animate-pulse'
+                      : 'text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10'
+                  }`}
+                >
+                  {isFieldListening ? <MicOff size={14} /> : <Mic size={14} />}
+                </button>
+                {!isFieldListening && value.replace(/\u200B/g, '').trim().length >= 10 && (
+                  <button
+                    type="button"
+                    onClick={() => correctWithAI(field.key)}
+                    disabled={isCorrecting}
+                    title="Corrigir com IA"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+                  >
+                    <Sparkles size={14} />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         );
         break;
+      }
 
       case 'cpf':
         input = (

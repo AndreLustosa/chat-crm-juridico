@@ -2,7 +2,9 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { SettingsService } from '../settings/settings.service';
 import { UpdateFichaDto } from './dto/update-ficha.dto';
+import OpenAI from 'openai';
 
 // Total de campos úteis do formulário (para cálculo de %)
 const TOTAL_FIELDS = 76;
@@ -60,6 +62,7 @@ export class FichaTrabalhistaService {
     private prisma: PrismaService,
     private whatsapp: WhatsappService,
     private gateway: ChatGateway,
+    private settings: SettingsService,
   ) {}
 
   /** Busca ficha do lead (cria vazia se não existir) */
@@ -450,5 +453,62 @@ export class FichaTrabalhistaService {
         }
       }, 30_000),
     );
+  }
+
+  /** Corrige texto ditado por voz usando IA (pontuação, gramática, coerência) */
+  async correctField(field: string, text: string): Promise<{ corrected: string }> {
+    const apiKey = await this.settings.get('OPENAI_API_KEY');
+    if (!apiKey) {
+      this.logger.warn('[Ficha] OPENAI_API_KEY não configurada — correção ignorada');
+      return { corrected: text };
+    }
+
+    const FIELD_LABELS: Record<string, string> = {
+      motivo_saida: 'Motivo da Saída do emprego',
+      atividades_realizadas: 'Atividades Realizadas no trabalho',
+      detalhes_acidente: 'Detalhes do Acidente de trabalho',
+      detalhes_assedio_moral: 'Detalhes do Assédio Moral sofrido',
+      detalhes_verbas_pendentes: 'Detalhes de Verbas Rescisórias pendentes',
+      detalhes_testemunhas: 'Nomes e Contatos das Testemunhas',
+      detalhes_provas_documentais: 'Descrição das Provas Documentais',
+      motivos_reclamacao: 'Motivos da Reclamação Trabalhista',
+    };
+
+    const label = FIELD_LABELS[field] || field;
+
+    try {
+      const openai = new OpenAI({ apiKey });
+      const result = await openai.chat.completions.create({
+        model: 'gpt-4.1-mini',
+        temperature: 0.3,
+        max_tokens: 1000,
+        messages: [
+          {
+            role: 'system',
+            content: `Você é um revisor de texto jurídico trabalhista. O texto abaixo foi DITADO POR VOZ por um cliente preenchendo uma ficha trabalhista.
+
+Sua tarefa:
+1. Corrigir pontuação e gramática
+2. Organizar o texto de forma clara e coerente
+3. Manter TODAS as informações originais — NÃO remova nem invente dados
+4. Manter linguagem simples (é um cliente, não um advogado)
+5. Se houver repetições por erro de ditado, remova as duplicatas
+6. NÃO adicione informações que não existem no original
+
+Campo: "${label}"
+
+Responda APENAS com o texto corrigido, sem explicações.`,
+          },
+          { role: 'user', content: text },
+        ],
+      });
+
+      const corrected = result.choices[0]?.message?.content?.trim() || text;
+      this.logger.log(`[Ficha] Campo "${field}" corrigido por IA (${text.length}→${corrected.length} chars)`);
+      return { corrected };
+    } catch (e: any) {
+      this.logger.warn(`[Ficha] Falha na correção IA: ${e.message}`);
+      return { corrected: text };
+    }
   }
 }
