@@ -76,7 +76,101 @@ export class FichaTrabalhistaService {
       finalizado: updated.finalizado,
     });
 
+    // Sincronizar dados da ficha → AiMemory (não bloqueia o retorno)
+    this.syncToMemory(leadId, merged).catch((err) =>
+      this.logger.warn(`[Ficha] Falha ao sincronizar memória: ${err.message}`),
+    );
+
     return updated;
+  }
+
+  /** Sincroniza campos da ficha → AiMemory (facts_json) */
+  private async syncToMemory(leadId: string, fichaData: Record<string, any>) {
+    // Mapear ficha → facts_json (inverso do fillFromMemory)
+    const hasValue = (v: any) => v !== null && v !== undefined && v !== '';
+
+    const leadFacts: Record<string, any> = {};
+    if (hasValue(fichaData.nome_completo)) leadFacts.full_name = fichaData.nome_completo;
+    if (hasValue(fichaData.cpf)) leadFacts.cpf = fichaData.cpf;
+    if (hasValue(fichaData.nome_mae)) leadFacts.mother_name = fichaData.nome_mae;
+    if (hasValue(fichaData.cidade)) leadFacts.city = fichaData.cidade;
+    if (hasValue(fichaData.estado_uf)) leadFacts.state = fichaData.estado_uf;
+    if (hasValue(fichaData.telefone)) leadFacts.phones = [fichaData.telefone];
+    if (hasValue(fichaData.email)) leadFacts.emails = [fichaData.email];
+
+    const partiesFacts: Record<string, any> = {};
+    if (hasValue(fichaData.nome_empregador)) partiesFacts.counterparty_name = fichaData.nome_empregador;
+    if (hasValue(fichaData.cnpjcpf_empregador)) partiesFacts.counterparty_id = fichaData.cnpjcpf_empregador;
+
+    const currentFacts: Record<string, any> = {};
+    if (hasValue(fichaData.situacao_atual)) currentFacts.employment_status = fichaData.situacao_atual;
+    if (hasValue(fichaData.motivos_reclamacao)) currentFacts.main_issue = fichaData.motivos_reclamacao;
+
+    const keyValues: Record<string, any> = {};
+    if (hasValue(fichaData.salario)) keyValues.salario = fichaData.salario;
+    if (hasValue(fichaData.funcao)) keyValues.funcao = fichaData.funcao;
+    if (hasValue(fichaData.cidade_trabalho)) keyValues.cidade_trabalho = fichaData.cidade_trabalho;
+
+    const keyDates: Record<string, any> = {};
+    if (hasValue(fichaData.data_admissao)) keyDates.admissao = fichaData.data_admissao;
+    if (hasValue(fichaData.data_saida)) keyDates.demissao = fichaData.data_saida;
+
+    // Só sincronizar se houver dados relevantes para a memória
+    if (
+      Object.keys(leadFacts).length === 0 &&
+      Object.keys(partiesFacts).length === 0 &&
+      Object.keys(currentFacts).length === 0 &&
+      Object.keys(keyValues).length === 0 &&
+      Object.keys(keyDates).length === 0
+    ) {
+      return;
+    }
+
+    // Buscar memória existente e fazer merge profundo
+    const existing = await this.prisma.aiMemory.findUnique({
+      where: { lead_id: leadId },
+    });
+
+    let facts: any = {};
+    try {
+      facts = existing?.facts_json
+        ? typeof existing.facts_json === 'string'
+          ? JSON.parse(existing.facts_json as string)
+          : existing.facts_json
+        : {};
+    } catch {
+      facts = {};
+    }
+
+    // Merge profundo preservando campos que a ficha não cobre
+    facts.lead = { ...(facts.lead || {}), ...leadFacts };
+    facts.parties = { ...(facts.parties || {}), ...partiesFacts };
+    if (!facts.facts) facts.facts = {};
+    facts.facts.current = { ...(facts.facts.current || {}), ...currentFacts };
+    facts.facts.current.key_values = { ...(facts.facts.current.key_values || {}), ...keyValues };
+    facts.facts.current.key_dates = { ...(facts.facts.current.key_dates || {}), ...keyDates };
+
+    // Upsert na AiMemory
+    if (existing) {
+      await this.prisma.aiMemory.update({
+        where: { lead_id: leadId },
+        data: {
+          facts_json: facts,
+          last_updated_at: new Date(),
+          version: { increment: 1 },
+        },
+      });
+    } else {
+      await this.prisma.aiMemory.create({
+        data: {
+          lead_id: leadId,
+          summary: `Ficha trabalhista preenchida: ${fichaData.nome_completo || 'lead'}`,
+          facts_json: facts,
+        },
+      });
+    }
+
+    this.logger.log(`[Ficha] Memória sincronizada para lead ${leadId}`);
   }
 
   /** Marca como finalizado + envia msg WhatsApp + avança stage CRM */

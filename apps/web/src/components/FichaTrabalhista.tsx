@@ -19,6 +19,7 @@ import {
   Bot,
   Search,
 } from 'lucide-react';
+import Image from 'next/image';
 import { FICHA_SECTIONS, type FichaField, getEmptyFormData } from '@/lib/fichaTrabalhistaFields';
 import api, { API_BASE_URL } from '@/lib/api';
 
@@ -519,28 +520,42 @@ export default function FichaTrabalhista({
   // ─── Main render ──────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Progress bar */}
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
-          <div
-            className="h-full bg-amber-500 rounded-full transition-all duration-500"
-            style={{ width: `${completionPct}%` }}
-          />
+    <div className="relative flex flex-col gap-4">
+      {/* Logo de fundo */}
+      <div className="pointer-events-none fixed inset-0 z-0 flex items-center justify-center opacity-[0.04]">
+        <Image
+          src="/landing/LOGO SEM FUNDO 01.png"
+          alt=""
+          width={500}
+          height={500}
+          className="select-none"
+          priority={false}
+        />
+      </div>
+
+      {/* Progress bar — sticky abaixo do header */}
+      <div className="sticky top-[73px] z-30 -mx-4 px-4 sm:-mx-6 sm:px-6 py-2 bg-zinc-950/95 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
+            <div
+              className="h-full bg-amber-500 rounded-full transition-all duration-500"
+              style={{ width: `${completionPct}%` }}
+            />
+          </div>
+          <span className="text-xs font-mono text-muted-foreground shrink-0">
+            {completionPct}%
+          </span>
+          {saving && (
+            <span className="flex items-center gap-1 text-xs text-amber-500">
+              <Loader2 size={12} className="animate-spin" /> Salvando...
+            </span>
+          )}
+          {!saving && lastSaved && (
+            <span className="flex items-center gap-1 text-xs text-emerald-500">
+              <CheckCircle2 size={12} /> Salvo
+            </span>
+          )}
         </div>
-        <span className="text-xs font-mono text-muted-foreground shrink-0">
-          {completionPct}%
-        </span>
-        {saving && (
-          <span className="flex items-center gap-1 text-xs text-amber-500">
-            <Loader2 size={12} className="animate-spin" /> Salvando...
-          </span>
-        )}
-        {!saving && lastSaved && (
-          <span className="flex items-center gap-1 text-xs text-emerald-500">
-            <CheckCircle2 size={12} /> Salvo
-          </span>
-        )}
       </div>
 
       {/* Finalized banner */}

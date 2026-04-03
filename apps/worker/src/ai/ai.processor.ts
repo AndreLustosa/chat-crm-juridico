@@ -505,7 +505,7 @@ export class AiProcessor extends WorkerHost {
           });
           const oldData = (ficha.data as Record<string, any>) || {};
           const merged = { ...oldData, ...cleanFields };
-          const totalFields = 72;
+          const totalFields = 76;
           const filled = Object.values(merged).filter(
             (v) => v !== null && v !== undefined && v !== '',
           ).length;
@@ -568,7 +568,7 @@ export class AiProcessor extends WorkerHost {
                 create: { lead_id: leadId, data: {} },
               });
               const merged = { ...(ficha.data as Record<string, any>), ...mappedData };
-              const totalFields = 72;
+              const totalFields = 76;
               const filled = Object.values(merged).filter((v) => v != null && v !== '').length;
               const pct = Math.min(100, Math.round((filled / totalFields) * 100));
 
