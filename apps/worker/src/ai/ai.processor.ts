@@ -227,7 +227,7 @@ export class AiProcessor extends WorkerHost {
         }
       }
       if (!media?.s3_key) {
-        msg.text = '[áudio sem transcrição]';
+        msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
         continue;
       }
 
@@ -261,7 +261,7 @@ export class AiProcessor extends WorkerHost {
         this.logger.warn(
           `[AI] Falha ao transcrever áudio ${msg.id}: ${e.message}`,
         );
-        msg.text = '[áudio não transcrito]';
+        msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
       }
     }
   }
