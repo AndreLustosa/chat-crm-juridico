@@ -205,9 +205,13 @@ export class AiProcessor extends WorkerHost {
       // Só áudios recebidos do cliente sem transcrição
       if (msg.direction !== 'in' || msg.type !== 'audio' || msg.text) continue;
 
-      // Retry: o media-job pode estar rodando em paralelo e ainda não ter salvo o registro
+      // Retry apenas para mensagens recentes (< 2 min). Mensagens antigas sem mídia
+      // são do sync-history e nunca terão registro no S3 — pular sem esperar.
       let media = msg.media ?? null;
-      if (!media?.s3_key) {
+      const msgAge = Date.now() - new Date(msg.created_at).getTime();
+      const isRecent = msgAge < 2 * 60 * 1000; // < 2 minutos
+
+      if (!media?.s3_key && isRecent) {
         for (let attempt = 1; attempt <= 5; attempt++) {
           await new Promise((r) => setTimeout(r, 800));
           const found = await this.prisma.media.findFirst({
@@ -222,7 +226,10 @@ export class AiProcessor extends WorkerHost {
           );
         }
       }
-      if (!media?.s3_key) continue;
+      if (!media?.s3_key) {
+        msg.text = '[áudio sem transcrição]';
+        continue;
+      }
 
       try {
         const { buffer, contentType } = await this.s3.getObjectBuffer(
