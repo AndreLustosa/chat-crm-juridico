@@ -403,11 +403,11 @@ export function ChatHeader({
           {selected?.leadId && isRealConvo && !isClosed && (
             <button
               onClick={onCreateTask}
-              title="Adiar atendimento"
+              title="Criar tarefa"
               className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
             >
-              <Clock size={16} />
-              Adiar
+              <ClipboardList size={16} />
+              Tarefa
             </button>
           )}
         </div>
