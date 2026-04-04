@@ -458,6 +458,7 @@ export class EvolutionService {
       // 5. Se AI_Mode ativo e mensagem recebida (não enviada), agenda job para a IA responder
       // Debounce: cancela job pendente e cria novo com timer resetado, acumulando mensagens
       // rápidas. Quando o lead para de digitar, o job dispara e a IA responde tudo de uma vez.
+      this.logger.debug(`[AI-CHECK] conv=${conv.id} ai_mode=${conv.ai_mode} isOutgoing=${isOutgoing}`);
       if (!isOutgoing && conv.ai_mode) {
         const cooldownRaw = await this.prisma.globalSetting.findUnique({
           where: { key: 'AI_COOLDOWN_SECONDS' },
