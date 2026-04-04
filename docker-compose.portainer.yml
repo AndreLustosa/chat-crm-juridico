@@ -124,6 +124,8 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - JWT_SECRET=${JWT_SECRET:-troque_esta_secret}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-${JWT_SECRET:-troque_esta_secret}}
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-https://andrelustosaadvogados.com.br/api}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
