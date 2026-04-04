@@ -165,6 +165,27 @@ export class AiProcessor extends WorkerHost {
     return aliases[model] || model;
   }
 
+  // ─── Constrói header WAV para PCM raw (Gemini TTS retorna PCM 24kHz) ───
+  private buildWavHeader(dataSize: number, sampleRate: number, channels: number, bitsPerSample: number): Buffer {
+    const header = Buffer.alloc(44);
+    const byteRate = sampleRate * channels * (bitsPerSample / 8);
+    const blockAlign = channels * (bitsPerSample / 8);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + dataSize, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); // PCM
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRate, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(dataSize, 40);
+    return header;
+  }
+
   // ─── Parseia resposta JSON da IA com fallbacks robustos ───
   private parseAiResponse(raw: string): {
     reply: string;
@@ -1807,36 +1828,55 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       if (ttsKeyValid && leadSentAudio) {
         this.logger.log(`[TTS] Chave OK (len=${ttsConfig.googleApiKey.length}), voz=${ttsConfig.voice}`);
         try {
-          // Remove formatação markdown do texto (negrito, itálico) antes de enviar ao TTS
+          // Remove formatação markdown do texto
           const ttsText = finalText
             .replace(/\*\*(.*?)\*\*/g, '$1')
             .replace(/\*(.*?)\*/g, '$1')
             .trim();
 
+          // Instrução de estilo para voz natural e acolhedora
+          const styledText = `Fale de forma natural, acolhedora e profissional, como uma atendente real de escritório de advocacia conversando pelo WhatsApp. Tom amigável, sem soar robótica: ${ttsText}`;
+
+          // Gemini 2.5 Flash TTS — voz natural com suporte a instruções de estilo
+          const geminiModel = 'gemini-2.5-flash-preview-tts';
+          const voiceName = ttsConfig.voice?.startsWith('pt-BR') ? 'Kore' : (ttsConfig.voice || 'Kore');
           const ttsRes = await fetch(
-            `https://texttospeech.googleapis.com/v1/text:synthesize?key=${ttsConfig.googleApiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${ttsConfig.googleApiKey}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                input:       { text: ttsText },
-                voice:       { languageCode: ttsConfig.language, name: ttsConfig.voice },
-                audioConfig: { audioEncoding: 'OGG_OPUS' },
+                contents: [{ parts: [{ text: styledText }] }],
+                generationConfig: {
+                  responseModalities: ['AUDIO'],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName },
+                    },
+                  },
+                },
               }),
-              signal: AbortSignal.timeout(20000),
+              signal: AbortSignal.timeout(30000),
             },
           );
 
           if (!ttsRes.ok) {
             const errText = await ttsRes.text().catch(() => '');
-            this.logger.warn(`[TTS] Google TTS retornou ${ttsRes.status}: ${errText.slice(0, 200)}`);
+            this.logger.warn(`[TTS] Gemini TTS retornou ${ttsRes.status}: ${errText.slice(0, 300)}`);
           } else {
-            const ttsData = (await ttsRes.json()) as { audioContent: string };
-            const audioBuffer = Buffer.from(ttsData.audioContent, 'base64');
+            const ttsData = await ttsRes.json();
+            const audioB64 = ttsData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (!audioB64) {
+              this.logger.warn('[TTS] Gemini TTS não retornou áudio');
+            } else {
+              // Gemini retorna PCM 24kHz 16-bit — converter para WAV
+              const pcmBuffer = Buffer.from(audioB64, 'base64');
+              const wavHeader = this.buildWavHeader(pcmBuffer.length, 24000, 1, 16);
+              const audioBuffer = Buffer.concat([wavHeader, pcmBuffer]);
 
             // Upload do áudio para S3
-            const audioKey = `tts/${convo.id}/${savedMsg.id}.ogg`;
-            await this.s3.uploadBuffer(audioKey, audioBuffer, 'audio/ogg');
+            const audioKey = `tts/${convo.id}/${savedMsg.id}.wav`;
+            await this.s3.uploadBuffer(audioKey, audioBuffer, 'audio/wav');
 
             // Cria registro de mensagem de áudio no banco
             const audioMsg = await this.prisma.message.create({
@@ -1855,12 +1895,12 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
               data: {
                 message_id: audioMsg.id,
                 s3_key:     audioKey,
-                mime_type:  'audio/ogg',
+                mime_type:  'audio/wav',
                 size:       audioBuffer.length,
               },
             });
 
-            // Envia via Evolution API como áudio base64 puro (sem prefixo data:)
+            // Envia via Evolution API como áudio base64 puro
             const audioBase64 = audioBuffer.toString('base64');
             await axios.post(
               `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`,
@@ -1868,7 +1908,8 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
               { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 30000 },
             );
 
-            this.logger.log(`[TTS] Áudio enviado para ${convo.lead.phone} (${audioBuffer.length} bytes)`);
+            this.logger.log(`[TTS] Áudio Gemini enviado para ${convo.lead.phone} (${audioBuffer.length} bytes, voz=${voiceName})`);
+            }
           }
         } catch (ttsErr: any) {
           this.logger.warn(`[TTS] Falha ao enviar áudio (não-fatal): ${ttsErr.message}`);
