@@ -1914,7 +1914,18 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             }
           }
         } catch (ttsErr: any) {
-          this.logger.warn(`[TTS] Falha ao enviar áudio (não-fatal): ${ttsErr.message}`);
+          this.logger.warn(`[TTS] Falha ao gerar/enviar áudio: ${ttsErr.message} — enviando texto como fallback`);
+          // Fallback: envia texto quando TTS falha (créditos esgotados, erro de API, etc.)
+          try {
+            await axios.post(
+              `${apiUrl}/message/sendText/${instanceName}`,
+              { number: convo.lead.phone, text: textToSend },
+              { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 30000 },
+            );
+            this.logger.log('[TTS] Fallback texto enviado com sucesso');
+          } catch (fallbackErr: any) {
+            this.logger.error(`[TTS] Fallback texto também falhou: ${fallbackErr.message}`);
+          }
         }
       }
 
