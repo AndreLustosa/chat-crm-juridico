@@ -208,7 +208,7 @@ export class SettingsController {
 
   @Patch('skills/assets/:assetId')
   @Roles('ADMIN')
-  async updateSkillAsset(@Param('assetId') assetId: string, @Body() body: { inject_mode?: string; asset_type?: string }) {
+  async updateSkillAsset(@Param('assetId') assetId: string, @Body() body: { inject_mode?: string; asset_type?: string; content_text?: string; size?: number }) {
     return this.settingsService.updateSkillAsset(assetId, body);
   }
 

@@ -1240,29 +1240,51 @@ function SkillEditor({
           ) : (
             <div className="space-y-1.5">
               {assets.map((asset) => (
-                <div key={asset.id} className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                      asset.asset_type === 'reference'
-                        ? 'text-green-400 bg-green-500/10 border-green-500/20'
-                        : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
-                    }`}>
-                      {asset.asset_type === 'reference' ? 'REF' : 'ASSET'}
-                    </span>
-                    <span className="text-sm font-medium text-foreground truncate">{asset.name}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {(asset.size / 1024).toFixed(1)} KB
-                    </span>
-                    {asset.asset_type === 'reference' && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        asset.inject_mode === 'full_text'
-                          ? 'text-emerald-400 bg-emerald-500/10'
-                          : 'text-muted-foreground bg-muted'
+                <div key={asset.id} className="bg-muted/30 rounded-lg px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                        asset.asset_type === 'reference'
+                          ? 'text-green-400 bg-green-500/10 border-green-500/20'
+                          : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
                       }`}>
-                        {asset.inject_mode === 'full_text' ? 'injetado' : 'não injetado'}
+                        {asset.asset_type === 'reference' ? 'REF' : 'ASSET'}
                       </span>
-                    )}
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.getElementById(`asset-content-${asset.id}`);
+                          if (el) el.classList.toggle('hidden');
+                        }}
+                        className="text-sm font-medium text-foreground truncate hover:text-primary transition-colors cursor-pointer"
+                      >
+                        {asset.name}
+                      </button>
+                      <span className="text-[10px] text-muted-foreground">
+                        {(asset.size / 1024).toFixed(1)} KB
+                      </span>
+                      {asset.asset_type === 'reference' && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          asset.inject_mode === 'full_text'
+                            ? 'text-emerald-400 bg-emerald-500/10'
+                            : 'text-muted-foreground bg-muted'
+                        }`}>
+                          {asset.inject_mode === 'full_text' ? 'injetado' : 'não injetado'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const el = document.getElementById(`asset-content-${asset.id}`);
+                          if (el) el.classList.toggle('hidden');
+                        }}
+                        className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                        title="Ver/editar conteúdo"
+                      >
+                        <Eye size={14} />
+                      </button>
                   <button
                     onClick={async () => {
                       if (!confirm(`Excluir "${asset.name}"?`)) return;
@@ -1275,6 +1297,28 @@ function SkillEditor({
                   >
                     <Trash2 size={13} />
                   </button>
+                    </div>
+                  </div>
+                  {/* Conteúdo expandível da referência */}
+                  {asset.content_text && (
+                    <div id={`asset-content-${asset.id}`} className="hidden mt-2">
+                      <textarea
+                        defaultValue={asset.content_text}
+                        className="w-full bg-background/50 border border-border rounded-lg px-3 py-2 text-[11px] font-mono text-foreground/80 outline-none focus:border-primary/50 resize-y"
+                        rows={8}
+                        style={{ minHeight: '120px' }}
+                        onBlur={async (e) => {
+                          const newText = e.target.value;
+                          if (newText === asset.content_text) return;
+                          try {
+                            await api.patch(`/settings/skills/assets/${asset.id}`, { content_text: newText, size: newText.length });
+                            onRefresh();
+                          } catch { alert('Erro ao salvar'); }
+                        }}
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-1">Edite e clique fora para salvar automaticamente.</p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
