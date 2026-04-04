@@ -1717,7 +1717,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         if (slotsToOffer?.length) {
           const rows = slotsToOffer.map((s: any) => ({
             title: s.label || `${s.date} ${s.time}`,
-            description: '',
+            description: s.date || 'Horário disponível',
             rowId: `slot_${s.date}_${s.time}`,
           }));
           sendResult = await axios.post(
