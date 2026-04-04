@@ -1715,12 +1715,23 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       // Captura o ID real da mensagem retornado pela Evolution API
       // para que o webhook echo seja corretamente deduplicado e não gere registro duplicado.
       let evolutionMsgId = `sys_ai_${Date.now()}`;
+      // Pré-calcular se vai enviar áudio (para pular texto nesse caso)
+      const _lastIn = [...convo.messages].reverse().find((m: any) => m.direction === 'in');
+      const _tts = await this.settings.getTtsConfig();
+      const _willAudio = _tts.enabled && _tts.googleApiKey && !_tts.googleApiKey.startsWith('enc:') && _lastIn?.type === 'audio';
+
+      if (_willAudio) {
+        this.logger.log('[AI] Lead enviou áudio — resposta será apenas por voz (sem texto)');
+      }
+
       try {
         let sendResult: any;
         const evoHeaders = { 'Content-Type': 'application/json', apikey: apiKey };
 
-        // Se a IA ofereceu horários, envia como lista interativa (clicável)
-        if (slotsToOffer?.length) {
+        // Se vai enviar áudio, pula o texto
+        if (_willAudio) {
+          // Não envia texto — será enviado apenas áudio no passo 18 (TTS)
+        } else if (slotsToOffer?.length) {
           const rows = slotsToOffer.map((s: any) => ({
             title: s.label || `${s.date} ${s.time}`,
             description: s.date || 'Horário disponível',
@@ -1776,11 +1787,12 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       );
 
       // 18. TTS — enviar áudio da resposta via Google TTS
-      // Envia áudio quando: TTS habilitado E a última mensagem do lead foi áudio (espelha o formato)
+      // Envia APENAS áudio quando: TTS habilitado E a última mensagem do lead foi áudio
       const lastInbound = [...convo.messages].reverse().find((m: any) => m.direction === 'in');
       const leadSentAudio = lastInbound?.type === 'audio';
       const ttsConfig = await this.settings.getTtsConfig();
       const ttsKeyValid = ttsConfig.enabled && ttsConfig.googleApiKey && !ttsConfig.googleApiKey.startsWith('enc:');
+      const willSendAudio = ttsKeyValid && leadSentAudio;
       if (ttsConfig.enabled && ttsConfig.googleApiKey?.startsWith('enc:')) {
         this.logger.warn('[TTS] API key encriptada — pulando TTS (configure ENCRYPTION_KEY no worker)');
       }
