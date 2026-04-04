@@ -879,21 +879,45 @@ export default function AiSettingsPage() {
                 onChange={(e) => setTtsVoice(e.target.value)}
                 className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
               >
-                <optgroup label="Gemini 2.5 Flash TTS (Recomendado — Natural)">
-                  <option value="Kore">Kore — Feminina (acolhedora)</option>
-                  <option value="Leda">Leda — Feminina (profissional)</option>
-                  <option value="Zephyr">Zephyr — Feminina (suave)</option>
-                  <option value="Puck">Puck — Masculina (amigável)</option>
-                  <option value="Charon">Charon — Masculina (grave)</option>
-                  <option value="Fenrir">Fenrir — Masculina (energético)</option>
-                  <option value="Aoede">Aoede — Feminina (clara)</option>
-                  <option value="Orus">Orus — Masculina (calmo)</option>
+                <optgroup label="Gemini — Suaves e Acolhedoras">
+                  <option value="Sulafat">Sulafat — Quente</option>
+                  <option value="Vindemiatrix">Vindemiatrix — Gentil</option>
+                  <option value="Achernar">Achernar — Suave</option>
+                  <option value="Achird">Achird — Amigável</option>
+                  <option value="Aoede">Aoede — Leve</option>
+                  <option value="Leda">Leda — Jovial</option>
                 </optgroup>
-                <optgroup label="Google Cloud TTS (Legado)">
-                  <option value="pt-BR-Studio-C">pt-BR-Studio-C — Feminina (Studio)</option>
-                  <option value="pt-BR-Studio-B">pt-BR-Studio-B — Masculina (Studio)</option>
-                  <option value="pt-BR-Neural2-A">pt-BR-Neural2-A — Feminina (Neural2)</option>
-                  <option value="pt-BR-Neural2-B">pt-BR-Neural2-B — Masculina (Neural2)</option>
+                <optgroup label="Gemini — Profissionais e Claras">
+                  <option value="Kore">Kore — Firme</option>
+                  <option value="Charon">Charon — Informativo</option>
+                  <option value="Iapetus">Iapetus — Claro</option>
+                  <option value="Erinome">Erinome — Claro</option>
+                  <option value="Schedar">Schedar — Equilibrado</option>
+                  <option value="Sadaltager">Sadaltager — Sábio</option>
+                  <option value="Rasalgethi">Rasalgethi — Informativo</option>
+                </optgroup>
+                <optgroup label="Gemini — Animadas e Energéticas">
+                  <option value="Puck">Puck — Animado</option>
+                  <option value="Zephyr">Zephyr — Brilhante</option>
+                  <option value="Fenrir">Fenrir — Empolgado</option>
+                  <option value="Laomedeia">Laomedeia — Animado</option>
+                  <option value="Sadachbia">Sadachbia — Vivaz</option>
+                  <option value="Autonoe">Autonoe — Brilhante</option>
+                </optgroup>
+                <optgroup label="Gemini — Relaxadas e Casuais">
+                  <option value="Algieba">Algieba — Suave</option>
+                  <option value="Despina">Despina — Suave</option>
+                  <option value="Callirrhoe">Callirrhoe — Tranquilo</option>
+                  <option value="Umbriel">Umbriel — Tranquilo</option>
+                  <option value="Zubenelgenubi">Zubenelgenubi — Casual</option>
+                  <option value="Enceladus">Enceladus — Sussurrante</option>
+                </optgroup>
+                <optgroup label="Gemini — Maduras e Fortes">
+                  <option value="Orus">Orus — Firme</option>
+                  <option value="Alnilam">Alnilam — Firme</option>
+                  <option value="Gacrux">Gacrux — Maduro</option>
+                  <option value="Algenib">Algenib — Grave</option>
+                  <option value="Pulcherrima">Pulcherrima — Projetado</option>
                 </optgroup>
               </select>
               <p className="text-[11px] text-muted-foreground">
