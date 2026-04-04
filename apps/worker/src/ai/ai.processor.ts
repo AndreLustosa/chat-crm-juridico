@@ -1860,8 +1860,8 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
               },
             });
 
-            // Envia via Evolution API como áudio base64 (evita problemas de URL pública)
-            const audioBase64 = `data:audio/ogg;base64,${audioBuffer.toString('base64')}`;
+            // Envia via Evolution API como áudio base64 puro (sem prefixo data:)
+            const audioBase64 = audioBuffer.toString('base64');
             await axios.post(
               `${apiUrl}/message/sendWhatsAppAudio/${instanceName}`,
               { number: convo.lead.phone, audio: audioBase64 },
