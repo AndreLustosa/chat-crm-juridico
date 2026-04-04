@@ -652,7 +652,7 @@ export class MessagesService {
     const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
     const result = await openai.audio.transcriptions.create({
       file,
-      model: 'whisper-1',
+      model: 'gpt-4o-mini-transcribe',
       language: 'pt',
       prompt: 'Transcrição de mensagem de voz do WhatsApp em português brasileiro. O cliente está conversando com um escritório de advocacia sobre questões jurídicas.',
     });
