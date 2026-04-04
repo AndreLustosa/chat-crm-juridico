@@ -879,30 +879,25 @@ export default function AiSettingsPage() {
                 onChange={(e) => setTtsVoice(e.target.value)}
                 className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
               >
-                <optgroup label="Neural2 (Recomendado)">
-                  <option value="pt-BR-Neural2-A">pt-BR-Neural2-A — Feminina</option>
-                  <option value="pt-BR-Neural2-B">pt-BR-Neural2-B — Masculina</option>
-                  <option value="pt-BR-Neural2-C">pt-BR-Neural2-C — Feminina</option>
+                <optgroup label="Gemini 2.5 Flash TTS (Recomendado — Natural)">
+                  <option value="Kore">Kore — Feminina (acolhedora)</option>
+                  <option value="Leda">Leda — Feminina (profissional)</option>
+                  <option value="Zephyr">Zephyr — Feminina (suave)</option>
+                  <option value="Puck">Puck — Masculina (amigável)</option>
+                  <option value="Charon">Charon — Masculina (grave)</option>
+                  <option value="Fenrir">Fenrir — Masculina (energético)</option>
+                  <option value="Aoede">Aoede — Feminina (clara)</option>
+                  <option value="Orus">Orus — Masculina (calmo)</option>
                 </optgroup>
-                <optgroup label="WaveNet">
-                  <option value="pt-BR-Wavenet-A">pt-BR-Wavenet-A — Feminina</option>
-                  <option value="pt-BR-Wavenet-B">pt-BR-Wavenet-B — Masculina</option>
-                  <option value="pt-BR-Wavenet-C">pt-BR-Wavenet-C — Feminina</option>
-                  <option value="pt-BR-Wavenet-D">pt-BR-Wavenet-D — Masculina</option>
-                  <option value="pt-BR-Wavenet-E">pt-BR-Wavenet-E — Feminina</option>
-                </optgroup>
-                <optgroup label="Studio (Premium)">
-                  <option value="pt-BR-Studio-B">pt-BR-Studio-B — Masculina</option>
-                  <option value="pt-BR-Studio-C">pt-BR-Studio-C — Feminina</option>
-                </optgroup>
-                <optgroup label="Standard">
-                  <option value="pt-BR-Standard-A">pt-BR-Standard-A — Feminina</option>
-                  <option value="pt-BR-Standard-B">pt-BR-Standard-B — Masculina</option>
-                  <option value="pt-BR-Standard-C">pt-BR-Standard-C — Feminina</option>
+                <optgroup label="Google Cloud TTS (Legado)">
+                  <option value="pt-BR-Studio-C">pt-BR-Studio-C — Feminina (Studio)</option>
+                  <option value="pt-BR-Studio-B">pt-BR-Studio-B — Masculina (Studio)</option>
+                  <option value="pt-BR-Neural2-A">pt-BR-Neural2-A — Feminina (Neural2)</option>
+                  <option value="pt-BR-Neural2-B">pt-BR-Neural2-B — Masculina (Neural2)</option>
                 </optgroup>
               </select>
               <p className="text-[11px] text-muted-foreground">
-                Teste as vozes em <span className="font-mono text-primary">cloud.google.com/text-to-speech#demo</span>
+                Vozes Gemini são naturais e aceitam instruções de estilo. Teste em <span className="font-mono text-primary">aistudio.google.com</span>
               </p>
             </div>
 

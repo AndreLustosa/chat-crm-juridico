@@ -1834,12 +1834,19 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             .replace(/\*(.*?)\*/g, '$1')
             .trim();
 
-          // Instrução de estilo para voz natural e acolhedora
+          // Detectar se é voz Gemini ou Google Cloud TTS legado
+          const isGeminiVoice = !ttsConfig.voice?.startsWith('pt-BR');
+          const voiceName = isGeminiVoice ? (ttsConfig.voice || 'Kore') : 'Kore';
+
+          if (!isGeminiVoice) {
+            this.logger.log(`[TTS] Voz legada ${ttsConfig.voice} detectada — usando Gemini com voz Kore`);
+          }
+
+          // Instrução de estilo para voz natural
           const styledText = `Fale de forma natural, acolhedora e profissional, como uma atendente real de escritório de advocacia conversando pelo WhatsApp. Tom amigável, sem soar robótica: ${ttsText}`;
 
-          // Gemini 2.5 Flash TTS — voz natural com suporte a instruções de estilo
+          // Gemini 2.5 Flash TTS
           const geminiModel = 'gemini-2.5-flash-preview-tts';
-          const voiceName = ttsConfig.voice?.startsWith('pt-BR') ? 'Kore' : (ttsConfig.voice || 'Kore');
           const ttsRes = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${ttsConfig.googleApiKey}`,
             {
