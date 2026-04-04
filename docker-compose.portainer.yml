@@ -56,8 +56,10 @@ services:
       - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
       - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
     networks:
-      - default
-      - OrionNet
+      default:
+      OrionNet:
+        aliases:
+          - lustosa-minio
     volumes:
       - minio_data:/data
     deploy:
@@ -82,7 +84,7 @@ services:
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
       - PUBLIC_API_URL=${PUBLIC_API_URL:-https://andrelustosaadvogados.com.br/api}
-      - S3_ENDPOINT=${S3_ENDPOINT:-http://lustosaadvogados_minio:9000}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://lustosa-minio:9000}
       - S3_REGION=${S3_REGION:-us-east-1}
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
@@ -131,7 +133,7 @@ services:
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
       - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME}
-      - S3_ENDPOINT=${S3_ENDPOINT:-http://lustosaadvogados_minio:9000}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://lustosa-minio:9000}
       - S3_REGION=us-east-1
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
