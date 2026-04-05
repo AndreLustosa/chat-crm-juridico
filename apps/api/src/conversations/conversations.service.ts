@@ -22,8 +22,12 @@ export class ConversationsService {
     const where: any = {};
     if (status) {
       where.status = status;
+    } else if (clientMode === true) {
+      // Aba Clientes: mostrar TODAS as conversas (inclusive FECHADO)
+      // Clientes que tiveram atendimento encerrado devem continuar visíveis
+      where.status = { notIn: ['ADIADO'] };
     } else {
-      // Por padrão excluir conversas fechadas ou adiadas do inbox principal
+      // Aba Leads: excluir conversas fechadas e adiadas do inbox
       where.status = { notIn: ['FECHADO', 'ADIADO'] };
     }
 
@@ -46,7 +50,7 @@ export class ConversationsService {
     const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
 
     // ─── Filtro por clientMode (modo Leads vs Clientes) ──────────────────
-    // clientMode=true  → clientes (is_client=true)
+    // clientMode=true  → clientes (is_client=true), inclui conversas fechadas
     // clientMode=false → leads em prospecção (is_client=false, excluindo PERDIDO)
     // clientMode=undefined → comportamento legado (excluir apenas PERDIDO)
     if (clientMode === true) {
