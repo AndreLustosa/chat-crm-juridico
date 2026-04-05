@@ -274,6 +274,16 @@ function CreateProcessModal({
   const [lawyers, setLawyers] = useState<{ id: string; name: string | null }[]>([]);
   const [selectedLawyerId, setSelectedLawyerId] = useState('');
 
+  // Sugestões automáticas de leads por correspondência de partes
+  const [suggestedLeads, setSuggestedLeads] = useState<{
+    autora: { id: string; name: string; phone: string; is_client: boolean; score: number }[];
+    rea: { id: string; name: string; phone: string; is_client: boolean; score: number }[];
+    parte_autora: string | null;
+    parte_rea: string | null;
+  } | null>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState(false);
+
   // Submitting
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -307,6 +317,24 @@ function CreateProcessModal({
       .finally(() => { if (!cancelled) setAnalyzingAi(false); });
     return () => { cancelled = true; };
   }, [pub.id, preloadedAnalysis]);
+
+  // Buscar sugestões de leads quando análise terminar (ou pub já tiver partes)
+  useEffect(() => {
+    if (selectedLead || dismissedSuggestions) return;
+    let cancelled = false;
+    setLoadingSuggestions(true);
+    api.get(`/djen/${pub.id}/suggest-leads`)
+      .then(res => {
+        if (cancelled) return;
+        const data = res.data;
+        if ((data.autora?.length > 0 || data.rea?.length > 0)) {
+          setSuggestedLeads(data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingSuggestions(false); });
+    return () => { cancelled = true; };
+  }, [pub.id, analysis, selectedLead, dismissedSuggestions]);
 
   // Debounce lead search
   useEffect(() => {
@@ -461,6 +489,89 @@ function CreateProcessModal({
                 </button>
               </div>
             </div>
+
+            {/* Sugestões automáticas de leads por partes da publicação */}
+            {clientMode === 'search' && !selectedLead && !dismissedSuggestions && suggestedLeads && (suggestedLeads.autora.length > 0 || suggestedLeads.rea.length > 0) && (
+              <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3 space-y-2 mb-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold text-violet-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles size={10} /> Possíveis clientes encontrados
+                  </p>
+                  <button
+                    onClick={() => setDismissedSuggestions(true)}
+                    className="text-[9px] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Ignorar
+                  </button>
+                </div>
+                {suggestedLeads.autora.length > 0 && (
+                  <div>
+                    {suggestedLeads.parte_autora && (
+                      <p className="text-[9px] text-muted-foreground mb-1">Parte autora: <span className="text-foreground/70 font-medium">{suggestedLeads.parte_autora}</span></p>
+                    )}
+                    {suggestedLeads.autora.map(lead => (
+                      <button
+                        key={lead.id}
+                        onClick={() => {
+                          const fullLead: Lead = { id: lead.id, name: lead.name, phone: lead.phone, conversations: [] } as any;
+                          selectLead(fullLead);
+                          setDismissedSuggestions(true);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-violet-500/10 transition-colors text-left"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
+                          <User size={11} className="text-violet-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-semibold text-foreground">{lead.name}</p>
+                          <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
+                        </div>
+                        {lead.is_client && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 shrink-0">CLIENTE</span>
+                        )}
+                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 shrink-0">AUTORA</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {suggestedLeads.rea.length > 0 && (
+                  <div>
+                    {suggestedLeads.parte_rea && (
+                      <p className="text-[9px] text-muted-foreground mb-1">Parte ré: <span className="text-foreground/70 font-medium">{suggestedLeads.parte_rea}</span></p>
+                    )}
+                    {suggestedLeads.rea.map(lead => (
+                      <button
+                        key={lead.id}
+                        onClick={() => {
+                          const fullLead: Lead = { id: lead.id, name: lead.name, phone: lead.phone, conversations: [] } as any;
+                          selectLead(fullLead);
+                          setDismissedSuggestions(true);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-violet-500/10 transition-colors text-left"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+                          <User size={11} className="text-amber-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-semibold text-foreground">{lead.name}</p>
+                          <p className="text-[10px] text-muted-foreground font-mono">{lead.phone}</p>
+                        </div>
+                        {lead.is_client && (
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 shrink-0">CLIENTE</span>
+                        )}
+                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 shrink-0">RÉ</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {clientMode === 'search' && !selectedLead && loadingSuggestions && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/5 border border-violet-500/20 mb-2">
+                <div className="w-3.5 h-3.5 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin shrink-0" />
+                <p className="text-[10px] text-violet-300">Buscando correspondências…</p>
+              </div>
+            )}
 
             {/* Modo: busca de existente */}
             {clientMode === 'search' && (

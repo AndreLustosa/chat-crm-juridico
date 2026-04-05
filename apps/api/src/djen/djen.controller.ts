@@ -96,4 +96,10 @@ export class DjenController {
   analyze(@Param('id') id: string) {
     return this.djenService.analyzePublication(id);
   }
+
+  /** Sugerir leads que correspondam às partes da publicação */
+  @Get(':id/suggest-leads')
+  suggestLeads(@Param('id') id: string, @Request() req: any) {
+    return this.djenService.suggestLeads(id, req.user?.tenant_id);
+  }
 }

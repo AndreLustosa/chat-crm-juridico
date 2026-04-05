@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
@@ -847,6 +847,17 @@ ${pub.conteudo.slice(0, 2000)}`;
       data_prazo: parsed.data_prazo || null,
     };
 
+    // Persistir parte_autora e parte_rea na publicação para matching futuro com leads
+    if (result.parte_autora || result.parte_rea) {
+      await this.prisma.djenPublication.update({
+        where: { id },
+        data: {
+          parte_autora: result.parte_autora || null,
+          parte_rea: result.parte_rea || null,
+        },
+      }).catch(e => this.logger.warn(`[DJEN] Falha ao salvar partes na publicação ${id}: ${e.message}`));
+    }
+
     // Salva insights da análise na memória do lead para enriquecer contexto futuro da IA
     const leadId = (pub.legal_case as any)?.lead?.id;
     if (leadId) {
@@ -907,5 +918,113 @@ ${pub.conteudo.slice(0, 2000)}`;
       });
     }
     this.logger.log(`[DJEN] Análise salva na memória do lead ${leadId}`);
+  }
+
+  // ─── Suggest Leads — Match automático por nome das partes ─────────────────
+
+  /**
+   * Busca leads cujos nomes correspondam às partes (autora/ré) da publicação.
+   * Usa tokenização + unaccent do PostgreSQL para matching robusto de nomes brasileiros.
+   */
+  async suggestLeads(publicationId: string, tenantId?: string): Promise<{
+    autora: { id: string; name: string; phone: string; is_client: boolean; score: number }[];
+    rea: { id: string; name: string; phone: string; is_client: boolean; score: number }[];
+    parte_autora: string | null;
+    parte_rea: string | null;
+  }> {
+    const pub = await this.prisma.djenPublication.findUnique({
+      where: { id: publicationId },
+      select: { parte_autora: true, parte_rea: true },
+    });
+    if (!pub) throw new NotFoundException('Publicação não encontrada.');
+
+    const parteAutora = pub.parte_autora || null;
+    const parteRea = pub.parte_rea || null;
+
+    // Se não há partes extraídas, retorna vazio
+    if (!parteAutora && !parteRea) {
+      return { autora: [], rea: [], parte_autora: null, parte_rea: null };
+    }
+
+    const PARTICLES = new Set(['de', 'da', 'do', 'dos', 'das', 'e', 'em', 'a', 'o', 'as', 'os']);
+
+    const tokenize = (name: string): string[] => {
+      return name
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+        .split(/\s+/)
+        .filter(t => t.length > 1 && !PARTICLES.has(t));
+    };
+
+    const searchByTokens = async (tokens: string[]): Promise<{ id: string; name: string; phone: string; is_client: boolean; score: number }[]> => {
+      if (tokens.length === 0) return [];
+
+      // Montar cláusulas CASE para scoring e WHERE para filtro
+      const caseClauses = tokens.map((_, i) => `CASE WHEN unaccent(lower("name")) ILIKE $${i + 2} THEN 1 ELSE 0 END`).join(' + ');
+      const whereClauses = tokens.map((_, i) => `unaccent(lower("name")) ILIKE $${i + 2}`).join(' OR ');
+      const params: any[] = [tenantId || null, ...tokens.map(t => `%${t}%`)];
+
+      const sql = `
+        SELECT id, name, phone, is_client, (${caseClauses}) as score
+        FROM "Lead"
+        WHERE (CASE WHEN $1::text IS NOT NULL THEN tenant_id = $1 ELSE TRUE END)
+          AND name IS NOT NULL
+          AND length(name) > 2
+          AND (${whereClauses})
+        ORDER BY score DESC, is_client DESC
+        LIMIT 5
+      `;
+
+      try {
+        const rows: any[] = await (this.prisma as any).$queryRawUnsafe(sql, ...params);
+        return rows.map(r => ({
+          id: r.id,
+          name: r.name,
+          phone: r.phone,
+          is_client: r.is_client,
+          score: Number(r.score),
+        }));
+      } catch (e) {
+        // Se unaccent não está disponível, fallback sem acentos
+        this.logger.warn(`[DJEN] suggestLeads SQL falhou (extensão unaccent pode não existir): ${e.message}`);
+        return this.fallbackSearchByTokens(tokens, tenantId);
+      }
+    };
+
+    const [autora, rea] = await Promise.all([
+      parteAutora ? searchByTokens(tokenize(parteAutora)) : Promise.resolve([]),
+      parteRea ? searchByTokens(tokenize(parteRea)) : Promise.resolve([]),
+    ]);
+
+    return { autora, rea, parte_autora: parteAutora, parte_rea: parteRea };
+  }
+
+  /** Fallback caso a extensão unaccent do PostgreSQL não esteja instalada */
+  private async fallbackSearchByTokens(tokens: string[], tenantId?: string): Promise<{ id: string; name: string; phone: string; is_client: boolean; score: number }[]> {
+    if (tokens.length === 0) return [];
+
+    const caseClauses = tokens.map((_, i) => `CASE WHEN lower("name") ILIKE $${i + 2} THEN 1 ELSE 0 END`).join(' + ');
+    const whereClauses = tokens.map((_, i) => `lower("name") ILIKE $${i + 2}`).join(' OR ');
+    const params: any[] = [tenantId || null, ...tokens.map(t => `%${t}%`)];
+
+    const sql = `
+      SELECT id, name, phone, is_client, (${caseClauses}) as score
+      FROM "Lead"
+      WHERE (CASE WHEN $1::text IS NOT NULL THEN tenant_id = $1 ELSE TRUE END)
+        AND name IS NOT NULL
+        AND length(name) > 2
+        AND (${whereClauses})
+      ORDER BY score DESC, is_client DESC
+      LIMIT 5
+    `;
+
+    const rows: any[] = await (this.prisma as any).$queryRawUnsafe(sql, ...params);
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      is_client: r.is_client,
+      score: Number(r.score),
+    }));
   }
 }

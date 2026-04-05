@@ -591,6 +591,8 @@ model DjenPublication {
   viewed_at             DateTime?
   archived              Boolean    @default(false)
   auto_task_id          String?
+  parte_autora          String?
+  parte_rea             String?
   created_at            DateTime   @default(now())
 
   @@index([data_disponibilizacao])
