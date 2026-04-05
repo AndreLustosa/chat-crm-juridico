@@ -20,20 +20,14 @@ export class ConversationsService {
 
   async findAll(status?: string, userId?: string, inboxId?: string, tenantId?: string, clientMode?: boolean) {
     const where: any = {};
+    // Filtro por status explícito (se passado via query param)
     if (status) {
       where.status = status;
-    } else if (clientMode === true) {
-      // Aba Clientes: mostrar TODAS as conversas (inclusive FECHADO)
-      // Clientes que tiveram atendimento encerrado devem continuar visíveis
-      where.status = { notIn: ['ADIADO'] };
-    } else {
-      // Aba Leads: excluir conversas fechadas e adiadas do inbox
-      where.status = { notIn: ['FECHADO', 'ADIADO'] };
     }
+    // Não filtramos mais por conversation.status (FECHADO/ADIADO).
+    // A visibilidade é controlada exclusivamente por lead.stage e lead.is_client.
 
-    // Tenant isolation estrito: todos os registros históricos foram migrados para o
-    // tenant padrão via prisma/migrate-tenant-null.ts em 2026-03-31. Não há mais
-    // registros com tenant_id = null que pertençam a tenants reais.
+    // Tenant isolation
     if (tenantId) {
       where.tenant_id = tenantId;
     }
@@ -50,16 +44,16 @@ export class ConversationsService {
     const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
 
     // ─── Filtro por clientMode (modo Leads vs Clientes) ──────────────────
-    // clientMode=true  → clientes (is_client=true), inclui conversas fechadas
-    // clientMode=false → leads em prospecção (is_client=false, excluindo PERDIDO)
-    // clientMode=undefined → comportamento legado (excluir apenas PERDIDO)
+    // Visibilidade controlada por lead.stage e lead.is_client:
+    //   - Aba Leads (clientMode=false): is_client=false, exclui FINALIZADO e PERDIDO
+    //   - Aba Clientes (clientMode=true): is_client=true (todos os clientes)
+    //   - Legado (clientMode=undefined): exclui apenas PERDIDO
     if (clientMode === true) {
       where.lead = { is_client: true };
     } else if (clientMode === false) {
-      where.lead = { is_client: false, stage: { not: 'PERDIDO' } };
+      where.lead = { is_client: false, stage: { notIn: ['PERDIDO', 'FINALIZADO'] } };
     } else {
-      // Legado: excluir apenas PERDIDO
-      where.lead = { stage: { not: 'PERDIDO' } };
+      where.lead = { stage: { notIn: ['PERDIDO', 'FINALIZADO'] } };
     }
 
     // ─── Controle de acesso por role ────────────────────────────────────
@@ -621,7 +615,7 @@ export class ConversationsService {
   }
 
   async countOpen(userId?: string): Promise<number> {
-    const where: any = { status: { not: 'FECHADO' } };
+    const where: any = { lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO'] }, is_client: false } };
     if (userId) {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
