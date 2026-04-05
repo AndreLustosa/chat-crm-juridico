@@ -418,6 +418,18 @@ export class DjenService {
           this.notifyLeadAboutMovement(pub, legalCase, tipoComunicacao, numeroProcesso, dataDisp).catch(e =>
             this.logger.warn(`[DJEN] Falha ao notificar lead: ${e.message}`),
           );
+
+          // ─── Atualizar memória da IA com a nova publicação ─────────
+          if (legalCase.lead?.id) {
+            this.saveAnalysisToMemory(legalCase.lead.id, pub, {
+              resumo: `${tipoComunicacao || 'Publicação'}${assunto ? ': ' + assunto : ''}`,
+              estagio_sugerido: null,
+              juizo: null,
+              parte_autora: pub.parte_autora || null,
+              parte_rea: pub.parte_rea || null,
+              urgencia: 'NORMAL',
+            }).catch(e => this.logger.warn(`[DJEN] Falha ao atualizar memória do lead: ${e.message}`));
+          }
         }
       } catch (e) {
         this.logger.error(`[DJEN] Erro ao salvar publicação: ${e}`);
@@ -708,6 +720,18 @@ export class DjenService {
       },
     });
 
+    // ─── Atualizar memória da IA com dados do processo e publicação ─────────
+    this.initializeProcessMemory(lead.id, {
+      caseNumber: pub.numero_processo,
+      legalArea: resolvedLegalArea,
+      trackingStage: finalTrackingStage,
+      tipoComunicacao: pub.tipo_comunicacao,
+      assunto: pub.assunto,
+      parteAutora: pub.parte_autora,
+      parteRea: pub.parte_rea,
+      dataDisponibilizacao: pub.data_disponibilizacao,
+    }).catch(e => this.logger.warn(`[DJEN] Falha ao inicializar memória do lead ${lead.id}: ${e.message}`));
+
     this.logger.log(
       `[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id} | ` +
       `lead=${lead.id} convertido em cliente | stage=${finalTrackingStage}`,
@@ -928,6 +952,105 @@ ${pub.conteudo.slice(0, 2000)}`;
       });
     }
     this.logger.log(`[DJEN] Análise salva na memória do lead ${leadId}`);
+  }
+
+  // ─── Inicializar/atualizar memória da IA com dados do processo ────────────
+
+  /**
+   * Atualiza a AiMemory do lead com informações do processo DJEN.
+   * Preenche campos estruturados (case, parties, facts.timeline, djen_publications)
+   * para que a Sophia tenha contexto sobre o processo do cliente.
+   */
+  private async initializeProcessMemory(leadId: string, data: {
+    caseNumber: string;
+    legalArea: string;
+    trackingStage: string;
+    tipoComunicacao?: string | null;
+    assunto?: string | null;
+    parteAutora?: string | null;
+    parteRea?: string | null;
+    dataDisponibilizacao?: Date | null;
+  }): Promise<void> {
+    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } });
+    let facts: any = {};
+    try {
+      facts = existing?.facts_json
+        ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json)
+        : {};
+    } catch { facts = {}; }
+
+    // Atualizar dados do caso
+    facts.case = facts.case || {};
+    facts.case.area = facts.case.area || this.normalizeAreaForMemory(data.legalArea);
+    facts.case.status = 'processo_ativo';
+    facts.case.case_number = data.caseNumber;
+    facts.case.tracking_stage = data.trackingStage;
+    if (!facts.case.summary) {
+      facts.case.summary = `Processo nº ${data.caseNumber} — ${this.normalizeAreaForMemory(data.legalArea)}`;
+    }
+
+    // Atualizar partes
+    if (data.parteAutora || data.parteRea) {
+      facts.parties = facts.parties || {};
+      if (data.parteAutora && !facts.parties.client_role) facts.parties.client_role = 'Parte autora';
+      if (data.parteRea && !facts.parties.counterparty_name) facts.parties.counterparty_name = data.parteRea;
+    }
+
+    // Adicionar timeline
+    facts.facts = facts.facts || {};
+    facts.facts.timeline = facts.facts.timeline || [];
+    const dateStr = data.dataDisponibilizacao
+      ? new Date(data.dataDisponibilizacao).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    facts.facts.timeline.push({
+      date: dateStr,
+      event: `Processo cadastrado via DJEN — ${data.tipoComunicacao || 'publicação'}${data.assunto ? ': ' + data.assunto : ''}`,
+      origin: 'DJEN',
+    });
+    if (facts.facts.timeline.length > 20) facts.facts.timeline = facts.facts.timeline.slice(-20);
+
+    // Adicionar à lista de publicações DJEN
+    const djenHistory: any[] = facts.djen_publications || [];
+    const pubEntry = {
+      date: dateStr,
+      tipo: data.tipoComunicacao || 'Publicação',
+      assunto: data.assunto || null,
+      resumo: `Processo ${data.caseNumber} cadastrado — ${this.normalizeAreaForMemory(data.legalArea)}`,
+      estagio: data.trackingStage,
+      parte_autora: data.parteAutora || null,
+      parte_rea: data.parteRea || null,
+      urgencia: 'NORMAL',
+    };
+    djenHistory.unshift(pubEntry);
+    if (djenHistory.length > 15) djenHistory.splice(15);
+    facts.djen_publications = djenHistory;
+
+    // Montar summary
+    const summaryLine = `[${dateStr}] Processo ${data.caseNumber} (${this.normalizeAreaForMemory(data.legalArea)}) cadastrado via DJEN. Estágio: ${data.trackingStage}.`;
+    const prevSummary = existing?.summary || '';
+    const newSummary = (summaryLine + (prevSummary ? '\n\n' + prevSummary : '')).slice(0, 2000);
+
+    if (existing) {
+      await this.prisma.aiMemory.update({
+        where: { lead_id: leadId },
+        data: { summary: newSummary, facts_json: facts, last_updated_at: new Date() },
+      });
+    } else {
+      await this.prisma.aiMemory.create({
+        data: { lead_id: leadId, summary: newSummary, facts_json: facts },
+      });
+    }
+    this.logger.log(`[DJEN] Memória da IA inicializada para lead ${leadId} com processo ${data.caseNumber}`);
+  }
+
+  /** Normaliza área jurídica para formato legível */
+  private normalizeAreaForMemory(area: string): string {
+    const map: Record<string, string> = {
+      'CIVIL': 'Cível', 'TRABALHISTA': 'Trabalhista', 'PREVIDENCIARIO': 'Previdenciário',
+      'TRIBUTARIO': 'Tributário', 'FAMILIA': 'Família', 'CRIMINAL': 'Criminal',
+      'CONSUMIDOR': 'Consumidor', 'EMPRESARIAL': 'Empresarial', 'ADMINISTRATIVO': 'Administrativo',
+    };
+    return map[area.toUpperCase()] || area;
   }
 
   // ─── Notificação WhatsApp ao lead sobre movimentação ──────────────────────
