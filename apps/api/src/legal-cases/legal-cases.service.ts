@@ -180,10 +180,14 @@ export class LegalCasesService {
     const conversations = await this.prisma.conversation.findMany({
       where: {
         assigned_lawyer_id: lawyerId,
-        status: 'ABERTO',
-        ...(existingLeadIds.length > 0
-          ? { lead_id: { notIn: existingLeadIds } }
-          : {}),
+        // Apenas leads FINALIZADOS (convertidos em cliente) que ainda não têm caso aberto
+        lead: {
+          stage: 'FINALIZADO',
+          is_client: true,
+          ...(existingLeadIds.length > 0
+            ? { id: { notIn: existingLeadIds } }
+            : {}),
+        },
       },
       include: {
         lead: {
@@ -276,6 +280,28 @@ export class LegalCasesService {
         },
       });
       this.logger.log(`[ARCHIVE] Lead ${legalCase.lead_id} marcado como encerrado`);
+    }
+
+    // Limpar memória da IA: marcar caso como arquivado em facts.cases[]
+    try {
+      const memory = await this.prisma.aiMemory.findUnique({ where: { lead_id: legalCase.lead_id } });
+      if (memory) {
+        const facts: any = (typeof memory.facts_json === 'string' ? JSON.parse(memory.facts_json as string) : memory.facts_json) || {};
+        const cases: any[] = facts.cases || (facts.case ? [facts.case] : []);
+        const caseToArchive = cases.find((c: any) => c.case_number === legalCase.case_number);
+        if (caseToArchive) {
+          caseToArchive.status = 'arquivado';
+          caseToArchive.archive_reason = reason;
+        }
+        facts.cases = cases;
+        facts.case = cases.find((c: any) => c.status !== 'arquivado') || cases[0] || null;
+        await this.prisma.aiMemory.update({
+          where: { lead_id: legalCase.lead_id },
+          data: { facts_json: facts, last_updated_at: new Date() },
+        });
+      }
+    } catch (e: any) {
+      this.logger.warn(`[ARCHIVE] Falha ao limpar memória IA: ${e.message}`);
     }
 
     return legalCase;
@@ -435,31 +461,34 @@ export class LegalCasesService {
     conversationId?: string,
     tenantId?: string,
   ) {
-    // Verifica se já existe um caso para este lead + advogado
-    const existing = await this.prisma.legalCase.findFirst({
-      where: { lead_id: leadId, lawyer_id: lawyerId },
-    });
-    if (existing) return existing; // já existe, não duplica
-
-    const created = await this.create({
-      lead_id: leadId,
-      conversation_id: conversationId,
-      lawyer_id: lawyerId,
-      tenant_id: tenantId,
-    });
-
-    try {
-      const lead = await this.prisma.lead.findUnique({
-        where: { id: leadId },
-        select: { name: true },
+    // Transação para evitar race condition (duplicatas se chamado 2x rapidamente)
+    return this.prisma.$transaction(async (tx) => {
+      // Verifica se já existe um caso para este lead + advogado (dentro da transação)
+      const existing = await tx.legalCase.findFirst({
+        where: { lead_id: leadId, lawyer_id: lawyerId },
       });
-      this.chatGateway.emitNewLegalCase(lawyerId, {
-        caseId: created.id,
-        leadName: lead?.name || 'Contato',
-      });
-    } catch {}
+      if (existing) return existing; // já existe, não duplica
 
-    return created;
+      const created = await this.create({
+        lead_id: leadId,
+        conversation_id: conversationId,
+        lawyer_id: lawyerId,
+        tenant_id: tenantId,
+      });
+
+      try {
+        const lead = await tx.lead.findUnique({
+          where: { id: leadId },
+          select: { name: true },
+        });
+        this.chatGateway.emitNewLegalCase(lawyerId, {
+          caseId: created.id,
+          leadName: lead?.name || 'Contato',
+        });
+      } catch {}
+
+      return created;
+    });
   }
 
   // ─── CADASTRO DIRETO (processo já em andamento, sem WhatsApp) ──
@@ -542,28 +571,8 @@ export class LegalCasesService {
       }
 
     } else {
-      // Caminho C: fallback — lead placeholder (retrocompatibilidade)
-      const placeholderPhone = `PROC_${data.case_number.replace(/\D/g, '')}`;
-      leadDisplayName = data.opposing_party
-        ? `[Processo] ${data.opposing_party}`
-        : `[Processo] ${data.case_number}`;
-
-      let lead = await this.prisma.lead.findFirst({
-        where: { phone: placeholderPhone },
-        select: { id: true },
-      });
-      if (!lead) {
-        lead = await this.prisma.lead.create({
-          data: {
-            phone: placeholderPhone,
-            name: leadDisplayName,
-            tenant_id: data.tenant_id,
-            origin: 'CADASTRO_DIRETO',
-          },
-          select: { id: true },
-        });
-      }
-      leadId = lead.id;
+      // Caminho C: sem lead_id nem lead_phone — exigir informação do cliente
+      throw new BadRequestException('Informe o cliente (lead_id ou telefone) para criar o processo. Não é possível criar processo sem vincular a um contato.');
     }
 
     // Se ADMIN passou override_lawyer_id, usa ele; caso contrário usa o usuário logado
@@ -770,8 +779,12 @@ export class LegalCasesService {
 
     const current = await this.prisma.legalCase.findUnique({
       where: { id },
-      select: { tracking_stage: true, lead_id: true, case_number: true, legal_area: true },
+      select: { tracking_stage: true, lead_id: true, case_number: true, legal_area: true, in_tracking: true },
     });
+
+    if (!current?.in_tracking) {
+      throw new BadRequestException('Este caso ainda não foi enviado para acompanhamento. Use "Enviar para Processos" primeiro.');
+    }
 
     // Dados adicionais para EXECUCAO: valor da condenação + sentença
     const extraData: any = {};
