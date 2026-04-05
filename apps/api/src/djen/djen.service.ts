@@ -720,6 +720,12 @@ export class DjenService {
       },
     });
 
+    // Fechar conversas abertas do lead (sai do painel de atendimento)
+    await this.prisma.conversation.updateMany({
+      where: { lead_id: lead.id, status: 'ABERTO' },
+      data: { status: 'FECHADO', ai_mode: false },
+    });
+
     // ─── Atualizar memória da IA com dados do processo e publicação ─────────
     this.initializeProcessMemory(lead.id, {
       caseNumber: pub.numero_processo,
@@ -979,17 +985,37 @@ ${pub.conteudo.slice(0, 2000)}`;
         : {};
     } catch { facts = {}; }
 
-    // Atualizar dados do caso
-    facts.case = facts.case || {};
-    facts.case.area = facts.case.area || this.normalizeAreaForMemory(data.legalArea);
-    facts.case.status = 'processo_ativo';
-    facts.case.case_number = data.caseNumber;
-    facts.case.tracking_stage = data.trackingStage;
-    if (!facts.case.summary) {
-      facts.case.summary = `Processo nº ${data.caseNumber} — ${this.normalizeAreaForMemory(data.legalArea)}`;
+    // ─── Migrar facts.case (singular) para facts.cases (array) se necessário ──
+    if (facts.case && !facts.cases) {
+      facts.cases = [facts.case];
+      delete facts.case;
+    }
+    facts.cases = facts.cases || [];
+
+    // Verificar se este processo já existe na memória (evitar duplicata)
+    const existingCase = facts.cases.find((c: any) => c.case_number === data.caseNumber);
+    if (existingCase) {
+      // Atualizar processo existente
+      existingCase.tracking_stage = data.trackingStage;
+      existingCase.status = 'processo_ativo';
+      if (data.parteRea && !existingCase.opposing_party) existingCase.opposing_party = data.parteRea;
+    } else {
+      // Adicionar novo processo
+      facts.cases.push({
+        case_number: data.caseNumber,
+        area: this.normalizeAreaForMemory(data.legalArea),
+        status: 'processo_ativo',
+        tracking_stage: data.trackingStage,
+        summary: `Processo nº ${data.caseNumber} — ${this.normalizeAreaForMemory(data.legalArea)}`,
+        opposing_party: data.parteRea || null,
+        client_role: data.parteAutora ? 'Parte autora' : null,
+      });
     }
 
-    // Atualizar partes
+    // Manter compatibilidade: facts.case aponta para o mais recente (IA legada)
+    facts.case = facts.cases[facts.cases.length - 1];
+
+    // Atualizar partes do caso mais recente
     if (data.parteAutora || data.parteRea) {
       facts.parties = facts.parties || {};
       if (data.parteAutora && !facts.parties.client_role) facts.parties.client_role = 'Parte autora';
@@ -1004,7 +1030,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       : new Date().toISOString().slice(0, 10);
     facts.facts.timeline.push({
       date: dateStr,
-      event: `Processo cadastrado via DJEN — ${data.tipoComunicacao || 'publicação'}${data.assunto ? ': ' + data.assunto : ''}`,
+      event: `Processo ${data.caseNumber} cadastrado via DJEN — ${data.tipoComunicacao || 'publicação'}${data.assunto ? ': ' + data.assunto : ''}`,
       origin: 'DJEN',
     });
     if (facts.facts.timeline.length > 20) facts.facts.timeline = facts.facts.timeline.slice(-20);
@@ -1026,7 +1052,10 @@ ${pub.conteudo.slice(0, 2000)}`;
     facts.djen_publications = djenHistory;
 
     // Montar summary
-    const summaryLine = `[${dateStr}] Processo ${data.caseNumber} (${this.normalizeAreaForMemory(data.legalArea)}) cadastrado via DJEN. Estágio: ${data.trackingStage}.`;
+    const casesCount = facts.cases.length;
+    const summaryLine = casesCount > 1
+      ? `[${dateStr}] ${casesCount} processos ativos. Último: ${data.caseNumber} (${this.normalizeAreaForMemory(data.legalArea)}) — ${data.trackingStage}.`
+      : `[${dateStr}] Processo ${data.caseNumber} (${this.normalizeAreaForMemory(data.legalArea)}) cadastrado via DJEN. Estágio: ${data.trackingStage}.`;
     const prevSummary = existing?.summary || '';
     const newSummary = (summaryLine + (prevSummary ? '\n\n' + prevSummary : '')).slice(0, 2000);
 
@@ -1040,7 +1069,7 @@ ${pub.conteudo.slice(0, 2000)}`;
         data: { lead_id: leadId, summary: newSummary, facts_json: facts },
       });
     }
-    this.logger.log(`[DJEN] Memória da IA inicializada para lead ${leadId} com processo ${data.caseNumber}`);
+    this.logger.log(`[DJEN] Memória da IA atualizada para lead ${leadId} — ${facts.cases.length} processo(s), último: ${data.caseNumber}`);
   }
 
   /** Normaliza área jurídica para formato legível */

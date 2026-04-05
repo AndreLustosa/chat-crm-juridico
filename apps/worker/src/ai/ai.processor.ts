@@ -970,15 +970,30 @@ export class AiProcessor extends WorkerHost {
           if (leadParts.length) parts.push(`👤 Dados do Lead: ${leadParts.join(' | ')}`);
         }
         // Caso
-        if (factsJson?.case) {
-          const c = factsJson.case;
+        // Suporte a múltiplos processos (facts.cases[]) + backward compat (facts.case)
+        const allCases: any[] = factsJson?.cases || (factsJson?.case ? [factsJson.case] : []);
+        if (allCases.length === 1) {
+          const c = allCases[0];
           const caseParts: string[] = [];
+          if (c.case_number) caseParts.push(`Nº: ${c.case_number}`);
           if (c.area) caseParts.push(`Área: ${c.area}`);
-          if (c.subarea) caseParts.push(`Subárea: ${c.subarea}`);
+          if (c.tracking_stage) caseParts.push(`Estágio: ${c.tracking_stage}`);
           if (c.status) caseParts.push(`Status: ${c.status}`);
           if (c.summary) caseParts.push(`Resumo: ${c.summary}`);
+          if (c.opposing_party) caseParts.push(`Parte contrária: ${c.opposing_party}`);
+          if (c.subarea) caseParts.push(`Subárea: ${c.subarea}`);
           if (c.tags?.length) caseParts.push(`Tags: ${c.tags.join(', ')}`);
-          if (caseParts.length) parts.push(`⚖️ Caso: ${caseParts.join(' | ')}`);
+          if (caseParts.length) parts.push(`⚖️ Processo: ${caseParts.join(' | ')}`);
+        } else if (allCases.length > 1) {
+          const caseLines = allCases.map((c: any, i: number) => {
+            const p: string[] = [];
+            if (c.case_number) p.push(`Nº: ${c.case_number}`);
+            if (c.area) p.push(c.area);
+            if (c.tracking_stage) p.push(`Estágio: ${c.tracking_stage}`);
+            if (c.opposing_party) p.push(`vs ${c.opposing_party}`);
+            return `  ${i + 1}. ${p.join(' | ')}`;
+          });
+          parts.push(`⚖️ Processos (${allCases.length}):\n${caseLines.join('\n')}`);
         }
         // Partes
         if (factsJson?.parties) {
