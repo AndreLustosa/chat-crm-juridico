@@ -37,7 +37,7 @@ interface LegalCase {
     email: string | null;
     profile_picture_url: string | null;
   };
-  _count?: { tasks: number; events: number };
+  _count?: { tasks: number; events: number; petitions?: number };
 }
 
 interface IncomingLead {
@@ -89,6 +89,18 @@ interface Intern {
   name: string;
 }
 
+interface Petition {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  template_id: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: { id: string; name: string };
+  _count: { versions: number };
+}
+
 // ─── Constants ────────────────────────────────────────────────
 
 const EVENT_TYPES = [
@@ -110,6 +122,22 @@ const PRIORITIES = [
   { id: 'NORMAL',  label: 'Normal',  color: '#f59e0b', bg: 'bg-amber-500/12', text: 'text-amber-400', border: 'border-amber-500/20' },
   { id: 'BAIXA',   label: 'Baixa',   color: '#6b7280', bg: 'bg-gray-500/12', text: 'text-gray-400', border: 'border-gray-500/20' },
 ];
+
+const PETITION_TYPES: Record<string, { label: string; color: string; bg: string; text: string; border: string }> = {
+  INICIAL:       { label: 'Inicial',       color: '#3b82f6', bg: 'bg-blue-500/12',   text: 'text-blue-400',   border: 'border-blue-500/20'   },
+  CONTESTACAO:   { label: 'Contestação',   color: '#ef4444', bg: 'bg-red-500/12',    text: 'text-red-400',    border: 'border-red-500/20'    },
+  REPLICA:       { label: 'Réplica',       color: '#a855f7', bg: 'bg-purple-500/12', text: 'text-purple-400', border: 'border-purple-500/20' },
+  RECURSO:       { label: 'Recurso',       color: '#f97316', bg: 'bg-orange-500/12', text: 'text-orange-400', border: 'border-orange-500/20' },
+  MANIFESTACAO:  { label: 'Manifestação',  color: '#14b8a6', bg: 'bg-teal-500/12',   text: 'text-teal-400',   border: 'border-teal-500/20'   },
+  OUTRO:         { label: 'Outro',         color: '#6b7280', bg: 'bg-gray-500/12',   text: 'text-gray-400',   border: 'border-gray-500/20'   },
+};
+
+const PETITION_STATUSES: Record<string, { label: string; color: string; bg: string; text: string; border: string }> = {
+  RASCUNHO:    { label: 'Rascunho',    color: '#6b7280', bg: 'bg-gray-500/12',   text: 'text-gray-400',   border: 'border-gray-500/20'   },
+  EM_REVISAO:  { label: 'Em Revisão',  color: '#eab308', bg: 'bg-yellow-500/12', text: 'text-yellow-400', border: 'border-yellow-500/20' },
+  APROVADA:    { label: 'Aprovada',    color: '#22c55e', bg: 'bg-green-500/12',  text: 'text-green-400',  border: 'border-green-500/20'  },
+  PROTOCOLADA: { label: 'Protocolada', color: '#3b82f6', bg: 'bg-blue-500/12',   text: 'text-blue-400',   border: 'border-blue-500/20'   },
+};
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -265,6 +293,11 @@ function CaseCard({
               <FileText size={10} /> {legalCase._count?.events}
             </span>
           )}
+          {(legalCase._count?.petitions ?? 0) > 0 && (
+            <span className="flex items-center gap-0.5">
+              <Gavel size={10} /> {legalCase._count?.petitions}
+            </span>
+          )}
         </div>
         {/* Tempo na etapa */}
         {stageDays && (
@@ -300,7 +333,7 @@ function CaseDetailPanel({
   globalNotify?: boolean;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'info' | 'tasks' | 'events'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'tasks' | 'events' | 'petitions'>('info');
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -349,6 +382,14 @@ function CaseDetailPanel({
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventUrl, setNewEventUrl] = useState('');
 
+  // Petitions
+  const [petitions, setPetitions] = useState<Petition[]>([]);
+  const [loadingPetitions, setLoadingPetitions] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [, setReviewAction] = useState<'APROVAR' | 'DEVOLVER' | null>(null);
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
+
   // Sync fields when legalCase changes externally
   useEffect(() => {
     setStage(legalCase.stage);
@@ -383,11 +424,24 @@ function CaseDetailPanel({
     } catch {}
   }, [legalCase.lawyer_id]);
 
+  const fetchPetitions = useCallback(async () => {
+    setLoadingPetitions(true);
+    try {
+      const res = await api.get(`/petitions/case/${legalCase.id}`);
+      setPetitions(res.data || []);
+    } catch {} finally { setLoadingPetitions(false); }
+  }, [legalCase.id]);
+
   useEffect(() => {
     fetchTasks();
     fetchEvents();
     fetchInterns();
   }, [fetchTasks, fetchEvents, fetchInterns]);
+
+  // Fetch petitions when tab is selected
+  useEffect(() => {
+    if (activeTab === 'petitions') fetchPetitions();
+  }, [activeTab, fetchPetitions]);
 
   // ─── Save info (BUG FIX: não fecha o painel + salva todos os campos) ───
 
@@ -575,6 +629,18 @@ function CaseDetailPanel({
     } catch {}
   };
 
+  // Review petition (approve or return)
+  const handleReviewPetition = async (petitionId: string, action: 'APROVAR' | 'DEVOLVER', notes?: string) => {
+    setSubmittingReview(true);
+    try {
+      await api.post(`/petitions/${petitionId}/review`, { action, notes: notes || undefined });
+      setReviewingId(null);
+      setReviewAction(null);
+      setReviewNotes('');
+      fetchPetitions();
+    } catch {} finally { setSubmittingReview(false); }
+  };
+
   const openInChat = () => {
     if (legalCase.conversation_id) {
       sessionStorage.setItem('crm_open_conv', legalCase.conversation_id);
@@ -625,7 +691,7 @@ function CaseDetailPanel({
 
         {/* Tabs */}
         <div className="flex border-b border-border shrink-0">
-          {(['info', 'tasks', 'events'] as const).map(tab => (
+          {(['info', 'tasks', 'events', 'petitions'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -635,7 +701,7 @@ function CaseDetailPanel({
                   : 'text-muted-foreground border-transparent hover:text-foreground'
               }`}
             >
-              {tab === 'info' ? 'Informações' : tab === 'tasks' ? `Tarefas (${tasks.length})` : `Eventos (${events.length})`}
+              {tab === 'info' ? 'Informações' : tab === 'tasks' ? `Tarefas (${tasks.length})` : tab === 'events' ? `Eventos (${events.length})` : `Petições${petitions.length > 0 ? ` (${petitions.length})` : ''}`}
             </button>
           ))}
         </div>
@@ -1134,6 +1200,129 @@ function CaseDetailPanel({
                             <ExternalLink size={9} /> Ver referência
                           </a>
                         )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── PETITIONS TAB ─── */}
+          {activeTab === 'petitions' && (
+            <div className="p-5 space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText size={12} /> Petições do Caso
+                </h3>
+                <button
+                  onClick={() => router.push(`/atendimento/workspace/${legalCase.id}?tab=peticoes`)}
+                  className="text-[11px] font-semibold text-primary hover:text-primary/80 flex items-center gap-1"
+                >
+                  <ExternalLink size={12} /> Abrir Workspace
+                </button>
+              </div>
+
+              {loadingPetitions ? (
+                <div className="text-center py-8 text-muted-foreground text-sm animate-pulse">Carregando petições…</div>
+              ) : petitions.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-[12px]">Nenhuma petição</div>
+              ) : (
+                <div className="space-y-2">
+                  {petitions.map(petition => {
+                    const typeInfo = PETITION_TYPES[petition.type] ?? PETITION_TYPES.OUTRO;
+                    const statusInfo = PETITION_STATUSES[petition.status] ?? PETITION_STATUSES.RASCUNHO;
+                    const isReviewing = reviewingId === petition.id;
+
+                    return (
+                      <div key={petition.id} className="border border-border rounded-xl overflow-hidden">
+                        <div className="p-3 hover:bg-accent/20 transition-colors">
+                          {/* Title + badges */}
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <h4 className="text-[13px] font-semibold text-foreground flex-1 min-w-0 truncate">{petition.title}</h4>
+                            <button
+                              onClick={() => router.push(`/atendimento/workspace/${legalCase.id}?tab=peticoes`)}
+                              className="shrink-0 text-[10px] font-semibold text-primary hover:text-primary/80 px-2 py-1 rounded-md border border-primary/20 hover:bg-primary/5 transition-colors"
+                            >
+                              Abrir
+                            </button>
+                          </div>
+
+                          {/* Type + Status badges */}
+                          <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${typeInfo.bg} ${typeInfo.text} ${typeInfo.border}`}>
+                              {typeInfo.label}
+                            </span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusInfo.bg} ${statusInfo.text} ${statusInfo.border}`}>
+                              {statusInfo.label}
+                            </span>
+                          </div>
+
+                          {/* Meta info */}
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                            <span className="flex items-center gap-0.5">
+                              <User size={9} /> {petition.created_by?.name || 'Desconhecido'}
+                            </span>
+                            <span className="flex items-center gap-0.5">
+                              <Clock size={9} /> {timeAgo(petition.updated_at)}
+                            </span>
+                            {petition._count?.versions > 0 && (
+                              <span className="flex items-center gap-0.5">
+                                <FileText size={9} /> {petition._count.versions} {petition._count.versions === 1 ? 'versão' : 'versões'}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Review actions for EM_REVISAO petitions */}
+                          {petition.status === 'EM_REVISAO' && (
+                            <div className="mt-3 pt-2 border-t border-border/50">
+                              {!isReviewing ? (
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleReviewPetition(petition.id, 'APROVAR')}
+                                    disabled={submittingReview}
+                                    className="flex-1 py-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 border border-green-500/25 rounded-lg hover:bg-green-500/25 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                                  >
+                                    <CheckCircle2 size={11} /> Aprovar
+                                  </button>
+                                  <button
+                                    onClick={() => { setReviewingId(petition.id); setReviewAction('DEVOLVER'); setReviewNotes(''); }}
+                                    className="flex-1 py-1.5 text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded-lg hover:bg-amber-500/25 transition-colors flex items-center justify-center gap-1"
+                                  >
+                                    <ArrowDown size={11} /> Devolver
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  <textarea
+                                    value={reviewNotes}
+                                    onChange={e => setReviewNotes(e.target.value)}
+                                    rows={2}
+                                    className="w-full px-3 py-2 text-[12px] bg-card border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500/40 resize-none"
+                                    placeholder="Observações para devolução…"
+                                    autoFocus
+                                  />
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => handleReviewPetition(petition.id, 'DEVOLVER', reviewNotes)}
+                                      disabled={submittingReview || !reviewNotes.trim()}
+                                      className="flex-1 py-1.5 text-[11px] font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-1 transition-opacity"
+                                    >
+                                      {submittingReview ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+                                      Devolver com Notas
+                                    </button>
+                                    <button
+                                      onClick={() => { setReviewingId(null); setReviewAction(null); setReviewNotes(''); }}
+                                      className="px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground border border-border rounded-lg transition-colors"
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}

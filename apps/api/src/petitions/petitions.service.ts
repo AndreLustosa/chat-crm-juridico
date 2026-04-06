@@ -236,6 +236,56 @@ export class PetitionsService {
     }
   }
 
+  /**
+   * Review de petição pelo advogado: aprovar ou devolver com notas.
+   */
+  async reviewPetition(
+    petitionId: string,
+    action: 'APROVAR' | 'DEVOLVER',
+    notes: string | undefined,
+    reviewerId: string,
+    tenantId?: string,
+  ) {
+    const petition = await this.verifyPetitionAccess(petitionId, tenantId);
+
+    if (action === 'APROVAR') {
+      if (petition.status !== 'EM_REVISAO') {
+        throw new BadRequestException('Só é possível aprovar petições em revisão');
+      }
+      const result = await this.prisma.casePetition.update({
+        where: { id: petitionId },
+        data: {
+          status: 'APROVADA',
+          review_notes: notes || null,
+          reviewed_by_id: reviewerId,
+          reviewed_at: new Date(),
+        },
+        select: { id: true, status: true, review_notes: true, updated_at: true },
+      });
+
+      this.appendPetitionToMemory(petition, 'APROVADA').catch(err =>
+        this.logger.warn(`[MEMORY] Falha ao registrar petição na memória: ${err}`),
+      );
+
+      return result;
+    }
+
+    // DEVOLVER
+    if (petition.status !== 'EM_REVISAO') {
+      throw new BadRequestException('Só é possível devolver petições em revisão');
+    }
+    return this.prisma.casePetition.update({
+      where: { id: petitionId },
+      data: {
+        status: 'RASCUNHO',
+        review_notes: notes || null,
+        reviewed_by_id: reviewerId,
+        reviewed_at: new Date(),
+      },
+      select: { id: true, status: true, review_notes: true, updated_at: true },
+    });
+  }
+
   async saveVersion(
     petitionId: string,
     userId: string,

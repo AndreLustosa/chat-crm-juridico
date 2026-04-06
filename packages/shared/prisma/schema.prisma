@@ -67,6 +67,7 @@ model User {
   uploaded_documents       CaseDocument[]         @relation("DocumentUploader")
   created_deadlines        CaseDeadline[]         @relation("DeadlineCreator")
   authored_petitions       CasePetition[]         @relation("PetitionAuthor")
+  reviewed_petitions       CasePetition[]         @relation("PetitionReviewer")
   saved_versions           PetitionVersion[]      @relation("VersionSaver")
   created_templates        LegalTemplate[]        @relation("TemplateCreator")
   ai_chats                 AiChat[]               @relation("AiChatOwner")
@@ -909,20 +910,26 @@ model CasePetition {
   created_by_id String
   title         String
   type          String // INICIAL, CONTESTACAO, REPLICA, EMBARGOS, RECURSO, MANIFESTACAO, OUTRO
-  status        String   @default("RASCUNHO") // RASCUNHO, EM_REVISAO, APROVADA, PROTOCOLADA
-  content_json  Json? // Tiptap JSON (editor state)
-  content_html  String? // HTML renderizado (para export)
-  template_id   String? // Se gerada a partir de template
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  status         String   @default("RASCUNHO") // RASCUNHO, EM_REVISAO, APROVADA, PROTOCOLADA
+  content_json   Json? // Tiptap JSON (editor state)
+  content_html   String? // HTML renderizado (para export)
+  template_id    String? // Se gerada a partir de template
+  deadline_at    DateTime? // Prazo para conclusão da peça
+  review_notes   String? // Observações do advogado na revisão
+  reviewed_by_id String? // Quem revisou
+  reviewed_at    DateTime? // Quando revisou
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
-  legal_case LegalCase         @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
-  created_by User              @relation("PetitionAuthor", fields: [created_by_id], references: [id])
-  template   LegalTemplate?    @relation(fields: [template_id], references: [id], onDelete: SetNull)
-  tenant     Tenant?           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  versions   PetitionVersion[]
+  legal_case  LegalCase         @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
+  created_by  User              @relation("PetitionAuthor", fields: [created_by_id], references: [id])
+  reviewed_by User?             @relation("PetitionReviewer", fields: [reviewed_by_id], references: [id])
+  template    LegalTemplate?    @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  tenant      Tenant?           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  versions    PetitionVersion[]
 
   @@index([legal_case_id, status])
+  @@index([created_by_id, status])
 }
 
 model PetitionVersion {

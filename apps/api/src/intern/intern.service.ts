@@ -140,4 +140,71 @@ export class InternService {
       },
     };
   }
+
+  /**
+   * Kanban board de petições do estagiário: agrupa por status.
+   */
+  async getKanbanDashboard(userId: string, tenantId?: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        name: true,
+        supervisors: { select: { id: true, name: true } },
+      },
+    });
+
+    const petitions = await (this.prisma as any).casePetition.findMany({
+      where: {
+        created_by_id: userId,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      include: {
+        legal_case: {
+          select: {
+            id: true,
+            case_number: true,
+            legal_area: true,
+            stage: true,
+            lead: { select: { id: true, name: true, phone: true } },
+            lawyer: { select: { id: true, name: true } },
+          },
+        },
+        reviewed_by: { select: { id: true, name: true } },
+        _count: { select: { versions: true } },
+      },
+      orderBy: [{ deadline_at: 'asc' }, { updated_at: 'desc' }],
+    });
+
+    const columns: Record<string, any[]> = {
+      RASCUNHO: [],
+      EM_REVISAO: [],
+      APROVADA: [],
+      PROTOCOLADA: [],
+    };
+
+    for (const p of petitions) {
+      const col = columns[p.status];
+      if (col) col.push(p);
+    }
+
+    // Stats
+    const total = petitions.length;
+    const approved = petitions.filter((p: any) => ['APROVADA', 'PROTOCOLADA'].includes(p.status)).length;
+    const correctionsCount = columns.RASCUNHO.filter((p: any) => (p._count?.versions || 0) > 0).length;
+
+    return {
+      internName: user?.name || '',
+      supervisors: user?.supervisors || [],
+      columns,
+      stats: {
+        total,
+        rascunho: columns.RASCUNHO.length,
+        emRevisao: columns.EM_REVISAO.length,
+        aprovada: columns.APROVADA.length,
+        protocolada: columns.PROTOCOLADA.length,
+        correctionsCount,
+        approvalRate: total > 0 ? Math.round((approved / total) * 100) : 0,
+      },
+    };
+  }
 }

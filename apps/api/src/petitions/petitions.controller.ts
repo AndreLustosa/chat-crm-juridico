@@ -246,6 +246,15 @@ export class PetitionsController {
     return this.service.findVersions(id, req.user.tenant_id);
   }
 
+  @Post(':id/review')
+  review(
+    @Param('id') id: string,
+    @Body() body: { action: 'APROVAR' | 'DEVOLVER'; notes?: string },
+    @Request() req: any,
+  ) {
+    return this.service.reviewPetition(id, body.action, body.notes, req.user.id, req.user.tenant_id);
+  }
+
   @Delete(':id')
   remove(
     @Param('id') id: string,

@@ -11,4 +11,9 @@ export class InternController {
   getDashboard(@Request() req: any) {
     return this.internService.getDashboard(req.user.id, req.user?.tenant_id);
   }
+
+  @Get('kanban')
+  getKanban(@Request() req: any) {
+    return this.internService.getKanbanDashboard(req.user.id, req.user?.tenant_id);
+  }
 }
