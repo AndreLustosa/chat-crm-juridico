@@ -1249,7 +1249,7 @@ export default function AdvogadoPage() {
     api.get('/calendar/events', { params: { start: new Date(Date.now() - 30 * 86400000).toISOString(), end: in7d, showAll: 'true' } })
       .then(r => {
         const items = (r.data || []).filter((e: any) =>
-          ['AGENDADO', 'CONFIRMADO'].includes(e.status) && ['TAREFA', 'PRAZO'].includes(e.type)
+          ['AGENDADO', 'CONFIRMADO'].includes(e.status) && e.type === 'PRAZO'
         );
         setDeadlines(items.sort((a: any, b: any) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()).slice(0, 50));
       })
@@ -1584,7 +1584,7 @@ export default function AdvogadoPage() {
                 >
                   <ChevronRight size={14} className={`transition-transform ${showDeadlines ? 'rotate-90' : ''}`} />
                   <Clock size={13} />
-                  Prazos e Petições ({deadlines.length})
+                  Prazos Processuais ({deadlines.length})
                 </button>
                 {showDeadlines && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
