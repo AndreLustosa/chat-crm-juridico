@@ -20,8 +20,10 @@ export class AuthService {
   }
 
   async login(user: any) {
-    // Multi-role: roles é array. Backward compat: aceita role (string) ou roles (array)
-    const roles: string[] = Array.isArray(user.roles) ? user.roles : (user.role ? [user.role] : ['OPERADOR']);
+    // Multi-role: roles é array. Fallback se vazio ou ausente.
+    const roles: string[] = (Array.isArray(user.roles) && user.roles.length > 0)
+      ? user.roles
+      : (user.role ? [user.role] : ['OPERADOR']);
     const payload = { email: user.email, sub: user.id, roles, tenant_id: user.tenant_id };
     return {
       access_token: this.jwtService.sign(payload),
@@ -30,7 +32,9 @@ export class AuthService {
   }
 
   async generateMcpToken(user: any) {
-    const roles: string[] = Array.isArray(user.roles) ? user.roles : (user.role ? [user.role] : ['OPERADOR']);
+    const roles: string[] = (Array.isArray(user.roles) && user.roles.length > 0)
+      ? user.roles
+      : (user.role ? [user.role] : ['OPERADOR']);
     const payload = { email: user.email, sub: user.id, roles, tenant_id: user.tenant_id };
     const mcp_token = this.jwtService.sign(payload, { expiresIn: '365d' });
     return { mcp_token };

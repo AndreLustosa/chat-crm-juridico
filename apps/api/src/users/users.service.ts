@@ -96,13 +96,16 @@ export class UsersService {
     return result as any;
   }
 
-  async update(id: string, data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }, tenantId?: string): Promise<Omit<User, 'password_hash'>> {
+  async update(id: string, data: { name?: string; email?: string; role?: string; roles?: string[]; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }, tenantId?: string): Promise<Omit<User, 'password_hash'>> {
     await this.verifyTenantOwnership(id, tenantId);
     const updateData: Prisma.UserUpdateInput = {};
     if (data.name) updateData.name = data.name;
     if (data.email) updateData.email = data.email;
-    if (data.role) {
-      (updateData as any).roles = [data.role];
+    // Multi-role: aceita roles[] (array) OU role (string legado)
+    if (data.roles && data.roles.length > 0) {
+      (updateData as any).roles = { set: data.roles };
+    } else if (data.role) {
+      (updateData as any).roles = { set: [data.role] };
     }
     if (data.phone !== undefined) updateData.phone = data.phone || null;
     if (data.password) updateData.password_hash = await argon2.hash(data.password);

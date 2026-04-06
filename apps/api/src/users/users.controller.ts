@@ -41,7 +41,7 @@ export class UsersController {
 
   @Patch(':id')
   @Roles('ADMIN')
-  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }) {
+  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; roles?: string[]; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }) {
     return this.usersService.update(id, data, req.user?.tenant_id);
   }
 
