@@ -36,7 +36,7 @@ export class LeadsController {
   ) {
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search, stage);
+    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search, stage, req.user?.id);
   }
 
   @Get('check-phone')
@@ -51,7 +51,7 @@ export class LeadsController {
     @Query('search') search: string,
     @Res() res: any,
   ) {
-    const csv = await this.leadsService.exportCsv(req.user?.tenant_id, search);
+    const csv = await this.leadsService.exportCsv(req.user?.tenant_id, search, req.user?.id);
     const filename = `leads_${new Date().toISOString().split('T')[0]}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
