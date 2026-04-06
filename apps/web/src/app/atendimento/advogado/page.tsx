@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Gavel, Clock, Archive, ArchiveRestore, Send,
-  AlertTriangle, CheckCircle2, Loader2, ExternalLink, ArrowRight, Flame, ArrowDown, CheckSquare,
+  AlertTriangle, CheckCircle2, Loader2, ExternalLink, ArrowRight, Flame, ArrowDown, CheckSquare, Bell,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
+import { useRole } from '@/lib/useRole';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -1171,6 +1172,11 @@ export default function AdvogadoPage() {
   const [interns, setInterns] = useState<{ id: string; name: string }[]>([]);
   const [assigningId, setAssigningId] = useState<string | null>(null);
 
+  // Toggle notificação DJEN ao cliente (admin only)
+  const { isAdmin } = useRole();
+  const [djenNotify, setDjenNotify] = useState(true);
+  const [loadingNotify, setLoadingNotify] = useState(false);
+
   // Modal de confirmação de conclusão de tarefas ao mover estágio
   const [pendingMove, setPendingMove] = useState<{ caseId: string; newStage: string; pendingTasks: number } | null>(null);
 
@@ -1254,6 +1260,15 @@ export default function AdvogadoPage() {
         setDeadlines(items.sort((a: any, b: any) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()).slice(0, 50));
       })
       .catch(() => {});
+
+    // Fetch setting DJEN_NOTIFY_CLIENT (admin only)
+    if (isAdmin) {
+      api.get('/settings').then(r => {
+        const settings = r.data || [];
+        const notify = settings.find((s: any) => s.key === 'DJEN_NOTIFY_CLIENT');
+        setDjenNotify(notify?.value !== 'false');
+      }).catch(() => {});
+    }
 
     // Fetch estagiários vinculados
     try {
@@ -1420,6 +1435,31 @@ export default function AdvogadoPage() {
                 className="pl-8 pr-3 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 w-44"
               />
             </div>
+
+            {/* Toggle notificação DJEN (admin only) */}
+            {isAdmin && (
+              <button
+                onClick={async () => {
+                  setLoadingNotify(true);
+                  const newVal = !djenNotify;
+                  try {
+                    await api.put('/settings', { key: 'DJEN_NOTIFY_CLIENT', value: newVal ? 'true' : 'false' });
+                    setDjenNotify(newVal);
+                  } catch {}
+                  setLoadingNotify(false);
+                }}
+                disabled={loadingNotify}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                  djenNotify
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    : 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                }`}
+                title={djenNotify ? 'Notificação DJEN ao cliente: ATIVADA' : 'Notificação DJEN ao cliente: DESATIVADA'}
+              >
+                <Bell size={11} />
+                {djenNotify ? 'Notif. Cliente ON' : 'Notif. Cliente OFF'}
+              </button>
+            )}
 
             {/* Refresh */}
             <button
