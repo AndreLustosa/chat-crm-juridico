@@ -513,15 +513,7 @@ function CreateProcessModal({
                       <p className="text-[9px] text-muted-foreground mb-1">Nome na publicação (autora): <span className="text-foreground/70 font-medium">{suggestedLeads.parte_autora}</span></p>
                     )}
                     {suggestedLeads.autora.map(lead => (
-                      <button
-                        key={lead.id}
-                        onClick={() => {
-                          const fullLead: Lead = { id: lead.id, name: lead.name, phone: lead.phone, conversations: [] } as any;
-                          selectLead(fullLead);
-                          setDismissedSuggestions(true);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-transparent hover:border-violet-500/30 hover:bg-violet-500/10 transition-all text-left"
-                      >
+                      <div key={lead.id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border/50 bg-background/50">
                         <div className="w-7 h-7 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
                           <User size={11} className="text-violet-400" />
                         </div>
@@ -534,9 +526,14 @@ function CreateProcessModal({
                             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">CLIENTE</span>
                           )}
                           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">AUTORA</span>
-                          <span className="text-[9px] text-violet-400 font-medium ml-1">Selecionar</span>
                         </div>
-                      </button>
+                        <button
+                          onClick={() => { setLeadSearch(lead.name); setDismissedSuggestions(true); }}
+                          className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-bold transition-colors shrink-0"
+                        >
+                          Buscar
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -546,15 +543,7 @@ function CreateProcessModal({
                       <p className="text-[9px] text-muted-foreground mb-1">Nome na publicação (ré): <span className="text-foreground/70 font-medium">{suggestedLeads.parte_rea}</span></p>
                     )}
                     {suggestedLeads.rea.map(lead => (
-                      <button
-                        key={lead.id}
-                        onClick={() => {
-                          const fullLead: Lead = { id: lead.id, name: lead.name, phone: lead.phone, conversations: [] } as any;
-                          selectLead(fullLead);
-                          setDismissedSuggestions(true);
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-transparent hover:border-amber-500/30 hover:bg-amber-500/10 transition-all text-left"
-                      >
+                      <div key={lead.id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border/50 bg-background/50">
                         <div className="w-7 h-7 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
                           <User size={11} className="text-amber-400" />
                         </div>
@@ -567,9 +556,14 @@ function CreateProcessModal({
                             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">CLIENTE</span>
                           )}
                           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">RÉ</span>
-                          <span className="text-[9px] text-amber-400 font-medium ml-1">Selecionar</span>
                         </div>
-                      </button>
+                        <button
+                          onClick={() => { setLeadSearch(lead.name); setDismissedSuggestions(true); }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold transition-colors shrink-0"
+                        >
+                          Buscar
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
