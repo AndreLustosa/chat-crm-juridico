@@ -159,7 +159,7 @@ export function Sidebar() {
     { label: 'Leads & CRM', href: '/atendimento/crm', icon: <Briefcase size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/crm'), show: true },
     { label: 'Contatos', href: '/atendimento/contacts', icon: <Users size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/contacts'), show: true },
     { label: 'Agenda & Tarefas', href: '/atendimento/agenda', icon: <Calendar size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/agenda') || p.startsWith('/atendimento/tasks'), badge: overdueCount, show: true },
-    { label: 'Follow-up IA', href: '/atendimento/followup', icon: <Bot size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/followup'), show: perms.isAdmin || perms.isAdvogado || perms.isOperador },
+    { label: 'Follow-up IA', href: '/atendimento/followup', icon: <Bot size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/followup'), show: perms.isAdmin },
     { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: <FileEdit size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/advogado'), show: perms.canViewAdvogado },
     { label: 'Processos', href: '/atendimento/processos', icon: <BookOpen size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/processos'), show: perms.canViewLegalCases },
     { label: 'DJEN — Publicações', href: '/atendimento/djen', icon: <Gavel size={22} strokeWidth={2} />, match: (p: string) => p.startsWith('/atendimento/djen'), badge: djenUnread, show: perms.canViewDjen },
