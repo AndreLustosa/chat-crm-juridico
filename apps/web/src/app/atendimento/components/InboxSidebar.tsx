@@ -8,6 +8,7 @@ import {
 } from '@/lib/desktopNotifications';
 import { showSuccess } from '@/lib/toast';
 import { normalizeStage } from '@/lib/crmStages';
+import { useRole } from '@/lib/useRole';
 import { getDateKey, formatDateLabel, formatTime, getInitial } from '@/lib/chatUtils';
 import type { ConversationSummary } from '../types';
 import { ContactAvatar } from './ContactAvatar';
@@ -164,6 +165,7 @@ export function InboxSidebar({
   onLightbox,
   hasDisconnectedInstance,
 }: InboxSidebarProps) {
+  const { isAdmin } = useRole();
 
   const myActiveConvs = (c: ConversationSummary) =>
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
@@ -385,7 +387,8 @@ export function InboxSidebar({
         <div className="flex items-center gap-2">
           <div className="flex bg-muted rounded-xl p-1 flex-1 relative">
             {[
-              { value: '', label: 'Tudo', count: conversations.filter(c => normalizeStage(c.leadStage) !== 'PERDIDO').length },
+              // "Tudo" só visível para ADMIN — outros usuários veem apenas suas conversas
+              ...(isAdmin ? [{ value: '', label: 'Tudo', count: conversations.filter(c => normalizeStage(c.leadStage) !== 'PERDIDO').length }] : []),
               { value: 'MINE', label: 'Minhas', count: conversations.filter(c => c.assignedAgentId === currentUserId && c.status !== 'CLOSED' && normalizeStage(c.leadStage) !== 'PERDIDO').length },
               { value: 'WAITING', label: 'Espera', count: conversations.filter(c => c.status === 'WAITING' && normalizeStage(c.leadStage) !== 'PERDIDO').length },
               { value: 'BOT', label: 'SophIA', count: conversations.filter(c => c.aiMode && c.assignedAgentId === currentUserId && normalizeStage(c.leadStage) !== 'PERDIDO').length },

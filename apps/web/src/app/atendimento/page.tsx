@@ -8,6 +8,7 @@ import { MessageSquare, Send, Download, Mic, FileText, Bot, BotOff, Paperclip, X
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { EventModal, type UserOption } from '@/components/EventModal';
 import { AudioRecorder } from '@/components/AudioRecorder';
+import { useRole } from '@/lib/useRole';
 import { AuthAudioPlayer } from '@/components/AuthAudioPlayer';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
@@ -104,7 +105,19 @@ function DateSeparator({ label }: { label: string }) {
 
 export default function Dashboard() {
   const router = useRouter();
-  const [leadFilter, setLeadFilter] = useState('');
+  const { isAdmin } = useRole();
+  // Não-admin começa no filtro "MINHAS" — admin começa em "TUDO"
+  const [leadFilter, setLeadFilter] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return 'MINE';
+      const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(atob(b64));
+      const roles: string[] = Array.isArray(payload?.roles) ? payload.roles : (payload?.role ? [payload.role] : []);
+      return roles.includes('ADMIN') ? '' : 'MINE';
+    } catch { return 'MINE'; }
+  });
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [userInboxes, setUserInboxes] = useState<any[]>([]);
   const [selectedInboxId, setSelectedInboxId] = useState<string | null>(null);
