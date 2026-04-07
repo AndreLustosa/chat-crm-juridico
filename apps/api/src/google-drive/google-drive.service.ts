@@ -270,15 +270,38 @@ export class GoogleDriveService {
   // ═══════════════════════════════════════════════════════════════
 
   /**
+   * Verifica se a pasta existe e é acessível pela auth atual.
+   * Pastas criadas pelo Service Account podem não ser visíveis via OAuth2.
+   */
+  private async isFolderAccessible(folderId: string): Promise<boolean> {
+    try {
+      const drive = await this.getDriveClient();
+      await drive.files.get({ fileId: folderId, fields: 'id' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Cria ou retorna a pasta do Lead no Google Drive.
    * Formato: "Nome do Lead (últimos 4 dígitos do ID)"
+   *
+   * Se a pasta salva no banco não for acessível (ex: criada por SA antigo),
+   * recria a pasta com a autenticação atual.
    */
   async ensureLeadFolder(leadId: string, leadName: string): Promise<string> {
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
       select: { google_drive_folder_id: true },
     });
-    if (lead?.google_drive_folder_id) return lead.google_drive_folder_id;
+
+    // Se já tem folder_id, verificar se é acessível
+    if (lead?.google_drive_folder_id) {
+      const accessible = await this.isFolderAccessible(lead.google_drive_folder_id);
+      if (accessible) return lead.google_drive_folder_id;
+      this.logger.warn(`Pasta do lead ${leadId} (${lead.google_drive_folder_id}) não acessível. Recriando...`);
+    }
 
     const rootFolder = await this.getSetting('GDRIVE_ROOT_FOLDER_ID');
     if (!rootFolder) throw new Error('GDRIVE_ROOT_FOLDER_ID não configurado');
@@ -287,7 +310,7 @@ export class GoogleDriveService {
     const suffix = leadId.slice(-4);
     const folderName = `${leadName} (${suffix})`;
 
-    // Verificar se pasta já existe
+    // Verificar se pasta já existe no Drive (acessível pela auth atual)
     const existing = await drive.files.list({
       q: `name='${folderName.replace(/'/g, "\\'")}' and '${rootFolder}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id,name)',
@@ -320,6 +343,7 @@ export class GoogleDriveService {
 
   /**
    * Cria ou retorna a subpasta do caso dentro da pasta do Lead.
+   * Verifica acessibilidade da pasta (pode ter sido criada por SA antigo).
    */
   async ensureCaseFolder(
     caseId: string,
@@ -330,7 +354,13 @@ export class GoogleDriveService {
       where: { id: caseId },
       select: { google_drive_folder_id: true },
     });
-    if (legalCase?.google_drive_folder_id) return legalCase.google_drive_folder_id;
+
+    // Se já tem folder_id, verificar se é acessível
+    if (legalCase?.google_drive_folder_id) {
+      const accessible = await this.isFolderAccessible(legalCase.google_drive_folder_id);
+      if (accessible) return legalCase.google_drive_folder_id;
+      this.logger.warn(`Pasta do caso ${caseId} (${legalCase.google_drive_folder_id}) não acessível. Recriando...`);
+    }
 
     const lead = await this.prisma.lead.findUnique({
       where: { id: leadId },
