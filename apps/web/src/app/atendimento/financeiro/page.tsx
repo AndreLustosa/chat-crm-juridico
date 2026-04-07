@@ -41,6 +41,10 @@ interface Transaction {
   notes?: string | null;
   interest_amount?: number;
   total_with_interest?: number;
+  honorario_payment?: {
+    id: string;
+    honorario: { type: string; notes: string | null; sentence_value: string | null; success_percentage: string | null } | null;
+  } | null;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -1898,12 +1902,17 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
                       onClick={() => setSelectedReceita(r)}
                       className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedReceita?.id === r.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(r.date)}</td>
-                      <td className="px-4 py-3 max-w-[250px]">
+                      <td className="px-4 py-3 max-w-[280px]">
                         {r.legal_case?.case_number && (
-                          <div className="flex items-center gap-1.5 mb-0.5">
+                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                             <span className="text-[10px] font-mono text-primary">{r.legal_case.case_number}</span>
                             {r.legal_case.legal_area && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{r.legal_case.legal_area}</span>
+                            )}
+                            {r.honorario_payment?.honorario?.type && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">
+                                {{CONTRATUAL:'Contratuais',SUCUMBENCIA:'Sucumbência',ENTRADA:'Entrada',ACORDO:'Acordo',FIXO:'Fixo',EXITO:'Êxito',MISTO:'Misto'}[r.honorario_payment.honorario.type] || r.honorario_payment.honorario.type}
+                              </span>
                             )}
                           </div>
                         )}
@@ -2081,12 +2090,20 @@ function ReceitaDetailPanel({
         {!editing ? (
           <div className="space-y-2.5">
             <InfoRow label="Descricao" value={r.description} />
+            {r.honorario_payment?.honorario?.type && (
+              <InfoRow label="Tipo honorario" value={{
+                CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo',
+                FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto',
+              }[r.honorario_payment.honorario.type] || r.honorario_payment.honorario.type} />
+            )}
             <InfoRow label="Categoria" value={`${RECEITA_CAT_ICONS[r.category] || ''} ${r.category}`} />
             <InfoRow label="Data" value={fmtDate(r.date)} />
             <InfoRow label="Vencimento" value={r.due_date ? fmtDate(r.due_date) : 'Sem vencimento'} />
             <InfoRow label="Forma pagamento" value={r.payment_method || 'Nao informado'} />
             {r.paid_at && <InfoRow label="Pago em" value={fmtDate(r.paid_at)} />}
-            {r.notes && <InfoRow label="Observacoes" value={r.notes} />}
+            {(r.notes || r.honorario_payment?.honorario?.notes) && (
+              <InfoRow label="Observacoes" value={r.notes || r.honorario_payment?.honorario?.notes || ''} />
+            )}
           </div>
         ) : (
           <div className="space-y-3">

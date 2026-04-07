@@ -95,6 +95,14 @@ export class FinanceiroService {
           lawyer: {
             select: { id: true, name: true, email: true },
           },
+          honorario_payment: {
+            select: {
+              id: true,
+              honorario: {
+                select: { type: true, notes: true, sentence_value: true, success_percentage: true },
+              },
+            },
+          },
         },
         orderBy: { date: 'desc' },
         take: query.limit || 50,
@@ -305,8 +313,16 @@ export class FinanceiroService {
 
     if (!payment) throw new NotFoundException('Pagamento de honorario nao encontrado');
 
-    const legalCase = (payment as any).honorario?.legal_case;
+    const honorario = (payment as any).honorario;
+    const legalCase = honorario?.legal_case;
     const status = payment.status === 'PAGO' ? 'PAGO' : 'PENDENTE';
+
+    // Label do tipo de honorário
+    const typeLabels: Record<string, string> = {
+      CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo',
+      FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto',
+    };
+    const typeLabel = typeLabels[honorario?.type] || honorario?.type || '';
 
     // Se já existe transação para este pagamento, atualizar status/valor
     const existing = await this.prisma.financialTransaction.findUnique({
@@ -330,7 +346,7 @@ export class FinanceiroService {
         tenant_id: tenantId || legalCase?.tenant_id || null,
         type: 'RECEITA',
         category: 'HONORARIO',
-        description: `Honorário - ${legalCase?.case_number || 'Processo'} ${legalCase?.legal_area ? `(${legalCase.legal_area})` : ''}`.trim(),
+        description: `Honorário ${typeLabel} - ${legalCase?.case_number || 'Processo'} ${legalCase?.legal_area ? `(${legalCase.legal_area})` : ''}`.trim(),
         amount: payment.amount,
         date: payment.paid_at || payment.due_date || new Date(),
         paid_at: payment.paid_at,
@@ -340,6 +356,7 @@ export class FinanceiroService {
         legal_case_id: legalCase?.id || null,
         lead_id: legalCase?.lead_id || null,
         honorario_payment_id: paymentId,
+        notes: honorario?.notes || payment.notes || null,
       },
     });
   }
