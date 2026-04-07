@@ -87,6 +87,15 @@ export class FinanceiroController {
     return this.service.deleteTransaction(id, req.user.tenant_id);
   }
 
+  @Post('transactions/:id/partial-payment')
+  partialPayment(
+    @Param('id') id: string,
+    @Body() body: { amount: number; payment_method?: string },
+    @Request() req: any,
+  ) {
+    return this.service.partialPayment(id, body.amount, body.payment_method, req.user.tenant_id);
+  }
+
   // ─── Summary & Cash Flow ───────────────────────────────
 
   @Get('summary')

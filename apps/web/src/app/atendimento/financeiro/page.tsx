@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   DollarSign, TrendingUp, TrendingDown, AlertTriangle, Clock,
   Plus, X, Search, Loader2, Phone, MessageSquare,
   ArrowUpDown, ChevronDown, Trash2, Pencil, Check,
-  BarChart3, Receipt, CreditCard, Ban, Users, Link2, Unlink,
+  BarChart3, Receipt, CreditCard, Ban, Users, Link2, Unlink, ExternalLink,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -37,6 +37,10 @@ interface Transaction {
   legal_case: { id: string; case_number: string; legal_area: string } | null;
   lead: { id: string; name: string; phone: string } | null;
   lawyer: { id: string; name: string } | null;
+  honorario_payment_id?: string | null;
+  notes?: string | null;
+  interest_amount?: number;
+  total_with_interest?: number;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -1651,11 +1655,13 @@ const RECEITA_CAT_ICONS: Record<string, string> = {
 };
 
 function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefresh: () => void }) {
+  const router = useRouter();
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedReceita, setSelectedReceita] = useState<Transaction | null>(null);
 
   // Form fields
   const [desc, setDesc] = useState('');
@@ -1696,35 +1702,23 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
     if (isNaN(numVal) || numVal <= 0) { showError('Valor invalido'); return; }
     setSaving(true);
     try {
-      // 1. Criar transacao financeira
       await api.post('/financeiro/transactions', {
-        type: 'RECEITA',
-        category,
-        description: desc.trim(),
-        amount: numVal,
+        type: 'RECEITA', category, description: desc.trim(), amount: numVal,
         date: new Date(date + 'T12:00:00Z').toISOString(),
         due_date: dueDate ? new Date(dueDate + 'T12:00:00Z').toISOString() : undefined,
-        payment_method: paymentMethod || undefined,
-        status,
+        payment_method: paymentMethod || undefined, status,
         lead_id: selectedClient?.id || undefined,
         notes: notes.trim() || undefined,
       });
 
-      // 2. Se gerar cobranca no Asaas
       if (generateCharge && selectedClient?.id) {
         try {
           await api.post('/payment-gateway/customers/sync/' + selectedClient.id);
           showSuccess('Receita criada! Cobranca Asaas sera gerada via honorarios.');
-        } catch {
-          showSuccess('Receita criada (cobranca Asaas nao gerada — vincule o cliente primeiro)');
-        }
-      } else {
-        showSuccess('Receita cadastrada!');
-      }
+        } catch { showSuccess('Receita criada (cobranca Asaas nao gerada — vincule o cliente primeiro)'); }
+      } else { showSuccess('Receita cadastrada!'); }
 
-      resetForm();
-      setShowForm(false);
-      onRefresh();
+      resetForm(); setShowForm(false); onRefresh();
     } catch { showError('Erro ao criar receita'); }
     finally { setSaving(false); }
   };
@@ -1732,26 +1726,17 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
   const handleDelete = async (id: string) => {
     if (!confirm('Excluir esta receita?')) return;
     setDeletingId(id);
-    try { await api.delete(`/financeiro/transactions/${id}`); showSuccess('Removida'); onRefresh(); }
+    try { await api.delete(`/financeiro/transactions/${id}`); showSuccess('Removida'); onRefresh(); if (selectedReceita?.id === id) setSelectedReceita(null); }
     catch { showError('Erro'); }
     finally { setDeletingId(null); }
   };
 
-  const handleToggle = async (t: Transaction) => {
-    const ns = t.status === 'PAGO' ? 'PENDENTE' : 'PAGO';
-    try {
-      await api.patch(`/financeiro/transactions/${t.id}`, { status: ns, paid_at: ns === 'PAGO' ? new Date().toISOString() : null });
-      showSuccess(ns === 'PAGO' ? 'Marcado como recebido' : 'Revertido');
-      onRefresh();
-    } catch { showError('Erro'); }
-  };
-
-  // Filtros
   const filtered = receitas.filter(r => {
     if (statusFilter && r.status !== statusFilter) return false;
     if (searchQ) {
       const q = searchQ.toLowerCase();
-      return (r.description || '').toLowerCase().includes(q) || (r.lead?.name || '').toLowerCase().includes(q) || (r.category || '').toLowerCase().includes(q);
+      return (r.description || '').toLowerCase().includes(q) || (r.lead?.name || '').toLowerCase().includes(q)
+        || (r.category || '').toLowerCase().includes(q) || (r.legal_case?.case_number || '').toLowerCase().includes(q);
     }
     return true;
   });
@@ -1759,211 +1744,534 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
   const totalFiltered = filtered.reduce((s, r) => s + parseFloat(String(r.amount)), 0);
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar receita..."
-              className="pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none w-52" />
+    <div className="flex gap-4">
+      {/* Left: Table */}
+      <div className={`space-y-4 transition-all ${selectedReceita ? 'flex-1 min-w-0' : 'w-full'}`}>
+        {/* Header */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar receita..."
+                className="pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none w-52" />
+            </div>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+              className="px-3 py-2 text-xs bg-background border border-border rounded-lg">
+              <option value="">Todos</option><option value="PAGO">Recebido</option><option value="PENDENTE">Pendente</option>
+            </select>
           </div>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="px-3 py-2 text-xs bg-background border border-border rounded-lg">
-            <option value="">Todos</option>
-            <option value="PAGO">Recebido</option>
-            <option value="PENDENTE">Pendente</option>
-          </select>
+          <button onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90">
+            <Plus size={14} /> Nova Receita
+          </button>
         </div>
-        <button onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90">
-          <Plus size={14} /> Nova Receita
-        </button>
-      </div>
 
-      {/* Formulario completo */}
-      {showForm && (
-        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-foreground">Cadastrar Receita</h3>
-            <button onClick={() => { setShowForm(false); resetForm(); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Descricao *</label>
-              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Ex: Honorarios processo 0001234"
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+        {/* Form */}
+        {showForm && (
+          <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-foreground">Cadastrar Receita</h3>
+              <button onClick={() => { setShowForm(false); resetForm(); }} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Valor (R$) *</label>
-              <input value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000.00"
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Categoria</label>
-              <select value={category} onChange={e => setCategory(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
-                {RECEITA_CATEGORIES.map(c => <option key={c} value={c}>{RECEITA_CAT_ICONS[c] || ''} {c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Data</label>
-              <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Vencimento</label>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Forma de pagamento</label>
-              <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
-                <option value="">Nao informado</option>
-                <option value="PIX">PIX</option>
-                <option value="BOLETO">Boleto</option>
-                <option value="CARTAO">Cartao</option>
-                <option value="DINHEIRO">Dinheiro</option>
-                <option value="TRANSFERENCIA">Transferencia</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Status</label>
-              <select value={status} onChange={e => setStatus(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
-                <option value="PENDENTE">Pendente</option>
-                <option value="PAGO">Recebido</option>
-              </select>
-            </div>
-
-            {/* Cliente */}
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Cliente (opcional)</label>
-              {selectedClient ? (
-                <div className="flex items-center gap-2 px-3 py-2 bg-background border border-border rounded-lg">
-                  <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[9px] font-bold">
-                    {selectedClient.name?.[0]?.toUpperCase() || '?'}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Descricao *</label>
+                <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Ex: Honorarios processo 0001234"
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Valor (R$) *</label>
+                <input value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000.00"
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Categoria</label>
+                <select value={category} onChange={e => setCategory(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
+                  {RECEITA_CATEGORIES.map(c => <option key={c} value={c}>{RECEITA_CAT_ICONS[c] || ''} {c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Data</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Vencimento</label>
+                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Forma de pagamento</label>
+                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
+                  <option value="">Nao informado</option><option value="PIX">PIX</option><option value="BOLETO">Boleto</option>
+                  <option value="CARTAO">Cartao</option><option value="DINHEIRO">Dinheiro</option><option value="TRANSFERENCIA">Transferencia</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Status</label>
+                <select value={status} onChange={e => setStatus(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none">
+                  <option value="PENDENTE">Pendente</option><option value="PAGO">Recebido</option>
+                </select>
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Cliente (opcional)</label>
+                {selectedClient ? (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-background border border-border rounded-lg">
+                    <div className="w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[9px] font-bold">{selectedClient.name?.[0]?.toUpperCase() || '?'}</div>
+                    <span className="text-sm font-medium text-foreground flex-1">{selectedClient.name || selectedClient.phone}</span>
+                    <button onClick={() => setSelectedClient(null)} className="text-muted-foreground hover:text-foreground"><X size={14} /></button>
                   </div>
-                  <span className="text-sm font-medium text-foreground flex-1">{selectedClient.name || selectedClient.phone}</span>
-                  <button onClick={() => setSelectedClient(null)} className="text-muted-foreground hover:text-foreground"><X size={14} /></button>
-                </div>
-              ) : (
-                <div className="relative">
-                  <input value={clientSearch} onChange={e => searchClients(e.target.value)} placeholder="Buscar cliente por nome..."
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
-                  {clientResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl z-10 max-h-40 overflow-y-auto">
-                      {clientResults.map(l => (
-                        <button key={l.id} onClick={() => { setSelectedClient(l); setClientSearch(''); setClientResults([]); }}
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-accent/30 flex items-center gap-2">
-                          <span className="font-medium">{l.name || l.phone}</span>
-                          <span className="text-xs text-muted-foreground">{l.phone}</span>
-                        </button>
-                      ))}
+                ) : (
+                  <div className="relative">
+                    <input value={clientSearch} onChange={e => searchClients(e.target.value)} placeholder="Buscar cliente por nome..."
+                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+                    {clientResults.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl z-10 max-h-40 overflow-y-auto">
+                        {clientResults.map(l => (
+                          <button key={l.id} onClick={() => { setSelectedClient(l); setClientSearch(''); setClientResults([]); }}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-accent/30 flex items-center gap-2">
+                            <span className="font-medium">{l.name || l.phone}</span>
+                            <span className="text-xs text-muted-foreground">{l.phone}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Observacoes</label>
+                <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notas internas..."
+                  className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+              </div>
+              {selectedClient && status === 'PENDENTE' && (
+                <div className="md:col-span-2">
+                  <button onClick={() => setGenerateCharge(!generateCharge)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border w-full transition-colors ${generateCharge ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-accent/30'}`}>
+                    <CreditCard size={14} />
+                    <div className="text-left flex-1">
+                      <p className="text-sm font-medium">Gerar cobranca no Asaas</p>
+                      <p className="text-[10px] text-muted-foreground">Sincroniza cliente e gera cobranca automaticamente</p>
                     </div>
-                  )}
+                  </button>
                 </div>
               )}
             </div>
-
-            {/* Observacoes */}
-            <div className="md:col-span-2">
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Observacoes</label>
-              <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notas internas..."
-                className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none" />
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { setShowForm(false); resetForm(); }}
+                className="px-4 py-2 text-sm text-muted-foreground border border-border rounded-lg hover:bg-accent/30">Cancelar</button>
+              <button onClick={handleSubmit} disabled={saving}
+                className="px-6 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Receita
+              </button>
             </div>
+          </div>
+        )}
 
-            {/* Gerar cobranca Asaas */}
-            {selectedClient && status === 'PENDENTE' && (
-              <div className="md:col-span-2">
-                <button onClick={() => setGenerateCharge(!generateCharge)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border w-full transition-colors ${
-                    generateCharge ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-accent/30'
-                  }`}>
-                  <CreditCard size={14} />
-                  <div className="text-left flex-1">
-                    <p className="text-sm font-medium">Gerar cobranca no Asaas</p>
-                    <p className="text-[10px] text-muted-foreground">Sincroniza cliente e gera cobranca automaticamente</p>
-                  </div>
-                </button>
-              </div>
+        {/* Table */}
+        {filtered.length === 0 ? (
+          <div className="bg-card border border-border rounded-xl p-12 text-center">
+            <TrendingUp size={40} className="mx-auto text-muted-foreground/30 mb-3" />
+            <p className="text-sm text-muted-foreground font-medium">Nenhuma receita encontrada</p>
+          </div>
+        ) : (
+          <>
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-card/80">
+                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Data</th>
+                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Processo / Descricao</th>
+                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
+                    <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
+                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Vencimento</th>
+                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(r => (
+                    <tr key={r.id}
+                      onClick={() => setSelectedReceita(r)}
+                      className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedReceita?.id === r.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}>
+                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(r.date)}</td>
+                      <td className="px-4 py-3 max-w-[250px]">
+                        {r.legal_case?.case_number && (
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-[10px] font-mono text-primary">{r.legal_case.case_number}</span>
+                            {r.legal_case.legal_area && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{r.legal_case.legal_area}</span>
+                            )}
+                          </div>
+                        )}
+                        <span className="font-medium text-foreground truncate block">{r.description}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{r.lead?.name || '--'}</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-bold text-emerald-400">{fmt(r.amount)}</span>
+                        {r.interest_amount && r.interest_amount > 0 && (
+                          <span className="block text-[9px] text-red-400">+ {fmt(r.interest_amount)} juros</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{r.due_date ? fmtDate(r.due_date) : '--'}</td>
+                      <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                      <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id}
+                          className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 disabled:opacity-50 inline-flex items-center gap-1">
+                          {deletingId === r.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+              <span>{filtered.length} receita(s)</span>
+              <span className="font-semibold text-emerald-400">Total: {fmt(totalFiltered)}</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Right: Detail Panel */}
+      {selectedReceita && (
+        <ReceitaDetailPanel
+          receita={selectedReceita}
+          onClose={() => setSelectedReceita(null)}
+          onRefresh={() => { onRefresh(); setSelectedReceita(null); }}
+          fmt={fmt}
+          fmtDate={fmtDate}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Painel lateral de detalhes da Receita ──────────────────── */
+
+function ReceitaDetailPanel({
+  receita: r,
+  onClose,
+  onRefresh,
+  fmt,
+  fmtDate,
+}: {
+  receita: Transaction;
+  onClose: () => void;
+  onRefresh: () => void;
+  fmt: (v: number | string) => string;
+  fmtDate: (d: string) => string;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showPartial, setShowPartial] = useState(false);
+  const [partialAmount, setPartialAmount] = useState('');
+  const [partialMethod, setPartialMethod] = useState('');
+  const [chargingType, setChargingType] = useState<string | null>(null);
+  const [chargeResult, setChargeResult] = useState<any>(null);
+  const chargeMenuRef = useRef<HTMLDivElement>(null);
+  const [showChargeMenu, setShowChargeMenu] = useState(false);
+
+  // Edit fields
+  const [editDesc, setEditDesc] = useState(r.description);
+  const [editAmount, setEditAmount] = useState(String(r.amount));
+  const [editDueDate, setEditDueDate] = useState(r.due_date?.slice(0, 10) || '');
+  const [editMethod, setEditMethod] = useState(r.payment_method || '');
+  const [editNotes, setEditNotes] = useState(r.notes || '');
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (chargeMenuRef.current && !chargeMenuRef.current.contains(e.target as Node)) setShowChargeMenu(false);
+    }
+    if (showChargeMenu) { document.addEventListener('mousedown', handleClick); return () => document.removeEventListener('mousedown', handleClick); }
+  }, [showChargeMenu]);
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/financeiro/transactions/${r.id}`, {
+        description: editDesc.trim(),
+        amount: parseFloat(editAmount.replace(',', '.')),
+        due_date: editDueDate ? new Date(editDueDate + 'T12:00:00Z').toISOString() : null,
+        payment_method: editMethod || null,
+        notes: editNotes.trim() || null,
+      });
+      showSuccess('Receita atualizada');
+      setEditing(false);
+      onRefresh();
+    } catch { showError('Erro ao salvar'); }
+    finally { setSaving(false); }
+  };
+
+  const handleMarkPaid = async () => {
+    try {
+      await api.patch(`/financeiro/transactions/${r.id}`, { status: 'PAGO', paid_at: new Date().toISOString() });
+      showSuccess('Marcado como recebido');
+      onRefresh();
+    } catch { showError('Erro'); }
+  };
+
+  const handlePartialPayment = async () => {
+    const val = parseFloat(partialAmount.replace(',', '.'));
+    if (!val || val <= 0) { showError('Informe o valor recebido'); return; }
+    setSaving(true);
+    try {
+      await api.post(`/financeiro/transactions/${r.id}/partial-payment`, {
+        amount: val,
+        payment_method: partialMethod || undefined,
+      });
+      showSuccess(`Recebimento parcial de ${fmt(val)} registrado`);
+      setShowPartial(false);
+      setPartialAmount('');
+      onRefresh();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao registrar pagamento parcial');
+    } finally { setSaving(false); }
+  };
+
+  const handleCreateCharge = async (billingType: string) => {
+    setShowChargeMenu(false);
+    setChargingType(billingType);
+    try {
+      let res;
+      if (r.honorario_payment_id) {
+        res = await api.post('/payment-gateway/charges', { honorarioPaymentId: r.honorario_payment_id, billingType });
+      } else {
+        // Para receita avulsa, sincronizar cliente e criar via honorário
+        if (r.lead?.id) {
+          await api.post('/payment-gateway/customers/sync/' + r.lead.id);
+        }
+        res = await api.post('/payment-gateway/charges', { honorarioPaymentId: r.honorario_payment_id, billingType });
+      }
+      setChargeResult({ type: billingType, ...res.data });
+      showSuccess(`Cobranca ${billingType} gerada!`);
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao gerar cobranca');
+    } finally { setChargingType(null); }
+  };
+
+  const isPending = r.status === 'PENDENTE' || r.status !== 'PAGO';
+
+  return (
+    <div className="w-[380px] shrink-0 bg-card border border-border rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-250px)] sticky top-4">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-border bg-accent/10 flex items-center justify-between">
+        <h3 className="text-sm font-bold text-foreground">Detalhes da Receita</h3>
+        <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/30"><X size={16} /></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* Status + Valor */}
+        <div className="flex items-center justify-between">
+          <StatusBadge status={r.status} />
+          <div className="text-right">
+            <p className="text-lg font-bold text-emerald-400">{fmt(r.amount)}</p>
+            {r.interest_amount && r.interest_amount > 0 && (
+              <p className="text-[10px] text-red-400">+ {fmt(r.interest_amount)} juros ({fmt(r.total_with_interest || 0)} total)</p>
             )}
           </div>
+        </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => { setShowForm(false); resetForm(); }}
-              className="px-4 py-2 text-sm text-muted-foreground border border-border rounded-lg hover:bg-accent/30">Cancelar</button>
-            <button onClick={handleSubmit} disabled={saving}
-              className="px-6 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar Receita
+        {/* Dados da transação */}
+        {!editing ? (
+          <div className="space-y-2.5">
+            <InfoRow label="Descricao" value={r.description} />
+            <InfoRow label="Categoria" value={`${RECEITA_CAT_ICONS[r.category] || ''} ${r.category}`} />
+            <InfoRow label="Data" value={fmtDate(r.date)} />
+            <InfoRow label="Vencimento" value={r.due_date ? fmtDate(r.due_date) : 'Sem vencimento'} />
+            <InfoRow label="Forma pagamento" value={r.payment_method || 'Nao informado'} />
+            {r.paid_at && <InfoRow label="Pago em" value={fmtDate(r.paid_at)} />}
+            {r.notes && <InfoRow label="Observacoes" value={r.notes} />}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Descricao</label>
+              <input value={editDesc} onChange={e => setEditDesc(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Valor</label>
+              <input value={editAmount} onChange={e => setEditAmount(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Vencimento</label>
+              <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Forma pagamento</label>
+              <select value={editMethod} onChange={e => setEditMethod(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none">
+                <option value="">Nao informado</option><option value="PIX">PIX</option><option value="BOLETO">Boleto</option>
+                <option value="CARTAO">Cartao</option><option value="DINHEIRO">Dinheiro</option><option value="TRANSFERENCIA">Transferencia</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Observacoes</label>
+              <input value={editNotes} onChange={e => setEditNotes(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(false)} className="flex-1 px-3 py-2 text-xs border border-border rounded-lg text-muted-foreground hover:bg-accent/30">Cancelar</button>
+              <button onClick={handleSaveEdit} disabled={saving}
+                className="flex-1 px-3 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1">
+                {saving && <Loader2 size={10} className="animate-spin" />} Salvar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Processo vinculado */}
+        {r.legal_case && (
+          <div className="border border-border rounded-xl p-3.5 space-y-2">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Processo Vinculado</p>
+            <div className="space-y-1.5">
+              <p className="text-xs font-mono text-primary">{r.legal_case.case_number}</p>
+              {r.legal_case.legal_area && (
+                <span className="text-[10px] px-2 py-0.5 rounded bg-accent/40 text-muted-foreground">{r.legal_case.legal_area}</span>
+              )}
+            </div>
+            <button
+              onClick={() => router.push(`/atendimento/processos?openCase=${r.legal_case!.id}`)}
+              className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline mt-1">
+              <ExternalLink size={10} /> Abrir processo
+            </button>
+          </div>
+        )}
+
+        {/* Cliente */}
+        {r.lead && (
+          <div className="border border-border rounded-xl p-3.5 space-y-2">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Cliente</p>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[10px] font-bold">
+                {r.lead.name?.[0]?.toUpperCase() || '?'}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-foreground">{r.lead.name}</p>
+                <p className="text-[10px] text-muted-foreground">{r.lead.phone}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recebimento parcial */}
+        {showPartial && isPending && (
+          <div className="border border-amber-500/30 rounded-xl p-3.5 space-y-3 bg-amber-500/5">
+            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Recebimento Parcial</p>
+            <div className="space-y-2">
+              <input type="text" value={partialAmount} onChange={e => setPartialAmount(e.target.value)} placeholder="Valor recebido (ex: 1000.00)"
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/40" autoFocus />
+              <select value={partialMethod} onChange={e => setPartialMethod(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none">
+                <option value="">Forma de pagamento</option><option value="PIX">PIX</option><option value="BOLETO">Boleto</option>
+                <option value="CARTAO">Cartao</option><option value="DINHEIRO">Dinheiro</option><option value="TRANSFERENCIA">Transferencia</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowPartial(false)} className="flex-1 px-3 py-2 text-xs border border-border rounded-lg text-muted-foreground">Cancelar</button>
+              <button onClick={handlePartialPayment} disabled={saving}
+                className="flex-1 px-3 py-2 text-xs bg-amber-500 text-white rounded-lg font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1">
+                {saving && <Loader2 size={10} className="animate-spin" />} Registrar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Charge result */}
+        {chargeResult && (
+          <div className="border border-primary/30 rounded-xl p-3.5 bg-primary/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-foreground">Cobranca {chargeResult.type} Gerada</p>
+              <button onClick={() => setChargeResult(null)} className="text-muted-foreground hover:text-foreground text-xs">&#10005;</button>
+            </div>
+            {chargeResult.pix_copy_paste && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-muted-foreground">Codigo PIX:</p>
+                <div className="flex gap-1.5">
+                  <input readOnly value={chargeResult.pix_copy_paste} className="flex-1 px-2 py-1.5 text-[10px] font-mono bg-accent/30 border border-border rounded-lg" />
+                  <button onClick={() => { navigator.clipboard.writeText(chargeResult.pix_copy_paste); showSuccess('Copiado!'); }}
+                    className="px-2 py-1.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-lg">Copiar</button>
+                </div>
+              </div>
+            )}
+            {chargeResult.boleto_url && (
+              <a href={chargeResult.boleto_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1 w-full px-3 py-2 bg-primary text-primary-foreground text-[10px] font-bold rounded-lg hover:opacity-90">
+                <ExternalLink size={10} /> Abrir Boleto
+              </a>
+            )}
+            {chargeResult.invoice_url && (
+              <a href={chargeResult.invoice_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1 w-full px-3 py-2 border border-border text-[10px] font-bold text-muted-foreground rounded-lg hover:bg-accent/30">
+                <ExternalLink size={10} /> Ver Fatura
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Actions footer */}
+      {isPending && !editing && (
+        <div className="border-t border-border px-5 py-3 space-y-2">
+          <div className="flex gap-2">
+            <button onClick={() => setEditing(true)}
+              className="flex-1 px-3 py-2 text-[10px] font-semibold border border-border rounded-lg text-muted-foreground hover:bg-accent/30 flex items-center justify-center gap-1">
+              <Pencil size={10} /> Editar
+            </button>
+            <button onClick={() => setShowPartial(!showPartial)}
+              className="flex-1 px-3 py-2 text-[10px] font-semibold border border-amber-400/30 rounded-lg text-amber-400 hover:bg-amber-400/10 flex items-center justify-center gap-1">
+              <DollarSign size={10} /> Parcial
+            </button>
+          </div>
+          <div className="flex gap-2">
+            {r.honorario_payment_id && (
+              <div className="relative flex-1" ref={chargeMenuRef}>
+                <button onClick={() => setShowChargeMenu(!showChargeMenu)}
+                  className="w-full px-3 py-2 text-[10px] font-semibold border border-blue-400/30 rounded-lg text-blue-400 hover:bg-blue-400/10 flex items-center justify-center gap-1">
+                  {chargingType ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />} Cobranca
+                </button>
+                {showChargeMenu && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1 bg-card border border-border rounded-lg shadow-xl z-50 py-1">
+                    <button onClick={() => handleCreateCharge('PIX')} className="w-full text-left px-3 py-2 text-[10px] text-foreground hover:bg-accent/30">PIX</button>
+                    <button onClick={() => handleCreateCharge('BOLETO')} className="w-full text-left px-3 py-2 text-[10px] text-foreground hover:bg-accent/30">Boleto</button>
+                    <button onClick={() => handleCreateCharge('CREDIT_CARD')} className="w-full text-left px-3 py-2 text-[10px] text-foreground hover:bg-accent/30">Cartao</button>
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={handleMarkPaid}
+              className="flex-1 px-3 py-2 text-[10px] font-semibold bg-emerald-500 text-white rounded-lg hover:opacity-90 flex items-center justify-center gap-1">
+              <Check size={10} /> Recebido Total
             </button>
           </div>
         </div>
       )}
 
-      {/* Tabela */}
-      {filtered.length === 0 ? (
-        <div className="bg-card border border-border rounded-xl p-12 text-center">
-          <TrendingUp size={40} className="mx-auto text-muted-foreground/30 mb-3" />
-          <p className="text-sm text-muted-foreground font-medium">Nenhuma receita encontrada</p>
-          <p className="text-xs text-muted-foreground mt-1">Clique em "Nova Receita" para cadastrar</p>
+      {r.status === 'PAGO' && !editing && (
+        <div className="border-t border-border px-5 py-3">
+          <button onClick={() => setEditing(true)}
+            className="w-full px-3 py-2 text-[10px] font-semibold border border-border rounded-lg text-muted-foreground hover:bg-accent/30 flex items-center justify-center gap-1">
+            <Pencil size={10} /> Editar
+          </button>
         </div>
-      ) : (
-        <>
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-card/80">
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Data</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Descricao</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Categoria</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Vencimento</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Status</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(r => (
-                  <tr key={r.id} className="border-b border-border/40 hover:bg-accent/10 transition-colors">
-                    <td className="px-4 py-3 text-muted-foreground">{fmtDate(r.date)}</td>
-                    <td className="px-4 py-3 font-medium text-foreground truncate max-w-[200px]">{r.description}</td>
-                    <td className="px-4 py-3">
-                      <span className="text-muted-foreground">{RECEITA_CAT_ICONS[r.category] || ''} {r.category}</span>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{r.lead?.name || '--'}</td>
-                    <td className="px-4 py-3 text-right font-bold text-emerald-400">{fmt(r.amount)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{r.due_date ? fmtDate(r.due_date) : '--'}</td>
-                    <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => handleToggle(r)} title={r.status === 'PAGO' ? 'Reverter' : 'Marcar recebido'}
-                          className={`px-2 py-1 text-[10px] font-semibold rounded-md inline-flex items-center gap-1 transition-colors ${
-                            r.status === 'PAGO' ? 'text-amber-400 border border-amber-400/20 hover:bg-amber-400/10' : 'text-emerald-400 border border-emerald-400/20 hover:bg-emerald-400/10'
-                          }`}>
-                          {r.status === 'PAGO' ? <ArrowUpDown size={10} /> : <Check size={10} />}
-                          {r.status === 'PAGO' ? 'Reverter' : 'Recebido'}
-                        </button>
-                        <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id}
-                          className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 disabled:opacity-50 inline-flex items-center gap-1">
-                          {deletingId === r.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-            <span>{filtered.length} receita(s)</span>
-            <span className="font-semibold text-emerald-400">Total: {fmt(totalFiltered)}</span>
-          </div>
-        </>
       )}
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider shrink-0">{label}</span>
+      <span className="text-xs text-foreground text-right">{value}</span>
     </div>
   );
 }

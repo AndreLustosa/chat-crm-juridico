@@ -222,6 +222,62 @@ export class FinanceiroService {
     });
   }
 
+  /**
+   * Recebimento parcial: cria transação PAGO com o valor recebido e reduz o original.
+   */
+  async partialPayment(id: string, amount: number, paymentMethod?: string, tenantId?: string) {
+    const original = await this.verifyTransactionAccess(id, tenantId);
+
+    if (original.status === 'PAGO') {
+      throw new ConflictException('Transação já está paga');
+    }
+    if (original.status === 'CANCELADO') {
+      throw new ConflictException('Transação está cancelada');
+    }
+
+    const originalAmount = Number(original.amount);
+    if (amount <= 0 || amount > originalAmount) {
+      throw new ConflictException(`Valor deve ser entre R$ 0,01 e R$ ${originalAmount.toFixed(2)}`);
+    }
+
+    const remaining = Math.round((originalAmount - amount) * 100) / 100;
+
+    // Criar transação do pagamento parcial recebido
+    const partialTx = await this.prisma.financialTransaction.create({
+      data: {
+        tenant_id: original.tenant_id,
+        type: original.type,
+        category: original.category,
+        description: `${original.description} (parcial)`,
+        amount: amount,
+        date: new Date(),
+        due_date: original.due_date,
+        paid_at: new Date(),
+        payment_method: paymentMethod || original.payment_method,
+        status: 'PAGO',
+        legal_case_id: original.legal_case_id,
+        lead_id: original.lead_id,
+        lawyer_id: original.lawyer_id,
+        notes: `Recebimento parcial de R$ ${amount.toFixed(2)}`,
+      },
+    });
+
+    // Atualizar original: reduzir valor ou marcar como pago se zerou
+    if (remaining <= 0) {
+      await this.prisma.financialTransaction.update({
+        where: { id },
+        data: { status: 'PAGO', paid_at: new Date(), amount: 0 },
+      });
+    } else {
+      await this.prisma.financialTransaction.update({
+        where: { id },
+        data: { amount: remaining },
+      });
+    }
+
+    return { partial: partialTx, remaining };
+  }
+
   async deleteTransaction(id: string, tenantId?: string) {
     await this.verifyTransactionAccess(id, tenantId);
 

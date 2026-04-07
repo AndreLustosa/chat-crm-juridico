@@ -445,6 +445,28 @@ export class PaymentGatewayService {
       }
     }
 
+    // Se pagamento RECEIVED/CONFIRMED e tem transaction_id mas NÃO tem honorario (receita avulsa),
+    // dar baixa direta na FinancialTransaction
+    if (
+      (mappedStatus === 'RECEIVED' || mappedStatus === 'CONFIRMED') &&
+      charge.transaction_id &&
+      !charge.honorario_payment_id
+    ) {
+      try {
+        await this.prisma.financialTransaction.update({
+          where: { id: charge.transaction_id },
+          data: {
+            status: 'PAGO',
+            paid_at: new Date(),
+            payment_method: charge.billing_type,
+          },
+        });
+        this.logger.log(`[WEBHOOK] FinancialTransaction ${charge.transaction_id} marcada como PAGO (receita avulsa)`);
+      } catch (e: any) {
+        this.logger.warn(`[WEBHOOK] Falha ao dar baixa em transação avulsa: ${e.message}`);
+      }
+    }
+
     // Se pagamento RECEIVED ou CONFIRMED, notificar cliente via WhatsApp
     if (mappedStatus === 'RECEIVED' || mappedStatus === 'CONFIRMED') {
       try {
