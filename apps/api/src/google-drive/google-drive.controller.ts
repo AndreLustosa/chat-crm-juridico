@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Query,
   Res,
@@ -192,5 +193,64 @@ export class GoogleDriveController {
   async disconnectOAuth() {
     await this.driveService.disconnectOAuth();
     return { ok: true, message: 'OAuth2 desconectado' };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Papel Timbrado (Letterhead Template)
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * GET /google-drive/letterhead — status do papel timbrado configurado.
+   */
+  @Get('letterhead')
+  async getLetterhead() {
+    return this.driveService.getLetterheadInfo();
+  }
+
+  /**
+   * POST /google-drive/letterhead/search — buscar arquivos no Drive do usuário.
+   * Usado para encontrar o papel timbrado.
+   */
+  @Post('letterhead/search')
+  @Roles('ADMIN')
+  async searchFiles(@Body() body: { query: string }) {
+    if (!body.query?.trim()) {
+      throw new BadRequestException('Query de busca é obrigatória');
+    }
+    const files = await this.driveService.searchDriveFiles(body.query.trim());
+    return { files };
+  }
+
+  /**
+   * POST /google-drive/letterhead — definir um arquivo como papel timbrado.
+   * Se o arquivo é DOCX, converte automaticamente para Google Doc.
+   */
+  @Post('letterhead')
+  @Roles('ADMIN')
+  async setLetterhead(@Body() body: { fileId: string }) {
+    if (!body.fileId?.trim()) {
+      throw new BadRequestException('fileId é obrigatório');
+    }
+    try {
+      const result = await this.driveService.setLetterheadTemplate(body.fileId.trim());
+      return {
+        ok: true,
+        message: 'Papel timbrado configurado com sucesso',
+        ...result,
+      };
+    } catch (err: any) {
+      this.logger.error(`Erro ao configurar papel timbrado: ${err.message}`);
+      throw new BadRequestException(err.message);
+    }
+  }
+
+  /**
+   * DELETE /google-drive/letterhead — remover papel timbrado.
+   */
+  @Delete('letterhead')
+  @Roles('ADMIN')
+  async removeLetterhead() {
+    await this.driveService.removeLetterhead();
+    return { ok: true, message: 'Papel timbrado removido' };
   }
 }

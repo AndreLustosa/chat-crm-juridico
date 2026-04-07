@@ -17,6 +17,11 @@ import {
   LogIn,
   Shield,
   User,
+  FileText,
+  Search,
+  Stamp,
+  Trash2,
+  ExternalLink,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -29,6 +34,16 @@ interface DriveConfig {
   oauthConfigured: boolean;
   oauthConnected: boolean;
   oauthUserEmail: string | null;
+  hasLetterhead: boolean;
+  letterheadTemplateId: string | null;
+  letterheadTemplateName: string | null;
+}
+
+interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
 }
 
 export default function GoogleDriveSettingsPage() {
@@ -50,6 +65,14 @@ export default function GoogleDriveSettingsPage() {
   const [connectingOAuth, setConnectingOAuth] = useState(false);
   const [disconnectingOAuth, setDisconnectingOAuth] = useState(false);
   const [oauthMessage, setOauthMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Papel Timbrado (Letterhead)
+  const [letterheadSearch, setLetterheadSearch] = useState('');
+  const [searchingFiles, setSearchingFiles] = useState(false);
+  const [searchResults, setSearchResults] = useState<DriveFile[]>([]);
+  const [settingLetterhead, setSettingLetterhead] = useState<string | null>(null);
+  const [removingLetterhead, setRemovingLetterhead] = useState(false);
+  const [letterheadMessage, setLetterheadMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -145,6 +168,56 @@ export default function GoogleDriveSettingsPage() {
     }
   };
 
+  // ─── Letterhead handlers ───
+  const handleSearchLetterhead = async () => {
+    if (!letterheadSearch.trim()) return;
+    setSearchingFiles(true);
+    setSearchResults([]);
+    setLetterheadMessage(null);
+    try {
+      const res = await api.post('/google-drive/letterhead/search', { query: letterheadSearch.trim() });
+      setSearchResults(res.data.files || []);
+      if (!res.data.files?.length) {
+        setLetterheadMessage({ ok: false, text: 'Nenhum arquivo encontrado. Tente outro termo de busca.' });
+      }
+    } catch (err: any) {
+      setLetterheadMessage({ ok: false, text: err.response?.data?.message || 'Erro ao buscar arquivos' });
+    } finally {
+      setSearchingFiles(false);
+    }
+  };
+
+  const handleSetLetterhead = async (fileId: string) => {
+    setSettingLetterhead(fileId);
+    setLetterheadMessage(null);
+    try {
+      const res = await api.post('/google-drive/letterhead', { fileId });
+      setLetterheadMessage({ ok: true, text: `Papel timbrado configurado: ${res.data.name}` });
+      setSearchResults([]);
+      setLetterheadSearch('');
+      fetchConfig();
+    } catch (err: any) {
+      setLetterheadMessage({ ok: false, text: err.response?.data?.message || 'Erro ao configurar papel timbrado' });
+    } finally {
+      setSettingLetterhead(null);
+    }
+  };
+
+  const handleRemoveLetterhead = async () => {
+    if (!confirm('Remover o papel timbrado? Novas petições serão criadas sem cabeçalho.')) return;
+    setRemovingLetterhead(true);
+    setLetterheadMessage(null);
+    try {
+      await api.delete('/google-drive/letterhead');
+      setLetterheadMessage({ ok: true, text: 'Papel timbrado removido.' });
+      fetchConfig();
+    } catch (err: any) {
+      setLetterheadMessage({ ok: false, text: err.response?.data?.message || 'Erro ao remover' });
+    } finally {
+      setRemovingLetterhead(false);
+    }
+  };
+
   const handleDisconnectOAuth = async () => {
     if (!confirm('Tem certeza que deseja desconectar sua conta Google? A criação automática de documentos será desativada.')) return;
     setDisconnectingOAuth(true);
@@ -207,6 +280,12 @@ export default function GoogleDriveSettingsPage() {
             }
             {' · '}
             {config?.hasRootFolder ? 'Pasta raiz: OK' : 'Pasta raiz: Pendente'}
+            {config?.oauthConnected && (
+              <>
+                {' · '}
+                {config?.hasLetterhead ? `Timbrado: ${config.letterheadTemplateName || 'OK'}` : 'Timbrado: Não configurado'}
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -356,6 +435,160 @@ export default function GoogleDriveSettingsPage() {
           </div>
         )}
       </div>
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* Papel Timbrado (Letterhead Template)                   */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      {config?.oauthConnected && (
+        <div className="bg-card border-2 border-amber-500/30 rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-amber-500/10 rounded-lg">
+              <Stamp className="w-4 h-4 text-amber-500" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Papel Timbrado</h3>
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                Todas as petições serão criadas com seu cabeçalho/rodapé
+              </p>
+            </div>
+          </div>
+
+          {/* Template atual */}
+          {config?.hasLetterhead ? (
+            <div className="flex items-center gap-3 p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
+              <FileText className="w-5 h-5 text-emerald-500 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 truncate">
+                  {config.letterheadTemplateName || 'Papel Timbrado'}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Novas petições usam este template automaticamente
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={`https://docs.google.com/document/d/${config.letterheadTemplateId}/edit`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium text-blue-600 dark:text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-lg hover:bg-blue-500/20 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Ver
+                </a>
+                <button
+                  onClick={handleRemoveLetterhead}
+                  disabled={removingLetterhead}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors"
+                >
+                  {removingLetterhead ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  Remover
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+              <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Nenhum papel timbrado configurado. Petições são criadas em branco.
+              </p>
+            </div>
+          )}
+
+          {/* Busca de arquivo no Drive */}
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Busque o arquivo do papel timbrado no seu Google Drive (DOCX ou Google Doc):
+            </p>
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
+                <input
+                  type="text"
+                  value={letterheadSearch}
+                  onChange={(e) => setLetterheadSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearchLetterhead()}
+                  placeholder="Ex: papel timbrado, letterhead, cabeçalho..."
+                  className="w-full text-xs bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-muted-foreground/50"
+                />
+              </div>
+              <button
+                onClick={handleSearchLetterhead}
+                disabled={searchingFiles || !letterheadSearch.trim()}
+                className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50"
+              >
+                {searchingFiles ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                Buscar
+              </button>
+            </div>
+
+            {/* Resultados da busca */}
+            {searchResults.length > 0 && (
+              <div className="bg-background rounded-lg border border-border divide-y divide-border max-h-64 overflow-y-auto">
+                {searchResults.map((file) => (
+                  <div
+                    key={file.id}
+                    className="flex items-center gap-3 p-3 hover:bg-foreground/5 transition-colors"
+                  >
+                    <FileText className={`w-4 h-4 shrink-0 ${
+                      file.mimeType === 'application/vnd.google-apps.document'
+                        ? 'text-blue-500'
+                        : 'text-amber-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{file.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {file.mimeType === 'application/vnd.google-apps.document'
+                          ? 'Google Doc'
+                          : file.mimeType.includes('wordprocessing')
+                            ? 'DOCX (será convertido)'
+                            : 'DOC (será convertido)'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleSetLetterhead(file.id)}
+                      disabled={settingLetterhead === file.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 shrink-0"
+                    >
+                      {settingLetterhead === file.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Stamp className="w-3 h-3" />
+                      )}
+                      {settingLetterhead === file.id ? 'Configurando...' : 'Usar como Timbrado'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Mensagem de feedback */}
+          {letterheadMessage && (
+            <div className={`flex items-start gap-2 p-3 rounded-lg border ${
+              letterheadMessage.ok
+                ? 'bg-emerald-500/5 border-emerald-500/20'
+                : 'bg-red-500/5 border-red-500/20'
+            }`}>
+              {letterheadMessage.ok ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+              )}
+              <p className={`text-xs ${letterheadMessage.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>
+                {letterheadMessage.text}
+              </p>
+            </div>
+          )}
+
+          {/* Info */}
+          <div className="bg-background rounded-lg p-3 space-y-1.5">
+            <p className="text-[11px] text-muted-foreground">
+              <strong className="text-foreground">Como funciona:</strong> O sistema copia o papel timbrado para cada nova petição,
+              preservando cabeçalho, rodapé, logo, margens e formatação. O estagiário edita o conteúdo no Google Docs.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ═══════════════════════════════════════════════════════ */}
       {/* Pasta Raiz + Service Account (configuração base)      */}

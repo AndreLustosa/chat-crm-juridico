@@ -50,6 +50,8 @@ export class GoogleDriveService {
     const oauthClientId = await this.getSetting('GDRIVE_OAUTH_CLIENT_ID');
     const oauthRefreshToken = await this.getSetting('GDRIVE_OAUTH_REFRESH_TOKEN');
     const oauthUserEmail = await this.getSetting('GDRIVE_OAUTH_USER_EMAIL');
+    const letterheadId = await this.getSetting('GDRIVE_LETTERHEAD_TEMPLATE_ID');
+    const letterheadName = await this.getSetting('GDRIVE_LETTERHEAD_TEMPLATE_NAME');
 
     return {
       configured: !!(rootFolder && (oauthRefreshToken || b64)),
@@ -60,6 +62,9 @@ export class GoogleDriveService {
       oauthConfigured: !!(oauthClientId),
       oauthConnected: !!oauthRefreshToken,
       oauthUserEmail: oauthUserEmail || null,
+      hasLetterhead: !!letterheadId,
+      letterheadTemplateId: letterheadId || null,
+      letterheadTemplateName: letterheadName || null,
     };
   }
 
@@ -401,19 +406,167 @@ export class GoogleDriveService {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  //  Papel Timbrado (Letterhead Template)
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Busca arquivos no Google Drive do usuário autenticado.
+   * Usado para encontrar o papel timbrado.
+   */
+  async searchDriveFiles(query: string): Promise<Array<{ id: string; name: string; mimeType: string; webViewLink?: string }>> {
+    const drive = await this.getDriveClientForFiles();
+
+    // Busca pelo nome (parcial) — inclui DOCX e Google Docs
+    const safeName = query.replace(/'/g, "\\'");
+    const res = await drive.files.list({
+      q: `name contains '${safeName}' and trashed=false and (mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document' or mimeType='application/msword')`,
+      fields: 'files(id,name,mimeType,webViewLink)',
+      spaces: 'drive',
+      pageSize: 20,
+      orderBy: 'modifiedTime desc',
+    });
+
+    return (res.data.files || []).map(f => ({
+      id: f.id!,
+      name: f.name!,
+      mimeType: f.mimeType!,
+      webViewLink: f.webViewLink || undefined,
+    }));
+  }
+
+  /**
+   * Define um arquivo do Google Drive como template de papel timbrado.
+   *
+   * Se o arquivo é DOCX, faz download e re-upload como Google Doc (conversão).
+   * O Google Doc resultante fica como template para todas as petições.
+   */
+  async setLetterheadTemplate(fileId: string): Promise<{ id: string; name: string; url: string }> {
+    const drive = await this.getDriveClientForFiles();
+
+    // 1. Verificar se o arquivo existe e obter metadados
+    const fileMeta = await drive.files.get({
+      fileId,
+      fields: 'id,name,mimeType,webViewLink',
+    });
+
+    const fileName = fileMeta.data.name || 'Papel Timbrado';
+    const mimeType = fileMeta.data.mimeType || '';
+    let templateDocId = fileId;
+    let templateUrl = fileMeta.data.webViewLink || '';
+
+    // 2. Se é DOCX ou DOC, converter para Google Docs
+    if (
+      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimeType === 'application/msword'
+    ) {
+      this.logger.log(`Convertendo ${mimeType} para Google Docs...`);
+
+      // Baixar conteúdo do DOCX
+      const downloadRes = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'stream' },
+      );
+
+      // Coletar stream em Buffer
+      const chunks: Buffer[] = [];
+      await new Promise<void>((resolve, reject) => {
+        (downloadRes.data as any)
+          .on('data', (chunk: Buffer) => chunks.push(chunk))
+          .on('end', () => resolve())
+          .on('error', (err: Error) => reject(err));
+      });
+      const fileBuffer = Buffer.concat(chunks);
+
+      const { Readable } = await import('stream');
+
+      // Re-upload como Google Doc (Drive API converte automaticamente)
+      const rootFolder = await this.getSetting('GDRIVE_ROOT_FOLDER_ID');
+      const uploadRes = await drive.files.create({
+        requestBody: {
+          name: `[TEMPLATE] ${fileName.replace(/\.(docx?|DOCX?)$/, '')}`,
+          mimeType: 'application/vnd.google-apps.document',
+          ...(rootFolder ? { parents: [rootFolder] } : {}),
+        },
+        media: {
+          mimeType,
+          body: Readable.from(fileBuffer),
+        },
+        fields: 'id,name,webViewLink',
+      });
+
+      templateDocId = uploadRes.data.id!;
+      templateUrl = uploadRes.data.webViewLink || `https://docs.google.com/document/d/${templateDocId}/edit`;
+      this.logger.log(`DOCX convertido para Google Doc: ${templateDocId}`);
+    } else if (mimeType !== 'application/vnd.google-apps.document') {
+      throw new Error(`Tipo de arquivo não suportado: ${mimeType}. Use um DOCX ou Google Doc.`);
+    }
+
+    // 3. Salvar ID do template
+    await this.setSetting('GDRIVE_LETTERHEAD_TEMPLATE_ID', templateDocId);
+    await this.setSetting('GDRIVE_LETTERHEAD_TEMPLATE_NAME', fileName.replace(/\.(docx?|DOCX?)$/, ''));
+
+    this.logger.log(`Papel timbrado definido: ${templateDocId} (${fileName})`);
+
+    return {
+      id: templateDocId,
+      name: fileName,
+      url: templateUrl || `https://docs.google.com/document/d/${templateDocId}/edit`,
+    };
+  }
+
+  /**
+   * Retorna informações sobre o papel timbrado configurado.
+   */
+  async getLetterheadInfo(): Promise<{ configured: boolean; id?: string; name?: string; url?: string }> {
+    const templateId = await this.getSetting('GDRIVE_LETTERHEAD_TEMPLATE_ID');
+    if (!templateId) {
+      return { configured: false };
+    }
+
+    const templateName = await this.getSetting('GDRIVE_LETTERHEAD_TEMPLATE_NAME');
+
+    // Verificar se o template ainda existe no Drive
+    try {
+      const drive = await this.getDriveClientForFiles();
+      const res = await drive.files.get({
+        fileId: templateId,
+        fields: 'id,name,webViewLink',
+      });
+      return {
+        configured: true,
+        id: templateId,
+        name: templateName || res.data.name || 'Papel Timbrado',
+        url: res.data.webViewLink || `https://docs.google.com/document/d/${templateId}/edit`,
+      };
+    } catch {
+      this.logger.warn(`Template de papel timbrado ${templateId} não encontrado no Drive`);
+      return { configured: false };
+    }
+  }
+
+  /**
+   * Remove o papel timbrado configurado.
+   */
+  async removeLetterhead(): Promise<void> {
+    await this.prisma.globalSetting.deleteMany({
+      where: { key: { in: ['GDRIVE_LETTERHEAD_TEMPLATE_ID', 'GDRIVE_LETTERHEAD_TEMPLATE_NAME'] } },
+    });
+    this.logger.log('Papel timbrado removido');
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   //  Google Docs — Criação via OAuth2 (storage do USUÁRIO)
   // ═══════════════════════════════════════════════════════════════
 
   /**
    * Cria um Google Doc dentro da pasta especificada.
    *
-   * Estratégia (idêntica ao n8n):
-   * - Usa drive.files.create com mimeType Google Docs e conversão
-   * - Autenticado via OAuth2 → arquivo pertence ao USUÁRIO (tem storage)
-   * - Service Accounts falhavam com storageQuotaExceeded desde Abr/2025
-   *   porque têm 0 bytes de storage
+   * Estratégia:
+   * 1. Se há papel timbrado configurado → copia o template (preserva cabeçalho, rodapé, margens, logo)
+   * 2. Senão → cria doc vazio via HTML conversion (método idêntico ao n8n)
    *
-   * Após criação, compartilha com "anyone with link" para embed funcionar.
+   * Autenticado via OAuth2 → arquivo pertence ao USUÁRIO (tem storage).
+   * Após criação, compartilha com "anyone with link".
    */
   async createDoc(
     title: string,
@@ -422,10 +575,66 @@ export class GoogleDriveService {
   ): Promise<{ docId: string; docUrl: string }> {
     const drive = await this.getDriveClientForFiles();
 
-    this.logger.log(`Criando Google Doc: "${title}" na pasta ${folderId}...`);
+    // Verificar se há papel timbrado configurado
+    const templateId = await this.getSetting('GDRIVE_LETTERHEAD_TEMPLATE_ID');
 
-    // Criar doc via Drive API com conversão de HTML → Google Docs
-    // Este é o mesmo método que o n8n usa internamente
+    let docId: string;
+    let docUrl: string;
+
+    if (templateId) {
+      // ───── Criar a partir do papel timbrado (drive.files.copy) ─────
+      this.logger.log(`Criando Google Doc "${title}" a partir do papel timbrado (template: ${templateId})...`);
+
+      try {
+        const copyRes = await drive.files.copy({
+          fileId: templateId,
+          requestBody: {
+            name: title,
+            parents: [folderId],
+          },
+          fields: 'id,webViewLink',
+        });
+
+        docId = copyRes.data.id!;
+        docUrl = copyRes.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`;
+        this.logger.log(`Google Doc criado a partir do template: ${docId}`);
+      } catch (templateErr: any) {
+        this.logger.warn(`Falha ao copiar template (${templateErr.message}). Criando doc sem papel timbrado...`);
+        // Fallback: criar doc sem template
+        const result = await this.createDocWithoutTemplate(drive, title, folderId, initialHtml);
+        docId = result.docId;
+        docUrl = result.docUrl;
+      }
+    } else {
+      // ───── Criar doc vazio (sem papel timbrado) ─────
+      const result = await this.createDocWithoutTemplate(drive, title, folderId, initialHtml);
+      docId = result.docId;
+      docUrl = result.docUrl;
+    }
+
+    // Compartilhar com "anyone with link" para embed funcionar
+    await this.shareDocPublicly(drive, docId);
+
+    // Se estamos usando OAuth2, também compartilhar com o service account
+    // para que operações de leitura/sync funcionem com ambas auths
+    await this.shareWithServiceAccount(drive, docId);
+
+    this.logger.log(`Google Doc finalizado: "${title}" (${docId})`);
+    return { docId, docUrl };
+  }
+
+  /**
+   * Cria Google Doc vazio (sem template) via HTML conversion.
+   * Método idêntico ao que o n8n usa internamente.
+   */
+  private async createDocWithoutTemplate(
+    drive: drive_v3.Drive,
+    title: string,
+    folderId: string,
+    initialHtml?: string,
+  ): Promise<{ docId: string; docUrl: string }> {
+    this.logger.log(`Criando Google Doc: "${title}" na pasta ${folderId} (sem template)...`);
+
     const { Readable } = await import('stream');
     const htmlContent = initialHtml || '<html><body><p></p></body></html>';
 
@@ -444,14 +653,16 @@ export class GoogleDriveService {
 
     const docId = res.data.id!;
     const docUrl = res.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`;
-
     this.logger.log(`Google Doc criado: ${docId} - ${docUrl}`);
 
-    // Compartilhar com "anyone with link" para iframe embed funcionar
-    await this.shareDocPublicly(drive, docId);
+    return { docId, docUrl };
+  }
 
-    // Se estamos usando OAuth2, também compartilhar com o service account
-    // para que operações de leitura/sync funcionem com ambas auths
+  /**
+   * Compartilha doc com Service Account (se configurado).
+   * Permite que operações de leitura/sync funcionem com ambas auths.
+   */
+  private async shareWithServiceAccount(drive: drive_v3.Drive, docId: string): Promise<void> {
     try {
       const b64 = await this.getSetting('GDRIVE_SERVICE_ACCOUNT_B64');
       if (b64) {
@@ -468,9 +679,6 @@ export class GoogleDriveService {
     } catch (err: any) {
       this.logger.debug(`Não foi possível compartilhar com SA: ${err.message}`);
     }
-
-    this.logger.log(`Google Doc finalizado: "${title}" (${docId})`);
-    return { docId, docUrl };
   }
 
   /**
