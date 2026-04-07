@@ -182,87 +182,127 @@ export class GoogleDriveService {
 
   /**
    * Cria um Google Doc dentro da pasta especificada.
+   *
+   * Estratégia: usa a Docs API (documents.create) para criar o doc e
+   * depois move para a pasta desejada via Drive API (files.update).
+   * Isso evita o erro "storageQuotaExceeded" que ocorre quando se usa
+   * drive.files.create com mimeType Google Doc em service accounts.
+   *
    * Após criação, compartilha com "anyone with link" para que
    * o iframe embed funcione e os usuários do escritório possam editar.
-   * Retorna { docId, docUrl }
    */
   async createDoc(
     title: string,
     folderId: string,
     initialHtml?: string,
   ): Promise<{ docId: string; docUrl: string }> {
+    const docs = await this.getDocsClient();
     const drive = await this.getDriveClient();
 
     this.logger.log(`Criando Google Doc: "${title}" na pasta ${folderId}...`);
 
-    // 1. Criar Doc vazio no Drive (dentro da pasta)
-    let res: any;
+    // 1. Criar doc via Docs API (cria na raiz do service account)
+    let docId: string;
     try {
-      res = await drive.files.create({
-        requestBody: {
-          name: title,
-          mimeType: 'application/vnd.google-apps.document',
-          parents: [folderId],
-        },
-        fields: 'id,webViewLink,name,mimeType',
+      const docRes = await docs.documents.create({
+        requestBody: { title },
       });
-    } catch (createErr: any) {
-      const errDetails = createErr?.response?.data?.error || createErr?.errors || createErr.message;
-      this.logger.error(`Erro ao criar Google Doc via drive.files.create: ${JSON.stringify(errDetails)}`);
-      throw new Error(`Falha ao criar Google Doc: ${JSON.stringify(errDetails)}`);
-    }
+      docId = docRes.data.documentId!;
+      this.logger.log(`Doc criado via Docs API: ${docId}`);
+    } catch (docsErr: any) {
+      const errDetails = docsErr?.response?.data?.error || docsErr.message;
+      this.logger.error(`Erro ao criar via Docs API: ${JSON.stringify(errDetails)}`);
 
-    const docId = res.data.id;
-    if (!docId) {
-      this.logger.error(`drive.files.create retornou sem ID. Response: ${JSON.stringify(res.data)}`);
-      throw new Error('Google Drive não retornou o ID do documento criado');
-    }
-
-    // URL de fallback caso webViewLink não venha
-    const docUrl = res.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`;
-
-    this.logger.log(`Google Doc criado com sucesso: "${title}" (${docId}) - URL: ${docUrl}`);
-
-    // 2. Compartilhar com "anyone with link" como writer
-    //    Necessário para o iframe embed funcionar e para os usuários do escritório editarem
-    try {
-      await drive.permissions.create({
-        fileId: docId,
-        requestBody: {
-          type: 'anyone',
-          role: 'writer',
-        },
-      });
-      this.logger.log(`Doc ${docId} compartilhado (anyone/writer)`);
-    } catch (shareErr: any) {
-      // Se não conseguir compartilhar como "anyone" (ex: domínio Google Workspace restringe),
-      // tenta como "anyone with link" reader
-      this.logger.warn(`Não foi possível compartilhar como writer: ${shareErr.message}. Tentando reader...`);
+      // Fallback: tentar via Drive API (upload de conteúdo vazio com conversão)
+      this.logger.log(`Tentando fallback via Drive API com media upload...`);
       try {
-        await drive.permissions.create({
-          fileId: docId,
+        const { Readable } = await import('stream');
+        const driveRes = await drive.files.create({
           requestBody: {
-            type: 'anyone',
-            role: 'reader',
+            name: title,
+            parents: [folderId],
+            mimeType: 'application/vnd.google-apps.document',
           },
+          media: {
+            mimeType: 'text/html',
+            body: Readable.from(initialHtml || '<html><body><p></p></body></html>'),
+          },
+          fields: 'id,webViewLink',
         });
-        this.logger.log(`Doc ${docId} compartilhado (anyone/reader - fallback)`);
-      } catch (shareErr2: any) {
-        this.logger.warn(`Falha ao compartilhar doc ${docId}: ${shareErr2.message}. O doc foi criado mas pode não ser visível no iframe.`);
+        docId = driveRes.data.id!;
+        const docUrl = driveRes.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`;
+        this.logger.log(`Doc criado via Drive upload fallback: ${docId}`);
+
+        // Compartilhar
+        await this.shareDocPublicly(drive, docId);
+
+        return { docId, docUrl };
+      } catch (driveErr: any) {
+        const drvDetails = driveErr?.response?.data?.error || driveErr.message;
+        this.logger.error(`Fallback Drive API também falhou: ${JSON.stringify(drvDetails)}`);
+        throw new Error(`Falha ao criar Google Doc: ${JSON.stringify(drvDetails)}`);
       }
     }
 
-    // 3. Se há conteúdo HTML inicial, inserir via Docs API
+    // 2. Mover doc da raiz do service account para a pasta desejada
+    try {
+      const fileInfo = await drive.files.get({
+        fileId: docId,
+        fields: 'parents',
+      });
+      const previousParents = (fileInfo.data.parents || []).join(',');
+
+      await drive.files.update({
+        fileId: docId,
+        addParents: folderId,
+        removeParents: previousParents,
+        fields: 'id,webViewLink',
+      });
+      this.logger.log(`Doc ${docId} movido para pasta ${folderId}`);
+    } catch (moveErr: any) {
+      this.logger.warn(`Não foi possível mover doc para pasta: ${moveErr.message}. Doc ficará na raiz.`);
+    }
+
+    const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
+
+    // 3. Compartilhar com "anyone with link"
+    await this.shareDocPublicly(drive, docId);
+
+    // 4. Se há conteúdo HTML inicial, inserir via Docs API
     if (initialHtml) {
       try {
         await this.insertHtmlContent(docId, initialHtml);
       } catch (contentErr: any) {
         this.logger.warn(`Doc criado mas falha ao inserir conteúdo: ${contentErr.message}`);
-        // Não re-throw — o doc foi criado com sucesso, só o conteúdo inicial falhou
       }
     }
 
+    this.logger.log(`Google Doc finalizado: "${title}" (${docId}) - URL: ${docUrl}`);
     return { docId, docUrl };
+  }
+
+  /**
+   * Compartilha doc com "anyone with link" — necessário para iframe embed.
+   */
+  private async shareDocPublicly(drive: drive_v3.Drive, docId: string): Promise<void> {
+    try {
+      await drive.permissions.create({
+        fileId: docId,
+        requestBody: { type: 'anyone', role: 'writer' },
+      });
+      this.logger.log(`Doc ${docId} compartilhado (anyone/writer)`);
+    } catch (shareErr: any) {
+      this.logger.warn(`Não conseguiu writer: ${shareErr.message}. Tentando reader...`);
+      try {
+        await drive.permissions.create({
+          fileId: docId,
+          requestBody: { type: 'anyone', role: 'reader' },
+        });
+        this.logger.log(`Doc ${docId} compartilhado (anyone/reader - fallback)`);
+      } catch (shareErr2: any) {
+        this.logger.warn(`Falha ao compartilhar doc ${docId}: ${shareErr2.message}`);
+      }
+    }
   }
 
   /**
@@ -408,19 +448,30 @@ export class GoogleDriveService {
       }
       details.push(`✓ Pasta raiz: ${res.data.name}`);
 
-      // 2. Testar criação de Google Doc
-      details.push('Testando criação de Google Doc...');
+      // 2. Testar criação de Google Doc (via Docs API — mesmo método usado em produção)
+      details.push('Testando criação de Google Doc (Docs API)...');
       try {
-        const testDoc = await drive.files.create({
-          requestBody: {
-            name: '_teste_conexao_deletar',
-            mimeType: 'application/vnd.google-apps.document',
-            parents: [rootFolder],
-          },
-          fields: 'id,webViewLink,name',
+        const docs = await this.getDocsClient();
+        const docRes = await docs.documents.create({
+          requestBody: { title: '_teste_conexao_deletar' },
         });
-        const testDocId = testDoc.data.id;
-        details.push(`✓ Doc criado com sucesso: ${testDocId}`);
+        const testDocId = docRes.data.documentId;
+        details.push(`✓ Doc criado via Docs API: ${testDocId}`);
+
+        // Mover para pasta raiz
+        details.push('Testando mover doc para pasta raiz...');
+        try {
+          const fileInfo = await drive.files.get({ fileId: testDocId!, fields: 'parents' });
+          const prevParents = (fileInfo.data.parents || []).join(',');
+          await drive.files.update({
+            fileId: testDocId!,
+            addParents: rootFolder,
+            removeParents: prevParents,
+          });
+          details.push('✓ Doc movido para pasta raiz');
+        } catch (moveErr: any) {
+          details.push(`⚠ Mover falhou: ${moveErr.message}`);
+        }
 
         // 3. Testar compartilhamento
         details.push('Testando compartilhamento (anyone/writer)...');
