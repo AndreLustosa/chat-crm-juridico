@@ -61,6 +61,41 @@ export class HonorariosService {
     });
   }
 
+  // ─── Parcelas pendentes (para tab Receitas / A Receber) ──
+
+  async findPendingPayments(tenantId?: string, lawyerId?: string) {
+    const where: any = {
+      status: { in: ['PENDENTE', 'ATRASADO'] },
+    };
+    if (tenantId) {
+      where.honorario = { tenant_id: tenantId };
+    }
+    if (lawyerId) {
+      where.honorario = { ...where.honorario, legal_case: { lawyer_id: lawyerId } };
+    }
+
+    return this.prisma.honorarioPayment.findMany({
+      where,
+      include: {
+        honorario: {
+          include: {
+            legal_case: {
+              select: {
+                id: true,
+                case_number: true,
+                legal_area: true,
+                lawyer_id: true,
+                lawyer: { select: { id: true, name: true } },
+                lead: { select: { id: true, name: true, phone: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { due_date: 'asc' },
+    });
+  }
+
   // ─── CRUD ──────────────────────────────────────────────
 
   async findByCaseId(caseId: string, tenantId?: string) {

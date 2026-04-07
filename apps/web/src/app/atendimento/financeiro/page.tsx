@@ -763,7 +763,7 @@ export default function FinanceiroPage() {
         )}
 
         {/* ─── TAB: Receitas ─── */}
-        {tab === 'Receitas' && <ReceitasTab receitas={receitas} onRefresh={fetchData} />}
+        {tab === 'Receitas' && <ReceitasTab receitas={receitas} onRefresh={fetchData} lawyerId={effectiveLawyerId} />}
 
         {/* ─── TAB: Despesas ─── */}
         {tab === 'Despesas' && (
@@ -1684,14 +1684,29 @@ const RECEITA_CAT_ICONS: Record<string, string> = {
   HONORARIO: '⚖️', CONSULTA: '📞', ACORDO: '🤝', OUTRO: '📋',
 };
 
-function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefresh: () => void }) {
+function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[]; onRefresh: () => void; lawyerId?: string }) {
   const router = useRouter();
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searchQ, setSearchQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [viewMode, setViewMode] = useState<'recebidas' | 'a_receber'>('a_receber');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedReceita, setSelectedReceita] = useState<Transaction | null>(null);
+  const [pendingPayments, setPendingPayments] = useState<any[]>([]);
+  const [loadingPending, setLoadingPending] = useState(true);
+
+  const fetchPending = useCallback(async () => {
+    setLoadingPending(true);
+    try {
+      const params: any = {};
+      if (lawyerId) params.lawyerId = lawyerId;
+      const res = await api.get('/honorarios/pending-payments', { params });
+      setPendingPayments(res.data || []);
+    } catch { setPendingPayments([]); }
+    finally { setLoadingPending(false); }
+  }, [lawyerId]);
+
+  useEffect(() => { fetchPending(); }, [fetchPending]);
 
   // Form fields
   const [desc, setDesc] = useState('');
@@ -1762,13 +1777,20 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
   };
 
   const filtered = receitas.filter(r => {
-    if (statusFilter && r.status !== statusFilter) return false;
     if (searchQ) {
       const q = searchQ.toLowerCase();
       return (r.description || '').toLowerCase().includes(q) || (r.lead?.name || '').toLowerCase().includes(q)
         || (r.category || '').toLowerCase().includes(q) || (r.legal_case?.case_number || '').toLowerCase().includes(q);
     }
     return true;
+  });
+
+  const filteredPending = pendingPayments.filter((p: any) => {
+    if (!searchQ) return true;
+    const q = searchQ.toLowerCase();
+    const lc = p.honorario?.legal_case;
+    return (lc?.case_number || '').toLowerCase().includes(q) || (lc?.lead?.name || '').toLowerCase().includes(q)
+      || (p.honorario?.type || '').toLowerCase().includes(q);
   });
 
   const totalFiltered = filtered.reduce((s, r) => s + parseFloat(String(r.amount)), 0);
@@ -1780,15 +1802,22 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
+            {/* Toggle A Receber / Recebidas */}
+            <div className="flex bg-background border border-border rounded-lg overflow-hidden">
+              <button onClick={() => setViewMode('a_receber')}
+                className={`px-4 py-2 text-xs font-semibold transition-colors ${viewMode === 'a_receber' ? 'bg-amber-500/15 text-amber-500' : 'text-muted-foreground hover:bg-accent/30'}`}>
+                A Receber ({pendingPayments.length})
+              </button>
+              <button onClick={() => setViewMode('recebidas')}
+                className={`px-4 py-2 text-xs font-semibold transition-colors ${viewMode === 'recebidas' ? 'bg-emerald-500/15 text-emerald-500' : 'text-muted-foreground hover:bg-accent/30'}`}>
+                Recebidas ({receitas.length})
+              </button>
+            </div>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar receita..."
-                className="pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none w-52" />
+              <input type="text" value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar..."
+                className="pl-9 pr-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none w-44" />
             </div>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-              className="px-3 py-2 text-xs bg-background border border-border rounded-lg">
-              <option value="">Todos</option><option value="PAGO">Recebido</option><option value="PENDENTE">Pendente</option>
-            </select>
           </div>
           <button onClick={() => setShowForm(!showForm)}
             className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90">
@@ -1901,74 +1930,127 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
           </div>
         )}
 
-        {/* Table */}
-        {filtered.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl p-12 text-center">
-            <TrendingUp size={40} className="mx-auto text-muted-foreground/30 mb-3" />
-            <p className="text-sm text-muted-foreground font-medium">Nenhuma receita encontrada</p>
-          </div>
-        ) : (
-          <>
-            <div className="bg-card border border-border rounded-xl overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-card/80">
-                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Data</th>
-                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Processo / Descricao</th>
-                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
-                    <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
-                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Vencimento</th>
-                    <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Status</th>
-                    <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map(r => (
-                    <tr key={r.id}
-                      onClick={() => setSelectedReceita(r)}
-                      className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedReceita?.id === r.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}>
-                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(r.date)}</td>
-                      <td className="px-4 py-3 max-w-[280px]">
-                        {r.legal_case?.case_number && (
-                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                            <span className="text-[10px] font-mono text-primary">{r.legal_case.case_number}</span>
-                            {r.legal_case.legal_area && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{r.legal_case.legal_area}</span>
-                            )}
-                            {r.honorario_payment?.honorario?.type && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">
-                                {{CONTRATUAL:'Contratuais',SUCUMBENCIA:'Sucumbência',ENTRADA:'Entrada',ACORDO:'Acordo',FIXO:'Fixo',EXITO:'Êxito',MISTO:'Misto'}[r.honorario_payment.honorario.type] || r.honorario_payment.honorario.type}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        <span className="font-medium text-foreground truncate block">{r.description}</span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{r.lead?.name || '--'}</td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-bold text-emerald-400">{fmt(r.amount)}</span>
-                        {r.interest_amount && r.interest_amount > 0 && (
-                          <span className="block text-[9px] text-red-400">+ {fmt(r.interest_amount)} juros</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{r.due_date ? fmtDate(r.due_date) : '--'}</td>
-                      <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
-                      <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id}
-                          className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 disabled:opacity-50 inline-flex items-center gap-1">
-                          {deletingId === r.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
-                        </button>
-                      </td>
+        {/* ── A RECEBER (parcelas de honorários pendentes) ── */}
+        {viewMode === 'a_receber' && (
+          loadingPending ? (
+            <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin text-primary" /></div>
+          ) : filteredPending.length === 0 ? (
+            <div className="bg-card border border-border rounded-xl p-12 text-center">
+              <Clock size={40} className="mx-auto text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">Nenhum valor a receber</p>
+              <p className="text-xs text-muted-foreground mt-1">Cadastre honorarios nos processos para acompanhar valores pendentes</p>
+            </div>
+          ) : (
+            <>
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-card/80">
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Processo</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Tipo</th>
+                      <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Vencimento</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredPending.map((p: any) => {
+                      const lc = p.honorario?.legal_case;
+                      const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
+                      return (
+                        <tr key={p.id} className="border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer"
+                          onClick={() => lc?.id && router.push(`/atendimento/processos?openCase=${lc.id}`)}>
+                          <td className="px-4 py-3">
+                            <span className="text-[10px] font-mono text-primary">{lc?.case_number || '--'}</span>
+                            {lc?.legal_area && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{lc.legal_area}</span>}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{lc?.lead?.name || '--'}</td>
+                          <td className="px-4 py-3">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">
+                              {typeLabels[p.honorario?.type] || p.honorario?.type || '--'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-amber-400">{fmt(p.amount)}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{p.due_date ? fmtDate(p.due_date) : <span className="italic text-muted-foreground/50">Alvará</span>}</td>
+                          <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                <span>{filteredPending.length} parcela(s) pendente(s)</span>
+                <span className="font-semibold text-amber-400">Total a receber: {fmt(filteredPending.reduce((s: number, p: any) => s + parseFloat(String(p.amount)), 0))}</span>
+              </div>
+            </>
+          )
+        )}
+
+        {/* ── RECEBIDAS (transações financeiras PAGO) ── */}
+        {viewMode === 'recebidas' && (
+          filtered.length === 0 ? (
+            <div className="bg-card border border-border rounded-xl p-12 text-center">
+              <TrendingUp size={40} className="mx-auto text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground font-medium">Nenhuma receita recebida</p>
             </div>
-            <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-              <span>{filtered.length} receita(s)</span>
-              <span className="font-semibold text-emerald-400">Total: {fmt(totalFiltered)}</span>
-            </div>
-          </>
+          ) : (
+            <>
+              <div className="bg-card border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-card/80">
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Data</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Processo / Descricao</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
+                      <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
+                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Pago em</th>
+                      <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Acoes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(r => (
+                      <tr key={r.id}
+                        onClick={() => setSelectedReceita(r)}
+                        className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedReceita?.id === r.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}>
+                        <td className="px-4 py-3 text-muted-foreground">{fmtDate(r.date)}</td>
+                        <td className="px-4 py-3 max-w-[280px]">
+                          {r.legal_case?.case_number && (
+                            <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                              <span className="text-[10px] font-mono text-primary">{r.legal_case.case_number}</span>
+                              {r.legal_case.legal_area && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{r.legal_case.legal_area}</span>
+                              )}
+                              {r.honorario_payment?.honorario?.type && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">
+                                  {{CONTRATUAL:'Contratuais',SUCUMBENCIA:'Sucumbência',ENTRADA:'Entrada',ACORDO:'Acordo',FIXO:'Fixo',EXITO:'Êxito',MISTO:'Misto'}[r.honorario_payment.honorario.type] || r.honorario_payment.honorario.type}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <span className="font-medium text-foreground truncate block">{r.description}</span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{r.lead?.name || '--'}</td>
+                        <td className="px-4 py-3 text-right font-bold text-emerald-400">{fmt(r.amount)}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{r.paid_at ? fmtDate(r.paid_at) : fmtDate(r.date)}</td>
+                        <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id}
+                            className="px-2 py-1 text-[10px] font-semibold text-red-400 border border-red-400/20 rounded-md hover:bg-red-400/10 disabled:opacity-50 inline-flex items-center gap-1">
+                            {deletingId === r.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                <span>{filtered.length} receita(s) recebida(s)</span>
+                <span className="font-semibold text-emerald-400">Total recebido: {fmt(totalFiltered)}</span>
+              </div>
+            </>
+          )
         )}
       </div>
 
