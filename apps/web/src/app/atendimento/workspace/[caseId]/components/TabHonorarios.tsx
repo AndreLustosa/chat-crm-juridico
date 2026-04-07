@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
   DollarSign, Loader2, Plus, ChevronDown, ChevronUp,
   Trash2, Check, Calendar, CreditCard, Copy, ExternalLink, QrCode,
@@ -49,16 +49,23 @@ const PAYMENT_METHODS = [
   { id: 'TRANSFERENCIA', label: 'Transferência' },
 ];
 
-const STATUS_BADGE: Record<string, string> = {
-  PAGO: 'badge-success',
-  PENDENTE: 'badge-warning',
-  ATRASADO: 'badge-error',
-};
-
 const STATUS_LABEL: Record<string, string> = {
   PAGO: 'Pago',
   PENDENTE: 'Pendente',
   ATRASADO: 'Atrasado',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  PAGO: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  PENDENTE: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  ATRASADO: 'bg-red-500/15 text-red-400 border-red-500/30',
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  FIXO: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  EXITO: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+  MISTO: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+  ENTRADA: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
 };
 
 function formatCurrency(value: number | string): string {
@@ -70,6 +77,17 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
   });
+}
+
+// ─── Summary Card ────────────────────────────────────────
+
+function SummaryCard({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className={`rounded-xl border p-3.5 text-center ${color}`}>
+      <p className="text-[9px] font-bold uppercase tracking-wider opacity-80">{label}</p>
+      <p className="text-[15px] font-bold mt-1">{formatCurrency(value)}</p>
+    </div>
+  );
 }
 
 // ─── Component ───────────────────────────────────────────
@@ -123,44 +141,67 @@ export default function TabHonorarios({ caseId }: { caseId: string }) {
   );
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold flex items-center gap-2">
-          <DollarSign className="h-4 w-4 text-primary" />
-          Honorários
-          {honorarios.length > 0 && (
-            <span className="text-xs text-base-content/50">({honorarios.length})</span>
-          )}
-        </h2>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="btn btn-primary btn-sm gap-1"
-        >
-          <Plus className="h-3.5 w-3.5" /> Novo Contrato
-        </button>
-      </div>
+    <div className="p-6 max-w-5xl mx-auto space-y-5">
 
-      {/* Summary bar */}
-      {honorarios.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-base-200/50 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-base-content/50 uppercase tracking-wider">Contratado</p>
-            <p className="text-sm font-bold text-base-content mt-0.5">{formatCurrency(summary.contracted)}</p>
-          </div>
-          <div className="bg-success/10 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-success uppercase tracking-wider">Recebido</p>
-            <p className="text-sm font-bold text-success mt-0.5">{formatCurrency(summary.received)}</p>
-          </div>
-          <div className="bg-warning/10 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-warning uppercase tracking-wider">Pendente</p>
-            <p className="text-sm font-bold text-warning mt-0.5">{formatCurrency(summary.pending)}</p>
-          </div>
-          <div className="bg-error/10 rounded-lg p-3 text-center">
-            <p className="text-[10px] text-error uppercase tracking-wider">Atrasado</p>
-            <p className="text-sm font-bold text-error mt-0.5">{formatCurrency(summary.overdue)}</p>
-          </div>
+      {/* Header Card */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-accent/20">
+          <h2 className="text-[13px] font-bold text-foreground flex items-center gap-2">
+            <DollarSign size={14} className="text-primary" />
+            Honorarios
+            {honorarios.length > 0 && (
+              <span className="text-[11px] font-normal text-muted-foreground">({honorarios.length})</span>
+            )}
+          </h2>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity shadow-lg shadow-primary/20"
+          >
+            <Plus size={12} /> Novo Contrato
+          </button>
         </div>
-      )}
+
+        {/* Summary bar */}
+        {honorarios.length > 0 && (
+          <div className="p-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <SummaryCard label="Contratado" value={summary.contracted} color="bg-blue-500/10 border-blue-500/20 text-blue-400" />
+              <SummaryCard label="Recebido" value={summary.received} color="bg-emerald-500/10 border-emerald-500/20 text-emerald-400" />
+              <SummaryCard label="Pendente" value={summary.pending} color="bg-amber-500/10 border-amber-500/20 text-amber-400" />
+              <SummaryCard label="Atrasado" value={summary.overdue} color="bg-red-500/10 border-red-500/20 text-red-400" />
+            </div>
+            {summary.contracted > 0 && (
+              <div className="mt-4 flex items-center gap-4">
+                <div className="flex-1 bg-accent/30 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-emerald-500 to-emerald-400 h-2.5 rounded-full transition-all"
+                    style={{ width: `${Math.min(100, Math.round((summary.received / summary.contracted) * 100))}%` }}
+                  />
+                </div>
+                <span className="text-[12px] font-bold text-emerald-400 shrink-0">
+                  {Math.round((summary.received / summary.contracted) * 100)}%
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Empty state inside the card when no summary */}
+        {honorarios.length === 0 && !loading && !showCreate && (
+          <div className="py-14 flex flex-col items-center justify-center">
+            <DollarSign size={48} className="text-muted-foreground opacity-20 mb-3" />
+            <p className="text-[13px] font-medium text-muted-foreground">Nenhum contrato de honorarios</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-1">Clique em &quot;Novo Contrato&quot; para registrar</p>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {loading && (
+          <div className="flex justify-center py-14">
+            <Loader2 size={20} className="animate-spin text-primary" />
+          </div>
+        )}
+      </div>
 
       {/* Create form */}
       {showCreate && (
@@ -172,18 +213,8 @@ export default function TabHonorarios({ caseId }: { caseId: string }) {
       )}
 
       {/* List */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        </div>
-      ) : honorarios.length === 0 ? (
-        <div className="text-center py-12 text-base-content/50">
-          <DollarSign className="h-12 w-12 mx-auto mb-2 opacity-30" />
-          <p>Nenhum contrato de honorários</p>
-          <p className="text-xs mt-1">Clique em &quot;Novo Contrato&quot; para registrar</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
+      {!loading && honorarios.length > 0 && (
+        <div className="space-y-4">
           {honorarios.map(h => (
             <HonorarioCard
               key={h.id}
@@ -247,96 +278,111 @@ function CreateHonorarioForm({
   };
 
   return (
-    <div className="rounded-lg border border-primary/30 bg-base-200/50 p-4 space-y-3">
-      <h3 className="text-sm font-semibold">Novo Contrato de Honorários</h3>
-      <div className={`grid grid-cols-1 ${isExito ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-3`}>
-        <div>
-          <label className="label text-xs">Tipo</label>
-          <select
-            value={type}
-            onChange={e => { setType(e.target.value); if (e.target.value === 'ENTRADA') setInstallmentCount('1'); }}
-            className="select select-bordered select-sm w-full"
-          >
-            {HONORARIO_TYPES.map(t => (
-              <option key={t.id} value={t.id}>{t.label}</option>
-            ))}
-          </select>
-        </div>
-        {isExito && (
-          <div>
-            <label className="label text-xs">Percentual de Êxito (%)</label>
+    <div className="bg-card border border-primary/30 rounded-2xl overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-primary/20 bg-primary/5">
+        <h3 className="text-[13px] font-bold text-foreground flex items-center gap-2">
+          <Plus size={14} className="text-primary" />
+          Novo Contrato de Honorarios
+        </h3>
+      </div>
+      <div className="p-5 space-y-4">
+        <div className={`grid grid-cols-1 ${isExito ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4`}>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Tipo</label>
+            <select
+              value={type}
+              onChange={e => { setType(e.target.value); if (e.target.value === 'ENTRADA') setInstallmentCount('1'); }}
+              className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all appearance-none cursor-pointer"
+            >
+              {HONORARIO_TYPES.map(t => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          {isExito && (
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Percentual de Exito (%)</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="100"
+                placeholder="30"
+                value={successPercentage}
+                onChange={e => setSuccessPercentage(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+              />
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              {isEntrada ? 'Valor da Entrada (R$)' : isExito ? 'Valor Fixo/Entrada (R$)' : 'Valor Total (R$)'}
+            </label>
             <input
               type="number"
-              step="0.1"
+              step="0.01"
               min="0"
-              max="100"
-              placeholder="30"
-              value={successPercentage}
-              onChange={e => setSuccessPercentage(e.target.value)}
-              className="input input-bordered input-sm w-full"
+              placeholder="5000.00"
+              value={totalValue}
+              onChange={e => setTotalValue(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+              autoFocus
             />
           </div>
-        )}
-        <div>
-          <label className="label text-xs">{isEntrada ? 'Valor da Entrada (R$)' : isExito ? 'Valor Fixo/Entrada (R$)' : 'Valor Total (R$)'}</label>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="5000.00"
-            value={totalValue}
-            onChange={e => setTotalValue(e.target.value)}
-            className="input input-bordered input-sm w-full"
-            autoFocus
-          />
+          {!isEntrada && (
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">N. de Parcelas</label>
+              <input
+                type="number"
+                min="1"
+                max="120"
+                value={installmentCount}
+                onChange={e => setInstallmentCount(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+              />
+            </div>
+          )}
         </div>
-        {!isEntrada && (
-        <div>
-          <label className="label text-xs">N. de Parcelas</label>
-          <input
-            type="number"
-            min="1"
-            max="120"
-            value={installmentCount}
-            onChange={e => setInstallmentCount(e.target.value)}
-            className="input input-bordered input-sm w-full"
-          />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              {isEntrada ? 'Data do Pagamento' : 'Data do Contrato'}
+            </label>
+            <input
+              type="date"
+              value={contractDate}
+              onChange={e => setContractDate(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Observacoes</label>
+            <input
+              type="text"
+              placeholder="Observacoes (opcional)"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+            />
+          </div>
         </div>
-        )}
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label className="label text-xs">{isEntrada ? 'Data do Pagamento' : 'Data do Contrato'}</label>
-          <input
-            type="date"
-            value={contractDate}
-            onChange={e => setContractDate(e.target.value)}
-            className="input input-bordered input-sm w-full"
-          />
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            className="px-4 py-2 rounded-xl border border-border text-[11px] font-bold text-muted-foreground hover:bg-accent/30 transition-colors disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity disabled:opacity-50 shadow-lg shadow-primary/20"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            Criar Contrato
+          </button>
         </div>
-        <div>
-          <label className="label text-xs">Observações</label>
-          <input
-            type="text"
-            placeholder="Observações (opcional)"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            className="input input-bordered input-sm w-full"
-          />
-        </div>
-      </div>
-      <div className="flex justify-end gap-2">
-        <button onClick={onCancel} disabled={saving} className="btn btn-ghost btn-sm">
-          Cancelar
-        </button>
-        <button
-          onClick={handleCreate}
-          disabled={saving}
-          className="btn btn-primary btn-sm gap-1"
-        >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-          Criar Contrato
-        </button>
       </div>
     </div>
   );
@@ -361,8 +407,24 @@ function HonorarioCard({
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [chargingId, setChargingId] = useState<string | null>(null);
   const [chargeResult, setChargeResult] = useState<{ paymentId: string; type: string; pixCopyPaste?: string; pixQrCode?: string; boletoUrl?: string; invoiceUrl?: string } | null>(null);
+  const [chargeMenuId, setChargeMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close charge menu on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setChargeMenuId(null);
+      }
+    }
+    if (chargeMenuId) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [chargeMenuId]);
 
   const handleCreateCharge = async (paymentId: string, billingType: string) => {
+    setChargeMenuId(null);
     setChargingId(paymentId);
     try {
       const res = await api.post('/payment-gateway/charges', { honorarioPaymentId: paymentId, billingType });
@@ -375,9 +437,9 @@ function HonorarioCard({
         boletoUrl: charge.boleto_url,
         invoiceUrl: charge.invoice_url,
       });
-      showSuccess(`Cobrança ${billingType} gerada!`);
+      showSuccess(`Cobranca ${billingType} gerada!`);
     } catch (e: any) {
-      showError(e?.response?.data?.message || 'Erro ao gerar cobrança');
+      showError(e?.response?.data?.message || 'Erro ao gerar cobranca');
     } finally {
       setChargingId(null);
     }
@@ -394,7 +456,7 @@ function HonorarioCard({
     setDeleting(true);
     try {
       await api.delete(`/honorarios/${honorario.id}`);
-      showSuccess('Contrato excluído');
+      showSuccess('Contrato excluido');
       onRefresh();
     } catch {
       showError('Erro ao excluir');
@@ -421,7 +483,7 @@ function HonorarioCard({
     setDeletingPaymentId(paymentId);
     try {
       await api.delete(`/honorarios/payments/${paymentId}`);
-      showSuccess('Parcela excluída');
+      showSuccess('Parcela excluida');
       onRefresh();
     } catch {
       showError('Erro ao excluir parcela');
@@ -430,150 +492,166 @@ function HonorarioCard({
     }
   };
 
-  const typeBadgeColor =
-    honorario.type === 'FIXO' ? 'badge-primary' :
-    honorario.type === 'EXITO' ? 'badge-secondary' :
-    honorario.type === 'ENTRADA' ? 'badge-warning' :
-    'badge-accent';
+  const pctPaid = parseFloat(honorario.total_value) > 0
+    ? Math.round((totalPaid / parseFloat(honorario.total_value)) * 100)
+    : 0;
 
   return (
-    <div className="rounded-lg border border-base-300 overflow-hidden">
+    <div className="bg-card border border-border rounded-2xl overflow-hidden">
       {/* Header */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center justify-between p-3 hover:bg-base-200/50 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-accent/10 transition-colors bg-accent/20"
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <DollarSign className="h-4 w-4 text-primary shrink-0" />
-          <span className={`badge badge-xs ${typeBadgeColor}`}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <DollarSign size={14} className="text-primary shrink-0" />
+          <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border ${TYPE_COLORS[honorario.type] || 'bg-accent/30 text-foreground border-border'}`}>
             {HONORARIO_TYPES.find(t => t.id === honorario.type)?.label || honorario.type}
           </span>
           {honorario.success_percentage && (
-            <span className="badge badge-xs badge-outline text-[10px]">
-              {parseFloat(honorario.success_percentage)}% êxito
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg border border-border bg-accent/30 text-muted-foreground">
+              {parseFloat(honorario.success_percentage)}% exito
             </span>
           )}
-          <span className="font-semibold text-sm">
+          <span className="text-[14px] font-bold text-foreground">
             {formatCurrency(honorario.total_value)}
           </span>
           {honorario.calculated_value && (
-            <span className="text-xs text-emerald-500 font-medium">
-              (Êxito: {formatCurrency(honorario.calculated_value)})
+            <span className="text-[11px] text-emerald-400 font-semibold">
+              (Exito: {formatCurrency(honorario.calculated_value)})
             </span>
           )}
-          <span className="text-xs text-base-content/50">
+          <span className="text-[11px] text-muted-foreground">
             ({paidCount}/{totalPayments} parcelas)
           </span>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-3 shrink-0">
           {honorario.contract_date && (
-            <span className="text-xs text-base-content/40 flex items-center gap-1">
-              <Calendar className="h-3 w-3" />
+            <span className="text-[11px] text-muted-foreground/60 flex items-center gap-1.5">
+              <Calendar size={11} />
               {formatDate(honorario.contract_date)}
             </span>
           )}
-          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          {expanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
         </div>
       </button>
 
       {/* Expanded content */}
       {expanded && (
-        <div className="border-t border-base-300">
+        <div className="border-t border-border">
           {/* Progress bar */}
-          <div className="px-3 pt-3">
-            <div className="flex items-center justify-between text-xs text-base-content/50 mb-1">
+          <div className="px-5 pt-4">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-2">
               <span>Progresso: {formatCurrency(totalPaid)} / {formatCurrency(honorario.total_value)}</span>
-              <span>{Math.round((totalPaid / parseFloat(honorario.total_value)) * 100)}%</span>
+              <span className="font-bold text-emerald-400">{pctPaid}%</span>
             </div>
-            <div className="w-full bg-base-300 rounded-full h-1.5">
+            <div className="w-full bg-accent/30 rounded-full h-2 overflow-hidden">
               <div
-                className="bg-success h-1.5 rounded-full transition-all"
-                style={{ width: `${Math.min(100, (totalPaid / parseFloat(honorario.total_value)) * 100)}%` }}
+                className="bg-gradient-to-r from-emerald-500 to-emerald-400 h-2 rounded-full transition-all"
+                style={{ width: `${Math.min(100, pctPaid)}%` }}
               />
             </div>
           </div>
 
           {honorario.notes && (
-            <p className="px-3 pt-2 text-xs text-base-content/50">{honorario.notes}</p>
+            <p className="px-5 pt-3 text-[11px] text-muted-foreground/70 italic">{honorario.notes}</p>
           )}
 
-          {/* Payments table */}
-          <div className="p-3">
-            <div className="overflow-x-auto">
-              <table className="table table-xs w-full">
-                <thead>
-                  <tr className="text-xs text-base-content/50">
-                    <th>#</th>
-                    <th>Valor</th>
-                    <th>Vencimento</th>
-                    <th>Status</th>
-                    <th>Método</th>
-                    <th>Pago em</th>
-                    <th className="text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {honorario.payments.map((p, idx) => (
-                    <tr key={p.id} className="hover">
-                      <td className="text-xs font-mono">{idx + 1}</td>
-                      <td className="text-xs font-medium">{formatCurrency(p.amount)}</td>
-                      <td className="text-xs">{formatDate(p.due_date)}</td>
-                      <td>
-                        <span className={`badge badge-xs ${STATUS_BADGE[p.status] || ''}`}>
-                          {STATUS_LABEL[p.status] || p.status}
-                        </span>
-                      </td>
-                      <td className="text-xs text-base-content/50">{p.payment_method || '—'}</td>
-                      <td className="text-xs text-base-content/50">
-                        {p.paid_at ? formatDate(p.paid_at) : '—'}
-                      </td>
-                      <td className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {p.status !== 'PAGO' && (
-                            <>
-                              <div className="dropdown dropdown-end">
-                                <label tabIndex={0} className="btn btn-ghost btn-xs text-primary" title="Gerar cobrança">
-                                  {chargingId === p.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CreditCard className="h-3 w-3" />}
-                                </label>
-                                <ul tabIndex={0} className="dropdown-content z-[1] menu p-1 shadow-lg bg-base-200 rounded-lg w-32">
-                                  <li><button onClick={() => handleCreateCharge(p.id, 'PIX')} className="text-xs">PIX</button></li>
-                                  <li><button onClick={() => handleCreateCharge(p.id, 'BOLETO')} className="text-xs">Boleto</button></li>
-                                  <li><button onClick={() => handleCreateCharge(p.id, 'CREDIT_CARD')} className="text-xs">Cartão</button></li>
-                                </ul>
-                              </div>
-                              <button
-                                onClick={() => handleMarkPaid(p.id)}
-                                disabled={markingId === p.id}
-                                className="btn btn-ghost btn-xs text-success"
-                                title="Marcar como pago"
-                              >
-                                {markingId === p.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Check className="h-3 w-3" />
-                                )}
-                              </button>
-                            </>
-                          )}
-                          <button
-                            onClick={() => handleDeletePayment(p.id)}
-                            disabled={deletingPaymentId === p.id}
-                            className="btn btn-ghost btn-xs text-error"
-                            title="Excluir parcela"
-                          >
-                            {deletingPaymentId === p.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3 w-3" />
-                            )}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Payments list */}
+          <div className="px-5 pt-4 pb-2">
+            {/* Table header */}
+            <div className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_auto] gap-2 pb-2 border-b border-border/50">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#</span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor</span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vencimento</span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Status</span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Metodo</span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pago em</span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider text-right">Acoes</span>
             </div>
+
+            {/* Table rows */}
+            {honorario.payments.map((p, idx) => (
+              <div
+                key={p.id}
+                className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_auto] gap-2 items-center py-2.5 border-b border-border/20 last:border-0 hover:bg-accent/10 transition-colors rounded-lg"
+              >
+                <span className="text-[11px] font-mono text-muted-foreground">{idx + 1}</span>
+                <span className="text-[12px] font-bold text-foreground">{formatCurrency(p.amount)}</span>
+                <span className="text-[11px] text-foreground">{formatDate(p.due_date)}</span>
+                <span>
+                  <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border ${STATUS_COLORS[p.status] || 'bg-accent/30 text-muted-foreground border-border'}`}>
+                    {STATUS_LABEL[p.status] || p.status}
+                  </span>
+                </span>
+                <span className="text-[11px] text-muted-foreground">{p.payment_method || '--'}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {p.paid_at ? formatDate(p.paid_at) : '--'}
+                </span>
+                <div className="flex items-center justify-end gap-1">
+                  {p.status !== 'PAGO' && (
+                    <>
+                      {/* Charge dropdown */}
+                      <div className="relative" ref={chargeMenuId === p.id ? menuRef : undefined}>
+                        <button
+                          onClick={() => setChargeMenuId(chargeMenuId === p.id ? null : p.id)}
+                          className="p-1.5 rounded-lg hover:bg-accent/40 text-primary transition-colors"
+                          title="Gerar cobranca"
+                        >
+                          {chargingId === p.id ? <Loader2 size={12} className="animate-spin" /> : <CreditCard size={12} />}
+                        </button>
+                        {chargeMenuId === p.id && (
+                          <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl shadow-black/20 py-1 min-w-[120px]">
+                            <button
+                              onClick={() => handleCreateCharge(p.id, 'PIX')}
+                              className="w-full text-left px-3 py-2 text-[11px] text-foreground hover:bg-accent/30 transition-colors"
+                            >
+                              PIX
+                            </button>
+                            <button
+                              onClick={() => handleCreateCharge(p.id, 'BOLETO')}
+                              className="w-full text-left px-3 py-2 text-[11px] text-foreground hover:bg-accent/30 transition-colors"
+                            >
+                              Boleto
+                            </button>
+                            <button
+                              onClick={() => handleCreateCharge(p.id, 'CREDIT_CARD')}
+                              className="w-full text-left px-3 py-2 text-[11px] text-foreground hover:bg-accent/30 transition-colors"
+                            >
+                              Cartao
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleMarkPaid(p.id)}
+                        disabled={markingId === p.id}
+                        className="p-1.5 rounded-lg hover:bg-emerald-500/15 text-emerald-400 transition-colors disabled:opacity-50"
+                        title="Marcar como pago"
+                      >
+                        {markingId === p.id ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <Check size={12} />
+                        )}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={() => handleDeletePayment(p.id)}
+                    disabled={deletingPaymentId === p.id}
+                    className="p-1.5 rounded-lg hover:bg-red-500/15 text-red-400 transition-colors disabled:opacity-50"
+                    title="Excluir parcela"
+                  >
+                    {deletingPaymentId === p.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={12} />
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Add payment form */}
@@ -585,67 +663,80 @@ function HonorarioCard({
             />
           )}
 
-          {/* Charge result modal (inline) */}
+          {/* Charge result inline */}
           {chargeResult && (
-            <div className="mx-3 mb-3 p-4 rounded-lg border-2 border-primary/30 bg-primary/5 space-y-3">
+            <div className="mx-5 mb-4 p-4 rounded-xl border border-primary/30 bg-primary/5 space-y-3">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold flex items-center gap-2">
-                  {chargeResult.type === 'PIX' ? <QrCode className="h-4 w-4 text-emerald-400" /> : <CreditCard className="h-4 w-4 text-blue-400" />}
-                  Cobrança {chargeResult.type} Gerada
+                <h4 className="text-[13px] font-bold text-foreground flex items-center gap-2">
+                  {chargeResult.type === 'PIX' ? <QrCode size={14} className="text-emerald-400" /> : <CreditCard size={14} className="text-blue-400" />}
+                  Cobranca {chargeResult.type} Gerada
                 </h4>
-                <button onClick={() => setChargeResult(null)} className="btn btn-ghost btn-xs">✕</button>
+                <button
+                  onClick={() => setChargeResult(null)}
+                  className="p-1 rounded-lg hover:bg-accent/30 text-muted-foreground transition-colors text-[12px]"
+                >
+                  &#10005;
+                </button>
               </div>
 
               {chargeResult.pixCopyPaste && (
                 <div className="space-y-2">
-                  <p className="text-xs text-base-content/60">Código PIX Copia e Cola:</p>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Codigo PIX Copia e Cola:</p>
                   <div className="flex gap-2">
                     <input
                       readOnly
                       value={chargeResult.pixCopyPaste}
-                      className="input input-bordered input-sm flex-1 font-mono text-xs"
+                      className="flex-1 px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[11px] font-mono text-foreground focus:outline-none"
                     />
                     <button
                       onClick={() => { navigator.clipboard.writeText(chargeResult.pixCopyPaste!); showSuccess('Copiado!'); }}
-                      className="btn btn-primary btn-sm gap-1"
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity shadow-lg shadow-primary/20"
                     >
-                      <Copy className="h-3 w-3" /> Copiar
+                      <Copy size={12} /> Copiar
                     </button>
                   </div>
                 </div>
               )}
 
               {chargeResult.boletoUrl && (
-                <a href={chargeResult.boletoUrl} target="_blank" rel="noopener noreferrer"
-                  className="btn btn-primary btn-sm gap-1 w-full">
-                  <ExternalLink className="h-3 w-3" /> Abrir Boleto
+                <a
+                  href={chargeResult.boletoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 w-full px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity shadow-lg shadow-primary/20"
+                >
+                  <ExternalLink size={12} /> Abrir Boleto
                 </a>
               )}
 
               {chargeResult.invoiceUrl && (
-                <a href={chargeResult.invoiceUrl} target="_blank" rel="noopener noreferrer"
-                  className="btn btn-ghost btn-sm gap-1 w-full">
-                  <ExternalLink className="h-3 w-3" /> Ver Fatura
+                <a
+                  href={chargeResult.invoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 w-full px-4 py-2 rounded-xl border border-border text-[11px] font-bold text-muted-foreground hover:bg-accent/30 transition-colors"
+                >
+                  <ExternalLink size={12} /> Ver Fatura
                 </a>
               )}
             </div>
           )}
 
-          {/* Actions */}
-          <div className="flex items-center justify-between border-t border-base-300 px-3 py-2">
+          {/* Actions footer */}
+          <div className="flex items-center justify-between border-t border-border px-5 py-3">
             <button
               onClick={() => setShowAddPayment(!showAddPayment)}
-              className="btn btn-ghost btn-xs gap-1"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-primary hover:bg-primary/10 transition-colors"
             >
-              <Plus className="h-3 w-3" />
+              <Plus size={12} />
               Adicionar Parcela
             </button>
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="btn btn-ghost btn-xs text-error gap-1"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
             >
-              {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
               Excluir Contrato
             </button>
           </div>
@@ -694,39 +785,58 @@ function AddPaymentForm({
   };
 
   return (
-    <div className="border-t border-base-300 bg-base-200/30 px-3 py-3 space-y-2">
-      <div className="grid grid-cols-3 gap-2">
-        <input
-          type="number"
-          step="0.01"
-          min="0"
-          placeholder="Valor (R$)"
-          value={amount}
-          onChange={e => setAmount(e.target.value)}
-          className="input input-bordered input-xs"
-          autoFocus
-        />
-        <input
-          type="date"
-          value={dueDate}
-          onChange={e => setDueDate(e.target.value)}
-          className="input input-bordered input-xs"
-        />
-        <select
-          value={method}
-          onChange={e => setMethod(e.target.value)}
-          className="select select-bordered select-xs"
-        >
-          <option value="">Método</option>
-          {PAYMENT_METHODS.map(m => (
-            <option key={m.id} value={m.id}>{m.label}</option>
-          ))}
-        </select>
+    <div className="border-t border-border bg-accent/10 px-5 py-4 space-y-3">
+      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nova Parcela</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor (R$)</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="Valor (R$)"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+            autoFocus
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vencimento</label>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={e => setDueDate(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Metodo</label>
+          <select
+            value={method}
+            onChange={e => setMethod(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all appearance-none cursor-pointer"
+          >
+            <option value="">Metodo</option>
+            {PAYMENT_METHODS.map(m => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
       <div className="flex justify-end gap-2">
-        <button onClick={onCancel} className="btn btn-ghost btn-xs">Cancelar</button>
-        <button onClick={handleAdd} disabled={saving} className="btn btn-primary btn-xs gap-1">
-          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+        <button
+          onClick={onCancel}
+          className="px-4 py-2 rounded-xl border border-border text-[11px] font-bold text-muted-foreground hover:bg-accent/30 transition-colors"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={handleAdd}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity disabled:opacity-50 shadow-lg shadow-primary/20"
+        >
+          {saving && <Loader2 size={12} className="animate-spin" />}
           Adicionar
         </button>
       </div>
