@@ -84,6 +84,7 @@ export class PaymentAlertsCronService {
         if (alreadySent) continue;
 
         const firstName = (lead.name || 'Cliente').split(' ')[0];
+        if (!payment.due_date) continue;
         const dueDate = payment.due_date.toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
         const amount = Number(payment.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -158,7 +159,7 @@ export class PaymentAlertsCronService {
         const totalOverdue = payments.reduce((s, p) => s + Number(p.amount), 0);
         const totalStr = totalOverdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         const count = payments.length;
-        const oldestDays = Math.ceil((Date.now() - new Date(payments[0].due_date).getTime()) / 86400000);
+        const oldestDays = payments[0].due_date ? Math.ceil((Date.now() - new Date(payments[0].due_date).getTime()) / 86400000) : 0;
 
         const msg =
           `⚠️ *Aviso de Pagamento em Atraso*\n\n` +
