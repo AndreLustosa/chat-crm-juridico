@@ -6,11 +6,16 @@ import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Gavel, Clock, Archive, ArchiveRestore, Send,
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, ArrowRight, Flame, ArrowDown, CheckSquare, Bell,
+  Save, Trash2, Sparkles, ArrowLeft, CalendarClock,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
+import dynamic from 'next/dynamic';
+
+const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
+const GoogleDocsEmbed = dynamic(() => import('@/components/GoogleDocsEmbed'), { ssr: false });
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -96,10 +101,23 @@ interface Petition {
   status: string;
   template_id: string | null;
   google_doc_url: string | null;
+  google_doc_id: string | null;
+  deadline_at: string | null;
+  review_notes: string | null;
+  content_json: any;
+  content_html: string | null;
   created_at: string;
   updated_at: string;
   created_by: { id: string; name: string };
+  reviewed_by: { id: string; name: string } | null;
   _count: { versions: number };
+}
+
+interface PetitionVersion {
+  id: string;
+  version: number;
+  created_at: string;
+  saved_by: { id: string; name: string };
 }
 
 // ─── Constants ────────────────────────────────────────────────
@@ -391,6 +409,29 @@ function CaseDetailPanel({
   const [reviewNotes, setReviewNotes] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
 
+  // Petition editor (inline)
+  const [editingPetition, setEditingPetition] = useState<Petition | null>(null);
+  const [editorMode, setEditorMode] = useState<'local' | 'gdocs'>('local');
+  const [editTitle, setEditTitle] = useState('');
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
+  const [editContentKey, setEditContentKey] = useState(0);
+  const [editVersions, setEditVersions] = useState<PetitionVersion[]>([]);
+  const [showEditVersions, setShowEditVersions] = useState(false);
+  const [savingVersion, setSavingVersion] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Create petition form
+  const [showCreatePetition, setShowCreatePetition] = useState(false);
+  const [newPetTitle, setNewPetTitle] = useState('');
+  const [newPetType, setNewPetType] = useState('INICIAL');
+  const [newPetDeadline, setNewPetDeadline] = useState('');
+  const [creatingPetition, setCreatingPetition] = useState(false);
+  const [generatingPetition, setGeneratingPetition] = useState(false);
+  const [driveConfigured, setDriveConfigured] = useState(false);
+  const [createGoogleDoc, setCreateGoogleDoc] = useState(true);
+
   // Sync fields when legalCase changes externally
   useEffect(() => {
     setStage(legalCase.stage);
@@ -638,8 +679,168 @@ function CaseDetailPanel({
       setReviewingId(null);
       setReviewAction(null);
       setReviewNotes('');
+      if (editingPetition?.id === petitionId) {
+        setEditingPetition(null);
+      }
       fetchPetitions();
     } catch {} finally { setSubmittingReview(false); }
+  };
+
+  // ─── Petition Editor Functions ────────────────────────────────
+
+  // Check Google Drive config on mount
+  useEffect(() => {
+    api.get('/google-drive/config').then(res => {
+      setDriveConfigured(res.data?.configured || false);
+    }).catch(() => {});
+  }, []);
+
+  // Open petition for editing
+  const openPetitionEditor = async (petitionId: string) => {
+    try {
+      const res = await api.get(`/petitions/${petitionId}`);
+      const pet = res.data;
+      setEditingPetition(pet);
+      setEditTitle(pet.title);
+      setEditorMode(pet.google_doc_url ? 'gdocs' : 'local');
+      setEditContentKey(prev => prev + 1);
+      setShowEditVersions(false);
+    } catch {}
+  };
+
+  const closePetitionEditor = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setEditingPetition(null);
+    setAutoSaveStatus('idle');
+    fetchPetitions();
+  };
+
+  // Auto-save
+  const doAutoSave = useCallback(async (json: any, html: string) => {
+    if (!editingPetition) return;
+    setAutoSaveStatus('saving');
+    try {
+      await api.patch(`/petitions/${editingPetition.id}`, { content_json: json, content_html: html });
+      setAutoSaveStatus('saved');
+    } catch { setAutoSaveStatus('idle'); }
+  }, [editingPetition?.id]);
+
+  const handleEditorChange = useCallback((json: any, html: string) => {
+    setAutoSaveStatus('idle');
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doAutoSave(json, html), 2000);
+  }, [doAutoSave]);
+
+  useEffect(() => {
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, []);
+
+  // Title save
+  const handleEditTitleSave = async () => {
+    if (!editingPetition || !editTitle.trim() || editTitle === editingPetition.title) return;
+    try {
+      await api.patch(`/petitions/${editingPetition.id}`, { title: editTitle });
+    } catch {}
+  };
+
+  // Status change
+  const handlePetitionStatusChange = async (newStatus: string) => {
+    if (!editingPetition) return;
+    try {
+      await api.patch(`/petitions/${editingPetition.id}/status`, { status: newStatus });
+      setEditingPetition(prev => prev ? { ...prev, status: newStatus } : null);
+    } catch {}
+  };
+
+  // Save version
+  const handleSaveVersion = async () => {
+    if (!editingPetition) return;
+    setSavingVersion(true);
+    try {
+      await api.post(`/petitions/${editingPetition.id}/version`);
+      loadEditVersions();
+    } catch {} finally { setSavingVersion(false); }
+  };
+
+  const loadEditVersions = async () => {
+    if (!editingPetition) return;
+    try {
+      const res = await api.get(`/petitions/${editingPetition.id}/versions`);
+      setEditVersions(res.data || []);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (showEditVersions && editingPetition) loadEditVersions();
+  }, [showEditVersions, editingPetition?.id]);
+
+  // Regenerate with AI
+  const handleRegenerate = async () => {
+    if (!editingPetition || !confirm('Substituir conteúdo pela IA?')) return;
+    setRegenerating(true);
+    try {
+      const res = await api.post(`/petitions/${editingPetition.id}/generate`);
+      setEditingPetition(prev => prev ? { ...prev, content_json: res.data.content_json } : null);
+      setEditContentKey(prev => prev + 1);
+    } catch {} finally { setRegenerating(false); }
+  };
+
+  // Sync from Google Docs
+  const handleSyncFromGoogleDoc = async () => {
+    if (!editingPetition) return;
+    setSyncing(true);
+    try {
+      await api.post(`/petitions/${editingPetition.id}/sync-gdoc`);
+    } catch {} finally { setSyncing(false); }
+  };
+
+  // Delete petition
+  const handleDeletePetition = async () => {
+    if (!editingPetition || !confirm('Excluir esta petição?')) return;
+    try {
+      await api.delete(`/petitions/${editingPetition.id}`);
+      setEditingPetition(null);
+      fetchPetitions();
+    } catch {}
+  };
+
+  // Create petition
+  const handleCreatePetition = async () => {
+    if (!newPetTitle.trim()) return;
+    setCreatingPetition(true);
+    try {
+      const res = await api.post(`/petitions/case/${legalCase.id}`, {
+        title: newPetTitle,
+        type: newPetType,
+        deadline_at: newPetDeadline || undefined,
+        create_google_doc: driveConfigured ? createGoogleDoc : false,
+      });
+      setShowCreatePetition(false);
+      setNewPetTitle(''); setNewPetDeadline('');
+      openPetitionEditor(res.data.id);
+    } catch {} finally { setCreatingPetition(false); }
+  };
+
+  const handleGeneratePetitionAI = async () => {
+    if (!newPetTitle.trim()) return;
+    setGeneratingPetition(true);
+    try {
+      const res = await api.post(`/petitions/case/${legalCase.id}/generate`, {
+        title: newPetTitle,
+        type: newPetType,
+      });
+      setShowCreatePetition(false);
+      setNewPetTitle(''); setNewPetDeadline('');
+      openPetitionEditor(res.data.id);
+    } catch {} finally { setGeneratingPetition(false); }
+  };
+
+  // Status transitions
+  const PETITION_STATUS_TRANSITIONS: Record<string, string[]> = {
+    RASCUNHO: ['EM_REVISAO'],
+    EM_REVISAO: ['RASCUNHO', 'APROVADA'],
+    APROVADA: ['EM_REVISAO', 'PROTOCOLADA'],
+    PROTOCOLADA: [],
   };
 
   const openInChat = () => {
@@ -1210,24 +1411,97 @@ function CaseDetailPanel({
           )}
 
           {/* ─── PETITIONS TAB ─── */}
-          {activeTab === 'petitions' && (
+          {activeTab === 'petitions' && !editingPetition && (
             <div className="p-5 space-y-3">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <FileText size={12} /> Petições do Caso
                 </h3>
-                <button
-                  onClick={() => router.push(`/atendimento/workspace/${legalCase.id}?tab=peticoes`)}
-                  className="text-[11px] font-semibold text-primary hover:text-primary/80 flex items-center gap-1"
-                >
-                  <ExternalLink size={12} /> Abrir Workspace
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowCreatePetition(true)}
+                    className="text-[11px] font-semibold text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1 rounded-md border border-primary/20 hover:bg-primary/5 transition-colors"
+                  >
+                    <Plus size={11} /> Nova Petição
+                  </button>
+                </div>
               </div>
+
+              {/* Create petition form */}
+              {showCreatePetition && (
+                <div className="border border-primary/30 bg-accent/30 rounded-xl p-4 space-y-3">
+                  <h4 className="text-[12px] font-semibold">Nova Petição</h4>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Título da petição..."
+                      value={newPetTitle}
+                      onChange={e => setNewPetTitle(e.target.value)}
+                      className="flex-1 text-[12px] bg-card border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                      autoFocus
+                      onKeyDown={e => e.key === 'Enter' && !creatingPetition && handleCreatePetition()}
+                    />
+                    <select
+                      value={newPetType}
+                      onChange={e => setNewPetType(e.target.value)}
+                      className="text-[11px] bg-card border border-border rounded-lg px-2 py-2"
+                    >
+                      {Object.entries(PETITION_TYPES).map(([key, val]) => (
+                        <option key={key} value={key}>{val.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <CalendarClock size={10} /> Prazo:
+                    </label>
+                    <input
+                      type="date"
+                      value={newPetDeadline}
+                      onChange={e => setNewPetDeadline(e.target.value)}
+                      className="text-[11px] bg-card border border-border rounded-lg px-2 py-1"
+                      min={new Date().toISOString().split('T')[0]}
+                    />
+                    {driveConfigured && (
+                      <label className="flex items-center gap-1 text-[10px] cursor-pointer ml-auto">
+                        <input type="checkbox" checked={createGoogleDoc} onChange={e => setCreateGoogleDoc(e.target.checked)} className="w-3 h-3" />
+                        <FileText size={10} className="text-blue-500" /> Google Docs
+                      </label>
+                    )}
+                  </div>
+                  {generatingPetition && (
+                    <div className="flex items-center gap-2 text-[11px] text-primary animate-pulse">
+                      <Sparkles size={12} /> Gerando com IA...
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => { setShowCreatePetition(false); setNewPetTitle(''); }} className="text-[11px] text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg border border-border transition-colors">Cancelar</button>
+                    <button
+                      onClick={handleCreatePetition}
+                      disabled={creatingPetition || generatingPetition || !newPetTitle.trim()}
+                      className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-border hover:bg-accent transition-colors flex items-center gap-1 disabled:opacity-40"
+                    >
+                      {creatingPetition ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Criar
+                    </button>
+                    <button
+                      onClick={handleGeneratePetitionAI}
+                      disabled={creatingPetition || generatingPetition || !newPetTitle.trim()}
+                      className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-1 disabled:opacity-40"
+                    >
+                      {generatingPetition ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} Gerar com IA
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {loadingPetitions ? (
                 <div className="text-center py-8 text-muted-foreground text-sm animate-pulse">Carregando petições…</div>
               ) : petitions.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground text-[12px]">Nenhuma petição</div>
+                <div className="text-center py-8 text-muted-foreground text-[12px]">
+                  <FileText size={24} className="mx-auto mb-2 opacity-30" />
+                  <p>Nenhuma petição</p>
+                  <p className="text-[10px] mt-1">Clique em &quot;Nova Petição&quot; para começar</p>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {petitions.map(petition => {
@@ -1238,18 +1512,18 @@ function CaseDetailPanel({
                     return (
                       <div key={petition.id} className="border border-border rounded-xl overflow-hidden">
                         <div className="p-3 hover:bg-accent/20 transition-colors">
-                          {/* Title + badges */}
+                          {/* Title + Edit button */}
                           <div className="flex items-start justify-between gap-2 mb-2">
                             <h4 className="text-[13px] font-semibold text-foreground flex-1 min-w-0 truncate">{petition.title}</h4>
                             <button
-                              onClick={() => router.push(`/atendimento/workspace/${legalCase.id}?tab=peticoes`)}
+                              onClick={() => openPetitionEditor(petition.id)}
                               className="shrink-0 text-[10px] font-semibold text-primary hover:text-primary/80 px-2 py-1 rounded-md border border-primary/20 hover:bg-primary/5 transition-colors"
                             >
-                              Abrir
+                              Editar
                             </button>
                           </div>
 
-                          {/* Type + Status badges */}
+                          {/* Type + Status + Deadline badges */}
                           <div className="flex flex-wrap items-center gap-1.5 mb-2">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${typeInfo.bg} ${typeInfo.text} ${typeInfo.border}`}>
                               {typeInfo.label}
@@ -1257,10 +1531,15 @@ function CaseDetailPanel({
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${statusInfo.bg} ${statusInfo.text} ${statusInfo.border}`}>
                               {statusInfo.label}
                             </span>
+                            {petition.deadline_at && (
+                              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold border border-amber-500/20 bg-amber-500/10 text-amber-400">
+                                <CalendarClock size={8} /> {new Date(petition.deadline_at).toLocaleDateString('pt-BR')}
+                              </span>
+                            )}
                           </div>
 
                           {/* Meta info */}
-                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground flex-wrap">
                             <span className="flex items-center gap-0.5">
                               <User size={9} /> {petition.created_by?.name || 'Desconhecido'}
                             </span>
@@ -1269,67 +1548,44 @@ function CaseDetailPanel({
                             </span>
                             {petition._count?.versions > 0 && (
                               <span className="flex items-center gap-0.5">
-                                <FileText size={9} /> {petition._count.versions} {petition._count.versions === 1 ? 'versão' : 'versões'}
+                                <FileText size={9} /> {petition._count.versions} versões
                               </span>
                             )}
                             {petition.google_doc_url && (
-                              <a
-                                href={petition.google_doc_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex items-center gap-0.5 text-blue-500 hover:text-blue-400 transition-colors"
-                              >
-                                <FileText size={9} /> Google Docs
-                                <ExternalLink size={8} />
+                              <a href={petition.google_doc_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-0.5 text-blue-500 hover:text-blue-400">
+                                <FileText size={9} /> Google Docs <ExternalLink size={8} />
                               </a>
                             )}
                           </div>
+
+                          {/* Review notes (if returned) */}
+                          {petition.review_notes && petition.status === 'RASCUNHO' && (
+                            <div className="mt-2 px-2 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                              <p className="text-[9px] font-semibold text-amber-400">Notas do revisor:</p>
+                              <p className="text-[10px] text-muted-foreground line-clamp-2">{petition.review_notes}</p>
+                            </div>
+                          )}
 
                           {/* Review actions for EM_REVISAO petitions */}
                           {petition.status === 'EM_REVISAO' && (
                             <div className="mt-3 pt-2 border-t border-border/50">
                               {!isReviewing ? (
                                 <div className="flex gap-2">
-                                  <button
-                                    onClick={() => handleReviewPetition(petition.id, 'APROVAR')}
-                                    disabled={submittingReview}
-                                    className="flex-1 py-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 border border-green-500/25 rounded-lg hover:bg-green-500/25 transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
-                                  >
+                                  <button onClick={() => handleReviewPetition(petition.id, 'APROVAR')} disabled={submittingReview} className="flex-1 py-1.5 text-[11px] font-semibold bg-green-500/15 text-green-400 border border-green-500/25 rounded-lg hover:bg-green-500/25 transition-colors flex items-center justify-center gap-1 disabled:opacity-50">
                                     <CheckCircle2 size={11} /> Aprovar
                                   </button>
-                                  <button
-                                    onClick={() => { setReviewingId(petition.id); setReviewAction('DEVOLVER'); setReviewNotes(''); }}
-                                    className="flex-1 py-1.5 text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded-lg hover:bg-amber-500/25 transition-colors flex items-center justify-center gap-1"
-                                  >
+                                  <button onClick={() => { setReviewingId(petition.id); setReviewAction('DEVOLVER'); setReviewNotes(''); }} className="flex-1 py-1.5 text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/25 rounded-lg hover:bg-amber-500/25 transition-colors flex items-center justify-center gap-1">
                                     <ArrowDown size={11} /> Devolver
                                   </button>
                                 </div>
                               ) : (
                                 <div className="space-y-2">
-                                  <textarea
-                                    value={reviewNotes}
-                                    onChange={e => setReviewNotes(e.target.value)}
-                                    rows={2}
-                                    className="w-full px-3 py-2 text-[12px] bg-card border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500/40 resize-none"
-                                    placeholder="Observações para devolução…"
-                                    autoFocus
-                                  />
+                                  <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} className="w-full px-3 py-2 text-[12px] bg-card border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500/40 resize-none" placeholder="Observações para devolução…" autoFocus />
                                   <div className="flex gap-2">
-                                    <button
-                                      onClick={() => handleReviewPetition(petition.id, 'DEVOLVER', reviewNotes)}
-                                      disabled={submittingReview || !reviewNotes.trim()}
-                                      className="flex-1 py-1.5 text-[11px] font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-1 transition-opacity"
-                                    >
-                                      {submittingReview ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
-                                      Devolver com Notas
+                                    <button onClick={() => handleReviewPetition(petition.id, 'DEVOLVER', reviewNotes)} disabled={submittingReview || !reviewNotes.trim()} className="flex-1 py-1.5 text-[11px] font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-1">
+                                      {submittingReview ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />} Devolver
                                     </button>
-                                    <button
-                                      onClick={() => { setReviewingId(null); setReviewAction(null); setReviewNotes(''); }}
-                                      className="px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground border border-border rounded-lg transition-colors"
-                                    >
-                                      Cancelar
-                                    </button>
+                                    <button onClick={() => { setReviewingId(null); setReviewAction(null); setReviewNotes(''); }} className="px-3 py-1.5 text-[11px] text-muted-foreground hover:text-foreground border border-border rounded-lg">Cancelar</button>
                                   </div>
                                 </div>
                               )}
@@ -1341,6 +1597,147 @@ function CaseDetailPanel({
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ─── PETITION EDITOR (inline) ─── */}
+          {activeTab === 'petitions' && editingPetition && (
+            <div className="flex flex-col h-full">
+              {/* Editor header */}
+              <div className="flex items-center gap-2 border-b border-border bg-accent/30 px-4 py-2.5 shrink-0">
+                <button onClick={closePetitionEditor} className="p-1 rounded-md hover:bg-accent transition-colors" title="Voltar à lista">
+                  <ArrowLeft size={14} />
+                </button>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  onBlur={handleEditTitleSave}
+                  className="flex-1 text-[13px] font-semibold bg-transparent border-none focus:outline-none min-w-0"
+                  disabled={editingPetition.status === 'PROTOCOLADA'}
+                />
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold border ${(PETITION_STATUSES[editingPetition.status] ?? PETITION_STATUSES.RASCUNHO).bg} ${(PETITION_STATUSES[editingPetition.status] ?? PETITION_STATUSES.RASCUNHO).text} ${(PETITION_STATUSES[editingPetition.status] ?? PETITION_STATUSES.RASCUNHO).border}`}>
+                  {(PETITION_STATUSES[editingPetition.status] ?? PETITION_STATUSES.RASCUNHO).label}
+                </span>
+                {autoSaveStatus === 'saving' && <span className="text-[10px] text-muted-foreground flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Salvando...</span>}
+                {autoSaveStatus === 'saved' && <span className="text-[10px] text-green-400">Salvo</span>}
+              </div>
+
+              {/* Action bar */}
+              <div className="flex items-center gap-1.5 border-b border-border px-4 py-1.5 shrink-0 flex-wrap">
+                {/* Editor mode toggle */}
+                {editingPetition.google_doc_url && (
+                  <div className="flex items-center bg-accent rounded-lg p-0.5 mr-1">
+                    <button onClick={() => setEditorMode('local')} className={`px-2 py-1 text-[10px] font-medium rounded-md transition-colors ${editorMode === 'local' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>
+                      Local
+                    </button>
+                    <button onClick={() => setEditorMode('gdocs')} className={`px-2 py-1 text-[10px] font-medium rounded-md transition-colors flex items-center gap-1 ${editorMode === 'gdocs' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}>
+                      <FileText size={10} className="text-blue-500" /> Docs
+                    </button>
+                  </div>
+                )}
+
+                {/* Sync from Google */}
+                {editingPetition.google_doc_url && editorMode === 'local' && (
+                  <button onClick={handleSyncFromGoogleDoc} disabled={syncing} className="text-[10px] text-blue-500 hover:text-blue-400 flex items-center gap-1 px-2 py-1">
+                    {syncing ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />} Sync Google
+                  </button>
+                )}
+
+                {/* Save version */}
+                <button onClick={handleSaveVersion} disabled={savingVersion} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1">
+                  {savingVersion ? <Loader2 size={10} className="animate-spin" /> : <Save size={10} />} Versão
+                </button>
+
+                {/* Versions */}
+                <button onClick={() => setShowEditVersions(!showEditVersions)} className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1">
+                  <Clock size={10} /> {editingPetition._count.versions}v
+                  <ChevronDown size={10} className={`transition-transform ${showEditVersions ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Regenerate AI */}
+                {(editingPetition.status === 'RASCUNHO' || editingPetition.status === 'EM_REVISAO') && editorMode === 'local' && (
+                  <button onClick={handleRegenerate} disabled={regenerating} className="text-[10px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1">
+                    {regenerating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />} IA
+                  </button>
+                )}
+
+                <div className="flex-1" />
+
+                {/* Review actions (for EM_REVISAO) */}
+                {editingPetition.status === 'EM_REVISAO' && (
+                  <>
+                    <button onClick={() => handleReviewPetition(editingPetition.id, 'APROVAR')} disabled={submittingReview} className="text-[10px] font-semibold text-green-400 border border-green-500/25 px-2.5 py-1 rounded-lg hover:bg-green-500/10 flex items-center gap-1 disabled:opacity-50">
+                      <CheckCircle2 size={10} /> Aprovar
+                    </button>
+                    <button onClick={() => { setReviewingId(editingPetition.id); setReviewAction('DEVOLVER'); setReviewNotes(''); }} className="text-[10px] font-semibold text-amber-400 border border-amber-500/25 px-2.5 py-1 rounded-lg hover:bg-amber-500/10 flex items-center gap-1">
+                      <ArrowDown size={10} /> Devolver
+                    </button>
+                  </>
+                )}
+
+                {/* Status transitions */}
+                {(PETITION_STATUS_TRANSITIONS[editingPetition.status] || []).filter(s => s !== 'APROVADA' && s !== 'RASCUNHO' || editingPetition.status !== 'EM_REVISAO').map(newStatus => (
+                  <button key={newStatus} onClick={() => handlePetitionStatusChange(newStatus)} className="text-[10px] font-medium border border-border px-2 py-1 rounded-lg hover:bg-accent">
+                    {(PETITION_STATUSES[newStatus] ?? { label: newStatus }).label}
+                  </button>
+                ))}
+
+                {/* Delete (only drafts) */}
+                {editingPetition.status === 'RASCUNHO' && (
+                  <button onClick={handleDeletePetition} className="text-[10px] text-red-400 hover:text-red-300 p-1" title="Excluir">
+                    <Trash2 size={11} />
+                  </button>
+                )}
+              </div>
+
+              {/* Review notes input (when returning) */}
+              {reviewingId === editingPetition.id && (
+                <div className="border-b border-border px-4 py-2 bg-amber-500/5 shrink-0">
+                  <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={2} className="w-full text-[12px] bg-card border border-border rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/40" placeholder="Observações para devolução…" autoFocus />
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => handleReviewPetition(editingPetition.id, 'DEVOLVER', reviewNotes)} disabled={submittingReview || !reviewNotes.trim()} className="text-[11px] font-semibold bg-amber-500 text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center gap-1">
+                      {submittingReview ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />} Devolver
+                    </button>
+                    <button onClick={() => { setReviewingId(null); setReviewAction(null); setReviewNotes(''); }} className="text-[11px] text-muted-foreground px-3 py-1.5 border border-border rounded-lg">Cancelar</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Versions panel */}
+              {showEditVersions && (
+                <div className="border-b border-border bg-accent/30 px-4 py-2 max-h-32 overflow-y-auto shrink-0">
+                  {editVersions.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground">Nenhuma versão salva</p>
+                  ) : editVersions.map(v => (
+                    <div key={v.id} className="flex items-center justify-between text-[10px] py-0.5">
+                      <span className="font-medium">v{v.version}</span>
+                      <span className="text-muted-foreground">{v.saved_by.name}</span>
+                      <span className="text-muted-foreground/60">{new Date(v.created_at).toLocaleString('pt-BR')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Editor area */}
+              <div className="flex-1 overflow-y-auto p-4">
+                {regenerating ? (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3">
+                    <Sparkles size={24} className="text-primary animate-pulse" />
+                    <p className="text-[12px] text-muted-foreground">Gerando com IA...</p>
+                  </div>
+                ) : editorMode === 'gdocs' && editingPetition.google_doc_url ? (
+                  <GoogleDocsEmbed docUrl={editingPetition.google_doc_url} editable={editingPetition.status === 'RASCUNHO' || editingPetition.status === 'EM_REVISAO'} />
+                ) : (
+                  <TiptapEditor
+                    key={editContentKey}
+                    initialContent={editingPetition.content_json}
+                    onChange={handleEditorChange}
+                    editable={editingPetition.status === 'RASCUNHO' || editingPetition.status === 'EM_REVISAO'}
+                    placeholder="Comece a redigir a petição..."
+                  />
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1485,6 +1882,46 @@ export default function AdvogadoPage() {
     const interval = setInterval(() => fetchCases(true), 30_000);
     return () => clearInterval(interval);
   }, [router, fetchCases, fetchArchivedTotal, view]);
+
+  // WebSocket: atualização em tempo real quando petição muda de status
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+    if (!token) return;
+
+    let socket: any;
+    const initSocket = async () => {
+      const { io } = await import('socket.io-client');
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || '';
+      socket = io(wsUrl, {
+        path: '/socket.io/',
+        transports: ['polling', 'websocket'],
+        auth: { token },
+        reconnection: true,
+      });
+
+      socket.on('connect', () => {
+        const payload = token.split('.')[1];
+        if (payload) {
+          try {
+            const decoded = JSON.parse(atob(payload));
+            if (decoded.sub) socket.emit('join_user', decoded.sub);
+          } catch {}
+        }
+      });
+
+      // Petição mudou de status → refresh silencioso
+      socket.on('petition_status_change', () => {
+        fetchCases(true);
+      });
+
+      socket.on('petition_created', () => {
+        fetchCases(true);
+      });
+    };
+
+    initSocket();
+    return () => { socket?.disconnect(); };
+  }, [fetchCases]);
 
   const executeMoveToStage = async (caseId: string, newStage: string) => {
     // Optimistic update
