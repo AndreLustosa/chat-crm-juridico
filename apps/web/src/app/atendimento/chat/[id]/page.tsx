@@ -885,37 +885,28 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                           );
                         })()
                       ) : msg.type === 'audio' ? (
-                        msg.media ? (
-                          <div>
-                            <AudioPlayer
-                              src={`/api/media/${msg.id}`}
-                              duration={msg.media.duration}
-                              isOutgoing={isOut}
-                            />
-                            {msg.text ? (
-                              <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                                {msg.text}
-                              </p>
-                            ) : (
-                              <button
-                                onClick={() => handleTranscribe(msg.id)}
-                                disabled={transcribing[msg.id]}
-                                className={`mt-2 flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg transition-colors disabled:opacity-50 ${isOut ? 'bg-white/15 hover:bg-white/25 text-white/80' : 'bg-primary/10 hover:bg-primary/20 text-primary'}`}
-                              >
-                                <Mic size={11} />
-                                {transcribing[msg.id] ? 'Transcrevendo...' : 'Transcrever'}
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3 w-48 animate-pulse">
-                            <div className="w-8 h-8 rounded-full bg-current opacity-20 shrink-0" />
-                            <div className="flex-1 space-y-1.5">
-                              <div className="h-1 rounded bg-current opacity-20" />
-                              <div className="h-1 rounded bg-current opacity-10 w-3/4" />
-                            </div>
-                          </div>
-                        )
+                        <div>
+                          <AudioPlayer
+                            src={`/api/media/${msg.id}`}
+                            duration={msg.media?.duration}
+                            isOutgoing={isOut}
+                            messageId={msg.id}
+                          />
+                          {msg.text ? (
+                            <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                              {msg.text}
+                            </p>
+                          ) : (
+                            <button
+                              onClick={() => handleTranscribe(msg.id)}
+                              disabled={transcribing[msg.id]}
+                              className={`mt-2 flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg transition-colors disabled:opacity-50 ${isOut ? 'bg-white/15 hover:bg-white/25 text-white/80' : 'bg-primary/10 hover:bg-primary/20 text-primary'}`}
+                            >
+                              <Mic size={11} />
+                              {transcribing[msg.id] ? 'Transcrevendo...' : 'Transcrever'}
+                            </button>
+                          )}
+                        </div>
                       ) : msg.type === 'image' ? (
                         msg.media ? (
                           <div className="relative group inline-block">

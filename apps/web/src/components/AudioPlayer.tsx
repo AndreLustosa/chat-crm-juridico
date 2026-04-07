@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Play, Pause, Download, AlertCircle, Loader2 } from 'lucide-react';
+import { Play, Pause, Download, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import api from '@/lib/api';
 
 const SPEEDS = [1, 1.5, 2];
 
@@ -9,9 +10,10 @@ interface AudioPlayerProps {
   src: string;
   duration?: number | null;
   isOutgoing?: boolean;
+  messageId?: string; // ID da mensagem para retry de download
 }
 
-export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
+export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -20,12 +22,33 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const retryCount = useRef(0);
+  const [fetchKey, setFetchKey] = useState(0); // increment to re-trigger fetch
 
   const fmt = (secs: number) => {
     const s = Math.floor(secs || 0);
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
+
+  // Retry manual: re-enfileira download no backend e tenta buscar novamente
+  const handleRetryDownload = useCallback(async () => {
+    if (!messageId) return;
+    setRetrying(true);
+    setError(false);
+    try {
+      await api.post(`/media/${messageId}/retry`);
+      // Aguarda o worker processar (3-5s) e tenta buscar o áudio de novo
+      retryCount.current = 0;
+      setTimeout(() => {
+        setFetchKey(k => k + 1); // triggers useEffect re-fetch
+        setRetrying(false);
+      }, 4000);
+    } catch {
+      setError(true);
+      setRetrying(false);
+    }
+  }, [messageId]);
 
   // Buscar audio como blob para evitar problemas de streaming/proxy
   useEffect(() => {
@@ -37,9 +60,11 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
         const res = await fetch(src);
         if (!res.ok) {
           // Media pode nao estar pronta ainda (worker processando) — retry
-          if (res.status === 404 && retryCount.current < 5) {
+          if (res.status === 404 && retryCount.current < 8) {
             retryCount.current++;
-            setTimeout(() => { if (!cancelled) fetchAudio(); }, 3000);
+            // Backoff progressivo: 2s, 2s, 3s, 3s, 4s, 4s, 5s, 5s
+            const delay = Math.min(2000 + Math.floor(retryCount.current / 2) * 1000, 5000);
+            setTimeout(() => { if (!cancelled) fetchAudio(); }, delay);
             return;
           }
           throw new Error(`HTTP ${res.status}`);
@@ -58,7 +83,7 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
     };
     fetchAudio();
     return () => { cancelled = true; };
-  }, [src]);
+  }, [src, fetchKey]);
 
   // Cleanup blob URL on unmount
   useEffect(() => {
@@ -131,6 +156,21 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
     );
   }
 
+  // Loading retry state (after manual retry)
+  if (retrying) {
+    return (
+      <div className="flex items-center gap-3 min-w-[200px] max-w-[300px]">
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${btnClass}`}>
+          <Loader2 size={15} className="animate-spin" />
+        </div>
+        <div className="flex-1 flex flex-col gap-1.5">
+          <div className={`h-1.5 rounded-full ${barBg} animate-pulse`} />
+          <span className={`text-[10px] ${timeClass}`}>Re-baixando audio...</span>
+        </div>
+      </div>
+    );
+  }
+
   // Error state
   if (error) {
     return (
@@ -140,13 +180,24 @@ export function AudioPlayer({ src, duration, isOutgoing }: AudioPlayerProps) {
         </div>
         <div className="flex-1">
           <span className={`text-[10px] ${timeClass}`}>Audio indisponivel</span>
-          <a
-            href={`${src}?dl=1`}
-            download="audio.ogg"
-            className={`block text-[10px] mt-0.5 underline ${speedClass}`}
-          >
-            Tentar baixar
-          </a>
+          <div className="flex items-center gap-2 mt-0.5">
+            {messageId && (
+              <button
+                onClick={handleRetryDownload}
+                className={`flex items-center gap-1 text-[10px] underline ${speedClass}`}
+              >
+                <RefreshCw size={10} />
+                Tentar novamente
+              </button>
+            )}
+            <a
+              href={`${src}?dl=1`}
+              download="audio.ogg"
+              className={`text-[10px] underline ${speedClass}`}
+            >
+              Baixar
+            </a>
+          </div>
         </div>
       </div>
     );

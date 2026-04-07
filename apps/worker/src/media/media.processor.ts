@@ -76,9 +76,16 @@ export class MediaProcessor extends WorkerHost {
       const originalName: string | null = media_data?.fileName ?? null;
 
       // Verificar se a mensagem ainda existe (pode ter sido deletada com o lead)
-      const msgExists = await this.prisma.message.findUnique({ where: { id: message_id }, select: { id: true } });
+      // Retry com delay para cobrir race condition: o job pode ser processado antes
+      // do commit da transação que criou a mensagem estar visível para esta conexão.
+      let msgExists = await this.prisma.message.findUnique({ where: { id: message_id }, select: { id: true } });
       if (!msgExists) {
-        this.logger.warn(`[MEDIA] Mensagem ${message_id} não existe mais — ignorando mídia`);
+        this.logger.warn(`[MEDIA] Mensagem ${message_id} não encontrada na 1ª tentativa — aguardando 2s para retry`);
+        await new Promise(r => setTimeout(r, 2000));
+        msgExists = await this.prisma.message.findUnique({ where: { id: message_id }, select: { id: true } });
+      }
+      if (!msgExists) {
+        this.logger.warn(`[MEDIA] Mensagem ${message_id} não existe após retry — ignorando mídia`);
         return;
       }
 

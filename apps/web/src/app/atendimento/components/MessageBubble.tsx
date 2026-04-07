@@ -263,6 +263,7 @@ function MessageBubbleInner({
               src={`/api/media/${msg.id}`}
               duration={msg.media?.duration}
               isOutgoing={isOut}
+              messageId={msg.id}
             />
             {msg.text ? (
               <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>

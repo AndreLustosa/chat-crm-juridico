@@ -1,20 +1,24 @@
 import {
   Controller,
   Get,
+  Post,
   Param,
   Query,
   Res,
   Req,
   NotFoundException,
   Logger,
+  UseGuards,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from './s3.service';
 import { Public } from '../auth/decorators/public.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as https from 'https';
 import * as http from 'http';
 
-@Public()
 @Controller('media')
 export class MediaController {
   private readonly logger = new Logger(MediaController.name);
@@ -22,9 +26,57 @@ export class MediaController {
   constructor(
     private prisma: PrismaService,
     private s3: MediaS3Service,
+    @InjectQueue('media-jobs') private mediaQueue: Queue,
   ) {}
 
+  /**
+   * POST /media/:messageId/retry — re-enfileira download de mídia para mensagens com problema.
+   * Usado quando o worker falhou ou o áudio ficou indisponível.
+   */
+  @Post(':messageId/retry')
+  @UseGuards(JwtAuthGuard)
+  async retryMediaDownload(@Param('messageId') messageId: string) {
+    const message = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: { media: true, conversation: { select: { id: true, instance_name: true } } },
+    });
+
+    if (!message) throw new NotFoundException('Mensagem não encontrada');
+
+    // Se já tem mídia no S3, não precisa re-baixar
+    if (message.media) {
+      try {
+        await this.s3.getObjectStream(message.media.s3_key);
+        return { ok: true, message: 'Mídia já existe no storage', alreadyExists: true };
+      } catch {
+        // Mídia no banco mas não no S3 — deletar record e re-baixar
+        await this.prisma.media.delete({ where: { id: message.media.id } });
+        this.logger.warn(`[RETRY] Media record deletado para msg ${messageId} (S3 key ausente)`);
+      }
+    }
+
+    if (!message.external_message_id) {
+      throw new NotFoundException('Mensagem sem external_message_id — não é possível re-baixar');
+    }
+
+    const instanceName = message.conversation?.instance_name
+      || process.env.EVOLUTION_INSTANCE_NAME || '';
+
+    await this.mediaQueue.add('download_media', {
+      message_id: message.id,
+      conversation_id: message.conversation_id,
+      media_data: null, // Dados originais perdidos, worker baixará o essencial
+      remote_jid: null,
+      msg_id: message.external_message_id,
+      instance_name: instanceName,
+    });
+
+    this.logger.log(`[RETRY] Job de mídia re-enfileirado para msg ${messageId}`);
+    return { ok: true, message: 'Download de mídia re-enfileirado' };
+  }
+
   // Rota pública (sem JWT) para que a Evolution API possa baixar o áudio
+  @Public()
   @Get(':messageId')
   async getMedia(
     @Param('messageId') messageId: string,

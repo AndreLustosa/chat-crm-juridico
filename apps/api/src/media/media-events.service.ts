@@ -45,13 +45,24 @@ export class MediaEventsService implements OnModuleInit, OnModuleDestroy {
         }
 
         // Busca mensagem atualizada com mídia no banco
-        const message = await this.prisma.message.findUnique({
+        // Retry com delay: o worker pode ter retornado antes do Media record ser visível
+        // para esta conexão, ou a mensagem pode estar em commit pendente.
+        let message = await this.prisma.message.findUnique({
           where: { id: messageId },
           include: { media: true },
         });
 
+        if (!message || !message.media) {
+          // Aguarda 2s e tenta novamente — cobre race conditions de commit
+          await new Promise(r => setTimeout(r, 2000));
+          message = await this.prisma.message.findUnique({
+            where: { id: messageId },
+            include: { media: true },
+          });
+        }
+
         if (!message) {
-          this.logger.warn(`[WS] Mensagem ${messageId} não encontrada`);
+          this.logger.warn(`[WS] Mensagem ${messageId} não encontrada após retry`);
           return;
         }
 
