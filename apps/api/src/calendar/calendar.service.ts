@@ -214,8 +214,27 @@ export class CalendarService {
     // Enqueue WhatsApp + Email reminders
     await this.enqueueReminders(event.id, event.start_at, event.reminders || []);
 
+    // Se não tem lead direto mas tem processo, buscar lead do processo
+    let leadPhone: string | undefined = event.lead?.phone || undefined;
+    if (!leadPhone && data.legal_case_id) {
+      try {
+        const lc = await this.prisma.legalCase.findUnique({
+          where: { id: data.legal_case_id },
+          select: { lead_id: true, lead: { select: { phone: true } } },
+        });
+        leadPhone = lc?.lead?.phone || undefined;
+        // Vincular lead_id ao evento para futuras referências
+        if (lc?.lead_id && !event.lead_id) {
+          await this.prisma.calendarEvent.update({
+            where: { id: event.id },
+            data: { lead_id: lc.lead_id },
+          }).catch(() => {});
+        }
+      } catch {}
+    }
+
     // Notificação imediata ao cliente (1 min de delay) quando audiência ou perícia é agendada
-    if ((data.type === 'AUDIENCIA' || data.type === 'PERICIA') && event.lead?.phone) {
+    if ((data.type === 'AUDIENCIA' || data.type === 'PERICIA') && leadPhone) {
       try {
         await this.reminderQueue.add(
           'notify-hearing-scheduled',

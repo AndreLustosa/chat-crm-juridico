@@ -270,8 +270,12 @@ export class DjenService {
         });
         saved++;
 
-        // ─── Auto-criar tarefa/audiência ao vincular publicação a um processo ─────
+        // ─── Notificações e memória ─────
         if (legalCase && pub) {
+          /*
+           * Auto-criação de tarefas DESATIVADA — o advogado cria manualmente.
+           * Para reativar, descomentar o bloco abaixo.
+           *
           const classification = classifyPublication(tipoComunicacao, assunto, conteudo);
           if (classification) {
             try {
@@ -413,6 +417,8 @@ export class DjenService {
               this.logger.warn(`[DJEN] Falha ao criar tarefa automática: ${e.message}`);
             }
           }
+
+          */ // fim do bloco de auto-criação de tarefas desativado
 
           // ─── Notificar lead via WhatsApp sobre nova movimentação ─────
           this.notifyLeadAboutMovement(pub, legalCase, tipoComunicacao, numeroProcesso, dataDisp).catch(e =>
