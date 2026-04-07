@@ -21,46 +21,65 @@ export class FollowupProcessor extends WorkerHost {
     if (job.name === 'send-message') return this.sendMessage(job.data.message_id);
   }
 
+  // ─── Timezone helper — America/Maceio (UTC-3) ────────────────────────────
+
+  private getMaceioNow(): { hora: number; dia: number; date: Date } {
+    const now = new Date();
+    // Usar offset fixo BRT = UTC-3
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    const maceioMs = utcMs - 3 * 3600000;
+    const maceio = new Date(maceioMs);
+    return { hora: maceio.getHours(), dia: maceio.getDay(), date: maceio };
+  }
+
   // ─── Decision Engine: Horário Comercial ──────────────────────────────────
 
   private isBusinessHours(): boolean {
-    const now = new Date();
-    const hora = parseInt(
-      now.toLocaleString('pt-BR', { timeZone: 'America/Maceio', hour: '2-digit', hour12: false }),
-    );
-    const diaSemana = now.toLocaleString('pt-BR', { timeZone: 'America/Maceio', weekday: 'short' });
-    // Domingo = não envia. Segunda a Sábado entre 8h e 18h
-    if (diaSemana === 'dom.') return false;
+    const { hora, dia } = this.getMaceioNow();
+    // Domingo (0) = não envia. Segunda a Sábado entre 8h e 18h
+    if (dia === 0) return false;
     return hora >= 8 && hora < 18;
   }
 
   private nextBusinessHour(): Date {
+    const { hora, dia, date } = this.getMaceioNow();
     const now = new Date();
-    const brt = new Date(now.toLocaleString('en-US', { timeZone: 'America/Maceio' }));
-    const hora = brt.getHours();
-    const dia = brt.getDay(); // 0=Dom
 
-    const next = new Date(brt);
     if (hora >= 18 || dia === 0) {
       // Após 18h ou domingo → próximo dia útil às 9h
-      next.setDate(next.getDate() + (dia === 6 ? 2 : 1));
-      next.setHours(9, 0, 0, 0);
+      let daysToAdd = 1;
+      if (dia === 6) daysToAdd = 2; // sábado → segunda
+      if (dia === 0) daysToAdd = 1; // domingo → segunda
+      const next = new Date(now.getTime() + daysToAdd * 86400000);
+      // Setar para 9h em Maceio (12h UTC)
+      next.setUTCHours(12, 0, 0, 0);
+      return next;
     } else if (hora < 8) {
-      next.setHours(8, 0, 0, 0);
+      // Antes de 8h → hoje às 8h em Maceio (11h UTC)
+      const next = new Date(now);
+      next.setUTCHours(11, 0, 0, 0);
+      return next;
     }
-    return next;
+    return now; // já está em horário comercial
   }
 
   // ─── Decision Engine: Rate Limiting — máx 2 mensagens por lead por dia ──
 
   private async exceedsDailyLimit(leadId: string): Promise<boolean> {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // Calcular início do dia em Maceio (UTC-3) → 03:00 UTC
+    const now = new Date();
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+    const maceioMs = utcMs - 3 * 3600000;
+    const maceio = new Date(maceioMs);
+    maceio.setHours(0, 0, 0, 0);
+    // Converter de volta para UTC
+    const startOfDayMaceio = new Date(maceio.getTime() + 3 * 3600000);
+
     const count = await this.prisma.followupMessage.count({
       where: {
         lead_id: leadId,
         status: { in: ['ENVIADO', 'APROVADO'] },
-        sent_at: { gte: startOfDay },
+        sent_at: { gte: startOfDayMaceio },
       },
     });
     return count >= 2;

@@ -8,7 +8,7 @@ export class FollowupController {
   constructor(private readonly svc: FollowupService) {}
 
   @Get('stats')
-  getStats() { return this.svc.getStats(); }
+  getStats(@Request() req: any) { return this.svc.getStats(req.user?.tenant_id); }
 
   // ─── Sequências ──────────────────────────────────────────────────────────
   @Get('sequences')
@@ -52,6 +52,9 @@ export class FollowupController {
     return this.svc.pauseEnrollment(id, body.reason);
   }
 
+  @Patch('enrollments/:id/resume')
+  resumeEnrollment(@Param('id') id: string) { return this.svc.resumeEnrollment(id); }
+
   @Patch('enrollments/:id/cancel')
   cancelEnrollment(@Param('id') id: string) { return this.svc.cancelEnrollment(id); }
 
@@ -60,7 +63,7 @@ export class FollowupController {
 
   // ─── Aprovações ──────────────────────────────────────────────────────────
   @Get('approvals')
-  listPendingApprovals() { return this.svc.listPendingApprovals(); }
+  listPendingApprovals(@Request() req: any) { return this.svc.listPendingApprovals(req.user?.tenant_id); }
 
   @Patch('messages/:id/approve')
   approveMessage(@Param('id') id: string, @Body() body: { edited_text?: string }, @Request() req: any) {

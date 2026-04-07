@@ -83,6 +83,11 @@ export class FollowupService {
   }
 
   async deleteSequence(id: string) {
+    // Cancelar enrollments ativos antes de deletar
+    await this.prisma.followupEnrollment.updateMany({
+      where: { sequence_id: id, status: { in: ['ATIVO', 'PAUSADO'] } },
+      data: { status: 'CANCELADO' },
+    });
     await this.prisma.followupSequence.delete({ where: { id } });
     return { ok: true };
   }
@@ -133,6 +138,14 @@ export class FollowupService {
     if (!sequence) throw new NotFoundException('Sequência não encontrada');
     if (!sequence.active) throw new BadRequestException('Sequência inativa');
 
+    // Verificar se já existe enrollment concluído — não re-enrolar automaticamente
+    const existing = await this.prisma.followupEnrollment.findUnique({
+      where: { lead_id_sequence_id: { lead_id: leadId, sequence_id: sequenceId } },
+    });
+    if (existing && existing.status === 'CONCLUIDO') {
+      throw new BadRequestException('Lead já concluiu esta sequência. Cancele antes de re-enrolar.');
+    }
+
     const firstStep = sequence.steps[0];
     const nextSendAt = firstStep ? new Date(Date.now() + firstStep.delay_hours * 3600 * 1000) : null;
 
@@ -157,6 +170,31 @@ export class FollowupService {
     });
   }
 
+  async resumeEnrollment(enrollmentId: string) {
+    const enrollment = await this.prisma.followupEnrollment.findUnique({
+      where: { id: enrollmentId },
+      include: { sequence: { include: { steps: { orderBy: { position: 'asc' } } } } },
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment não encontrado');
+    if (enrollment.status !== 'PAUSADO') throw new BadRequestException('Enrollment não está pausado');
+
+    const currentStep = enrollment.sequence.steps.find(s => s.position === enrollment.current_step);
+    const nextSendAt = currentStep ? new Date(Date.now() + currentStep.delay_hours * 3600 * 1000) : new Date(Date.now() + 3600000);
+
+    const updated = await this.prisma.followupEnrollment.update({
+      where: { id: enrollmentId },
+      data: { status: 'ATIVO', paused_reason: null, next_send_at: nextSendAt },
+    });
+
+    await this.followupQueue.add('process-step', { enrollment_id: enrollmentId }, {
+      delay: Math.max(0, nextSendAt.getTime() - Date.now()),
+      jobId: `resume-${enrollmentId}-${Date.now()}`,
+      removeOnComplete: true,
+    });
+
+    return updated;
+  }
+
   async cancelEnrollment(enrollmentId: string) {
     return this.prisma.followupEnrollment.update({
       where: { id: enrollmentId },
@@ -173,14 +211,18 @@ export class FollowupService {
 
   // ─── Fila de Aprovação ───────────────────────────────────────────────────
 
-  async listPendingApprovals() {
+  async listPendingApprovals(tenantId?: string) {
     return this.prisma.followupMessage.findMany({
-      where: { status: 'PENDENTE_APROVACAO' },
+      where: {
+        status: 'PENDENTE_APROVACAO',
+        ...(tenantId && { enrollment: { lead: { tenant_id: tenantId } } }),
+      },
       include: {
         enrollment: {
           include: {
             lead: { select: { id: true, name: true, phone: true, stage: true } },
             sequence: { select: { id: true, name: true } },
+            messages: { orderBy: { created_at: 'desc' }, take: 5, select: { id: true, generated_text: true, sent_text: true, status: true, created_at: true, channel: true } },
           },
         },
         step: { select: { position: true, channel: true, tone: true, objective: true } },
@@ -360,15 +402,17 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
 
   // ─── Stats ───────────────────────────────────────────────────────────────
 
-  async getStats() {
+  async getStats(tenantId?: string) {
+    const tenantFilter = tenantId ? { lead: { tenant_id: tenantId } } : {};
+    const msgTenantFilter = tenantId ? { enrollment: { lead: { tenant_id: tenantId } } } : {};
     const [total, ativos, pendentes, enviados, convertidos] = await Promise.all([
-      this.prisma.followupEnrollment.count(),
-      this.prisma.followupEnrollment.count({ where: { status: 'ATIVO' } }),
-      this.prisma.followupMessage.count({ where: { status: 'PENDENTE_APROVACAO' } }),
-      this.prisma.followupMessage.count({ where: { status: 'ENVIADO' } }),
-      this.prisma.followupEnrollment.count({ where: { status: 'CONVERTIDO' } }),
+      this.prisma.followupEnrollment.count({ where: tenantFilter }),
+      this.prisma.followupEnrollment.count({ where: { status: 'ATIVO', ...tenantFilter } }),
+      this.prisma.followupMessage.count({ where: { status: 'PENDENTE_APROVACAO', ...msgTenantFilter } }),
+      this.prisma.followupMessage.count({ where: { status: 'ENVIADO', ...msgTenantFilter } }),
+      this.prisma.followupEnrollment.count({ where: { status: 'CONVERTIDO', ...tenantFilter } }),
     ]);
-    const taxaConversao = total > 0 ? Math.round((convertidos / total) * 100) : 0;
+    const taxaConversao = total > 0 ? Math.round((convertidos / total) * 1000) / 10 : 0;
     return { total_enrollments: total, ativos, pendentes_aprovacao: pendentes, total_enviados: enviados, convertidos, taxa_conversao: taxaConversao };
   }
 

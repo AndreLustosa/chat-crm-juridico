@@ -123,6 +123,7 @@ const STAGES = [
 const CHANNELS = [
   { id: 'whatsapp', label: 'WhatsApp' },
   { id: 'email', label: 'E-mail' },
+  { id: 'ligacao', label: 'Ligação' },
 ];
 
 const TONES = [
@@ -527,43 +528,54 @@ function StepModal({
 // ─── MELHORIA 1: Modal Ver Contexto ──────────────────────────────────────────
 
 interface ContextData {
-  lead?: {
-    name?: string;
-    stage?: string;
-    type?: string;
-    days_without_contact?: number;
-    sentiment?: string;
-    preferred_channel?: string;
-    best_time?: string;
+  pessoa?: {
+    id?: string;
+    nome?: string;
+    telefone?: string;
+    email?: string;
+    tipo?: string;
+    estagio?: string;
+    canal_preferido?: string;
+    horario_responde_mais?: string;
+    dias_sem_contato?: number;
+    inadimplente?: boolean;
+    valor_devido?: number;
+    advogado_responsavel?: string;
+    origem?: string;
   };
   historico?: {
-    total_messages?: number;
-    general_sentiment?: string;
-    last_message_summary?: string;
-    last_message_from?: string;
+    total_msgs?: number;
+    sentimento_geral?: string;
+    sentimento?: string;
+    ultima_msg_resumo?: string;
+    ultima_msg_direcao?: string;
+    dias_sem_resposta?: number;
+    ultimas_msgs?: Array<{ direcao: string; text: string; created_at: string }>;
   };
-  processos?: Array<{
-    number?: string;
-    type?: string;
-    status?: string;
-  }>;
+  processual?: {
+    processos?: Array<{
+      numero?: string;
+      tipo?: string;
+      area?: string;
+      status?: string;
+    }>;
+  };
   financeiro?: {
     inadimplente?: boolean;
     valor_devido?: number;
+    dias_atraso?: number;
   };
-  sequencia?: {
-    name?: string;
-    step_objective?: string;
-    tone?: string;
-    channel?: string;
-    attempt_number?: number;
+  tarefa?: {
+    sequencia_nome?: string;
+    categoria?: string;
+    step_position?: number;
+    total_steps?: number;
+    tentativa_numero?: number;
+    objetivo?: string;
+    tom?: string;
+    canal?: string;
+    mensagens_anteriores?: string[];
   };
-  mensagens_anteriores?: Array<{
-    text?: string;
-    sent_at?: string;
-    channel?: string;
-    status?: string;
-  }>;
 }
 
 function ContextModal({ msg, onClose }: { msg: FollowupMessage; onClose: () => void }) {
@@ -594,36 +606,39 @@ function ContextModal({ msg, onClose }: { msg: FollowupMessage; onClose: () => v
         {/* Lead */}
         <Section title="Dados do Lead">
           <div className="bg-gray-800/60 rounded-xl p-4 space-y-2">
-            <Row label="Nome" value={msg.enrollment.lead.name || msg.enrollment.lead.phone} />
-            <Row label="Stage" value={msg.enrollment.lead.stage} />
-            <Row label="Tipo" value={ctx.lead?.type} />
-            <Row label="Dias sem contato" value={ctx.lead?.days_without_contact !== undefined ? `${ctx.lead.days_without_contact} dias` : undefined} />
-            <Row label="Sentimento" value={ctx.lead?.sentiment} />
-            <Row label="Canal preferido" value={ctx.lead?.preferred_channel} />
-            <Row label="Melhor horário" value={ctx.lead?.best_time} />
-            {!ctx.lead && <p className="text-xs text-gray-600 italic">Dados do lead não disponíveis no contexto.</p>}
+            <Row label="Nome" value={ctx.pessoa?.nome || msg.enrollment.lead.name || msg.enrollment.lead.phone} />
+            <Row label="Stage" value={ctx.pessoa?.estagio || msg.enrollment.lead.stage} />
+            <Row label="Tipo" value={ctx.pessoa?.tipo} />
+            <Row label="Dias sem contato" value={ctx.pessoa?.dias_sem_contato !== undefined ? `${ctx.pessoa.dias_sem_contato} dias` : undefined} />
+            <Row label="Canal preferido" value={ctx.pessoa?.canal_preferido} />
+            <Row label="Horário que mais responde" value={ctx.pessoa?.horario_responde_mais} />
+            <Row label="Advogado responsável" value={ctx.pessoa?.advogado_responsavel} />
+            <Row label="Origem" value={ctx.pessoa?.origem} />
+            {!ctx.pessoa && <p className="text-xs text-gray-600 italic">Dados do lead não disponíveis no contexto.</p>}
           </div>
         </Section>
 
         {/* Histórico */}
         <Section title="Histórico de Conversa">
           <div className="bg-gray-800/60 rounded-xl p-4 space-y-2">
-            <Row label="Total de mensagens" value={ctx.historico?.total_messages} />
-            <Row label="Sentimento geral" value={ctx.historico?.general_sentiment} />
-            <Row label="Resumo da última msg" value={ctx.historico?.last_message_summary} />
-            <Row label="Quem enviou por último" value={ctx.historico?.last_message_from} />
+            <Row label="Total de mensagens" value={ctx.historico?.total_msgs} />
+            <Row label="Sentimento geral" value={ctx.historico?.sentimento_geral || ctx.historico?.sentimento} />
+            <Row label="Dias sem resposta" value={ctx.historico?.dias_sem_resposta !== undefined ? `${ctx.historico.dias_sem_resposta} dias` : undefined} />
+            <Row label="Resumo da última msg" value={ctx.historico?.ultima_msg_resumo} />
+            <Row label="Última msg enviada por" value={ctx.historico?.ultima_msg_direcao === 'in' ? 'Cliente' : ctx.historico?.ultima_msg_direcao === 'out' ? 'Escritório' : ctx.historico?.ultima_msg_direcao} />
             {!ctx.historico && <p className="text-xs text-gray-600 italic">Histórico não disponível no contexto.</p>}
           </div>
         </Section>
 
         {/* Processos */}
-        {(ctx.processos?.length ?? 0) > 0 ? (
+        {(ctx.processual?.processos?.length ?? 0) > 0 ? (
           <Section title="Dados Processuais">
             <div className="space-y-2">
-              {ctx.processos!.map((p, i) => (
+              {ctx.processual!.processos!.map((p, i) => (
                 <div key={i} className="bg-gray-800/60 rounded-xl p-3 flex flex-wrap gap-3 text-sm">
-                  {p.number ? <span className="text-blue-300 font-mono text-xs">{p.number}</span> : null}
-                  {p.type ? <Badge label={p.type} colorClass="text-gray-300 bg-gray-700/50" /> : null}
+                  {p.numero ? <span className="text-blue-300 font-mono text-xs">{p.numero}</span> : null}
+                  {p.tipo ? <Badge label={p.tipo} colorClass="text-gray-300 bg-gray-700/50" /> : null}
+                  {p.area ? <Badge label={p.area} colorClass="text-blue-400 bg-blue-400/10" /> : null}
                   {p.status ? <Badge label={p.status} colorClass="text-green-400 bg-green-400/10" /> : null}
                 </div>
               ))}
@@ -652,13 +667,14 @@ function ContextModal({ msg, onClose }: { msg: FollowupMessage; onClose: () => v
         {/* Sequência */}
         <Section title="Informações da Sequência">
           <div className="bg-gray-800/60 rounded-xl p-4 space-y-2">
-            <Row label="Nome da sequência" value={msg.enrollment.sequence.name} />
-            <Row label="Objetivo do step" value={msg.step.objective} />
-            <Row label="Tom" value={msg.step.tone} />
-            <Row label="Canal" value={msg.step.channel} />
-            <Row label="Step #" value={msg.step.position} />
-            {ctx.sequencia?.attempt_number !== undefined && (
-              <Row label="Tentativa" value={`#${ctx.sequencia.attempt_number}`} />
+            <Row label="Nome da sequência" value={ctx.tarefa?.sequencia_nome || msg.enrollment.sequence.name} />
+            <Row label="Categoria" value={ctx.tarefa?.categoria} />
+            <Row label="Objetivo do step" value={ctx.tarefa?.objetivo || msg.step.objective} />
+            <Row label="Tom" value={ctx.tarefa?.tom || msg.step.tone} />
+            <Row label="Canal" value={ctx.tarefa?.canal || msg.step.channel} />
+            <Row label="Step" value={ctx.tarefa?.step_position !== undefined ? `${ctx.tarefa.step_position} de ${ctx.tarefa.total_steps}` : String(msg.step.position)} />
+            {ctx.tarefa?.tentativa_numero !== undefined && (
+              <Row label="Tentativa" value={`#${ctx.tarefa.tentativa_numero}`} />
             )}
           </div>
         </Section>
@@ -681,7 +697,7 @@ function ContextModal({ msg, onClose }: { msg: FollowupMessage; onClose: () => v
         )}
 
         {/* Contexto bruto se não houver estrutura */}
-        {!ctx.lead && !ctx.historico && !ctx.processos && !ctx.financeiro && !ctx.sequencia && msg.context_json && (
+        {!ctx.pessoa && !ctx.historico && !ctx.processual && !ctx.financeiro && !ctx.tarefa && msg.context_json && (
           <Section title="Contexto Bruto (JSON)">
             <pre className="bg-gray-800/60 rounded-xl p-4 text-xs text-gray-300 overflow-auto max-h-64 whitespace-pre-wrap">
               {JSON.stringify(msg.context_json, null, 2)}
@@ -952,7 +968,12 @@ function ApprovalCard({
       {/* Ações */}
       <div className="flex gap-2 flex-wrap">
         <button
-          onClick={() => handle(() => onApprove(msg.id, text), 'approve')}
+          onClick={() => {
+            if (msg.risk_level?.toUpperCase() === 'ALTO') {
+              if (!confirm('Esta mensagem tem risco ALTO. Tem certeza que deseja aprovar e enviar?')) return;
+            }
+            handle(() => onApprove(msg.id, text), 'approve');
+          }}
           disabled={!!loading}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-green-600/20 border border-green-600/30 text-green-400 hover:bg-green-600/30 disabled:opacity-50 text-sm font-medium transition-all duration-200"
         >
@@ -1214,7 +1235,7 @@ export default function FollowupPage() {
 
   // Fetch inicial por tab
   useEffect(() => {
-    if (activeTab === 'dashboard') fetchStats();
+    if (activeTab === 'dashboard') { fetchStats(); fetchEnrollments(); }
     if (activeTab === 'sequencias') fetchSequences();
     if (activeTab === 'enrollments') fetchEnrollments();
     if (activeTab === 'aprovacoes') fetchApprovals();
@@ -1301,12 +1322,12 @@ export default function FollowupPage() {
 
   const handleEnrollmentAction = async (
     id: string,
-    action: 'pause' | 'cancel' | 'converted',
+    action: 'pause' | 'cancel' | 'converted' | 'resume',
   ) => {
     try {
       await apiFetch(`/followup/enrollments/${id}/${action}`, { method: 'PATCH' });
       const labels: Record<string, string> = {
-        pause: 'Pausado', cancel: 'Cancelado', converted: 'Marcado como convertido',
+        pause: 'Pausado', cancel: 'Cancelado', converted: 'Marcado como convertido', resume: 'Retomado',
       };
       showSuccess(labels[action]);
       fetchEnrollments();
@@ -1346,8 +1367,8 @@ export default function FollowupPage() {
 
   const handleRegenerate = async (id: string) => {
     await apiFetch(`/followup/messages/${id}/regenerate`, { method: 'POST' });
-    showSuccess('Regenerando mensagem...');
-    setTimeout(() => fetchApprovals(), 2000);
+    showSuccess('Mensagem regenerada!');
+    fetchApprovals();
   };
 
   // MELHORIA 7: Criar Sequências Padrão
@@ -1916,7 +1937,7 @@ export default function FollowupPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-800/80 border-b border-gray-700">
-                      {['Lead', 'Sequência', 'Step', 'Status', 'Última Resposta', 'Próximo envio', 'Inscrito em', 'Ações'].map(h => (
+                      {['Lead', 'Sequência', 'Step', 'Status', 'Última Resposta', 'Último envio', 'Próximo envio', 'Inscrito em', 'Ações'].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                           {h}
                         </th>
@@ -1956,9 +1977,12 @@ export default function FollowupPage() {
                             colorClass={STATUS_COLORS[enroll.status] ?? 'text-gray-400 bg-gray-700/50'}
                           />
                         </td>
-                        {/* MELHORIA 6: Coluna Última Resposta */}
+                        {/* Coluna Última Resposta */}
                         <td className="px-4 py-3">
                           <LeadResponseStatus enrollment={enroll} />
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                          {formatDate(enroll.last_sent_at)}
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
                           {formatDate(enroll.next_send_at)}
@@ -1979,7 +2003,7 @@ export default function FollowupPage() {
                             )}
                             {enroll.status === 'PAUSADO' && (
                               <button
-                                onClick={() => handleEnrollmentAction(enroll.id, 'pause')}
+                                onClick={() => handleEnrollmentAction(enroll.id, 'resume')}
                                 title="Retomar"
                                 className="p-1.5 rounded text-green-400 hover:bg-green-400/10 transition-all duration-200"
                               >
@@ -2022,7 +2046,7 @@ export default function FollowupPage() {
               <div>
                 <h2 className="text-lg font-semibold text-white">Fila de Aprovação</h2>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  {approvals.length} mensagem{approvals.length !== 1 ? 'ns' : ''} aguardando revisão
+                  {approvals.length} {approvals.length === 1 ? 'mensagem' : 'mensagens'} aguardando revisão
                 </p>
               </div>
               <button

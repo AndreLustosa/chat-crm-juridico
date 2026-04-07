@@ -155,7 +155,7 @@ export class FollowupService {
     return 'morno';
   }
 
-  async generateMessage(dossie: any, customPrompt?: string | null): Promise<string> {
+  async generateMessage(dossie: any, customPrompt?: string | null, retries?: number): Promise<string> {
     const categoria = dossie.tarefa?.categoria || 'LEADS';
     const canal = dossie.tarefa?.canal || 'whatsapp';
     const tom = dossie.tarefa?.tom || 'amigavel';
@@ -256,10 +256,10 @@ Gere APENAS o texto da mensagem final, sem introduções, sem "Aqui está a mens
       });
       return completion.choices[0]?.message?.content?.trim() || this.fallbackMessage(nome);
     } catch (e: any) {
-      if (e?.status === 429) {
-        this.logger.warn('[FOLLOWUP] OpenAI rate limit — aguardando 5s e tentando novamente');
+      if (e?.status === 429 && (retries ?? 0) < 2) {
+        this.logger.warn(`[FOLLOWUP] OpenAI rate limit — tentativa ${(retries ?? 0) + 1}/2, aguardando 5s`);
         await new Promise(r => setTimeout(r, 5000));
-        return this.generateMessage(dossie, customPrompt);
+        return this.generateMessage(dossie, customPrompt, (retries ?? 0) + 1);
       }
       this.logger.error(`[FOLLOWUP] Erro OpenAI: ${e.message}`);
       return this.fallbackMessage(nome);
