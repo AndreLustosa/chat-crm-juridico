@@ -217,7 +217,14 @@ export class PetitionsController {
   @Patch(':id')
   update(
     @Param('id') id: string,
-    @Body() body: { content_json?: any; content_html?: string; title?: string; deadline_at?: string },
+    @Body() body: {
+      content_json?: any;
+      content_html?: string;
+      title?: string;
+      deadline_at?: string;
+      google_doc_url?: string;
+      google_doc_id?: string;
+    },
     @Request() req: any,
   ) {
     return this.service.update(id, body, req.user.tenant_id);

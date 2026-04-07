@@ -211,7 +211,14 @@ export class PetitionsService {
 
   async update(
     petitionId: string,
-    data: { content_json?: any; content_html?: string; title?: string; deadline_at?: string },
+    data: {
+      content_json?: any;
+      content_html?: string;
+      title?: string;
+      deadline_at?: string;
+      google_doc_url?: string;
+      google_doc_id?: string;
+    },
     tenantId?: string,
   ) {
     await this.verifyPetitionAccess(petitionId, tenantId);
@@ -221,6 +228,8 @@ export class PetitionsService {
     if (data.content_html !== undefined) updateData.content_html = data.content_html;
     if (data.title) updateData.title = data.title;
     if (data.deadline_at !== undefined) updateData.deadline_at = data.deadline_at ? new Date(data.deadline_at) : null;
+    if (data.google_doc_url !== undefined) updateData.google_doc_url = data.google_doc_url || null;
+    if (data.google_doc_id !== undefined) updateData.google_doc_id = data.google_doc_id || null;
 
     return this.prisma.casePetition.update({
       where: { id: petitionId },

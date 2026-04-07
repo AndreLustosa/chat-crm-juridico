@@ -383,12 +383,15 @@ function PetitionEditor({
   const latestContentRef = useRef<{ json: any; html: string } | null>(null);
   const [currentContent, setCurrentContent] = useState(petition.content_json);
   // Google Docs é SEMPRE o editor primário quando disponível
-  // O editor local (Tiptap) só é usado como fallback quando Google Drive não está configurado
-  const hasGoogleDoc = !!petition.google_doc_url;
+  const [googleDocUrl, setGoogleDocUrl] = useState(petition.google_doc_url);
+  const hasGoogleDoc = !!googleDocUrl;
   const [editorMode, setEditorMode] = useState<'local' | 'gdocs'>(
     hasGoogleDoc ? 'gdocs' : 'local'
   );
   const [syncing, setSyncing] = useState(false);
+  const [showLinkDoc, setShowLinkDoc] = useState(false);
+  const [linkDocUrl, setLinkDocUrl] = useState('');
+  const [linkingDoc, setLinkingDoc] = useState(false);
 
   const isEditable = status === 'RASCUNHO' || status === 'EM_REVISAO';
 
@@ -526,6 +529,37 @@ function PetitionEditor({
     }
   };
 
+  // ─── Link Google Doc manually ────────────────────────────────
+
+  const handleLinkGoogleDoc = async () => {
+    const url = linkDocUrl.trim();
+    if (!url) { showError('Cole a URL do Google Doc'); return; }
+
+    // Extrair docId da URL: https://docs.google.com/document/d/XXXXX/edit
+    const match = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+    if (!match) { showError('URL inválida. Cole uma URL do Google Docs (ex: https://docs.google.com/document/d/...)'); return; }
+
+    const docId = match[1];
+    const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
+
+    setLinkingDoc(true);
+    try {
+      await api.patch(`/petitions/${petition.id}`, {
+        google_doc_id: docId,
+        google_doc_url: docUrl,
+      });
+      setGoogleDocUrl(docUrl);
+      setEditorMode('gdocs');
+      setShowLinkDoc(false);
+      setLinkDocUrl('');
+      showSuccess('Google Doc vinculado com sucesso!');
+    } catch {
+      showError('Erro ao vincular Google Doc');
+    } finally {
+      setLinkingDoc(false);
+    }
+  };
+
   // ─── Status transitions ────────────────────────────────────
 
   const transitions: Record<string, string[]> = {
@@ -649,6 +683,18 @@ function PetitionEditor({
           </button>
         )}
 
+        {/* Vincular Google Doc (quando não tem doc vinculado) */}
+        {!hasGoogleDoc && isEditable && (
+          <button
+            onClick={() => setShowLinkDoc(!showLinkDoc)}
+            className="btn btn-ghost btn-xs gap-1 text-blue-500"
+            title="Vincular um Google Doc existente"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Vincular Google Doc
+          </button>
+        )}
+
         <div className="flex-1" />
 
         {/* Status transitions */}
@@ -677,6 +723,41 @@ function PetitionEditor({
         )}
       </div>
 
+      {/* Link Google Doc panel */}
+      {showLinkDoc && (
+        <div className="border-b border-base-300 bg-blue-500/5 px-4 py-3 space-y-2">
+          <p className="text-xs text-base-content/70">
+            Crie um Google Doc no seu Drive e cole a URL abaixo para editar diretamente no sistema:
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={linkDocUrl}
+              onChange={(e) => setLinkDocUrl(e.target.value)}
+              placeholder="https://docs.google.com/document/d/.../edit"
+              className="input input-bordered input-sm flex-1 text-xs"
+              onKeyDown={(e) => e.key === 'Enter' && handleLinkGoogleDoc()}
+              autoFocus
+            />
+            <button
+              onClick={handleLinkGoogleDoc}
+              disabled={linkingDoc || !linkDocUrl.trim()}
+              className="btn btn-primary btn-sm gap-1"
+            >
+              {linkingDoc ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+              Vincular
+            </button>
+            <button onClick={() => { setShowLinkDoc(false); setLinkDocUrl(''); }} className="btn btn-ghost btn-sm">
+              Cancelar
+            </button>
+          </div>
+          <p className="text-[10px] text-base-content/40">
+            Dica: Abra o <a href="https://docs.google.com/document/create" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">Google Docs</a>, crie um documento, e cole a URL aqui.
+            O documento precisa estar como &quot;Qualquer pessoa com o link pode editar&quot;.
+          </p>
+        </div>
+      )}
+
       {/* Versions panel */}
       {showVersions && (
         <div className="border-b border-base-300 bg-base-200/30 px-4 py-2 max-h-40 overflow-y-auto">
@@ -703,9 +784,9 @@ function PetitionEditor({
             <Sparkles className="h-8 w-8 text-primary animate-pulse" />
             <p className="text-sm text-base-content/60">Gerando petição com IA... isso pode levar até 30 segundos</p>
           </div>
-        ) : editorMode === 'gdocs' && petition.google_doc_url ? (
+        ) : editorMode === 'gdocs' && googleDocUrl ? (
           <GoogleDocsEmbed
-            docUrl={petition.google_doc_url}
+            docUrl={googleDocUrl}
             editable={isEditable}
             fullHeight
             petitionId={petition.id}

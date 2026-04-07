@@ -412,6 +412,7 @@ function CaseDetailPanel({
   // Petition editor (inline)
   const [editingPetition, setEditingPetition] = useState<Petition | null>(null);
   const [editorMode, setEditorMode] = useState<'local' | 'gdocs'>('local');
+  const [editGoogleDocUrl, setEditGoogleDocUrl] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'idle'>('idle');
   const [editContentKey, setEditContentKey] = useState(0);
@@ -420,6 +421,9 @@ function CaseDetailPanel({
   const [savingVersion, setSavingVersion] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [showLinkDoc, setShowLinkDoc] = useState(false);
+  const [linkDocUrl, setLinkDocUrl] = useState('');
+  const [linkingDoc, setLinkingDoc] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Create petition form
@@ -702,9 +706,11 @@ function CaseDetailPanel({
       const pet = res.data;
       setEditingPetition(pet);
       setEditTitle(pet.title);
+      setEditGoogleDocUrl(pet.google_doc_url);
       setEditorMode(pet.google_doc_url ? 'gdocs' : 'local');
       setEditContentKey(prev => prev + 1);
       setShowEditVersions(false);
+      setShowLinkDoc(false);
     } catch {}
   };
 
@@ -792,6 +798,25 @@ function CaseDetailPanel({
     try {
       await api.post(`/petitions/${editingPetition.id}/sync-gdoc`);
     } catch {} finally { setSyncing(false); }
+  };
+
+  // Link Google Doc manually
+  const handleLinkGoogleDoc = async () => {
+    if (!editingPetition) return;
+    const url = linkDocUrl.trim();
+    if (!url) return;
+    const match = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+    if (!match) return;
+    const docId = match[1];
+    const docUrl = `https://docs.google.com/document/d/${docId}/edit`;
+    setLinkingDoc(true);
+    try {
+      await api.patch(`/petitions/${editingPetition.id}`, { google_doc_id: docId, google_doc_url: docUrl });
+      setEditGoogleDocUrl(docUrl);
+      setEditorMode('gdocs');
+      setShowLinkDoc(false);
+      setLinkDocUrl('');
+    } catch {} finally { setLinkingDoc(false); }
   };
 
   // Delete petition
@@ -1626,14 +1651,14 @@ function CaseDetailPanel({
               {/* Action bar */}
               <div className="flex items-center gap-1.5 border-b border-border px-4 py-1.5 shrink-0 flex-wrap">
                 {/* Google Docs: botão discreto para trocar para editor local */}
-                {editingPetition.google_doc_url && editorMode === 'gdocs' && (
+                {editGoogleDocUrl && editorMode === 'gdocs' && (
                   <button onClick={() => setEditorMode('local')} className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground flex items-center gap-1 px-2 py-1">
                     Editor local
                   </button>
                 )}
 
                 {/* Se está no editor local mas tem Google Doc, botão para voltar ao Docs */}
-                {editingPetition.google_doc_url && editorMode === 'local' && (
+                {editGoogleDocUrl && editorMode === 'local' && (
                   <>
                     <button onClick={() => setEditorMode('gdocs')} className="text-[10px] text-blue-500 hover:text-blue-400 flex items-center gap-1 px-2 py-1">
                       <FileText size={10} /> Voltar ao Docs
@@ -1659,6 +1684,13 @@ function CaseDetailPanel({
                 {(editingPetition.status === 'RASCUNHO' || editingPetition.status === 'EM_REVISAO') && editorMode === 'local' && (
                   <button onClick={handleRegenerate} disabled={regenerating} className="text-[10px] text-primary hover:text-primary/80 flex items-center gap-1 px-2 py-1">
                     {regenerating ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />} IA
+                  </button>
+                )}
+
+                {/* Vincular Google Doc (quando não tem doc vinculado) */}
+                {!editGoogleDocUrl && (editingPetition.status === 'RASCUNHO' || editingPetition.status === 'EM_REVISAO') && (
+                  <button onClick={() => setShowLinkDoc(!showLinkDoc)} className="text-[10px] text-blue-500 hover:text-blue-400 flex items-center gap-1 px-2 py-1">
+                    <ExternalLink size={10} /> Vincular Google Doc
                   </button>
                 )}
 
@@ -1704,6 +1736,23 @@ function CaseDetailPanel({
                 </div>
               )}
 
+              {/* Link Google Doc panel */}
+              {showLinkDoc && (
+                <div className="border-b border-border bg-blue-500/5 px-4 py-2.5 shrink-0 space-y-1.5">
+                  <p className="text-[10px] text-muted-foreground">Crie um Google Doc e cole a URL abaixo:</p>
+                  <div className="flex gap-2">
+                    <input type="text" value={linkDocUrl} onChange={e => setLinkDocUrl(e.target.value)} placeholder="https://docs.google.com/document/d/.../edit" className="flex-1 text-[11px] bg-card border border-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500/40" onKeyDown={e => e.key === 'Enter' && handleLinkGoogleDoc()} autoFocus />
+                    <button onClick={handleLinkGoogleDoc} disabled={linkingDoc || !linkDocUrl.trim()} className="text-[10px] font-semibold bg-blue-500 text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center gap-1">
+                      {linkingDoc ? <Loader2 size={10} className="animate-spin" /> : <FileText size={10} />} Vincular
+                    </button>
+                    <button onClick={() => { setShowLinkDoc(false); setLinkDocUrl(''); }} className="text-[10px] text-muted-foreground px-2 py-1.5 border border-border rounded-lg">Cancelar</button>
+                  </div>
+                  <p className="text-[9px] text-muted-foreground/60">
+                    Abra o <a href="https://docs.google.com/document/create" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">Google Docs</a>, crie um documento, e cole a URL. O doc deve ser &quot;qualquer pessoa com o link pode editar&quot;.
+                  </p>
+                </div>
+              )}
+
               {/* Versions panel */}
               {showEditVersions && (
                 <div className="border-b border-border bg-accent/30 px-4 py-2 max-h-32 overflow-y-auto shrink-0">
@@ -1726,9 +1775,9 @@ function CaseDetailPanel({
                     <Sparkles size={24} className="text-primary animate-pulse" />
                     <p className="text-[12px] text-muted-foreground">Gerando com IA...</p>
                   </div>
-                ) : editorMode === 'gdocs' && editingPetition.google_doc_url ? (
+                ) : editorMode === 'gdocs' && editGoogleDocUrl ? (
                   <GoogleDocsEmbed
-                    docUrl={editingPetition.google_doc_url}
+                    docUrl={editGoogleDocUrl}
                     editable={editingPetition.status === 'RASCUNHO' || editingPetition.status === 'EM_REVISAO'}
                     fullHeight
                     petitionId={editingPetition.id}
