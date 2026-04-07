@@ -870,6 +870,20 @@ export default function Dashboard() {
     fetchSpecialists(true);
   }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId, clientMode]);
 
+  // Sincronizar unreadCounts com o banco de dados ao carregar
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/conversations/unread-counts')
+      .then(res => {
+        if (!cancelled && res.data) {
+          setUnreadCounts(res.data);
+        }
+      })
+      .catch(() => {}); // silencioso se falhar
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Polling de transferências pendentes (30s) — resiliência caso o socket perca o evento
   useEffect(() => {
     const interval = setInterval(() => fetchPendingTransfers(true), 30_000);

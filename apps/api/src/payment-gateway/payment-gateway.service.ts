@@ -157,7 +157,7 @@ export class PaymentGatewayService {
     );
 
     // Criar cobranca no Asaas
-    const dueDate = new Date(payment.due_date);
+    const dueDate = payment.due_date ? new Date(payment.due_date) : new Date();
     const dueDateStr = dueDate.toISOString().slice(0, 10); // YYYY-MM-DD
 
     const asaasCharge = await this.asaas.createCharge({

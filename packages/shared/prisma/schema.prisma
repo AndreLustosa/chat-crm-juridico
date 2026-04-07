@@ -983,10 +983,13 @@ model CaseHonorario {
   id                   String    @id @default(uuid())
   tenant_id            String?
   legal_case_id        String
-  type                 String // FIXO, EXITO, MISTO
+  type                 String // CONTRATUAL, SUCUMBENCIA, ENTRADA, ACORDO
   total_value          Decimal
-  success_percentage   Decimal? // Percentual de êxito (ex: 30.00 = 30%)
-  calculated_value     Decimal? // Auto-calculado: sentence_value × percentage / 100
+  success_percentage   Decimal?  // Percentual de sucumbência (ex: 20.00 = 20%)
+  calculated_value     Decimal?  // Auto-calculado: sentence_value × percentage / 100
+  sentence_value       Decimal?  // Valor da condenação (SUCUMBENCIA)
+  interest_rate        Decimal?  // Taxa de juros mensal (padrão: 1% = juros legais)
+  base_date            DateTime? // Data base para cálculo de juros
   status               String    @default("ATIVO") // ATIVO, FINALIZADO, CANCELADO
   installment_count    Int       @default(1)
   contract_date        DateTime?
@@ -1006,7 +1009,7 @@ model HonorarioPayment {
   id             String    @id @default(uuid())
   honorario_id   String
   amount         Decimal
-  due_date       DateTime
+  due_date       DateTime? // Opcional para alvará judicial (SUCUMBENCIA)
   paid_at        DateTime?
   payment_method String? // PIX, BOLETO, CARTAO, DINHEIRO, TRANSFERENCIA
   status         String    @default("PENDENTE") // PENDENTE, PAGO, ATRASADO

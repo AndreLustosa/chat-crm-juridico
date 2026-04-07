@@ -700,8 +700,8 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
               telefone: (p as any).honorario?.legal_case?.lead?.phone || '',
               processo: (p as any).honorario?.legal_case?.case_number || 'Sem número',
               valor: `R$ ${Number(p.amount).toFixed(2)}`,
-              vencimento: new Date(p.due_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }),
-              dias_atraso: Math.ceil((Date.now() - new Date(p.due_date).getTime()) / 86400000),
+              vencimento: p.due_date ? new Date(p.due_date).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Sem vencimento',
+              dias_atraso: p.due_date ? Math.ceil((Date.now() - new Date(p.due_date).getTime()) / 86400000) : 0,
             })),
           };
         }

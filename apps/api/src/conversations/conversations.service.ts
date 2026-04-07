@@ -664,6 +664,33 @@ export class ConversationsService {
 
   // ── Mark as Read (envia tick azul ao contato) ───────────────────────────────
 
+  /**
+   * Retorna a contagem real de mensagens não lidas por conversa (fonte: banco de dados).
+   */
+  async getUnreadCounts(tenantId?: string) {
+    const where: any = {
+      direction: 'in',
+      status: { in: ['recebido', 'entregue'] },
+    };
+    if (tenantId) {
+      where.conversation = { tenant_id: tenantId };
+    }
+
+    const counts = await this.prisma.message.groupBy({
+      by: ['conversation_id'],
+      where,
+      _count: { id: true },
+    });
+
+    const result: Record<string, number> = {};
+    for (const c of counts) {
+      if (c.conversation_id) {
+        result[c.conversation_id] = c._count.id;
+      }
+    }
+    return result;
+  }
+
   async markAsRead(conversationId: string) {
     const convo = await this.prisma.conversation.findUnique({
       where: { id: conversationId },

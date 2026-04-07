@@ -103,7 +103,63 @@ export class FinanceiroService {
       this.prisma.financialTransaction.count({ where }),
     ]);
 
-    return { data, total };
+    // Enriquecer transações PENDENTE/ATRASADO de honorários com juros legais
+    const enriched = await this.enrichWithInterest(data);
+
+    return { data: enriched, total };
+  }
+
+  /**
+   * Calcula juros legais (1% a.m. padrão) para transações de honorários vencidas.
+   * Cálculo em tempo de leitura — não altera dados no banco.
+   */
+  private async enrichWithInterest(transactions: any[]) {
+    const now = new Date();
+
+    return Promise.all(
+      transactions.map(async (tx) => {
+        // Só calcular juros para receitas de honorário pendentes/vencidas com due_date
+        if (
+          tx.type !== 'RECEITA' ||
+          tx.category !== 'HONORARIO' ||
+          tx.status === 'PAGO' ||
+          tx.status === 'CANCELADO' ||
+          !tx.due_date ||
+          !tx.honorario_payment_id
+        ) {
+          return { ...tx, interest_amount: 0, total_with_interest: Number(tx.amount) };
+        }
+
+        const dueDate = new Date(tx.due_date);
+        if (dueDate >= now) {
+          return { ...tx, interest_amount: 0, total_with_interest: Number(tx.amount) };
+        }
+
+        // Buscar taxa de juros do honorário
+        let monthlyRate = 1.0; // padrão: 1% ao mês (juros legais art. 406 CC)
+        try {
+          const payment = await this.prisma.honorarioPayment.findUnique({
+            where: { id: tx.honorario_payment_id },
+            select: { honorario: { select: { interest_rate: true } } },
+          });
+          if (payment?.honorario?.interest_rate) {
+            monthlyRate = Number(payment.honorario.interest_rate);
+          }
+        } catch {}
+
+        // Calcular meses de atraso
+        const msPerMonth = 30.44 * 24 * 60 * 60 * 1000;
+        const monthsOverdue = Math.max(0, (now.getTime() - dueDate.getTime()) / msPerMonth);
+        const amount = Number(tx.amount);
+        const interestAmount = Math.round(amount * (monthlyRate / 100) * monthsOverdue * 100) / 100;
+
+        return {
+          ...tx,
+          interest_amount: interestAmount,
+          total_with_interest: Math.round((amount + interestAmount) * 100) / 100,
+        };
+      }),
+    );
   }
 
   async createTransaction(data: CreateTransactionDto & { tenant_id?: string }) {

@@ -251,6 +251,7 @@ export class DashboardAnalyticsService {
 
     let grandTotal = 0;
     for (const p of overdue) {
+      if (!p.due_date) continue;
       const days = Math.round((now.getTime() - p.due_date.getTime()) / (1000 * 60 * 60 * 24));
       const amount = Number(p.amount);
       grandTotal += amount;
