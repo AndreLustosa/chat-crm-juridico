@@ -355,6 +355,7 @@ export class FinanceiroService {
         status,
         legal_case_id: legalCase?.id || null,
         lead_id: legalCase?.lead_id || null,
+        lawyer_id: legalCase?.lawyer_id || null,
         honorario_payment_id: paymentId,
         notes: honorario?.notes || payment.notes || null,
       },
@@ -363,9 +364,10 @@ export class FinanceiroService {
 
   // ─── Summary & Analytics ───────────────────────────────
 
-  async getSummary(tenantId?: string, startDate?: string, endDate?: string) {
+  async getSummary(tenantId?: string, startDate?: string, endDate?: string, lawyerId?: string) {
     const where: any = {};
     if (tenantId) where.tenant_id = tenantId;
+    if (lawyerId) where.lawyer_id = lawyerId;
     // Exclude cancelled from aggregation
     where.status = { not: 'CANCELADO' };
 

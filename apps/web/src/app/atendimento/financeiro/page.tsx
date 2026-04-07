@@ -68,8 +68,8 @@ const DESPESA_CATEGORIES = ['Custas Judiciais', 'Pericias', 'Deslocamento', 'Mat
    Helpers
 ────────────────────────────────────────────────────────────── */
 const fmt = (v: number | string) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
-    typeof v === 'string' ? parseFloat(v) : v,
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+    Math.round((typeof v === 'string' ? parseFloat(v) : v) * 100) / 100,
   );
 
 const fmtDate = (d: string) => {
@@ -1682,7 +1682,7 @@ function ReceitasTab({ receitas, onRefresh }: { receitas: Transaction[]; onRefre
   const [chargeType, setChargeType] = useState('BOLETO');
   const [notes, setNotes] = useState('');
 
-  const fmt = (v: number | string) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(typeof v === 'string' ? parseFloat(v) : v);
+  const fmt = (v: number | string) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.round((typeof v === 'string' ? parseFloat(v) : v) * 100) / 100);
   const fmtDate = (d: string) => { if (!d) return '--'; const dt = new Date(d); return `${String(dt.getUTCDate()).padStart(2,'0')}/${String(dt.getUTCMonth()+1).padStart(2,'0')}/${dt.getUTCFullYear()}`; };
 
   const resetForm = () => {

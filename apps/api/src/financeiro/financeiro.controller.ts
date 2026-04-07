@@ -102,9 +102,10 @@ export class FinanceiroController {
   getSummary(
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
+    @Query('lawyerId') lawyerId: string,
     @Request() req: any,
   ) {
-    return this.service.getSummary(req.user.tenant_id, startDate, endDate);
+    return this.service.getSummary(req.user.tenant_id, startDate, endDate, lawyerId);
   }
 
   @Get('cash-flow')

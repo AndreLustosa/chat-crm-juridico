@@ -70,9 +70,9 @@ function buildInfo(roles: AppRole[], userId: string | null): RoleInfo {
     canViewLegalCases: has(['ADMIN', 'ADVOGADO']),
     canManageSettings: roles.includes('ADMIN'),
     canViewDashboard: has(['ADMIN', 'ADVOGADO', 'OPERADOR', 'COMERCIAL']),
-    canViewAnalytics: has(['ADMIN', 'ADVOGADO']),
+    canViewAnalytics: has(['ADMIN']),
     canViewDjen: has(['ADMIN', 'ADVOGADO']),
-    canViewFinanceiro: has(['ADMIN', 'FINANCEIRO']),
+    canViewFinanceiro: has(['ADMIN', 'FINANCEIRO', 'ADVOGADO']),
     canViewAdvogado: has(['ADMIN', 'ADVOGADO']),
   };
 }
