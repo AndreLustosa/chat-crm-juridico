@@ -99,7 +99,6 @@ export default function NewContactModal({ onClose, onCreated }: {
         lead_id: leadR.data.id,
         channel: 'whatsapp',
         instance_name: 'whatsapp',
-        status: 'ABERTO',
       });
 
       // Atribuir atendente (quem cadastrou), advogado e área jurídica na conversa
