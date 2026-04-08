@@ -712,8 +712,25 @@ export class LegalCasesService {
       }
 
     } else {
-      // Caminho C: sem lead_id nem lead_phone — exigir informação do cliente
-      throw new BadRequestException('Informe o cliente (lead_id ou telefone) para criar o processo. Não é possível criar processo sem vincular a um contato.');
+      throw new BadRequestException('Informe o cliente (lead_id ou telefone) para criar o processo.');
+    }
+
+    // Garantir que o lead tenha pelo menos uma conversa (para aparecer no chat)
+    const existingConvo = await this.prisma.conversation.findFirst({
+      where: { lead_id: leadId },
+      select: { id: true },
+    });
+    if (!existingConvo) {
+      await this.prisma.conversation.create({
+        data: {
+          lead_id: leadId,
+          tenant_id: data.tenant_id || null,
+          instance_name: process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp',
+          status: 'OPEN',
+          last_message_at: new Date(),
+        },
+      });
+      this.logger.log(`[LEGAL] Conversa criada para lead ${leadId} (sem WhatsApp prévio)`);
     }
 
     // Se ADMIN passou override_lawyer_id, usa ele; caso contrário usa o usuário logado
