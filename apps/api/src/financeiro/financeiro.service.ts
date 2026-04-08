@@ -89,7 +89,12 @@ export class FinanceiroService {
     if (query.tenantId) where.tenant_id = query.tenantId;
     if (query.type) where.type = query.type;
     if (query.category) where.category = query.category;
-    if (query.status) where.status = query.status;
+    if (query.status) {
+      where.status = query.status;
+    } else {
+      // Por padrão, não mostrar CANCELADO
+      where.status = { not: 'CANCELADO' };
+    }
     if (query.legalCaseId) where.legal_case_id = query.legalCaseId;
     if (query.leadId) where.lead_id = query.leadId;
     if (query.lawyerId) {
@@ -462,7 +467,16 @@ export class FinanceiroService {
   async getSummary(tenantId?: string, startDate?: string, endDate?: string, lawyerId?: string) {
     const where: any = {};
     if (tenantId) where.tenant_id = tenantId;
-    if (lawyerId) where.lawyer_id = lawyerId;
+    if (lawyerId) {
+      // Advogado vê: suas transações + despesas gerais visíveis
+      where.AND = [
+        { visible_to_lawyer: true },
+        { OR: [
+          { lawyer_id: lawyerId },
+          { lawyer_id: null, type: 'DESPESA' },
+        ]},
+      ];
+    }
     // Exclude cancelled from aggregation
     where.status = { not: 'CANCELADO' };
 
