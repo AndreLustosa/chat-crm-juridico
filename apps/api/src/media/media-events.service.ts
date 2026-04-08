@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { QueueEvents, Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { GoogleDriveService } from '../google-drive/google-drive.service';
+import { MediaS3Service } from './s3.service';
 
 @Injectable()
 export class MediaEventsService implements OnModuleInit, OnModuleDestroy {
@@ -12,6 +14,8 @@ export class MediaEventsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
+    private driveService: GoogleDriveService,
+    private s3Service: MediaS3Service,
   ) {}
 
   onModuleInit() {
@@ -69,6 +73,13 @@ export class MediaEventsService implements OnModuleInit, OnModuleDestroy {
         // Emite evento para o room da conversa
         this.chatGateway.server?.to(conversationId).emit('mediaReady', message);
         this.logger.log(`[WS] mediaReady emitido: msg=${messageId} conv=${conversationId}`);
+
+        // Auto-upload de documentos para Google Drive (se lead tem pasta)
+        if (message.media && message.direction === 'in') {
+          this.uploadMediaToDrive(message, conversationId).catch(e =>
+            this.logger.warn(`[DRIVE-SYNC] Falha: ${e.message}`),
+          );
+        }
       } catch (e: any) {
         this.logger.error(`Erro no MediaEventsService: ${e.message}`);
       }
@@ -79,6 +90,62 @@ export class MediaEventsService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.logger.log('Escutando eventos de conclusão de media-jobs via QueueEvents');
+  }
+
+  /**
+   * Upload automático de mídia do chat para a pasta do lead no Google Drive.
+   * Só faz upload de documentos (PDF, DOC, imagens) — ignora áudios curtos.
+   */
+  private async uploadMediaToDrive(message: any, conversationId: string) {
+    const media = message.media;
+    if (!media?.s3_key || !media?.mime_type) return;
+
+    // Só fazer upload de documentos e imagens (não áudios de voz)
+    const isDocument = media.mime_type.startsWith('application/') || media.mime_type.startsWith('image/');
+    if (!isDocument) return;
+
+    // Buscar lead da conversa
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { lead_id: true, lead: { select: { id: true, name: true, google_drive_folder_id: true } } },
+    });
+
+    if (!conv?.lead?.google_drive_folder_id) return; // Lead sem pasta no Drive
+
+    try {
+      // Verificar se Drive está configurado
+      const configured = await this.driveService.isConfigured();
+      if (!configured) return;
+
+      // Baixar arquivo do S3
+      const fileBuffer = await this.s3Service.getFileBuffer(media.s3_key);
+      if (!fileBuffer) return;
+
+      const fileName = media.original_name || `${message.id}${this.getExtension(media.mime_type)}`;
+
+      // Upload para Drive
+      const result = await this.driveService.uploadFile(
+        conv.lead.google_drive_folder_id,
+        fileName,
+        media.mime_type,
+        fileBuffer,
+      );
+
+      this.logger.log(`[DRIVE-SYNC] Arquivo "${fileName}" enviado ao Drive (lead: ${conv.lead.name || conv.lead.id})`);
+    } catch (e: any) {
+      this.logger.warn(`[DRIVE-SYNC] Erro ao enviar para Drive: ${e.message}`);
+    }
+  }
+
+  private getExtension(mimeType: string): string {
+    const map: Record<string, string> = {
+      'application/pdf': '.pdf',
+      'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+      'application/msword': '.doc',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    };
+    return map[mimeType] || '';
   }
 
   async onModuleDestroy() {

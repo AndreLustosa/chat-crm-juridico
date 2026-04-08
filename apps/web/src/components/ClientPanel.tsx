@@ -232,6 +232,8 @@ export function ClientPanel({
   // Google Drive
   const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
   const [creatingDriveFolder, setCreatingDriveFolder] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [loadingDriveFiles, setLoadingDriveFiles] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -241,6 +243,13 @@ export function ClientPanel({
     api.get(`/leads/${leadId}`).then(r => {
       setLead(r.data);
       setDriveFolderId(r.data.google_drive_folder_id ?? null);
+      // Buscar arquivos do Drive se tem pasta
+      if (r.data.google_drive_folder_id) {
+        setLoadingDriveFiles(true);
+        api.get(`/google-drive/leads/${leadId}/files`).then(dr => {
+          setDriveFiles(dr.data || []);
+        }).catch(() => {}).finally(() => setLoadingDriveFiles(false));
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [leadId]);
@@ -666,7 +675,37 @@ export function ClientPanel({
 
               {docsOpen && (
                 <div className="px-6 pb-5">
-                  {documents.length === 0 ? (
+                  {/* Arquivos do Google Drive */}
+                  {driveFiles.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">📁 Arquivos no Drive</p>
+                      <div className="space-y-1.5">
+                        {driveFiles.map((f: any) => (
+                          <a key={f.id} href={f.webViewLink || `https://drive.google.com/file/d/${f.id}`} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/20 hover:bg-accent/40 transition-colors group">
+                            <span className="text-sm">{f.mimeType?.startsWith('image/') ? '🖼️' : f.mimeType?.includes('pdf') ? '📄' : f.mimeType?.includes('document') || f.mimeType?.includes('word') ? '📝' : f.mimeType?.includes('sheet') ? '📊' : '📁'}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] font-medium text-foreground truncate">{f.name}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString('pt-BR') : ''}
+                                {f.size ? ` · ${(parseInt(f.size) / 1024).toFixed(0)} KB` : ''}
+                              </p>
+                            </div>
+                            <ExternalLink size={11} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {loadingDriveFiles && (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 size={14} className="animate-spin text-muted-foreground" />
+                      <span className="text-[11px] text-muted-foreground ml-2">Carregando arquivos do Drive...</span>
+                    </div>
+                  )}
+
+                  {/* Arquivos do Chat */}
+                  {documents.length === 0 && driveFiles.length === 0 && !loadingDriveFiles ? (
                     <p className="text-[13px] text-muted-foreground text-center py-6 opacity-40 italic">Nenhum documento enviado</p>
                   ) : (() => {
                     const getCategory = (mime: string) => {

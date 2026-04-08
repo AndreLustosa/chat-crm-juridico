@@ -72,4 +72,17 @@ export class MediaS3Service implements OnModuleInit {
       contentLength: response.ContentLength,
     };
   }
+
+  async getFileBuffer(key: string): Promise<Buffer | null> {
+    try {
+      const { stream } = await this.getObjectStream(key);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    } catch {
+      return null;
+    }
+  }
 }

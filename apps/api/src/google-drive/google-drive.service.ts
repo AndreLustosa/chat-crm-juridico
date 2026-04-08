@@ -435,6 +435,54 @@ export class GoogleDriveService {
   }
 
   /**
+   * Lista arquivos de uma pasta do Drive (para Banco de Documentos).
+   */
+  async listFolderFiles(folderId: string): Promise<Array<{
+    id: string; name: string; mimeType: string; size: string | null;
+    webViewLink: string | null; createdTime: string | null; modifiedTime: string | null;
+  }>> {
+    const drive = await this.getDriveClientForFiles();
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed=false`,
+      fields: 'files(id,name,mimeType,size,webViewLink,createdTime,modifiedTime)',
+      spaces: 'drive',
+      pageSize: 100,
+      orderBy: 'modifiedTime desc',
+    });
+    return (res.data.files || []).map(f => ({
+      id: f.id!,
+      name: f.name!,
+      mimeType: f.mimeType!,
+      size: f.size || null,
+      webViewLink: f.webViewLink || null,
+      createdTime: f.createdTime || null,
+      modifiedTime: f.modifiedTime || null,
+    }));
+  }
+
+  /**
+   * Upload de arquivo para pasta do Drive.
+   */
+  async uploadFile(folderId: string, fileName: string, mimeType: string, body: Buffer | NodeJS.ReadableStream): Promise<{ id: string; webViewLink: string | null }> {
+    const drive = await this.getDriveClientForFiles();
+    const res = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: [folderId],
+      },
+      media: {
+        mimeType,
+        body,
+      },
+      fields: 'id,webViewLink',
+    });
+    return {
+      id: res.data.id!,
+      webViewLink: res.data.webViewLink || null,
+    };
+  }
+
+  /**
    * Define um arquivo do Google Drive como template de papel timbrado.
    *
    * Se o arquivo é DOCX, faz download e re-upload como Google Doc (conversão).
