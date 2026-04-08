@@ -178,12 +178,13 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
   const [dueDate, setDueDate] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [visibleToLawyer, setVisibleToLawyer] = useState(true);
+  const [isPaid, setIsPaid] = useState(false);
   const [showCatManager, setShowCatManager] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [savingCat, setSavingCat] = useState(false);
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
 
-  const reset = () => { setDesc(''); setAmount(''); setCategory(categories[0]); setDate(new Date().toISOString().slice(0, 10)); setDueDate(''); setPaymentMethod(''); setVisibleToLawyer(true); };
+  const reset = () => { setDesc(''); setAmount(''); setCategory(categories[0]); setDate(new Date().toISOString().slice(0, 10)); setDueDate(''); setPaymentMethod(''); setVisibleToLawyer(true); setIsPaid(false); };
 
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return;
@@ -224,7 +225,8 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
         date: new Date(date + 'T12:00:00Z').toISOString(),
         due_date: dueDate ? new Date(dueDate + 'T12:00:00Z').toISOString() : new Date(date + 'T12:00:00Z').toISOString(),
         payment_method: paymentMethod || undefined,
-        status: 'PENDENTE',
+        status: isPaid ? 'PAGO' : 'PENDENTE',
+        paid_at: isPaid ? new Date().toISOString() : undefined,
         visible_to_lawyer: type === 'DESPESA' ? visibleToLawyer : true,
       });
       showSuccess(`${type === 'RECEITA' ? 'Receita' : 'Despesa'} criada`);
@@ -314,14 +316,32 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
           />
         </div>
       </div>
-      {/* Visibilidade para advogado (só despesas) */}
-      {type === 'DESPESA' && (
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={!visibleToLawyer} onChange={e => setVisibleToLawyer(!e.target.checked)}
-            className="w-3.5 h-3.5 rounded border-border accent-primary" />
-          <span className="text-xs text-muted-foreground">Ocultar do advogado</span>
-        </label>
-      )}
+      {/* Status de pagamento */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setIsPaid(!isPaid)}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border transition-colors ${
+            isPaid
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+              : 'border-border bg-background text-muted-foreground hover:bg-accent/30'
+          }`}
+        >
+          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isPaid ? 'border-emerald-400 bg-emerald-400' : 'border-muted-foreground/40'}`}>
+            {isPaid && <Check size={10} className="text-white" />}
+          </div>
+          <span className="text-xs font-semibold">{isPaid ? 'Já pago' : 'Pendente'}</span>
+        </button>
+
+        {/* Visibilidade para advogado (só despesas) */}
+        {type === 'DESPESA' && (
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={!visibleToLawyer} onChange={e => setVisibleToLawyer(!e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-border accent-primary" />
+            <span className="text-xs text-muted-foreground">Ocultar do advogado</span>
+          </label>
+        )}
+      </div>
 
       <div className="flex items-center justify-between">
         <button
