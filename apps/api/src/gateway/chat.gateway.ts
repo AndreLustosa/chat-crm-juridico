@@ -195,12 +195,9 @@ export class ChatGateway {
     const payload = { ...data, assignedUserId };
 
     if (assignedUserId) {
-      // Conversa atribuída: notifica o operador responsável
+      // Conversa atribuída: notifica SOMENTE o operador responsável
       this.logger.log(`[SOCKET] incoming_message_notification → user:${assignedUserId}`);
       this.server.to(`user:${assignedUserId}`).emit('incoming_message_notification', payload);
-
-      // Notificar também os ADMINs (para supervisão)
-      this.notifyAdmins(tenantId, payload);
     } else if (tenantId) {
       // Sem operador: notifica todos do tenant para alguém assumir
       this.logger.log(`[SOCKET] incoming_message_notification → tenant:${tenantId} (sem atribuicao)`);
@@ -212,23 +209,6 @@ export class ChatGateway {
         }
       }).catch(() => {});
     }
-  }
-
-  /** Notifica admins sobre mensagens recebidas por outros atendentes */
-  private notifyAdmins(tenantId: string | null, payload: any) {
-    this.prisma.user.findMany({
-      where: {
-        roles: { has: 'ADMIN' },
-        ...(tenantId ? { tenant_id: tenantId } : {}),
-      },
-      select: { id: true },
-    }).then(admins => {
-      for (const admin of admins) {
-        if (admin.id !== payload.assignedUserId) {
-          this.server.to(`user:${admin.id}`).emit('incoming_message_notification', payload);
-        }
-      }
-    }).catch(() => {});
   }
 
   // ─── Legal Cases ────────────────────────────────────────────────
