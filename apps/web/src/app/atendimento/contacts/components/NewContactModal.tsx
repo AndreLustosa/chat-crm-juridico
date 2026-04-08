@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, X, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { useRole } from '@/lib/useRole';
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -11,29 +12,31 @@ function normalizePhone(raw: string): string {
   return digits;
 }
 
+const LEGAL_AREAS = ['Trabalhista', 'Civil', 'Criminal', 'Previdenciário', 'Família', 'Consumidor', 'Administrativo', 'Tributário', 'Empresarial'];
+
 export default function NewContactModal({ onClose, onCreated }: {
   onClose: () => void;
   onCreated: (convId: string) => void;
 }) {
   const router = useRouter();
+  const { isAdmin, isFinanceiro, userId } = useRole();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [instance, setInstance] = useState('');
-  const [instances, setInstances] = useState<{ instanceName: string }[]>([]);
+  const [legalArea, setLegalArea] = useState('');
+  const [selectedLawyerId, setSelectedLawyerId] = useState('');
+  const [lawyers, setLawyers] = useState<{ id: string; name: string | null }[]>([]);
   const [checking, setChecking] = useState(false);
   const [duplicate, setDuplicate] = useState<{ name: string; convId?: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Carrega instâncias ao abrir — seleciona automaticamente a primeira (comercial)
+  // Carregar advogados (para admin/financeiro)
   useEffect(() => {
-    api.get('/whatsapp/instances').then(r => {
-      const active = (r.data as any[]).filter(i => i.status === 'open');
-      setInstances(active);
-      if (active.length > 0) setInstance(active[0].instanceName);
-    }).catch(() => {});
-  }, []);
+    if (isAdmin || isFinanceiro) {
+      api.get('/users/lawyers').then(r => setLawyers(r.data || [])).catch(() => {});
+    }
+  }, [isAdmin, isFinanceiro]);
 
   const checkPhoneDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const checkPhone = useCallback((phoneVal: string) => {
@@ -68,11 +71,10 @@ export default function NewContactModal({ onClose, onCreated }: {
     const normalized = normalizePhone(phone);
     if (normalized.length < 12) { setError('Telefone inválido. Use DDD + número (ex: 82 99913-0127)'); return; }
     if (!name.trim()) { setError('Nome é obrigatório'); return; }
-    if (!instance) { setError('Selecione uma instância WhatsApp'); return; }
 
     setSubmitting(true);
     try {
-      // Safety check
+      // Verificar duplicata
       const check = await api.get(`/leads/check-phone?phone=${normalized}`);
       if (check.data.exists) {
         const lead = check.data.lead;
@@ -83,7 +85,7 @@ export default function NewContactModal({ onClose, onCreated }: {
         return;
       }
 
-      // Cria lead
+      // Criar lead
       const leadR = await api.post('/leads', {
         name: name.trim(),
         phone: normalized,
@@ -92,13 +94,22 @@ export default function NewContactModal({ onClose, onCreated }: {
         stage: 'INICIAL',
       });
 
-      // Cria conversa vinculada
+      // Criar conversa — instância sempre "whatsapp", atendente = quem cadastrou
       const convR = await api.post('/conversations', {
         lead_id: leadR.data.id,
         channel: 'whatsapp',
-        instance_name: instance,
+        instance_name: 'whatsapp',
         status: 'ABERTO',
       });
+
+      // Atribuir atendente (quem cadastrou), advogado e área jurídica na conversa
+      const convUpdate: any = {};
+      if (userId) convUpdate.assigned_user_id = userId;
+      if (selectedLawyerId) convUpdate.assigned_lawyer_id = selectedLawyerId;
+      if (legalArea) convUpdate.legal_area = legalArea;
+      if (Object.keys(convUpdate).length > 0) {
+        await api.patch(`/conversations/${convR.data.id}/assign`, convUpdate).catch(() => {});
+      }
 
       onCreated(convR.data.id);
     } catch (err: any) {
@@ -123,47 +134,28 @@ export default function NewContactModal({ onClose, onCreated }: {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 px-6 py-5">
-
           {/* Nome */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Nome *</label>
-            <input
-              value={name} onChange={e => setName(e.target.value)}
-              placeholder="Nome completo"
-              className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/40"
-            />
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Nome completo"
+              className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/40" />
           </div>
 
           {/* Telefone */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Telefone (DDD + número) *</label>
             <div className="relative">
-              <input
-                value={phone} onChange={e => { setPhone(e.target.value); checkPhone(e.target.value); }}
-                placeholder="(82) 99913-0127"
-                className={`w-full px-3.5 py-2.5 bg-background border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 transition-all placeholder:text-muted-foreground/40 ${
-                  duplicate ? 'border-amber-500/50 focus:ring-amber-500/20 focus:border-amber-500' : 'border-border focus:ring-primary/20 focus:border-primary'
-                }`}
-              />
+              <input value={phone} onChange={e => { setPhone(e.target.value); checkPhone(e.target.value); }} placeholder="(82) 99913-0127"
+                className={`w-full px-3.5 py-2.5 bg-background border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 transition-all placeholder:text-muted-foreground/40 ${duplicate ? 'border-amber-500/50 focus:ring-amber-500/20' : 'border-border focus:ring-primary/20 focus:border-primary'}`} />
               {checking && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
             </div>
-
-            {/* Aviso de duplicata */}
             {duplicate && (
               <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
                 <div className="flex items-center gap-2">
                   <AlertCircle size={14} className="text-amber-500 shrink-0" />
-                  <span className="text-[12px] text-amber-600 dark:text-amber-400 font-medium">
-                    Contato já existe: <strong>{duplicate.name}</strong>
-                  </span>
+                  <span className="text-[12px] text-amber-400 font-medium">Contato já existe: <strong>{duplicate.name}</strong></span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openDuplicate(duplicate.convId)}
-                  className="text-[11px] font-bold text-amber-600 dark:text-amber-400 hover:underline whitespace-nowrap"
-                >
-                  Abrir no Chat →
-                </button>
+                <button type="button" onClick={() => openDuplicate(duplicate.convId)} className="text-[11px] font-bold text-amber-400 hover:underline whitespace-nowrap">Abrir no Chat →</button>
               </div>
             )}
           </div>
@@ -171,37 +163,31 @@ export default function NewContactModal({ onClose, onCreated }: {
           {/* Email */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">E-mail <span className="normal-case font-normal opacity-60">(opcional)</span></label>
-            <input
-              type="email" value={email} onChange={e => setEmail(e.target.value)}
-              placeholder="email@exemplo.com"
-              className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/40"
-            />
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@exemplo.com"
+              className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/40" />
           </div>
 
-          {/* Instância WhatsApp */}
+          {/* Área Jurídica */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Instância WhatsApp *</label>
-            {instances.length === 0 ? (
-              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-foreground/[0.04] border border-border rounded-xl text-[12px] text-muted-foreground">
-                <Loader2 size={13} className="animate-spin" /> Carregando instâncias...
-              </div>
-            ) : instances.length === 1 ? (
-              <div className="flex items-center gap-2 px-3.5 py-2.5 bg-green-500/10 border border-green-500/20 rounded-xl text-[12px] text-green-600 dark:text-green-400 font-medium">
-                <CheckCircle2 size={13} />
-                {instances[0].instanceName}
-              </div>
-            ) : (
-              <select
-                value={instance} onChange={e => setInstance(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              >
-                <option value="">Selecionar instância...</option>
-                {instances.map(i => (
-                  <option key={i.instanceName} value={i.instanceName}>{i.instanceName}</option>
-                ))}
-              </select>
-            )}
+            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Área Jurídica <span className="normal-case font-normal opacity-60">(opcional)</span></label>
+            <select value={legalArea} onChange={e => setLegalArea(e.target.value)}
+              className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+              <option value="">Selecionar...</option>
+              {LEGAL_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
           </div>
+
+          {/* Advogado (admin/financeiro) */}
+          {(isAdmin || isFinanceiro) && lawyers.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Advogado Responsável <span className="normal-case font-normal opacity-60">(opcional)</span></label>
+              <select value={selectedLawyerId} onChange={e => setSelectedLawyerId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-background border border-border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+                <option value="">Sem advogado</option>
+                {lawyers.map(l => <option key={l.id} value={l.id}>{l.name || l.id}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* Erro */}
           {error && (
@@ -217,13 +203,10 @@ export default function NewContactModal({ onClose, onCreated }: {
               className="flex-1 py-2.5 rounded-xl border border-border text-[13px] font-semibold text-muted-foreground hover:bg-accent transition-colors">
               Cancelar
             </button>
-            <button
-              type="submit"
-              disabled={submitting || !!duplicate}
-              className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-[13px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm shadow-primary/20"
-            >
+            <button type="submit" disabled={submitting || !!duplicate}
+              className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-[13px] font-bold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2">
               {submitting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
-              {submitting ? 'Cadastrando...' : 'Cadastrar e Abrir Chat'}
+              Cadastrar e Abrir Chat
             </button>
           </div>
         </form>
