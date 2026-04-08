@@ -6,6 +6,7 @@ import { Prisma, Lead } from '@crm/shared';
 import { LegalCasesService } from '../legal-cases/legal-cases.service';
 import { AutomationsService } from '../automations/automations.service';
 import { FollowupService } from '../followup/followup.service';
+import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import OpenAI from 'openai';
 
@@ -32,6 +33,7 @@ export class LeadsService {
     private chatGateway: ChatGateway,
     private automationsService: AutomationsService,
     private moduleRef: ModuleRef,
+    private googleDriveService: GoogleDriveService,
   ) {}
 
   async create(data: Prisma.LeadCreateInput): Promise<Lead> {
@@ -335,6 +337,18 @@ export class LeadsService {
 
     // Broadcast: notificar outros clientes sobre mudanca de stage do lead
     this.chatGateway.emitConversationsUpdate(tenantId ?? null);
+
+    // Criar pasta no Google Drive ao atingir AGUARDANDO_DOCS
+    if (stage === 'AGUARDANDO_DOCS') {
+      this.googleDriveService.isConfigured().then(configured => {
+        if (!configured) return;
+        return this.googleDriveService.ensureLeadFolder(id, lead.name || 'Lead');
+      }).then(folderId => {
+        if (folderId) this.logger.log(`[DRIVE] Pasta criada/garantida para lead ${id}: ${folderId}`);
+      }).catch(err =>
+        this.logger.warn(`[DRIVE] Falha ao criar pasta para lead ${id} em AGUARDANDO_DOCS: ${err.message}`),
+      );
+    }
 
     // Fire stage-change automation hooks asynchronously
     this.automationsService.onStageChange(id, stage, tenantId).catch(err =>

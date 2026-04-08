@@ -771,6 +771,27 @@ export class GoogleDriveService {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  //  Exclusão de Pasta
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Exclui uma pasta do Google Drive pelo ID.
+   * Retorna true se excluiu com sucesso, false se a pasta não existia (404).
+   * Re-lança qualquer outro erro.
+   */
+  async deleteFolder(folderId: string): Promise<boolean> {
+    const drive = await this.getDriveClient();
+    try {
+      await drive.files.delete({ fileId: folderId });
+      return true;
+    } catch (err: any) {
+      const status = err?.response?.status ?? err?.code;
+      if (status === 404) return false; // já não existe — ok
+      throw err;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   //  Teste de Conexão
   // ═══════════════════════════════════════════════════════════════
 

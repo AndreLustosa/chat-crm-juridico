@@ -5,7 +5,7 @@ import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, Chevro
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
-import { showError } from '@/lib/toast';
+import { showError, showSuccess } from '@/lib/toast';
 import { formatPhone } from '@/lib/utils';
 
 interface LeadDetail {
@@ -18,6 +18,7 @@ interface LeadDetail {
   tags: string[];
   created_at: string;
   profile_picture_url?: string;
+  google_drive_folder_id?: string | null;
   memory?: {
     summary: string;
     facts_json: any;
@@ -228,6 +229,10 @@ export function ClientPanel({
   const [convHistory, setConvHistory] = useState<any[]>([]);
   const [convHistoryOpen, setConvHistoryOpen] = useState(false);
 
+  // Google Drive
+  const [driveFolderId, setDriveFolderId] = useState<string | null>(null);
+  const [creatingDriveFolder, setCreatingDriveFolder] = useState(false);
+
   useEffect(() => {
     setLoading(true);
     setResolvedAgent(null);
@@ -235,6 +240,7 @@ export function ClientPanel({
     setDocuments([]);
     api.get(`/leads/${leadId}`).then(r => {
       setLead(r.data);
+      setDriveFolderId(r.data.google_drive_folder_id ?? null);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [leadId]);
@@ -376,6 +382,20 @@ export function ClientPanel({
       await api.delete(`/leads/${leadId}/notes/${noteId}`);
       setNotes(prev => prev.filter(n => n.id !== noteId));
     } catch { /* silencioso */ } finally { setDeletingNoteId(null); }
+  };
+
+  const createDriveFolder = async () => {
+    if (creatingDriveFolder) return;
+    setCreatingDriveFolder(true);
+    try {
+      const r = await api.post(`/google-drive/leads/${leadId}/folder`);
+      setDriveFolderId(r.data.folderId);
+      showSuccess('Pasta criada no Google Drive!');
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao criar pasta no Drive');
+    } finally {
+      setCreatingDriveFolder(false);
+    }
   };
 
   const deleteDoc = (messageId: string) => {
@@ -618,6 +638,32 @@ export function ClientPanel({
                 </div>
                 {docsOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
               </button>
+
+              {/* Ações Google Drive */}
+              <div className="px-6 pb-3 flex items-center gap-2">
+                {driveFolderId ? (
+                  <a
+                    href={`https://drive.google.com/drive/folders/${driveFolderId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors font-medium"
+                  >
+                    <FolderOpen size={13} />
+                    Abrir pasta no Drive
+                    <ExternalLink size={11} className="opacity-60" />
+                  </a>
+                ) : (
+                  <button
+                    onClick={createDriveFolder}
+                    disabled={creatingDriveFolder}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-medium disabled:opacity-50"
+                  >
+                    {creatingDriveFolder ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />}
+                    {creatingDriveFolder ? 'Criando pasta...' : 'Criar pasta no Drive'}
+                  </button>
+                )}
+              </div>
+
               {docsOpen && (
                 <div className="px-6 pb-5">
                   {documents.length === 0 ? (

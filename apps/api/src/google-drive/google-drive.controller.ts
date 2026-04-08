@@ -5,9 +5,11 @@ import {
   Delete,
   Body,
   Query,
+  Param,
   Res,
   UseGuards,
   BadRequestException,
+  NotFoundException,
   Logger,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -252,5 +254,32 @@ export class GoogleDriveController {
   async removeLetterhead() {
     await this.driveService.removeLetterhead();
     return { ok: true, message: 'Papel timbrado removido' };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Pastas de Lead — criação manual
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * POST /google-drive/leads/:leadId/folder
+   * Cria (ou retorna) a pasta do lead no Drive.
+   * Qualquer usuário autenticado pode acionar.
+   */
+  @Post('leads/:leadId/folder')
+  async createLeadFolder(@Param('leadId') leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { name: true },
+    });
+    if (!lead) throw new NotFoundException('Lead não encontrado');
+
+    const configured = await this.driveService.isConfigured();
+    if (!configured) {
+      throw new BadRequestException('Google Drive não configurado. Configure em Configurações > Google Drive.');
+    }
+
+    const folderId = await this.driveService.ensureLeadFolder(leadId, lead.name || 'Lead');
+    const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
+    return { ok: true, folderId, folderUrl };
   }
 }
