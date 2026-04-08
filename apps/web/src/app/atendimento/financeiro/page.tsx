@@ -173,12 +173,14 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState(categories[0]);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('');
   const [showCatManager, setShowCatManager] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [savingCat, setSavingCat] = useState(false);
   const [deletingCatId, setDeletingCatId] = useState<string | null>(null);
 
-  const reset = () => { setDesc(''); setAmount(''); setCategory(categories[0]); setDate(new Date().toISOString().slice(0, 10)); };
+  const reset = () => { setDesc(''); setAmount(''); setCategory(categories[0]); setDate(new Date().toISOString().slice(0, 10)); setDueDate(''); setPaymentMethod(''); };
 
   const handleAddCategory = async () => {
     if (!newCatName.trim()) return;
@@ -217,7 +219,8 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
         description: desc.trim(),
         amount: numVal,
         date: new Date(date + 'T12:00:00Z').toISOString(),
-        due_date: new Date(date + 'T12:00:00Z').toISOString(),
+        due_date: dueDate ? new Date(dueDate + 'T12:00:00Z').toISOString() : new Date(date + 'T12:00:00Z').toISOString(),
+        payment_method: paymentMethod || undefined,
         status: 'PENDENTE',
       });
       showSuccess(`${type === 'RECEITA' ? 'Receita' : 'Despesa'} criada`);
@@ -252,7 +255,7 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
           <X size={16} />
         </button>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <input
           placeholder="Descricao"
           value={desc}
@@ -272,12 +275,40 @@ function QuickAddForm({ type, categories, onCreated, onManageCategories, allDbCa
         >
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <select
+          value={paymentMethod}
+          onChange={(e) => setPaymentMethod(e.target.value)}
           className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-        />
+        >
+          <option value="">Forma de pagamento</option>
+          <option value="PIX">PIX</option>
+          <option value="CARTAO_CREDITO">Cartão de Crédito</option>
+          <option value="CARTAO_DEBITO">Cartão de Débito</option>
+          <option value="BOLETO">Boleto</option>
+          <option value="DINHEIRO">Dinheiro</option>
+          <option value="TRANSFERENCIA">Transferência</option>
+        </select>
+        <div>
+          <label className="text-[10px] text-muted-foreground block mb-1">Data da compra</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-muted-foreground block mb-1">Vencimento</label>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            placeholder="Vencimento"
+            className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+        </div>
       </div>
       <div className="flex items-center justify-between">
         <button
