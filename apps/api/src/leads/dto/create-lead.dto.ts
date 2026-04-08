@@ -24,6 +24,11 @@ export class CreateLeadDto {
   origin?: string;
 
   @IsOptional()
+  @IsString()
+  @IsIn(VALID_STAGES)
+  stage?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   tags?: string[];

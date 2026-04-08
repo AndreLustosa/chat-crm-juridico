@@ -26,12 +26,12 @@ export default function NewContactModal({ onClose, onCreated }: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Carrega instâncias ao abrir
+  // Carrega instâncias ao abrir — seleciona automaticamente a primeira (comercial)
   useEffect(() => {
     api.get('/whatsapp/instances').then(r => {
       const active = (r.data as any[]).filter(i => i.status === 'open');
       setInstances(active);
-      if (active.length === 1) setInstance(active[0].instanceName);
+      if (active.length > 0) setInstance(active[0].instanceName);
     }).catch(() => {});
   }, []);
 
