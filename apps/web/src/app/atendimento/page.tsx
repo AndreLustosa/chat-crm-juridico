@@ -875,6 +875,14 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchPendingTransfers]);
 
+  // Polling de conversas (60s) — resiliência para mensagens recebidas quando offline
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchConversations(selectedInboxIdRef.current, true);
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [fetchConversations]);
+
   // Ao trocar clientMode: deseleciona conversa ativa para evitar contexto errado
   useEffect(() => {
     setSelectedId(null);
