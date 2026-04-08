@@ -141,6 +141,7 @@ export default function Dashboard() {
   const [fichaInboxVisible, setFichaInboxVisible] = useState(false);
   const [fichaFinalizada, setFichaFinalizada] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<{ file: File; preview: string | null }[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [editingMsg, setEditingMsg] = useState<{ id: string; text: string } | null>(null);
@@ -1885,11 +1886,61 @@ export default function Dashboard() {
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const addFileToPending = (file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      showError(`Arquivo muito grande (${(file.size / 1024 / 1024).toFixed(1)}MB). Limite: 50MB`);
+      return;
+    }
+    if (!ALLOWED_MEDIA.test(file.type) && !ALLOWED_DOC_TYPES.some(t => file.type.startsWith(t))) {
+      showError('Tipo de arquivo não permitido');
+      return;
+    }
+    const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+    setPendingFiles(prev => [...prev, { file, preview }]);
+  };
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles(prev => {
+      const removed = prev[index];
+      if (removed?.preview) URL.revokeObjectURL(removed.preview);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const sendPendingFiles = async () => {
+    if (!pendingFiles.length || !selectedId || selectedId.startsWith('demo-')) return;
+    setUploadingFile(true);
+    try {
+      for (const { file, preview } of pendingFiles) {
+        await uploadFile(file);
+        if (preview) URL.revokeObjectURL(preview);
+      }
+      setPendingFiles([]);
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
     e.target.value = '';
-    await uploadFile(file);
+    for (let i = 0; i < files.length; i++) {
+      addFileToPending(files[i]);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (file) addFileToPending(file);
+        return;
+      }
+    }
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -1908,13 +1959,15 @@ export default function Dashboard() {
     e.preventDefault();
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     dragCounterRef.current = 0;
     setIsDragging(false);
     if (!isRealConvo || isClosed) return;
-    const file = e.dataTransfer.files?.[0];
-    if (file) await uploadFile(file);
+    const files = e.dataTransfer.files;
+    for (let i = 0; i < files.length; i++) {
+      addFileToPending(files[i]);
+    }
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -2907,9 +2960,44 @@ export default function Dashboard() {
                     ref={fileInputRef}
                     type="file"
                     accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                    multiple
                     className="hidden"
                     onChange={handleFileSelect}
                   />
+
+                  {/* ── Arquivos pendentes (preview antes de enviar) ── */}
+                  {pendingFiles.length > 0 && (
+                    <div className="flex items-center gap-2 p-2 bg-accent/20 border border-border rounded-xl mb-2 flex-wrap">
+                      {pendingFiles.map((pf, idx) => (
+                        <div key={idx} className="relative group">
+                          {pf.preview ? (
+                            <img src={pf.preview} alt="" className="w-16 h-16 object-cover rounded-lg border border-border" />
+                          ) : (
+                            <div className="w-16 h-16 flex items-center justify-center bg-accent/40 rounded-lg border border-border">
+                              <span className="text-[9px] text-muted-foreground text-center leading-tight px-1 truncate">{pf.file.name.slice(-12)}</span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => removePendingFile(idx)}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={sendPendingFiles}
+                        disabled={uploadingFile}
+                        className="ml-auto flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-bold hover:opacity-90 disabled:opacity-50"
+                      >
+                        {uploadingFile ? (
+                          <span>Enviando...</span>
+                        ) : (
+                          <>Enviar {pendingFiles.length} arquivo{pendingFiles.length > 1 ? 's' : ''}</>
+                        )}
+                      </button>
+                    </div>
+                  )}
 
                   {/* ── Textarea + ícones internos ──────────────────── */}
                   <div className="relative flex-1">
@@ -2920,6 +3008,7 @@ export default function Dashboard() {
                       ref={inputRef}
                       rows={1}
                       value={text}
+                      onPaste={handlePaste}
                       onChange={(e) => {
                         const val = e.target.value;
                         setText(val);
