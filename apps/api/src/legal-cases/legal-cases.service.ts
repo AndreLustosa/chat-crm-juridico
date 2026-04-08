@@ -781,9 +781,33 @@ export class LegalCasesService {
       },
     });
 
-    // Atribuir advogado e atendente nas conversas do lead
-    const convUpdate: any = { assigned_lawyer_id: effectiveLawyerId };
-    if (data.assigned_user_id) convUpdate.assigned_user_id = data.assigned_user_id;
+    // Atribuir advogado, atendente e área jurídica nas conversas do lead
+    const convUpdate: any = {
+      assigned_lawyer_id: effectiveLawyerId,
+      legal_area: data.legal_area || null,
+    };
+
+    // Atendente: usar o informado ou sortear entre operadores disponíveis
+    if (data.assigned_user_id) {
+      convUpdate.assigned_user_id = data.assigned_user_id;
+    } else {
+      // Sortear operador disponível (OPERADOR ou COMERCIAL)
+      try {
+        const operators = await this.prisma.user.findMany({
+          where: {
+            roles: { hasSome: ['OPERADOR', 'COMERCIAL'] },
+            ...(data.tenant_id ? { tenant_id: data.tenant_id } : {}),
+          },
+          select: { id: true },
+        });
+        if (operators.length > 0) {
+          const randomOp = operators[Math.floor(Math.random() * operators.length)];
+          convUpdate.assigned_user_id = randomOp.id;
+          this.logger.log(`[LEGAL] Atendente sorteado: ${randomOp.id} (de ${operators.length} disponíveis)`);
+        }
+      } catch {}
+    }
+
     await this.prisma.conversation.updateMany({
       where: { lead_id: leadId },
       data: convUpdate,
