@@ -88,26 +88,31 @@ function getPeriodRange(period: string): { startDate: string; endDate: string } 
   const m = now.getUTCMonth();
   const d = now.getUTCDate();
   let start: Date;
-  let end: Date = new Date(Date.UTC(y, m, d, 23, 59, 59));
+  let end: Date;
 
   switch (period) {
     case 'hoje':
       start = new Date(Date.UTC(y, m, d));
+      end = new Date(Date.UTC(y, m, d, 23, 59, 59));
       break;
     case 'semana': {
       const day = now.getUTCDay();
       const diff = day === 0 ? 6 : day - 1;
       start = new Date(Date.UTC(y, m, d - diff));
+      end = new Date(Date.UTC(y, m, d - diff + 6, 23, 59, 59));
       break;
     }
     case 'trimestre':
       start = new Date(Date.UTC(y, Math.floor(m / 3) * 3, 1));
+      end = new Date(Date.UTC(y, Math.floor(m / 3) * 3 + 3, 0, 23, 59, 59));
       break;
     case 'ano':
       start = new Date(Date.UTC(y, 0, 1));
+      end = new Date(Date.UTC(y, 11, 31, 23, 59, 59));
       break;
-    default: // mes
+    default: // mes — vai até o último dia do mês
       start = new Date(Date.UTC(y, m, 1));
+      end = new Date(Date.UTC(y, m + 1, 0, 23, 59, 59)); // dia 0 do próximo mês = último dia deste
       break;
   }
 
