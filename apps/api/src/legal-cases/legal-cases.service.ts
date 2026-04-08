@@ -89,6 +89,9 @@ export class LegalCasesService {
       data: { assigned_lawyer_id: data.lawyer_id },
     }).catch(() => {});
 
+    // Vincular publicações DJEN existentes com o mesmo número de processo
+    await this.reconcileDjenPublications(legalCase.id, (legalCase as any).case_number);
+
     return legalCase;
   }
 
@@ -832,7 +835,43 @@ export class LegalCasesService {
       });
     } catch {}
 
+    // Vincular publicações DJEN existentes com o mesmo número de processo
+    await this.reconcileDjenPublications(legalCase.id, data.case_number);
+
     return legalCase;
+  }
+
+  // ─── Vincular publicações DJEN ao processo recém-criado ─────────
+
+  private async reconcileDjenPublications(caseId: string, caseNumber?: string) {
+    if (!caseNumber) return;
+    try {
+      const result = await this.prisma.djenPublication.updateMany({
+        where: {
+          legal_case_id: null,
+          numero_processo: caseNumber.replace(/[.\-]/g, ''), // normalizar para comparação
+        },
+        data: { legal_case_id: caseId },
+      });
+
+      // Tentar também com o número formatado (com pontos e traços)
+      if (result.count === 0) {
+        const result2 = await this.prisma.djenPublication.updateMany({
+          where: {
+            legal_case_id: null,
+            numero_processo: caseNumber,
+          },
+          data: { legal_case_id: caseId },
+        });
+        if (result2.count > 0) {
+          this.logger.log(`[LEGAL] ${result2.count} publicação(ões) DJEN vinculadas ao processo ${caseId}`);
+        }
+      } else {
+        this.logger.log(`[LEGAL] ${result.count} publicação(ões) DJEN vinculadas ao processo ${caseId}`);
+      }
+    } catch (e: any) {
+      this.logger.warn(`[LEGAL] Falha ao reconciliar DJEN: ${e.message}`);
+    }
   }
 
   // ─── REPARO: promove leads com processo ativo para is_client ────
