@@ -420,6 +420,14 @@ export class DjenService {
 
           */ // fim do bloco de auto-criação de tarefas desativado
 
+          // ─── Garantir que a conversa do lead tenha advogado atribuído ─────
+          if (legalCase.lead?.id && legalCase.lawyer_id) {
+            await this.prisma.conversation.updateMany({
+              where: { lead_id: legalCase.lead.id, assigned_lawyer_id: null },
+              data: { assigned_lawyer_id: legalCase.lawyer_id },
+            });
+          }
+
           // ─── Analisar publicação com IA ANTES de notificar ─────────
           let aiResumo: string | null = null;
           let aiAnalysis: any = null;
@@ -765,10 +773,13 @@ export class DjenService {
 
     // Lead virou cliente (is_client=true, stage=FINALIZADO) → sai da aba Leads automaticamente.
     // Conversas permanecem intactas — visibilidade controlada por lead.stage.
-    // Desligar IA nas conversas ativas do lead (atendimento humano a partir daqui)
+    // Desligar IA e atribuir advogado responsável nas conversas do lead
     await this.prisma.conversation.updateMany({
-      where: { lead_id: lead.id, ai_mode: true },
-      data: { ai_mode: false },
+      where: { lead_id: lead.id },
+      data: {
+        ai_mode: false,
+        assigned_lawyer_id: lawyerId,
+      },
     });
 
     // ─── Atualizar memória da IA com dados do processo e publicação ─────────
