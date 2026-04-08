@@ -1692,6 +1692,7 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
   const [viewMode, setViewMode] = useState<'recebidas' | 'a_receber'>('a_receber');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedReceita, setSelectedReceita] = useState<Transaction | null>(null);
+  const [selectedPending, setSelectedPending] = useState<any>(null);
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
 
@@ -1798,7 +1799,7 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
   return (
     <div className="flex gap-4">
       {/* Left: Table */}
-      <div className={`space-y-4 transition-all ${selectedReceita ? 'flex-1 min-w-0' : 'w-full'}`}>
+      <div className={`space-y-4 transition-all ${selectedReceita || selectedPending ? 'flex-1 min-w-0' : 'w-full'}`}>
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -1959,8 +1960,9 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                       const lc = p.honorario?.legal_case;
                       const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
                       return (
-                        <tr key={p.id} className="border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer"
-                          onClick={() => lc?.id && router.push(`/atendimento/processos?openCase=${lc.id}`)}>
+                        <tr key={p.id}
+                          className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedPending?.id === p.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}
+                          onClick={() => setSelectedPending(p)}>
                           <td className="px-4 py-3">
                             <span className="text-[10px] font-mono text-primary">{lc?.case_number || '--'}</span>
                             {lc?.legal_area && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{lc.legal_area}</span>}
@@ -2054,7 +2056,7 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
         )}
       </div>
 
-      {/* Right: Detail Panel */}
+      {/* Right: Detail Panel — Receita recebida */}
       {selectedReceita && (
         <ReceitaDetailPanel
           receita={selectedReceita}
@@ -2063,6 +2065,303 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
           fmt={fmt}
           fmtDate={fmtDate}
         />
+      )}
+
+      {/* Right: Detail Panel — Parcela pendente */}
+      {selectedPending && (
+        <PendingPaymentPanel
+          payment={selectedPending}
+          onClose={() => setSelectedPending(null)}
+          onRefresh={() => { fetchPending(); onRefresh(); setSelectedPending(null); }}
+          fmt={fmt}
+          fmtDate={fmtDate}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Painel lateral de Parcela Pendente (A Receber) ────────── */
+
+function PendingPaymentPanel({
+  payment: p,
+  onClose,
+  onRefresh,
+  fmt,
+  fmtDate,
+}: {
+  payment: any;
+  onClose: () => void;
+  onRefresh: () => void;
+  fmt: (v: number | string) => string;
+  fmtDate: (d: string) => string;
+}) {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editDueDate, setEditDueDate] = useState(p.due_date?.slice(0, 10) || '');
+  const [editAmount, setEditAmount] = useState(String(p.amount));
+  const [editMethod, setEditMethod] = useState(p.payment_method || '');
+  const [showPartial, setShowPartial] = useState(false);
+  const [partialAmount, setPartialAmount] = useState('');
+  const [partialMethod, setPartialMethod] = useState('');
+  const [showChargeMenu, setShowChargeMenu] = useState(false);
+  const [chargingType, setChargingType] = useState<string | null>(null);
+  const [chargeResult, setChargeResult] = useState<any>(null);
+  const chargeMenuRef = useRef<HTMLDivElement>(null);
+
+  const lc = p.honorario?.legal_case;
+  const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (chargeMenuRef.current && !chargeMenuRef.current.contains(e.target as Node)) setShowChargeMenu(false);
+    }
+    if (showChargeMenu) { document.addEventListener('mousedown', handleClick); return () => document.removeEventListener('mousedown', handleClick); }
+  }, [showChargeMenu]);
+
+  const handleMarkPaid = async () => {
+    setSaving(true);
+    try {
+      await api.patch(`/honorarios/payments/${p.id}/mark-paid`, { payment_method: editMethod || undefined });
+      showSuccess('Pagamento registrado como recebido');
+      onRefresh();
+    } catch { showError('Erro ao marcar como pago'); }
+    finally { setSaving(false); }
+  };
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    try {
+      // Atualizar parcela (não existe endpoint de update individual — deletar e recriar)
+      // Usar o PATCH direto no honorarioPayment via endpoint existente
+      // Como não existe endpoint PATCH para parcela individual, atualizo via workaround:
+      // Deletar a parcela e criar nova com os valores editados
+      await api.delete(`/honorarios/payments/${p.id}`);
+      await api.post(`/honorarios/${p.honorario_id}/payments`, {
+        amount: parseFloat(editAmount.replace(',', '.')),
+        due_date: editDueDate || undefined,
+        payment_method: editMethod || undefined,
+      });
+      showSuccess('Parcela atualizada');
+      setEditing(false);
+      onRefresh();
+    } catch { showError('Erro ao atualizar parcela'); }
+    finally { setSaving(false); }
+  };
+
+  const handlePartialPayment = async () => {
+    const val = parseFloat(partialAmount.replace(',', '.'));
+    if (!val || val <= 0 || val > parseFloat(String(p.amount))) {
+      showError('Valor inválido');
+      return;
+    }
+    setSaving(true);
+    try {
+      // Marcar como pago parcialmente: criar pagamento PAGO + ajustar parcela
+      // 1. Marcar parcela atual como paga com valor parcial
+      await api.patch(`/honorarios/payments/${p.id}/mark-paid`, { payment_method: partialMethod || undefined });
+      // 2. Criar nova parcela com o saldo restante
+      const remaining = parseFloat(String(p.amount)) - val;
+      if (remaining > 0) {
+        // Atualizar o valor da transação que acabou de ser criada
+        // E criar nova parcela para o restante
+        await api.post(`/honorarios/${p.honorario_id}/payments`, {
+          amount: remaining,
+          due_date: p.due_date || undefined,
+          payment_method: undefined,
+        });
+      }
+      showSuccess(`Recebimento parcial de ${fmt(val)} registrado`);
+      setShowPartial(false);
+      onRefresh();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao registrar pagamento parcial');
+    } finally { setSaving(false); }
+  };
+
+  const handleCreateCharge = async (billingType: string) => {
+    setShowChargeMenu(false);
+    setChargingType(billingType);
+    try {
+      const res = await api.post('/payment-gateway/charges', { honorarioPaymentId: p.id, billingType });
+      setChargeResult({ type: billingType, ...res.data });
+      showSuccess(`Cobrança ${billingType} gerada!`);
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao gerar cobrança');
+    } finally { setChargingType(null); }
+  };
+
+  return (
+    <div className="w-[380px] shrink-0 bg-card border border-border rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-250px)] sticky top-4">
+      <div className="px-5 py-4 border-b border-border bg-amber-500/5 flex items-center justify-between">
+        <h3 className="text-sm font-bold text-foreground">Parcela A Receber</h3>
+        <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/30"><X size={16} /></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* Valor + Status */}
+        <div className="flex items-center justify-between">
+          <StatusBadge status={p.status} />
+          <p className="text-lg font-bold text-amber-400">{fmt(p.amount)}</p>
+        </div>
+
+        {/* Dados */}
+        {!editing ? (
+          <div className="space-y-2.5">
+            <InfoRow label="Tipo" value={typeLabels[p.honorario?.type] || p.honorario?.type || '--'} />
+            <InfoRow label="Vencimento" value={p.due_date ? fmtDate(p.due_date) : 'Alvará judicial'} />
+            <InfoRow label="Método" value={p.payment_method || 'Não informado'} />
+            {p.honorario?.notes && <InfoRow label="Observações" value={p.honorario.notes} />}
+            {p.honorario?.sentence_value && (
+              <InfoRow label="Condenação" value={fmt(p.honorario.sentence_value)} />
+            )}
+            {p.honorario?.success_percentage && (
+              <InfoRow label="Porcentagem" value={`${parseFloat(p.honorario.success_percentage)}%`} />
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Valor</label>
+              <input value={editAmount} onChange={e => setEditAmount(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Vencimento</label>
+              <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Método</label>
+              <select value={editMethod} onChange={e => setEditMethod(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none">
+                <option value="">Não informado</option><option value="PIX">PIX</option><option value="BOLETO">Boleto</option>
+                <option value="CARTAO">Cartão</option><option value="DINHEIRO">Dinheiro</option><option value="TRANSFERENCIA">Transferência</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(false)} className="flex-1 px-3 py-2 text-xs border border-border rounded-lg text-muted-foreground hover:bg-accent/30">Cancelar</button>
+              <button onClick={handleSaveEdit} disabled={saving}
+                className="flex-1 px-3 py-2 text-xs bg-primary text-primary-foreground rounded-lg font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1">
+                {saving && <Loader2 size={10} className="animate-spin" />} Salvar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Processo */}
+        {lc && (
+          <div className="border border-border rounded-xl p-3.5 space-y-2">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Processo</p>
+            <p className="text-xs font-mono text-primary">{lc.case_number}</p>
+            {lc.legal_area && <span className="text-[10px] px-2 py-0.5 rounded bg-accent/40 text-muted-foreground">{lc.legal_area}</span>}
+            {lc.lawyer?.name && <p className="text-[10px] text-muted-foreground mt-1">Adv. {lc.lawyer.name}</p>}
+            <button onClick={() => router.push(`/atendimento/processos?openCase=${lc.id}`)}
+              className="flex items-center gap-1 text-[10px] font-bold text-primary hover:underline mt-1">
+              <ExternalLink size={10} /> Abrir processo
+            </button>
+          </div>
+        )}
+
+        {/* Cliente */}
+        {lc?.lead && (
+          <div className="border border-border rounded-xl p-3.5 space-y-2">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Cliente</p>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[10px] font-bold">
+                {lc.lead.name?.[0]?.toUpperCase() || '?'}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-foreground">{lc.lead.name}</p>
+                <p className="text-[10px] text-muted-foreground">{lc.lead.phone}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recebimento parcial */}
+        {showPartial && (
+          <div className="border border-amber-500/30 rounded-xl p-3.5 space-y-3 bg-amber-500/5">
+            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Recebimento Parcial</p>
+            <input type="text" value={partialAmount} onChange={e => setPartialAmount(e.target.value)}
+              placeholder={`Valor recebido (máx ${fmt(p.amount)})`}
+              className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400/40" autoFocus />
+            <select value={partialMethod} onChange={e => setPartialMethod(e.target.value)}
+              className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none">
+              <option value="">Forma de pagamento</option><option value="PIX">PIX</option><option value="BOLETO">Boleto</option>
+              <option value="CARTAO">Cartão</option><option value="DINHEIRO">Dinheiro</option><option value="TRANSFERENCIA">Transferência</option>
+            </select>
+            <div className="flex gap-2">
+              <button onClick={() => setShowPartial(false)} className="flex-1 px-3 py-2 text-xs border border-border rounded-lg text-muted-foreground">Cancelar</button>
+              <button onClick={handlePartialPayment} disabled={saving}
+                className="flex-1 px-3 py-2 text-xs bg-amber-500 text-white rounded-lg font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1">
+                {saving && <Loader2 size={10} className="animate-spin" />} Registrar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Resultado cobrança */}
+        {chargeResult && (
+          <div className="border border-primary/30 rounded-xl p-3.5 bg-primary/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold text-foreground">Cobrança {chargeResult.type} Gerada</p>
+              <button onClick={() => setChargeResult(null)} className="text-muted-foreground hover:text-foreground text-xs">&#10005;</button>
+            </div>
+            {chargeResult.pix_copy_paste && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-muted-foreground">Código PIX:</p>
+                <div className="flex gap-1.5">
+                  <input readOnly value={chargeResult.pix_copy_paste} className="flex-1 px-2 py-1.5 text-[10px] font-mono bg-accent/30 border border-border rounded-lg" />
+                  <button onClick={() => { navigator.clipboard.writeText(chargeResult.pix_copy_paste); showSuccess('Copiado!'); }}
+                    className="px-2 py-1.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-lg">Copiar</button>
+                </div>
+              </div>
+            )}
+            {chargeResult.boleto_url && (
+              <a href={chargeResult.boleto_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1 w-full px-3 py-2 bg-primary text-primary-foreground text-[10px] font-bold rounded-lg hover:opacity-90">
+                <ExternalLink size={10} /> Abrir Boleto
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Ações */}
+      {!editing && (
+        <div className="border-t border-border px-5 py-3 space-y-2">
+          <div className="flex gap-2">
+            <button onClick={() => setEditing(true)}
+              className="flex-1 px-3 py-2 text-[10px] font-semibold border border-border rounded-lg text-muted-foreground hover:bg-accent/30 flex items-center justify-center gap-1">
+              <Pencil size={10} /> Editar
+            </button>
+            <button onClick={() => setShowPartial(!showPartial)}
+              className="flex-1 px-3 py-2 text-[10px] font-semibold border border-amber-400/30 rounded-lg text-amber-400 hover:bg-amber-400/10 flex items-center justify-center gap-1">
+              <DollarSign size={10} /> Parcial
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <div className="relative flex-1" ref={chargeMenuRef}>
+              <button onClick={() => setShowChargeMenu(!showChargeMenu)}
+                className="w-full px-3 py-2 text-[10px] font-semibold border border-blue-400/30 rounded-lg text-blue-400 hover:bg-blue-400/10 flex items-center justify-center gap-1">
+                {chargingType ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />} Cobrança
+              </button>
+              {showChargeMenu && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-card border border-border rounded-lg shadow-xl z-50 py-1">
+                  <button onClick={() => handleCreateCharge('PIX')} className="w-full text-left px-3 py-2 text-[10px] text-foreground hover:bg-accent/30">PIX</button>
+                  <button onClick={() => handleCreateCharge('BOLETO')} className="w-full text-left px-3 py-2 text-[10px] text-foreground hover:bg-accent/30">Boleto</button>
+                  <button onClick={() => handleCreateCharge('CREDIT_CARD')} className="w-full text-left px-3 py-2 text-[10px] text-foreground hover:bg-accent/30">Cartão</button>
+                </div>
+              )}
+            </div>
+            <button onClick={handleMarkPaid} disabled={saving}
+              className="flex-1 px-3 py-2 text-[10px] font-semibold bg-emerald-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1">
+              {saving ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} Recebido Total
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
