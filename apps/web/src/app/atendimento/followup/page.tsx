@@ -7,6 +7,7 @@ import {
   Trash2, Play, Pause, X, Search, Filter, ChevronDown,
   MessageSquare, Settings, BarChart2, List, Shield, AlertOctagon,
   Phone, Mail, Smartphone, Eye, Download, Sprout, FileJson,
+  Radio, Calendar, MapPin, Hash,
 } from 'lucide-react';
 import { showError, showSuccess } from '@/lib/toast';
 import { API_BASE_URL } from '@/lib/api';
@@ -93,6 +94,47 @@ interface LeadSearchResult {
   stage: string;
 }
 
+interface BroadcastTarget {
+  event_id: string;
+  event_title: string;
+  event_date: string;
+  event_location?: string;
+  lead_id: string;
+  lead_name?: string;
+  lead_phone: string;
+  lead_stage: string;
+  case_number?: string;
+  case_type?: string;
+  court?: string;
+}
+
+interface BroadcastJob {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  total_targets: number;
+  sent_count: number;
+  failed_count: number;
+  interval_ms: number;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  created_by?: { name: string };
+  items?: BroadcastItem[];
+  _count?: { items: number };
+}
+
+interface BroadcastItem {
+  id: string;
+  lead_id: string;
+  phone: string;
+  generated_text?: string;
+  status: string;
+  sent_at?: string;
+  error?: string;
+}
+
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const API = API_BASE_URL;
@@ -102,6 +144,7 @@ const TABS = [
   { id: 'sequencias', label: 'Sequências', icon: List },
   { id: 'enrollments', label: 'Enrollments', icon: Users },
   { id: 'aprovacoes', label: 'Aprovações', icon: MessageSquare },
+  { id: 'disparos', label: 'Disparos', icon: Radio },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -1182,6 +1225,19 @@ export default function FollowupPage() {
   const [enrollFilter, setEnrollFilter] = useState('');
   const [enrollSearch, setEnrollSearch] = useState('');
 
+  // Disparos
+  const [broadcastTargets, setBroadcastTargets] = useState<BroadcastTarget[]>([]);
+  const [broadcasts, setBroadcasts] = useState<BroadcastJob[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [loadingBroadcasts, setLoadingBroadcasts] = useState(false);
+  const [dispatchingBroadcast, setDispatchingBroadcast] = useState(false);
+  const [broadcastDaysAhead, setBroadcastDaysAhead] = useState(7);
+  const [broadcastInterval, setBroadcastInterval] = useState(10);
+  const [broadcastCustomPrompt, setBroadcastCustomPrompt] = useState('');
+  const [activeBroadcast, setActiveBroadcast] = useState<BroadcastJob | null>(null);
+  const [expandedBroadcast, setExpandedBroadcast] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // ── Fetch functions ─────────────────────────────────────────────────────────
 
   const fetchStats = useCallback(async () => {
@@ -1233,13 +1289,103 @@ export default function FollowupPage() {
     }
   }, []);
 
+  // ── Broadcast fetch functions ────────────────────────────────────────────────
+
+  const fetchBroadcastPreview = useCallback(async () => {
+    setLoadingPreview(true);
+    try {
+      const data = await apiFetch(`/followup/broadcasts/preview?type=AUDIENCIA&days_ahead=${broadcastDaysAhead}`);
+      setBroadcastTargets(Array.isArray(data) ? data : []);
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao carregar preview');
+    } finally {
+      setLoadingPreview(false);
+    }
+  }, [broadcastDaysAhead]);
+
+  const fetchBroadcasts = useCallback(async () => {
+    setLoadingBroadcasts(true);
+    try {
+      const data = await apiFetch('/followup/broadcasts');
+      setBroadcasts(Array.isArray(data) ? data : []);
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao carregar disparos');
+    } finally {
+      setLoadingBroadcasts(false);
+    }
+  }, []);
+
+  const handleDispatchBroadcast = async () => {
+    if (broadcastTargets.length === 0) { showError('Nenhum alvo encontrado'); return; }
+    if (!confirm(`Disparar ${broadcastTargets.length} mensagens com intervalo de ${broadcastInterval}s entre cada? As mensagens serão geradas por IA individualmente.`)) return;
+    setDispatchingBroadcast(true);
+    try {
+      const result = await apiFetch('/followup/broadcasts', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'AUDIENCIA',
+          days_ahead: broadcastDaysAhead,
+          interval_ms: broadcastInterval * 1000,
+          custom_prompt: broadcastCustomPrompt || undefined,
+        }),
+      });
+      showSuccess(`Disparo iniciado! ${result.items?.length || result.total_targets} mensagens sendo enviadas.`);
+      setActiveBroadcast(result);
+      setBroadcastTargets([]);
+      fetchBroadcasts();
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao criar disparo');
+    } finally {
+      setDispatchingBroadcast(false);
+    }
+  };
+
+  const handleCancelBroadcast = async (id: string) => {
+    if (!confirm('Cancelar este disparo? Mensagens já enviadas não serão revertidas.')) return;
+    try {
+      await apiFetch(`/followup/broadcasts/${id}/cancel`, { method: 'PATCH' });
+      showSuccess('Disparo cancelado');
+      setActiveBroadcast(null);
+      fetchBroadcasts();
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao cancelar');
+    }
+  };
+
+  const handleViewBroadcast = async (id: string) => {
+    try {
+      const data = await apiFetch(`/followup/broadcasts/${id}`);
+      setActiveBroadcast(data);
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao carregar detalhes');
+    }
+  };
+
+  // Poll active broadcast progress
+  useEffect(() => {
+    if (activeBroadcast && activeBroadcast.status === 'ENVIANDO') {
+      pollRef.current = setInterval(async () => {
+        try {
+          const data = await apiFetch(`/followup/broadcasts/${activeBroadcast.id}`);
+          setActiveBroadcast(data);
+          if (data.status !== 'ENVIANDO') {
+            if (pollRef.current) clearInterval(pollRef.current);
+            fetchBroadcasts();
+          }
+        } catch { /* ignore */ }
+      }, 3000);
+      return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    }
+  }, [activeBroadcast?.id, activeBroadcast?.status, fetchBroadcasts]);
+
   // Fetch inicial por tab
   useEffect(() => {
     if (activeTab === 'dashboard') { fetchStats(); fetchEnrollments(); }
     if (activeTab === 'sequencias') fetchSequences();
     if (activeTab === 'enrollments') fetchEnrollments();
     if (activeTab === 'aprovacoes') fetchApprovals();
-  }, [activeTab, fetchStats, fetchSequences, fetchEnrollments, fetchApprovals]);
+    if (activeTab === 'disparos') fetchBroadcasts();
+  }, [activeTab, fetchStats, fetchSequences, fetchEnrollments, fetchApprovals, fetchBroadcasts]);
 
   useEffect(() => {
     if (activeTab === 'enrollments') fetchEnrollments();
@@ -2085,6 +2231,326 @@ export default function FollowupPage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── TAB: DISPAROS ──────────────────────────────────────────────────── */}
+        {activeTab === 'disparos' && (
+          <div className="space-y-6">
+            {/* Card: Novo Disparo */}
+            <div className="bg-card/50 border border-border rounded-2xl p-6 space-y-5">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-primary/20">
+                  <Radio size={16} className="text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Novo Disparo — Lembrete de Audiência</h3>
+                  <p className="text-xs text-muted-foreground">Envie mensagens personalizadas por IA para clientes com audiências próximas</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className={labelCls()}>Próximos dias</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={90}
+                    className={inputCls()}
+                    value={broadcastDaysAhead}
+                    onChange={e => setBroadcastDaysAhead(Math.max(1, Number(e.target.value)))}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Audiências nos próximos X dias</p>
+                </div>
+                <div>
+                  <label className={labelCls()}>Intervalo entre mensagens (seg)</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={60}
+                    className={inputCls()}
+                    value={broadcastInterval}
+                    onChange={e => setBroadcastInterval(Math.max(5, Math.min(60, Number(e.target.value))))}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Mín 5s, recomendado 10s+</p>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={fetchBroadcastPreview}
+                    disabled={loadingPreview}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-sm font-medium transition-all duration-200"
+                  >
+                    {loadingPreview ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                    Pré-visualizar
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className={labelCls()}>Instrução adicional para IA (opcional)</label>
+                <textarea
+                  className={inputCls('resize-none')}
+                  rows={2}
+                  value={broadcastCustomPrompt}
+                  onChange={e => setBroadcastCustomPrompt(e.target.value)}
+                  placeholder="Ex: Mencionar que devem levar documentos originais, perguntar se precisam de transporte..."
+                />
+              </div>
+
+              {/* Preview de alvos */}
+              {broadcastTargets.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Users size={14} className="text-green-400" />
+                      <span className="text-sm font-medium text-foreground">
+                        {broadcastTargets.length} {broadcastTargets.length === 1 ? 'cliente encontrado' : 'clientes encontrados'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleDispatchBroadcast}
+                      disabled={dispatchingBroadcast}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 disabled:opacity-50 text-foreground text-sm font-medium transition-all duration-200"
+                    >
+                      {dispatchingBroadcast ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+                      {dispatchingBroadcast ? 'Disparando...' : 'Disparar Mensagens'}
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/80 border-b border-border">
+                          {['Cliente', 'Telefone', 'Audiência', 'Data/Hora', 'Local', 'Processo'].map(h => (
+                            <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {broadcastTargets.map(t => (
+                          <tr key={`${t.lead_id}-${t.event_id}`} className="hover:bg-muted/40 transition-all duration-200">
+                            <td className="px-4 py-3 text-foreground font-medium">{t.lead_name || '—'}</td>
+                            <td className="px-4 py-3 text-muted-foreground text-xs font-mono">{t.lead_phone}</td>
+                            <td className="px-4 py-3 text-foreground/80 text-xs">{t.event_title}</td>
+                            <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
+                              <div className="flex items-center gap-1">
+                                <Calendar size={12} />
+                                {formatDate(t.event_date)}
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground text-xs">
+                              {t.event_location ? (
+                                <div className="flex items-center gap-1">
+                                  <MapPin size={12} />
+                                  <span className="truncate max-w-[200px]">{t.event_location}</span>
+                                </div>
+                              ) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground text-xs">
+                              {t.case_number ? (
+                                <div className="flex items-center gap-1">
+                                  <Hash size={12} />
+                                  <span className="font-mono">{t.case_number}</span>
+                                </div>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Tempo estimado: ~{Math.ceil(broadcastTargets.length * broadcastInterval / 60)} min ({broadcastTargets.length} msgs × {broadcastInterval}s)
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Progresso do disparo ativo */}
+            {activeBroadcast && activeBroadcast.status === 'ENVIANDO' && (
+              <div className="bg-card border border-blue-500/30 rounded-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw size={16} className="text-blue-400 animate-spin" />
+                    <h3 className="text-sm font-semibold text-foreground">Disparo em andamento</h3>
+                    <span className="text-xs text-muted-foreground">— {activeBroadcast.name}</span>
+                  </div>
+                  <button
+                    onClick={() => handleCancelBroadcast(activeBroadcast.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 border border-red-600/30 text-red-400 hover:bg-red-600/30 text-xs font-medium transition-all duration-200"
+                  >
+                    <XCircle size={13} />
+                    Cancelar
+                  </button>
+                </div>
+
+                {/* Barra de progresso */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Progresso</span>
+                    <span className="text-foreground font-medium">
+                      {activeBroadcast.sent_count + activeBroadcast.failed_count} / {activeBroadcast.total_targets}
+                    </span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
+                    <div className="h-full flex">
+                      <div
+                        className="bg-green-500 transition-all duration-500"
+                        style={{ width: `${activeBroadcast.total_targets > 0 ? (activeBroadcast.sent_count / activeBroadcast.total_targets) * 100 : 0}%` }}
+                      />
+                      <div
+                        className="bg-red-500 transition-all duration-500"
+                        style={{ width: `${activeBroadcast.total_targets > 0 ? (activeBroadcast.failed_count / activeBroadcast.total_targets) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-4 text-xs">
+                    <span className="text-green-400">Enviados: {activeBroadcast.sent_count}</span>
+                    {activeBroadcast.failed_count > 0 && (
+                      <span className="text-red-400">Falhas: {activeBroadcast.failed_count}</span>
+                    )}
+                    <span className="text-muted-foreground">
+                      Restante: {activeBroadcast.total_targets - activeBroadcast.sent_count - activeBroadcast.failed_count}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Histórico de disparos */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Histórico de Disparos</h3>
+                <button
+                  onClick={fetchBroadcasts}
+                  className="p-2 rounded-lg bg-muted border border-border text-muted-foreground hover:text-foreground hover:border-border transition-all duration-200"
+                  title="Atualizar"
+                >
+                  <RefreshCw size={14} className={loadingBroadcasts ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {loadingBroadcasts ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <RefreshCw size={18} className="animate-spin mr-2" />
+                  Carregando...
+                </div>
+              ) : broadcasts.length === 0 ? (
+                <div className="text-center py-12 border border-dashed border-border rounded-2xl">
+                  <Radio size={32} className="mx-auto mb-3 opacity-30 text-muted-foreground" />
+                  <p className="text-muted-foreground text-sm">Nenhum disparo realizado ainda.</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Use o formulário acima para criar o primeiro disparo.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {broadcasts.map(b => {
+                    const progress = b.total_targets > 0 ? Math.round(((b.sent_count + b.failed_count) / b.total_targets) * 100) : 0;
+                    const statusColors: Record<string, string> = {
+                      PENDENTE: 'text-yellow-400 bg-yellow-400/10',
+                      ENVIANDO: 'text-blue-400 bg-blue-400/10',
+                      CONCLUIDO: 'text-green-400 bg-green-400/10',
+                      CANCELADO: 'text-red-400 bg-red-400/10',
+                    };
+
+                    return (
+                      <div key={b.id} className="bg-card border border-border rounded-xl overflow-hidden transition-all duration-200">
+                        <div className="flex items-center gap-4 px-5 py-4">
+                          <button
+                            onClick={() => setExpandedBroadcast(expandedBroadcast === b.id ? null : b.id)}
+                            className="p-1 text-muted-foreground hover:text-foreground/80 transition-all duration-200"
+                          >
+                            <ChevronDown
+                              size={16}
+                              className={`transition-transform duration-200 ${expandedBroadcast === b.id ? 'rotate-180' : ''}`}
+                            />
+                          </button>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-foreground text-sm">{b.name}</span>
+                              <Badge label={b.status} colorClass={statusColors[b.status] ?? 'text-muted-foreground bg-muted/50'} />
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                              <span>{b.sent_count}/{b.total_targets} enviados</span>
+                              {b.failed_count > 0 && <span className="text-red-400">{b.failed_count} falhas</span>}
+                              <span>·</span>
+                              <span>{formatDate(b.created_at)}</span>
+                              {b.created_by?.name && <><span>·</span><span>{b.created_by.name}</span></>}
+                            </div>
+                          </div>
+
+                          {/* Mini progress bar */}
+                          <div className="w-24 shrink-0">
+                            <div className="w-full bg-muted rounded-full h-1.5">
+                              <div
+                                className={`h-1.5 rounded-full transition-all duration-500 ${b.status === 'CONCLUIDO' ? 'bg-green-500' : b.status === 'CANCELADO' ? 'bg-red-500' : 'bg-blue-500'}`}
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground text-center mt-1">{progress}%</p>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {b.status === 'ENVIANDO' && (
+                              <button
+                                onClick={() => handleCancelBroadcast(b.id)}
+                                title="Cancelar"
+                                className="p-1.5 rounded text-red-400 hover:bg-red-400/10 transition-all duration-200"
+                              >
+                                <XCircle size={14} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleViewBroadcast(b.id)}
+                              title="Ver detalhes"
+                              className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
+                            >
+                              <Eye size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Items expandidos */}
+                        {expandedBroadcast === b.id && activeBroadcast?.id === b.id && activeBroadcast.items && (
+                          <div className="border-t border-border bg-background/40 px-5 py-4">
+                            <div className="max-h-64 overflow-y-auto space-y-1.5">
+                              {activeBroadcast.items.map(item => {
+                                const itemStatusColors: Record<string, string> = {
+                                  PENDENTE: 'text-yellow-400',
+                                  ENVIADO: 'text-green-400',
+                                  FALHOU: 'text-red-400',
+                                  PULADO: 'text-muted-foreground',
+                                };
+                                const itemStatusIcons: Record<string, React.ReactNode> = {
+                                  PENDENTE: <Clock size={12} />,
+                                  ENVIADO: <CheckCircle size={12} />,
+                                  FALHOU: <XCircle size={12} />,
+                                  PULADO: <Pause size={12} />,
+                                };
+                                return (
+                                  <div key={item.id} className="flex items-center gap-3 px-3 py-2 bg-muted/60 rounded-lg text-xs">
+                                    <span className={itemStatusColors[item.status] ?? 'text-muted-foreground'}>
+                                      {itemStatusIcons[item.status] ?? <Clock size={12} />}
+                                    </span>
+                                    <span className="text-foreground font-mono">{item.phone}</span>
+                                    <Badge label={item.status} colorClass={`${itemStatusColors[item.status] ?? 'text-muted-foreground'} bg-muted/50`} />
+                                    {item.sent_at && <span className="text-muted-foreground ml-auto">{formatDate(item.sent_at)}</span>}
+                                    {item.error && <span className="text-red-400 truncate max-w-[200px]" title={item.error}>{item.error}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -78,6 +78,32 @@ export class FollowupController {
   @Post('messages/:id/regenerate')
   regenerateMessage(@Param('id') id: string) { return this.svc.regenerateMessage(id); }
 
+  // ─── Disparos em Massa (Broadcasts) ─────────────────────────────────────
+  @Get('broadcasts/preview')
+  previewBroadcast(@Query('type') type: string, @Query('days_ahead') daysAhead: string, @Request() req: any) {
+    return this.svc.previewBroadcast(type || 'AUDIENCIA', parseInt(daysAhead) || 7, req.user?.tenant_id);
+  }
+
+  @Get('broadcasts')
+  listBroadcasts(@Request() req: any) {
+    return this.svc.listBroadcasts(req.user?.tenant_id);
+  }
+
+  @Get('broadcasts/:id')
+  getBroadcast(@Param('id') id: string) {
+    return this.svc.getBroadcast(id);
+  }
+
+  @Post('broadcasts')
+  createBroadcast(@Body() body: { type: string; days_ahead: number; interval_ms: number; custom_prompt?: string }, @Request() req: any) {
+    return this.svc.createBroadcast(body, req.user.id, req.user?.tenant_id);
+  }
+
+  @Patch('broadcasts/:id/cancel')
+  cancelBroadcast(@Param('id') id: string) {
+    return this.svc.cancelBroadcast(id);
+  }
+
   // ─── Seed ────────────────────────────────────────────────────────────────
   @Post('seed-defaults')
   seedDefaultSequences() { return this.svc.seedDefaultSequences(); }

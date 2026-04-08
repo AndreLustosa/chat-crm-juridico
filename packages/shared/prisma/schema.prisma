@@ -33,6 +33,7 @@ model Tenant {
   payment_gateway_charges   PaymentGatewayCharge[]
   notas_fiscais             NotaFiscal[]
   tax_records               TaxRecord[]
+  broadcast_jobs            BroadcastJob[]
 }
 
 model User {
@@ -75,6 +76,7 @@ model User {
   financial_transactions   FinancialTransaction[] @relation("FinancialLawyer")
   tax_records              TaxRecord[]            @relation("TaxRecordLawyer")
   conversation_notes       ConversationNote[]     @relation("ConversationNoteAuthor")
+  broadcast_jobs           BroadcastJob[]
 }
 
 model Lead {
@@ -686,6 +688,54 @@ model FollowupMessage {
 
   @@index([enrollment_id])
   @@index([status])
+  @@index([lead_id])
+}
+
+// ===============================================
+// Broadcast / Disparos em Massa
+// ===============================================
+
+model BroadcastJob {
+  id             String          @id @default(cuid())
+  tenant_id      String?
+  name           String
+  type           String          @default("AUDIENCIA")
+  status         String          @default("PENDENTE")
+  filter_json    Json?
+  custom_prompt  String?         @db.Text
+  total_targets  Int             @default(0)
+  sent_count     Int             @default(0)
+  failed_count   Int             @default(0)
+  interval_ms    Int             @default(10000)
+  started_at     DateTime?
+  completed_at   DateTime?
+  created_by_id  String
+  created_at     DateTime        @default(now())
+  updated_at     DateTime        @updatedAt
+
+  tenant         Tenant?         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by     User            @relation(fields: [created_by_id], references: [id])
+  items          BroadcastItem[]
+
+  @@index([tenant_id, status])
+  @@index([created_at])
+}
+
+model BroadcastItem {
+  id             String       @id @default(cuid())
+  broadcast_id   String
+  lead_id        String
+  event_id       String?
+  phone          String
+  generated_text String?      @db.Text
+  status         String       @default("PENDENTE")
+  sent_at        DateTime?
+  error          String?
+  created_at     DateTime     @default(now())
+
+  broadcast      BroadcastJob @relation(fields: [broadcast_id], references: [id], onDelete: Cascade)
+
+  @@index([broadcast_id, status])
   @@index([lead_id])
 }
 

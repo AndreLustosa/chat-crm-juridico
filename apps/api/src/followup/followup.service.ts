@@ -416,6 +416,133 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
     return { total_enrollments: total, ativos, pendentes_aprovacao: pendentes, total_enviados: enviados, convertidos, taxa_conversao: taxaConversao };
   }
 
+  // ─── Disparos em Massa (Broadcasts) ─────────────────────────────────────
+
+  async previewBroadcast(type: string, daysAhead: number, tenantId?: string) {
+    const now = new Date();
+    const until = new Date(Date.now() + daysAhead * 86400000);
+
+    const events = await this.prisma.calendarEvent.findMany({
+      where: {
+        type: type,
+        start_at: { gte: now, lte: until },
+        status: { in: ['AGENDADO', 'CONFIRMADO'] },
+        lead_id: { not: null },
+        lead: { phone: { not: '' }, ...(tenantId ? { tenant_id: tenantId } : {}) },
+      },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, stage: true } },
+        legal_case: { select: { id: true, case_number: true, action_type: true, court: true, opposing_party: true } },
+      },
+      orderBy: { start_at: 'asc' },
+    });
+
+    return events.map(e => ({
+      event_id: e.id,
+      event_title: e.title,
+      event_date: e.start_at,
+      event_location: e.location,
+      lead_id: e.lead!.id,
+      lead_name: e.lead!.name,
+      lead_phone: e.lead!.phone,
+      lead_stage: e.lead!.stage,
+      case_number: e.legal_case?.case_number,
+      case_type: e.legal_case?.action_type,
+      court: e.legal_case?.court,
+    }));
+  }
+
+  async createBroadcast(data: { type: string; days_ahead: number; interval_ms: number; custom_prompt?: string }, userId: string, tenantId?: string) {
+    const targets = await this.previewBroadcast(data.type, data.days_ahead, tenantId);
+    if (targets.length === 0) throw new BadRequestException('Nenhum alvo encontrado para este disparo');
+
+    // Deduplicate by lead_id (same lead may have multiple events)
+    const uniqueTargets = targets.filter((t, i, arr) => arr.findIndex(x => x.lead_id === t.lead_id) === i);
+
+    const typeLabels: Record<string, string> = { AUDIENCIA: 'Audiências', PERICIA: 'Perícias', PRAZO: 'Prazos' };
+    const today = new Date().toLocaleDateString('pt-BR');
+    const name = `Lembrete ${typeLabels[data.type] || data.type} — ${today}`;
+
+    const broadcast = await this.prisma.broadcastJob.create({
+      data: {
+        name,
+        type: data.type,
+        tenant_id: tenantId,
+        created_by_id: userId,
+        total_targets: uniqueTargets.length,
+        interval_ms: Math.max(5000, Math.min(60000, data.interval_ms)),
+        custom_prompt: data.custom_prompt,
+        filter_json: { type: data.type, days_ahead: data.days_ahead },
+        status: 'ENVIANDO',
+        started_at: new Date(),
+        items: {
+          create: uniqueTargets.map(t => ({
+            lead_id: t.lead_id,
+            event_id: t.event_id,
+            phone: t.lead_phone,
+          })),
+        },
+      },
+      include: { items: true },
+    });
+
+    // Enqueue each item with staggered delay
+    for (let i = 0; i < broadcast.items.length; i++) {
+      const item = broadcast.items[i];
+      const delay = i * broadcast.interval_ms;
+      await this.followupQueue.add('broadcast-send', {
+        broadcast_id: broadcast.id,
+        item_id: item.id,
+        custom_prompt: data.custom_prompt,
+      }, {
+        delay,
+        jobId: `broadcast-${broadcast.id}-${item.id}`,
+        removeOnComplete: true,
+      });
+    }
+
+    this.logger.log(`[BROADCAST] Criado "${name}" com ${broadcast.items.length} alvos, intervalo ${broadcast.interval_ms}ms`);
+    return broadcast;
+  }
+
+  async listBroadcasts(tenantId?: string) {
+    return this.prisma.broadcastJob.findMany({
+      where: tenantId ? { tenant_id: tenantId } : {},
+      include: { created_by: { select: { name: true } }, _count: { select: { items: true } } },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    });
+  }
+
+  async getBroadcast(id: string) {
+    const broadcast = await this.prisma.broadcastJob.findUnique({
+      where: { id },
+      include: {
+        items: { orderBy: { created_at: 'asc' } },
+        created_by: { select: { name: true } },
+      },
+    });
+    if (!broadcast) throw new NotFoundException('Disparo não encontrado');
+    return broadcast;
+  }
+
+  async cancelBroadcast(id: string) {
+    const broadcast = await this.prisma.broadcastJob.findUnique({ where: { id } });
+    if (!broadcast) throw new NotFoundException('Disparo não encontrado');
+    if (broadcast.status !== 'ENVIANDO') throw new BadRequestException('Disparo não está em andamento');
+
+    // Cancel pending items
+    await this.prisma.broadcastItem.updateMany({
+      where: { broadcast_id: id, status: 'PENDENTE' },
+      data: { status: 'PULADO' },
+    });
+
+    return this.prisma.broadcastJob.update({
+      where: { id },
+      data: { status: 'CANCELADO', completed_at: new Date() },
+    });
+  }
+
   // ─── Auto-enroll por stage ───────────────────────────────────────────────
 
   async autoEnrollByStage(leadId: string, stage: string) {
