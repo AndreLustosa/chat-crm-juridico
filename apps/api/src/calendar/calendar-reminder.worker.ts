@@ -362,9 +362,15 @@ export class CalendarReminderWorker extends WorkerHost {
           clientMsg,
           lastConvo?.instance_name ?? undefined,
         );
+        // sendText() retorna objeto de erro em vez de lançar exceção em falhas HTTP
+        if (!reminderSendResult || reminderSendResult?.statusCode >= 400 || reminderSendResult?.error) {
+          throw new Error(`Evolution API error ${reminderSendResult?.statusCode}: ${reminderSendResult?.error}`);
+        }
         this.logger.log(`[REMINDER] WhatsApp enviado para cliente ${clientPhone}`);
       } catch (e: any) {
         this.logger.warn(`[REMINDER] Erro ao enviar para cliente ${clientPhone}: ${e.message}`);
+        // Não salva mensagem se envio falhou
+        reminderSendResult = undefined;
       }
 
       // ── Salva mensagem e contexto na conversa (visível para operador) ──
@@ -482,10 +488,15 @@ export class CalendarReminderWorker extends WorkerHost {
         msg,
         lastConvo?.instance_name ?? undefined,
       );
-      this.logger.log(`[HEARING-NOTIFY] WhatsApp enviado para ${clientPhone} sobre audiência ${eventId}`);
+      // sendText() retorna objeto de erro em vez de lançar exceção em falhas HTTP
+      if (!sendResult || sendResult?.statusCode >= 400 || sendResult?.error) {
+        throw new Error(`Evolution API error ${sendResult?.statusCode}: ${sendResult?.error}`);
+      }
+      this.logger.log(`[HEARING-NOTIFY] WhatsApp enviado para ${clientPhone} sobre ${event.type} ${eventId}`);
     } catch (e: any) {
       this.logger.warn(`[HEARING-NOTIFY] Erro ao enviar para ${clientPhone}: ${e.message}`);
-      return;
+      // Lança para que o BullMQ faça retry (attempts: 3)
+      throw e;
     }
 
     // Salva mensagem na conversa (visível para o operador no chat)

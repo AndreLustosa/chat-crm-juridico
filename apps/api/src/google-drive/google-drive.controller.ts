@@ -202,6 +202,26 @@ export class GoogleDriveController {
   // ═══════════════════════════════════════════════════════════════
 
   /**
+   * GET /google-drive/leads/:leadId/files — lista arquivos da pasta do Drive do lead.
+   */
+  @Get('leads/:leadId/files')
+  async listLeadFiles(@Param('leadId') leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { google_drive_folder_id: true },
+    });
+    if (!lead?.google_drive_folder_id) {
+      return [];
+    }
+    try {
+      return await this.driveService.listFolderFiles(lead.google_drive_folder_id);
+    } catch (e: any) {
+      this.logger.warn(`[DRIVE] Erro ao listar arquivos do lead ${leadId}: ${e.message}`);
+      return [];
+    }
+  }
+
+  /**
    * GET /google-drive/letterhead — status do papel timbrado configurado.
    */
   @Get('letterhead')
