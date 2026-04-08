@@ -701,7 +701,19 @@ export class LegalCasesService {
 
       if (byPhone) {
         leadId = byPhone.id;
-        leadDisplayName = byPhone.name || normalizedPhone;
+        // Atualizar nome/email se o lead existente não tem e foram informados
+        if (data.lead_name && (!byPhone.name || byPhone.name.startsWith('[Processo]'))) {
+          await this.prisma.lead.update({
+            where: { id: byPhone.id },
+            data: {
+              name: data.lead_name,
+              ...(data.lead_email && { email: data.lead_email }),
+            },
+          });
+          leadDisplayName = data.lead_name;
+        } else {
+          leadDisplayName = byPhone.name || normalizedPhone;
+        }
       } else {
         const newLead = await this.prisma.lead.create({
           data: {
