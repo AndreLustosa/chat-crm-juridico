@@ -45,15 +45,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [showThemes, setShowThemes] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  const [unreadTotal, setUnreadTotal] = useState(() => {
-    if (typeof window === 'undefined') return 0;
-    try {
-      const raw = sessionStorage.getItem('unreadCounts');
-      if (!raw) return 0;
-      const counts: Record<string, number> = JSON.parse(raw);
-      return Object.values(counts).reduce((s, n) => s + n, 0);
-    } catch { return 0; }
-  });
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [overdueCount, setOverdueCount] = useState(0);
   const pathnameRef = useRef(pathname);
   useEffect(() => { pathnameRef.current = pathname; }, [pathname]);
@@ -99,6 +91,26 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   useEffect(() => {
     setAuthToken(localStorage.getItem('token'));
   }, [pathname]); // re-lê token a cada navegação (captura momento pós-login)
+
+  // ─── Fetch unread counts do servidor na montagem (fonte de verdade) ──────
+  useEffect(() => {
+    if (!authToken) return;
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+    fetch(`${apiUrl}/conversations/unread-counts`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      signal: AbortSignal.timeout(5000),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          const total = Object.values(data as Record<string, number>).reduce((s: number, n: number) => s + n, 0);
+          setUnreadTotal(total);
+          window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
+          try { sessionStorage.setItem('unreadCounts', JSON.stringify(data)); } catch {}
+        }
+      })
+      .catch(() => {});
+  }, [authToken]);
 
   // ─── Socket global de notificações (persiste em todas as rotas) ──────────
   // page.tsx cuida do som e dos badges quando o usuário está na tela do chat.
