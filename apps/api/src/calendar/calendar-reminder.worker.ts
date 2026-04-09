@@ -355,16 +355,9 @@ export class CalendarReminderWorker extends WorkerHost {
         select: { id: true, instance_name: true },
       }).catch(() => null);
 
-      // instance_name: usa da conversa ativa; se não houver, busca em qualquer conversa
-      let reminderInstanceName: string | undefined = lastConvo?.instance_name ?? undefined;
-      if (!reminderInstanceName) {
-        const anyConvo = await this.prisma.conversation.findFirst({
-          where: { lead_id: event.lead.id, instance_name: { not: null } },
-          orderBy: { last_message_at: 'desc' },
-          select: { instance_name: true },
-        }).catch(() => null);
-        reminderInstanceName = anyConvo?.instance_name ?? undefined;
-      }
+      // Resolve instância WhatsApp em 4 níveis: conversa ativa → encerrada → banco → env
+      // Cobre clientes sem histórico no chat (cadastrados via processos/DJEN)
+      const reminderInstanceName = await this.resolveInstanceName(event.lead.id);
 
       let reminderSendResult: any;
       try {
@@ -490,22 +483,11 @@ export class CalendarReminderWorker extends WorkerHost {
       where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
       orderBy: { last_message_at: 'desc' },
       select: { id: true, ai_mode: true, instance_name: true },
-    });
+    }).catch(() => null);
 
-    // instance_name: usa da conversa ativa; se não houver, busca em qualquer
-    // conversa do lead (inclusive encerradas) — evita fallback para instância errada
-    let instanceName: string | undefined = lastConvo?.instance_name ?? undefined;
-    if (!instanceName) {
-      const anyConvo = await this.prisma.conversation.findFirst({
-        where: { lead_id: leadId, instance_name: { not: null } },
-        orderBy: { last_message_at: 'desc' },
-        select: { instance_name: true },
-      });
-      instanceName = anyConvo?.instance_name ?? undefined;
-      if (instanceName) {
-        this.logger.log(`[HEARING-NOTIFY] Conversa ativa sem instance_name — usando da conversa anterior: ${instanceName}`);
-      }
-    }
+    // Resolve instância WhatsApp em 4 níveis: conversa ativa → encerrada → banco → env
+    // Cobre clientes sem histórico no chat (cadastrados via processos/DJEN)
+    const instanceName = await this.resolveInstanceName(leadId);
 
     let sendResult: any;
     try {
@@ -741,5 +723,57 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
       });
       return (completion.choices[0]?.message?.content || '').trim();
     }
+  }
+
+  // ─── Resolução da instância WhatsApp (4 níveis de fallback) ──────────────────
+  //
+  //  1. Conversa ativa do lead (status ≠ ENCERRADO)
+  //  2. Qualquer conversa do lead (inclusive encerradas)
+  //  3. Primeira instância WhatsApp cadastrada no banco
+  //     → cobre clientes sem histórico no chat (cadastrados via processos/DJEN)
+  //  4. Variável de ambiente EVOLUTION_INSTANCE_NAME
+  //
+  // Ao retornar undefined o sendText() usará a instância padrão configurada
+  // no WhatsappService — envio ainda pode funcionar em instâncias single-tenant.
+
+  private async resolveInstanceName(leadId: string): Promise<string | undefined> {
+    // Nível 1: conversa ativa
+    const activeConvo = await this.prisma.conversation.findFirst({
+      where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
+      orderBy: { last_message_at: 'desc' },
+      select: { instance_name: true },
+    }).catch(() => null);
+    if (activeConvo?.instance_name) return activeConvo.instance_name;
+
+    // Nível 2: qualquer conversa (inclusive encerradas)
+    const anyConvo = await this.prisma.conversation.findFirst({
+      where: { lead_id: leadId, instance_name: { not: null } },
+      orderBy: { last_message_at: 'desc' },
+      select: { instance_name: true },
+    }).catch(() => null);
+    if (anyConvo?.instance_name) {
+      this.logger.log(`[INSTANCE] Lead ${leadId} sem conversa ativa — usando instância de conversa anterior: ${anyConvo.instance_name}`);
+      return anyConvo.instance_name;
+    }
+
+    // Nível 3: primeira instância WhatsApp cadastrada no banco
+    const dbInstance = await this.prisma.instance.findFirst({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    }).catch(() => null);
+    if (dbInstance?.name) {
+      this.logger.log(`[INSTANCE] Lead ${leadId} sem conversas — usando instância do banco: ${dbInstance.name}`);
+      return dbInstance.name;
+    }
+
+    // Nível 4: variável de ambiente
+    const envInstance = process.env.EVOLUTION_INSTANCE_NAME;
+    if (envInstance) {
+      this.logger.log(`[INSTANCE] Lead ${leadId} sem instância no banco — usando env EVOLUTION_INSTANCE_NAME: ${envInstance}`);
+      return envInstance;
+    }
+
+    this.logger.warn(`[INSTANCE] Lead ${leadId}: nenhuma instância WhatsApp encontrada. Envio pode falhar.`);
+    return undefined;
   }
 }
