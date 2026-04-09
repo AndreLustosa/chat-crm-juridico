@@ -107,6 +107,32 @@ const BLANK_FORM: SkillForm = {
   provider: 'openai',
 };
 
+const DEFAULT_DJEN_PROMPT = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos abaixo. Extraia as informações DIRETAMENTE do texto da publicação quando disponíveis — não invente dados.
+
+Campos obrigatórios:
+- resumo: string (máx 3 frases, PT-BR, linguagem direta para o advogado)
+- urgencia: "URGENTE" | "NORMAL" | "BAIXA"
+- tipo_acao: string (ação concreta que o advogado deve tomar)
+- prazo_dias: number (prazo em dias ÚTEIS)
+- estagio_sugerido: string | null (um de: DISTRIBUIDO, CITACAO, CONTESTACAO, REPLICA, PERICIA_AGENDADA, INSTRUCAO, JULGAMENTO, RECURSO, TRANSITADO, EXECUCAO, ENCERRADO)
+- tarefa_titulo: string (título curto da tarefa)
+- tarefa_descricao: string (descrição da tarefa, máx 200 chars)
+- orientacoes: string (observações estratégicas, máx 300 chars)
+- event_type: "AUDIENCIA" | "PRAZO" | "TAREFA" (AUDIENCIA se há audiência/sessão/julgamento com data marcada no texto; PRAZO se há prazo processual para o advogado cumprir; TAREFA para outros casos)
+
+Campos de extração (null se não encontrado no texto):
+- parte_autora: string | null (nome do autor/requerente/exequente)
+- parte_rea: string | null (nome do réu/requerido/executado)
+- juizo: string | null (vara, juízo ou tribunal onde tramita)
+- area_juridica: string | null (ex: "Trabalhista", "Cível", "Previdenciário", "Criminal", "Consumidor", "Família", "Tributário")
+- valor_causa: string | null (valor da causa se mencionado, formato "R$ X.XXX,XX")
+- data_audiencia: string | null (data e hora da audiência/sessão/perícia se mencionada EXPLICITAMENTE NO TEXTO, formato ISO "YYYY-MM-DDTHH:MM:00". IMPORTANTE: se a publicação for de perícia previdenciária (INSS) e não constar data no texto, retorne null — NÃO calcule nem invente data. Retorne null também se não for publicação de audiência ou perícia.)
+- data_prazo: string | null (data limite do prazo processual se mencionada NO TEXTO, formato ISO "YYYY-MM-DDTHH:MM:00", null se não houver prazo com data explícita)
+
+Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada, perícia designada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
+Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, perícia/laudo/perito designado→PERICIA_AGENDADA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.
+Critérios de event_type: use AUDIENCIA apenas se houver data/hora explícita no texto para audiência ou sessão. Para perícia sem data explícita no texto use TAREFA. Para prazos com data explícita use PRAZO. Nos demais casos use TAREFA.`;
+
 const DEFAULT_DJEN_NOTIFY_TEMPLATE = `⚖️ *Movimentação no seu processo*
 
 Olá {{nome}}! Houve uma nova movimentação no seu processo nº {{processo}}.
@@ -130,7 +156,7 @@ export default function AiSettingsPage() {
   const [adminKey, setAdminKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
   const [djenModel, setDjenModel] = useState('gpt-4o-mini');
-  const [djenPrompt, setDjenPrompt] = useState('');
+  const [djenPrompt, setDjenPrompt] = useState(DEFAULT_DJEN_PROMPT);
   const [showDjenPrompt, setShowDjenPrompt] = useState(false);
   const [djenNotifyTemplate, setDjenNotifyTemplate] = useState(DEFAULT_DJEN_NOTIFY_TEMPLATE);
   const [showDjenNotifyTemplate, setShowDjenNotifyTemplate] = useState(false);
@@ -183,7 +209,7 @@ export default function AiSettingsPage() {
       setIsAnthropicKeyConfigured(configRes.data.isAnthropicKeyConfigured ?? false);
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
-      setDjenPrompt(configRes.data.djenPrompt || '');
+      setDjenPrompt(configRes.data.djenPrompt || DEFAULT_DJEN_PROMPT);
       setDjenNotifyTemplate(configRes.data.djenNotifyTemplate || DEFAULT_DJEN_NOTIFY_TEMPLATE);
       setAdminBotEnabled(configRes.data.adminBotEnabled ?? true);
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
@@ -464,18 +490,17 @@ export default function AiSettingsPage() {
                     <textarea
                       value={djenPrompt}
                       onChange={(e) => setDjenPrompt(e.target.value)}
-                      rows={14}
-                      placeholder="Deixe vazio para usar o prompt padrão do sistema."
+                      rows={20}
                       className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-xs font-mono outline-none focus:border-primary/50 transition-all resize-y"
                     />
                     <p className="text-[11px] text-muted-foreground">
                       Prompt do sistema enviado à IA ao analisar publicações DJEN. Deixe vazio para usar o prompt padrão.<br />
                       <strong>Atenção:</strong> o retorno deve ser sempre um JSON com os campos obrigatórios (resumo, urgencia, event_type, data_audiencia, data_prazo, etc.).
                     </p>
-                    {djenPrompt && (
+                    {djenPrompt !== DEFAULT_DJEN_PROMPT && (
                       <button
                         type="button"
-                        onClick={() => setDjenPrompt('')}
+                        onClick={() => setDjenPrompt(DEFAULT_DJEN_PROMPT)}
                         className="text-[11px] text-destructive hover:underline"
                       >
                         Restaurar prompt padrão
