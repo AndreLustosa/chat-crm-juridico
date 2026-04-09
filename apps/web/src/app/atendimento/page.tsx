@@ -715,6 +715,14 @@ export default function Dashboard() {
       fetchConversations(selectedInboxIdRef.current, true);
       fetchAdiadoConversations(selectedInboxIdRef.current);
       fetchPendingTransfers(true);
+      // Re-fetch unread counts para sincronizar badges após mudanças de outros operadores
+      api.get('/conversations/unread-counts', { _silent401: true } as any)
+        .then(r => {
+          if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
+            setUnreadCounts(r.data as Record<string, number>);
+          }
+        })
+        .catch(() => {});
     });
 
     // Nota criada em uma conversa — marcar hasNotes=true na lista

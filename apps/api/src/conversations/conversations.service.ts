@@ -73,7 +73,12 @@ export class ConversationsService {
       // OPERADOR vê: assigned_user_id + cs_user_id (clientes)
       // Ambos: combina tudo via OR
       if (inboxId) {
-        where.inbox_id = inboxId;
+        // Valida que o usuário pertence ao inbox solicitado
+        if (userInboxIds.length > 0 && !userInboxIds.includes(inboxId)) {
+          where.inbox_id = '__none__'; // retorna vazio se não pertence ao inbox
+        } else {
+          where.inbox_id = inboxId;
+        }
       } else {
         const orConditions: any[] = [];
 
@@ -667,28 +672,81 @@ export class ConversationsService {
   /**
    * Retorna a contagem real de mensagens não lidas por conversa (fonte: banco de dados).
    *
-   * Regra de negócio:
-   *  - Lead:    badge apenas para o operador responsável (assigned_user_id)
-   *  - Cliente: badge para o operador (assigned_user_id) E para o advogado (assigned_lawyer_id)
-   *  - Sem ninguém atribuído: badge visível para todos os usuários do tenant
+   * Regra de negócio (alinhada com findAll):
+   *  - ADMIN: vê todas as conversas do tenant
+   *  - ADVOGADO: assigned_lawyer_id + legal_cases.lawyer_id (clientes)
+   *  - OPERADOR: assigned_user_id + cs_user_id (clientes) + inbox membership (leads)
+   *  - Sem atribuição: badge apenas para usuários cujo inbox contém a conversa
+   *  - Exclui leads PERDIDO/FINALIZADO (não aparecem na lista)
    */
   async getUnreadCounts(tenantId?: string, userId?: string) {
     let conversationIds: string[] | undefined;
 
     if (userId) {
-      // Etapa 1: identifica quais conversas são relevantes para este usuário
+      // Carrega user com roles e inboxes (mesmo padrão do findAll)
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { inboxes: { select: { id: true } } },
+      });
+
+      const userRoles: string[] = Array.isArray(user?.roles)
+        ? user.roles
+        : [effectiveRole(user?.roles ?? 'OPERADOR')];
+      const isAdminUser = userRoles.includes('ADMIN');
+      const isAdvogadoUser = userRoles.includes('ADVOGADO');
+      const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL');
+      const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
+
+      // Filtro base: tenant + exclui leads PERDIDO/FINALIZADO (consistente com findAll)
+      const convWhere: any = {
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+        lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO'] } },
+      };
+
+      if (isAdminUser) {
+        // Admin vê tudo — sem filtro adicional de acesso
+      } else {
+        const orConditions: any[] = [];
+
+        // Visibilidade de ADVOGADO
+        if (isAdvogadoUser) {
+          orConditions.push({ assigned_lawyer_id: userId });
+          orConditions.push({ lead: { is_client: true, legal_cases: { some: { lawyer_id: userId } } } });
+        }
+
+        // Visibilidade de OPERADOR (ou advogado com duplo papel)
+        if (isOperadorUser || isAdvogadoUser) {
+          orConditions.push({ assigned_user_id: userId });
+          orConditions.push({ lead: { is_client: true, cs_user_id: userId } });
+        }
+
+        // Inboxes vinculados — apenas para leads (clientes são filtrados por atribuição)
+        if (userInboxIds.length > 0) {
+          orConditions.push({
+            inbox_id: { in: userInboxIds },
+            lead: { is_client: false },
+          });
+        }
+
+        // Conversas sem atribuição: visíveis apenas se pertencem a um inbox do user
+        if (userInboxIds.length > 0) {
+          orConditions.push({
+            assigned_user_id: null,
+            assigned_lawyer_id: null,
+            inbox_id: { in: userInboxIds },
+          });
+        }
+
+        // Fallback (estagiário puro, financeiro)
+        if (orConditions.length === 0) {
+          orConditions.push({ assigned_user_id: userId });
+        }
+
+        convWhere.OR = orConditions;
+      }
+
       const convs = await this.prisma.conversation.findMany({
-        where: {
-          ...(tenantId ? { tenant_id: tenantId } : {}),
-          OR: [
-            // Usuário é o operador responsável (leads e clientes)
-            { assigned_user_id: userId },
-            // Usuário é o advogado de um cliente (is_client = true)
-            { assigned_lawyer_id: userId, lead: { is_client: true } },
-            // Conversa sem ninguém atribuído: todos do tenant veem o badge
-            { assigned_user_id: null, assigned_lawyer_id: null },
-          ],
-        },
+        where: convWhere,
         select: { id: true },
       });
       conversationIds = convs.map(c => c.id);
