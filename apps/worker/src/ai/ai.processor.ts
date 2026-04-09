@@ -1734,6 +1734,15 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         );
       }
 
+      // 14a. Reply vazio = conversa encerrada — IA decidiu não responder
+      // (ex: cliente disse "obrigado" após despedida, loop detectado)
+      if (!finalText || !finalText.trim()) {
+        this.logger.log(`[AI] Reply vazio — conversa encerrada, IA não responde (conv ${conversation_id})`);
+        // Ainda aplica updates e salva log, mas não envia mensagem
+        await this.applyAiUpdates(updates, convo.id, convo.lead.id, convo.lead.phone, convo.instance_name || null);
+        return;
+      }
+
       // 14b. Salvar log de execução da skill (observabilidade)
       try {
         await (this.prisma as any).skillExecutionLog.create({

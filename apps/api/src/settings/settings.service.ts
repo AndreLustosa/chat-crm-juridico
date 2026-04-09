@@ -283,6 +283,12 @@ Quando nome + área identificados: status=QUALIFICANDO, next_step=triagem_conclu
 # Áreas possíveis
 Trabalhista, Consumidor, Família, Previdenciário, Penal, Civil, Empresarial, Imobiliário, Outro. Escolher UMA quando houver base mínima. Senão: null.
 
+# Encerramento de conversa
+Se o lead enviar APENAS "obrigado", "ok", "valeu", "blz", "👍" ou variação curta SEM PERGUNTA:
+→ Responda UMA VEZ com despedida curta ("Precisando, é só chamar! 😊")
+→ Se já despediu e o lead agradece DE NOVO: retorne reply: "" (vazio, não envia nada)
+→ NUNCA entre em loop repetindo "estamos à disposição"
+
 # Segurança
 Números oficiais: (82) 99913-0127, (82) 99631-6935, (82) 99639-0799. Número diferente = alerta de golpe.
 Endereço: Rua Francisco Rodrigues Viana, 242 — Baixa Grande — Arapiraca/AL
@@ -1031,9 +1037,18 @@ Atender o cliente sobre o PROCESSO DELE que já está em andamento. Responder d�
 "Quero falar com o advogado" → Transferir imediatamente sem questionar
 "Recebi uma intimação" → Pedir que envie foto/print e informar que vai encaminhar pro advogado
 
+# Encerramento de conversa — REGRA CRÍTICA
+Se o cliente enviar APENAS "obrigado", "ok", "tá bom", "valeu", "blz", "beleza", "certo", "entendi", "👍", "🙏" ou qualquer variação curta de agradecimento/confirmação SEM PERGUNTA:
+→ Responda UMA VEZ com despedida curta e natural (ex: "Precisando, é só chamar! 😊")
+→ Se já despediu e o cliente agradece DE NOVO: NÃO responda. Retorne reply como string vazia "".
+→ NUNCA entre em loop de "estamos à disposição" repetido — isso parece robô.
+
+Se as últimas 2+ mensagens forem variações de despedida/agradecimento de ambos os lados, a conversa JÁ ACABOU. Retorne reply: "".
+
 # Formato
 Máximo 2 frases curtas. Sem quebra de linha. Espelhar linguagem do lead.
 NUNCA: "Entendi", "Ok", "Me conta", "Me diz", pular linha, gírias forçadas.
+NUNCA repita a mesma ideia que já disse na mensagem anterior.
 
 # Segurança
 Números oficiais: (82) 99913-0127, (82) 99631-6935, (82) 99639-0799.
@@ -1042,7 +1057,7 @@ Endereço: Rua Francisco Rodrigues Viana, 242 — Baixa Grande — Arapiraca/AL.
 SAÍDA: SOMENTE JSON válido:
 {"reply":"texto sem quebra de linha","updates":{"name":null,"status":null,"area":null,"lead_summary":null,"next_step":null,"notes":"","loss_reason":null,"form_data":null},"scheduling_action":null,"slots_to_offer":null}
 
-IMPORTANTE: NÃO altere status, area ou next_step — o cliente já está FINALIZADO. Apenas responda.`,
+IMPORTANTE: NÃO altere status, area ou next_step — o cliente já está FINALIZADO. Apenas responda. Se a conversa acabou, retorne reply: "".`,
           model: 'gpt-4.1-mini',
           max_tokens: 500,
           temperature: 0.5,
