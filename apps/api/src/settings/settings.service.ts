@@ -167,8 +167,10 @@ export class SettingsService {
       isAnthropicKeyConfigured: !!(anthropicKey || process.env.ANTHROPIC_API_KEY),
       defaultModel,
       djenModel,
-      djenPrompt: djenPrompt || null,
-      djenNotifyTemplate: djenNotifyTemplate || null,
+      djenPrompt: djenPrompt || '',
+      djenPromptIsCustom: !!djenPrompt,
+      djenNotifyTemplate: djenNotifyTemplate || '',
+      djenNotifyTemplateIsCustom: !!djenNotifyTemplate,
       adminBotEnabled,
       cooldownSeconds: isNaN(cooldownSeconds) ? 8 : cooldownSeconds,
     };

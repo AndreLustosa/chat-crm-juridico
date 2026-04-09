@@ -165,8 +165,10 @@ export default function AiSettingsPage() {
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
   const [djenModel, setDjenModel] = useState('gpt-4o-mini');
   const [djenPrompt, setDjenPrompt] = useState(DEFAULT_DJEN_PROMPT);
+  const [djenPromptIsCustom, setDjenPromptIsCustom] = useState(false);
   const [showDjenPrompt, setShowDjenPrompt] = useState(false);
   const [djenNotifyTemplate, setDjenNotifyTemplate] = useState(DEFAULT_DJEN_NOTIFY_TEMPLATE);
+  const [djenNotifyTemplateIsCustom, setDjenNotifyTemplateIsCustom] = useState(false);
   const [showDjenNotifyTemplate, setShowDjenNotifyTemplate] = useState(false);
   const [adminBotEnabled, setAdminBotEnabled] = useState(true);
   const [cooldownSeconds, setCooldownSeconds] = useState(8);
@@ -218,7 +220,9 @@ export default function AiSettingsPage() {
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
       setDjenPrompt(configRes.data.djenPrompt || DEFAULT_DJEN_PROMPT);
+      setDjenPromptIsCustom(configRes.data.djenPromptIsCustom ?? false);
       setDjenNotifyTemplate(configRes.data.djenNotifyTemplate || DEFAULT_DJEN_NOTIFY_TEMPLATE);
+      setDjenNotifyTemplateIsCustom(configRes.data.djenNotifyTemplateIsCustom ?? false);
       setAdminBotEnabled(configRes.data.adminBotEnabled ?? true);
       setCooldownSeconds(configRes.data.cooldownSeconds ?? 8);
       setSkills(skillsRes.data);
@@ -238,7 +242,11 @@ export default function AiSettingsPage() {
   const handleSaveConfig = async () => {
     setSavingConfig(true);
     try {
-      const payload: any = { defaultModel, djenModel, djenPrompt, djenNotifyTemplate, adminBotEnabled, cooldownSeconds };
+      // Se prompt/template é igual ao default do código, envia vazio para limpar o banco
+      // Isso garante que atualizações futuras do default no código sejam aplicadas automaticamente
+      const effectiveDjenPrompt = djenPrompt === DEFAULT_DJEN_PROMPT ? '' : djenPrompt;
+      const effectiveDjenNotifyTemplate = djenNotifyTemplate === DEFAULT_DJEN_NOTIFY_TEMPLATE ? '' : djenNotifyTemplate;
+      const payload: any = { defaultModel, djenModel, djenPrompt: effectiveDjenPrompt, djenNotifyTemplate: effectiveDjenNotifyTemplate, adminBotEnabled, cooldownSeconds };
       if (apiKey.trim())       payload.apiKey         = apiKey.trim();
       if (adminKey.trim())     payload.adminKey       = adminKey.trim();
       if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
@@ -505,13 +513,13 @@ export default function AiSettingsPage() {
                       Prompt do sistema enviado à IA ao analisar publicações DJEN. Deixe vazio para usar o prompt padrão.<br />
                       <strong>Atenção:</strong> o retorno deve ser sempre um JSON com os campos obrigatórios (resumo, urgencia, event_type, data_audiencia, data_prazo, etc.).
                     </p>
-                    {djenPrompt !== DEFAULT_DJEN_PROMPT && (
+                    {djenPromptIsCustom && (
                       <button
                         type="button"
-                        onClick={() => setDjenPrompt(DEFAULT_DJEN_PROMPT)}
+                        onClick={() => { setDjenPrompt(DEFAULT_DJEN_PROMPT); setDjenPromptIsCustom(false); }}
                         className="text-[11px] text-destructive hover:underline"
                       >
-                        Restaurar prompt padrão
+                        Restaurar prompt padrão do sistema
                       </button>
                     )}
                   </div>
@@ -554,10 +562,10 @@ export default function AiSettingsPage() {
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{proximo_passo}}'}</code>{' '}
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{orientacao}}'}</code>
                     </p>
-                    {djenNotifyTemplate !== DEFAULT_DJEN_NOTIFY_TEMPLATE && (
+                    {djenNotifyTemplateIsCustom && (
                       <button
                         type="button"
-                        onClick={() => setDjenNotifyTemplate(DEFAULT_DJEN_NOTIFY_TEMPLATE)}
+                        onClick={() => { setDjenNotifyTemplate(DEFAULT_DJEN_NOTIFY_TEMPLATE); setDjenNotifyTemplateIsCustom(false); }}
                         className="text-[11px] text-destructive hover:underline"
                       >
                         Restaurar template padrão
