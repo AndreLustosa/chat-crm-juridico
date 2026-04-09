@@ -144,7 +144,15 @@ Olá {{nome}}! Houve uma nova movimentação no seu processo nº {{processo}}.
 📖 *O que aconteceu:*
 {{resumo}}
 
+📊 *Fase atual do processo:*
+{{fase_processo}}
+
+⏰ *Prazo:* {{prazo}}
+📍 *Local:* {{local_evento}}
+
 ✅ *Próximo passo:* {{proximo_passo}}
+
+💡 *Orientação:* {{orientacao}}
 
 Nosso advogado já foi notificado e está acompanhando. Se tiver dúvidas, pode nos chamar aqui!
 
@@ -532,6 +540,7 @@ export default function AiSettingsPage() {
                     />
                     <p className="text-[11px] text-muted-foreground">
                       Mensagem enviada via WhatsApp ao cliente quando uma publicação DJEN é vinculada ao processo dele.<br />
+                      Linhas com variáveis vazias são removidas automaticamente.<br />
                       <strong>Variáveis:</strong>{' '}
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{nome}}'}</code>{' '}
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{processo}}'}</code>{' '}
@@ -539,7 +548,11 @@ export default function AiSettingsPage() {
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{data}}'}</code>{' '}
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{assunto}}'}</code>{' '}
                       <code className="text-[10px] bg-muted px-1 rounded">{'{{resumo}}'}</code>{' '}
-                      <code className="text-[10px] bg-muted px-1 rounded">{'{{proximo_passo}}'}</code>
+                      <code className="text-[10px] bg-muted px-1 rounded">{'{{fase_processo}}'}</code>{' '}
+                      <code className="text-[10px] bg-muted px-1 rounded">{'{{prazo}}'}</code>{' '}
+                      <code className="text-[10px] bg-muted px-1 rounded">{'{{local_evento}}'}</code>{' '}
+                      <code className="text-[10px] bg-muted px-1 rounded">{'{{proximo_passo}}'}</code>{' '}
+                      <code className="text-[10px] bg-muted px-1 rounded">{'{{orientacao}}'}</code>
                     </p>
                     {djenNotifyTemplate !== DEFAULT_DJEN_NOTIFY_TEMPLATE && (
                       <button

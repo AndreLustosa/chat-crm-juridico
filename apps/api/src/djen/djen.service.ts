@@ -441,7 +441,7 @@ export class DjenService {
           // ─── Notificar lead via WhatsApp com detalhes da movimentação ─────
           this.notifyLeadAboutMovement(
             pub, legalCase, tipoComunicacao, numeroProcesso, dataDisp,
-            assunto, aiResumo, aiAnalysis?.tipo_acao,
+            assunto, aiAnalysis,
           ).catch(e =>
             this.logger.warn(`[DJEN] Falha ao notificar lead: ${e.message}`),
           );
@@ -887,25 +887,33 @@ export class DjenService {
 
     const DEFAULT_DJEN_PROMPT = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos abaixo. Extraia as informações DIRETAMENTE do texto da publicação quando disponíveis — não invente dados.
 
-Campos obrigatórios:
-- resumo: string (máx 3 frases, PT-BR, linguagem direta para o advogado)
+CAMPOS PARA O ADVOGADO (técnicos):
+- resumo: string (máx 3 frases, PT-BR, linguagem técnica para o advogado)
 - urgencia: "URGENTE" | "NORMAL" | "BAIXA"
-- tipo_acao: string (ação concreta que o advogado deve tomar)
+- tipo_acao: string (ação concreta que o ADVOGADO deve tomar)
 - prazo_dias: number (prazo em dias ÚTEIS)
 - estagio_sugerido: string | null (um de: ${STAGES.join(', ')})
 - tarefa_titulo: string (título curto da tarefa)
 - tarefa_descricao: string (descrição da tarefa, máx 200 chars)
-- orientacoes: string (observações estratégicas, máx 300 chars)
-- event_type: "AUDIENCIA" | "PRAZO" | "TAREFA" (AUDIENCIA se há audiência/sessão/julgamento com data marcada no texto; PRAZO se há prazo processual para o advogado cumprir; TAREFA para outros casos)
+- orientacoes: string (observações estratégicas para o advogado, máx 300 chars)
+- event_type: "AUDIENCIA" | "PRAZO" | "TAREFA"
 
-Campos de extração (null se não encontrado no texto):
-- parte_autora: string | null (nome do autor/requerente/exequente)
-- parte_rea: string | null (nome do réu/requerido/executado)
-- juizo: string | null (vara, juízo ou tribunal onde tramita)
+CAMPOS PARA O CLIENTE (linguagem acessível — serão enviados via WhatsApp):
+- resumo_cliente: string (síntese da publicação para leigo, linguagem clara e completa, sem termos jurídicos complexos. Deve explicar o conteúdo integral da publicação de forma que o cliente entenda o que aconteceu. Máx 5 frases.)
+- proximo_passo_cliente: string | null (o que o CLIENTE precisa saber/fazer agora, em linguagem simples. Ex: "Seu advogado vai preparar a defesa dentro do prazo", "Você precisará comparecer à audiência", "Nenhuma ação sua é necessária no momento". NÃO usar linguagem técnica do advogado.)
+- fase_processo_cliente: string | null (explicação da fase atual do processo para leigo. Ex: "Seu processo está na fase de instrução, onde são ouvidas testemunhas e produzidas provas", "Seu processo está na fase de recurso, aguardando decisão do tribunal superior")
+- orientacao_cliente: string | null (orientações práticas para o cliente, se aplicável. Ex: "Separe documentos originais e compareça 30min antes", "Caso receba algum contato estranho sobre o processo, nos avise imediatamente". Null se não há orientação específica.)
+- prazo_cliente: string | null (prazo em linguagem acessível. Ex: "O advogado tem até 15 dias úteis para tomar providências", "A audiência está marcada para 20/05/2026 às 14h". Null se não há prazo.)
+- local_evento: string | null (endereço ou link do local do evento se audiência/perícia. Se virtual, informar plataforma/link. Se presencial, informar endereço. Extrair do texto da publicação se disponível. Null se não aplicável.)
+
+CAMPOS DE EXTRAÇÃO (null se não encontrado no texto):
+- parte_autora: string | null
+- parte_rea: string | null
+- juizo: string | null (vara, juízo ou tribunal)
 - area_juridica: string | null (ex: "Trabalhista", "Cível", "Previdenciário", "Criminal", "Consumidor", "Família", "Tributário")
-- valor_causa: string | null (valor da causa se mencionado, formato "R$ X.XXX,XX")
-- data_audiencia: string | null (data e hora da audiência/sessão/perícia se mencionada EXPLICITAMENTE NO TEXTO, formato ISO "YYYY-MM-DDTHH:MM:00". IMPORTANTE: se a publicação for de perícia previdenciária (INSS) e não constar data no texto, retorne null — NÃO calcule nem invente data. Retorne null também se não for publicação de audiência ou perícia.)
-- data_prazo: string | null (data limite do prazo processual se mencionada NO TEXTO, formato ISO "YYYY-MM-DDTHH:MM:00", null se não houver prazo com data explícita)
+- valor_causa: string | null (formato "R$ X.XXX,XX")
+- data_audiencia: string | null (formato ISO "YYYY-MM-DDTHH:MM:00". IMPORTANTE: se perícia previdenciária (INSS) sem data no texto, retorne null — NÃO invente.)
+- data_prazo: string | null (formato ISO "YYYY-MM-DDTHH:MM:00", null se não houver prazo explícito)
 
 Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada, perícia designada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
 Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, perícia/laudo/perito designado→PERICIA_AGENDADA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.
@@ -1189,6 +1197,7 @@ ${pub.conteudo.slice(0, 2000)}`;
 
   /**
    * Envia notificação WhatsApp ao lead quando publicação é vinculada a seu processo.
+   * Usa campos orientados ao cliente gerados pela IA (resumo_cliente, proximo_passo_cliente, etc.)
    * Controles: horário comercial, deduplica por publicação, setting habilitável.
    */
   private async notifyLeadAboutMovement(
@@ -1198,8 +1207,7 @@ ${pub.conteudo.slice(0, 2000)}`;
     numeroProcesso: string,
     dataDisp: Date,
     assunto?: string | null,
-    aiResumo?: string | null,
-    tipoAcao?: string | null,
+    aiAnalysis?: any | null,
   ): Promise<void> {
     // Já notificou para esta publicação
     if (pub.client_notified_at) return;
@@ -1221,7 +1229,7 @@ ${pub.conteudo.slice(0, 2000)}`;
 
     if (!isBusinessHours) {
       this.logger.log(`[DJEN] Notificação adiada (fora do horário comercial) para lead ${lead.id}`);
-      return; // Próximo sync diário às 8h cuidará
+      return;
     }
 
     // Buscar instância WhatsApp do lead (da última conversa)
@@ -1232,41 +1240,52 @@ ${pub.conteudo.slice(0, 2000)}`;
     });
     const instance = lastConvo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
 
-    // Montar mensagem usando template customizável
+    // Extrair campos da análise IA
     const nome = lead.name?.split(' ')[0] || 'cliente';
     const dataFmt = dataDisp.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const tipo = tipoComunicacao || 'Publicação';
     const processoFmt = numeroProcesso.length > 20 ? numeroProcesso.slice(0, 20) + '…' : numeroProcesso;
+
+    // Campos orientados ao CLIENTE (gerados pela IA)
+    const resumoCliente = aiAnalysis?.resumo_cliente || aiAnalysis?.resumo || '';
+    const proximoPassoCliente = aiAnalysis?.proximo_passo_cliente || '';
+    const faseProcessoCliente = aiAnalysis?.fase_processo_cliente || '';
+    const orientacaoCliente = aiAnalysis?.orientacao_cliente || '';
+    const prazoCliente = aiAnalysis?.prazo_cliente || '';
+    const localEvento = aiAnalysis?.local_evento || '';
 
     const customTemplate = await this.settings.getDjenNotifyTemplate();
 
     let message: string;
 
     if (customTemplate) {
-      // Template customizado: substituir variáveis e remover linhas com variáveis vazias
+      // Template customizado: substituir variáveis
       const vars: Record<string, string> = {
         '{{nome}}': nome,
         '{{processo}}': processoFmt,
         '{{tipo}}': tipo,
         '{{data}}': dataFmt,
         '{{assunto}}': assunto || '',
-        '{{resumo}}': aiResumo || '',
-        '{{proximo_passo}}': tipoAcao || '',
+        '{{resumo}}': resumoCliente,
+        '{{proximo_passo}}': proximoPassoCliente,
+        '{{fase_processo}}': faseProcessoCliente,
+        '{{orientacao}}': orientacaoCliente,
+        '{{prazo}}': prazoCliente,
+        '{{local_evento}}': localEvento,
       };
 
       message = customTemplate;
       for (const [key, val] of Object.entries(vars)) {
         message = message.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), val);
       }
-      // Remove linhas que contêm apenas espaços em branco (resultado de variáveis vazias)
+      // Remove linhas com variáveis vazias e colapsa quebras consecutivas
       message = message
         .split('\n')
         .filter(line => line.trim() !== '' || line === '')
         .join('\n')
-        // Colapsa 3+ quebras de linha consecutivas em 2
         .replace(/\n{3,}/g, '\n\n');
     } else {
-      // Template padrão (fallback hardcoded)
+      // Template padrão (fallback) — orientado ao cliente
       const lines = [
         `⚖️ *Movimentação no seu processo*`,
         ``,
@@ -1275,21 +1294,38 @@ ${pub.conteudo.slice(0, 2000)}`;
         `📋 *Tipo:* ${tipo}`,
       ];
 
-      if (assunto) {
-        lines.push(`📝 *Assunto:* ${assunto}`);
-      }
-
+      if (assunto) lines.push(`📝 *Assunto:* ${assunto}`);
       lines.push(`📅 *Data:* ${dataFmt}`);
 
-      if (aiResumo) {
+      if (resumoCliente) {
         lines.push(``);
         lines.push(`📖 *O que aconteceu:*`);
-        lines.push(aiResumo);
+        lines.push(resumoCliente);
       }
 
-      if (tipoAcao) {
+      if (faseProcessoCliente) {
         lines.push(``);
-        lines.push(`✅ *Próximo passo:* ${tipoAcao}`);
+        lines.push(`📊 *Fase atual do processo:*`);
+        lines.push(faseProcessoCliente);
+      }
+
+      if (prazoCliente) {
+        lines.push(``);
+        lines.push(`⏰ *Prazo:* ${prazoCliente}`);
+      }
+
+      if (localEvento) {
+        lines.push(`📍 *Local:* ${localEvento}`);
+      }
+
+      if (proximoPassoCliente) {
+        lines.push(``);
+        lines.push(`✅ *Próximo passo:* ${proximoPassoCliente}`);
+      }
+
+      if (orientacaoCliente) {
+        lines.push(``);
+        lines.push(`💡 *Orientação:* ${orientacaoCliente}`);
       }
 
       lines.push(``);
@@ -1303,7 +1339,6 @@ ${pub.conteudo.slice(0, 2000)}`;
     try {
       await this.whatsappService.sendText(lead.phone, message, instance);
 
-      // Marcar como notificado
       await this.prisma.djenPublication.update({
         where: { id: pub.id },
         data: { client_notified_at: new Date() },
