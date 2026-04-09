@@ -319,14 +319,18 @@ export class ConversationsService {
   async setAiMode(id: string, ai_mode: boolean): Promise<Conversation> {
     return this.prisma.conversation.update({
       where: { id },
-      data: { ai_mode },
+      data: {
+        ai_mode,
+        // Registra timestamp quando desligou; limpa quando religou
+        ai_mode_disabled_at: ai_mode ? null : new Date(),
+      },
     });
   }
 
   async assign(id: string, userId: string): Promise<Conversation> {
     return this.prisma.conversation.update({
       where: { id },
-      data: { assigned_user_id: userId, ai_mode: false },
+      data: { assigned_user_id: userId, ai_mode: false, ai_mode_disabled_at: new Date() },
     });
   }
 
@@ -440,6 +444,7 @@ export class ConversationsService {
             assigned_user_id: userId,
             origin_assigned_user_id: current.pending_transfer_from_id,
             ai_mode: false,
+            ai_mode_disabled_at: new Date(),
             pending_transfer_to_id: null,
             pending_transfer_from_id: null,
             pending_transfer_reason: null,
@@ -595,6 +600,7 @@ export class ConversationsService {
           assigned_user_id: conv.origin_assigned_user_id,
           origin_assigned_user_id: null,
           ai_mode: false,
+          ai_mode_disabled_at: new Date(),
           linked_agent_ids: { push: linkedIds },
         },
       });

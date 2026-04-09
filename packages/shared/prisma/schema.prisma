@@ -136,6 +136,7 @@ model Conversation {
   external_id                String?
   status                     String              @default("ABERTO")
   ai_mode                    Boolean             @default(true)
+  ai_mode_disabled_at        DateTime?           // Timestamp de quando ai_mode foi desligado (para auto-reativação)
   assigned_user_id           String?
   inbox_id                   String?
   instance_name              String? // Nome da instancia de origem (ex: wa1)
