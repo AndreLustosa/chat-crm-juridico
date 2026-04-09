@@ -901,6 +901,21 @@ export default function AgendaPage() {
     }
   };
 
+  const [sendingNotify, setSendingNotify] = useState(false);
+
+  const handleNotify = async () => {
+    if (!editingEvent) return;
+    setSendingNotify(true);
+    try {
+      const res = await api.post(`/calendar/events/${editingEvent.id}/notify`);
+      showSuccess(res.data?.message || 'Notificação WhatsApp enviada ao cliente!');
+    } catch (e: any) {
+      showError(e?.response?.data?.message || e?.message || 'Erro ao reenviar notificação');
+    } finally {
+      setSendingNotify(false);
+    }
+  };
+
   const handleDuplicate = () => {
     if (!editingEvent) return;
     setShowModal(false);
@@ -1957,6 +1972,16 @@ export default function AgendaPage() {
                     title="Exportar .ics"
                   >
                     <Download size={12} /> .ics
+                  </button>
+                )}
+                {editingEvent && ['AUDIENCIA', 'PERICIA'].includes(editingEvent.type) && (
+                  <button
+                    onClick={handleNotify}
+                    disabled={sendingNotify}
+                    className="px-3 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-lg transition-colors inline-flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
+                    title="Reenviar notificação WhatsApp ao cliente"
+                  >
+                    <Bell size={12} /> {sendingNotify ? 'Enviando…' : 'Notificar'}
                   </button>
                 )}
               </div>

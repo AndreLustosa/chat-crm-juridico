@@ -1121,4 +1121,63 @@ export class CalendarService {
 
     return { orphanTasksMigrated: migrated, commentsMigrated };
   }
+
+  // ─── Re-envio manual de notificação ──────────────────────────────────────────
+
+  async notifyEvent(eventId: string): Promise<{ queued: boolean; message: string }> {
+    const event = await this.prisma.calendarEvent.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        title: true,
+        lead: { select: { phone: true } },
+      },
+    });
+
+    if (!event) {
+      throw new NotFoundException(`Evento ${eventId} não encontrado`);
+    }
+
+    if (!['AUDIENCIA', 'PERICIA'].includes(event.type)) {
+      throw new BadRequestException(
+        `Notificação manual disponível apenas para Audiência e Perícia (tipo atual: ${event.type})`,
+      );
+    }
+
+    if (!event.lead?.phone) {
+      throw new BadRequestException(
+        'Cliente vinculado ao evento não possui telefone cadastrado',
+      );
+    }
+
+    if (['CANCELADO', 'CONCLUIDO'].includes(event.status)) {
+      throw new BadRequestException(
+        `Evento está ${event.status} — notificação não enviada`,
+      );
+    }
+
+    // Remove job pendente anterior para evitar duplicata
+    try {
+      const existing = await this.reminderQueue.getJob(`hearing-notify-${eventId}`);
+      if (existing) await existing.remove();
+    } catch {}
+
+    // Enfileira sem delay (envio imediato)
+    await this.reminderQueue.add(
+      'notify-hearing-scheduled',
+      { eventId },
+      {
+        jobId: `hearing-notify-manual-${eventId}-${Date.now()}`,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+
+    this.logger.log(`[NOTIFY] Re-envio manual enfileirado para evento ${eventId} (${event.type}: "${event.title}")`);
+    return { queued: true, message: `Notificação de ${event.type === 'PERICIA' ? 'perícia' : 'audiência'} enfileirada com sucesso` };
+  }
 }

@@ -92,6 +92,11 @@ export class CalendarController {
     return this.calendarService.updateStatus(id, status);
   }
 
+  @Post('events/:id/notify')
+  async notifyEvent(@Param('id') id: string) {
+    return this.calendarService.notifyEvent(id);
+  }
+
   @Delete('events/:id')
   async remove(
     @Param('id') id: string,
