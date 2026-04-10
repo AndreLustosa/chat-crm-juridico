@@ -1504,19 +1504,50 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         const role: 'user' | 'assistant' = isClient ? 'user' : 'assistant';
 
         // Imagem do cliente + modelo suporta visão → incluir inline no turn
-        if (isClient && (m as any).type === 'image' && (m as any).media?.s3_key && supportsVision) {
-          try {
-            const { buffer, contentType } = await this.s3.getObjectBuffer((m as any).media.s3_key);
-            const mimeBase = contentType.split(';')[0].trim();
-            const base64 = buffer.toString('base64');
-            const imageBlock = { type: 'image_url', image_url: { url: `data:${mimeBase};base64,${base64}` } };
-            const textBlock = { type: 'text', text: (m as any).text || '[imagem enviada pelo cliente]' };
-            // Imagens nunca são mescladas com outros turns — sempre novo turn
-            chatTurns.push({ role, content: [imageBlock, textBlock] });
-            this.logger.log(`[AI] Imagem ${(m as any).id} incluída inline no chatTurn (${(buffer.length / 1024).toFixed(0)}KB)`);
-            continue;
-          } catch (e: any) {
-            this.logger.warn(`[AI] Falha ao carregar imagem ${(m as any).id} inline: ${e.message}`);
+        // Se media ainda não chegou (race condition com media job), aguarda com polling.
+        if (isClient && (m as any).type === 'image' && supportsVision) {
+          let mediaRecord = (m as any).media ?? null;
+
+          if (!mediaRecord?.s3_key) {
+            const msgAge = Date.now() - new Date((m as any).created_at).getTime();
+            const isRecent = msgAge < 2 * 60 * 1000;
+            if (isRecent) {
+              // Polling: fase rápida (5×500ms) + fase lenta (6×2000ms) = até 14.5s
+              const phases = [
+                { attempts: 5, delay: 500 },
+                { attempts: 6, delay: 2000 },
+              ];
+              outer: for (const phase of phases) {
+                for (let attempt = 1; attempt <= phase.attempts; attempt++) {
+                  await new Promise((r) => setTimeout(r, phase.delay));
+                  const found = await this.prisma.media.findFirst({
+                    where: { message_id: (m as any).id },
+                  });
+                  if (found?.s3_key) {
+                    mediaRecord = found;
+                    break outer;
+                  }
+                  this.logger.log(
+                    `[AI] Aguardando mídia de imagem para msg ${(m as any).id} (delay=${phase.delay}ms tentativa ${attempt}/${phase.attempts})...`,
+                  );
+                }
+              }
+            }
+          }
+
+          if (mediaRecord?.s3_key) {
+            try {
+              const { buffer, contentType } = await this.s3.getObjectBuffer(mediaRecord.s3_key);
+              const mimeBase = contentType.split(';')[0].trim();
+              const base64 = buffer.toString('base64');
+              const imageBlock = { type: 'image_url', image_url: { url: `data:${mimeBase};base64,${base64}` } };
+              const textBlock = { type: 'text', text: (m as any).text || '[imagem enviada pelo cliente]' };
+              chatTurns.push({ role, content: [imageBlock, textBlock] });
+              this.logger.log(`[AI] Imagem ${(m as any).id} incluída inline no chatTurn (${(buffer.length / 1024).toFixed(0)}KB)`);
+              continue;
+            } catch (e: any) {
+              this.logger.warn(`[AI] Falha ao carregar imagem ${(m as any).id} inline: ${e.message}`);
+            }
           }
         }
 
