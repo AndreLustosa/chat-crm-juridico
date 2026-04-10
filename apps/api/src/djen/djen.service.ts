@@ -218,6 +218,12 @@ export class DjenService {
     let errors = 0;
     let tasksCreated = 0;
 
+    // Carregar processos ignorados (renúncia) — 1 query antes do loop
+    const ignoredRows = await this.prisma.djenIgnoredProcess.findMany({
+      select: { numero_processo: true },
+    });
+    const ignoredSet = new Set(ignoredRows.map((r: any) => r.numero_processo));
+
     for (const item of items) {
       try {
         const comunicacaoId = item.id ?? item.idComunicacao ?? item.comunicacaoId;
@@ -231,13 +237,13 @@ export class DjenService {
 
         // Tenta vincular ao LegalCase pelo número do processo
         let legalCaseId: string | null = null;
-        let legalCase: { id: string; lawyer_id: string; tenant_id: string | null; lead?: { id: string; name: string | null; phone: string } | null } | null = null;
+        let legalCase: { id: string; lawyer_id: string; tenant_id: string | null; renounced: boolean; lead?: { id: string; name: string | null; phone: string } | null } | null = null;
 
         if (numeroProcesso) {
           legalCase = await this.prisma.legalCase.findFirst({
             where: { case_number: numeroProcesso, in_tracking: true },
             select: {
-              id: true, lawyer_id: true, tenant_id: true,
+              id: true, lawyer_id: true, tenant_id: true, renounced: true,
               lead: { select: { id: true, name: true, phone: true } },
             },
           });
@@ -270,8 +276,19 @@ export class DjenService {
         });
         saved++;
 
+        // Auto-arquivar publicações de processos renunciados ou ignorados
+        const shouldAutoArchive =
+          (legalCase?.renounced) || ignoredSet.has(numeroProcesso);
+        if (shouldAutoArchive && !pub.archived) {
+          await this.prisma.djenPublication.update({
+            where: { id: pub.id },
+            data: { archived: true, viewed_at: pub.viewed_at || new Date() },
+          });
+          this.logger.log(`[DJEN] Publicação ${pub.id} auto-arquivada (processo renunciado/ignorado: ${numeroProcesso})`);
+        }
+
         // ─── Notificações e memória ─────
-        if (legalCase && pub) {
+        if (legalCase && pub && !shouldAutoArchive) {
           /*
            * Auto-criação de tarefas DESATIVADA — o advogado cria manualmente.
            * Para reativar, descomentar o bloco abaixo.
@@ -1456,5 +1473,43 @@ ${pub.conteudo.slice(0, 2000)}`;
       is_client: r.is_client,
       score: Number(r.score),
     }));
+  }
+
+  // ─── Ignorar processo (auto-arquivar publicações futuras) ─────
+
+  async ignoreProcess(numeroProcesso: string, tenantId?: string, reason?: string) {
+    const record = await this.prisma.djenIgnoredProcess.upsert({
+      where: { numero_processo: numeroProcesso },
+      update: { reason: reason || null },
+      create: {
+        numero_processo: numeroProcesso,
+        tenant_id: tenantId || null,
+        reason: reason || null,
+      },
+    });
+
+    // Auto-arquivar publicações existentes desse número
+    const archived = await this.prisma.djenPublication.updateMany({
+      where: { numero_processo: numeroProcesso, archived: false },
+      data: { archived: true, viewed_at: new Date() },
+    });
+
+    this.logger.log(`[DJEN] Processo ${numeroProcesso} ignorado — ${archived.count} publicação(ões) arquivada(s)`);
+    return { ...record, archivedCount: archived.count };
+  }
+
+  async unignoreProcess(numeroProcesso: string) {
+    await this.prisma.djenIgnoredProcess.delete({
+      where: { numero_processo: numeroProcesso },
+    }).catch(() => null); // Ignora se não existir
+    this.logger.log(`[DJEN] Processo ${numeroProcesso} removido da lista de ignorados`);
+    return { ok: true };
+  }
+
+  async listIgnoredProcesses(tenantId?: string) {
+    return this.prisma.djenIgnoredProcess.findMany({
+      where: tenantId ? { tenant_id: tenantId } : {},
+      orderBy: { created_at: 'desc' },
+    });
   }
 }

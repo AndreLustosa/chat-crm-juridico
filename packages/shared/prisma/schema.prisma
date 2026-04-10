@@ -34,6 +34,7 @@ model Tenant {
   notas_fiscais             NotaFiscal[]
   tax_records               TaxRecord[]
   broadcast_jobs            BroadcastJob[]
+  djen_ignored_processes    DjenIgnoredProcess[]
 }
 
 model User {
@@ -488,6 +489,8 @@ model LegalCase {
   filed_at         DateTime? // quando foi protocolado/ajuizado
   archived         Boolean   @default(false)
   archive_reason   String?
+  renounced        Boolean   @default(false) // renúncia: advogado não atua mais no processo
+  renounced_at     DateTime?
   notes            String?
   court            String?
   action_type      String? // Tipo de ação (Reclamatória Trabalhista, Indenizatória, etc.)
@@ -610,6 +613,17 @@ model DjenPublication {
   @@index([legal_case_id])
   @@index([viewed_at])
   @@index([archived])
+}
+
+model DjenIgnoredProcess {
+  id              String   @id @default(uuid())
+  numero_processo String   @unique
+  tenant_id       String?
+  reason          String?
+  created_at      DateTime @default(now())
+  tenant          Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id])
 }
 
 // ===============================================

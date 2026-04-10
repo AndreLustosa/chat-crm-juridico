@@ -8,7 +8,7 @@ import {
   ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
   ArrowRight, CheckSquare, AlertCircle, ChevronDown,
-  Search, User, UserCheck, Scale,
+  Search, User, UserCheck, Scale, Ban,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -916,6 +916,7 @@ function PublicationCard({
   onArchive,
   onUnarchive,
   onCreateProcess,
+  onIgnoreProcess,
 }: {
   pub: DjenPublication;
   isSelected: boolean;
@@ -924,6 +925,7 @@ function PublicationCard({
   onArchive: (id: string) => Promise<void>;
   onUnarchive: (id: string) => Promise<void>;
   onCreateProcess: (id: string, analysis?: AiAnalysis | null) => void;
+  onIgnoreProcess: (numeroProcesso: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
@@ -1052,6 +1054,16 @@ function PublicationCard({
               >
                 <Plus size={10} />
                 Criar Processo
+              </button>
+            )}
+            {!pub.archived && pub.numero_processo && (
+              <button
+                disabled={loading === 'ignore'}
+                onClick={() => handle('ignore', () => onIgnoreProcess(pub.numero_processo))}
+                className="flex items-center gap-1 text-[10px] font-semibold text-red-400 px-2 py-1 rounded border border-red-500/30 hover:bg-red-500/5 transition-colors disabled:opacity-50"
+              >
+                {loading === 'ignore' ? <Loader2 size={10} className="animate-spin" /> : <Ban size={10} />}
+                Ignorar processo
               </button>
             )}
             {isUnread && (
@@ -1418,6 +1430,17 @@ function DjenPageContent() {
     setPubs(prev => prev.filter(p => p.id !== id));
   };
 
+  const handleIgnoreProcess = async (numeroProcesso: string) => {
+    await api.post('/djen/ignore-process', { numero_processo: numeroProcesso });
+    // Remover todas as publicações desse número da lista atual
+    setPubs(prev => prev.filter(p => p.numero_processo !== numeroProcesso));
+    setTotal(c => {
+      const removed = pubs.filter(p => p.numero_processo === numeroProcesso).length;
+      return Math.max(0, c - removed);
+    });
+    if (selectedPub?.numero_processo === numeroProcesso) setSelectedPub(null);
+  };
+
   // Abre o modal de criação, com análise IA opcional já carregada (do AiPanel)
   const handleOpenCreateModal = (id: string, analysis?: AiAnalysis | null) => {
     const pub = pubs.find(p => p.id === id);
@@ -1567,6 +1590,7 @@ function DjenPageContent() {
                   onArchive={handleArchive}
                   onUnarchive={handleUnarchive}
                   onCreateProcess={handleOpenCreateModal}
+                  onIgnoreProcess={handleIgnoreProcess}
                 />
               ))}
             </div>

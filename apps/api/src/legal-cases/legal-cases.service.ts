@@ -475,6 +475,33 @@ export class LegalCasesService {
     return legalCase;
   }
 
+  // ─── RENOUNCE (renúncia — advogado não atua mais) ──────────
+
+  async renounce(id: string, tenantId?: string) {
+    await this.verifyTenantOwnership(id, tenantId);
+    const legalCase = await this.prisma.legalCase.update({
+      where: { id },
+      data: { renounced: true, renounced_at: new Date() },
+    });
+
+    // Auto-arquivar publicações DJEN existentes desse caso
+    const archived = await this.prisma.djenPublication.updateMany({
+      where: { legal_case_id: id, archived: false },
+      data: { archived: true, viewed_at: new Date() },
+    });
+
+    this.logger.log(`[RENOUNCE] Caso ${id} marcado como renunciado — ${archived.count} publicação(ões) arquivada(s)`);
+    return legalCase;
+  }
+
+  async unrenounce(id: string, tenantId?: string) {
+    await this.verifyTenantOwnership(id, tenantId);
+    return this.prisma.legalCase.update({
+      where: { id },
+      data: { renounced: false, renounced_at: null },
+    });
+  }
+
   async findPendingClosure(tenantId?: string) {
     return this.prisma.legalCase.findMany({
       where: {

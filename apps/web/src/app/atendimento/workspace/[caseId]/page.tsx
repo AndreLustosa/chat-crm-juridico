@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, FileText, CalendarDays, Clock, MessageSquare, Activity,
   Loader2, AlertTriangle, ClipboardList, FileSignature, BookOpen,
-  DollarSign, Archive, ArchiveRestore, Send,
+  DollarSign, Archive, ArchiveRestore, Send, Ban, Undo2,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -34,6 +34,7 @@ interface WorkspaceData {
   filed_at: string | null;
   archived: boolean;
   archive_reason: string | null;
+  renounced: boolean;
   notes: string | null;
   court: string | null;
   action_type: string | null;
@@ -237,6 +238,26 @@ export default function WorkspacePage() {
     }
   };
 
+  const handleRenounce = async () => {
+    try {
+      await api.patch(`/legal-cases/${caseId}/renounce`);
+      showSuccess('Renúncia registrada — publicações DJEN serão auto-arquivadas');
+      fetchWorkspace();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao renunciar');
+    }
+  };
+
+  const handleUnrenounce = async () => {
+    try {
+      await api.patch(`/legal-cases/${caseId}/unrenounce`);
+      showSuccess('Renúncia desfeita');
+      fetchWorkspace();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao desfazer renúncia');
+    }
+  };
+
   const clientName = data.lead?.name || 'Cliente sem nome';
   const stageLabel = data.in_tracking ? (data.tracking_stage || data.stage) : data.stage;
   const currentStages = data.in_tracking ? TRACKING_STAGES : LEGAL_STAGES;
@@ -264,6 +285,11 @@ export default function WorkspacePage() {
             {data.legal_area && (
               <span className="badge badge-outline badge-sm whitespace-nowrap">
                 {data.legal_area}
+              </span>
+            )}
+            {data.renounced && (
+              <span className="badge badge-error badge-sm whitespace-nowrap gap-1">
+                <Ban className="h-3 w-3" /> Renunciado
               </span>
             )}
           </div>
@@ -326,6 +352,26 @@ export default function WorkspacePage() {
             >
               <Archive className="h-3 w-3" />
               Arquivar
+            </button>
+          )}
+
+          {data.renounced ? (
+            <button
+              onClick={handleUnrenounce}
+              className="btn btn-xs btn-outline btn-info gap-1"
+              title="Desfazer renúncia"
+            >
+              <Undo2 className="h-3 w-3" />
+              Desfazer renúncia
+            </button>
+          ) : (
+            <button
+              onClick={handleRenounce}
+              className="btn btn-xs btn-outline btn-error gap-1"
+              title="Marcar que não é mais advogado deste processo — publicações DJEN serão auto-arquivadas"
+            >
+              <Ban className="h-3 w-3" />
+              Renunciar
             </button>
           )}
         </div>

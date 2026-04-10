@@ -193,6 +193,16 @@ export class LegalCasesController {
     return this.service.unarchive(id, req.user?.tenant_id);
   }
 
+  @Patch(':id/renounce')
+  renounce(@Param('id') id: string, @Request() req: any) {
+    return this.service.renounce(id, req.user?.tenant_id);
+  }
+
+  @Patch(':id/unrenounce')
+  unrenounce(@Param('id') id: string, @Request() req: any) {
+    return this.service.unrenounce(id, req.user?.tenant_id);
+  }
+
   @Patch(':id/case-number')
   setCaseNumber(@Param('id') id: string, @Body() body: { caseNumber: string; court?: string }, @Request() req: any) {
     return this.service.setCaseNumber(id, body.caseNumber, body.court, req.user?.tenant_id);

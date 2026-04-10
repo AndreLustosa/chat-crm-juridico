@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Query, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Query, Param, UseGuards, Request } from '@nestjs/common';
 import { DjenService } from './djen.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -101,5 +101,25 @@ export class DjenController {
   @Get(':id/suggest-leads')
   suggestLeads(@Param('id') id: string, @Request() req: any) {
     return this.djenService.suggestLeads(id, req.user?.tenant_id);
+  }
+
+  // ─── Ignorar processo (auto-arquivar publicações futuras) ─────
+
+  /** Ignorar processo — publicações futuras serão auto-arquivadas */
+  @Post('ignore-process')
+  ignoreProcess(@Body() body: { numero_processo: string; reason?: string }, @Request() req: any) {
+    return this.djenService.ignoreProcess(body.numero_processo, req.user?.tenant_id, body.reason);
+  }
+
+  /** Remover processo da lista de ignorados */
+  @Delete('ignore-process/:numero')
+  unignoreProcess(@Param('numero') numero: string) {
+    return this.djenService.unignoreProcess(numero);
+  }
+
+  /** Listar processos ignorados */
+  @Get('ignored-processes')
+  listIgnoredProcesses(@Request() req: any) {
+    return this.djenService.listIgnoredProcesses(req.user?.tenant_id);
   }
 }
