@@ -28,12 +28,14 @@ interface DjenPublication {
   legal_case_id: string | null;
   viewed_at: string | null;
   archived: boolean;
+  ignored: boolean;
   auto_task_id: string | null;
   legal_case?: {
     id: string;
     case_number: string | null;
     legal_area: string | null;
     tracking_stage: string | null;
+    renounced: boolean;
     lead: { name: string | null };
   } | null;
   created_at: string;
@@ -973,14 +975,19 @@ function PublicationCard({
                 {pub.tipo_comunicacao}
               </span>
             )}
-            {!pub.legal_case_id && !pub.archived && (
+            {!pub.legal_case_id && !pub.archived && !pub.ignored && (
               <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 flex items-center gap-0.5">
                 <AlertTriangle size={8} /> Não vinculado
               </span>
             )}
-            {pub.legal_case_id && (
+            {pub.legal_case_id && !pub.ignored && (
               <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 flex items-center gap-0.5">
                 <Link2 size={8} /> Vinculado
+              </span>
+            )}
+            {pub.ignored && (
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-red-500/10 text-red-400 flex items-center gap-0.5">
+                <Ban size={8} /> Não sou mais advogado
               </span>
             )}
             {pub.auto_task_id && (
@@ -1056,14 +1063,14 @@ function PublicationCard({
                 Criar Processo
               </button>
             )}
-            {!pub.archived && pub.numero_processo && (
+            {!pub.archived && !pub.ignored && pub.numero_processo && (
               <button
                 disabled={loading === 'ignore'}
                 onClick={() => handle('ignore', () => onIgnoreProcess(pub.numero_processo))}
                 className="flex items-center gap-1 text-[10px] font-semibold text-red-400 px-2 py-1 rounded border border-red-500/30 hover:bg-red-500/5 transition-colors disabled:opacity-50"
               >
                 {loading === 'ignore' ? <Loader2 size={10} className="animate-spin" /> : <Ban size={10} />}
-                Ignorar processo
+                Não sou mais advogado
               </button>
             )}
             {isUnread && (

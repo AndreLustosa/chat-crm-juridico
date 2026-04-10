@@ -575,6 +575,7 @@ export class DjenService {
               case_number: true,
               legal_area: true,
               tracking_stage: true,
+              renounced: true,
               lead: { select: { name: true } },
             },
           },
@@ -590,7 +591,18 @@ export class DjenService {
       where: { viewed_at: null, archived: false },
     });
 
-    return { items, total, page, limit, unreadCount };
+    // Enriquecer com flag "ignored" para publicações de processos na lista de ignorados
+    const ignoredRows = await this.prisma.djenIgnoredProcess.findMany({
+      select: { numero_processo: true },
+    });
+    const ignoredSet = new Set(ignoredRows.map((r: any) => r.numero_processo));
+
+    const enrichedItems = items.map((item: any) => ({
+      ...item,
+      ignored: ignoredSet.has(item.numero_processo) || (item.legal_case as any)?.renounced === true,
+    }));
+
+    return { items: enrichedItems, total, page, limit, unreadCount };
   }
 
   async findByCase(legalCaseId: string) {
