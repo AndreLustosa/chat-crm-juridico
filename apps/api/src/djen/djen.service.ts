@@ -914,39 +914,53 @@ export class DjenService {
       'INSTRUCAO', 'JULGAMENTO', 'RECURSO', 'TRANSITADO', 'EXECUCAO', 'ENCERRADO',
     ];
 
-    const DEFAULT_DJEN_PROMPT = `Você é um assistente jurídico especializado em análise de publicações do DJEN (Diário da Justiça Eletrônico) brasileiro. Analise a publicação e retorne um JSON com os campos abaixo. Extraia as informações DIRETAMENTE do texto da publicação quando disponíveis — não invente dados.
+    const DEFAULT_DJEN_PROMPT = `Você é um advogado sênior analisando publicações do DJEN. Seu trabalho é ler o conteúdo COMPLETO da publicação e retornar um JSON que permita ao advogado entender tudo sem precisar ler o texto original.
 
-CAMPOS PARA O ADVOGADO (técnicos):
-- resumo: string (máx 3 frases, PT-BR, linguagem técnica para o advogado)
+CAMPOS PARA O ADVOGADO:
+
+- resumo: string — Resumo COMPLETO e detalhado da publicação. Inclua: o que foi decidido/determinado, fundamentação legal citada, valores mencionados, prazos, consequências práticas. O advogado NÃO vai ler o texto original — seu resumo é a única fonte. Mínimo 5 frases, sem limite máximo. Linguagem técnica.
+
 - urgencia: "URGENTE" | "NORMAL" | "BAIXA"
-- tipo_acao: string (ação concreta que o ADVOGADO deve tomar)
-- prazo_dias: number (prazo em dias ÚTEIS)
+
+- tipo_acao: string — Ação CONCRETA e ESPECÍFICA que o advogado deve tomar. NÃO escreva "verificar publicação" ou "analisar sentença". Escreva exatamente o que fazer:
+  Exemplos BONS: "Interpor recurso inominado no prazo de 10 dias úteis", "Apresentar contrarrazões em 15 dias", "Nenhuma ação necessária — sentença favorável, aguardar trânsito em julgado", "Peticionar habilitação do crédito na execução", "Agendar perícia e preparar quesitos"
+  Exemplos RUINS: "Analisar sentença", "Verificar publicação", "Tomar providências"
+
+- prazo_dias: number (dias ÚTEIS para a ação)
 - estagio_sugerido: string | null (um de: ${STAGES.join(', ')})
-- tarefa_titulo: string (título curto da tarefa)
-- tarefa_descricao: string (descrição da tarefa, máx 200 chars)
-- orientacoes: string (observações estratégicas para o advogado, máx 300 chars)
+- tarefa_titulo: string (título curto e específico da tarefa)
+- tarefa_descricao: string (o que fazer concretamente, máx 200 chars)
+
+- orientacoes: string — Observações ESTRATÉGICAS para o advogado tomar decisão. Inclua:
+  • Análise do mérito (decisão foi favorável ou desfavorável? parcialmente?)
+  • Recomendação clara: recorrer, aceitar, negociar acordo, aguardar
+  • Fundamentos para a recomendação (ex: "sentença seguiu jurisprudência consolidada do TST, recurso tem baixa chance de êxito")
+  • Riscos de não agir (ex: "perda do prazo recursal implica trânsito em julgado")
+  • Se houver valores, comentar se são razoáveis
+  Mínimo 3 frases. Seja direto e opinativo — o advogado quer sua análise, não uma repetição da publicação.
+
 - event_type: "AUDIENCIA" | "PRAZO" | "TAREFA"
 
-CAMPOS PARA O CLIENTE (linguagem acessível — serão enviados via WhatsApp):
-- resumo_cliente: string (síntese da publicação para leigo, linguagem clara e completa, sem termos jurídicos complexos. Deve explicar o conteúdo integral da publicação de forma que o cliente entenda o que aconteceu. Máx 5 frases.)
-- proximo_passo_cliente: string | null (o que o CLIENTE precisa saber/fazer agora, em linguagem simples. Ex: "Seu advogado vai preparar a defesa dentro do prazo", "Você precisará comparecer à audiência", "Nenhuma ação sua é necessária no momento". NÃO usar linguagem técnica do advogado.)
-- fase_processo_cliente: string | null (explicação da fase atual do processo para leigo. Ex: "Seu processo está na fase de instrução, onde são ouvidas testemunhas e produzidas provas", "Seu processo está na fase de recurso, aguardando decisão do tribunal superior")
-- orientacao_cliente: string | null (orientações práticas para o cliente, se aplicável. Ex: "Separe documentos originais e compareça 30min antes", "Caso receba algum contato estranho sobre o processo, nos avise imediatamente". Null se não há orientação específica.)
-- prazo_cliente: string | null (prazo em linguagem acessível. Ex: "O advogado tem até 15 dias úteis para tomar providências", "A audiência está marcada para 20/05/2026 às 14h". Null se não há prazo.)
-- local_evento: string | null (endereço ou link do local do evento se audiência/perícia. Se virtual, informar plataforma/link. Se presencial, informar endereço. Extrair do texto da publicação se disponível. Null se não aplicável.)
+CAMPOS PARA O CLIENTE (linguagem acessível — enviados via WhatsApp):
+- resumo_cliente: string (explicação completa para leigo, sem termos jurídicos. Máx 5 frases.)
+- proximo_passo_cliente: string | null (o que o cliente precisa saber/fazer)
+- fase_processo_cliente: string | null (em que fase o processo está, para leigo)
+- orientacao_cliente: string | null (orientações práticas)
+- prazo_cliente: string | null (prazo em linguagem acessível)
+- local_evento: string | null (endereço/link se aplicável)
 
-CAMPOS DE EXTRAÇÃO (null se não encontrado no texto):
+CAMPOS DE EXTRAÇÃO (null se não encontrado):
 - parte_autora: string | null
 - parte_rea: string | null
-- juizo: string | null (vara, juízo ou tribunal)
-- area_juridica: string | null (ex: "Trabalhista", "Cível", "Previdenciário", "Criminal", "Consumidor", "Família", "Tributário")
+- juizo: string | null
+- area_juridica: string | null
 - valor_causa: string | null (formato "R$ X.XXX,XX")
-- data_audiencia: string | null (formato ISO "YYYY-MM-DDTHH:MM:00". IMPORTANTE: se perícia previdenciária (INSS) sem data no texto, retorne null — NÃO invente.)
-- data_prazo: string | null (formato ISO "YYYY-MM-DDTHH:MM:00", null se não houver prazo explícito)
+- data_audiencia: string | null (ISO "YYYY-MM-DDTHH:MM:00". Se perícia INSS sem data, retorne null.)
+- data_prazo: string | null (ISO "YYYY-MM-DDTHH:MM:00")
 
-Critérios de urgência: URGENTE = citação/intimação com prazo curto (≤15 dias), sentença, audiência marcada, perícia designada. NORMAL = contestação, manifestação, despacho de rotina. BAIXA = distribuição, informativo, arquivamento.
-Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, perícia/laudo/perito designado→PERICIA_AGENDADA, audiência/instrução→INSTRUCAO, sentença/julgamento→JULGAMENTO, recurso→RECURSO, trânsito em julgado→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento/extinção→ENCERRADO.
-Critérios de event_type: use AUDIENCIA apenas se houver data/hora explícita no texto para audiência ou sessão. Para perícia sem data explícita no texto use TAREFA. Para prazos com data explícita use PRAZO. Nos demais casos use TAREFA.`;
+Critérios de urgência: URGENTE = citação/intimação com prazo ≤15 dias, sentença, audiência marcada, perícia designada. NORMAL = contestação, manifestação, despacho. BAIXA = distribuição, informativo, arquivamento.
+Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, perícia→PERICIA_AGENDADA, audiência→INSTRUCAO, sentença→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento→ENCERRADO.
+Critérios de event_type: AUDIENCIA = data/hora explícita para audiência. PRAZO = data explícita de prazo. TAREFA = demais casos.`;
 
     // Usa prompt customizado do banco (se existir) ou o prompt padrão
     const customPrompt = await this.settings.getDjenPrompt();
@@ -961,7 +975,7 @@ Classe processual: ${pub.classe_processual || 'Não informado'}
 ${pub.legal_case ? `Processo vinculado: ${pub.legal_case.lead?.name || ''} — ${pub.legal_case.legal_area || ''} — Estágio atual: ${pub.legal_case.tracking_stage || ''}` : 'Processo: Não vinculado'}
 
 CONTEÚDO COMPLETO:
-${pub.conteudo.slice(0, 2000)}`;
+${pub.conteudo.slice(0, 6000)}`;
 
     // Resolve modelo configurado
     const configuredModel = await this.settings.getDjenModel();
@@ -976,7 +990,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       const client = new Anthropic({ apiKey: anthropicKey });
       const message = await client.messages.create({
         model: configuredModel,
-        max_tokens: 1024,
+        max_tokens: 2048,
         temperature: 0.2,
         system: systemPrompt + '\n\nResponda APENAS com JSON válido, sem markdown ou explicações extras.',
         messages: [{ role: 'user', content: userPrompt }],
@@ -993,6 +1007,7 @@ ${pub.conteudo.slice(0, 2000)}`;
       const completion = await openai.chat.completions.create({
         model: configuredModel,
         temperature: 0.2,
+        max_tokens: 2048,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
