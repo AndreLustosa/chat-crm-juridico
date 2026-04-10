@@ -588,7 +588,7 @@ export class DjenService {
     ]);
 
     const unreadCount = await this.prisma.djenPublication.count({
-      where: { viewed_at: null, archived: false },
+      where: { viewed_at: null, archived: false, data_disponibilizacao: { gte: since } },
     });
 
     // Enriquecer com flag "ignored" para publicações de processos na lista de ignorados
