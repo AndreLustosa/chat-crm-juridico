@@ -1920,24 +1920,34 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         if (_willAudio) {
           // Não envia texto — será enviado apenas áudio no passo 18 (TTS)
         } else if (slotsToOffer?.length) {
-          const rows = slotsToOffer.map((s: any) => ({
-            title: s.label || `${s.date} ${s.time}`,
-            description: s.date || 'Horário disponível',
-            rowId: `slot_${s.date}_${(s.time || '').replace(/:/g, '')}`,
-          }));
-          sendResult = await axios.post(
-            `${apiUrl}/message/sendList/${instanceName}`,
-            {
-              number: convo.lead.phone,
-              title: 'Horários disponíveis',
-              description: finalText,
-              buttonText: 'Escolher horário',
-              footerText: 'André Lustosa Advogados',
-              sections: [{ title: 'Horários', rows }],
-            },
-            { headers: evoHeaders, timeout: 30000 },
-          );
-          this.logger.log(`[AI] Lista interativa enviada: ${rows.length} horários`);
+          // Tenta lista interativa; se falhar, envia como texto simples (fallback)
+          try {
+            const rows = slotsToOffer.map((s: any) => ({
+              title: s.label || `${s.date} ${s.time}`,
+              description: s.date || 'Horário disponível',
+              rowId: `slot_${s.date}_${(s.time || '').replace(/:/g, '')}`,
+            }));
+            sendResult = await axios.post(
+              `${apiUrl}/message/sendList/${instanceName}`,
+              {
+                number: convo.lead.phone,
+                title: 'Horários disponíveis',
+                description: finalText,
+                buttonText: 'Escolher horário',
+                footerText: 'André Lustosa Advogados',
+                sections: [{ title: 'Horários', rows }],
+              },
+              { headers: evoHeaders, timeout: 30000 },
+            );
+            this.logger.log(`[AI] Lista interativa enviada: ${rows.length} horários`);
+          } catch (listErr: any) {
+            this.logger.warn(`[AI] sendList falhou (${listErr.response?.status || listErr.message}) — fallback para texto simples`);
+            sendResult = await axios.post(
+              `${apiUrl}/message/sendText/${instanceName}`,
+              { number: convo.lead.phone, text: textToSend },
+              { headers: evoHeaders, timeout: 30000 },
+            );
+          }
         } else {
           sendResult = await axios.post(
             `${apiUrl}/message/sendText/${instanceName}`,
