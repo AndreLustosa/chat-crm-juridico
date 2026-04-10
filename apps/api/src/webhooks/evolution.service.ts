@@ -209,6 +209,21 @@ export class EvolutionService {
         origin: 'whatsapp',
       });
 
+      // 1b. Lead PERDIDO/FINALIZADO voltou a falar → reativar para QUALIFICANDO
+      // Sem isso, a conversa existe mas fica invisível no inbox (filtro de stage).
+      if (!isFromMe && ['PERDIDO', 'FINALIZADO'].includes(lead.stage)) {
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: {
+            stage: 'QUALIFICANDO',
+            stage_entered_at: new Date(),
+            loss_reason: null,
+          },
+        });
+        (lead as any).stage = 'QUALIFICANDO';
+        this.logger.log(`[REACTIVATE] Lead ${lead.id} (${phone}) voltou a falar — stage ${lead.stage} → QUALIFICANDO`);
+      }
+
       // 2. Find or Create Conversation
       let conv = await this.prisma.conversation.findFirst({
         where: {
