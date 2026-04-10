@@ -124,7 +124,7 @@ export class MediaEventsService implements OnModuleInit, OnModuleDestroy {
       const fileName = media.original_name || `${message.id}${this.getExtension(media.mime_type)}`;
 
       // Upload para Drive
-      const result = await this.driveService.uploadFile(
+      await this.driveService.uploadFile(
         conv.lead.google_drive_folder_id,
         fileName,
         media.mime_type,

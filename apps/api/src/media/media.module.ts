@@ -10,7 +10,15 @@ import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
-    BullModule.registerQueue({ name: 'media-jobs' }),
+    BullModule.registerQueue({
+      name: 'media-jobs',
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    }),
     forwardRef(() => GoogleDriveModule),
     SettingsModule,
   ],
