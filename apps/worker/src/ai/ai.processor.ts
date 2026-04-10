@@ -233,18 +233,27 @@ export class AiProcessor extends WorkerHost {
       const isRecent = msgAge < 2 * 60 * 1000; // < 2 minutos
 
       if (!media?.s3_key && isRecent) {
-        for (let attempt = 1; attempt <= 5; attempt++) {
-          await new Promise((r) => setTimeout(r, 800));
-          const found = await this.prisma.media.findFirst({
-            where: { message_id: msg.id },
-          });
-          if (found?.s3_key) {
-            media = found;
-            break;
+        // Polling com duas fases:
+        // - Fase rápida (5×500ms = 2.5s): cobre download síncrono com pequeno atraso de commit
+        // - Fase lenta (12×2000ms = 24s): cobre fallback BullMQ processando áudios longos
+        const phases = [
+          { attempts: 5, delay: 500 },
+          { attempts: 12, delay: 2000 },
+        ];
+        outer: for (const phase of phases) {
+          for (let attempt = 1; attempt <= phase.attempts; attempt++) {
+            await new Promise((r) => setTimeout(r, phase.delay));
+            const found = await this.prisma.media.findFirst({
+              where: { message_id: msg.id },
+            });
+            if (found?.s3_key) {
+              media = found;
+              break outer;
+            }
+            this.logger.log(
+              `[AI] Aguardando mídia para msg ${msg.id} (delay=${phase.delay}ms tentativa ${attempt}/${phase.attempts})...`,
+            );
           }
-          this.logger.log(
-            `[AI] Aguardando mídia para msg ${msg.id} (tentativa ${attempt}/5)...`,
-          );
         }
       }
       if (!media?.s3_key) {
