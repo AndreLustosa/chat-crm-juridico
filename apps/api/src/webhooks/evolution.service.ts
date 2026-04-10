@@ -164,7 +164,6 @@ export class EvolutionService {
       // Only use it as the contact name for incoming messages.
       const isFromMe = key.fromMe === true;
       const pushName = !isFromMe ? ((data.pushName as string) || null) : null;
-      const externalMessageIdCheck = key.id as string;
       const messageContentCheck =
         (data.message?.conversation as string) ||
         (data.message?.extendedTextMessage?.text as string) ||
@@ -465,7 +464,7 @@ export class EvolutionService {
           await this.mediaQueue.add('download_media', {
             message_id: msg.id,
             conversation_id: conv.id,
-            media_data: (data.message as any)?.[messageType],
+            media_data: mediaData,
             remote_jid: remoteJid,
             msg_id: externalMessageId,
             instance_name: instanceName,

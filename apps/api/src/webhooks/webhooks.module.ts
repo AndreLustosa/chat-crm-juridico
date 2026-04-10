@@ -21,9 +21,6 @@ import { MediaModule } from '../media/media.module';
     AdminBotModule,
     MediaModule,
     BullModule.registerQueue({
-      name: 'media-jobs',
-    }),
-    BullModule.registerQueue({
       name: 'ai-jobs',
     }),
   ],

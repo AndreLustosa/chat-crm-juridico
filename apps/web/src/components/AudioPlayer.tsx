@@ -23,7 +23,6 @@ export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlaye
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const retryCount = useRef(0);
   const [fetchKey, setFetchKey] = useState(0); // increment to re-trigger fetch
 
   const fmt = (secs: number) => {
@@ -39,9 +38,8 @@ export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlaye
     try {
       await api.post(`/media/${messageId}/retry`);
       // Aguarda o worker processar (3-5s) e tenta buscar o áudio de novo
-      retryCount.current = 0;
       setTimeout(() => {
-        setFetchKey(k => k + 1); // triggers useEffect re-fetch
+        setFetchKey(k => k + 1); // triggers useEffect re-fetch (retryCount resets via new closure)
         setRetrying(false);
       }, 4000);
     } catch {
@@ -53,6 +51,7 @@ export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlaye
   // Buscar audio como blob para evitar problemas de streaming/proxy
   useEffect(() => {
     let cancelled = false;
+    let retryCount = 0;
     const fetchAudio = async () => {
       setLoading(true);
       setError(false);
@@ -60,10 +59,10 @@ export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlaye
         const res = await fetch(src);
         if (!res.ok) {
           // Media pode nao estar pronta (fallback BullMQ processando) — retry
-          if (res.status === 404 && retryCount.current < 3) {
-            retryCount.current++;
+          if (res.status === 404 && retryCount < 3) {
+            retryCount++;
             // Backoff progressivo: 3s, 4s, 5s
-            const delay = Math.min(3000 + retryCount.current * 1000, 5000);
+            const delay = Math.min(3000 + retryCount * 1000, 5000);
             setTimeout(() => { if (!cancelled) fetchAudio(); }, delay);
             return;
           }
