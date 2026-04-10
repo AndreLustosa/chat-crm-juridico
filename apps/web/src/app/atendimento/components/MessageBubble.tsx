@@ -1,7 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
-import { Download, Mic, FileText, Trash2, Reply, Pencil, CheckCheck, Check, Bot } from 'lucide-react';
+import { Download, Mic, FileText, Trash2, Reply, Pencil, CheckCheck, Check, Bot, Loader2 } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { LinkPreview } from '@/components/LinkPreview';
 import type { MessageItem } from '../types';
@@ -259,12 +259,19 @@ function MessageBubbleInner({
           )
         ) : msg.type === 'audio' ? (
           <div>
-            <AudioPlayer
-              src={`/api/media/${msg.id}`}
-              duration={msg.media?.duration}
-              isOutgoing={isOut}
-              messageId={msg.id}
-            />
+            {msg.media ? (
+              <AudioPlayer
+                src={`/api/media/${msg.id}`}
+                duration={msg.media.duration}
+                isOutgoing={isOut}
+                messageId={msg.id}
+              />
+            ) : (
+              <div className={`flex items-center gap-2 min-w-[160px] text-[11px] ${isOut ? 'text-white/60' : 'text-muted-foreground'}`}>
+                <Loader2 size={13} className="animate-spin shrink-0" />
+                <span>Aguardando áudio...</span>
+              </div>
+            )}
             {msg.text ? (
               <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                 {msg.text}

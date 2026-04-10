@@ -233,10 +233,19 @@ export function ChatPopup({ leadId, leadName, conversationId: initialConvId, cas
 
       socket.on('newMessage', (msg: MessageItem) => {
         if (msg.conversation_id !== convIdRef.current) return;
-        setMessages((prev) => {
+        const addMsg = () => setMessages((prev) => {
           if (prev.some((m) => m.id === msg.id || (msg.external_message_id && m.external_message_id === msg.external_message_id))) return prev;
           return [...prev, msg];
         });
+        // Áudio com mídia pronta: pré-busca o blob para exibir já reproduzível
+        if ((msg as any).type === 'audio' && (msg as any).media?.s3_key) {
+          import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
+            const timeout = setTimeout(addMsg, 8000);
+            preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+          });
+        } else {
+          addMsg();
+        }
       });
 
       socket.on('messageUpdate', (updated: MessageItem) => {

@@ -499,7 +499,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           });
 
           socketRef.current.on('newMessage', (msg: any) => {
-            setMessages(prev => {
+            const addMsg = () => setMessages(prev => {
               const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
               if (exists) return prev;
               return [...prev, msg];
@@ -518,6 +518,15 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                 }
               }).catch(() => {});
             }, memDelay);
+            // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
+            if (msg.type === 'audio' && msg.media?.s3_key) {
+              import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
+                const timeout = setTimeout(addMsg, 8000);
+                preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+              });
+            } else {
+              addMsg();
+            }
           });
 
           socketRef.current.on('messageUpdate', (updatedMsg: any) => {

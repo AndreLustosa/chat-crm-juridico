@@ -6,6 +6,33 @@ import api from '@/lib/api';
 
 const SPEEDS = [1, 1.5, 2];
 
+// Cache de blobs por messageId — compartilhado entre todos os AudioPlayers da sessão.
+// Permite que handlers de newMessage pré-busquem o áudio antes de exibir no chat.
+const audioBlobCache = new Map<string, string>();
+
+/**
+ * Pré-busca o áudio e armazena no cache. Retorna true se bem-sucedido.
+ * Deve ser chamado pelo handler de newMessage antes de adicionar ao state.
+ */
+export async function preFetchAudio(messageId: string, timeout = 8000): Promise<boolean> {
+  if (audioBlobCache.has(messageId)) return true;
+  const url = `/api/media/${messageId}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return false;
+    const rawBlob = await res.blob();
+    const blob = rawBlob.type.startsWith('audio/') ? rawBlob : new Blob([rawBlob], { type: 'audio/ogg' });
+    audioBlobCache.set(messageId, URL.createObjectURL(blob));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface AudioPlayerProps {
   src: string;
   duration?: number | null;
@@ -19,8 +46,11 @@ export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlaye
   const [current, setCurrent] = useState(0);
   const [total, setTotal] = useState(duration || 0);
   const [speedIdx, setSpeedIdx] = useState(0);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Inicializa com blob do cache se já pré-buscado (exibição instantânea)
+  const [blobUrl, setBlobUrl] = useState<string | null>(
+    messageId ? (audioBlobCache.get(messageId) ?? null) : null
+  );
+  const [loading, setLoading] = useState(!messageId || !audioBlobCache.has(messageId));
   const [error, setError] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [fetchKey, setFetchKey] = useState(0); // increment to re-trigger fetch
@@ -50,6 +80,9 @@ export function AudioPlayer({ src, duration, isOutgoing, messageId }: AudioPlaye
 
   // Buscar audio como blob para evitar problemas de streaming/proxy
   useEffect(() => {
+    // Se já temos blob do cache (pré-buscado), não busca de novo
+    if (messageId && audioBlobCache.has(messageId) && fetchKey === 0) return;
+
     let cancelled = false;
     let retryCount = 0;
     const fetchAudio = async () => {

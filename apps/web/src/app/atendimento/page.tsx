@@ -1020,30 +1020,33 @@ export default function Dashboard() {
           socketRef.current.on('newMessage', (msg: MessageItem) => {
             // Guard estrito: ignora mensagens de outra conversa
             if (msg.conversation_id !== selectedIdRef.current) return;
-            setMessages(prev => {
+            const addMsg = () => setMessages(prev => {
               // Dedup: já existe pelo ID real
               if (prev.some(m => m.id === msg.id)) return prev;
               // Dedup: já existe pelo external_message_id
               if (msg.external_message_id && prev.some(m => m.external_message_id === msg.external_message_id)) return prev;
               // Se é outgoing, substituir a msg otimista com texto mais próximo (optimistic UI)
-              // Usa o texto para corresponder corretamente quando há múltiplas msgs otimistas
               if (msg.direction === 'out') {
                 const optimisticIdx = prev.findIndex(
                   m => typeof m.id === 'string' && m.id.startsWith('optimistic_') &&
                        (m.text === msg.text || !msg.text)
                 );
-                if (optimisticIdx >= 0) {
-                  return prev.map((m, i) => i === optimisticIdx ? msg : m);
-                }
-                // Fallback: substitui a primeira otimista sem correspondência de texto
+                if (optimisticIdx >= 0) return prev.map((m, i) => i === optimisticIdx ? msg : m);
                 const fallbackIdx = prev.findIndex(m => typeof m.id === 'string' && m.id.startsWith('optimistic_'));
-                if (fallbackIdx >= 0) {
-                  return prev.map((m, i) => i === fallbackIdx ? msg : m);
-                }
+                if (fallbackIdx >= 0) return prev.map((m, i) => i === fallbackIdx ? msg : m);
               }
               return [...prev, msg];
             });
             if (msg.direction === 'in') playNotificationSound();
+            // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
+            if ((msg as any).type === 'audio' && (msg as any).media?.s3_key) {
+              import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
+                const timeout = setTimeout(addMsg, 8000);
+                preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+              });
+            } else {
+              addMsg();
+            }
             // Refetch memória após cada mensagem (IA: 3s, humano: 18s para cobrir debounce de 15s)
             const delay = (msg as any).skill_id || (msg as any).skill ? 3000 : 18000;
             setTimeout(() => {

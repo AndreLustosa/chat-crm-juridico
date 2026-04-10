@@ -132,7 +132,7 @@ export function useChatSocket(leadId: string): UseChatSocketResult {
           });
 
           socketRef.current.on('newMessage', (msg: any) => {
-            setMessages(prev => {
+            const addMsg = () => setMessages(prev => {
               const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
               if (exists) return prev;
               return [...prev, msg];
@@ -140,6 +140,15 @@ export function useChatSocket(leadId: string): UseChatSocketResult {
             if (msg.direction === 'in') {
               playNotificationSound();
               api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
+            }
+            // Áudio com mídia pronta: pré-busca o blob para exibir já reproduzível
+            if (msg.type === 'audio' && msg.media?.s3_key) {
+              import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
+                const timeout = setTimeout(addMsg, 8000); // garante exibição mesmo se pré-fetch demorar
+                preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+              });
+            } else {
+              addMsg();
             }
           });
 
