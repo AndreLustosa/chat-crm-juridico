@@ -861,7 +861,7 @@ export class EvolutionService {
         const updated = await this.prisma.message.update({
           where: { id: msg.id },
           data: { status: newStatus },
-          include: { media: true },
+          include: { media: true, skill: { select: { id: true, name: true, area: true } } },
         });
 
         this.chatGateway.emitMessageUpdate(msg.conversation_id, updated);
@@ -937,7 +937,7 @@ export class EvolutionService {
     const updated = await this.prisma.message.update({
       where: { id: msg.id },
       data: { status: 'apagado_pelo_contato' },
-      include: { media: true },
+      include: { media: true, skill: { select: { id: true, name: true, area: true } } },
     });
 
     // Emite messageUpdate — frontend ja escuta e atualiza

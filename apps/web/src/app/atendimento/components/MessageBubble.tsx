@@ -442,6 +442,7 @@ export const MessageBubble = memo(MessageBubbleInner, (prev, next) => {
     prev.msg.type === next.msg.type &&
     prev.msg.media === next.msg.media &&
     prev.msg.reactions === next.msg.reactions &&
+    prev.msg.skill === next.msg.skill &&
     prev.isOut === next.isOut &&
     prev.editingMsg?.id === next.editingMsg?.id &&
     (prev.editingMsg?.id !== prev.msg.id || prev.editingMsg?.text === next.editingMsg?.text) &&

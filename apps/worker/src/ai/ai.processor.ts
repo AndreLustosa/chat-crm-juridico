@@ -1931,8 +1931,11 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       });
 
       this.logger.log(
-        `[AI] Resposta enviada para ${convo.lead.phone} (model=${model}, skill=${skill?.name || 'fallback'})`,
+        `[AI] Resposta enviada para ${convo.lead.phone} (model=${model}, skill=${skill?.name || 'NULL — badge não aparecerá'}, skill_id=${skill?.id || 'null'}, evoId=${evolutionMsgId})`,
       );
+      if (!skill?.id) {
+        this.logger.warn(`[AI] skill_id=null para conv ${convo.id} — verifique se as skills estão ativas nas configurações de IA`);
+      }
 
       // 18. TTS — reutiliza _willAudio calculado antes do envio de texto
       const ttsConfig = _tts; // reutiliza config já carregado
