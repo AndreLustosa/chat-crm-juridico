@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign } from 'lucide-react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
@@ -209,6 +209,22 @@ export function ClientPanel({
   const [financeSummary, setFinanceSummary] = useState<{ contracted: number; received: number; pending: number; overdue: number } | null>(null);
   const [financeLoading, setFinanceLoading] = useState(false);
 
+  // Honorários negociados
+  const [negHonOpen, setNegHonOpen] = useState(false);
+  const [negHonorarios, setNegHonorarios] = useState<Array<{
+    id: string; type: string; total_value: string; installment_count: number;
+    entry_value: string | null; success_percentage: string | null;
+    notes: string | null; status: string; created_at: string;
+  }>>([]);
+  const [negHonLoading, setNegHonLoading] = useState(false);
+  const [showNegHonForm, setShowNegHonForm] = useState(false);
+  const [negHonType, setNegHonType] = useState('CONTRATUAL');
+  const [negHonValue, setNegHonValue] = useState('');
+  const [negHonInstallments, setNegHonInstallments] = useState('1');
+  const [negHonEntryValue, setNegHonEntryValue] = useState('');
+  const [negHonNotes, setNegHonNotes] = useState('');
+  const [negHonSaving, setNegHonSaving] = useState(false);
+
   // Notas internas
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState<LeadNote[]>([]);
@@ -341,6 +357,16 @@ export function ClientPanel({
       .finally(() => setFinanceLoading(false));
   }, [financeOpen, leadId, financeSummary]);
 
+  // Buscar honorários negociados quando seção abrir
+  useEffect(() => {
+    if (!negHonOpen || !leadId) return;
+    setNegHonLoading(true);
+    api.get(`/leads/${leadId}/honorarios-negociados`)
+      .then(r => setNegHonorarios(r.data || []))
+      .catch(() => {})
+      .finally(() => setNegHonLoading(false));
+  }, [negHonOpen, leadId]);
+
   // Buscar notas quando seção abrir
   useEffect(() => {
     if (!notesOpen || !leadId) return;
@@ -391,6 +417,43 @@ export function ClientPanel({
       await api.delete(`/leads/${leadId}/notes/${noteId}`);
       setNotes(prev => prev.filter(n => n.id !== noteId));
     } catch { /* silencioso */ } finally { setDeletingNoteId(null); }
+  };
+
+  // ─── Honorários negociados handlers ───
+  const createNegHonorario = async () => {
+    const val = parseFloat(negHonValue);
+    if (!val || val <= 0 || !leadId) return;
+    setNegHonSaving(true);
+    try {
+      const res = await api.post(`/leads/${leadId}/honorarios-negociados`, {
+        type: negHonType,
+        total_value: val,
+        installment_count: parseInt(negHonInstallments) || 1,
+        entry_value: negHonEntryValue ? parseFloat(negHonEntryValue) : undefined,
+        notes: negHonNotes || undefined,
+      });
+      setNegHonorarios(prev => [res.data, ...prev]);
+      setShowNegHonForm(false);
+      setNegHonType('CONTRATUAL'); setNegHonValue(''); setNegHonInstallments('1');
+      setNegHonEntryValue(''); setNegHonNotes('');
+      showSuccess('Honorário negociado salvo');
+    } catch { showError('Erro ao salvar honorário'); }
+    finally { setNegHonSaving(false); }
+  };
+
+  const updateNegHonStatus = async (id: string, newStatus: string) => {
+    try {
+      const res = await api.patch(`/leads/${leadId}/honorarios-negociados/${id}`, { status: newStatus });
+      setNegHonorarios(prev => prev.map(h => h.id === id ? res.data : h));
+    } catch { showError('Erro ao atualizar status'); }
+  };
+
+  const deleteNegHonorario = async (id: string) => {
+    if (!window.confirm('Excluir este honorário negociado?')) return;
+    try {
+      await api.delete(`/leads/${leadId}/honorarios-negociados/${id}`);
+      setNegHonorarios(prev => prev.filter(h => h.id !== id));
+    } catch { showError('Erro ao excluir'); }
   };
 
   const createDriveFolder = async () => {
@@ -994,6 +1057,171 @@ export function ClientPanel({
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground text-center py-2">Sem dados financeiros</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Honorários Negociados */}
+            <div className="border-t border-border">
+              <button
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors"
+                onClick={() => setNegHonOpen(!negHonOpen)}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Handshake size={15} className="text-amber-400" />
+                  <span className="text-[13px] font-bold text-foreground">Honorários Negociados</span>
+                  {negHonorarios.length > 0 && (
+                    <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{negHonorarios.length}</span>
+                  )}
+                </div>
+                {negHonOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
+              </button>
+              {negHonOpen && (
+                <div className="px-6 pb-5 space-y-3">
+                  {negHonLoading ? (
+                    <div className="text-center py-4"><Loader2 size={16} className="animate-spin text-muted-foreground mx-auto" /></div>
+                  ) : (
+                    <>
+                      {negHonorarios.length === 0 && !showNegHonForm && (
+                        <p className="text-xs text-muted-foreground text-center py-2">Nenhum honorário negociado</p>
+                      )}
+
+                      {/* Lista de honorários */}
+                      {negHonorarios.map(h => {
+                        const statusColors: Record<string, string> = {
+                          NEGOCIANDO: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+                          ACEITO: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+                          RECUSADO: 'bg-red-500/15 text-red-400 border-red-500/30',
+                          CONVERTIDO: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+                        };
+                        const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratual', ENTRADA: 'Entrada', ACORDO: 'Acordo' };
+                        const nextStatus: Record<string, string> = { NEGOCIANDO: 'ACEITO', ACEITO: 'RECUSADO', RECUSADO: 'NEGOCIANDO' };
+
+                        return (
+                          <div key={h.id} className="bg-accent/30 rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] uppercase font-semibold bg-foreground/[0.06] px-2 py-0.5 rounded text-muted-foreground">
+                                  {typeLabels[h.type] || h.type}
+                                </span>
+                                <button
+                                  onClick={() => h.status !== 'CONVERTIDO' && updateNegHonStatus(h.id, nextStatus[h.status] || 'NEGOCIANDO')}
+                                  disabled={h.status === 'CONVERTIDO'}
+                                  className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded border ${statusColors[h.status] || 'bg-gray-500/15 text-gray-400'} ${h.status !== 'CONVERTIDO' ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                                  title={h.status !== 'CONVERTIDO' ? 'Clique para alterar status' : 'Convertido em honorário do caso'}
+                                >
+                                  {h.status}
+                                </button>
+                              </div>
+                              {h.status !== 'CONVERTIDO' && (
+                                <button onClick={() => deleteNegHonorario(h.id)} className="text-muted-foreground hover:text-red-400 transition-colors">
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex items-baseline gap-3">
+                              <span className="text-sm font-bold text-foreground">
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(h.total_value))}
+                              </span>
+                              {h.installment_count > 1 && (
+                                <span className="text-[11px] text-muted-foreground">{h.installment_count}x</span>
+                              )}
+                              {h.entry_value && parseFloat(h.entry_value) > 0 && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  Entrada: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(h.entry_value))}
+                                </span>
+                              )}
+                            </div>
+                            {h.notes && <p className="text-[11px] text-muted-foreground leading-relaxed">{h.notes}</p>}
+                          </div>
+                        );
+                      })}
+
+                      {/* Formulário de criação */}
+                      {showNegHonForm ? (
+                        <div className="bg-accent/30 rounded-lg p-3 space-y-2.5">
+                          <select
+                            value={negHonType}
+                            onChange={e => setNegHonType(e.target.value)}
+                            className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground"
+                          >
+                            <option value="CONTRATUAL">Contratual</option>
+                            <option value="ENTRADA">Entrada</option>
+                            <option value="ACORDO">Acordo</option>
+                          </select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-muted-foreground uppercase">Valor Total (R$)</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={negHonValue}
+                                onChange={e => setNegHonValue(e.target.value)}
+                                placeholder="5000.00"
+                                className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-muted-foreground uppercase">Parcelas</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={negHonInstallments}
+                                onChange={e => setNegHonInstallments(e.target.value)}
+                                className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground uppercase">Valor de Entrada (opcional)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={negHonEntryValue}
+                              onChange={e => setNegHonEntryValue(e.target.value)}
+                              placeholder="1000.00"
+                              className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground uppercase">Observações</label>
+                            <textarea
+                              value={negHonNotes}
+                              onChange={e => setNegHonNotes(e.target.value)}
+                              placeholder="Ex: Combinado 3x sem juros..."
+                              rows={2}
+                              className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5 resize-none"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 justify-end">
+                            <button
+                              onClick={() => setShowNegHonForm(false)}
+                              className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={createNegHonorario}
+                              disabled={negHonSaving || !negHonValue}
+                              className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-1.5 rounded-md disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                              {negHonSaving && <Loader2 size={12} className="animate-spin" />}
+                              Salvar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowNegHonForm(true)}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 py-2 border border-dashed border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors"
+                        >
+                          <Plus size={13} /> Adicionar Honorário
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               )}

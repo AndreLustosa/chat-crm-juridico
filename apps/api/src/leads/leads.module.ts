@@ -4,14 +4,16 @@ import { LeadsController } from './leads.controller';
 import { LeadsCleanupService } from './leads-cleanup.service';
 import { LeadNotesService } from './lead-notes.service';
 import { LeadNotesController } from './lead-notes.controller';
+import { LeadHonorariosService } from './lead-honorarios.service';
+import { LeadHonorariosController } from './lead-honorarios.controller';
 import { LegalCasesModule } from '../legal-cases/legal-cases.module';
 import { AutomationsModule } from '../automations/automations.module';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
 
 @Module({
   imports: [LegalCasesModule, AutomationsModule, GoogleDriveModule],
-  controllers: [LeadsController, LeadNotesController],
-  providers: [LeadsService, LeadsCleanupService, LeadNotesService],
+  controllers: [LeadsController, LeadNotesController, LeadHonorariosController],
+  providers: [LeadsService, LeadsCleanupService, LeadNotesService, LeadHonorariosService],
   exports: [LeadsService],
 })
 export class LeadsModule {}

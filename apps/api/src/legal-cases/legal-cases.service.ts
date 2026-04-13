@@ -89,6 +89,11 @@ export class LegalCasesService {
       data: { assigned_lawyer_id: data.lawyer_id },
     }).catch(() => {});
 
+    // Promover honorários negociados do lead → CaseHonorario
+    await this.promoteLeadHonorarios(data.lead_id, legalCase.id, data.tenant_id).catch(e =>
+      this.logger.warn(`[LEGAL] Falha ao promover honorários negociados: ${e.message}`),
+    );
+
     // Vincular publicações DJEN existentes com o mesmo número de processo
     await this.reconcileDjenPublications(legalCase.id, (legalCase as any).case_number);
 
@@ -887,6 +892,62 @@ export class LegalCasesService {
     await this.reconcileDjenPublications(legalCase.id, data.case_number);
 
     return legalCase;
+  }
+
+  // ─── Promover honorários negociados → CaseHonorario ────────────
+
+  private async promoteLeadHonorarios(leadId: string, caseId: string, tenantId?: string) {
+    const pending = await this.prisma.leadHonorario.findMany({
+      where: { lead_id: leadId, status: { in: ['ACEITO', 'NEGOCIANDO'] } },
+    });
+
+    if (!pending.length) return;
+
+    for (const lh of pending) {
+      const totalValue = Number(lh.total_value);
+      const installmentCount = lh.installment_count || 1;
+
+      // Gerar parcelas (mesma lógica de honorarios.service.ts)
+      const baseAmount = Math.floor((totalValue * 100) / installmentCount) / 100;
+      const lastAmount = Math.round((totalValue - baseAmount * (installmentCount - 1)) * 100) / 100;
+
+      const now = new Date();
+      const payments: Array<{ amount: number; due_date: Date | null; status: string }> = [];
+
+      for (let i = 0; i < installmentCount; i++) {
+        const dueDate = new Date(now);
+        dueDate.setMonth(dueDate.getMonth() + i);
+        payments.push({
+          amount: i === installmentCount - 1 ? lastAmount : baseAmount,
+          due_date: dueDate,
+          status: 'PENDENTE',
+        });
+      }
+
+      const honorario = await this.prisma.caseHonorario.create({
+        data: {
+          legal_case_id: caseId,
+          tenant_id: tenantId || lh.tenant_id,
+          type: lh.type,
+          total_value: totalValue,
+          success_percentage: lh.success_percentage ? Number(lh.success_percentage) : null,
+          installment_count: installmentCount,
+          contract_date: now,
+          notes: lh.notes,
+          status: 'ATIVO',
+          payments: {
+            create: payments,
+          },
+        },
+      });
+
+      await this.prisma.leadHonorario.update({
+        where: { id: lh.id },
+        data: { status: 'CONVERTIDO', promoted_to_id: honorario.id },
+      });
+    }
+
+    this.logger.log(`[LEGAL] ${pending.length} honorário(s) negociado(s) promovido(s) para caso ${caseId}`);
   }
 
   // ─── Vincular publicações DJEN ao processo recém-criado ─────────

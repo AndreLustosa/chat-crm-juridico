@@ -35,6 +35,7 @@ model Tenant {
   tax_records               TaxRecord[]
   broadcast_jobs            BroadcastJob[]
   djen_ignored_processes    DjenIgnoredProcess[]
+  lead_honorarios           LeadHonorario[]
 }
 
 model User {
@@ -122,6 +123,7 @@ model Lead {
   payment_gateway_customers PaymentGatewayCustomer[]
   notas_fiscais             NotaFiscal[]
   broadcast_items           BroadcastItem[]
+  lead_honorarios           LeadHonorario[]
   cpf_cnpj                  String? // CPF ou CNPJ — facilita match com Asaas
 
   @@index([tenant_id, phone])
@@ -1089,6 +1091,32 @@ model HonorarioPayment {
 
   @@index([honorario_id, due_date])
   @@index([status])
+}
+
+// ===============================================
+// Honorários Negociados (fase de negociação/lead)
+// ===============================================
+
+model LeadHonorario {
+  id                 String    @id @default(uuid())
+  tenant_id          String?
+  lead_id            String
+  type               String    // CONTRATUAL, ENTRADA, ACORDO
+  total_value        Decimal
+  success_percentage Decimal?  // % sucumbência negociada antecipadamente
+  installment_count  Int       @default(1)
+  entry_value        Decimal?  // Valor de entrada separado
+  notes              String?
+  status             String    @default("NEGOCIANDO") // NEGOCIANDO, ACEITO, RECUSADO, CONVERTIDO
+  promoted_to_id     String?   // ID do CaseHonorario após conversão
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  lead   Lead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([lead_id])
+  @@index([tenant_id])
 }
 
 // ===============================================
