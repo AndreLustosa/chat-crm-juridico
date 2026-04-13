@@ -19,17 +19,14 @@ export class InboxesService {
         include: { users: { select: { id: true, name: true } } },
       }),
       (this.prisma as any).sector.findMany({
-        include: { users: { select: { id: true, name: true } } },
+        include: { users: { select: { id: true, name: true, roles: true } } },
         orderBy: { name: 'asc' },
       }),
-      // Todos os usuários elegíveis (para grupo "Equipe" genérico)
       (this.prisma as any).user.findMany({
         where: { roles: { hasSome: ['OPERADOR', 'ADVOGADO', 'ADMIN'] } },
-        select: { id: true, name: true },
+        select: { id: true, name: true, roles: true },
         orderBy: { name: 'asc' },
       }),
-      // Operadores que não estão em nenhum inbox (ex: advogada com perfil operador)
-      // Devem aparecer na seção comercial mesmo se estiverem em um setor de advogados
       (this.prisma as any).user.findMany({
         where: { roles: { has: 'OPERADOR' } },
         select: { id: true, name: true },
@@ -37,50 +34,52 @@ export class InboxesService {
       }),
     ]);
 
-    const inboxGroups = inboxes.map((inbox: any) => ({
+    const inboxUserIds = new Set(inboxes.flatMap((i: any) => (i.users || []).map((u: any) => u.id)));
+    const operatorIds = new Set((allOperators as any[]).map((u: any) => u.id));
+
+    // Operadores sem inbox → injetar no primeiro inbox (Comercial)
+    const operatorsNotInInbox = (allOperators as { id: string; name: string }[]).filter(
+      u => !inboxUserIds.has(u.id),
+    );
+
+    const inboxGroups = inboxes.map((inbox: any, idx: number) => ({
       id: inbox.id,
       name: inbox.name,
       type: 'INBOX' as const,
       auto_route: false,
-      users: inbox.users as { id: string; name: string }[],
+      // Adicionar operadores sem inbox ao primeiro inbox (Comercial)
+      users: idx === 0
+        ? [...inbox.users as { id: string; name: string }[], ...operatorsNotInInbox]
+        : inbox.users as { id: string; name: string }[],
     }));
 
+    // Setores de advogados: remover usuários com role OPERADOR (eles já aparecem em Comercial)
     const sectorGroups = sectors.map((sector: any) => ({
       id: sector.id,
       name: sector.name,
       type: 'SECTOR' as const,
       auto_route: sector.auto_route ?? false,
-      users: sector.users as { id: string; name: string }[],
+      users: sector.auto_route
+        ? (sector.users as any[]).filter((u: any) => !operatorIds.has(u.id)).map((u: any) => ({ id: u.id, name: u.name }))
+        : (sector.users as any[]).map((u: any) => ({ id: u.id, name: u.name })),
     }));
 
-    const inboxUserIds = new Set(inboxes.flatMap((i: any) => (i.users || []).map((u: any) => u.id)));
     const sectorUserIds = new Set(sectors.flatMap((s: any) => (s.users || []).map((u: any) => u.id)));
 
-    // Operadores que não estão em nenhum inbox devem aparecer no grupo Equipe
-    // (mesmo que estejam em um setor de advogados — o papel OPERADOR garante visibilidade comercial)
-    const operatorsNotInInbox = (allOperators as { id: string; name: string }[]).filter(
-      u => !inboxUserIds.has(u.id),
+    // Equipe: usuários sem inbox e sem setor (não operadores já inclusos acima)
+    const ungroupedUsers = (allEligible as { id: string; name: string }[]).filter(
+      u => !inboxUserIds.has(u.id) && !sectorUserIds.has(u.id) && !operatorIds.has(u.id),
     );
-
-    // Demais elegíveis que não estão em nenhum inbox nem setor
-    const ungroupedOther = (allEligible as { id: string; name: string }[]).filter(
-      u => !inboxUserIds.has(u.id) && !sectorUserIds.has(u.id),
-    );
-
-    // Unir sem duplicatas
-    const teamMap = new Map<string, { id: string; name: string }>();
-    for (const u of [...operatorsNotInInbox, ...ungroupedOther]) teamMap.set(u.id, u);
-    const teamUsers = Array.from(teamMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
     const result = [...inboxGroups, ...sectorGroups];
 
-    if (teamUsers.length > 0) {
+    if (ungroupedUsers.length > 0) {
       result.push({
         id: '__team__',
         name: 'Equipe',
         type: 'SECTOR' as const,
         auto_route: false,
-        users: teamUsers,
+        users: ungroupedUsers,
       });
     }
 
