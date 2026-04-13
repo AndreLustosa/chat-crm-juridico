@@ -807,6 +807,11 @@ export class ConversationsService {
       data: { status: 'lido' },
     });
 
+    // Emitir atualização para todos os clientes conectados (limpar badge de não-lidas)
+    if (convo.tenant_id) {
+      this.chatGateway.emitConversationsUpdate(convo.tenant_id);
+    }
+
     return { marked: unreadMessages.length };
   }
 
