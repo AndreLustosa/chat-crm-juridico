@@ -1077,14 +1077,27 @@ IMPORTANTE: NÃO altere status, area ou next_step — o cliente já está FINALI
         },
       ];
 
-      // Upsert por name: sincroniza system_prompt e configs do código com o DB.
-      // Garante que atualizações nos prompts padrão sejam aplicadas mesmo após o primeiro deploy.
+      // Upsert por name: sincroniza TODOS os campos do código com o DB.
+      // Garante que atualizações nos prompts, modelo, tokens, etc. sejam aplicadas automaticamente.
       for (const s of defaultSkills) {
         const existing = await (this.prisma as any).promptSkill.findFirst({ where: { name: s.name } });
         if (existing) {
           await (this.prisma as any).promptSkill.update({
             where: { id: existing.id },
-            data: { system_prompt: s.system_prompt },
+            data: {
+              system_prompt: s.system_prompt,
+              model: s.model,
+              max_tokens: s.max_tokens,
+              temperature: s.temperature,
+              area: s.area,
+              order: s.order,
+              description: s.description,
+              trigger_keywords: s.trigger_keywords,
+              skill_type: s.skill_type,
+              provider: s.provider,
+              handoff_signal: s.handoff_signal,
+              active: s.active,
+            },
           });
         } else {
           await (this.prisma as any).promptSkill.create({ data: s });
