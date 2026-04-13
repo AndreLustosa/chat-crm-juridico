@@ -89,7 +89,7 @@ export class LeadHonorariosService {
     type: string;
     total_value: number;
     notes?: string;
-    payments: Array<{ amount: number; due_date: string }>;
+    payments: Array<{ amount: number; due_date?: string | null }>;
   }, tenantId?: string) {
     if (!data.total_value || data.total_value <= 0) {
       throw new BadRequestException('Valor total deve ser maior que zero');
@@ -122,11 +122,14 @@ export class LeadHonorariosService {
         installment_count: data.payments.length,
         notes: data.notes || null,
         payments: {
-          create: data.payments.map(p => ({
-            amount: p.amount,
-            due_date: new Date(p.due_date),
-            status: new Date(p.due_date) < now ? 'ATRASADO' : 'PENDENTE',
-          })),
+          create: data.payments.map(p => {
+            const dueDate = p.due_date ? new Date(p.due_date) : null;
+            return {
+              amount: p.amount,
+              due_date: dueDate,
+              status: dueDate && dueDate < now ? 'ATRASADO' : 'PENDENTE',
+            };
+          }),
         },
       },
       include: {

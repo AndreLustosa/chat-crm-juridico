@@ -442,8 +442,8 @@ export function ClientPanel({
   const createNegHonorario = async () => {
     const total = parseFloat(negHonValue);
     if (!total || total <= 0 || !leadId) return;
-    const payments = negHonParcelas.map(p => ({ amount: parseFloat(p.amount) || 0, due_date: p.due_date }));
-    if (payments.some(p => !p.amount || !p.due_date)) { showError('Preencha valor e vencimento de todas as parcelas'); return; }
+    const payments = negHonParcelas.map(p => ({ amount: parseFloat(p.amount) || 0, due_date: p.due_date || undefined }));
+    if (payments.some(p => !p.amount)) { showError('Preencha o valor de todas as parcelas'); return; }
     setNegHonSaving(true);
     try {
       const res = await api.post(`/leads/${leadId}/honorarios-negociados`, {
@@ -1170,7 +1170,7 @@ export function ClientPanel({
                                     <div className="flex items-center gap-2">
                                       <span className="text-muted-foreground w-4">{idx + 1}.</span>
                                       <span className="font-medium text-foreground">{fmtBRL(pay.amount)}</span>
-                                      <span className="text-muted-foreground">{pay.due_date ? fmtDt(pay.due_date) : '--'}</span>
+                                      <span className="text-muted-foreground">{pay.due_date ? fmtDt(pay.due_date) : <span className="italic text-muted-foreground/50">Ao final</span>}</span>
                                       <span className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold ${
                                         pay.status === 'PAGO' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' :
                                         pay.status === 'ATRASADO' ? 'bg-red-500/15 text-red-400 border-red-500/20' :

@@ -10,8 +10,9 @@ class PaymentItemDto {
   @Min(0.01)
   amount: number;
 
+  @IsOptional()
   @IsString()
-  due_date: string;
+  due_date?: string;
 }
 
 class CreateLeadHonorarioDto {
