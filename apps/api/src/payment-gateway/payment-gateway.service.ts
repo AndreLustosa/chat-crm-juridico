@@ -58,6 +58,7 @@ export class PaymentGatewayService {
         name: true,
         phone: true,
         email: true,
+        cpf_cnpj: true,
         tenant_id: true,
         ficha_trabalhista: { select: { data: true } },
       },
@@ -65,13 +66,13 @@ export class PaymentGatewayService {
 
     if (!lead) throw new NotFoundException('Lead nao encontrado');
 
-    // Extrair CPF/CNPJ da ficha trabalhista (campo "cpf" no JSON data)
+    // Buscar CPF/CNPJ: primeiro do painel do lead, depois da ficha trabalhista
     const fichaData = (lead.ficha_trabalhista as any)?.data as Record<string, any> | undefined;
-    const cpfCnpj = fichaData?.cpf || fichaData?.cpfCnpj || fichaData?.cnpj || null;
+    const cpfCnpj = lead.cpf_cnpj || fichaData?.cpf || fichaData?.cpfCnpj || fichaData?.cnpj || null;
 
     if (!cpfCnpj) {
       throw new BadRequestException(
-        'Lead nao possui CPF/CNPJ cadastrado. Preencha a ficha trabalhista antes de criar o cliente no gateway.',
+        'Lead não possui CPF/CNPJ cadastrado. Preencha o CPF no painel do lead antes de gerar cobrança.',
       );
     }
 

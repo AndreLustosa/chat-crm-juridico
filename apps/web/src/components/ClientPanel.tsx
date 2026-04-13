@@ -558,7 +558,7 @@ export function ClientPanel({
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[780px] max-w-[95vw] max-h-[90vh] bg-card border border-border rounded-2xl shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200" style={{ zIndex: zBase }}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <h2 className="text-[15px] font-bold text-foreground">Painel do Cliente</h2>
+          <h2 className="text-[15px] font-bold text-foreground">{lead?.stage === 'FINALIZADO' ? 'Painel do Cliente' : 'Painel do Lead'}</h2>
           <div className="flex items-center gap-2">
             {saving && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
