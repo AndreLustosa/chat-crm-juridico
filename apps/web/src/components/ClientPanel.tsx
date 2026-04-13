@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake } from 'lucide-react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake, CreditCard } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
@@ -219,6 +219,8 @@ export function ClientPanel({
   const [negHonNotes, setNegHonNotes] = useState('');
   const [negHonSaving, setNegHonSaving] = useState(false);
   const [negHonParcelas, setNegHonParcelas] = useState<Array<{ amount: string; due_date: string }>>([{ amount: '', due_date: '' }]);
+  const [negHonCharging, setNegHonCharging] = useState<string | null>(null);
+  const [negHonChargeResult, setNegHonChargeResult] = useState<Record<string, any>>({});
 
   // Notas internas
   const [notesOpen, setNotesOpen] = useState(false);
@@ -1187,6 +1189,57 @@ export function ClientPanel({
                                     )}
                                   </div>
                                 ))}
+                              </div>
+                            )}
+
+                            {/* Botão Gerar Cobrança / Badge Cobrança Gerada */}
+                            {payments.length > 0 && h.status !== 'CONVERTIDO' && payments.some((p: any) => p.status !== 'PAGO') && (
+                              <div className="pt-2 border-t border-border/40">
+                                {negHonChargeResult[h.id] ? (
+                                  <div className="space-y-1.5">
+                                    <span className="text-[10px] px-2 py-1 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-semibold inline-flex items-center gap-1">
+                                      <Check size={10} /> Cobrança Gerada
+                                    </span>
+                                    {negHonChargeResult[h.id].boleto?.url && (
+                                      <a href={negHonChargeResult[h.id].boleto.url} target="_blank" rel="noopener noreferrer"
+                                        className="text-[11px] text-primary hover:underline flex items-center gap-1">
+                                        <ExternalLink size={10} /> Abrir Boleto
+                                      </a>
+                                    )}
+                                    {negHonChargeResult[h.id].pix?.copyPaste && (
+                                      <button onClick={() => { navigator.clipboard.writeText(negHonChargeResult[h.id].pix.copyPaste); showSuccess('PIX copiado!'); }}
+                                        className="text-[11px] text-primary hover:underline flex items-center gap-1">
+                                        <CreditCard size={10} /> Copiar PIX
+                                      </button>
+                                    )}
+                                    {negHonChargeResult[h.id].invoice_url && (
+                                      <a href={negHonChargeResult[h.id].invoice_url} target="_blank" rel="noopener noreferrer"
+                                        className="text-[11px] text-primary hover:underline flex items-center gap-1">
+                                        <ExternalLink size={10} /> Ver Fatura
+                                      </a>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={async () => {
+                                      setNegHonCharging(h.id);
+                                      try {
+                                        const res = await api.post('/payment-gateway/charges/installment', {
+                                          leadHonorarioId: h.id,
+                                          billingType: 'BOLETO',
+                                        });
+                                        setNegHonChargeResult(prev => ({ ...prev, [h.id]: res.data }));
+                                        showSuccess(`Cobrança gerada! ${payments.length}x`);
+                                      } catch (err: any) { showError(err?.response?.data?.message || 'Erro ao gerar cobrança'); }
+                                      finally { setNegHonCharging(null); }
+                                    }}
+                                    disabled={negHonCharging === h.id}
+                                    className="w-full text-[11px] py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                                  >
+                                    {negHonCharging === h.id ? <Loader2 size={11} className="animate-spin" /> : <CreditCard size={11} />}
+                                    Gerar Cobrança Asaas {payments.length > 1 ? `(${payments.length}x)` : ''}
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
