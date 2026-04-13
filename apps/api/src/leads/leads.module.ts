@@ -9,9 +9,10 @@ import { LeadHonorariosController } from './lead-honorarios.controller';
 import { LegalCasesModule } from '../legal-cases/legal-cases.module';
 import { AutomationsModule } from '../automations/automations.module';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
+import { FinanceiroModule } from '../financeiro/financeiro.module';
 
 @Module({
-  imports: [LegalCasesModule, AutomationsModule, GoogleDriveModule],
+  imports: [LegalCasesModule, AutomationsModule, GoogleDriveModule, FinanceiroModule],
   controllers: [LeadsController, LeadNotesController, LeadHonorariosController],
   providers: [LeadsService, LeadsCleanupService, LeadNotesService, LeadHonorariosService],
   exports: [LeadsService],

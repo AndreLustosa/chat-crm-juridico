@@ -211,19 +211,14 @@ export function ClientPanel({
 
   // Honorários negociados
   const [negHonOpen, setNegHonOpen] = useState(false);
-  const [negHonorarios, setNegHonorarios] = useState<Array<{
-    id: string; type: string; total_value: string; installment_count: number;
-    entry_value: string | null; success_percentage: string | null;
-    notes: string | null; status: string; created_at: string;
-  }>>([]);
+  const [negHonorarios, setNegHonorarios] = useState<any[]>([]);
   const [negHonLoading, setNegHonLoading] = useState(false);
   const [showNegHonForm, setShowNegHonForm] = useState(false);
   const [negHonType, setNegHonType] = useState('CONTRATUAL');
   const [negHonValue, setNegHonValue] = useState('');
-  const [negHonInstallments, setNegHonInstallments] = useState('1');
-  const [negHonEntryValue, setNegHonEntryValue] = useState('');
   const [negHonNotes, setNegHonNotes] = useState('');
   const [negHonSaving, setNegHonSaving] = useState(false);
+  const [negHonParcelas, setNegHonParcelas] = useState<Array<{ amount: string; due_date: string }>>([{ amount: '', due_date: '' }]);
 
   // Notas internas
   const [notesOpen, setNotesOpen] = useState(false);
@@ -420,24 +415,43 @@ export function ClientPanel({
   };
 
   // ─── Honorários negociados handlers ───
+  const fmtBRL = (v: number | string) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(typeof v === 'string' ? parseFloat(v) : v);
+  const fmtDt = (d: string) => { if (!d) return '--'; const dt = new Date(d); return `${String(dt.getUTCDate()).padStart(2,'0')}/${String(dt.getUTCMonth()+1).padStart(2,'0')}/${dt.getUTCFullYear()}`; };
+
+  const resetNegHonForm = () => {
+    setNegHonType('CONTRATUAL'); setNegHonValue(''); setNegHonNotes('');
+    setNegHonParcelas([{ amount: '', due_date: '' }]);
+  };
+
+  const handleDividirIgual = () => {
+    const total = parseFloat(negHonValue);
+    const count = negHonParcelas.length;
+    if (!total || count === 0) return;
+    const base = Math.floor((total * 100) / count) / 100;
+    const last = Math.round((total - base * (count - 1)) * 100) / 100;
+    const now = new Date();
+    setNegHonParcelas(negHonParcelas.map((p, i) => {
+      const dt = new Date(now);
+      dt.setMonth(dt.getMonth() + i);
+      return { amount: String(i === count - 1 ? last : base), due_date: dt.toISOString().slice(0, 10) };
+    }));
+  };
+
   const createNegHonorario = async () => {
-    const val = parseFloat(negHonValue);
-    if (!val || val <= 0 || !leadId) return;
+    const total = parseFloat(negHonValue);
+    if (!total || total <= 0 || !leadId) return;
+    const payments = negHonParcelas.map(p => ({ amount: parseFloat(p.amount) || 0, due_date: p.due_date }));
+    if (payments.some(p => !p.amount || !p.due_date)) { showError('Preencha valor e vencimento de todas as parcelas'); return; }
     setNegHonSaving(true);
     try {
       const res = await api.post(`/leads/${leadId}/honorarios-negociados`, {
-        type: negHonType,
-        total_value: val,
-        installment_count: parseInt(negHonInstallments) || 1,
-        entry_value: negHonEntryValue ? parseFloat(negHonEntryValue) : undefined,
-        notes: negHonNotes || undefined,
+        type: negHonType, total_value: total, notes: negHonNotes || undefined, payments,
       });
       setNegHonorarios(prev => [res.data, ...prev]);
       setShowNegHonForm(false);
-      setNegHonType('CONTRATUAL'); setNegHonValue(''); setNegHonInstallments('1');
-      setNegHonEntryValue(''); setNegHonNotes('');
+      resetNegHonForm();
       showSuccess('Honorário negociado salvo');
-    } catch { showError('Erro ao salvar honorário'); }
+    } catch (e: any) { showError(e?.response?.data?.message || 'Erro ao salvar honorário'); }
     finally { setNegHonSaving(false); }
   };
 
@@ -454,6 +468,25 @@ export function ClientPanel({
       await api.delete(`/leads/${leadId}/honorarios-negociados/${id}`);
       setNegHonorarios(prev => prev.filter(h => h.id !== id));
     } catch { showError('Erro ao excluir'); }
+  };
+
+  const markNegPaymentPaid = async (paymentId: string) => {
+    try {
+      await api.patch(`/leads/honorarios-negociados/payments/${paymentId}/mark-paid`, {});
+      // Refresh honorários
+      const res = await api.get(`/leads/${leadId}/honorarios-negociados`);
+      setNegHonorarios(res.data || []);
+      showSuccess('Pagamento registrado');
+    } catch { showError('Erro ao marcar como pago'); }
+  };
+
+  const deleteNegPayment = async (paymentId: string) => {
+    if (!window.confirm('Excluir esta parcela?')) return;
+    try {
+      await api.delete(`/leads/honorarios-negociados/payments/${paymentId}`);
+      const res = await api.get(`/leads/${leadId}/honorarios-negociados`);
+      setNegHonorarios(res.data || []);
+    } catch { showError('Erro ao excluir parcela'); }
   };
 
   const createDriveFolder = async () => {
@@ -1087,8 +1120,8 @@ export function ClientPanel({
                         <p className="text-xs text-muted-foreground text-center py-2">Nenhum honorário negociado</p>
                       )}
 
-                      {/* Lista de honorários */}
-                      {negHonorarios.map(h => {
+                      {/* Lista de honorários com parcelas */}
+                      {negHonorarios.map((h: any) => {
                         const statusColors: Record<string, string> = {
                           NEGOCIANDO: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
                           ACEITO: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -1097,6 +1130,7 @@ export function ClientPanel({
                         };
                         const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratual', ENTRADA: 'Entrada', ACORDO: 'Acordo' };
                         const nextStatus: Record<string, string> = { NEGOCIANDO: 'ACEITO', ACEITO: 'RECUSADO', RECUSADO: 'NEGOCIANDO' };
+                        const payments: any[] = h.payments || [];
 
                         return (
                           <div key={h.id} className="bg-accent/30 rounded-lg p-3 space-y-2">
@@ -1121,24 +1155,45 @@ export function ClientPanel({
                               )}
                             </div>
                             <div className="flex items-baseline gap-3">
-                              <span className="text-sm font-bold text-foreground">
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(h.total_value))}
-                              </span>
-                              {h.installment_count > 1 && (
-                                <span className="text-[11px] text-muted-foreground">{h.installment_count}x</span>
-                              )}
-                              {h.entry_value && parseFloat(h.entry_value) > 0 && (
-                                <span className="text-[11px] text-muted-foreground">
-                                  Entrada: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(parseFloat(h.entry_value))}
-                                </span>
-                              )}
+                              <span className="text-sm font-bold text-foreground">{fmtBRL(h.total_value)}</span>
+                              {payments.length > 1 && <span className="text-[11px] text-muted-foreground">{payments.length}x</span>}
                             </div>
                             {h.notes && <p className="text-[11px] text-muted-foreground leading-relaxed">{h.notes}</p>}
+
+                            {/* Parcelas */}
+                            {payments.length > 0 && (
+                              <div className="space-y-1 pt-1 border-t border-border/40">
+                                {payments.map((pay: any, idx: number) => (
+                                  <div key={pay.id} className="flex items-center justify-between text-[11px]">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-muted-foreground w-4">{idx + 1}.</span>
+                                      <span className="font-medium text-foreground">{fmtBRL(pay.amount)}</span>
+                                      <span className="text-muted-foreground">{pay.due_date ? fmtDt(pay.due_date) : '--'}</span>
+                                      <span className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold ${
+                                        pay.status === 'PAGO' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' :
+                                        pay.status === 'ATRASADO' ? 'bg-red-500/15 text-red-400 border-red-500/20' :
+                                        'bg-amber-500/15 text-amber-400 border-amber-500/20'
+                                      }`}>{pay.status}</span>
+                                    </div>
+                                    {pay.status !== 'PAGO' && h.status !== 'CONVERTIDO' && (
+                                      <div className="flex items-center gap-1">
+                                        <button onClick={() => markNegPaymentPaid(pay.id)} className="text-emerald-400 hover:text-emerald-300 text-[10px] font-semibold" title="Marcar como pago">
+                                          <Check size={12} />
+                                        </button>
+                                        <button onClick={() => deleteNegPayment(pay.id)} className="text-muted-foreground hover:text-red-400" title="Excluir parcela">
+                                          <Trash2 size={11} />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
 
-                      {/* Formulário de criação */}
+                      {/* Formulário de criação com parcelas individuais */}
                       {showNegHonForm ? (
                         <div className="bg-accent/30 rounded-lg p-3 space-y-2.5">
                           <select
@@ -1150,74 +1205,68 @@ export function ClientPanel({
                             <option value="ENTRADA">Entrada</option>
                             <option value="ACORDO">Acordo</option>
                           </select>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="text-[10px] text-muted-foreground uppercase">Valor Total (R$)</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={negHonValue}
-                                onChange={e => setNegHonValue(e.target.value)}
-                                placeholder="5000.00"
-                                className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-muted-foreground uppercase">Parcelas</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={negHonInstallments}
-                                onChange={e => setNegHonInstallments(e.target.value)}
-                                className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5"
-                              />
-                            </div>
+                          <div>
+                            <label className="text-[10px] text-muted-foreground uppercase">Valor Total (R$)</label>
+                            <input type="number" step="0.01" min="0" value={negHonValue} onChange={e => setNegHonValue(e.target.value)}
+                              placeholder="5000.00" className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5" />
                           </div>
                           <div>
-                            <label className="text-[10px] text-muted-foreground uppercase">Valor de Entrada (opcional)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={negHonEntryValue}
-                              onChange={e => setNegHonEntryValue(e.target.value)}
-                              placeholder="1000.00"
-                              className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5"
-                            />
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10px] text-muted-foreground uppercase">Parcelas</label>
+                              <button onClick={handleDividirIgual} disabled={!negHonValue} className="text-[10px] text-amber-400 hover:text-amber-300 disabled:opacity-30">
+                                Dividir igual
+                              </button>
+                            </div>
+                            <div className="space-y-1.5">
+                              {negHonParcelas.map((p, i) => (
+                                <div key={i} className="flex items-center gap-1.5">
+                                  <span className="text-[10px] text-muted-foreground w-3">{i + 1}.</span>
+                                  <input type="number" step="0.01" min="0" value={p.amount}
+                                    onChange={e => { const arr = [...negHonParcelas]; arr[i] = { ...arr[i], amount: e.target.value }; setNegHonParcelas(arr); }}
+                                    placeholder="R$" className="flex-1 text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground" />
+                                  <input type="date" value={p.due_date}
+                                    onChange={e => { const arr = [...negHonParcelas]; arr[i] = { ...arr[i], due_date: e.target.value }; setNegHonParcelas(arr); }}
+                                    className="text-xs bg-background border border-border rounded-md px-2 py-1.5 text-foreground" />
+                                  {negHonParcelas.length > 1 && (
+                                    <button onClick={() => setNegHonParcelas(negHonParcelas.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-red-400">
+                                      <X size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            <button onClick={() => setNegHonParcelas([...negHonParcelas, { amount: '', due_date: '' }])}
+                              className="text-[10px] text-amber-400 hover:text-amber-300 mt-1 flex items-center gap-1">
+                              <Plus size={10} /> Adicionar parcela
+                            </button>
+                            {negHonValue && (
+                              <p className={`text-[10px] mt-1 ${
+                                Math.abs(negHonParcelas.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) - parseFloat(negHonValue)) <= 0.02
+                                  ? 'text-emerald-400' : 'text-red-400'
+                              }`}>
+                                Total parcelas: {fmtBRL(negHonParcelas.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0))}
+                                {Math.abs(negHonParcelas.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) - parseFloat(negHonValue)) <= 0.02 ? ' ✓' : ` (esperado: ${fmtBRL(negHonValue)})`}
+                              </p>
+                            )}
                           </div>
                           <div>
                             <label className="text-[10px] text-muted-foreground uppercase">Observações</label>
-                            <textarea
-                              value={negHonNotes}
-                              onChange={e => setNegHonNotes(e.target.value)}
-                              placeholder="Ex: Combinado 3x sem juros..."
-                              rows={2}
-                              className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5 resize-none"
-                            />
+                            <textarea value={negHonNotes} onChange={e => setNegHonNotes(e.target.value)}
+                              placeholder="Ex: Combinado 3x sem juros..." rows={2}
+                              className="w-full text-xs bg-background border border-border rounded-md px-3 py-2 text-foreground mt-0.5 resize-none" />
                           </div>
                           <div className="flex items-center gap-2 justify-end">
-                            <button
-                              onClick={() => setShowNegHonForm(false)}
-                              className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5"
-                            >
-                              Cancelar
-                            </button>
-                            <button
-                              onClick={createNegHonorario}
-                              disabled={negHonSaving || !negHonValue}
-                              className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-1.5 rounded-md disabled:opacity-50 flex items-center gap-1.5"
-                            >
-                              {negHonSaving && <Loader2 size={12} className="animate-spin" />}
-                              Salvar
+                            <button onClick={() => { setShowNegHonForm(false); resetNegHonForm(); }}
+                              className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5">Cancelar</button>
+                            <button onClick={createNegHonorario} disabled={negHonSaving || !negHonValue}
+                              className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-1.5 rounded-md disabled:opacity-50 flex items-center gap-1.5">
+                              {negHonSaving && <Loader2 size={12} className="animate-spin" />} Salvar
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => setShowNegHonForm(true)}
-                          className="w-full flex items-center justify-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 py-2 border border-dashed border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors"
-                        >
+                        <button onClick={() => setShowNegHonForm(true)}
+                          className="w-full flex items-center justify-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 py-2 border border-dashed border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors">
                           <Plus size={13} /> Adicionar Honorário
                         </button>
                       )}

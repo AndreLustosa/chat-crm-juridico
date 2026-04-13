@@ -899,29 +899,28 @@ export class LegalCasesService {
   private async promoteLeadHonorarios(leadId: string, caseId: string, tenantId?: string) {
     const pending = await this.prisma.leadHonorario.findMany({
       where: { lead_id: leadId, status: { in: ['ACEITO', 'NEGOCIANDO'] } },
+      include: { payments: true },
     });
 
     if (!pending.length) return;
 
     for (const lh of pending) {
       const totalValue = Number(lh.total_value);
-      const installmentCount = lh.installment_count || 1;
 
-      // Gerar parcelas (mesma lógica de honorarios.service.ts)
-      const baseAmount = Math.floor((totalValue * 100) / installmentCount) / 100;
-      const lastAmount = Math.round((totalValue - baseAmount * (installmentCount - 1)) * 100) / 100;
+      // Transferir parcelas existentes do LeadHonorario para CaseHonorario
+      // Parcelas PENDENTE/ATRASADO viram HonorarioPayment; PAGO ficam no histórico
+      const pendingPayments = lh.payments.filter((p: any) => p.status !== 'PAGO');
+      const payments = pendingPayments.map((p: any) => ({
+        amount: Number(p.amount),
+        due_date: p.due_date,
+        status: p.status,
+        payment_method: p.payment_method,
+        notes: p.notes,
+      }));
 
-      const now = new Date();
-      const payments: Array<{ amount: number; due_date: Date | null; status: string }> = [];
-
-      for (let i = 0; i < installmentCount; i++) {
-        const dueDate = new Date(now);
-        dueDate.setMonth(dueDate.getMonth() + i);
-        payments.push({
-          amount: i === installmentCount - 1 ? lastAmount : baseAmount,
-          due_date: dueDate,
-          status: 'PENDENTE',
-        });
+      // Se não há parcelas pendentes, gerar uma parcela única
+      if (payments.length === 0) {
+        payments.push({ amount: totalValue, due_date: null, status: 'PENDENTE', payment_method: null, notes: null });
       }
 
       const honorario = await this.prisma.caseHonorario.create({
@@ -931,13 +930,11 @@ export class LegalCasesService {
           type: lh.type,
           total_value: totalValue,
           success_percentage: lh.success_percentage ? Number(lh.success_percentage) : null,
-          installment_count: installmentCount,
-          contract_date: now,
+          installment_count: payments.length,
+          contract_date: new Date(),
           notes: lh.notes,
           status: 'ATIVO',
-          payments: {
-            create: payments,
-          },
+          payments: { create: payments },
         },
       });
 

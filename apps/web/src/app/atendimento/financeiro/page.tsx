@@ -158,6 +158,43 @@ function KpiCard({ icon: Icon, label, value, color, bgColor }: {
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Despesa Section (seção colapsável por status)
+────────────────────────────────────────────────────────────── */
+function DespesaSection({ icon: Icon, label, count, total, color, bgColor, borderColor, defaultOpen, rows, onRefresh, currentUserId, canManageAll }: {
+  icon: any; label: string; count: number; total: number;
+  color: string; bgColor: string; borderColor: string; defaultOpen: boolean;
+  rows: Transaction[]; onRefresh: () => void; currentUserId?: string; canManageAll: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (count === 0) return null;
+  return (
+    <div className={`border ${borderColor} rounded-xl overflow-hidden`}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`w-full flex items-center justify-between px-4 py-3 ${bgColor} hover:opacity-90 transition-opacity`}
+      >
+        <div className="flex items-center gap-2">
+          <Icon size={15} className={color} />
+          <span className={`text-sm font-bold ${color}`}>{label}</span>
+          <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${bgColor} ${color}`}>{count}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={`text-sm font-bold tabular-nums ${color}`}>
+            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(total)}
+          </span>
+          <ChevronDown size={14} className={`${color} transition-transform ${open ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+      {open && (
+        <div className="bg-card">
+          <TransactionTable rows={rows} onRefresh={onRefresh} currentUserId={currentUserId} canManageAll={canManageAll} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
    Status Badge
 ────────────────────────────────────────────────────────────── */
 function StatusBadge({ status }: { status: string }) {
@@ -1134,12 +1171,49 @@ export default function FinanceiroPage() {
         {tab === 'Receitas' && <ReceitasTab receitas={receitas} onRefresh={fetchData} lawyerId={effectiveLawyerId} />}
 
         {/* ─── TAB: Despesas ─── */}
-        {tab === 'Despesas' && (
-          <div className="space-y-4">
-            <QuickAddForm type="DESPESA" categories={activeDespesaCats} onCreated={fetchData} onManageCategories={refreshCategories} allDbCategories={dbCategories} />
-            <TransactionTable rows={despesas} onRefresh={fetchData} currentUserId={userId || undefined} canManageAll={isAdmin || isFinanceiro} />
-          </div>
-        )}
+        {tab === 'Despesas' && (() => {
+          const now = new Date();
+          const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+          const vencidas = despesas.filter(d => d.status === 'PENDENTE' && d.due_date && new Date(d.due_date) < todayStart);
+          const venceHoje = despesas.filter(d => d.status === 'PENDENTE' && d.due_date && new Date(d.due_date) >= todayStart && new Date(d.due_date) < tomorrowStart);
+          const aVencer = despesas.filter(d => d.status === 'PENDENTE' && (!d.due_date || new Date(d.due_date) >= tomorrowStart));
+          const pagas = despesas.filter(d => d.status === 'PAGO');
+
+          const sumOf = (items: Transaction[]) => items.reduce((s, t) => s + Number(t.amount || 0), 0);
+
+          return (
+            <div className="space-y-4">
+              <QuickAddForm type="DESPESA" categories={activeDespesaCats} onCreated={fetchData} onManageCategories={refreshCategories} allDbCategories={dbCategories} />
+
+              <DespesaSection
+                icon={AlertTriangle} label="Vencidas" count={vencidas.length} total={sumOf(vencidas)}
+                color="text-red-400" bgColor="bg-red-500/10" borderColor="border-red-500/20"
+                defaultOpen={vencidas.length > 0}
+                rows={vencidas} onRefresh={fetchData} currentUserId={userId || undefined} canManageAll={isAdmin || isFinanceiro}
+              />
+              <DespesaSection
+                icon={Clock} label="Vencem Hoje" count={venceHoje.length} total={sumOf(venceHoje)}
+                color="text-amber-400" bgColor="bg-amber-500/10" borderColor="border-amber-500/20"
+                defaultOpen={venceHoje.length > 0}
+                rows={venceHoje} onRefresh={fetchData} currentUserId={userId || undefined} canManageAll={isAdmin || isFinanceiro}
+              />
+              <DespesaSection
+                icon={TrendingUp} label="A Vencer" count={aVencer.length} total={sumOf(aVencer)}
+                color="text-emerald-400" bgColor="bg-emerald-500/10" borderColor="border-emerald-500/20"
+                defaultOpen={aVencer.length > 0}
+                rows={aVencer} onRefresh={fetchData} currentUserId={userId || undefined} canManageAll={isAdmin || isFinanceiro}
+              />
+              <DespesaSection
+                icon={Check} label="Pagas" count={pagas.length} total={sumOf(pagas)}
+                color="text-muted-foreground" bgColor="bg-muted/30" borderColor="border-border"
+                defaultOpen={false}
+                rows={pagas} onRefresh={fetchData} currentUserId={userId || undefined} canManageAll={isAdmin || isFinanceiro}
+              />
+            </div>
+          );
+        })()}
 
         {/* ─── TAB: Processos (financeiro por caso) ─── */}
         {tab === 'Processos' && <ProcessosFinanceiroTab lawyerId={effectiveLawyerId} />}
@@ -2210,8 +2284,18 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
     try {
       const params: any = {};
       if (lawyerId) params.lawyerId = lawyerId;
-      const res = await api.get('/honorarios/pending-payments', { params });
-      setPendingPayments(res.data || []);
+      const [caseRes, leadRes] = await Promise.all([
+        api.get('/honorarios/pending-payments', { params }),
+        api.get('/leads/honorarios-negociados/pending-payments', { params }),
+      ]);
+      // Marcar origem para diferenciar na renderização
+      const casePays = (caseRes.data || []).map((p: any) => ({ ...p, _source: 'case' }));
+      const leadPays = (leadRes.data || []).map((p: any) => ({ ...p, _source: 'lead' }));
+      setPendingPayments([...casePays, ...leadPays].sort((a: any, b: any) => {
+        const da = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+        const db = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+        return da - db;
+      }));
     } catch { setPendingPayments([]); }
     finally { setLoadingPending(false); }
   }, [lawyerId]);
@@ -2298,6 +2382,10 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
   const filteredPending = pendingPayments.filter((p: any) => {
     if (!searchQ) return true;
     const q = searchQ.toLowerCase();
+    if (p._source === 'lead') {
+      return (p.lead_honorario?.lead?.name || '').toLowerCase().includes(q)
+        || (p.lead_honorario?.type || '').toLowerCase().includes(q) || 'lead'.includes(q);
+    }
     const lc = p.honorario?.legal_case;
     return (lc?.case_number || '').toLowerCase().includes(q) || (lc?.lead?.name || '').toLowerCase().includes(q)
       || (p.honorario?.type || '').toLowerCase().includes(q);
@@ -2466,20 +2554,29 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                   </thead>
                   <tbody>
                     {filteredPending.map((p: any) => {
-                      const lc = p.honorario?.legal_case;
+                      const isLead = p._source === 'lead';
+                      const lc = isLead ? null : p.honorario?.legal_case;
+                      const leadData = isLead ? p.lead_honorario?.lead : lc?.lead;
+                      const honType = isLead ? p.lead_honorario?.type : p.honorario?.type;
                       const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
                       return (
                         <tr key={p.id}
                           className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedPending?.id === p.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}
                           onClick={() => setSelectedPending(p)}>
                           <td className="px-4 py-3">
-                            <span className="text-[10px] font-mono text-primary">{lc?.case_number || '--'}</span>
-                            {lc?.legal_area && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{lc.legal_area}</span>}
+                            {isLead ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 font-semibold">LEAD</span>
+                            ) : (
+                              <>
+                                <span className="text-[10px] font-mono text-primary">{lc?.case_number || '--'}</span>
+                                {lc?.legal_area && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{lc.legal_area}</span>}
+                              </>
+                            )}
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{lc?.lead?.name || '--'}</td>
+                          <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{leadData?.name || '--'}</td>
                           <td className="px-4 py-3">
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">
-                              {typeLabels[p.honorario?.type] || p.honorario?.type || '--'}
+                              {typeLabels[honType] || honType || '--'}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right font-bold text-amber-400">{fmt(p.amount)}</td>
@@ -2620,7 +2717,10 @@ function PendingPaymentPanel({
   const [chargeResult, setChargeResult] = useState<any>(null);
   const chargeMenuRef = useRef<HTMLDivElement>(null);
 
-  const lc = p.honorario?.legal_case;
+  const isLead = p._source === 'lead';
+  const lc = isLead ? null : p.honorario?.legal_case;
+  const leadData = isLead ? p.lead_honorario?.lead : null;
+  const honType = isLead ? p.lead_honorario?.type : p.honorario?.type;
   const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
 
   useEffect(() => {
@@ -2633,7 +2733,10 @@ function PendingPaymentPanel({
   const handleMarkPaid = async () => {
     setSaving(true);
     try {
-      await api.patch(`/honorarios/payments/${p.id}/mark-paid`, { payment_method: editMethod || undefined });
+      const endpoint = isLead
+        ? `/leads/honorarios-negociados/payments/${p.id}/mark-paid`
+        : `/honorarios/payments/${p.id}/mark-paid`;
+      await api.patch(endpoint, { payment_method: editMethod || undefined });
       showSuccess('Pagamento registrado como recebido');
       onRefresh();
     } catch { showError('Erro ao marcar como pago'); }

@@ -451,6 +451,64 @@ export class FinanceiroService {
     });
   }
 
+  async createFromLeadHonorarioPayment(paymentId: string, tenantId?: string) {
+    const payment = await this.prisma.leadHonorarioPayment.findUnique({
+      where: { id: paymentId },
+      include: {
+        lead_honorario: {
+          include: {
+            lead: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!payment) throw new NotFoundException('Pagamento de honorário negociado não encontrado');
+
+    const honorario = (payment as any).lead_honorario;
+    const lead = honorario?.lead;
+    const status = payment.status === 'PAGO' ? 'PAGO' : 'PENDENTE';
+
+    const typeLabels: Record<string, string> = {
+      CONTRATUAL: 'Contratuais', ENTRADA: 'Entrada', ACORDO: 'Acordo',
+    };
+    const typeLabel = typeLabels[honorario?.type] || honorario?.type || '';
+
+    const existing = await this.prisma.financialTransaction.findUnique({
+      where: { lead_honorario_payment_id: paymentId },
+    });
+    if (existing) {
+      return this.prisma.financialTransaction.update({
+        where: { id: existing.id },
+        data: {
+          status,
+          amount: payment.amount,
+          paid_at: payment.paid_at,
+          payment_method: payment.payment_method || existing.payment_method,
+          date: payment.paid_at || existing.date,
+        },
+      });
+    }
+
+    return this.prisma.financialTransaction.create({
+      data: {
+        tenant_id: tenantId || honorario?.tenant_id || null,
+        type: 'RECEITA',
+        category: 'HONORARIO',
+        description: `Honorário ${typeLabel} - Lead ${lead?.name || 'Sem nome'}`.trim(),
+        amount: payment.amount,
+        date: payment.paid_at || payment.due_date || new Date(),
+        paid_at: payment.paid_at,
+        due_date: payment.due_date,
+        payment_method: payment.payment_method,
+        status,
+        lead_id: lead?.id || null,
+        lead_honorario_payment_id: paymentId,
+        notes: honorario?.notes || payment.notes || null,
+      },
+    });
+  }
+
   // ─── Audit Log ─────────────────────────────────────────
 
   async getAuditLog(lawyerId?: string, startDate?: string, endDate?: string, limit = 50, offset = 0) {
@@ -514,7 +572,16 @@ export class FinanceiroService {
       ? { ...where, OR: [{ lawyer_id: lawyerId }, { lawyer_id: null, visible_to_lawyer: true }] }
       : where;
 
-    const [totalRevenue, totalExpenses, totalPayable, totalReceivable, totalOverdue] = await Promise.all([
+    // Where para parcelas de lead honorários negociados
+    const leadHonWhere: any = {
+      status: { in: ['PENDENTE', 'ATRASADO'] },
+      lead_honorario: { status: { in: ['NEGOCIANDO', 'ACEITO'] } },
+    };
+    if (tenantId) {
+      leadHonWhere.lead_honorario.tenant_id = tenantId;
+    }
+
+    const [totalRevenue, totalExpenses, totalPayable, totalReceivable, totalOverdue, leadReceivable, leadOverdue] = await Promise.all([
       // Receita efetiva (regime de caixa: só PAGO) — advogado só dele
       this.prisma.financialTransaction.aggregate({
         where: { ...receitaWhere, type: 'RECEITA', status: 'PAGO' },
@@ -530,17 +597,24 @@ export class FinanceiroService {
         where: { ...despesaWhere, type: 'DESPESA', status: 'PENDENTE' },
         _sum: { amount: true },
       }),
-      // A receber: parcelas de honorários pendentes (não transações)
+      // A receber: parcelas de honorários de casos pendentes
       this.prisma.honorarioPayment.aggregate({
         where: { ...honorarioWhere, status: { in: ['PENDENTE', 'ATRASADO'] } },
         _sum: { amount: true },
       }),
-      // Atrasado: parcelas com due_date vencida
+      // Atrasado: parcelas de casos com due_date vencida
       this.prisma.honorarioPayment.aggregate({
-        where: {
-          ...honorarioWhere,
-          status: 'ATRASADO',
-        },
+        where: { ...honorarioWhere, status: 'ATRASADO' },
+        _sum: { amount: true },
+      }),
+      // A receber: parcelas de honorários negociados (leads)
+      this.prisma.leadHonorarioPayment.aggregate({
+        where: { ...leadHonWhere, status: { in: ['PENDENTE', 'ATRASADO'] } },
+        _sum: { amount: true },
+      }),
+      // Atrasado: parcelas de leads vencidas
+      this.prisma.leadHonorarioPayment.aggregate({
+        where: { ...leadHonWhere, status: 'ATRASADO' },
         _sum: { amount: true },
       }),
     ]);
@@ -548,8 +622,8 @@ export class FinanceiroService {
     const revenue = Number(totalRevenue._sum.amount || 0);
     const expenses = Number(totalExpenses._sum.amount || 0);
     const payable = Number(totalPayable._sum.amount || 0);
-    const receivable = Number(totalReceivable._sum.amount || 0);
-    const overdue = Number(totalOverdue._sum.amount || 0);
+    const receivable = Number(totalReceivable._sum.amount || 0) + Number(leadReceivable._sum.amount || 0);
+    const overdue = Number(totalOverdue._sum.amount || 0) + Number(leadOverdue._sum.amount || 0);
 
     return {
       totalRevenue: revenue,
