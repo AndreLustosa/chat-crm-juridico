@@ -11,7 +11,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PaymentGatewayService } from './payment-gateway.service';
-import { CreateChargeDto, CreateBatchChargesDto } from './payment-gateway.dto';
+import { CreateChargeDto, CreateBatchChargesDto, CreateInstallmentChargeDto } from './payment-gateway.dto';
 import { AsaasClient } from './asaas/asaas-client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -224,6 +224,17 @@ export class PaymentGatewayController {
     const tenantId = req.user?.tenantId;
     this.logger.log(`[POST /charges/batch] honorarioId=${dto.honorarioId} billingType=${dto.billingType}`);
     return this.service.createBatchCharges(dto.honorarioId, dto.billingType, tenantId);
+  }
+
+  @Post('charges/installment')
+  async createInstallmentCharge(@Body() dto: CreateInstallmentChargeDto, @Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    this.logger.log(`[POST /charges/installment] leadHonorarioId=${dto.leadHonorarioId} billingType=${dto.billingType}`);
+    return this.service.createInstallmentCharge(
+      dto.leadHonorarioId,
+      dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+      tenantId,
+    );
   }
 
   @Post('charges/sync')

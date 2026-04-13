@@ -24,6 +24,8 @@ interface CreateChargeData {
   description?: string;
   externalReference?: string;
   postalService?: boolean;
+  installmentCount?: number;  // Parcelamento: número de parcelas
+  installmentValue?: number;  // Parcelamento: valor de cada parcela
 }
 
 interface ListChargesParams {

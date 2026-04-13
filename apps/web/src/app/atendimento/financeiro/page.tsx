@@ -2279,6 +2279,8 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [chargingGroup, setChargingGroup] = useState<string | null>(null);
+  const [chargeGroupResult, setChargeGroupResult] = useState<{ key: string; data: any } | null>(null);
 
   const fetchPending = useCallback(async () => {
     setLoadingPending(true);
@@ -2567,8 +2569,8 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                     return (
                       <div key={g.key} className="bg-card border border-border rounded-xl overflow-hidden">
                         {/* Header do grupo */}
-                        <button onClick={() => toggleGroup(g.key)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-accent/10 transition-colors">
-                          <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="px-4 py-3 flex items-center justify-between hover:bg-accent/10 transition-colors">
+                          <button onClick={() => toggleGroup(g.key)} className="flex items-center gap-2.5 min-w-0 flex-1">
                             {isOpen ? <ChevronDown size={14} className="text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
                             {g.isLead ? (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 font-semibold shrink-0">LEAD</span>
@@ -2579,12 +2581,37 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20 shrink-0">
                               {typeLabels[g.honType] || g.honType}
                             </span>
-                          </div>
+                          </button>
                           <div className="flex items-center gap-3 shrink-0">
+                            {g.isLead && g.payments.length > 1 && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const honId = g.payments[0]?.lead_honorario_id;
+                                  if (!honId) return;
+                                  setChargingGroup(g.key);
+                                  try {
+                                    const res = await api.post('/payment-gateway/charges/installment', {
+                                      leadHonorarioId: honId,
+                                      billingType: 'BOLETO',
+                                    });
+                                    setChargeGroupResult({ key: g.key, data: res.data });
+                                    showSuccess(`Cobrança parcelada gerada! ${g.payments.length}x ${fmt(Number(g.payments[0].amount))}`);
+                                    setExpandedGroups(prev => { const s = new Set(prev); s.add(g.key); return s; });
+                                  } catch (err: any) { showError(err?.response?.data?.message || 'Erro ao gerar cobrança'); }
+                                  finally { setChargingGroup(null); }
+                                }}
+                                disabled={chargingGroup === g.key}
+                                className="text-[10px] px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-semibold disabled:opacity-50 flex items-center gap-1"
+                              >
+                                {chargingGroup === g.key ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />}
+                                Gerar Cobrança {g.payments.length}x
+                              </button>
+                            )}
                             <span className="text-[10px] text-muted-foreground">{g.payments.length} parcela(s)</span>
                             <span className="text-sm font-bold text-amber-400">{fmt(total)}</span>
                           </div>
-                        </button>
+                        </div>
                         {/* Parcelas expandidas */}
                         {isOpen && (
                           <div className="border-t border-border">
@@ -2605,6 +2632,30 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                                 ))}
                               </tbody>
                             </table>
+                            {/* Resultado da cobrança parcelada */}
+                            {chargeGroupResult?.key === g.key && chargeGroupResult.data && (
+                              <div className="px-4 py-3 bg-emerald-500/5 border-t border-emerald-500/20">
+                                <p className="text-[10px] font-bold text-emerald-400 uppercase mb-2">Cobrança Parcelada Gerada</p>
+                                {chargeGroupResult.data.boleto?.url && (
+                                  <a href={chargeGroupResult.data.boleto.url} target="_blank" rel="noopener noreferrer"
+                                    className="text-xs text-primary hover:underline flex items-center gap-1 mb-1">
+                                    <ExternalLink size={11} /> Abrir Boleto
+                                  </a>
+                                )}
+                                {chargeGroupResult.data.pix?.copyPaste && (
+                                  <button onClick={() => { navigator.clipboard.writeText(chargeGroupResult.data.pix.copyPaste); showSuccess('PIX copiado!'); }}
+                                    className="text-xs text-primary hover:underline flex items-center gap-1">
+                                    <CreditCard size={11} /> Copiar PIX
+                                  </button>
+                                )}
+                                {chargeGroupResult.data.invoice_url && (
+                                  <a href={chargeGroupResult.data.invoice_url} target="_blank" rel="noopener noreferrer"
+                                    className="text-xs text-primary hover:underline flex items-center gap-1 mt-1">
+                                    <ExternalLink size={11} /> Ver Fatura Asaas
+                                  </a>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

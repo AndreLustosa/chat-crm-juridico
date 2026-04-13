@@ -15,6 +15,17 @@ export class CreateChargeDto {
   billingType: string;
 }
 
+export class CreateInstallmentChargeDto {
+  @IsString()
+  @IsNotEmpty()
+  leadHonorarioId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['PIX', 'BOLETO', 'CREDIT_CARD'])
+  billingType: string;
+}
+
 export class CreateBatchChargesDto {
   @IsString()
   @IsNotEmpty()

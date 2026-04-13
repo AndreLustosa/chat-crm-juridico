@@ -310,6 +310,105 @@ export class PaymentGatewayService {
     };
   }
 
+  // ─── Cobrança parcelada (Asaas installment) ────────────
+
+  async createInstallmentCharge(
+    leadHonorarioId: string,
+    billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+    tenantId?: string,
+  ) {
+    // Buscar honorário com parcelas pendentes
+    const honorario = await this.prisma.leadHonorario.findUnique({
+      where: { id: leadHonorarioId },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, email: true } },
+        payments: {
+          where: { status: { in: ['PENDENTE', 'ATRASADO'] } },
+          orderBy: { due_date: 'asc' },
+        },
+      },
+    });
+
+    if (!honorario) throw new NotFoundException('Honorário negociado não encontrado');
+    if (!honorario.lead?.id) throw new BadRequestException('Lead não vinculado');
+    if (honorario.payments.length === 0) throw new BadRequestException('Nenhuma parcela pendente');
+
+    // Verificar se já existem cobranças para essas parcelas
+    const paymentIds = honorario.payments.map(p => p.id);
+    const existingCharges = await this.prisma.paymentGatewayCharge.findMany({
+      where: { lead_honorario_payment_id: { in: paymentIds } },
+    });
+    if (existingCharges.length > 0) {
+      throw new BadRequestException(`Já existem ${existingCharges.length} cobrança(s) gerada(s) para este honorário`);
+    }
+
+    // Garantir customer no Asaas
+    const customer = await this.ensureCustomer(
+      honorario.lead.id,
+      tenantId || honorario.tenant_id || undefined,
+    );
+
+    const totalValue = honorario.payments.reduce((s, p) => s + Number(p.amount), 0);
+    const installmentCount = honorario.payments.length;
+    const installmentValue = Number(honorario.payments[0].amount); // Asaas usa valor da primeira parcela
+    const firstDueDate = honorario.payments[0].due_date || new Date();
+    const dueDateStr = new Date(firstDueDate).toISOString().slice(0, 10);
+
+    const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', ENTRADA: 'Entrada', ACORDO: 'Acordo' };
+    const description = `Honorário ${typeLabels[honorario.type] || honorario.type} - ${honorario.lead.name || 'Lead'} (${installmentCount}x)`.trim();
+
+    // Criar cobrança parcelada no Asaas
+    const asaasCharge = await this.asaas.createCharge({
+      customer: customer.external_id,
+      billingType,
+      value: totalValue,
+      dueDate: dueDateStr,
+      description,
+      externalReference: leadHonorarioId,
+      installmentCount,
+      installmentValue,
+    });
+
+    this.logger.log(`[CHARGE] Parcelada criada no Asaas: ${asaasCharge.id} | ${billingType} | ${installmentCount}x R$ ${installmentValue} | Total: R$ ${totalValue}`);
+
+    let pixData: any = null;
+    if (billingType === 'PIX' && asaasCharge.id) {
+      try { pixData = await this.asaas.getPixQrCode(asaasCharge.id); }
+      catch (e: any) { this.logger.warn(`[CHARGE] Falha QR Code PIX: ${e.message}`); }
+    }
+
+    // Salvar cobrança vinculada à primeira parcela
+    const charge = await this.prisma.paymentGatewayCharge.create({
+      data: {
+        tenant_id: tenantId || honorario.tenant_id || null,
+        lead_honorario_payment_id: honorario.payments[0].id,
+        gateway: 'ASAAS',
+        external_id: asaasCharge.id,
+        customer_external_id: customer.external_id,
+        billing_type: billingType,
+        amount: totalValue,
+        due_date: new Date(firstDueDate),
+        status: asaasCharge.status || 'PENDING',
+        description,
+        pix_qr_code: pixData?.encodedImage || null,
+        pix_copy_paste: pixData?.payload || null,
+        pix_expiration_date: pixData?.expirationDate ? new Date(pixData.expirationDate) : null,
+        boleto_url: asaasCharge.bankSlipUrl || null,
+        boleto_barcode: asaasCharge.nossoNumero || null,
+        invoice_url: asaasCharge.invoiceUrl || null,
+      },
+    });
+
+    return {
+      ...charge,
+      installmentCount,
+      installmentValue,
+      totalValue,
+      pix: pixData ? { qrCode: pixData.encodedImage, copyPaste: pixData.payload, expirationDate: pixData.expirationDate } : null,
+      boleto: asaasCharge.bankSlipUrl ? { url: asaasCharge.bankSlipUrl, barcode: asaasCharge.nossoNumero } : null,
+    };
+  }
+
   // ─── Batch charges ─────────────────────────────────────
 
   async createBatchCharges(
