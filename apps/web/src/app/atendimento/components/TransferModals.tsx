@@ -111,41 +111,42 @@ export function TransferModals({
                       </p>
                       {group.type === 'SECTOR' && group.auto_route ? (
                         <div className="space-y-2">
-                          {selected?.assignedLawyerId && (() => {
-                            const lawyer = group.users.find(u => u.id === selected.assignedLawyerId);
-                            const lawyerName = lawyer?.name || selected.assignedLawyerName || 'Advogado vinculado';
-                            return (
-                              <button
-                                onClick={() => onOpenReasonPopup('lawyer', lawyerName)}
-                                className="w-full py-3 bg-violet-500/10 border border-violet-500/30 text-violet-300 rounded-xl font-bold text-sm hover:bg-violet-500/20 transition-colors flex items-center justify-center gap-2"
-                              >
-                                {"⚖️"} Transferir para {lawyerName}{selected.legalArea ? ` (${selected.legalArea})` : ''}
-                              </button>
-                            );
-                          })()}
-                          {/* Listar demais advogados do setor */}
-                          {group.users.filter(u => u.id !== selected?.assignedLawyerId).length > 0 && (
-                            <div className="flex flex-col gap-1">
-                              {group.users.filter(u => u.id !== selected?.assignedLawyerId).map(user => (
+                          {selected?.assignedLawyerId ? (
+                            (() => {
+                              const lawyer = group.users.find(u => u.id === selected.assignedLawyerId);
+                              const lawyerName = lawyer?.name || selected.assignedLawyerName || 'Advogado vinculado';
+                              return (
                                 <button
-                                  key={user.id}
-                                  onClick={() => onSelectTransferUser(user.id)}
-                                  className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
-                                    selectedTransferUserId === user.id
-                                      ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
-                                      : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
-                                  }`}
+                                  onClick={() => onOpenReasonPopup('lawyer', lawyerName)}
+                                  className="w-full py-3 bg-violet-500/10 border border-violet-500/30 text-violet-300 rounded-xl font-bold text-sm hover:bg-violet-500/20 transition-colors flex items-center justify-center gap-2"
                                 >
-                                  {selectedTransferUserId === user.id && <span className="mr-2">{"✓"}</span>}
-                                  {user.name}
+                                  {"⚖️"} Transferir para {lawyerName}{selected.legalArea ? ` (${selected.legalArea})` : ''}
                                 </button>
-                              ))}
-                            </div>
-                          )}
-                          {group.users.length === 0 && (
-                            <p className="text-sm text-muted-foreground text-center py-2 px-1 italic">
-                              Nenhum advogado especialista cadastrado.
-                            </p>
+                              );
+                            })()
+                          ) : (
+                            group.users.length > 0 ? (
+                              <div className="flex flex-col gap-1">
+                                {group.users.map(user => (
+                                  <button
+                                    key={user.id}
+                                    onClick={() => onSelectTransferUser(user.id)}
+                                    className={`w-full text-left px-4 py-2.5 rounded-xl border transition-colors font-medium text-sm ${
+                                      selectedTransferUserId === user.id
+                                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40'
+                                        : 'bg-muted/30 hover:bg-sky-500/10 hover:text-sky-400 border-border hover:border-sky-500/30'
+                                    }`}
+                                  >
+                                    {selectedTransferUserId === user.id && <span className="mr-2">{"✓"}</span>}
+                                    {user.name}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-muted-foreground text-center py-2 px-1 italic">
+                                Nenhum advogado especialista cadastrado.
+                              </p>
+                            )
                           )}
                         </div>
                       ) : (

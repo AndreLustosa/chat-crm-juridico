@@ -14,7 +14,7 @@ export class InboxesService {
   }
 
   async findAllOperators() {
-    const [inboxes, sectors, allEligible] = await Promise.all([
+    const [inboxes, sectors, allEligible, allOperators] = await Promise.all([
       this.inbox.findMany({
         include: { users: { select: { id: true, name: true } } },
       }),
@@ -22,10 +22,16 @@ export class InboxesService {
         include: { users: { select: { id: true, name: true } } },
         orderBy: { name: 'asc' },
       }),
-      // Inclui TODOS os usuários que têm role de OPERADOR ou ADVOGADO (multi-role)
-      // Mesmo que não estejam vinculados a um inbox específico
+      // Todos os usuários elegíveis (para grupo "Equipe" genérico)
       (this.prisma as any).user.findMany({
         where: { roles: { hasSome: ['OPERADOR', 'ADVOGADO', 'ADMIN'] } },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      // Operadores que não estão em nenhum inbox (ex: advogada com perfil operador)
+      // Devem aparecer na seção comercial mesmo se estiverem em um setor de advogados
+      (this.prisma as any).user.findMany({
+        where: { roles: { has: 'OPERADOR' } },
         select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
@@ -47,23 +53,34 @@ export class InboxesService {
       users: sector.users as { id: string; name: string }[],
     }));
 
-    // Grupo "Todos" com usuários elegíveis que podem receber transferências
     const inboxUserIds = new Set(inboxes.flatMap((i: any) => (i.users || []).map((u: any) => u.id)));
     const sectorUserIds = new Set(sectors.flatMap((s: any) => (s.users || []).map((u: any) => u.id)));
-    const ungroupedUsers = (allEligible as { id: string; name: string }[]).filter(
+
+    // Operadores que não estão em nenhum inbox devem aparecer no grupo Equipe
+    // (mesmo que estejam em um setor de advogados — o papel OPERADOR garante visibilidade comercial)
+    const operatorsNotInInbox = (allOperators as { id: string; name: string }[]).filter(
+      u => !inboxUserIds.has(u.id),
+    );
+
+    // Demais elegíveis que não estão em nenhum inbox nem setor
+    const ungroupedOther = (allEligible as { id: string; name: string }[]).filter(
       u => !inboxUserIds.has(u.id) && !sectorUserIds.has(u.id),
     );
 
+    // Unir sem duplicatas
+    const teamMap = new Map<string, { id: string; name: string }>();
+    for (const u of [...operatorsNotInInbox, ...ungroupedOther]) teamMap.set(u.id, u);
+    const teamUsers = Array.from(teamMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+
     const result = [...inboxGroups, ...sectorGroups];
 
-    // Adicionar grupo "Equipe" com usuários que não estão em nenhum inbox/setor
-    if (ungroupedUsers.length > 0) {
+    if (teamUsers.length > 0) {
       result.push({
         id: '__team__',
         name: 'Equipe',
         type: 'SECTOR' as const,
         auto_route: false,
-        users: ungroupedUsers,
+        users: teamUsers,
       });
     }
 
