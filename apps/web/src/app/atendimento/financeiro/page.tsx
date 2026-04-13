@@ -2583,31 +2583,67 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                             </span>
                           </button>
                           <div className="flex items-center gap-3 shrink-0">
-                            {g.isLead && g.payments.length > 1 && (
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  const honId = g.payments[0]?.lead_honorario_id;
-                                  if (!honId) return;
-                                  setChargingGroup(g.key);
-                                  try {
-                                    const res = await api.post('/payment-gateway/charges/installment', {
-                                      leadHonorarioId: honId,
-                                      billingType: 'BOLETO',
-                                    });
-                                    setChargeGroupResult({ key: g.key, data: res.data });
-                                    showSuccess(`Cobrança parcelada gerada! ${g.payments.length}x ${fmt(Number(g.payments[0].amount))}`);
-                                    setExpandedGroups(prev => { const s = new Set(prev); s.add(g.key); return s; });
-                                  } catch (err: any) { showError(err?.response?.data?.message || 'Erro ao gerar cobrança'); }
-                                  finally { setChargingGroup(null); }
-                                }}
-                                disabled={chargingGroup === g.key}
-                                className="text-[10px] px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-semibold disabled:opacity-50 flex items-center gap-1"
-                              >
-                                {chargingGroup === g.key ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />}
-                                Gerar Cobrança {g.payments.length}x
-                              </button>
-                            )}
+                            {(() => {
+                              const hasCharge = chargeGroupResult?.key === g.key;
+                              const hasExistingCharge = g.payments.some((p: any) => p.gateway_charge || p.lead_honorario?.gateway_charge);
+                              if (hasCharge || hasExistingCharge) {
+                                return (
+                                  <span className="text-[10px] px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-semibold flex items-center gap-1">
+                                    <Check size={10} /> Cobrança Gerada
+                                  </span>
+                                );
+                              }
+                              // Botão para leads (parcelamento Asaas) e processos (batch)
+                              if (g.isLead && g.payments.length > 0) {
+                                return (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      const honId = g.payments[0]?.lead_honorario_id;
+                                      if (!honId) return;
+                                      setChargingGroup(g.key);
+                                      try {
+                                        const res = await api.post('/payment-gateway/charges/installment', { leadHonorarioId: honId, billingType: 'BOLETO' });
+                                        setChargeGroupResult({ key: g.key, data: res.data });
+                                        showSuccess(`Cobrança gerada! ${g.payments.length}x ${fmt(Number(g.payments[0].amount))}`);
+                                        setExpandedGroups(prev => { const s = new Set(prev); s.add(g.key); return s; });
+                                      } catch (err: any) { showError(err?.response?.data?.message || 'Erro ao gerar cobrança'); }
+                                      finally { setChargingGroup(null); }
+                                    }}
+                                    disabled={chargingGroup === g.key}
+                                    className="text-[10px] px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-semibold disabled:opacity-50 flex items-center gap-1"
+                                  >
+                                    {chargingGroup === g.key ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />}
+                                    Gerar Cobrança {g.payments.length > 1 ? `${g.payments.length}x` : ''}
+                                  </button>
+                                );
+                              }
+                              if (!g.isLead && g.payments.length > 0) {
+                                const honId = g.payments[0]?.honorario_id;
+                                return (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (!honId) return;
+                                      setChargingGroup(g.key);
+                                      try {
+                                        const res = await api.post('/payment-gateway/charges/batch', { honorarioId: honId, billingType: 'BOLETO' });
+                                        setChargeGroupResult({ key: g.key, data: res.data });
+                                        showSuccess(`Cobrança(s) gerada(s)!`);
+                                        setExpandedGroups(prev => { const s = new Set(prev); s.add(g.key); return s; });
+                                      } catch (err: any) { showError(err?.response?.data?.message || 'Erro ao gerar cobrança'); }
+                                      finally { setChargingGroup(null); }
+                                    }}
+                                    disabled={chargingGroup === g.key}
+                                    className="text-[10px] px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 font-semibold disabled:opacity-50 flex items-center gap-1"
+                                  >
+                                    {chargingGroup === g.key ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />}
+                                    Gerar Cobrança {g.payments.length > 1 ? `${g.payments.length}x` : ''}
+                                  </button>
+                                );
+                              }
+                              return null;
+                            })()}
                             <span className="text-[10px] text-muted-foreground">{g.payments.length} parcela(s)</span>
                             <span className="text-sm font-bold text-amber-400">{fmt(total)}</span>
                           </div>
