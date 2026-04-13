@@ -226,6 +226,90 @@ export class PaymentGatewayService {
     };
   }
 
+  // ─── Cobrança para LeadHonorarioPayment ─────────────────
+
+  async createChargeForLeadPayment(
+    leadHonorarioPaymentId: string,
+    billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+    tenantId?: string,
+  ) {
+    const existingCharge = await this.prisma.paymentGatewayCharge.findUnique({
+      where: { lead_honorario_payment_id: leadHonorarioPaymentId },
+    });
+    if (existingCharge) {
+      this.logger.warn(`[CHARGE] Ja existe cobranca para lead payment ${leadHonorarioPaymentId}: ${existingCharge.external_id}`);
+      return existingCharge;
+    }
+
+    const payment = await this.prisma.leadHonorarioPayment.findUnique({
+      where: { id: leadHonorarioPaymentId },
+      include: {
+        lead_honorario: {
+          include: {
+            lead: { select: { id: true, name: true, phone: true, email: true } },
+          },
+        },
+      },
+    });
+
+    if (!payment) throw new NotFoundException('Pagamento de honorário negociado não encontrado');
+
+    const lead = (payment as any).lead_honorario?.lead;
+    if (!lead?.id) throw new BadRequestException('Honorário negociado não possui lead vinculado');
+
+    const honTenant = (payment as any).lead_honorario?.tenant_id;
+    const customer = await this.ensureCustomer(lead.id, tenantId || honTenant);
+
+    const dueDate = payment.due_date ? new Date(payment.due_date) : new Date();
+    const dueDateStr = dueDate.toISOString().slice(0, 10);
+    const honType = (payment as any).lead_honorario?.type || '';
+    const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', ENTRADA: 'Entrada', ACORDO: 'Acordo' };
+
+    const asaasCharge = await this.asaas.createCharge({
+      customer: customer.external_id,
+      billingType,
+      value: Number(payment.amount),
+      dueDate: dueDateStr,
+      description: `Honorário ${typeLabels[honType] || honType} - Lead ${lead.name || 'Sem nome'}`.trim(),
+      externalReference: leadHonorarioPaymentId,
+    });
+
+    this.logger.log(`[CHARGE] Criada para lead: ${asaasCharge.id} | ${billingType} | R$ ${Number(payment.amount)} | Venc: ${dueDateStr}`);
+
+    let pixData: any = null;
+    if (billingType === 'PIX' && asaasCharge.id) {
+      try { pixData = await this.asaas.getPixQrCode(asaasCharge.id); }
+      catch (e: any) { this.logger.warn(`[CHARGE] Falha QR Code PIX: ${e.message}`); }
+    }
+
+    const charge = await this.prisma.paymentGatewayCharge.create({
+      data: {
+        tenant_id: tenantId || honTenant || null,
+        lead_honorario_payment_id: leadHonorarioPaymentId,
+        gateway: 'ASAAS',
+        external_id: asaasCharge.id,
+        customer_external_id: customer.external_id,
+        billing_type: billingType,
+        amount: Number(payment.amount),
+        due_date: dueDate,
+        status: asaasCharge.status || 'PENDING',
+        description: asaasCharge.description || null,
+        pix_qr_code: pixData?.encodedImage || null,
+        pix_copy_paste: pixData?.payload || null,
+        pix_expiration_date: pixData?.expirationDate ? new Date(pixData.expirationDate) : null,
+        boleto_url: asaasCharge.bankSlipUrl || null,
+        boleto_barcode: asaasCharge.nossoNumero || null,
+        invoice_url: asaasCharge.invoiceUrl || null,
+      },
+    });
+
+    return {
+      ...charge,
+      pix: pixData ? { qrCode: pixData.encodedImage, copyPaste: pixData.payload, expirationDate: pixData.expirationDate } : null,
+      boleto: asaasCharge.bankSlipUrl ? { url: asaasCharge.bankSlipUrl, barcode: asaasCharge.nossoNumero } : null,
+    };
+  }
+
   // ─── Batch charges ─────────────────────────────────────
 
   async createBatchCharges(

@@ -1,9 +1,13 @@
-import { IsString, IsNotEmpty, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsOptional } from 'class-validator';
 
 export class CreateChargeDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  honorarioPaymentId: string;
+  honorarioPaymentId?: string;
+
+  @IsOptional()
+  @IsString()
+  leadHonorarioPaymentId?: string;
 
   @IsString()
   @IsNotEmpty()

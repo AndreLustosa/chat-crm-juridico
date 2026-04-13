@@ -47,6 +47,42 @@ export class LeadHonorariosService {
     });
   }
 
+  async getSummary(tenantId?: string) {
+    const where: any = {
+      status: { in: ['NEGOCIANDO', 'ACEITO'] },
+    };
+    if (tenantId) where.tenant_id = tenantId;
+
+    const honorarios = await this.prisma.leadHonorario.findMany({
+      where,
+      include: {
+        lead: { select: { id: true, name: true, phone: true } },
+        payments: true,
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return honorarios.map(h => {
+      const payments = h.payments || [];
+      const contracted = Number(h.total_value);
+      const received = payments.filter(p => p.status === 'PAGO').reduce((s, p) => s + Number(p.amount), 0);
+      const pending = payments.filter(p => p.status === 'PENDENTE').reduce((s, p) => s + Number(p.amount), 0);
+      const overdue = payments.filter(p => p.status === 'ATRASADO').reduce((s, p) => s + Number(p.amount), 0);
+      return {
+        id: h.id,
+        lead: h.lead,
+        type: h.type,
+        status: h.status,
+        contracted,
+        received,
+        pending,
+        overdue,
+        installment_count: h.installment_count,
+        created_at: h.created_at,
+      };
+    });
+  }
+
   // ─── CRUD Honorário ─────────────────────────────────────
 
   async create(leadId: string, data: {

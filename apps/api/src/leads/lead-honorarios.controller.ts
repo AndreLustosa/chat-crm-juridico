@@ -74,10 +74,15 @@ class MarkPaidDto {
 export class LeadHonorariosController {
   constructor(private readonly service: LeadHonorariosService) {}
 
-  // ─── Parcelas pendentes globais (para módulo financeiro) ──
+  // ─── Endpoints globais (módulo financeiro) ───────────────
   @Get('honorarios-negociados/pending-payments')
   findPendingPayments(@Request() req: any) {
     return this.service.findPendingPayments(req.user?.tenant_id);
+  }
+
+  @Get('honorarios-negociados/summary')
+  getSummary(@Request() req: any) {
+    return this.service.getSummary(req.user?.tenant_id);
   }
 
   // ─── CRUD por lead ──────────────────────────────────────

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   DollarSign, TrendingUp, TrendingDown, AlertTriangle, Clock, Target,
   Plus, X, Search, Loader2, Phone, MessageSquare,
-  ArrowUpDown, ChevronDown, Trash2, Pencil, Check,
+  ArrowUpDown, ChevronDown, ChevronRight, Trash2, Pencil, Check, Handshake,
   BarChart3, Receipt, CreditCard, Ban, Users, Link2, Unlink, ExternalLink, FileText,
 } from 'lucide-react';
 import api from '@/lib/api';
@@ -2278,6 +2278,7 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
   const [selectedPending, setSelectedPending] = useState<any>(null);
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const fetchPending = useCallback(async () => {
     setLoadingPending(true);
@@ -2528,7 +2529,7 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
           </div>
         )}
 
-        {/* ── A RECEBER (parcelas de honorários pendentes) ── */}
+        {/* ── A RECEBER (parcelas agrupadas por honorário) ── */}
         {viewMode === 'a_receber' && (
           loadingPending ? (
             <div className="flex justify-center py-12"><Loader2 size={20} className="animate-spin text-primary" /></div>
@@ -2538,62 +2539,85 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
               <p className="text-sm text-muted-foreground font-medium">Nenhum valor a receber</p>
               <p className="text-xs text-muted-foreground mt-1">Cadastre honorarios nos processos para acompanhar valores pendentes</p>
             </div>
-          ) : (
-            <>
-              <div className="bg-card border border-border rounded-xl overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border bg-card/80">
-                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Processo</th>
-                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
-                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Tipo</th>
-                      <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor</th>
-                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Vencimento</th>
-                      <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredPending.map((p: any) => {
-                      const isLead = p._source === 'lead';
-                      const lc = isLead ? null : p.honorario?.legal_case;
-                      const leadData = isLead ? p.lead_honorario?.lead : lc?.lead;
-                      const honType = isLead ? p.lead_honorario?.type : p.honorario?.type;
-                      const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
-                      return (
-                        <tr key={p.id}
-                          className={`border-b border-border/40 hover:bg-accent/10 transition-colors cursor-pointer ${selectedPending?.id === p.id ? 'bg-primary/5 border-l-2 border-l-primary' : ''}`}
-                          onClick={() => setSelectedPending(p)}>
-                          <td className="px-4 py-3">
-                            {isLead ? (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 font-semibold">LEAD</span>
+          ) : (() => {
+            // Agrupar parcelas por honorário
+            const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', SUCUMBENCIA: 'Sucumbência', ENTRADA: 'Entrada', ACORDO: 'Acordo', FIXO: 'Fixo', EXITO: 'Êxito', MISTO: 'Misto' };
+            const groups = new Map<string, { key: string; isLead: boolean; label: string; clientName: string; honType: string; payments: any[] }>();
+            filteredPending.forEach((p: any) => {
+              const isLead = p._source === 'lead';
+              const groupKey = isLead ? `lead_${p.lead_honorario_id}` : `case_${p.honorario_id}`;
+              if (!groups.has(groupKey)) {
+                const lc = isLead ? null : p.honorario?.legal_case;
+                const leadData = isLead ? p.lead_honorario?.lead : lc?.lead;
+                const honType = isLead ? p.lead_honorario?.type : p.honorario?.type;
+                const label = isLead ? 'LEAD' : `${lc?.case_number || '--'} ${lc?.legal_area ? `(${lc.legal_area})` : ''}`.trim();
+                groups.set(groupKey, { key: groupKey, isLead, label, clientName: leadData?.name || '--', honType: honType || '', payments: [] });
+              }
+              groups.get(groupKey)!.payments.push(p);
+            });
+            const groupList = Array.from(groups.values());
+            const toggleGroup = (key: string) => setExpandedGroups(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
+
+            return (
+              <>
+                <div className="space-y-2">
+                  {groupList.map(g => {
+                    const total = g.payments.reduce((s: number, p: any) => s + parseFloat(String(p.amount)), 0);
+                    const isOpen = expandedGroups.has(g.key);
+                    return (
+                      <div key={g.key} className="bg-card border border-border rounded-xl overflow-hidden">
+                        {/* Header do grupo */}
+                        <button onClick={() => toggleGroup(g.key)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-accent/10 transition-colors">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            {isOpen ? <ChevronDown size={14} className="text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+                            {g.isLead ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 font-semibold shrink-0">LEAD</span>
                             ) : (
-                              <>
-                                <span className="text-[10px] font-mono text-primary">{lc?.case_number || '--'}</span>
-                                {lc?.legal_area && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded bg-accent/40 text-muted-foreground">{lc.legal_area}</span>}
-                              </>
+                              <span className="text-[10px] font-mono text-primary shrink-0">{g.label}</span>
                             )}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">{leadData?.name || '--'}</td>
-                          <td className="px-4 py-3">
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">
-                              {typeLabels[honType] || honType || '--'}
+                            <span className="text-xs text-foreground font-medium truncate">{g.clientName}</span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20 shrink-0">
+                              {typeLabels[g.honType] || g.honType}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-right font-bold text-amber-400">{fmt(p.amount)}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{p.due_date ? fmtDate(p.due_date) : <span className="italic text-muted-foreground/50">Alvará</span>}</td>
-                          <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-                <span>{filteredPending.length} parcela(s) pendente(s)</span>
-                <span className="font-semibold text-amber-400">Total a receber: {fmt(filteredPending.reduce((s: number, p: any) => s + parseFloat(String(p.amount)), 0))}</span>
-              </div>
-            </>
-          )
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-[10px] text-muted-foreground">{g.payments.length} parcela(s)</span>
+                            <span className="text-sm font-bold text-amber-400">{fmt(total)}</span>
+                          </div>
+                        </button>
+                        {/* Parcelas expandidas */}
+                        {isOpen && (
+                          <div className="border-t border-border">
+                            <table className="w-full text-xs">
+                              <tbody>
+                                {g.payments.map((p: any, idx: number) => (
+                                  <tr key={p.id}
+                                    className={`border-b border-border/30 hover:bg-accent/10 transition-colors cursor-pointer ${selectedPending?.id === p.id ? 'bg-primary/5' : ''}`}
+                                    onClick={() => setSelectedPending(p)}>
+                                    <td className="pl-10 pr-2 py-2.5 text-muted-foreground w-8">{idx + 1}.</td>
+                                    <td className="px-2 py-2.5 text-right font-semibold text-foreground">{fmt(p.amount)}</td>
+                                    <td className="px-2 py-2.5 text-muted-foreground">{p.due_date ? fmtDate(p.due_date) : <span className="italic text-muted-foreground/50">Alvará</span>}</td>
+                                    <td className="px-2 py-2.5"><StatusBadge status={p.status} /></td>
+                                    <td className="px-4 py-2.5 text-right">
+                                      <button onClick={(e) => { e.stopPropagation(); setSelectedPending(p); }} className="text-[10px] text-primary hover:underline">Detalhes</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                  <span>{groupList.length} honorário(s) | {filteredPending.length} parcela(s)</span>
+                  <span className="font-semibold text-amber-400">Total a receber: {fmt(filteredPending.reduce((s: number, p: any) => s + parseFloat(String(p.amount)), 0))}</span>
+                </div>
+              </>
+            );
+          })()
         )}
 
         {/* ── RECEBIDAS (transações financeiras PAGO) ── */}
@@ -3343,6 +3367,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function ProcessosFinanceiroTab({ lawyerId }: { lawyerId: string }) {
   const router = useRouter();
   const [cases, setCases] = useState<any[]>([]);
+  const [leadHonSummary, setLeadHonSummary] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQ, setSearchQ] = useState('');
 
@@ -3350,9 +3375,15 @@ function ProcessosFinanceiroTab({ lawyerId }: { lawyerId: string }) {
 
   useEffect(() => {
     setLoading(true);
-    api.get('/legal-cases', { params: { inTracking: 'true', archived: 'false' } })
-      .then(r => setCases(r.data || []))
-      .catch(() => setCases([]))
+    Promise.all([
+      api.get('/legal-cases', { params: { inTracking: 'true', archived: 'false' } }),
+      api.get('/leads/honorarios-negociados/summary'),
+    ])
+      .then(([caseRes, leadRes]) => {
+        setCases(caseRes.data || []);
+        setLeadHonSummary(leadRes.data || []);
+      })
+      .catch(() => { setCases([]); setLeadHonSummary([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -3417,14 +3448,68 @@ function ProcessosFinanceiroTab({ lawyerId }: { lawyerId: string }) {
         </div>
       </div>
 
+      {/* Leads com Honorários Negociados */}
+      {leadHonSummary.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <Handshake size={14} className="text-amber-400" />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400">Leads com Honorários Negociados</span>
+            <span className="text-[10px] text-muted-foreground">({leadHonSummary.length})</span>
+          </div>
+          <div className="bg-card border border-amber-500/20 rounded-xl overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-card/80">
+                  <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground">Cliente</th>
+                  <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground">Tipo</th>
+                  <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground">Parcelas</th>
+                  <th className="px-4 py-2.5 text-right font-semibold text-muted-foreground">Contratado</th>
+                  <th className="px-4 py-2.5 text-right font-semibold text-muted-foreground">Recebido</th>
+                  <th className="px-4 py-2.5 text-right font-semibold text-muted-foreground">Pendente</th>
+                  <th className="px-4 py-2.5 text-left font-semibold text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leadHonSummary.map((lh: any) => {
+                  const statusColors: Record<string, string> = {
+                    NEGOCIANDO: 'bg-amber-500/15 text-amber-400', ACEITO: 'bg-emerald-500/15 text-emerald-400',
+                  };
+                  const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratual', ENTRADA: 'Entrada', ACORDO: 'Acordo' };
+                  return (
+                    <tr key={lh.id} className="border-b border-border/40 hover:bg-accent/10">
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 font-semibold">LEAD</span>
+                          <span className="font-medium text-foreground truncate max-w-[120px]">{lh.lead?.name || '--'}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5"><span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/20">{typeLabels[lh.type] || lh.type}</span></td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{lh.installment_count}x</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-blue-400">{fmt(lh.contracted)}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-emerald-400">{fmt(lh.received)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {lh.overdue > 0 ? <span className="font-semibold text-red-400">{fmt(lh.overdue)}</span>
+                          : lh.pending > 0 ? <span className="font-semibold text-amber-400">{fmt(lh.pending)}</span>
+                          : <span className="text-muted-foreground">--</span>}
+                      </td>
+                      <td className="px-4 py-2.5"><span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${statusColors[lh.status] || 'bg-gray-500/15 text-gray-400'}`}>{lh.status}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center py-12"><Loader2 size={20} className="animate-spin text-muted-foreground mx-auto" /></div>
-      ) : withHonorarios.length === 0 ? (
+      ) : withHonorarios.length === 0 && leadHonSummary.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <Receipt size={40} className="mx-auto mb-3 opacity-30" />
           <p className="text-sm">Nenhum processo com honorarios cadastrados</p>
         </div>
-      ) : (
+      ) : withHonorarios.length === 0 ? null : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <table className="w-full text-xs">
             <thead>

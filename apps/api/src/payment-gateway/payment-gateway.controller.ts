@@ -202,9 +202,18 @@ export class PaymentGatewayController {
   @Post('charges')
   async createCharge(@Body() dto: CreateChargeDto, @Req() req: any) {
     const tenantId = req.user?.tenantId;
+    // Suporta tanto HonorarioPayment (caso) quanto LeadHonorarioPayment (lead)
+    if (dto.leadHonorarioPaymentId) {
+      this.logger.log(`[POST /charges] billingType=${dto.billingType} leadPaymentId=${dto.leadHonorarioPaymentId}`);
+      return this.service.createChargeForLeadPayment(
+        dto.leadHonorarioPaymentId,
+        dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+        tenantId,
+      );
+    }
     this.logger.log(`[POST /charges] billingType=${dto.billingType} paymentId=${dto.honorarioPaymentId}`);
     return this.service.createCharge(
-      dto.honorarioPaymentId,
+      dto.honorarioPaymentId!,
       dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
       tenantId,
     );

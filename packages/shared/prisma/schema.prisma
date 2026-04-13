@@ -1133,6 +1133,7 @@ model LeadHonorarioPayment {
 
   lead_honorario        LeadHonorario         @relation(fields: [lead_honorario_id], references: [id], onDelete: Cascade)
   financial_transaction FinancialTransaction?
+  gateway_charge        PaymentGatewayCharge?
 
   @@index([lead_honorario_id, due_date])
   @@index([status])
@@ -1352,10 +1353,12 @@ model PaymentGatewayCharge {
   created_at           DateTime  @default(now())
   updated_at           DateTime  @updatedAt
 
-  honorario_payment    HonorarioPayment?    @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
-  transaction          FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
-  legal_case           LegalCase?           @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
-  tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lead_honorario_payment_id String?  @unique
+  honorario_payment    HonorarioPayment?      @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
+  lead_honorario_payment LeadHonorarioPayment? @relation(fields: [lead_honorario_payment_id], references: [id], onDelete: SetNull)
+  transaction          FinancialTransaction?  @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  legal_case           LegalCase?             @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  tenant               Tenant?                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, status])
   @@index([customer_external_id])
