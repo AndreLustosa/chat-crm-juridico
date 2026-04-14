@@ -193,14 +193,15 @@ export class EsajTjalScraper {
     const cookie = await this.initSession();
     await sleep(this.REQUEST_DELAY);
 
-    // ESAJ aceita formato "14209AL" (número + UF) no campo de valor
-    const oabValue = `${oabNumber}${oabUf}`;
+    // ESAJ TJAL aceita só o número (sem UF) — a UF é implícita no domínio
+    const oabValue = oabNumber;
     const allCases: CourtCaseListItem[] = [];
     let currentPage = 1;
-    let totalPages = 1;
+    let totalExpected = 0;
+    const MAX_PAGES = 30; // segurança: máximo 750 processos
 
-    // Buscar TODAS as páginas automaticamente
-    do {
+    // Buscar TODAS as páginas — continua enquanto houver resultados
+    while (currentPage <= MAX_PAGES) {
       const searchUrl = `${this.BASE_URL}/search.do?` + new URLSearchParams({
         'conversationId': '',
         'cbPesquisa': 'NUMOAB',
@@ -210,29 +211,24 @@ export class EsajTjalScraper {
         'paginaConsulta': String(currentPage),
       }).toString();
 
-      this.logger.log(`[OAB] Buscando processos para OAB ${oabValue}, pagina ${currentPage}...`);
+      this.logger.log(`[OAB] Buscando OAB ${oabValue}, pagina ${currentPage}...`);
 
-      const html = await this.fetchPage(searchUrl, cookie);
+      let html: string;
+      try {
+        html = await this.fetchPage(searchUrl, cookie);
+      } catch (err: any) {
+        this.logger.warn(`[OAB] Erro na pagina ${currentPage}: ${err.message}`);
+        break;
+      }
       const $ = cheerio.load(html);
 
-      // Detectar total de páginas na primeira requisição
+      // Na primeira página, detectar total esperado para log
       if (currentPage === 1) {
-        // Extrair "164 Processos encontrados" do texto
-        const totalText = $('body').text();
-        const totalMatch = totalText.match(/(\d+)\s+Processos?\s+encontrados?/i);
+        const bodyText = $('body').text();
+        const totalMatch = bodyText.match(/(\d+)\s+Processos?\s+encontrados?/i);
         if (totalMatch) {
-          const totalResults = parseInt(totalMatch[1]);
-          totalPages = Math.ceil(totalResults / 25); // ESAJ pagina em 25
-          this.logger.log(`[OAB] Total: ${totalResults} processos em ${totalPages} paginas`);
-        }
-
-        // Fallback: contar páginas pelos links de paginação
-        if (totalPages <= 1) {
-          $('a[href*="paginaConsulta"]').each((_, el) => {
-            const href = $(el).attr('href') || '';
-            const pageMatch = href.match(/paginaConsulta=(\d+)/);
-            if (pageMatch) totalPages = Math.max(totalPages, parseInt(pageMatch[1]));
-          });
+          totalExpected = parseInt(totalMatch[1]);
+          this.logger.log(`[OAB] ESAJ reporta ${totalExpected} processos`);
         }
       }
 
@@ -255,7 +251,10 @@ export class EsajTjalScraper {
 
       // Parsear resultados desta página
       const links = $('a[href*="show.do"]');
-      if (links.length === 0) break;
+      if (links.length === 0) {
+        this.logger.log(`[OAB] Pagina ${currentPage}: 0 resultados — fim da paginação`);
+        break;
+      }
 
       links.each((_, el) => {
         const href = $(el).attr('href') || '';
@@ -266,32 +265,18 @@ export class EsajTjalScraper {
         const digits = linkText.replace(/\D/g, '');
         const caseNumber = digits.length === 20 ? formatCNJ(digits) : linkText;
 
-        // O container pai no ESAJ TJAL tem a estrutura:
-        // <a>número</a> ... classe/assunto ... "Recebido em: data - vara"
         const container = $(el).closest('tr, .containerResultado, div.linha, li').first();
-        let containerText = '';
-        if (container.length) {
-          containerText = container.text().replace(/\s+/g, ' ').trim();
-        } else {
-          // Fallback: pegar próximos siblings até encontrar outro link
-          let sibling = $(el).parent();
-          containerText = sibling.text().replace(/\s+/g, ' ').trim();
-        }
+        let containerText = container.length
+          ? container.text().replace(/\s+/g, ' ').trim()
+          : $(el).parent().text().replace(/\s+/g, ' ').trim();
 
-        // Extrair classe processual e assunto (textos em negrito após o número)
-        let actionType = '';
+        // Extrair vara/juizado do texto "Recebido em: DD/MM/YYYY - Vara..."
         let court = '';
-        let partiesSummary = '';
-
-        // Padrão ESAJ: "Execução de Título Extrajudicial Obrigação de Fazer"
-        // seguido de "Recebido em: 08/04/2026 - 1º Juizado Especial Cível..."
         const recebidoMatch = containerText.match(/Recebido em:\s*[\d\/]+\s*-\s*(.+?)(?:\s*$|\s*Advogado)/i);
         if (recebidoMatch) court = recebidoMatch[1].trim();
 
-        // Extrair advogado
-        const advMatch = containerText.match(/Advogado\(a\):\s*(.+?)(?:\s+(?:Execu|Procedimento|Tutela|A[çc][aã]o|Reclama|Recebido)|$)/i);
-
-        // Tudo entre o número do processo e "Recebido em:" é a classe + assunto
+        // Extrair classe processual (texto entre o advogado e "Recebido em:")
+        let actionType = '';
         const afterNumber = containerText.split(linkText).pop() || '';
         const beforeRecebido = afterNumber.split(/Recebido em:/i)[0] || '';
         const cleanedAction = beforeRecebido
@@ -306,22 +291,26 @@ export class EsajTjalScraper {
           case_number: caseNumber,
           action_type: actionType,
           court,
-          parties_summary: partiesSummary,
+          parties_summary: '',
           processo_codigo: codigoMatch?.[1] || '',
           foro: foroMatch?.[1] || '',
         });
       });
 
-      this.logger.log(`[OAB] Pagina ${currentPage}/${totalPages}: ${links.length} processos (total acumulado: ${allCases.length})`);
+      this.logger.log(`[OAB] Pagina ${currentPage}: ${links.length} processos (acumulado: ${allCases.length}${totalExpected ? `/${totalExpected}` : ''})`);
+
+      // Se encontrou menos de 25 resultados, é a última página
+      if (links.length < 25) {
+        this.logger.log(`[OAB] Pagina ${currentPage} com ${links.length} resultados (<25) — última página`);
+        break;
+      }
 
       currentPage++;
-      if (currentPage <= totalPages) {
-        await sleep(this.REQUEST_DELAY); // Rate limit entre páginas
-      }
-    } while (currentPage <= totalPages);
+      await sleep(this.REQUEST_DELAY);
+    }
 
-    this.logger.log(`[OAB] Concluido: ${allCases.length} processos encontrados em ${totalPages} paginas`);
-    return { cases: allCases, totalPages, currentPage: totalPages };
+    this.logger.log(`[OAB] Concluido: ${allCases.length} processos em ${currentPage} paginas${totalExpected ? ` (ESAJ reportou ${totalExpected})` : ''}`);
+    return { cases: allCases, totalPages: currentPage, currentPage };
   }
 
   // ─── Detalhe do Processo ───────────────────────────────────
