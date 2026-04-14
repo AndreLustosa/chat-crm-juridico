@@ -96,7 +96,7 @@ export class UsersService {
     return result as any;
   }
 
-  async update(id: string, data: { name?: string; email?: string; role?: string; roles?: string[]; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }, tenantId?: string): Promise<Omit<User, 'password_hash'>> {
+  async update(id: string, data: { name?: string; email?: string; role?: string; roles?: string[]; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string; oab_number?: string; oab_uf?: string }, tenantId?: string): Promise<Omit<User, 'password_hash'>> {
     await this.verifyTenantOwnership(id, tenantId);
     const updateData: Prisma.UserUpdateInput = {};
     if (data.name) updateData.name = data.name;
@@ -110,6 +110,8 @@ export class UsersService {
     if (data.phone !== undefined) updateData.phone = data.phone || null;
     if (data.password) updateData.password_hash = await argon2.hash(data.password);
     if (data.specialties !== undefined) (updateData as any).specialties = { set: data.specialties };
+    if (data.oab_number !== undefined) updateData.oab_number = data.oab_number || null;
+    if (data.oab_uf !== undefined) updateData.oab_uf = data.oab_uf || null;
 
     if (data.inboxIds) {
       updateData.inboxes = {

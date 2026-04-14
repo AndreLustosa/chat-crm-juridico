@@ -26,9 +26,13 @@ interface UserForm {
   inboxIds: string[];
   specialties: string[];
   supervisorIds: string[];
+  oab_number: string;
+  oab_uf: string;
 }
 
-const emptyForm: UserForm = { name: '', email: '', phone: '', password: '', role: '', inboxIds: [], specialties: [], supervisorIds: [] };
+const UF_OPTIONS = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
+
+const emptyForm: UserForm = { name: '', email: '', phone: '', password: '', role: '', inboxIds: [], specialties: [], supervisorIds: [], oab_number: '', oab_uf: 'AL' };
 
 export default function UsersSettingsPage() {
   const router = useRouter();
@@ -117,6 +121,8 @@ export default function UsersSettingsPage() {
       inboxIds: user.inboxes?.map((i: any) => i.id) || [],
       specialties: user.specialties || [],
       supervisorIds: user.supervisors?.map((s: any) => s.id) || [],
+      oab_number: user.oab_number || '',
+      oab_uf: user.oab_uf || 'AL',
     });
     setSpecialtyInput('');
     setError('');
@@ -148,6 +154,8 @@ export default function UsersSettingsPage() {
           role: form.role,
           inboxIds: form.inboxIds,
           specialties: form.specialties,
+          oab_number: form.oab_number || null,
+          oab_uf: form.oab_uf || null,
         };
         if (form.password) payload.password = form.password;
         await api.patch(`/users/${editingId}`, payload);
@@ -439,6 +447,33 @@ export default function UsersSettingsPage() {
                   })()}
                 </select>
               </div>
+
+              {/* OAB — visível para advogados */}
+              {(form.role === 'Advogados' || form.role === 'ADMIN') && (
+                <div className="space-y-1.5">
+                  <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Registro OAB</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={form.oab_number}
+                      onChange={e => setForm({ ...form, oab_number: e.target.value.replace(/\D/g, '') })}
+                      className="flex-1 px-4 py-2.5 border border-border rounded-xl bg-background text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
+                      placeholder="Número OAB (ex: 14209)"
+                      maxLength={10}
+                    />
+                    <select
+                      value={form.oab_uf}
+                      onChange={e => setForm({ ...form, oab_uf: e.target.value })}
+                      className="w-20 px-2 py-2.5 border border-border rounded-xl bg-background text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                    >
+                      {UF_OPTIONS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+                    </select>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground opacity-70 ml-1">
+                    Usado para importar processos do tribunal via ESAJ.
+                  </p>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Setores (Acesso ao Chat)</label>

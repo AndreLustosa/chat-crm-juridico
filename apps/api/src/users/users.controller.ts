@@ -52,7 +52,7 @@ export class UsersController {
 
   @Patch(':id')
   @Roles('ADMIN')
-  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; roles?: string[]; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string }) {
+  update(@Request() req: any, @Param('id') id: string, @Body() data: { name?: string; email?: string; role?: string; roles?: string[]; password?: string; inboxIds?: string[]; specialties?: string[]; phone?: string; oab_number?: string; oab_uf?: string }) {
     return this.usersService.update(id, data, req.user?.tenant_id);
   }
 
