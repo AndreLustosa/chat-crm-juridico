@@ -3246,72 +3246,85 @@ function TabelaView({
 // ─── OAB Import Modal ──────────────────────────────────────────
 
 function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const UF_LIST = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
   const [lawyers, setLawyers] = useState<Array<{ id: string; name: string; oab_number: string | null; oab_uf: string | null }>>([]);
   const [selectedOabs, setSelectedOabs] = useState<Set<string>>(new Set());
   const [customOab, setCustomOab] = useState('');
+  const [customUf, setCustomUf] = useState('AL');
   const [searching, setSearching] = useState(false);
+  const [searchProgress, setSearchProgress] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [selectedForImport, setSelectedForImport] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  const [importingOne, setImportingOne] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
+  const [importedSet, setImportedSet] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.get('/court-scraper/lawyers').then(r => {
       const data = r.data || [];
       setLawyers(data);
-      // Selecionar todos por padrão
       const oabs = new Set<string>(data.filter((l: any) => l.oab_number).map((l: any) => l.oab_number as string));
       setSelectedOabs(oabs);
     }).catch(() => {});
   }, []);
 
   const toggleOab = (oab: string) => {
-    setSelectedOabs(prev => {
-      const n = new Set(prev);
-      n.has(oab) ? n.delete(oab) : n.add(oab);
-      return n;
-    });
+    setSelectedOabs(prev => { const n = new Set(prev); n.has(oab) ? n.delete(oab) : n.add(oab); return n; });
   };
 
   const handleSearch = async () => {
-    const oabs = [...selectedOabs];
-    if (customOab.trim()) oabs.push(customOab.trim());
-    if (oabs.length === 0) { setError('Selecione ao menos uma OAB'); return; }
+    // Montar lista de OABs com UF: "14209:AL,17697:AL"
+    const oabEntries: string[] = [];
+    for (const oab of selectedOabs) {
+      const lawyer = lawyers.find(l => l.oab_number === oab);
+      oabEntries.push(`${oab}:${lawyer?.oab_uf || 'AL'}`);
+    }
+    if (customOab.trim()) oabEntries.push(`${customOab.trim()}:${customUf}`);
+    if (oabEntries.length === 0) { setError('Selecione ao menos uma OAB'); return; }
 
     setSearching(true);
+    setSearchProgress('Conectando ao ESAJ/TJAL...');
     setError(null);
     setResults([]);
     setSelectedForImport(new Set());
+    setImportedSet(new Set());
+    setImportResult(null);
     try {
-      const res = await api.get('/court-scraper/search-oab', { params: { oabs: oabs.join(',') } });
+      const res = await api.get('/court-scraper/search-oab', {
+        params: { oabs: oabEntries.join(',') },
+        timeout: 300000, // 5 min — pode demorar com muitas páginas
+      });
       const cases = res.data?.cases || [];
       setResults(cases);
-      // Pre-selecionar os não cadastrados
       const toSelect = new Set<string>(cases.filter((c: any) => !c.already_registered && c.processo_codigo).map((c: any) => c.processo_codigo as string));
       setSelectedForImport(toSelect);
+      setSearchProgress('');
     } catch (e: any) {
-      setError(e?.response?.data?.message || 'Erro ao buscar processos no ESAJ');
+      setError(e?.response?.data?.message || 'Erro ao buscar processos no ESAJ. A busca pode demorar para OABs com muitos processos.');
     } finally {
       setSearching(false);
+      setSearchProgress('');
     }
   };
 
-  const handleImport = async () => {
+  const handleImportBatch = async () => {
     const items = results
-      .filter(c => selectedForImport.has(c.processo_codigo) && !c.already_registered)
+      .filter(c => selectedForImport.has(c.processo_codigo) && !c.already_registered && !importedSet.has(c.processo_codigo))
       .map(c => ({ processo_codigo: c.processo_codigo, foro: c.foro || '1' }));
-
     if (items.length === 0) { setError('Nenhum processo selecionado para importar'); return; }
 
     setImporting(true);
     setError(null);
     try {
-      const res = await api.post('/court-scraper/import', { items });
+      const res = await api.post('/court-scraper/import', { items }, { timeout: 600000 });
       setImportResult(res.data);
-      if (res.data.imported > 0) {
-        setTimeout(() => onSuccess(), 2000);
-      }
+      // Marcar importados
+      const newImported = new Set(importedSet);
+      items.forEach(item => newImported.add(item.processo_codigo));
+      setImportedSet(newImported);
+      if (res.data.imported > 0) setTimeout(() => onSuccess(), 2500);
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Erro ao importar processos');
     } finally {
@@ -3319,13 +3332,31 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
     }
   };
 
-  const toggleImport = (codigo: string) => {
-    setSelectedForImport(prev => {
-      const n = new Set(prev);
-      n.has(codigo) ? n.delete(codigo) : n.add(codigo);
-      return n;
-    });
+  const handleImportOne = async (c: any) => {
+    if (!c.processo_codigo || c.already_registered || importedSet.has(c.processo_codigo)) return;
+    setImportingOne(c.processo_codigo);
+    setError(null);
+    try {
+      const res = await api.post('/court-scraper/import', {
+        items: [{ processo_codigo: c.processo_codigo, foro: c.foro || '1' }],
+      }, { timeout: 60000 });
+      if (res.data.imported > 0) {
+        setImportedSet(prev => { const n = new Set(prev); n.add(c.processo_codigo); return n; });
+      } else if (res.data.errors?.length > 0) {
+        setError(res.data.errors[0]);
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao importar processo');
+    } finally {
+      setImportingOne(null);
+    }
   };
+
+  const toggleImport = (codigo: string) => {
+    setSelectedForImport(prev => { const n = new Set(prev); n.has(codigo) ? n.delete(codigo) : n.add(codigo); return n; });
+  };
+
+  const notRegistered = results.filter(c => !c.already_registered && !importedSet.has(c.processo_codigo));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -3334,7 +3365,7 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div>
             <h2 className="text-base font-bold text-foreground">Importar Processos por OAB</h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Busque processos no ESAJ/TJAL vinculados ao número da OAB</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Busca TODAS as páginas do ESAJ/TJAL automaticamente</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X size={16} /></button>
         </div>
@@ -3344,7 +3375,7 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
           <div>
             <label className="text-xs font-semibold text-foreground mb-2 block">Selecione os advogados:</label>
             {lawyers.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">Nenhum advogado com OAB cadastrada. Cadastre a OAB no perfil do advogado.</p>
+              <p className="text-[11px] text-muted-foreground">Nenhum advogado com OAB cadastrada. Cadastre na tela Configurações → Equipe.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {lawyers.map(l => (
@@ -3366,33 +3397,42 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
               </div>
             )}
 
-            {/* OAB avulsa */}
+            {/* OAB avulsa com UF */}
             <div className="mt-2 flex items-center gap-2">
               <input
                 value={customOab}
                 onChange={e => setCustomOab(e.target.value.replace(/\D/g, ''))}
                 placeholder="OAB avulsa..."
-                className="px-3 py-1.5 text-[11px] bg-accent/50 border border-border rounded-lg w-32 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                className="px-3 py-1.5 text-[11px] bg-accent/50 border border-border rounded-lg w-28 focus:outline-none focus:ring-1 focus:ring-primary/40"
               />
+              <select
+                value={customUf}
+                onChange={e => setCustomUf(e.target.value)}
+                className="px-2 py-1.5 text-[11px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40"
+              >
+                {UF_LIST.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+              </select>
               <button
                 onClick={handleSearch}
                 disabled={searching}
                 className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-lg hover:opacity-90 disabled:opacity-50"
               >
                 {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                {searching ? 'Buscando...' : 'Buscar Processos'}
+                {searching ? 'Buscando todas as páginas...' : 'Buscar Processos'}
               </button>
             </div>
+            {searchProgress && <p className="text-[10px] text-orange-500 mt-1 animate-pulse">{searchProgress}</p>}
           </div>
 
           {/* Erro */}
           {error && (
             <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-xs text-destructive flex items-center gap-2">
-              <AlertCircle size={14} /> {error}
+              <AlertCircle size={14} className="shrink-0" /> <span className="flex-1">{error}</span>
+              <button onClick={() => setError(null)} className="shrink-0 p-0.5 hover:opacity-70"><X size={12} /></button>
             </div>
           )}
 
-          {/* Resultado da importação */}
+          {/* Resultado da importação em lote */}
           {importResult && (
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs">
               <p className="font-semibold text-emerald-700 dark:text-emerald-400">
@@ -3401,7 +3441,8 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
               </p>
               {importResult.errors.length > 0 && (
                 <div className="mt-1 text-muted-foreground">
-                  {importResult.errors.map((e, i) => <p key={i}>• {e}</p>)}
+                  {importResult.errors.slice(0, 5).map((e, i) => <p key={i}>• {e}</p>)}
+                  {importResult.errors.length > 5 && <p>... e mais {importResult.errors.length - 5} erro(s)</p>}
                 </div>
               )}
             </div>
@@ -3418,71 +3459,97 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
                       ({results.filter(c => c.already_registered).length} já cadastrados)
                     </span>
                   )}
+                  {importedSet.size > 0 && (
+                    <span className="text-emerald-500 font-normal ml-1">
+                      ({importedSet.size} importado(s) agora)
+                    </span>
+                  )}
                 </label>
                 <span className="text-[10px] text-muted-foreground">
                   {selectedForImport.size} selecionado(s)
                 </span>
               </div>
-              <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
-                {results.map((c: any, i: number) => (
-                  <div
-                    key={i}
-                    className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all text-[11px] ${
-                      c.already_registered
-                        ? 'bg-accent/20 border-border/50 opacity-60'
-                        : selectedForImport.has(c.processo_codigo)
-                        ? 'bg-primary/5 border-primary/30'
-                        : 'bg-card border-border'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedForImport.has(c.processo_codigo)}
-                      onChange={() => toggleImport(c.processo_codigo)}
-                      disabled={c.already_registered || !c.processo_codigo}
-                      className="rounded"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-semibold">{c.case_number}</span>
-                        {c.already_registered && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-bold">Já cadastrado</span>
+              <div className="space-y-1.5 max-h-[350px] overflow-y-auto">
+                {results.map((c: any, i: number) => {
+                  const isImported = importedSet.has(c.processo_codigo);
+                  const isRegistered = c.already_registered || isImported;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all text-[11px] ${
+                        isRegistered
+                          ? 'bg-accent/20 border-border/50 opacity-60'
+                          : selectedForImport.has(c.processo_codigo)
+                          ? 'bg-primary/5 border-primary/30'
+                          : 'bg-card border-border'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedForImport.has(c.processo_codigo)}
+                        onChange={() => toggleImport(c.processo_codigo)}
+                        disabled={isRegistered || !c.processo_codigo}
+                        className="rounded shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-semibold">{c.case_number}</span>
+                          {c.already_registered && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-bold">Já cadastrado</span>
+                          )}
+                          {isImported && !c.already_registered && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold flex items-center gap-0.5">
+                              <CheckCircle2 size={10} /> Importado
+                            </span>
+                          )}
+                        </div>
+                        {(c.action_type || c.court) && (
+                          <div className="text-muted-foreground truncate mt-0.5">
+                            {c.action_type && <span>{c.action_type}</span>}
+                            {c.court && <span> • {c.court}</span>}
+                          </div>
+                        )}
+                        {c.found_by_lawyers?.length > 0 && (
+                          <div className="flex gap-1 mt-0.5 flex-wrap">
+                            {c.found_by_lawyers.map((name: string, j: number) => (
+                              <span key={j} className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-500 font-bold">{name}</span>
+                            ))}
+                          </div>
                         )}
                       </div>
-                      <div className="text-muted-foreground truncate">
-                        {c.action_type && <span>{c.action_type}</span>}
-                        {c.court && <span> • {c.court}</span>}
-                      </div>
-                      {c.found_by_lawyers?.length > 0 && (
-                        <div className="flex gap-1 mt-0.5">
-                          {c.found_by_lawyers.map((name: string, j: number) => (
-                            <span key={j} className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-500 font-bold">
-                              {name}
-                            </span>
-                          ))}
-                        </div>
+                      {/* Botão importar individual */}
+                      {!isRegistered && c.processo_codigo && (
+                        <button
+                          onClick={() => handleImportOne(c)}
+                          disabled={importingOne === c.processo_codigo}
+                          className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 transition-all"
+                          title="Importar este processo"
+                        >
+                          {importingOne === c.processo_codigo ? <Loader2 size={11} className="animate-spin" /> : <FolderPlus size={11} />}
+                          Importar
+                        </button>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        {results.length > 0 && !importResult && (
+        {results.length > 0 && notRegistered.length > 0 && (
           <div className="flex items-center justify-end gap-3 p-4 border-t border-border">
             <button onClick={onClose} className="px-4 py-1.5 text-[11px] font-semibold rounded-lg border border-border hover:bg-accent">
               Cancelar
             </button>
             <button
-              onClick={handleImport}
+              onClick={handleImportBatch}
               disabled={importing || selectedForImport.size === 0}
               className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50"
             >
               {importing ? <Loader2 size={12} className="animate-spin" /> : <FolderPlus size={12} />}
-              {importing ? 'Importando...' : `Importar ${selectedForImport.size} processo(s)`}
+              {importing ? 'Importando...' : `Importar ${selectedForImport.size} processo(s) em lote`}
             </button>
           </div>
         )}

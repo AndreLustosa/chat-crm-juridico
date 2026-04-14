@@ -187,41 +187,61 @@ export class EsajTjalScraper {
     return this.fetchCaseDetail(codigoMatch[1], foroMatch?.[1] || '1', cookie);
   }
 
-  // ─── Busca por OAB ──────────────────────────────────────────
+  // ─── Busca por OAB (todas as páginas) ────────────────────────
 
-  async searchByOAB(oabNumber: string, page = 1): Promise<CourtCaseListResult> {
+  async searchByOAB(oabNumber: string, oabUf = 'AL'): Promise<CourtCaseListResult> {
     const cookie = await this.initSession();
     await sleep(this.REQUEST_DELAY);
 
-    const searchUrl = `${this.BASE_URL}/search.do?` + new URLSearchParams({
-      'conversationId': '',
-      'cbPesquisa': 'NUMOAB',
-      'dadosConsulta.localPesquisa.cdLocal': '-1',
-      'tipoNuProcesso': 'UNIFICADO',
-      'dadosConsulta.valorConsulta': oabNumber,
-      'paginaConsulta': String(page),
-    }).toString();
+    // ESAJ aceita formato "14209AL" (número + UF) no campo de valor
+    const oabValue = `${oabNumber}${oabUf}`;
+    const allCases: CourtCaseListItem[] = [];
+    let currentPage = 1;
+    let totalPages = 1;
 
-    this.logger.log(`[OAB] Buscando processos para OAB ${oabNumber}, pagina ${page}`);
+    // Buscar TODAS as páginas automaticamente
+    do {
+      const searchUrl = `${this.BASE_URL}/search.do?` + new URLSearchParams({
+        'conversationId': '',
+        'cbPesquisa': 'NUMOAB',
+        'dadosConsulta.localPesquisa.cdLocal': '-1',
+        'tipoNuProcesso': 'UNIFICADO',
+        'dadosConsulta.valorConsulta': oabValue,
+        'paginaConsulta': String(currentPage),
+      }).toString();
 
-    const html = await this.fetchPage(searchUrl, cookie);
-    const $ = cheerio.load(html);
+      this.logger.log(`[OAB] Buscando processos para OAB ${oabValue}, pagina ${currentPage}...`);
 
-    const cases: CourtCaseListItem[] = [];
+      const html = await this.fetchPage(searchUrl, cookie);
+      const $ = cheerio.load(html);
 
-    // Cada resultado de busca é um container com links para show.do
-    const resultContainers = $('tr.fundoClaro, tr.fundoEscuro, .containerResultado, .resultadoPesquisa');
+      // Detectar total de páginas na primeira requisição
+      if (currentPage === 1) {
+        // Extrair "164 Processos encontrados" do texto
+        const totalText = $('body').text();
+        const totalMatch = totalText.match(/(\d+)\s+Processos?\s+encontrados?/i);
+        if (totalMatch) {
+          const totalResults = parseInt(totalMatch[1]);
+          totalPages = Math.ceil(totalResults / 25); // ESAJ pagina em 25
+          this.logger.log(`[OAB] Total: ${totalResults} processos em ${totalPages} paginas`);
+        }
 
-    // Se não encontrou containers padrão, tentar parsear links diretamente
-    const links = $('a[href*="show.do"]');
+        // Fallback: contar páginas pelos links de paginação
+        if (totalPages <= 1) {
+          $('a[href*="paginaConsulta"]').each((_, el) => {
+            const href = $(el).attr('href') || '';
+            const pageMatch = href.match(/paginaConsulta=(\d+)/);
+            if (pageMatch) totalPages = Math.max(totalPages, parseInt(pageMatch[1]));
+          });
+        }
+      }
 
-    if (links.length === 0) {
-      // Verificar se a busca retornou direto na página de detalhes (1 só resultado)
+      // Verificar se caiu direto na página de detalhes (1 resultado)
       const hasDetail = $('#tabelaUltimasMovimentacoes').length > 0;
-      if (hasDetail) {
+      if (hasDetail && currentPage === 1) {
         const parsed = this.parseCaseDetail($, '');
         if (parsed) {
-          cases.push({
+          allCases.push({
             case_number: parsed.case_number,
             action_type: parsed.action_type,
             court: parsed.court,
@@ -230,55 +250,78 @@ export class EsajTjalScraper {
             foro: '',
           });
         }
+        break;
       }
 
-      return { cases, totalPages: 1, currentPage: page };
-    }
+      // Parsear resultados desta página
+      const links = $('a[href*="show.do"]');
+      if (links.length === 0) break;
 
-    // Parsear cada link de resultado
-    links.each((_, el) => {
-      const href = $(el).attr('href') || '';
-      const codigoMatch = href.match(/processo\.codigo=([^&]+)/);
-      const foroMatch = href.match(/processo\.foro=([^&]+)/);
+      links.each((_, el) => {
+        const href = $(el).attr('href') || '';
+        const codigoMatch = href.match(/processo\.codigo=([^&]+)/);
+        const foroMatch = href.match(/processo\.foro=([^&]+)/);
 
-      // Buscar informações do container pai
-      const container = $(el).closest('tr, .containerResultado, div');
-      const text = container.text().replace(/\s+/g, ' ').trim();
+        const linkText = $(el).text().trim();
+        const digits = linkText.replace(/\D/g, '');
+        const caseNumber = digits.length === 20 ? formatCNJ(digits) : linkText;
 
-      // Extrair número do processo (geralmente é o texto do link)
-      const linkText = $(el).text().trim();
-      const caseNumber = linkText.replace(/\D/g, '').length === 20
-        ? formatCNJ(linkText.replace(/\D/g, ''))
-        : linkText;
+        // O container pai no ESAJ TJAL tem a estrutura:
+        // <a>número</a> ... classe/assunto ... "Recebido em: data - vara"
+        const container = $(el).closest('tr, .containerResultado, div.linha, li').first();
+        let containerText = '';
+        if (container.length) {
+          containerText = container.text().replace(/\s+/g, ' ').trim();
+        } else {
+          // Fallback: pegar próximos siblings até encontrar outro link
+          let sibling = $(el).parent();
+          containerText = sibling.text().replace(/\s+/g, ' ').trim();
+        }
 
-      // Tentar extrair classe e vara do texto do container
-      const classeMatch = text.match(/Classe:\s*(.+?)(?:\s+Assunto:|$)/i);
-      const varaMatch = text.match(/Vara:\s*(.+?)(?:\s+Classe:|$)/i);
-      const partesText = text.match(/Partes.*?:?\s*(.+?)(?:\s+Classe:|$)/i);
+        // Extrair classe processual e assunto (textos em negrito após o número)
+        let actionType = '';
+        let court = '';
+        let partiesSummary = '';
 
-      cases.push({
-        case_number: caseNumber,
-        action_type: classeMatch?.[1]?.trim() || '',
-        court: varaMatch?.[1]?.trim() || '',
-        parties_summary: partesText?.[1]?.trim()?.slice(0, 120) || '',
-        processo_codigo: codigoMatch?.[1] || '',
-        foro: foroMatch?.[1] || '',
+        // Padrão ESAJ: "Execução de Título Extrajudicial Obrigação de Fazer"
+        // seguido de "Recebido em: 08/04/2026 - 1º Juizado Especial Cível..."
+        const recebidoMatch = containerText.match(/Recebido em:\s*[\d\/]+\s*-\s*(.+?)(?:\s*$|\s*Advogado)/i);
+        if (recebidoMatch) court = recebidoMatch[1].trim();
+
+        // Extrair advogado
+        const advMatch = containerText.match(/Advogado\(a\):\s*(.+?)(?:\s+(?:Execu|Procedimento|Tutela|A[çc][aã]o|Reclama|Recebido)|$)/i);
+
+        // Tudo entre o número do processo e "Recebido em:" é a classe + assunto
+        const afterNumber = containerText.split(linkText).pop() || '';
+        const beforeRecebido = afterNumber.split(/Recebido em:/i)[0] || '';
+        const cleanedAction = beforeRecebido
+          .replace(/Advogado\(a\):\s*[^\s]+(?: [^\s]+)*/i, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (cleanedAction.length > 3 && cleanedAction.length < 200) {
+          actionType = cleanedAction;
+        }
+
+        allCases.push({
+          case_number: caseNumber,
+          action_type: actionType,
+          court,
+          parties_summary: partiesSummary,
+          processo_codigo: codigoMatch?.[1] || '',
+          foro: foroMatch?.[1] || '',
+        });
       });
-    });
 
-    // Contar páginas
-    const paginacao = $('a[href*="paginaConsulta"]');
-    let totalPages = page;
-    paginacao.each((_, el) => {
-      const href = $(el).attr('href') || '';
-      const pageMatch = href.match(/paginaConsulta=(\d+)/);
-      if (pageMatch) {
-        totalPages = Math.max(totalPages, parseInt(pageMatch[1]));
+      this.logger.log(`[OAB] Pagina ${currentPage}/${totalPages}: ${links.length} processos (total acumulado: ${allCases.length})`);
+
+      currentPage++;
+      if (currentPage <= totalPages) {
+        await sleep(this.REQUEST_DELAY); // Rate limit entre páginas
       }
-    });
+    } while (currentPage <= totalPages);
 
-    this.logger.log(`[OAB] Encontrados ${cases.length} processos na pagina ${page}/${totalPages}`);
-    return { cases, totalPages, currentPage: page };
+    this.logger.log(`[OAB] Concluido: ${allCases.length} processos encontrados em ${totalPages} paginas`);
+    return { cases: allCases, totalPages, currentPage: totalPages };
   }
 
   // ─── Detalhe do Processo ───────────────────────────────────

@@ -11,7 +11,7 @@ import {
 
 interface TribunalScraper {
   searchByNumber(caseNumber: string): Promise<CourtCaseData | null>;
-  searchByOAB(oabNumber: string, page?: number): Promise<CourtCaseListResult>;
+  searchByOAB(oabNumber: string, oabUf?: string): Promise<CourtCaseListResult>;
   fetchCaseDetail(processoCodigo: string, foro: string, cookie: string): Promise<CourtCaseData | null>;
 }
 
@@ -134,13 +134,14 @@ export class CourtScraperService {
   // ─── Busca por OAB (múltiplas) ───────────────────────────
 
   async searchByOABs(
-    oabNumbers: string[],
-    page = 1,
+    oabEntries: Array<{ number: string; uf: string }>,
     tenantId?: string,
   ): Promise<MultiOabResult> {
-    if (!oabNumbers.length) {
+    if (!oabEntries.length) {
       throw new BadRequestException('Informe ao menos uma OAB');
     }
+
+    const oabNumbers = oabEntries.map(e => e.number);
 
     // Buscar nomes dos advogados para cada OAB
     const lawyers = await this.prisma.user.findMany({
@@ -153,7 +154,7 @@ export class CourtScraperService {
     const oabToName = new Map(lawyers.map(l => [l.oab_number!, l.name]));
 
     // Por enquanto, só temos ESAJ TJAL — buscar em cada OAB
-    const scraper = this.scrapers['8.02'];
+    const scraper = this.scrapers['8.02'] as EsajTjalScraper;
     if (!scraper) {
       throw new BadRequestException('Nenhum scraper disponível');
     }
@@ -164,16 +165,17 @@ export class CourtScraperService {
     }>();
     const totalByOab: Record<string, number> = {};
 
-    for (const oab of oabNumbers) {
+    for (const entry of oabEntries) {
+      const oab = entry.number;
+      const uf = entry.uf || 'AL';
       try {
-        this.logger.log(`[OAB-MULTI] Buscando OAB ${oab} (${oabToName.get(oab) || 'Desconhecido'})...`);
-        const result = await scraper.searchByOAB(oab, page);
+        this.logger.log(`[OAB-MULTI] Buscando OAB ${oab}/${uf} (${oabToName.get(oab) || 'Avulsa'})...`);
+        const result = await scraper.searchByOAB(oab, uf);
         totalByOab[oab] = result.cases.length;
 
         for (const c of result.cases) {
           const key = c.case_number.replace(/\D/g, '');
           if (allCases.has(key)) {
-            // Mesmo processo encontrado por outra OAB
             const existing = allCases.get(key)!;
             if (!existing.found_by_oabs.includes(oab)) {
               existing.found_by_oabs.push(oab);
@@ -189,7 +191,7 @@ export class CourtScraperService {
         }
 
         // Delay entre OABs para não sobrecarregar
-        if (oabNumbers.indexOf(oab) < oabNumbers.length - 1) {
+        if (oabEntries.indexOf(entry) < oabEntries.length - 1) {
           await new Promise(r => setTimeout(r, 3000));
         }
       } catch (error: any) {

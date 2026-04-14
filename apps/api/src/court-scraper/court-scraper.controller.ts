@@ -26,20 +26,23 @@ export class CourtScraperController {
     return this.service.searchByNumber(caseNumber.trim());
   }
 
-  /** Busca processos por OAB(s) no ESAJ */
+  /** Busca processos por OAB(s) no ESAJ — formato: "14209:AL,17697:AL" */
   @Get('search-oab')
   async searchByOAB(
     @Query('oabs') oabs: string,
-    @Query('page') page: string | undefined,
     @Req() req: any,
   ) {
     if (!oabs?.trim()) {
-      throw new BadRequestException('Parâmetro oabs é obrigatório (ex: 14209,17697)');
+      throw new BadRequestException('Parâmetro oabs é obrigatório (ex: 14209:AL,17697:AL)');
     }
-    const oabList = oabs.split(',').map(o => o.trim()).filter(Boolean);
+    // Aceita formato "14209:AL,17697:AL" ou legado "14209,17697" (default UF=AL)
+    const oabEntries = oabs.split(',').map(o => {
+      const parts = o.trim().split(':');
+      return { number: parts[0], uf: parts[1] || 'AL' };
+    }).filter(e => e.number);
     const tenantId = req.user?.tenant_id;
-    this.logger.log(`[GET /search-oab] oabs=${oabList.join(',')} page=${page || 1}`);
-    return this.service.searchByOABs(oabList, parseInt(page || '1'), tenantId);
+    this.logger.log(`[GET /search-oab] oabs=${oabEntries.map(e => `${e.number}/${e.uf}`).join(',')}`);
+    return this.service.searchByOABs(oabEntries, tenantId);
   }
 
   /** Lista advogados do escritório que têm OAB cadastrada */
