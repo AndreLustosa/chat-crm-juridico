@@ -1030,14 +1030,106 @@ export class EvolutionService {
   }
 
   private async scheduleResyncAfterReconnect(instanceName: string): Promise<void> {
-    // Aguarda 5 segundos para a instância estabilizar antes de buscar mensagens
-    const STABILIZE_DELAY = 5000;
+    // Aguarda para a instância estabilizar antes de buscar mensagens
+    const STABILIZE_DELAY = 10000; // 10s para garantir estabilidade
 
+    // ─── FASE 1: Descobrir chats novos via Evolution API ──────────────
+    // Busca chats recentes do WhatsApp e cria leads/conversas para os que
+    // NÃO existem no CRM (mensagens que chegaram durante a queda do servidor).
+    try {
+      const recentChats = await this.whatsappService.fetchChats(instanceName);
+      const inbox = await this.inboxesService.findByInstanceName(instanceName);
+      const inboxId = inbox?.inbox_id || null;
+      const tenantId = inbox?.tenant_id || null;
+
+      // Filtrar apenas chats com mensagens recentes (últimas 72h)
+      const cutoff72h = Date.now() - 72 * 3600 * 1000;
+      let newConvsCreated = 0;
+
+      for (const chat of recentChats) {
+        if (!chat) continue;
+        const remoteJid = (chat.remoteJidAlt || chat.remoteJid) as string;
+        if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast') || remoteJid.includes('status@')) continue;
+
+        const phone = extractPhone(chat.remoteJid as string, chat.remoteJidAlt as string);
+        if (!phone || phone.length > 13 || phone.length < 10) continue;
+
+        // Verificar se tem mensagem recente (nas últimas 72h)
+        const lastMsgTs = chat.lastMessage?.messageTimestamp
+          ? Number(chat.lastMessage.messageTimestamp) * 1000
+          : 0;
+        if (lastMsgTs > 0 && lastMsgTs < cutoff72h) continue; // Chat antigo, ignorar
+
+        // Verificar se já existe conversa ABERTA para este lead
+        const existingLead = await this.leadsService.findByPhone(phone);
+        if (existingLead) {
+          const existingConv = await this.prisma.conversation.findFirst({
+            where: { lead_id: existingLead.id, channel: 'whatsapp', status: { in: ['ABERTO', 'ADIADO'] } },
+          });
+          if (existingConv) continue; // Já existe conversa ativa → será sincronizada na fase 2
+        }
+
+        // Chat recente sem conversa no CRM → criar lead + conversa
+        const pushName = (chat.pushName as string) || (chat.name as string) || null;
+        if (!existingLead && !pushName) continue; // Sem lead e sem nome → ignorar
+
+        const lead = await this.leadsService.upsert({
+          phone,
+          name: existingLead?.name ? null : pushName,
+          ...(chat.profilePicUrl ? { profile_picture_url: chat.profilePicUrl as string } : {}),
+          origin: 'whatsapp',
+          ...(tenantId ? { tenant: { connect: { id: tenantId } } } : {}),
+        });
+
+        // Reabrir conversa fechada ou criar nova
+        let conv = await this.prisma.conversation.findFirst({
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO' },
+          orderBy: { last_message_at: 'desc' },
+        });
+
+        if (conv) {
+          conv = await this.prisma.conversation.update({
+            where: { id: conv.id },
+            data: {
+              status: 'ABERTO',
+              last_message_at: lastMsgTs ? new Date(lastMsgTs) : new Date(),
+              instance_name: instanceName,
+              ...(inboxId && !conv.inbox_id ? { inbox_id: inboxId } : {}),
+            },
+          });
+        } else {
+          conv = await this.prisma.conversation.create({
+            data: {
+              lead_id: lead.id,
+              channel: 'whatsapp',
+              status: 'ABERTO',
+              external_id: remoteJid,
+              inbox_id: inboxId,
+              instance_name: instanceName,
+              tenant_id: tenantId,
+              last_message_at: lastMsgTs ? new Date(lastMsgTs) : new Date(),
+            },
+          });
+        }
+
+        newConvsCreated++;
+        this.logger.log(`[RESYNC] Nova conversa criada para ${phone} (mensagem durante a queda)`);
+      }
+
+      if (newConvsCreated > 0) {
+        this.logger.log(`[RESYNC] ${newConvsCreated} conversas novas criadas de chats recentes do WhatsApp`);
+        this.chatGateway.emitConversationsUpdate(tenantId, true);
+      }
+    } catch (e: any) {
+      this.logger.warn(`[RESYNC] Erro ao buscar chats recentes: ${e.message}`);
+    }
+
+    // ─── FASE 2: Sincronizar mensagens perdidas das conversas abertas ─
     const conversations = await this.prisma.conversation.findMany({
-      where: { instance_name: instanceName, status: 'ABERTO' },
+      where: { instance_name: instanceName, status: { in: ['ABERTO', 'ADIADO'] } },
       include: { lead: { select: { phone: true } } },
       orderBy: { last_message_at: 'desc' },
-      take: 50,
+      take: 100, // Aumentado de 50 para 100
     });
 
     this.logger.log(`[RESYNC] ${conversations.length} conversas ativas para resync na instância ${instanceName}`);

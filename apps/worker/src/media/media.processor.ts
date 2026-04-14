@@ -183,6 +183,7 @@ export class MediaProcessor extends WorkerHost {
       : 0;
 
     let imported = 0;
+    let latestTs: Date | null = null; // Rastrear a mensagem mais recente importada
     for (const msg of rawMessages) {
       try {
         const externalId: string | undefined = msg.key?.id || msg.id;
@@ -208,6 +209,9 @@ export class MediaProcessor extends WorkerHost {
           ? new Date(Number(msg.messageTimestamp) * 1000)
           : new Date();
 
+        // Rastrear a mensagem mais recente para atualizar last_message_at
+        if (!latestTs || ts > latestTs) latestTs = ts;
+
         await this.prisma.message.create({
           data: {
             conversation_id,
@@ -227,9 +231,14 @@ export class MediaProcessor extends WorkerHost {
 
     if (imported > 0) {
       this.logger.log(`[RESYNC] ${imported}/${rawMessages.length} mensagens importadas para conversa ${conversation_id}`);
+      // Atualizar last_message_at com o timestamp REAL da última mensagem importada
+      // (não new Date()) para preservar a ordenação correta no inbox
+      const updateTs = latestTs && conv.last_message_at && latestTs > conv.last_message_at
+        ? latestTs
+        : latestTs || conv.last_message_at || new Date();
       await this.prisma.conversation.update({
         where: { id: conversation_id },
-        data: { last_message_at: new Date() },
+        data: { last_message_at: updateTs },
       });
     }
 
