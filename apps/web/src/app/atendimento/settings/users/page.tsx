@@ -448,8 +448,8 @@ export default function UsersSettingsPage() {
                 </select>
               </div>
 
-              {/* OAB — visível para advogados */}
-              {(form.role === 'Advogados' || form.role === 'ADMIN') && (
+              {/* OAB — visível para todos (admin e advogados podem ter OAB) */}
+              {(form.role === 'Advogados' || form.role === 'ADMIN' || form.oab_number) && (
                 <div className="space-y-1.5">
                   <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Registro OAB</label>
                   <div className="flex gap-2">
