@@ -12,6 +12,16 @@ import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
 
+/** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
+const formatCNJ = (num: string | null | undefined): string => {
+  if (!num) return '--';
+  const digits = num.replace(/\D/g, '');
+  if (digits.length === 20) {
+    return `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+  }
+  return num;
+};
+
 /* ──────────────────────────────────────────────────────────────
    Types
 ────────────────────────────────────────────────────────────── */
@@ -1245,7 +1255,7 @@ export default function FinanceiroPage() {
                   const days = t.due_date ? daysOverdue(t.due_date) : 0;
                   const clientName = t.lead?.name || 'Cliente desconhecido';
                   const clientPhone = t.lead?.phone || '';
-                  const caseNumber = t.legal_case?.case_number || '-';
+                  const caseNumber = formatCNJ(t.legal_case?.case_number);
                   const reminderMsg = `Ola ${clientName}, verificamos que existe um pagamento pendente no valor de ${fmt(t.amount)} referente ao processo ${caseNumber}. Por gentileza, entre em contato para regularizacao.`;
 
                   return (
@@ -2552,7 +2562,7 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                 const lc = isLead ? null : p.honorario?.legal_case;
                 const leadData = isLead ? p.lead_honorario?.lead : lc?.lead;
                 const honType = isLead ? p.lead_honorario?.type : p.honorario?.type;
-                const label = isLead ? 'LEAD' : `${lc?.case_number || '--'} ${lc?.legal_area ? `(${lc.legal_area})` : ''}`.trim();
+                const label = isLead ? 'LEAD' : `${formatCNJ(lc?.case_number)} ${lc?.legal_area ? `(${lc.legal_area})` : ''}`.trim();
                 groups.set(groupKey, { key: groupKey, isLead, label, clientName: leadData?.name || '--', honType: honType || '', payments: [] });
               }
               groups.get(groupKey)!.payments.push(p);
@@ -3659,7 +3669,7 @@ function ProcessosFinanceiroTab({ lawyerId }: { lawyerId: string }) {
             {withoutHonorarios.slice(0, 10).map(c => (
               <div key={c.id} className="flex items-center gap-2 cursor-pointer hover:text-foreground" onClick={() => router.push(`/atendimento/processos?openCase=${c.id}`)}>
                 <span className="truncate max-w-[200px]">{c.lead?.name || '--'}</span>
-                <span className="font-mono text-[10px]">{c.case_number || '--'}</span>
+                <span className="font-mono text-[10px]">{formatCNJ(c.case_number)}</span>
                 <span className="text-[10px]">{c.tracking_stage}</span>
               </div>
             ))}

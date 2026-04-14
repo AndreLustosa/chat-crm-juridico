@@ -9,6 +9,17 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+
+/** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
+const formatCNJ = (num: string | null | undefined): string => {
+  if (!num) return '';
+  const digits = num.replace(/\D/g, '');
+  if (digits.length === 20) {
+    return `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+  }
+  return num;
+};
+
 import TabResumo from './components/TabResumo';
 import TabDocumentos from './components/TabDocumentos';
 import TabTarefas from './components/TabTarefas';
@@ -295,7 +306,7 @@ export default function WorkspacePage() {
           </div>
           <div className="flex items-center gap-2 text-xs text-base-content/60">
             {data.case_number && (
-              <span>Processo: {data.case_number}</span>
+              <span>Processo: {formatCNJ(data.case_number)}</span>
             )}
             {data.court && (
               <>

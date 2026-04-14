@@ -18,6 +18,18 @@ import { ChatPopup } from '@/components/ChatPopup';
 import { EventModal } from '@/components/EventModal';
 import TabHonorarios from '@/app/atendimento/workspace/[caseId]/components/TabHonorarios';
 
+// ─── Helpers ─────────────────────────────────────────────────
+
+/** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
+const formatCNJ = (num: string | null | undefined): string => {
+  if (!num) return 'Sem número';
+  const digits = num.replace(/\D/g, '');
+  if (digits.length === 20) {
+    return `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+  }
+  return num; // Não é CNJ de 20 dígitos, retorna como está
+};
+
 // ─── Types ────────────────────────────────────────────────────
 
 interface LegalCase {
@@ -305,7 +317,7 @@ function ProcessoCard({
           </p>
         )}
         <p className="text-[10px] text-muted-foreground font-mono truncate pl-8 mt-0.5">
-          {legalCase.case_number || 'Sem número'}
+          {formatCNJ(legalCase.case_number)}
         </p>
       </div>
 
@@ -516,7 +528,7 @@ function AgendarAudienciaModal({
           {/* Info do processo */}
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-muted-foreground">
             <Scale size={12} className="shrink-0" />
-            <span className="truncate font-mono">{legalCase.case_number || 'Processo sem número'}</span>
+            <span className="truncate font-mono">{formatCNJ(legalCase.case_number)}</span>
             <span className="shrink-0">·</span>
             <span className="truncate">{legalCase.lead?.name || 'Sem cliente'}</span>
           </div>
@@ -640,7 +652,7 @@ function SentencaModal({
           <div>
             <h3 className="text-base font-bold text-foreground">Execução — Dados da Sentença</h3>
             <p className="text-xs text-muted-foreground">
-              {legalCase.lead?.name} • {legalCase.case_number || 'Sem número'}
+              {legalCase.lead?.name} • {formatCNJ(legalCase.case_number)}
             </p>
           </div>
         </div>
@@ -804,7 +816,7 @@ function AgendarPericiaModal({
           {/* Info do processo */}
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-muted-foreground">
             <Scale size={12} className="shrink-0" />
-            <span className="truncate font-mono">{legalCase.case_number || 'Processo sem número'}</span>
+            <span className="truncate font-mono">{formatCNJ(legalCase.case_number)}</span>
             <span className="shrink-0">·</span>
             <span className="truncate">{legalCase.lead?.name || 'Sem cliente'}</span>
           </div>
@@ -1319,7 +1331,7 @@ function ProcessoDetailPanel({
             {legalCase.opposing_party && (
               <p className="text-[11px] text-muted-foreground truncate">vs. {legalCase.opposing_party}</p>
             )}
-            <p className="text-[10px] text-muted-foreground font-mono">{legalCase.case_number || 'Sem número'}</p>
+            <p className="text-[10px] text-muted-foreground font-mono">{formatCNJ(legalCase.case_number)}</p>
           </div>
           <div className="flex items-center gap-2">
             <span className="px-2 py-0.5 rounded-full text-[9px] font-bold border"
@@ -3158,7 +3170,7 @@ function TabelaView({
                   )}
                 </td>
                 <td className="px-3 py-2.5">
-                  <span className="font-mono text-[11px] text-muted-foreground">{c.case_number || '—'}</span>
+                  <span className="font-mono text-[11px] text-muted-foreground">{formatCNJ(c.case_number) === 'Sem número' ? '—' : formatCNJ(c.case_number)}</span>
                 </td>
                 <td className="px-3 py-2.5">
                   {c.legal_area ? (
@@ -3642,7 +3654,7 @@ function ProcessosPageContent() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="text-[13px] font-semibold truncate">{c.lead?.name || 'Sem nome'}</h4>
-                        <p className="text-[10px] text-muted-foreground font-mono truncate">{c.case_number || 'Sem número'}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono truncate">{formatCNJ(c.case_number)}</p>
                       </div>
                     </div>
                     {c.archive_reason && (

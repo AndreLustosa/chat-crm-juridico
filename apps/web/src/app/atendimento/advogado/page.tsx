@@ -17,6 +17,16 @@ import dynamic from 'next/dynamic';
 const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
 const GoogleDocsEmbed = dynamic(() => import('@/components/GoogleDocsEmbed'), { ssr: false });
 
+/** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
+const formatCNJ = (num: string | null | undefined): string => {
+  if (!num) return 'Sem número';
+  const digits = num.replace(/\D/g, '');
+  if (digits.length === 20) {
+    return `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+  }
+  return num;
+};
+
 // ─── Types ────────────────────────────────────────────────────
 
 interface LegalCase {
@@ -284,7 +294,7 @@ function CaseCard({
         )}
         {legalCase.case_number && (
           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/12 text-blue-400 text-[9px] font-bold border border-blue-500/20">
-            📋 {legalCase.case_number}
+            📋 {formatCNJ(legalCase.case_number)}
           </span>
         )}
         {legalCase.priority === 'URGENTE' && (
@@ -2046,7 +2056,10 @@ export default function AdvogadoPage() {
       const name = (c.lead?.name || '').toLowerCase();
       const phone = (c.lead?.phone || '').toLowerCase();
       const caseNum = (c.case_number || '').toLowerCase();
-      if (!name.includes(q) && !phone.includes(q) && !caseNum.includes(q)) return false;
+      const qDigits = q.replace(/\D/g, '');
+      const caseNumDigits = (c.case_number || '').replace(/\D/g, '');
+      const matchDigits = qDigits.length >= 5 && caseNumDigits.includes(qDigits);
+      if (!name.includes(q) && !phone.includes(q) && !caseNum.includes(q) && !matchDigits) return false;
     }
     if (areaFilter) {
       if (c.legal_area !== areaFilter) return false;
