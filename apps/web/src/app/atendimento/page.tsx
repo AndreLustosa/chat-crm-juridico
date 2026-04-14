@@ -714,20 +714,27 @@ export default function Dashboard() {
       console.error('[SOCKET] Connection error:', err);
     });
 
+    // Debounce inboxUpdate — após reconexão do WhatsApp, dezenas de contacts.update
+    // chegam em sequência rápida. Sem debounce, o frontend refaz a listagem 50+ vezes.
+    let inboxUpdateTimer: ReturnType<typeof setTimeout> | null = null;
     socket.on('inboxUpdate', () => {
-      console.log('[SOCKET] inboxUpdate received, fetching conversations...');
-      // silent=true: 401 nestas chamadas de background não redireciona todos os usuários
-      fetchConversations(selectedInboxIdRef.current, true);
-      fetchAdiadoConversations(selectedInboxIdRef.current);
-      fetchPendingTransfers(true);
-      // Re-fetch unread counts para sincronizar badges após mudanças de outros operadores
-      api.get('/conversations/unread-counts', { _silent401: true } as any)
-        .then(r => {
-          if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
-            setUnreadCounts(r.data as Record<string, number>);
-          }
-        })
-        .catch(() => {});
+      if (inboxUpdateTimer) clearTimeout(inboxUpdateTimer);
+      inboxUpdateTimer = setTimeout(() => {
+        inboxUpdateTimer = null;
+        console.log('[SOCKET] inboxUpdate received (debounced), fetching conversations...');
+        // silent=true: 401 nestas chamadas de background não redireciona todos os usuários
+        fetchConversations(selectedInboxIdRef.current, true);
+        fetchAdiadoConversations(selectedInboxIdRef.current);
+        fetchPendingTransfers(true);
+        // Re-fetch unread counts para sincronizar badges após mudanças de outros operadores
+        api.get('/conversations/unread-counts', { _silent401: true } as any)
+          .then(r => {
+            if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
+              setUnreadCounts(r.data as Record<string, number>);
+            }
+          })
+          .catch(() => {});
+      }, 1500);
     });
 
     // Nota criada em uma conversa — marcar hasNotes=true na lista

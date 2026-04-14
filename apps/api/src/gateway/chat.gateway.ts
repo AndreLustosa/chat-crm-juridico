@@ -13,6 +13,11 @@ export class ChatGateway {
   // Map<userId, Set<socketId>> — um usuário pode ter múltiplas abas
   private onlineUsers = new Map<string, Set<string>>();
 
+  // ─── Debounce para inboxUpdate ───────────────────────────────────
+  // Evita flood de emissões quando muitos contacts.update chegam em sequência
+  private inboxUpdateTimers = new Map<string, NodeJS.Timeout>();
+  private readonly INBOX_UPDATE_DEBOUNCE_MS = 2000; // 2 segundos
+
   constructor(
     private prisma: PrismaService,
     @Inject(forwardRef(() => InboxesService))
@@ -232,18 +237,41 @@ export class ChatGateway {
     this.server.to(conversationId).emit('messageUpdate', message);
   }
 
-  emitConversationsUpdate(tenantId: string | null) {
+  /**
+   * Emite inboxUpdate com debounce para evitar flood.
+   * Múltiplas chamadas dentro de 2s resultam em UMA única emissão.
+   * Use immediate=true para emitir instantaneamente (ex: nova mensagem).
+   */
+  emitConversationsUpdate(tenantId: string | null, immediate = false) {
+    const resolveAndEmit = (resolvedTenantId: string) => {
+      if (immediate) {
+        // Emissão imediata — mensagens novas não podem esperar
+        this.logger.log(`[SOCKET] Emitting inboxUpdate to tenant:${resolvedTenantId}`);
+        this.server.to(`tenant:${resolvedTenantId}`).emit('inboxUpdate');
+        return;
+      }
+
+      // Debounce — múltiplas chamadas em sequência rápida consolidam em 1
+      const key = resolvedTenantId;
+      const existing = this.inboxUpdateTimers.get(key);
+      if (existing) {
+        clearTimeout(existing);
+      }
+      const timer = setTimeout(() => {
+        this.inboxUpdateTimers.delete(key);
+        this.logger.log(`[SOCKET] Emitting inboxUpdate (debounced) to tenant:${resolvedTenantId}`);
+        this.server.to(`tenant:${resolvedTenantId}`).emit('inboxUpdate');
+      }, this.INBOX_UPDATE_DEBOUNCE_MS);
+      this.inboxUpdateTimers.set(key, timer);
+    };
+
     if (tenantId) {
-      this.logger.log(`[SOCKET] Emitting inboxUpdate to tenant:${tenantId}`);
-      this.server.to(`tenant:${tenantId}`).emit('inboxUpdate');
+      resolveAndEmit(tenantId);
     } else {
       // SEGURANCA: sem tenantId, busca o tenant padrao em vez de broadcast global.
-      // Isso evita vazamento de dados entre tenants em ambiente multi-tenant.
       this.logger.warn(`[SOCKET] inboxUpdate sem tenantId — resolvendo tenant padrao`);
       this.prisma.tenant.findFirst().then((t) => {
-        if (t) {
-          this.server.to(`tenant:${t.id}`).emit('inboxUpdate');
-        }
+        if (t) resolveAndEmit(t.id);
       }).catch(() => {});
     }
   }

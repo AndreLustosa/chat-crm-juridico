@@ -314,7 +314,7 @@ export class EvolutionService {
             );
           }
           // Notifica a inbox para atualizar (remove duplicata da tela)
-          this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
+          this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
         }
       }
       // ──────────────────────────────────────────────────────────────────────
@@ -352,7 +352,7 @@ export class EvolutionService {
         // Re-emite WebSocket para cobrir o caso em que o BullMQ QueueEvents perdeu o evento
         // (mensagem já está no banco mas o frontend pode não ter sido notificado em tempo real)
         this.chatGateway.emitNewMessage(existingMsg.conversation_id, existingMsg);
-        this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
+        this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
         continue;
       }
 
@@ -490,7 +490,7 @@ export class EvolutionService {
 
       // ─── 5. Emit WebSocket (com mídia se download foi OK) ─────────────
       this.chatGateway.emitNewMessage(conv.id, msgToEmit);
-      this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
+      this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
 
       // Notify operator(s) about incoming message (sound + unread badge)
       if (!isOutgoing) {
@@ -843,7 +843,7 @@ export class EvolutionService {
       });
 
       if (updated.count > 0) {
-        this.chatGateway.emitConversationsUpdate(lead.tenant_id ?? null);
+        this.chatGateway.emitConversationsUpdate(lead.tenant_id ?? null, true);
         this.logger.log(`[WEBHOOK] chats.delete: ${updated.count} conversa(s) de ${phone} arquivadas`);
       }
     }
