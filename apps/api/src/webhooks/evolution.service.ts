@@ -681,6 +681,16 @@ export class EvolutionService {
       ? (dataPayload as any[])
       : [dataPayload];
 
+    // ─── Proteção anti-flood na reconexão ──────────────────────────
+    // Após reconectar a instância WhatsApp, a Evolution API envia chats.upsert
+    // para TODOS os chats do dispositivo (1000+). Isso criava/reabria conversas
+    // para contatos antigos, poluindo o inbox com leads irrelevantes.
+    // Solução: chats.upsert NUNCA cria conversas novas nem reabre fechadas.
+    // Apenas atualiza metadados (inbox_id, instance_name, foto) de conversas
+    // já abertas. Conversas são criadas/reabertas APENAS via messages.upsert
+    // (quando chega uma mensagem real).
+    // ────────────────────────────────────────────────────────────────
+
     for (const data of chats) {
       if (!data) continue;
 
@@ -690,108 +700,64 @@ export class EvolutionService {
       const phone = extractPhone(data.remoteJid as string, data.remoteJidAlt as string);
       if (phone.length > 13) continue; // LID, não é telefone real
 
-      const pushName = (data.pushName as string) || (data.name as string) || null;
-
-      // 1. Upsert Lead — two guards:
-      //   a) Skip creation when there's no name and lead doesn't exist yet (prevents phantom leads).
-      //   b) Never overwrite an existing name: chats.upsert fires after outgoing messages and can
-      //      carry the business account's profile name ("André Lustosa Advogados") instead of the
-      //      client's name.  Only set name when lead has none.
+      // Apenas atualizar leads existentes — NÃO criar novos via chats.upsert
       const existingLead = await this.leadsService.findByPhone(phone);
-      if (!pushName && !existingLead) continue; // No name, no existing lead → skip
-      const nameToSet = existingLead?.name ? null : pushName;
+      if (!existingLead) continue;
 
-      // profilePicUrl vem no payload chats.upsert — aproveitamos para manter a foto fresca
+      // Atualizar foto se disponível (URLs do WhatsApp expiram)
       const profilePicUrl = (data.profilePicUrl as string) || null;
-
-      const lead = await this.leadsService.upsert({
-        phone,
-        name: nameToSet,
-        ...(profilePicUrl ? { profile_picture_url: profilePicUrl } : {}),
-        origin: 'whatsapp',
-        tenant: inbox?.tenant_id ? { connect: { id: inbox.tenant_id } } : undefined,
-      });
-
-      // 2. Find or Create Conversation
-      let conv = await this.prisma.conversation.findFirst({
-        where: {
-          lead_id: lead.id,
-          channel: 'whatsapp',
-          status: 'ABERTO',
-          instance_name: instanceName
-        },
-      });
-
-      if (!conv) {
-        // 1) Tentar reabrir conversa FECHADO
-        const closedConv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
-          orderBy: { last_message_at: 'desc' },
-        });
-        if (closedConv) {
-          conv = await this.prisma.conversation.update({
-            where: { id: closedConv.id },
-            data: {
-              status: 'ABERTO',
-              last_message_at: new Date(),
-              inbox_id: inboxId || closedConv.inbox_id,
-              instance_name: instanceName,
-              tenant_id: inbox?.tenant_id || closedConv.tenant_id || lead.tenant_id,
-            },
-          });
-          this.logger.log(`[REOPEN] Conversa ${conv.id} reaberta via chat webhook: ${phone}`);
-        }
-        // 2) Se não achou FECHADO, checar ADIADO — mantém status, só atualiza timestamp
-        if (!conv) {
-          const adiadoConv = await this.prisma.conversation.findFirst({
-            where: { lead_id: lead.id, channel: 'whatsapp', status: 'ADIADO', instance_name: instanceName },
-            orderBy: { last_message_at: 'desc' },
-          });
-          if (adiadoConv) {
-            conv = await this.prisma.conversation.update({
-              where: { id: adiadoConv.id },
-              data: { last_message_at: new Date() },
-            });
-            this.logger.log(`[ADIADO] Conversa ${conv.id} recebeu msg via chat webhook mas permanece ADIADO`);
-          }
-        }
-        // 3) Se não encontrou nenhuma, criar nova
-        if (!conv) {
-          conv = await this.prisma.conversation.create({
-            data: {
-              lead_id: lead.id,
-              channel: 'whatsapp',
-              status: 'ABERTO',
-              external_id: remoteJid,
-              inbox_id: inboxId,
-              instance_name: instanceName,
-              tenant_id: inbox?.tenant_id || lead.tenant_id,
-            },
-          });
-          this.logger.log(`Nova conversa criada via chat webhook: ${phone} no setor ${inbox?.inbox?.name || 'Nenhum'}`);
-        }
-      } else {
-        // Só atualiza inbox_id se tiver valor — evita apagar o setor da conversa
-        conv = await this.prisma.conversation.update({
-          where: { id: conv.id },
-          data: {
-            ...(inboxId ? { inbox_id: inboxId } : {}),
-            instance_name: instanceName,
-            tenant_id: inbox?.tenant_id || conv.tenant_id || lead.tenant_id
-          }
+      if (profilePicUrl && profilePicUrl !== existingLead.profile_picture_url) {
+        await this.prisma.lead.update({
+          where: { id: existingLead.id },
+          data: { profile_picture_url: profilePicUrl },
         });
       }
 
-      // 3. Sync Last Message if available
-      if (data.lastMessage && conv) {
+      // Atualizar nome se lead não tem (nunca sobrescrever)
+      const pushName = (data.pushName as string) || (data.name as string) || null;
+      if (pushName && !existingLead.name) {
+        await this.prisma.lead.update({
+          where: { id: existingLead.id },
+          data: { name: pushName },
+        });
+      }
+
+      // Apenas atualizar conversa ABERTA existente — NÃO reabrir fechadas, NÃO criar novas
+      const conv = await this.prisma.conversation.findFirst({
+        where: {
+          lead_id: existingLead.id,
+          channel: 'whatsapp',
+          status: 'ABERTO',
+        },
+      });
+
+      if (!conv) continue; // Sem conversa aberta → pular (não criar/reabrir)
+
+      // Atualizar metadados da conversa existente (inbox, instance)
+      const updateData: any = {};
+      if (inboxId && !conv.inbox_id) updateData.inbox_id = inboxId;
+      if (instanceName) updateData.instance_name = instanceName;
+      if (inbox?.tenant_id && !conv.tenant_id) updateData.tenant_id = inbox.tenant_id;
+
+      if (Object.keys(updateData).length > 0) {
+        await this.prisma.conversation.update({
+          where: { id: conv.id },
+          data: updateData,
+        });
+      }
+
+      // Sync last message ONLY if conversation already existed (no creation/reopen)
+      if (data.lastMessage) {
         const lm = data.lastMessage;
         const msgId = lm.key?.id || lm.id;
-        const msgText = lm.message?.conversation || 
-                        lm.message?.extendedTextMessage?.text || 
-                        lm.message?.imageMessage?.caption || 
+        const msgText = lm.message?.conversation ||
+                        lm.message?.extendedTextMessage?.text ||
+                        lm.message?.imageMessage?.caption ||
                         (lm.messageType !== 'conversation' ? `[${lm.messageType}]` : '');
 
         if (msgId && msgText) {
+          // Upsert da mensagem — apenas se é mais recente que a última
+          const msgTimestamp = lm.messageTimestamp ? new Date(lm.messageTimestamp * 1000) : null;
           await this.prisma.message.upsert({
             where: { external_message_id: msgId },
             update: {
@@ -804,14 +770,18 @@ export class EvolutionService {
               text: msgText,
               external_message_id: msgId,
               status: lm.status || 'recebido',
-              created_at: lm.messageTimestamp ? new Date(lm.messageTimestamp * 1000) : new Date(),
+              created_at: msgTimestamp || new Date(),
             },
           });
 
-          await this.prisma.conversation.update({
-            where: { id: conv.id },
-            data: { last_message_at: lm.messageTimestamp ? new Date(lm.messageTimestamp * 1000) : new Date() }
-          });
+          // Atualizar last_message_at APENAS se o timestamp da mensagem é mais recente
+          // que o current — evita bagunçar a ordenação com mensagens antigas
+          if (msgTimestamp && conv.last_message_at && msgTimestamp > conv.last_message_at) {
+            await this.prisma.conversation.update({
+              where: { id: conv.id },
+              data: { last_message_at: msgTimestamp },
+            });
+          }
         }
       }
     }
@@ -895,6 +865,14 @@ export class EvolutionService {
       ? (payload.data as any[])
       : [payload?.data as any];
 
+    // ─── Proteção anti-flood na reconexão ──────────────────────────
+    // Após reconectar, a Evolution API envia contacts.upsert para TODOS os
+    // contatos do WhatsApp (1000+), criando leads fantasma para números antigos.
+    // Solução: contacts.upsert NUNCA cria leads novos — apenas atualiza
+    // leads existentes (nome e foto). Leads são criados APENAS via
+    // messages.upsert (quando chega uma mensagem real).
+    // ────────────────────────────────────────────────────────────────
+
     for (const data of contacts) {
       if (!data) continue;
 
@@ -904,32 +882,38 @@ export class EvolutionService {
       const phone = extractPhone(remoteJid, (data.remoteJidAlt as string) || (data.remoteJid as string));
       if (phone.length > 13) continue; // LID, não é telefone real
 
+      // Apenas atualizar leads existentes — NÃO criar novos via contacts.upsert
+      const existingContact = await this.leadsService.findByPhone(phone);
+      if (!existingContact) continue;
+
+      const updates: Record<string, string> = {};
+
+      // Atualizar nome se lead não tem (nunca sobrescrever nome existente)
       const name =
         (data.pushName as string) ||
         (data.name as string) ||
         (data.verifiedName as string) ||
         null;
-
-      // contacts.upsert can fire with the business account's profile name after outgoing messages.
-      // Only set the name if the lead doesn't already have one — never overwrite the client's name.
-      const existingContact = await this.leadsService.findByPhone(phone);
-      if (!existingContact && !name) continue; // No name, no existing lead → skip
-      const contactNameToSet = existingContact?.name ? null : name;
-
-      // contacts.upsert não envia profilePicUrl no payload — buscar separadamente se o lead não tiver foto
-      let contactPhoto: string | null = null;
-      if (instanceName && (!existingContact || !existingContact.profile_picture_url)) {
-        contactPhoto = await this.whatsappService.fetchProfilePicture(instanceName, phone).catch(() => null);
+      if (name && !existingContact.name) {
+        updates.name = name;
       }
 
-      await this.leadsService.upsert({
-        phone,
-        name: contactNameToSet,
-        ...(contactPhoto ? { profile_picture_url: contactPhoto } : {}),
-        origin: 'whatsapp',
+      // Buscar foto se o lead não tem
+      if (instanceName && !existingContact.profile_picture_url) {
+        const contactPhoto = await this.whatsappService.fetchProfilePicture(instanceName, phone).catch(() => null);
+        if (contactPhoto) {
+          updates.profile_picture_url = contactPhoto;
+        }
+      }
+
+      if (Object.keys(updates).length === 0) continue;
+
+      await this.prisma.lead.update({
+        where: { id: existingContact.id },
+        data: updates,
       });
 
-      this.logger.log(`Contato sincronizado via webhook: ${phone} (${contactNameToSet ?? 'nome preservado'})${contactPhoto ? ' + foto' : ''}`);
+      this.logger.log(`Contato sincronizado via webhook: ${phone} (${updates.name ? updates.name : 'nome preservado'})${updates.profile_picture_url ? ' + foto' : ''}`);
     }
   }
 
