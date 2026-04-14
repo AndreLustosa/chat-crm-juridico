@@ -170,9 +170,9 @@ export function InboxSidebar({
   const myActiveConvs = (c: ConversationSummary) =>
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
 
-  // Contadores de nao-lidos por modo (Leads vs Clientes) — conta CONVERSAS com não-lidas, não total de mensagens
-  const unreadLeadsCount = conversations.filter(c => !c.isClient && (unreadCounts[c.id] ?? 0) > 0).length;
-  const unreadClientsCount = conversations.filter(c => c.isClient && (unreadCounts[c.id] ?? 0) > 0).length;
+  // Contadores de nao-lidos por modo (Leads vs Clientes)
+  const unreadLeadsCount = conversations.filter(c => !c.isClient && (unreadCounts[c.id] ?? 0) > 0).reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
+  const unreadClientsCount = conversations.filter(c => c.isClient && (unreadCounts[c.id] ?? 0) > 0).reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
 
   // ─── Saved Filters ────────────────────────────────────────────
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
