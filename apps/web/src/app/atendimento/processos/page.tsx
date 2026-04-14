@@ -2539,9 +2539,22 @@ const LEGAL_AREAS_LIST = [
 function CadastrarProcessoModal({
   onClose,
   onSuccess,
+  prefillData,
 }: {
   onClose: () => void;
   onSuccess: () => void;
+  prefillData?: {
+    case_number?: string;
+    legal_area?: string;
+    action_type?: string;
+    opposing_party?: string;
+    court?: string;
+    judge?: string;
+    claim_value?: number | null;
+    filed_at?: string | null;
+    tracking_stage?: string;
+    notes?: string;
+  } | null;
 }) {
   const { isAdmin } = useRole();
 
@@ -2598,17 +2611,17 @@ function CadastrarProcessoModal({
   };
 
   // ── Processo ──────────────────────────────────────────────────
-  const [caseNumber, setCaseNumber] = useState('');
-  const [legalArea, setLegalArea] = useState('');
-  const [actionType, setActionType] = useState('');
-  const [opposingParty, setOpposingParty] = useState('');
-  const [court, setCourt] = useState('');
-  const [judge, setJudge] = useState('');
-  const [claimValue, setClaimValue] = useState('');
-  const [trackingStage, setTrackingStage] = useState('DISTRIBUIDO');
+  const [caseNumber, setCaseNumber] = useState(prefillData?.case_number || '');
+  const [legalArea, setLegalArea] = useState(prefillData?.legal_area || '');
+  const [actionType, setActionType] = useState(prefillData?.action_type || '');
+  const [opposingParty, setOpposingParty] = useState(prefillData?.opposing_party || '');
+  const [court, setCourt] = useState(prefillData?.court || '');
+  const [judge, setJudge] = useState(prefillData?.judge || '');
+  const [claimValue, setClaimValue] = useState(prefillData?.claim_value ? String(prefillData.claim_value) : '');
+  const [trackingStage, setTrackingStage] = useState(prefillData?.tracking_stage || 'DISTRIBUIDO');
   const [priority, setPriority] = useState('NORMAL');
-  const [notes, setNotes] = useState('');
-  const [filedAt, setFiledAt] = useState('');
+  const [notes, setNotes] = useState(prefillData?.notes || '');
+  const [filedAt, setFiledAt] = useState(prefillData?.filed_at || '');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -3230,6 +3243,256 @@ function TabelaView({
 
 // ─── Main Page ─────────────────────────────────────────────────
 
+// ─── OAB Import Modal ──────────────────────────────────────────
+
+function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [lawyers, setLawyers] = useState<Array<{ id: string; name: string; oab_number: string | null; oab_uf: string | null }>>([]);
+  const [selectedOabs, setSelectedOabs] = useState<Set<string>>(new Set());
+  const [customOab, setCustomOab] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const [selectedForImport, setSelectedForImport] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get('/court-scraper/lawyers').then(r => {
+      const data = r.data || [];
+      setLawyers(data);
+      // Selecionar todos por padrão
+      const oabs = new Set<string>(data.filter((l: any) => l.oab_number).map((l: any) => l.oab_number as string));
+      setSelectedOabs(oabs);
+    }).catch(() => {});
+  }, []);
+
+  const toggleOab = (oab: string) => {
+    setSelectedOabs(prev => {
+      const n = new Set(prev);
+      n.has(oab) ? n.delete(oab) : n.add(oab);
+      return n;
+    });
+  };
+
+  const handleSearch = async () => {
+    const oabs = [...selectedOabs];
+    if (customOab.trim()) oabs.push(customOab.trim());
+    if (oabs.length === 0) { setError('Selecione ao menos uma OAB'); return; }
+
+    setSearching(true);
+    setError(null);
+    setResults([]);
+    setSelectedForImport(new Set());
+    try {
+      const res = await api.get('/court-scraper/search-oab', { params: { oabs: oabs.join(',') } });
+      const cases = res.data?.cases || [];
+      setResults(cases);
+      // Pre-selecionar os não cadastrados
+      const toSelect = new Set<string>(cases.filter((c: any) => !c.already_registered && c.processo_codigo).map((c: any) => c.processo_codigo as string));
+      setSelectedForImport(toSelect);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao buscar processos no ESAJ');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleImport = async () => {
+    const items = results
+      .filter(c => selectedForImport.has(c.processo_codigo) && !c.already_registered)
+      .map(c => ({ processo_codigo: c.processo_codigo, foro: c.foro || '1' }));
+
+    if (items.length === 0) { setError('Nenhum processo selecionado para importar'); return; }
+
+    setImporting(true);
+    setError(null);
+    try {
+      const res = await api.post('/court-scraper/import', { items });
+      setImportResult(res.data);
+      if (res.data.imported > 0) {
+        setTimeout(() => onSuccess(), 2000);
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao importar processos');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const toggleImport = (codigo: string) => {
+    setSelectedForImport(prev => {
+      const n = new Set(prev);
+      n.has(codigo) ? n.delete(codigo) : n.add(codigo);
+      return n;
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div>
+            <h2 className="text-base font-bold text-foreground">Importar Processos por OAB</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Busque processos no ESAJ/TJAL vinculados ao número da OAB</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X size={16} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Advogados com OAB */}
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-2 block">Selecione os advogados:</label>
+            {lawyers.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">Nenhum advogado com OAB cadastrada. Cadastre a OAB no perfil do advogado.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {lawyers.map(l => (
+                  <label key={l.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-all text-[11px] ${
+                    l.oab_number && selectedOabs.has(l.oab_number)
+                      ? 'bg-primary/10 border-primary text-primary font-semibold'
+                      : 'bg-accent/30 border-border text-muted-foreground'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={!!l.oab_number && selectedOabs.has(l.oab_number)}
+                      onChange={() => l.oab_number && toggleOab(l.oab_number)}
+                      disabled={!l.oab_number}
+                      className="rounded"
+                    />
+                    {l.name} {l.oab_number ? `(OAB ${l.oab_number}/${l.oab_uf || 'AL'})` : '(sem OAB)'}
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {/* OAB avulsa */}
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                value={customOab}
+                onChange={e => setCustomOab(e.target.value.replace(/\D/g, ''))}
+                placeholder="OAB avulsa..."
+                className="px-3 py-1.5 text-[11px] bg-accent/50 border border-border rounded-lg w-32 focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+              <button
+                onClick={handleSearch}
+                disabled={searching}
+                className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-lg hover:opacity-90 disabled:opacity-50"
+              >
+                {searching ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                {searching ? 'Buscando...' : 'Buscar Processos'}
+              </button>
+            </div>
+          </div>
+
+          {/* Erro */}
+          {error && (
+            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-xs text-destructive flex items-center gap-2">
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+
+          {/* Resultado da importação */}
+          {importResult && (
+            <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs">
+              <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 size={14} className="inline mr-1" />
+                {importResult.imported} processo(s) importado(s) com sucesso!
+              </p>
+              {importResult.errors.length > 0 && (
+                <div className="mt-1 text-muted-foreground">
+                  {importResult.errors.map((e, i) => <p key={i}>• {e}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Lista de processos */}
+          {results.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-foreground">
+                  {results.length} processo(s) encontrado(s)
+                  {results.filter(c => c.already_registered).length > 0 && (
+                    <span className="text-muted-foreground font-normal ml-1">
+                      ({results.filter(c => c.already_registered).length} já cadastrados)
+                    </span>
+                  )}
+                </label>
+                <span className="text-[10px] text-muted-foreground">
+                  {selectedForImport.size} selecionado(s)
+                </span>
+              </div>
+              <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
+                {results.map((c: any, i: number) => (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all text-[11px] ${
+                      c.already_registered
+                        ? 'bg-accent/20 border-border/50 opacity-60'
+                        : selectedForImport.has(c.processo_codigo)
+                        ? 'bg-primary/5 border-primary/30'
+                        : 'bg-card border-border'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedForImport.has(c.processo_codigo)}
+                      onChange={() => toggleImport(c.processo_codigo)}
+                      disabled={c.already_registered || !c.processo_codigo}
+                      className="rounded"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-semibold">{c.case_number}</span>
+                        {c.already_registered && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-bold">Já cadastrado</span>
+                        )}
+                      </div>
+                      <div className="text-muted-foreground truncate">
+                        {c.action_type && <span>{c.action_type}</span>}
+                        {c.court && <span> • {c.court}</span>}
+                      </div>
+                      {c.found_by_lawyers?.length > 0 && (
+                        <div className="flex gap-1 mt-0.5">
+                          {c.found_by_lawyers.map((name: string, j: number) => (
+                            <span key={j} className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-500 font-bold">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {results.length > 0 && !importResult && (
+          <div className="flex items-center justify-end gap-3 p-4 border-t border-border">
+            <button onClick={onClose} className="px-4 py-1.5 text-[11px] font-semibold rounded-lg border border-border hover:bg-accent">
+              Cancelar
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={importing || selectedForImport.size === 0}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50"
+            >
+              {importing ? <Loader2 size={12} className="animate-spin" /> : <FolderPlus size={12} />}
+              {importing ? 'Importando...' : `Importar ${selectedForImport.size} processo(s)`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────
+
 function ProcessosPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -3250,6 +3513,13 @@ function ProcessosPageContent() {
   const [chatPopupCase, setChatPopupCase] = useState<LegalCase | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const { isAdmin: currentUserIsAdmin } = useRole();
+
+  // ─── ESAJ / Tribunal Search State ──────────────────────
+  const [esajSearching, setEsajSearching] = useState(false);
+  const [esajResult, setEsajResult] = useState<any>(null);
+  const [esajError, setEsajError] = useState<string | null>(null);
+  const [prefillData, setPrefillData] = useState<any>(null);
+  const [showOabImportModal, setShowOabImportModal] = useState(false);
 
   const [pendingClosure, setPendingClosure] = useState<any[]>([]);
 
@@ -3403,6 +3673,62 @@ function ProcessosPageContent() {
       }
     }
     await executeMoveCase(caseId, newTrackingStage);
+  };
+
+  // ─── ESAJ Search helpers ──────────────────────────────────
+  const isCNJLike = (query: string): boolean => {
+    const digits = query.replace(/\D/g, '');
+    return digits.length >= 15 && digits.length <= 20;
+  };
+
+  const searchEsaj = async () => {
+    const digits = searchQuery.replace(/\D/g, '');
+    setEsajSearching(true);
+    setEsajError(null);
+    setEsajResult(null);
+    try {
+      const res = await api.get('/court-scraper/search', { params: { caseNumber: digits } });
+      if (res.data?.found) {
+        if (res.data.already_registered) {
+          setEsajError(`Processo já cadastrado no sistema (ID: ${res.data.existing_case_id})`);
+        } else {
+          setEsajResult(res.data.data);
+        }
+      } else {
+        setEsajError('Processo não encontrado no ESAJ/TJAL. Verifique o número.');
+      }
+    } catch (e: any) {
+      setEsajError(e?.response?.data?.message || 'Erro ao consultar ESAJ. Tente novamente.');
+    } finally {
+      setEsajSearching(false);
+    }
+  };
+
+  const openCadastrarWithEsajData = () => {
+    if (!esajResult) return;
+    const opposingParty = esajResult.parties
+      ?.filter((p: any) => /r[eé]u|requerido|executado/i.test(p.role))
+      .map((p: any) => p.name)
+      .join(', ') || '';
+    const assuntoNotes = [
+      esajResult.subject ? `Assunto: ${esajResult.subject}` : '',
+      ...(esajResult.parties || []).slice(0, 6).map((p: any) => `${p.role}: ${p.name}`),
+    ].filter(Boolean).join('\n');
+
+    setPrefillData({
+      case_number: esajResult.case_number,
+      legal_area: esajResult.legal_area,
+      action_type: esajResult.action_type,
+      court: esajResult.court,
+      judge: esajResult.judge,
+      claim_value: esajResult.claim_value,
+      filed_at: esajResult.filed_at,
+      tracking_stage: esajResult.tracking_stage || 'DISTRIBUIDO',
+      notes: assuntoNotes,
+      opposing_party: opposingParty,
+    });
+    setShowCadastrarModal(true);
+    setEsajResult(null);
   };
 
   // Filters
@@ -3573,10 +3899,34 @@ function ProcessosPageContent() {
               />
             </div>
 
+            {/* Buscar no ESAJ (quando 0 resultados locais e query é CNJ-like) */}
+            {view === 'active' && filteredCases.length === 0 && isCNJLike(searchQuery) && (
+              <button
+                onClick={searchEsaj}
+                disabled={esajSearching}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-orange-500 text-white rounded-lg hover:opacity-90 transition-all"
+                title="Buscar dados do processo no tribunal"
+              >
+                {esajSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {esajSearching ? 'Buscando...' : 'Buscar no ESAJ'}
+              </button>
+            )}
+
+            {/* Importar por OAB */}
+            {view === 'active' && currentUserIsAdmin && (
+              <button
+                onClick={() => setShowOabImportModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-lg hover:opacity-90 transition-all"
+                title="Importar processos pelo número da OAB"
+              >
+                <ExternalLink size={13} /> Importar OAB
+              </button>
+            )}
+
             {/* Cadastrar processo existente */}
             {view === 'active' && (
               <button
-                onClick={() => setShowCadastrarModal(true)}
+                onClick={() => { setPrefillData(null); setShowCadastrarModal(true); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all"
                 title="Cadastrar processo em andamento"
               >
@@ -3595,6 +3945,58 @@ function ProcessosPageContent() {
             </button>
           </div>
         </header>
+
+        {/* ─── ESAJ Result Banner ─────────────────────────────── */}
+        {esajResult && (
+          <div className="mx-4 mt-2 p-4 bg-orange-50 dark:bg-orange-950/30 border border-orange-300 dark:border-orange-800 rounded-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold text-orange-600 bg-orange-100 dark:bg-orange-900/50 px-2 py-0.5 rounded-full">ESAJ / {esajResult.tribunal || 'TJAL'}</span>
+                  <span className="text-sm font-semibold text-foreground font-mono">{esajResult.case_number}</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-muted-foreground">
+                  {esajResult.action_type && <div><span className="font-semibold text-foreground">Classe:</span> {esajResult.action_type}</div>}
+                  {esajResult.court && <div><span className="font-semibold text-foreground">Vara:</span> {esajResult.court}</div>}
+                  {esajResult.judge && <div><span className="font-semibold text-foreground">Juiz:</span> {esajResult.judge}</div>}
+                  {esajResult.legal_area && <div><span className="font-semibold text-foreground">Área:</span> {esajResult.legal_area}</div>}
+                  {esajResult.filed_at && <div><span className="font-semibold text-foreground">Distribuição:</span> {esajResult.filed_at}</div>}
+                  {esajResult.claim_value && <div><span className="font-semibold text-foreground">Valor:</span> R$ {Number(esajResult.claim_value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>}
+                </div>
+                {esajResult.parties?.length > 0 && (
+                  <div className="mt-2 text-[10px] text-muted-foreground">
+                    <span className="font-semibold text-foreground">Partes: </span>
+                    {esajResult.parties.slice(0, 4).map((p: any, i: number) => (
+                      <span key={i}>{i > 0 ? ' • ' : ''}{p.role}: {p.name}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={openCadastrarWithEsajData}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all"
+                >
+                  <FolderPlus size={13} /> Cadastrar com estes dados
+                </button>
+                <button onClick={() => setEsajResult(null)} className="p-1 text-muted-foreground hover:text-foreground">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ESAJ Error */}
+        {esajError && (
+          <div className="mx-4 mt-2 p-3 bg-destructive/10 border border-destructive/30 rounded-xl flex items-center gap-2">
+            <AlertCircle size={14} className="text-destructive shrink-0" />
+            <span className="text-xs text-destructive">{esajError}</span>
+            <button onClick={() => setEsajError(null)} className="ml-auto p-0.5 text-destructive/50 hover:text-destructive">
+              <X size={12} />
+            </button>
+          </div>
+        )}
 
         {fetchError ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-6">
@@ -3825,8 +4227,9 @@ function ProcessosPageContent() {
       {/* Modal Cadastrar Processo Existente */}
       {showCadastrarModal && (
         <CadastrarProcessoModal
-          onClose={() => setShowCadastrarModal(false)}
+          onClose={() => { setShowCadastrarModal(false); setPrefillData(null); }}
           onSuccess={() => fetchCases(true)}
+          prefillData={prefillData}
         />
       )}
 
@@ -3878,6 +4281,14 @@ function ProcessosPageContent() {
             <X size={20} />
           </button>
         </div>
+      )}
+
+      {/* Modal Importar por OAB */}
+      {showOabImportModal && (
+        <OabImportModal
+          onClose={() => setShowOabImportModal(false)}
+          onSuccess={() => { setShowOabImportModal(false); fetchCases(true); }}
+        />
       )}
     </div>
   );
