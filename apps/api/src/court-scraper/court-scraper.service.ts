@@ -293,7 +293,7 @@ export class CourtScraperService {
         if (!lawyerId) {
           const firstLawyer = await this.prisma.user.findFirst({
             where: {
-              roles: { hasSome: ['ADVOGADO'] },
+              roles: { hasSome: ['ADVOGADO', 'Advogados', 'ADMIN'] },
               ...(tenantId ? { tenant_id: tenantId } : {}),
             },
             select: { id: true },
@@ -371,7 +371,7 @@ export class CourtScraperService {
   async getLawyersWithOAB(tenantId?: string) {
     return this.prisma.user.findMany({
       where: {
-        roles: { hasSome: ['ADVOGADO'] },
+        roles: { hasSome: ['ADVOGADO', 'Advogados', 'ADMIN'] },
         oab_number: { not: null },
         ...(tenantId ? { tenant_id: tenantId } : {}),
       },
