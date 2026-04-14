@@ -332,9 +332,9 @@ export default function Dashboard() {
     return () => document.removeEventListener('mousedown', handler);
   }, [mobileMoreOpen]);
 
-  // Broadcast unread total to Sidebar (no sessionStorage persistence to avoid stale counts)
+  // Broadcast unread total to Sidebar — conta CONVERSAS com não-lidas, não total de msgs
   useEffect(() => {
-    const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+    const total = Object.values(unreadCounts).filter(n => n > 0).length;
     window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
   }, [unreadCounts]);
 
@@ -346,7 +346,7 @@ export default function Dashboard() {
 
   // ─── Tab title + favicon dinâmico com badge de não lidos ─────
   useEffect(() => {
-    const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+    const total = Object.values(unreadCounts).filter(n => n > 0).length;
     document.title = total > 0 ? `(${total}) Atendimento | LexCRM` : 'Atendimento | LexCRM';
 
     // Favicon dinâmico via Canvas API
