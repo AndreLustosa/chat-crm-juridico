@@ -22,6 +22,7 @@ import { TransferAudioModule } from './transfer-audio/transfer-audio.module';
 import { LegalCasesModule } from './legal-cases/legal-cases.module';
 import { DjenModule } from './djen/djen.module';
 import { CourtScraperModule } from './court-scraper/court-scraper.module';
+import { EsajSyncModule } from './esaj-sync/esaj-sync.module';
 import { FichaTrabalhistaModule } from './ficha-trabalhista/ficha-trabalhista.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { CaseDocumentsModule } from './case-documents/case-documents.module';
@@ -89,6 +90,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     LegalCasesModule,
     DjenModule,
     CourtScraperModule,
+    EsajSyncModule,
     FichaTrabalhistaModule,
     CalendarModule,
     CaseDocumentsModule,

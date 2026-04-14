@@ -535,17 +535,23 @@ model LegalCase {
 model CaseEvent {
   id            String    @id @default(uuid())
   case_id       String
-  type          String
+  type          String    // MOVIMENTACAO, PUBLICACAO, MANUAL, etc.
   title         String
   description   String?
-  source        String?
+  source        String?   // ESAJ, DJEN, MANUAL
   reference_url String?
   event_date    DateTime?
   created_at    DateTime  @default(now())
 
+  // Campos para sync ESAJ — dedup e notificação
+  movement_hash String?   @unique  // SHA256(case_number|date|description)
+  notified_at   DateTime?           // quando WhatsApp foi enviado ao advogado
+  source_raw    Json?               // dado bruto da movimentação
+
   legal_case LegalCase @relation(fields: [case_id], references: [id], onDelete: Cascade)
 
   @@index([case_id, created_at])
+  @@index([source, notified_at])
 }
 
 model TaskComment {

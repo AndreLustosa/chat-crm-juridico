@@ -46,7 +46,7 @@ const formatCNJ = (digits: string): string => {
 };
 
 /** Infere tracking_stage a partir dos movimentos (último → primeiro) */
-const inferTrackingStage = (movements: Array<{ description: string }>): string => {
+export const inferTrackingStage = (movements: Array<{ description: string }>): string => {
   for (const m of movements) {
     const desc = m.description.toLowerCase();
     if (/tr[aâ]nsito\s+em\s+julgado/.test(desc)) return 'TRANSITADO';
@@ -84,7 +84,7 @@ export class EsajTjalScraper {
 
   // ─── Sessão ──────────────────────────────────────────────
 
-  private async initSession(): Promise<string> {
+  async initSession(): Promise<string> {
     const res = await fetch(`${this.BASE_URL}/open.do?cdForo=-1`, {
       headers: { 'User-Agent': this.USER_AGENT },
       signal: AbortSignal.timeout(15000),
