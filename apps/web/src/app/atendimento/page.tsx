@@ -1322,9 +1322,14 @@ export default function Dashboard() {
 
     const msgText = text;
     const replyId = replyingTo?.id;
-    setSending(true);
+    // Limpar input ANTES de desabilitar para garantir que o DOM atualize
     setText('');
     setReplyingTo(null);
+    if (inputRef.current) {
+      inputRef.current.value = ''; // Forçar limpeza no DOM diretamente
+      inputRef.current.style.height = 'auto';
+    }
+    setSending(true);
     // Stop typing indicator on send
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     socketRef.current?.emit('typing', { conversationId: selectedId, isTyping: false });
