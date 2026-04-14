@@ -3403,7 +3403,11 @@ function ProcessosPageContent() {
       const phone = (c.lead?.phone || '').toLowerCase();
       const caseNum = (c.case_number || '').toLowerCase();
       const opp = (c.opposing_party || '').toLowerCase();
-      if (!name.includes(q) && !phone.includes(q) && !caseNum.includes(q) && !opp.includes(q)) return false;
+      // Normalizar dígitos para busca por número CNJ (ex: 0706377-27.2026.8.02 ↔ 07063772720268020058)
+      const qDigits = q.replace(/\D/g, '');
+      const caseNumDigits = (c.case_number || '').replace(/\D/g, '');
+      const matchDigits = qDigits.length >= 5 && caseNumDigits.includes(qDigits);
+      if (!name.includes(q) && !phone.includes(q) && !caseNum.includes(q) && !opp.includes(q) && !matchDigits) return false;
     }
     if (areaFilter && c.legal_area !== areaFilter) return false;
     if (priorityFilter && c.priority !== priorityFilter) return false;
