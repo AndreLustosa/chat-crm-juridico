@@ -85,8 +85,12 @@ export class ConversationsService {
         // Visibilidade de ADVOGADO: apenas CLIENTES atribuídos como advogada + processos
         // Na aba Leads: advogado NÃO vê leads de outros operadores via assigned_lawyer_id
         if (isAdvogadoUser && clientMode === true) {
+          // Conversas onde o advogado está atribuído diretamente
           orConditions.push({ assigned_lawyer_id: userId, lead: { is_client: true } });
+          // Clientes com processos deste advogado
           orConditions.push({ lead: { is_client: true, legal_cases: { some: { lawyer_id: userId } } } });
+          // Clientes que têm QUALQUER conversa atribuída a este advogado (ex: atribuído via lead/IA)
+          orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: userId } } } });
         }
 
         // Conversas atribuídas diretamente ao usuário (qualquer role)
