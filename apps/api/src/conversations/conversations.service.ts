@@ -60,8 +60,8 @@ export class ConversationsService {
     // ─── Controle de acesso por role (multi-role aware) ────────────────
     const userRoles: string[] = Array.isArray(user?.roles) ? user.roles : [userRole];
     const isAdminUser = userRoles.includes('ADMIN');
-    const isAdvogadoUser = userRoles.includes('ADVOGADO');
-    const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL');
+    const isAdvogadoUser = userRoles.includes('ADVOGADO') || userRoles.includes('Advogados');
+    const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL') || userRoles.includes('Atendente Comercial');
 
     if (isAdminUser) {
       // Admin vê tudo — apenas filtra por inboxId se explicitamente pedido
@@ -700,8 +700,8 @@ export class ConversationsService {
       const userRoles: string[] = Array.isArray(user?.roles)
         ? user.roles
         : [effectiveRole(user?.roles ?? 'OPERADOR')];
-      const isAdvogadoUser = userRoles.includes('ADVOGADO');
-      const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL');
+      const isAdvogadoUser = userRoles.includes('ADVOGADO') || userRoles.includes('Advogados');
+      const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL') || userRoles.includes('Atendente Comercial');
       const isAdminUser = userRoles.includes('ADMIN');
 
       // Filtro base: tenant + exclui leads PERDIDO/FINALIZADO
