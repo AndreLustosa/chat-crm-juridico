@@ -413,9 +413,27 @@ export class EsajTjalScraper {
       });
     }
 
-    // Movimentações
+    // Movimentacoes
+    // Nota: o TJAL usa prefixo "table*" (ingles) tanto para partes quanto
+    // para movimentacoes, ao contrario de outros tribunais SAJ que usam
+    // "tabela*" (portugues). Tentamos ambos, mais um filtro por atributo
+    // contendo "ovimenta" como ultima rede de seguranca.
     const movements: Array<{ date: string; description: string }> = [];
-    const movTable = $('#tabelaTodasMovimentacoes, #tabelaUltimasMovimentacoes').first();
+    let movTable = $([
+      '#tabelaTodasMovimentacoes',
+      '#tabelaUltimasMovimentacoes',
+      '#tableTodasMovimentacoes',
+      '#tableUltimasMovimentacoes',
+    ].join(', ')).first();
+
+    // Fallback: qualquer <table> cujo id contenha "ovimenta" (case-insensitive)
+    if (!movTable.length) {
+      movTable = $('table').filter((_, el) => {
+        const id = $(el).attr('id') || '';
+        return /ovimenta/i.test(id);
+      }).first();
+    }
+
     if (movTable.length) {
       movTable.find('tr').each((_, row) => {
         const tds = $(row).find('td');
@@ -464,6 +482,21 @@ export class EsajTjalScraper {
     if (missing.length > 0) {
       this.logger.warn(
         `[PARSE] Processo ${caseNumber}: campos vazios = [${missing.join(', ')}]`,
+      );
+    }
+
+    // Diagnostico extra: se nao achou movimentacoes, lista TODAS as tables
+    // da pagina com id+row count para descobrir qual o TJAL esta usando.
+    // Facilita fazer o fix definitivo sem precisar dump completo do HTML.
+    if (movements.length === 0) {
+      const tables = $('table').map((_, el) => {
+        const id = $(el).attr('id') || '-';
+        const cls = ($(el).attr('class') || '-').slice(0, 25);
+        const rows = $(el).find('tr').length;
+        return `${id}.${cls}[${rows}r]`;
+      }).get().slice(0, 15);
+      this.logger.warn(
+        `[PARSE-DEBUG] Processo ${caseNumber}: tables na pagina: ${tables.join(' | ') || '(nenhuma)'}`,
       );
     }
 
