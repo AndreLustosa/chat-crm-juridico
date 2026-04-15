@@ -26,6 +26,7 @@ import {
 import { AgendaView } from './components/AgendaView';
 import { ClienteView } from './components/ClienteView';
 import { DashboardStrip, DashboardStripReopenButton } from './components/DashboardStrip';
+import { ProcessoTimeline } from './components/ProcessoTimeline';
 import {
   loadSavedViews,
   persistSavedViews,
@@ -983,7 +984,7 @@ function ProcessoDetailPanel({
   onOpenChat: (legalCase: LegalCase) => void;
 }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'info' | 'djen' | 'events' | 'tasks' | 'honorarios'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'timeline' | 'djen' | 'events' | 'tasks' | 'honorarios'>('info');
   const { isAdmin } = useRole();
   const [saving, setSaving] = useState(false);
   const [savedFeedback, setSavedFeedback] = useState(false);
@@ -1395,6 +1396,7 @@ function ProcessoDetailPanel({
         <div className="flex border-b border-border shrink-0">
           {([
             { id: 'info' as const, label: 'Processo' },
+            { id: 'timeline' as const, label: 'Linha do tempo' },
             { id: 'honorarios' as const, label: 'Honorários' },
             { id: 'djen' as const, label: `DJEN (${djenPubs.length})` },
             { id: 'events' as const, label: `Movim. (${events.length})` },
@@ -1942,6 +1944,16 @@ function ProcessoDetailPanel({
                 )
               )}
             </div>
+          )}
+
+          {/* ─── TIMELINE TAB ─── */}
+          {activeTab === 'timeline' && (
+            <ProcessoTimeline
+              legalCase={legalCase}
+              tasks={tasks}
+              events={events}
+              djenPubs={djenPubs}
+            />
           )}
 
           {/* ─── HONORÁRIOS TAB ─── */}
