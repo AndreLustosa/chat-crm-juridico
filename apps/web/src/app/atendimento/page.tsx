@@ -2293,11 +2293,11 @@ export default function Dashboard() {
             {selectedId && transferContextMap[selectedId] && (() => {
               const ctx = transferContextMap[selectedId];
               return (
-                <div className="border-b border-amber-500/20 bg-amber-500/5 px-5 py-3 shrink-0">
+                <div className="border-b border-sky-500/20 bg-sky-500/5 px-5 py-3 shrink-0">
                   <div className="flex items-start gap-3 max-w-4xl mx-auto">
-                    <span className="text-amber-400 text-base shrink-0 mt-0.5">📋</span>
+                    <span className="text-sky-400 text-base shrink-0 mt-0.5">📋</span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-bold text-amber-400 mb-1">
+                      <p className="text-[11px] font-bold text-sky-300 mb-1">
                         Contexto da transferência — de {ctx.fromUserName}
                       </p>
                       {ctx.reason && (
@@ -2787,7 +2787,7 @@ export default function Dashboard() {
                         {!isClosed && (
                           <button
                             onClick={handleSendFormLink}
-                            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-semibold active:bg-amber-500/20 transition-colors"
+                            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 text-sm font-semibold active:bg-sky-500/20 transition-colors"
                           >
                             <ClipboardList size={17} />
                             Enviar Form.
@@ -2835,7 +2835,7 @@ export default function Dashboard() {
                         <>
                           <button
                             onClick={() => { openReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem'); setShowDetailsPanel(false); }}
-                            className="flex items-center gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-semibold active:bg-amber-500/20 transition-colors"
+                            className="flex items-center gap-3 p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 text-sm font-semibold active:bg-sky-500/20 transition-colors"
                           >
                             <CornerDownLeft size={18} />
                             Devolver ao SDR
@@ -2932,11 +2932,11 @@ export default function Dashboard() {
                     <button
                       onClick={() => setNotesPanelOpen(true)}
                       title="Notas da conversa — visíveis para a equipe"
-                      className={`relative p-2.5 md:p-3 rounded-xl border transition-colors shrink-0 mb-0.5 ${selected?.hasNotes ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-card border-border text-muted-foreground hover:text-amber-400 hover:border-amber-500/30 hover:bg-amber-500/10'}`}
+                      className={`relative p-2.5 md:p-3 rounded-xl border transition-colors shrink-0 mb-0.5 ${selected?.hasNotes ? 'bg-sky-500/20 border-sky-500/40 text-sky-400' : 'bg-card border-border text-muted-foreground hover:text-sky-400 hover:border-sky-500/30 hover:bg-sky-500/10'}`}
                     >
                       <StickyNote size={20} />
                       {selected?.hasNotes && (
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse" />
                       )}
                     </button>
                   )}
@@ -3420,7 +3420,7 @@ export default function Dashboard() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm dark">
           <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 animate-in zoom-in-95 duration-200">
             <div className="flex items-center gap-2 mb-1">
-              <Clock size={20} className="text-amber-400 shrink-0" />
+              <Clock size={20} className="text-sky-400 shrink-0" />
               <h3 className="text-lg font-bold text-foreground">Adiar Atendimento</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-5">
@@ -3474,9 +3474,9 @@ export default function Dashboard() {
               <button
                 onClick={createTask}
                 disabled={!taskTitle.trim() || savingTask}
-                className="px-4 py-2 text-sm rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium hover:bg-amber-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-4 py-2 text-sm rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-400 font-medium hover:bg-sky-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {savingTask && <div className="w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />}
+                {savingTask && <div className="w-3.5 h-3.5 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />}
                 Adiar
               </button>
             </div>
@@ -3495,8 +3495,8 @@ export default function Dashboard() {
           <div className="relative w-full max-w-2xl h-full bg-background border-l border-border flex flex-col shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0 bg-card/80 backdrop-blur-sm">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                  <ClipboardList size={16} className="text-amber-500" />
+                <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                  <ClipboardList size={16} className="text-sky-400" />
                 </div>
                 <div>
                   <h2 className="font-bold text-foreground text-sm">Ficha Trabalhista</h2>
@@ -3631,13 +3631,13 @@ export default function Dashboard() {
 
       {/* Toast de Lembrete de Tarefa Agendada */}
       {taskReminderToast && typeof document !== 'undefined' && createPortal(
-        <div className="fixed top-4 right-4 z-[10000] w-80 bg-card border border-amber-500/30 rounded-xl shadow-2xl p-4 animate-in slide-in-from-right-5 duration-300">
+        <div className="fixed top-4 right-4 z-[10000] w-80 bg-card border border-sky-500/30 rounded-xl shadow-2xl p-4 animate-in slide-in-from-right-5 duration-300">
           <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-              <Clock size={18} className="text-amber-400" />
+            <div className="w-9 h-9 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
+              <Clock size={18} className="text-sky-400" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-amber-400 mb-0.5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-sky-300 mb-0.5">
                 {taskReminderToast.minutesBefore > 0 ? `Lembrete em ${taskReminderToast.minutesBefore} min` : 'Tarefa agora!'}
               </p>
               <p className="text-sm font-semibold text-foreground truncate">

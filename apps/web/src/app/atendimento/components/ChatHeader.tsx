@@ -320,7 +320,7 @@ export function ChatHeader({
               <button
                 onClick={onSendFormLink}
                 title="Enviar link do formulário trabalhista ao lead"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold border border-amber-500/20 hover:bg-amber-500/25 transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 text-[10px] font-bold border border-sky-500/20 hover:bg-sky-500/25 transition-colors"
               >
                 <ClipboardList size={10} />
                 Enviar Formulário
@@ -385,7 +385,7 @@ export function ChatHeader({
               <button
                 onClick={() => onOpenReasonPopup('return', selected?.originAssignedUserName || 'atendente de origem')}
                 title="Devolver conversa ao atendente de origem"
-                className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+                className="px-3 py-2 text-sm font-semibold text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded-xl hover:bg-sky-500/20 transition-colors flex items-center gap-2"
               >
                 <CornerDownLeft size={16} />
                 Devolver
@@ -404,7 +404,7 @@ export function ChatHeader({
             <button
               onClick={onCreateTask}
               title="Criar tarefa"
-              className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+              className="px-3 py-2 text-sm font-semibold text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded-xl hover:bg-sky-500/20 transition-colors flex items-center gap-2"
             >
               <ClipboardList size={16} />
               Tarefa
@@ -454,11 +454,11 @@ export function ChatHeader({
     {/* ── Barra de tarefa ativa — aparece sempre que houver activeTask ── */}
     {activeTask && (
       <div className={`flex items-center gap-2 px-3 md:px-6 py-2 border-b ${
-        isOverdue ? 'bg-red-500/5 border-red-500/20' : 'bg-amber-500/5 border-amber-500/20'
+        isOverdue ? 'bg-red-500/5 border-red-500/20' : 'bg-sky-500/5 border-sky-500/20'
       }`}>
-        <Clock size={13} className={`shrink-0 ${isOverdue ? 'text-red-400 animate-pulse' : 'text-amber-400'}`} />
+        <Clock size={13} className={`shrink-0 ${isOverdue ? 'text-red-400 animate-pulse' : 'text-sky-400'}`} />
         <div className="flex-1 min-w-0">
-          <p className={`text-xs font-semibold truncate ${isOverdue ? 'text-red-400' : 'text-amber-300'}`}>
+          <p className={`text-xs font-semibold truncate ${isOverdue ? 'text-red-400' : 'text-sky-300'}`}>
             {activeTask.title}
             {activeTask.dueAt && (
               <span className={`ml-2 text-[10px] font-bold ${isOverdue ? 'text-red-500' : 'opacity-60'}`}>
@@ -467,7 +467,7 @@ export function ChatHeader({
             )}
           </p>
           {(activeTask.postponeCount ?? 0) > 0 && (
-            <p className="text-[9px] text-amber-500/60 font-medium">
+            <p className="text-[9px] text-sky-400/60 font-medium">
               {activeTask.postponeCount}ª vez adiando
             </p>
           )}
@@ -492,7 +492,7 @@ export function ChatHeader({
         {/* Nova tarefa */}
         <button
           onClick={onNewTask}
-          className="px-2.5 py-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+          className="px-2.5 py-1 text-[11px] font-bold text-sky-300 bg-sky-500/10 border border-sky-500/20 rounded-lg hover:bg-sky-500/20 transition-colors whitespace-nowrap"
           title="Criar nova tarefa para este contato"
         >
           + Nova
@@ -514,7 +514,7 @@ export function ChatHeader({
             <span className="text-xl">✅</span>
             <h3 className="font-bold text-sm">Concluir tarefa</h3>
           </div>
-          <p className="text-xs text-amber-400/80 mb-4 truncate font-medium">{activeTask.title}</p>
+          <p className="text-xs text-sky-300/80 mb-4 truncate font-medium">{activeTask.title}</p>
 
           <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
             Como foi? <span className="text-muted-foreground/40 font-normal normal-case">(opcional)</span>
@@ -564,9 +564,9 @@ export function ChatHeader({
             <span className="text-xl">⏰</span>
             <h3 className="font-bold text-sm">Adiar tarefa</h3>
           </div>
-          <p className="text-xs text-amber-400/80 mb-1 truncate font-medium">{activeTask.title}</p>
+          <p className="text-xs text-sky-300/80 mb-1 truncate font-medium">{activeTask.title}</p>
           {(activeTask.postponeCount ?? 0) > 0 && (
-            <p className="text-[10px] text-amber-500 font-semibold mb-3">
+            <p className="text-[10px] text-sky-400 font-semibold mb-3">
               {activeTask.postponeCount}ª vez adiando esta tarefa
             </p>
           )}
