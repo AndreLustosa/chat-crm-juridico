@@ -105,11 +105,13 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
     // ─── Notificação centralizada de nova mensagem ───────────────
     // ÚNICO ponto que toca som para incoming_message_notification.
     // page.tsx NÃO registra handler próprio nem toca som em newMessage.
-    s.on('incoming_message_notification', (data: { conversationId?: string; contactName?: string }) => {
+    // _prefs vem do backend (NotificationSettingsService) com flags por usuário.
+    s.on('incoming_message_notification', (data: { conversationId?: string; contactName?: string; _prefs?: { skipSound?: boolean; skipDesktop?: boolean } }) => {
       const onChatPage = pathnameRef.current === '/atendimento' ||
         pathnameRef.current.startsWith('/atendimento/chat');
+      const prefs = data._prefs || {};
 
-      // Sempre atualiza contagem de não-lidas (mesmo no chat)
+      // Sempre atualiza contagem de não-lidas (independe de prefs)
       if (data?.conversationId) {
         try {
           const raw = sessionStorage.getItem('unreadCounts');
@@ -121,36 +123,48 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
         } catch {}
       }
 
-      // Som SEMPRE toca (é o único ponto — corrige bug de som duplo)
-      playNotificationSound();
+      // Som: respeita preferência do servidor
+      if (!prefs.skipSound) {
+        playNotificationSound();
+      }
 
-      // Desktop notification sempre (lib já checa document.hasFocus)
-      const name = data?.contactName || 'Novo contato';
-      showDesktopNotification({
-        title: name,
-        body: 'Nova mensagem recebida',
-        tag: `msg-${data?.conversationId || 'unknown'}`,
-      });
+      // Desktop notification: respeita preferência do servidor
+      if (!prefs.skipDesktop) {
+        const name = data?.contactName || 'Novo contato';
+        showDesktopNotification({
+          title: name,
+          body: 'Nova mensagem recebida',
+          tag: `msg-${data?.conversationId || 'unknown'}`,
+        });
+      }
 
       // Toast apenas fora do chat (no chat o user já vê a mensagem inline)
       if (onChatPage) return;
+      const name = data?.contactName || 'Novo contato';
       toast(`Nova mensagem de ${name}`, { icon: '💬', duration: 4000 });
     });
 
-    // ─── Transferências: toast + som fora do chat ────────────────
-    s.on('transfer_request', (data: { contactName?: string; fromUserName?: string }) => {
+    // ─── Transferências: toast + som (respeita _prefs) ──────────
+    s.on('transfer_request', (data: { contactName?: string; fromUserName?: string; _prefs?: { skipSound?: boolean; skipDesktop?: boolean } }) => {
       const onChatPage = pathnameRef.current === '/atendimento' ||
         pathnameRef.current.startsWith('/atendimento/chat');
-      if (onChatPage) return; // page.tsx já exibe o popup
+      const prefs = data._prefs || {};
 
-      playNotificationSound();
+      if (onChatPage) return; // page.tsx já exibe o popup com som próprio
+
+      if (!prefs.skipSound) {
+        playNotificationSound();
+      }
+
       toast(`Transferência de ${data?.fromUserName || 'Operador'}: ${data?.contactName || 'Contato'}`, { icon: '📨', duration: 6000 });
 
-      showDesktopNotification({
-        title: 'Transferência recebida',
-        body: `${data?.fromUserName || 'Operador'} transferiu ${data?.contactName || 'um contato'}`,
-        tag: 'transfer',
-      });
+      if (!prefs.skipDesktop) {
+        showDesktopNotification({
+          title: 'Transferência recebida',
+          body: `${data?.fromUserName || 'Operador'} transferiu ${data?.contactName || 'um contato'}`,
+          tag: 'transfer',
+        });
+      }
     });
 
     setSocket(s);

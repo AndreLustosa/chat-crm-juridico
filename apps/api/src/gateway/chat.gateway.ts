@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { InboxesService } from '../inboxes/inboxes.service';
+import { NotificationSettingsService, type NotifEventType } from '../notification-settings/notification-settings.service';
 
 @Injectable()
 export class ChatGateway {
@@ -22,6 +23,7 @@ export class ChatGateway {
     private prisma: PrismaService,
     @Inject(forwardRef(() => InboxesService))
     private inboxesService: InboxesService,
+    private notifSettings: NotificationSettingsService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -197,9 +199,10 @@ export class ChatGateway {
     this.logger.log(`[SOCKET] Client ${client.id} joined user room: user:${userId}`);
   }
 
-  emitTransferRequest(toUserId: string, data: any) {
+  async emitTransferRequest(toUserId: string, data: any) {
+    const prefs = await this.notifSettings.getNotifFlags(toUserId, 'transfer_request').catch(() => ({ skipSound: false, skipDesktop: false }));
     this.logger.log(`[SOCKET] Emitting transfer_request to user:${toUserId}`);
-    this.server.to(`user:${toUserId}`).emit('transfer_request', data);
+    this.server.to(`user:${toUserId}`).emit('transfer_request', { ...data, _prefs: prefs });
   }
 
   emitTransferResponse(fromUserId: string, data: any) {
@@ -284,33 +287,38 @@ export class ChatGateway {
    *  - Cliente com operador atribuído → notifica operador E advogado (assigned_lawyer_id), se distintos
    *  - Sem operador atribuído        → notifica todo o tenant para alguém assumir
    */
-  emitIncomingMessageNotification(
+  async emitIncomingMessageNotification(
     tenantId: string | null,
     assignedUserId: string | null,
     data: { conversationId: string; contactName?: string },
     assignedLawyerId?: string | null,
     isClient?: boolean,
   ) {
-    const payload = { ...data, assignedUserId };
+    const basePayload = { ...data, assignedUserId };
 
     if (assignedUserId) {
-      // Notifica o operador responsável
-      this.logger.log(`[SOCKET] incoming_message_notification → user:${assignedUserId}`);
+      // Consulta preferências do operador (cache 60s)
+      const prefs = await this.notifSettings.getNotifFlags(assignedUserId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
+      const payload = { ...basePayload, _prefs: prefs };
+
+      this.logger.log(`[SOCKET] incoming_message_notification → user:${assignedUserId} (sound=${!prefs.skipSound}, desktop=${!prefs.skipDesktop})`);
       this.server.to(`user:${assignedUserId}`).emit('incoming_message_notification', payload);
 
       // Para clientes: notifica também o advogado responsável (se diferente do operador)
       if (isClient && assignedLawyerId && assignedLawyerId !== assignedUserId) {
+        const lawyerPrefs = await this.notifSettings.getNotifFlags(assignedLawyerId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
+        const lawyerPayload = { ...basePayload, _prefs: lawyerPrefs };
         this.logger.log(`[SOCKET] incoming_message_notification → lawyer:${assignedLawyerId} (cliente)`);
-        this.server.to(`user:${assignedLawyerId}`).emit('incoming_message_notification', payload);
+        this.server.to(`user:${assignedLawyerId}`).emit('incoming_message_notification', lawyerPayload);
       }
     } else if (tenantId) {
-      // Sem operador: notifica todos do tenant para alguém assumir
+      // Sem operador: notifica todos do tenant (sem _prefs individuais — usa defaults no frontend)
       this.logger.log(`[SOCKET] incoming_message_notification → tenant:${tenantId} (sem atribuicao)`);
-      this.server.to(`tenant:${tenantId}`).emit('incoming_message_notification', payload);
+      this.server.to(`tenant:${tenantId}`).emit('incoming_message_notification', basePayload);
     } else {
       this.prisma.tenant.findFirst().then((t) => {
         if (t) {
-          this.server.to(`tenant:${t.id}`).emit('incoming_message_notification', payload);
+          this.server.to(`tenant:${t.id}`).emit('incoming_message_notification', basePayload);
         }
       }).catch(() => {});
     }
@@ -340,9 +348,10 @@ export class ChatGateway {
     this.server.to(`user:${userId}`).emit('calendar_update', data);
   }
 
-  emitCalendarReminder(userId: string, data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) {
+  async emitCalendarReminder(userId: string, data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) {
+    const prefs = await this.notifSettings.getNotifFlags(userId, 'calendar_reminder').catch(() => ({ skipSound: false, skipDesktop: false }));
     this.logger.log(`[SOCKET] Emitting calendar_reminder to user:${userId} — ${data.title} em ${data.minutesBefore}min`);
-    this.server.to(`user:${userId}`).emit('calendar_reminder', data);
+    this.server.to(`user:${userId}`).emit('calendar_reminder', { ...data, _prefs: prefs });
   }
 
   // ─── Reactions ──────────────────────────────────────────────
