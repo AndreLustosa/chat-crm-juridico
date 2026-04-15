@@ -15,6 +15,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationSettingsModule } from './notification-settings/notification-settings.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { InboxesModule } from './inboxes/inboxes.module';
 import { SectorsModule } from './sectors/sectors.module';
 import { MediaModule } from './media/media.module';
@@ -112,6 +113,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     PaymentGatewayModule,
     NotaFiscalModule,
     NotificationSettingsModule,
+    NotificationsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

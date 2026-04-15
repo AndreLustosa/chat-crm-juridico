@@ -3,6 +3,7 @@ import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { InboxesService } from '../inboxes/inboxes.service';
 import { NotificationSettingsService, type NotifEventType } from '../notification-settings/notification-settings.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ChatGateway {
@@ -24,6 +25,7 @@ export class ChatGateway {
     @Inject(forwardRef(() => InboxesService))
     private inboxesService: InboxesService,
     private notifSettings: NotificationSettingsService,
+    private notificationsService: NotificationsService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -297,19 +299,44 @@ export class ChatGateway {
     const basePayload = { ...data, assignedUserId };
 
     if (assignedUserId) {
-      // Consulta preferências do operador (cache 60s)
-      const prefs = await this.notifSettings.getNotifFlags(assignedUserId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
+      // Checa mute da conversa para o operador
+      const isMuted = await this.notificationsService.isConversationMuted(assignedUserId, data.conversationId).catch(() => false);
+      const prefs = isMuted
+        ? { skipSound: true, skipDesktop: true }
+        : await this.notifSettings.getNotifFlags(assignedUserId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
       const payload = { ...basePayload, _prefs: prefs };
 
-      this.logger.log(`[SOCKET] incoming_message_notification → user:${assignedUserId} (sound=${!prefs.skipSound}, desktop=${!prefs.skipDesktop})`);
+      this.logger.log(`[SOCKET] incoming_message_notification → user:${assignedUserId} (sound=${!prefs.skipSound}, desktop=${!prefs.skipDesktop}${isMuted ? ', MUTED' : ''})`);
       this.server.to(`user:${assignedUserId}`).emit('incoming_message_notification', payload);
+
+      // Persiste no histórico de notificações (fire-and-forget)
+      this.notificationsService.create({
+        userId: assignedUserId,
+        tenantId,
+        type: 'incoming_message',
+        title: data.contactName || 'Nova mensagem',
+        body: 'Nova mensagem recebida',
+        data: { conversationId: data.conversationId },
+      }).catch(() => {});
 
       // Para clientes: notifica também o advogado responsável (se diferente do operador)
       if (isClient && assignedLawyerId && assignedLawyerId !== assignedUserId) {
-        const lawyerPrefs = await this.notifSettings.getNotifFlags(assignedLawyerId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
+        const lawyerMuted = await this.notificationsService.isConversationMuted(assignedLawyerId, data.conversationId).catch(() => false);
+        const lawyerPrefs = lawyerMuted
+          ? { skipSound: true, skipDesktop: true }
+          : await this.notifSettings.getNotifFlags(assignedLawyerId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
         const lawyerPayload = { ...basePayload, _prefs: lawyerPrefs };
         this.logger.log(`[SOCKET] incoming_message_notification → lawyer:${assignedLawyerId} (cliente)`);
         this.server.to(`user:${assignedLawyerId}`).emit('incoming_message_notification', lawyerPayload);
+
+        this.notificationsService.create({
+          userId: assignedLawyerId,
+          tenantId,
+          type: 'incoming_message',
+          title: data.contactName || 'Nova mensagem',
+          body: 'Nova mensagem de cliente',
+          data: { conversationId: data.conversationId },
+        }).catch(() => {});
       }
     } else if (tenantId) {
       // Sem operador: notifica todos do tenant (sem _prefs individuais — usa defaults no frontend)

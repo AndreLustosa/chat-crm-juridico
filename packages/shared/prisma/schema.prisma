@@ -36,6 +36,7 @@ model Tenant {
   broadcast_jobs            BroadcastJob[]
   djen_ignored_processes    DjenIgnoredProcess[]
   lead_honorarios           LeadHonorario[]
+  notifications             Notification[]
 }
 
 model User {
@@ -82,6 +83,8 @@ model User {
   conversation_notes       ConversationNote[]     @relation("ConversationNoteAuthor")
   broadcast_jobs           BroadcastJob[]
   notification_setting     NotificationSetting?
+  conversation_mutes       ConversationMute[]
+  notifications            Notification[]
 }
 
 model Lead {
@@ -171,6 +174,7 @@ model Conversation {
   transfer_audios            TransferAudio[]
   contract_signatures        ContractSignature[]
   notes                      ConversationNote[]
+  mutes                      ConversationMute[]
 
   @@index([lead_id])
   @@index([last_message_at(sort: Desc)])
@@ -1480,4 +1484,38 @@ model NotificationSetting {
   updated_at  DateTime  @updatedAt
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+/// Mute de conversa — permite silenciar notificações de uma conversa específica.
+model ConversationMute {
+  id              String    @id @default(uuid())
+  user_id         String
+  conversation_id String
+  muted_until     DateTime? /// null = mudo indefinidamente
+  created_at      DateTime  @default(now())
+
+  user         User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, conversation_id])
+  @@index([user_id])
+}
+
+/// Histórico persistente de notificações — feed de atividade com read/unread.
+model Notification {
+  id                String    @id @default(uuid())
+  user_id           String
+  tenant_id         String?
+  notification_type String    /// incoming_message, transfer_request, task_overdue, etc.
+  title             String
+  body              String?
+  data              Json?     /// { conversationId, taskId, caseId, etc. }
+  read_at           DateTime?
+  created_at        DateTime  @default(now())
+
+  user   User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, read_at])
+  @@index([user_id, created_at])
 }
