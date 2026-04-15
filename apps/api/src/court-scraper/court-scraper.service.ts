@@ -100,35 +100,53 @@ export class CourtScraperService {
       select: { id: true, case_number: true },
     });
 
+    // Scrape do tribunal. IMPORTANTE: sempre rodamos o scraper, mesmo quando o
+    // processo ja esta cadastrado localmente. O modal de cadastro em lote usa
+    // este endpoint para pre-preencher campos (autor, reu, classe, vara etc.);
+    // se retornassemos cedo quando existing=true, o frontend receberia uma
+    // resposta sem `data` e o modal abriria com todos os campos vazios.
+    const scraper = this.getScraper(tribunalKey);
+    let scraped: CourtCaseData | null = null;
+    try {
+      scraped = await scraper.searchByNumber(digits);
+    } catch (error: any) {
+      this.logger.error(`[SEARCH] Erro ao consultar ${tribunal?.name}: ${error.message}`);
+      // Se o processo ja existe localmente, ainda conseguimos devolver uma
+      // resposta util (o frontend pode alertar "ja cadastrado"). Caso contrario,
+      // propagamos o erro para o usuario.
+      if (existing) {
+        return {
+          found: true,
+          already_registered: true,
+          existing_case_id: existing.id,
+          tribunal: tribunal?.name,
+        };
+      }
+      throw new BadRequestException(
+        `Erro ao consultar ${tribunal?.name || 'tribunal'}: ${error.message}`,
+      );
+    }
+
     if (existing) {
       return {
         found: true,
         already_registered: true,
         existing_case_id: existing.id,
+        data: scraped || undefined,
         tribunal: tribunal?.name,
       };
     }
 
-    // Scrape do tribunal
-    const scraper = this.getScraper(tribunalKey);
-
-    try {
-      const data = await scraper.searchByNumber(digits);
-      if (!data) {
-        return { found: false, already_registered: false, tribunal: tribunal?.name };
-      }
-      return {
-        found: true,
-        already_registered: false,
-        data,
-        tribunal: tribunal?.name,
-      };
-    } catch (error: any) {
-      this.logger.error(`[SEARCH] Erro ao consultar ${tribunal?.name}: ${error.message}`);
-      throw new BadRequestException(
-        `Erro ao consultar ${tribunal?.name || 'tribunal'}: ${error.message}`,
-      );
+    if (!scraped) {
+      return { found: false, already_registered: false, tribunal: tribunal?.name };
     }
+
+    return {
+      found: true,
+      already_registered: false,
+      data: scraped,
+      tribunal: tribunal?.name,
+    };
   }
 
   // ─── Busca por OAB (múltiplas) ───────────────────────────
