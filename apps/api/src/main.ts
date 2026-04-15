@@ -125,7 +125,11 @@ async function bootstrap() {
     }
     try {
       const payload = jwtService.verify(token);
-      (socket as any).user = payload;
+      // Armazena em socket.data (nao em socket diretamente): o
+      // connectionStateRecovery restaura apenas `rooms` e `data`, entao
+      // propriedades soltas no socket (ex.: (socket as any).user) seriam
+      // perdidas em conexoes recuperadas. socket.data persiste.
+      socket.data.user = payload;
       next();
     } catch {
       logger.warn(`[SOCKET] Conexao rejeitada — token JWT invalido`);
@@ -175,7 +179,8 @@ async function bootstrap() {
     chatGateway.handleConnection(socket);
 
     // Auto-join tenant room for scoped broadcasts
-    const socketUser = (socket as any).user;
+    // (recovered sockets ja tem a room restaurada — join e idempotente)
+    const socketUser = socket.data.user;
     if (socketUser?.tenant_id) {
       socket.join(`tenant:${socketUser.tenant_id}`);
     }
@@ -206,7 +211,7 @@ async function bootstrap() {
     });
     socket.on('typing', (data: { conversationId: string; isTyping: boolean }) => {
       if (!checkSocketRateLimit(socket.id, 'typing', 30)) return;
-      const user = (socket as any).user;
+      const user = socket.data.user;
       if (!user?.sub || !data?.conversationId) return;
       chatGateway.emitTypingIndicator(data.conversationId, {
         userId: user.sub,

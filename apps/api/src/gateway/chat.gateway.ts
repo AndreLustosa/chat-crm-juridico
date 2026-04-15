@@ -39,7 +39,7 @@ export class ChatGateway {
     client.conn?.on('upgrade', (t: any) => {
       this.logger.log(`[SOCKET] Transport upgrade: ${client.id} → ${t?.name ?? 'unknown'}`);
     });
-    const socketUser = (client as any).user;
+    const socketUser = client.data.user;
     if (socketUser?.sub) {
       this.trackUserOnline(socketUser.sub, client.id);
     }
@@ -48,7 +48,7 @@ export class ChatGateway {
   handleDisconnect(client: Socket, reason?: string) {
     const transport = client.conn?.transport?.name ?? 'unknown';
     this.logger.log(`[SOCKET] Client disconnected: ${client.id} reason="${reason ?? 'unknown'}" transport=${transport}`);
-    const socketUser = (client as any).user;
+    const socketUser = client.data.user;
     if (socketUser?.sub) {
       this.trackUserOffline(socketUser.sub, client.id);
     }
@@ -147,7 +147,7 @@ export class ChatGateway {
   }
 
   async handleJoinConversation(conversationId: string, client: Socket) {
-    const socketUser = (client as any).user;
+    const socketUser = client.data.user;
     if (!socketUser?.sub) {
       this.logger.warn(`[SOCKET] BLOQUEADO: join_conversation sem user no socket`);
       return;
@@ -201,7 +201,7 @@ export class ChatGateway {
   }
 
   handleJoinUser(userId: string, client: Socket) {
-    const socketUser = (client as any).user;
+    const socketUser = client.data.user;
     // So permite entrar na propria sala
     if (socketUser?.sub !== userId) {
       this.logger.warn(`[SOCKET] BLOQUEADO: Client ${client.id} tentou entrar em user:${userId} (user real: ${socketUser?.sub})`);
