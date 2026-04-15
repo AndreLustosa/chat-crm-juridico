@@ -170,6 +170,42 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
     setSocket(s);
 
     return () => {
+      // Diagnostico: o cleanup pode ser disparado por (a) logout automatico,
+      // (b) navegacao para fora de /atendimento, ou (c) mudanca de token.
+      // Cada caso vira um `client namespace disconnect` no servidor, sem
+      // distincao. Aqui detectamos o caso (a) e enviamos um beacon HTTP
+      // para o backend logar a causa raiz nos logs da API antes do
+      // disconnect derrubar o socket.
+      try {
+        const tokenStillThere = !!localStorage.getItem('token');
+        const logoutReason = localStorage.getItem('auth_logout_reason');
+        if (!tokenStillThere && logoutReason && typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+          // Decodifica exp do token anterior (ja removido do localStorage,
+          // mas ainda no escopo via authToken da closure)
+          let exp: number | null = null;
+          try {
+            const b64 = (authToken || '').split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/');
+            if (b64) {
+              const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+              exp = JSON.parse(atob(padded))?.exp ?? null;
+            }
+          } catch {}
+          const body = new Blob(
+            [JSON.stringify({
+              reason: logoutReason,
+              userId: uid,
+              socketId: s.id,
+              tokenExp: exp,
+              now: Math.floor(Date.now() / 1000),
+              path: pathnameRef.current,
+            })],
+            { type: 'application/json' },
+          );
+          // sendBeacon sobrevive a unload de pagina (perfeito para esta janela)
+          navigator.sendBeacon(`${apiUrl}/diagnostics/socket-logout`, body);
+        }
+      } catch {}
       s.disconnect();
       setSocket(null);
       setConnected(false);
