@@ -4,11 +4,11 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { RouteGuard } from '@/components/RouteGuard';
 import {
-  User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
+  User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronRight,
   Plus, X, Calendar, FileText, Clock, Archive, ArchiveRestore, Send,
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, Bell, RefreshCcw, BookOpen,
   LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown, FolderPlus, Pencil, Trash2,
-  Sparkles, AlertCircle,
+  Sparkles, AlertCircle, SlidersHorizontal, Columns3, BookmarkPlus, Bookmark, Star,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { TRACKING_STAGES, findTrackingStage } from '@/lib/legalStages';
@@ -17,6 +17,28 @@ import { ClientPanel } from '@/components/ClientPanel';
 import { ChatPopup } from '@/components/ChatPopup';
 import { EventModal } from '@/components/EventModal';
 import TabHonorarios from '@/app/atendimento/workspace/[caseId]/components/TabHonorarios';
+import {
+  ProcessosFilterDrawer,
+  emptyFilters,
+  countActiveFilters,
+  type ProcessosFilters,
+} from './components/ProcessosFilterDrawer';
+import {
+  loadSavedViews,
+  persistSavedViews,
+  serializeFilters,
+  deserializeFilters,
+  loadColumns,
+  persistColumns,
+  loadSort,
+  persistSort,
+  DEFAULT_COLUMNS,
+  COLUMN_LABELS,
+  type SavedView,
+  type TableColumnsState,
+  type SortState,
+  type SortField,
+} from './components/processosStorage';
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -3100,67 +3122,168 @@ function CadastrarProcessoModal({
   );
 }
 
+// ─── FilterChip (chip de filtro ativo removível) ──────────────
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 border border-primary/25 text-primary">
+      {label}
+      <button
+        onClick={onRemove}
+        className="opacity-70 hover:opacity-100 hover:text-destructive"
+        aria-label={`Remover filtro ${label}`}
+      >
+        <X size={10} />
+      </button>
+    </span>
+  );
+}
+
 // ─── Tabela View ───────────────────────────────────────────────
 
-type SortField = 'lead' | 'area' | 'stage' | 'priority' | 'days' | 'updated';
-type SortDir = 'asc' | 'desc';
+// SortField e SortDir importados de ./components/processosStorage
 
-function TabelaView({
-  cases,
-  onSelect,
-}: {
+interface TabelaViewProps {
   cases: LegalCase[];
   onSelect: (c: LegalCase) => void;
-}) {
-  const [sortField, setSortField] = useState<SortField>('days');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  columns: TableColumnsState;
+  onToggleColumn: (key: keyof TableColumnsState) => void;
+  sort: SortState;
+  onSortChange: (field: SortField) => void;
+}
 
-  const toggleSort = (field: SortField) => {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortField(field); setSortDir('desc'); }
-  };
+function TabelaView({ cases, onSelect, columns, onToggleColumn, sort, onSortChange }: TabelaViewProps) {
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
 
   const PRIORITY_ORDER = { URGENTE: 0, NORMAL: 1, BAIXA: 2 };
 
+  const nextDeadline = (c: LegalCase): number => {
+    const now = Date.now();
+    const future = (c.calendar_events || [])
+      .map(e => new Date(e.start_at).getTime())
+      .filter(t => t >= now)
+      .sort((a, b) => a - b);
+    return future[0] ?? Number.MAX_SAFE_INTEGER;
+  };
+
   const sorted = [...cases].sort((a, b) => {
     let cmp = 0;
-    if (sortField === 'lead') cmp = (a.lead?.name || '').localeCompare(b.lead?.name || '');
-    else if (sortField === 'area') cmp = (a.legal_area || '').localeCompare(b.legal_area || '');
-    else if (sortField === 'stage') cmp = (a.tracking_stage || '').localeCompare(b.tracking_stage || '');
-    else if (sortField === 'priority') cmp = (PRIORITY_ORDER[a.priority as keyof typeof PRIORITY_ORDER] ?? 1) - (PRIORITY_ORDER[b.priority as keyof typeof PRIORITY_ORDER] ?? 1);
-    else if (sortField === 'days') cmp = daysInStage(b.stage_changed_at) - daysInStage(a.stage_changed_at);
-    else if (sortField === 'updated') cmp = new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-    return sortDir === 'asc' ? cmp : -cmp;
+    const f = sort.field;
+    if (f === 'lead') cmp = (a.lead?.name || '').localeCompare(b.lead?.name || '');
+    else if (f === 'area') cmp = (a.legal_area || '').localeCompare(b.legal_area || '');
+    else if (f === 'stage') cmp = (a.tracking_stage || '').localeCompare(b.tracking_stage || '');
+    else if (f === 'priority') cmp = (PRIORITY_ORDER[a.priority as keyof typeof PRIORITY_ORDER] ?? 1) - (PRIORITY_ORDER[b.priority as keyof typeof PRIORITY_ORDER] ?? 1);
+    else if (f === 'days') cmp = daysInStage(b.stage_changed_at) - daysInStage(a.stage_changed_at);
+    else if (f === 'updated') cmp = new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    else if (f === 'claim_value') cmp = (Number(a.claim_value) || 0) - (Number(b.claim_value) || 0);
+    else if (f === 'next_deadline') cmp = nextDeadline(a) - nextDeadline(b);
+    return sort.dir === 'asc' ? cmp : -cmp;
   });
 
-  const SortHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+  const SortableTh = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
     <th
       className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider cursor-pointer hover:text-foreground select-none whitespace-nowrap"
-      onClick={() => toggleSort(field)}
+      onClick={() => onSortChange(field)}
     >
       <span className="flex items-center gap-1">
         {children}
-        <ArrowUpDown size={9} className={sortField === field ? 'text-primary' : 'opacity-30'} />
+        <ArrowUpDown size={9} className={sort.field === field ? 'text-primary' : 'opacity-30'} />
       </span>
     </th>
   );
 
+  const StaticTh = ({ children }: { children: React.ReactNode }) => (
+    <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+      {children}
+    </th>
+  );
+
+  const visibleColsCount = Object.values(columns).filter(Boolean).length;
+
+  const fmtMoney = (v: any) => {
+    const n = Number(v);
+    if (!n || Number.isNaN(n)) return '—';
+    return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  const fmtNextDeadline = (c: LegalCase): React.ReactNode => {
+    const now = Date.now();
+    const future = (c.calendar_events || [])
+      .map(e => ({ t: new Date(e.start_at).getTime(), e }))
+      .filter(x => x.t >= now)
+      .sort((a, b) => a.t - b.t);
+    if (future.length === 0) return <span className="text-[11px] text-muted-foreground">—</span>;
+    const d = new Date(future[0].t);
+    const daysLeft = Math.ceil((future[0].t - now) / (24 * 60 * 60 * 1000));
+    const cls = daysLeft <= 3 ? 'text-red-400' : daysLeft <= 7 ? 'text-amber-400' : 'text-emerald-400';
+    return (
+      <span className={`text-[11px] font-semibold ${cls}`}>
+        {d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+        <span className="opacity-70 ml-1">({daysLeft}d)</span>
+      </span>
+    );
+  };
+
   return (
     <div className="flex-1 overflow-auto p-6">
+      {/* Toolbar: column picker */}
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[11px] text-muted-foreground">
+          {sorted.length} processo{sorted.length !== 1 ? 's' : ''}
+        </p>
+        <div className="relative">
+          <button
+            onClick={() => setShowColumnPicker(v => !v)}
+            className="text-[11px] font-semibold flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="Colunas visíveis"
+          >
+            <Columns3 size={13} /> Colunas
+          </button>
+          {showColumnPicker && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowColumnPicker(false)} />
+              <div className="absolute right-0 top-full mt-1 w-56 bg-card border border-border rounded-lg shadow-lg z-20 overflow-hidden">
+                <div className="px-3 py-2 border-b border-border text-[10px] font-bold text-muted-foreground uppercase">
+                  Colunas visíveis
+                </div>
+                <div className="max-h-80 overflow-y-auto py-1">
+                  {(Object.keys(COLUMN_LABELS) as Array<keyof TableColumnsState>).map(key => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 px-3 py-1.5 text-[12px] hover:bg-accent/50 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={columns[key]}
+                        onChange={() => onToggleColumn(key)}
+                        className="accent-primary"
+                      />
+                      <span className="text-foreground">{COLUMN_LABELS[key]}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="border-b border-border">
-            <SortHeader field="priority">Prior.</SortHeader>
-            <SortHeader field="lead">Cliente</SortHeader>
-            <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Nº Processo</th>
-            <SortHeader field="area">Área</SortHeader>
-            <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vara</th>
-            <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Advogado</th>
-            <SortHeader field="stage">Etapa</SortHeader>
-            <SortHeader field="days">Dias</SortHeader>
-            <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Tarefas</th>
-            <th className="px-3 py-2.5 text-left text-[10px] font-bold text-muted-foreground uppercase tracking-wider">DJEN</th>
-            <SortHeader field="updated">Atualizado</SortHeader>
+            {columns.priority && <SortableTh field="priority">Prior.</SortableTh>}
+            {columns.lead && <SortableTh field="lead">Cliente</SortableTh>}
+            {columns.case_number && <StaticTh>Nº Processo</StaticTh>}
+            {columns.area && <SortableTh field="area">Área</SortableTh>}
+            {columns.court && <StaticTh>Vara</StaticTh>}
+            {columns.lawyer && <StaticTh>Advogado</StaticTh>}
+            {columns.stage && <SortableTh field="stage">Etapa</SortableTh>}
+            {columns.days && <SortableTh field="days">Dias</SortableTh>}
+            {columns.tasks && <StaticTh>Tarefas</StaticTh>}
+            {columns.djen && <StaticTh>DJEN</StaticTh>}
+            {columns.updated && <SortableTh field="updated">Atualizado</SortableTh>}
+            {columns.claim_value && <SortableTh field="claim_value">Valor</SortableTh>}
+            {columns.next_deadline && <SortableTh field="next_deadline">Próx. prazo</SortableTh>}
           </tr>
         </thead>
         <tbody>
@@ -3175,68 +3298,98 @@ function TabelaView({
                 onClick={() => onSelect(c)}
                 className="border-b border-border/50 hover:bg-accent/30 cursor-pointer transition-colors group"
               >
-                <td className="px-3 py-2.5">
-                  <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${pCfg.badgeClass}`}>
-                    {c.priority}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <div className="font-semibold text-[13px] text-foreground truncate max-w-[150px]">
-                    {c.lead?.name || '—'}
-                  </div>
-                  {c.opposing_party && (
-                    <div className="text-[10px] text-muted-foreground truncate max-w-[150px]">vs. {c.opposing_party}</div>
-                  )}
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="font-mono text-[11px] text-muted-foreground">{formatCNJ(c.case_number) === 'Sem número' ? '—' : formatCNJ(c.case_number)}</span>
-                </td>
-                <td className="px-3 py-2.5">
-                  {c.legal_area ? (
-                    <span className="text-[11px] text-violet-400">{c.legal_area}</span>
-                  ) : '—'}
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="text-[11px] text-muted-foreground truncate max-w-[100px] block">{c.court || '—'}</span>
-                </td>
-                <td className="px-3 py-2.5">
-                  {c.lawyer?.name ? (
-                    <span className="text-[11px] text-emerald-400 font-semibold truncate max-w-[120px] block" title={c.lawyer.name}>
-                      {c.lawyer.name}
+                {columns.priority && (
+                  <td className="px-3 py-2.5">
+                    <span className={`inline-flex px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${pCfg.badgeClass}`}>
+                      {c.priority}
                     </span>
-                  ) : <span className="text-[11px] text-muted-foreground">—</span>}
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="text-[11px] font-semibold" style={{ color: stageInfo.color }}>
-                    {stageInfo.emoji} {stageInfo.label}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className={`text-[12px] font-semibold ${days > 30 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                    {days}d
-                  </span>
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="text-[12px] text-muted-foreground">{c._count?.tasks ?? 0}</span>
-                </td>
-                <td className="px-3 py-2.5">
-                  {djenCount > 0 ? (
-                    <span className="text-[12px] text-amber-400 font-semibold flex items-center gap-0.5">
-                      <Bell size={10} /> {djenCount}
+                  </td>
+                )}
+                {columns.lead && (
+                  <td className="px-3 py-2.5">
+                    <div className="font-semibold text-[13px] text-foreground truncate max-w-[150px]">
+                      {c.lead?.name || '—'}
+                    </div>
+                    {c.opposing_party && (
+                      <div className="text-[10px] text-muted-foreground truncate max-w-[150px]">vs. {c.opposing_party}</div>
+                    )}
+                  </td>
+                )}
+                {columns.case_number && (
+                  <td className="px-3 py-2.5">
+                    <span className="font-mono text-[11px] text-muted-foreground">{formatCNJ(c.case_number) === 'Sem número' ? '—' : formatCNJ(c.case_number)}</span>
+                  </td>
+                )}
+                {columns.area && (
+                  <td className="px-3 py-2.5">
+                    {c.legal_area ? (
+                      <span className="text-[11px] text-violet-400">{c.legal_area}</span>
+                    ) : '—'}
+                  </td>
+                )}
+                {columns.court && (
+                  <td className="px-3 py-2.5">
+                    <span className="text-[11px] text-muted-foreground truncate max-w-[100px] block">{c.court || '—'}</span>
+                  </td>
+                )}
+                {columns.lawyer && (
+                  <td className="px-3 py-2.5">
+                    {c.lawyer?.name ? (
+                      <span className="text-[11px] text-emerald-400 font-semibold truncate max-w-[120px] block" title={c.lawyer.name}>
+                        {c.lawyer.name}
+                      </span>
+                    ) : <span className="text-[11px] text-muted-foreground">—</span>}
+                  </td>
+                )}
+                {columns.stage && (
+                  <td className="px-3 py-2.5">
+                    <span className="text-[11px] font-semibold" style={{ color: stageInfo.color }}>
+                      {stageInfo.emoji} {stageInfo.label}
                     </span>
-                  ) : (
-                    <span className="text-[12px] text-muted-foreground">—</span>
-                  )}
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="text-[11px] text-muted-foreground">{timeAgo(c.updated_at)}</span>
-                </td>
+                  </td>
+                )}
+                {columns.days && (
+                  <td className="px-3 py-2.5">
+                    <span className={`text-[12px] font-semibold ${days > 30 ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                      {days}d
+                    </span>
+                  </td>
+                )}
+                {columns.tasks && (
+                  <td className="px-3 py-2.5">
+                    <span className="text-[12px] text-muted-foreground">{c._count?.tasks ?? 0}</span>
+                  </td>
+                )}
+                {columns.djen && (
+                  <td className="px-3 py-2.5">
+                    {djenCount > 0 ? (
+                      <span className="text-[12px] text-amber-400 font-semibold flex items-center gap-0.5">
+                        <Bell size={10} /> {djenCount}
+                      </span>
+                    ) : (
+                      <span className="text-[12px] text-muted-foreground">—</span>
+                    )}
+                  </td>
+                )}
+                {columns.updated && (
+                  <td className="px-3 py-2.5">
+                    <span className="text-[11px] text-muted-foreground">{timeAgo(c.updated_at)}</span>
+                  </td>
+                )}
+                {columns.claim_value && (
+                  <td className="px-3 py-2.5">
+                    <span className="text-[11px] text-foreground font-semibold">{fmtMoney(c.claim_value)}</span>
+                  </td>
+                )}
+                {columns.next_deadline && (
+                  <td className="px-3 py-2.5">{fmtNextDeadline(c)}</td>
+                )}
               </tr>
             );
           })}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={10} className="text-center py-12 text-muted-foreground text-sm">
+              <td colSpan={visibleColsCount} className="text-center py-12 text-muted-foreground text-sm">
                 Nenhum processo encontrado
               </td>
             </tr>
@@ -3538,9 +3691,31 @@ function ProcessosPageContent() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [areaFilter, setAreaFilter] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState('');
+
+  // ─── Filtros unificados ────────────────────────────────
+  const [filters, setFilters] = useState<ProcessosFilters>(() => emptyFilters());
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(null);
+  const [showSavedViewsMenu, setShowSavedViewsMenu] = useState(false);
+
+  // ─── Estado da tabela (colunas + ordenação persistidas) ───
+  const [tableColumns, setTableColumns] = useState<TableColumnsState>(DEFAULT_COLUMNS);
+  const [tableSort, setTableSort] = useState<SortState>({ field: 'days', dir: 'desc' });
+  const [tablePageSize, setTablePageSize] = useState<number>(50);
+  const [tablePage, setTablePage] = useState<number>(1);
+
+  // Hidratar estado a partir de localStorage após mount (evita SSR mismatch)
+  useEffect(() => {
+    setTableColumns(loadColumns());
+    setTableSort(loadSort());
+    setSavedViews(loadSavedViews());
+  }, []);
+
+  // Alias para busca textual (mantém compat com handlers existentes)
+  const searchQuery = filters.search;
+  const setSearchQuery = (v: string) => setFilters(f => ({ ...f, search: v }));
+
   const [view, setView] = useState<'active' | 'archived'>('active');
   const [displayView, setDisplayView] = useState<'kanban' | 'tabela'>('kanban');
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -3824,11 +3999,76 @@ function ProcessosPageContent() {
     }
   }, [oabCadastroQueue, openCadastroForOabItem, fetchCases]);
 
+  // ─── Helpers de views salvas e colunas ────────────────────
+  const handleSaveView = useCallback(() => {
+    const name = window.prompt('Nome para a view (ex: "Urgentes sem movimentação"):');
+    if (!name || !name.trim()) return;
+    const view: SavedView = {
+      id: `v_${Date.now()}`,
+      name: name.trim(),
+      filters: serializeFilters(filters),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...savedViews, view];
+    setSavedViews(updated);
+    persistSavedViews(updated);
+    setActiveSavedViewId(view.id);
+  }, [filters, savedViews]);
+
+  const handleApplySavedView = useCallback((view: SavedView) => {
+    setFilters(deserializeFilters(view.filters));
+    setActiveSavedViewId(view.id);
+    setShowSavedViewsMenu(false);
+  }, []);
+
+  const handleDeleteSavedView = useCallback((id: string) => {
+    const updated = savedViews.filter(v => v.id !== id);
+    setSavedViews(updated);
+    persistSavedViews(updated);
+    if (activeSavedViewId === id) setActiveSavedViewId(null);
+  }, [savedViews, activeSavedViewId]);
+
+  const handleClearFilters = useCallback(() => {
+    setFilters(emptyFilters());
+    setActiveSavedViewId(null);
+  }, []);
+
+  const handleToggleColumn = useCallback((key: keyof TableColumnsState) => {
+    setTableColumns(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      persistColumns(next);
+      return next;
+    });
+  }, []);
+
+  const handleSortChange = useCallback((field: SortField) => {
+    setTableSort(prev => {
+      const next: SortState =
+        prev.field === field
+          ? { field, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+          : { field, dir: 'desc' };
+      persistSort(next);
+      return next;
+    });
+  }, []);
+
   // Filters
   const allAreas = [...new Set(cases.map(c => c.legal_area).filter(Boolean))].sort() as string[];
+  // Advogados disponíveis para filtragem (distintos dos casos carregados)
+  const allLawyers = (() => {
+    const map = new Map<string, { id: string; name: string | null }>();
+    cases.forEach(c => {
+      if (c.lawyer?.id && !map.has(c.lawyer.id)) {
+        map.set(c.lawyer.id, { id: c.lawyer.id, name: c.lawyer.name });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  })();
+  const activeFiltersCount = countActiveFilters(filters);
 
   const filteredCases = cases.filter(c => {
-    const q = searchQuery.toLowerCase().trim();
+    // Busca textual (nome, telefone, CNJ, parte contrária)
+    const q = filters.search.toLowerCase().trim();
     if (q) {
       const name = (c.lead?.name || '').toLowerCase();
       const phone = (c.lead?.phone || '').toLowerCase();
@@ -3840,8 +4080,35 @@ function ProcessosPageContent() {
       const matchDigits = qDigits.length >= 5 && caseNumDigits.includes(qDigits);
       if (!name.includes(q) && !phone.includes(q) && !caseNum.includes(q) && !opp.includes(q) && !matchDigits) return false;
     }
-    if (areaFilter && c.legal_area !== areaFilter) return false;
-    if (priorityFilter && c.priority !== priorityFilter) return false;
+    // Áreas (multi)
+    if (filters.areas.size > 0 && !filters.areas.has(c.legal_area || '')) return false;
+    // Prioridades (multi)
+    if (filters.priorities.size > 0 && !filters.priorities.has(c.priority)) return false;
+    // Advogados (multi)
+    if (filters.lawyerIds.size > 0 && !filters.lawyerIds.has(c.lawyer_id)) return false;
+    // Etapa processual (multi)
+    if (filters.trackingStages.size > 0 && !filters.trackingStages.has(c.tracking_stage || 'DISTRIBUIDO')) return false;
+    // Vara (contém)
+    if (filters.court.trim()) {
+      const courtQ = filters.court.toLowerCase().trim();
+      if (!(c.court || '').toLowerCase().includes(courtQ)) return false;
+    }
+    // Próximo prazo/audiência em X dias
+    if (filters.nextDeadlineDays !== null) {
+      const now = Date.now();
+      const limit = now + filters.nextDeadlineDays * 24 * 60 * 60 * 1000;
+      const hasEventInWindow = (c.calendar_events || []).some(e => {
+        const t = new Date(e.start_at).getTime();
+        return t >= now && t <= limit;
+      });
+      if (!hasEventInWindow) return false;
+    }
+    // Sem movimentação há mais de X dias
+    if (filters.withoutMovementDays !== null) {
+      const lastUpdate = new Date(c.stage_changed_at || c.updated_at).getTime();
+      const threshold = Date.now() - filters.withoutMovementDays * 24 * 60 * 60 * 1000;
+      if (lastUpdate > threshold) return false;
+    }
     return true;
   });
 
@@ -3887,7 +4154,7 @@ function ProcessosPageContent() {
             </h1>
             <p className="text-[12px] text-muted-foreground mt-0.5">
               {filteredCases.length} processo{filteredCases.length !== 1 ? 's' : ''}{' '}
-              {searchQuery || areaFilter || priorityFilter ? 'filtrados' : 'em acompanhamento'}
+              {activeFiltersCount > 0 ? `filtrado${filteredCases.length !== 1 ? 's' : ''} (${activeFiltersCount} filtro${activeFiltersCount > 1 ? 's' : ''} ativo${activeFiltersCount > 1 ? 's' : ''})` : 'em acompanhamento'}
             </p>
             {currentUserIsAdmin && pendingClosure.length > 0 && (
               <div className="mt-1.5 flex items-center gap-3 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/5">
@@ -3925,6 +4192,76 @@ function ProcessosPageContent() {
               </div>
             )}
 
+            {/* Filtros avançados */}
+            {view === 'active' && (
+              <button
+                onClick={() => setFilterDrawerOpen(true)}
+                className={`text-[11px] font-semibold flex items-center gap-1.5 px-3 py-1.5 border rounded-lg transition-colors ${
+                  activeFiltersCount > 0
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+                }`}
+                title="Filtros avançados"
+              >
+                <SlidersHorizontal size={13} />
+                Filtros
+                {activeFiltersCount > 0 && (
+                  <span className="ml-0.5 px-1.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold">
+                    {activeFiltersCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Views salvas */}
+            {view === 'active' && savedViews.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowSavedViewsMenu(v => !v)}
+                  className="text-[11px] font-semibold flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  title="Views salvas"
+                >
+                  <Bookmark size={13} />
+                  Views
+                </button>
+                {showSavedViewsMenu && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowSavedViewsMenu(false)} />
+                    <div className="absolute right-0 top-full mt-1 w-64 bg-card border border-border rounded-lg shadow-lg z-20 overflow-hidden">
+                      <div className="px-3 py-2 border-b border-border text-[10px] font-bold text-muted-foreground uppercase">
+                        Views salvas
+                      </div>
+                      <div className="max-h-72 overflow-y-auto">
+                        {savedViews.map(v => (
+                          <div
+                            key={v.id}
+                            className={`flex items-center gap-2 px-3 py-2 text-[12px] hover:bg-accent/50 group ${
+                              activeSavedViewId === v.id ? 'bg-primary/5 border-l-2 border-primary' : ''
+                            }`}
+                          >
+                            <button
+                              onClick={() => handleApplySavedView(v)}
+                              className="flex-1 text-left font-semibold text-foreground truncate"
+                            >
+                              {activeSavedViewId === v.id && <Star size={10} className="inline mr-1 text-primary" />}
+                              {v.name}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSavedView(v.id)}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+                              title="Excluir view"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* View toggle (active/archived) */}
             {view === 'active' ? (
               <button
@@ -3949,36 +4286,6 @@ function ProcessosPageContent() {
             >
               <Bell size={13} /> DJEN
             </button>
-
-            {/* Priority filter */}
-            <div className="relative">
-              <select
-                value={priorityFilter}
-                onChange={e => setPriorityFilter(e.target.value)}
-                className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
-              >
-                <option value="">Prioridade</option>
-                <option value="URGENTE">🔴 Urgente</option>
-                <option value="NORMAL">🟡 Normal</option>
-                <option value="BAIXA">⬜ Baixa</option>
-              </select>
-              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            </div>
-
-            {/* Area filter */}
-            {allAreas.length > 0 && (
-              <div className="relative">
-                <select
-                  value={areaFilter}
-                  onChange={e => setAreaFilter(e.target.value)}
-                  className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
-                >
-                  <option value="">Todas as áreas</option>
-                  {allAreas.map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
-                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              </div>
-            )}
 
             {/* Search */}
             <div className="relative">
@@ -4038,6 +4345,95 @@ function ProcessosPageContent() {
             </button>
           </div>
         </header>
+
+        {/* ─── Chips de filtros ativos ───────────────────────── */}
+        {view === 'active' && activeFiltersCount > 0 && (
+          <div className="px-6 py-2 border-b border-border bg-accent/20 flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mr-1">
+              Filtros ativos:
+            </span>
+            {filters.search.trim() && (
+              <FilterChip
+                label={`Busca: "${filters.search.trim()}"`}
+                onRemove={() => setFilters(f => ({ ...f, search: '' }))}
+              />
+            )}
+            {Array.from(filters.priorities).map(p => (
+              <FilterChip
+                key={`pri-${p}`}
+                label={`Prioridade: ${p}`}
+                onRemove={() => setFilters(f => {
+                  const n = new Set(f.priorities);
+                  n.delete(p);
+                  return { ...f, priorities: n };
+                })}
+              />
+            ))}
+            {Array.from(filters.areas).map(a => (
+              <FilterChip
+                key={`area-${a}`}
+                label={`Área: ${a}`}
+                onRemove={() => setFilters(f => {
+                  const n = new Set(f.areas);
+                  n.delete(a);
+                  return { ...f, areas: n };
+                })}
+              />
+            ))}
+            {Array.from(filters.lawyerIds).map(id => {
+              const lw = allLawyers.find(l => l.id === id);
+              return (
+                <FilterChip
+                  key={`lw-${id}`}
+                  label={`Adv: ${lw?.name || id.slice(0, 6)}`}
+                  onRemove={() => setFilters(f => {
+                    const n = new Set(f.lawyerIds);
+                    n.delete(id);
+                    return { ...f, lawyerIds: n };
+                  })}
+                />
+              );
+            })}
+            {Array.from(filters.trackingStages).map(s => {
+              const stage = findTrackingStage(s);
+              return (
+                <FilterChip
+                  key={`st-${s}`}
+                  label={`Etapa: ${stage?.label || s}`}
+                  onRemove={() => setFilters(f => {
+                    const n = new Set(f.trackingStages);
+                    n.delete(s);
+                    return { ...f, trackingStages: n };
+                  })}
+                />
+              );
+            })}
+            {filters.court.trim() && (
+              <FilterChip
+                label={`Vara: ${filters.court.trim()}`}
+                onRemove={() => setFilters(f => ({ ...f, court: '' }))}
+              />
+            )}
+            {filters.nextDeadlineDays !== null && (
+              <FilterChip
+                label={`Prazo em ${filters.nextDeadlineDays} dias`}
+                onRemove={() => setFilters(f => ({ ...f, nextDeadlineDays: null }))}
+              />
+            )}
+            {filters.withoutMovementDays !== null && (
+              <FilterChip
+                label={`Sem movimento há +${filters.withoutMovementDays} dias`}
+                onRemove={() => setFilters(f => ({ ...f, withoutMovementDays: null }))}
+              />
+            )}
+            <button
+              onClick={handleClearFilters}
+              className="ml-1 text-[10px] font-semibold text-muted-foreground hover:text-destructive underline"
+            >
+              Limpar tudo
+            </button>
+          </div>
+        )}
 
         {/* ─── ESAJ Result Banner ─────────────────────────────── */}
         {esajResult && (
@@ -4168,7 +4564,14 @@ function ProcessosPageContent() {
           </div>
         ) : displayView === 'tabela' ? (
           /* ─── Tabela View ─── */
-          <TabelaView cases={filteredCases} onSelect={setSelectedCase} />
+          <TabelaView
+            cases={filteredCases}
+            onSelect={setSelectedCase}
+            columns={tableColumns}
+            onToggleColumn={handleToggleColumn}
+            sort={tableSort}
+            onSortChange={handleSortChange}
+          />
         ) : (
           /* ─── Kanban + DJEN Panel ─── */
           <div className="flex-1 flex overflow-hidden">
@@ -4384,6 +4787,18 @@ function ProcessosPageContent() {
           onStartCadastro={handleStartOabCadastro}
         />
       )}
+
+      {/* Drawer de Filtros Avançados */}
+      <ProcessosFilterDrawer
+        open={filterDrawerOpen}
+        onClose={() => setFilterDrawerOpen(false)}
+        filters={filters}
+        onChange={setFilters}
+        availableAreas={allAreas}
+        availableLawyers={allLawyers}
+        onClear={handleClearFilters}
+        onSaveView={handleSaveView}
+      />
     </div>
   );
 }
