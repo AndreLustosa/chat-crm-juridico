@@ -218,32 +218,54 @@ export class CourtScraperService {
       }
     }
 
-    // Verificar quais já estão cadastrados
-    const caseNumbers = Array.from(allCases.keys());
-    const existingCases = caseNumbers.length > 0
+    // Verificar quais já estão cadastrados.
+    // IMPORTANTE: o banco tem mistura de formatos (alguns processos foram
+    // salvos com mascara formatada "0707175-85.2026.8.02.0058", outros como
+    // digits-only "07071758520268020058"). A query antiga usava apenas
+    // `contains: digits.slice(0,13)`, que e um substring literal do Postgres
+    // e NAO casa com formatos mascarados (os 13 digitos nunca aparecem
+    // contiguos em "0707175-85.2026.8...").
+    //
+    // Fix: tentar casar tanto o formato digits-only quanto o formatado (e
+    // manter o contains como fallback para outros formatos esdruxulos).
+    // O filtro final em JS normaliza ambos os lados para digits-only, entao
+    // falsos positivos do contains sao descartados.
+    const caseNumbers = Array.from(allCases.keys()); // digits-only (20 digits)
+
+    const formatCnj = (d: string): string => {
+      if (d.length !== 20) return d;
+      return `${d.slice(0, 7)}-${d.slice(7, 9)}.${d.slice(9, 13)}.${d.slice(13, 14)}.${d.slice(14, 16)}.${d.slice(16, 20)}`;
+    };
+
+    const orConditions = caseNumbers.flatMap(digits => {
+      const formatted = formatCnj(digits);
+      const conditions: any[] = [
+        { case_number: digits },       // banco em digits-only
+        { case_number: formatted },    // banco com mascara formatada
+        { case_number: { contains: digits.slice(0, 13) } }, // fallback
+      ];
+      return conditions;
+    });
+
+    const existingCases = orConditions.length > 0
       ? await this.prisma.legalCase.findMany({
-          where: {
-            OR: caseNumbers.map(digits => ({
-              case_number: { contains: digits.slice(0, 13) },
-            })),
-          },
+          where: { OR: orConditions },
           select: { id: true, case_number: true },
         })
       : [];
 
-    const registeredSet = new Set(
-      existingCases.map(c => (c.case_number || '').replace(/\D/g, '')),
+    // Normaliza chaves dos existentes para comparacao robusta (digits-only)
+    const existingById = new Map<string, string>(
+      existingCases.map(c => [(c.case_number || '').replace(/\D/g, ''), c.id]),
     );
 
     const cases = Array.from(allCases.values()).map(c => {
       const digits = c.case_number.replace(/\D/g, '');
-      const matchedExisting = existingCases.find(
-        e => (e.case_number || '').replace(/\D/g, '').includes(digits.slice(0, 13)),
-      );
+      const existingId = existingById.get(digits);
       return {
         ...c,
-        already_registered: registeredSet.has(digits) || !!matchedExisting,
-        existing_case_id: matchedExisting?.id,
+        already_registered: !!existingId,
+        existing_case_id: existingId,
       };
     });
 
