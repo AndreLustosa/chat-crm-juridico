@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { EvolutionService } from './evolution.service';
 import { EvolutionController } from './evolution.controller';
+import { EvolutionAdminController } from './evolution-admin.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { LeadsModule } from '../leads/leads.module';
 import { InboxesModule } from '../inboxes/inboxes.module';
@@ -23,7 +24,7 @@ import { MediaModule } from '../media/media.module';
     BullModule.registerQueue({ name: 'media-jobs' }),
     BullModule.registerQueue({ name: 'ai-jobs' }),
   ],
-  controllers: [EvolutionController],
+  controllers: [EvolutionController, EvolutionAdminController],
   providers: [EvolutionService, HmacGuard],
   exports: [EvolutionService],
 })

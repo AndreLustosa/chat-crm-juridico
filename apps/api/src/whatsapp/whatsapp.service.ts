@@ -286,10 +286,13 @@ export class WhatsappService {
       url,
       enabled: true,
       webhook_by_events: false,
-      // Retry automático: tenta reenviar até 5 vezes com intervalo de 5s
-      // Garante entrega mesmo se o CRM estiver temporariamente indisponível
-      retryDelay: 5000,
-      maxRetries: 5,
+      // Retry automático: tenta reenviar até 10 vezes com intervalo de 15s
+      // (2,5 min de tolerância total). Garante entrega mesmo se o CRM estiver
+      // temporariamente indisponível durante reinicialização ou queda breve.
+      // Para quedas maiores, o `onApplicationBootstrap` do EvolutionService
+      // dispara um resync completo ao voltar do ar.
+      retryDelay: 15000,
+      maxRetries: 10,
       events: [
         'MESSAGES_UPSERT',
         'MESSAGES_UPDATE',

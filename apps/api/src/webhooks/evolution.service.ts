@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -73,7 +74,7 @@ function extractPhone(remoteJid: string, remoteJidAlt?: string): string {
 }
 
 @Injectable()
-export class EvolutionService {
+export class EvolutionService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EvolutionService.name);
 
   constructor(
@@ -1023,15 +1024,46 @@ export class EvolutionService {
     // Limitamos às 50 conversas mais recentes para não sobrecarregar.
     if (state === 'open' && instanceName) {
       this.logger.log(`[RESYNC] Instância ${instanceName} reconectou — agendando resync de mensagens`);
-      this.scheduleResyncAfterReconnect(instanceName).catch(e =>
+      this.scheduleResyncAfterReconnect(instanceName, { triggerReason: 'webhook' }).catch(e =>
         this.logger.warn(`[RESYNC] Erro ao agendar resync: ${e.message}`),
       );
     }
   }
 
-  private async scheduleResyncAfterReconnect(instanceName: string): Promise<void> {
-    // Aguarda para a instância estabilizar antes de buscar mensagens
-    const STABILIZE_DELAY = 10000; // 10s para garantir estabilidade
+  /**
+   * Dispara o resync de mensagens perdidas para uma instância.
+   *
+   * Fluxo em 2 fases:
+   *  - Fase 1: busca chats recentes via Evolution `findChats` e cria
+   *    leads/conversas para os que não existem no CRM (mensagens chegadas
+   *    com o servidor fora do ar → novas conversas).
+   *  - Fase 2: enfileira um job `sync_missed_messages` por conversa aberta
+   *    para reimportar o histórico via `findMessages` (dedup por
+   *    `external_message_id`).
+   *
+   * Triggers:
+   *  - `webhook`   → evento `connection.update` state=open (WhatsApp reconectou)
+   *  - `startup`   → subida do servidor (cobre quando o CRM caiu mas a Evolution ficou de pé)
+   *  - `cron`      → rede de segurança a cada 15 min
+   *  - `manual`    → endpoint administrativo `/whatsapp/instances/:name/resync`
+   */
+  async scheduleResyncAfterReconnect(
+    instanceName: string,
+    options: {
+      cutoffHours?: number;
+      stabilizeDelayMs?: number;
+      triggerReason?: 'webhook' | 'startup' | 'cron' | 'manual';
+    } = {},
+  ): Promise<{ newConvsCreated: number; conversationsResynced: number }> {
+    const cutoffHours = options.cutoffHours ?? 72;
+    const STABILIZE_DELAY = options.stabilizeDelayMs ?? 10000;
+    const reason = options.triggerReason ?? 'webhook';
+
+    this.logger.log(
+      `[RESYNC] Iniciando resync para ${instanceName} (trigger=${reason}, cutoff=${cutoffHours}h, stabilize=${STABILIZE_DELAY}ms)`,
+    );
+
+    let newConvsCreated = 0;
 
     // ─── FASE 1: Descobrir chats novos via Evolution API ──────────────
     // Busca chats recentes do WhatsApp e cria leads/conversas para os que
@@ -1042,9 +1074,8 @@ export class EvolutionService {
       const inboxId = inbox?.inbox_id || null;
       const tenantId = inbox?.tenant_id || null;
 
-      // Filtrar apenas chats com mensagens recentes (últimas 72h)
-      const cutoff72h = Date.now() - 72 * 3600 * 1000;
-      let newConvsCreated = 0;
+      // Filtrar apenas chats com mensagens recentes dentro da janela configurada
+      const cutoffTs = Date.now() - cutoffHours * 3600 * 1000;
 
       for (const chat of recentChats) {
         if (!chat) continue;
@@ -1054,11 +1085,11 @@ export class EvolutionService {
         const phone = extractPhone(chat.remoteJid as string, chat.remoteJidAlt as string);
         if (!phone || phone.length > 13 || phone.length < 10) continue;
 
-        // Verificar se tem mensagem recente (nas últimas 72h)
+        // Verificar se tem mensagem recente (dentro da janela de cutoff)
         const lastMsgTs = chat.lastMessage?.messageTimestamp
           ? Number(chat.lastMessage.messageTimestamp) * 1000
           : 0;
-        if (lastMsgTs > 0 && lastMsgTs < cutoff72h) continue; // Chat antigo, ignorar
+        if (lastMsgTs > 0 && lastMsgTs < cutoffTs) continue; // Chat antigo, ignorar
 
         // Verificar se já existe conversa ABERTA para este lead
         const existingLead = await this.leadsService.findByPhone(phone);
@@ -1132,15 +1163,115 @@ export class EvolutionService {
       take: 100, // Aumentado de 50 para 100
     });
 
-    this.logger.log(`[RESYNC] ${conversations.length} conversas ativas para resync na instância ${instanceName}`);
+    this.logger.log(
+      `[RESYNC] ${conversations.length} conversas ativas para resync na instância ${instanceName} (trigger=${reason})`,
+    );
 
     for (const conv of conversations) {
       if (!conv.lead?.phone) continue;
       await this.mediaQueue.add(
         'sync_missed_messages',
         { conversation_id: conv.id, instance_name: instanceName, phone: conv.lead.phone },
-        { delay: STABILIZE_DELAY, removeOnComplete: true, removeOnFail: false },
+        {
+          delay: STABILIZE_DELAY,
+          removeOnComplete: true,
+          removeOnFail: false,
+          // Retry automático: se o job falhar (timeout, instância momentaneamente
+          // fora, etc), tenta de novo 3x com backoff exponencial. Sem isso, um
+          // soluço na rede deixava a conversa sem sincronizar até o próximo cron.
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+        },
       );
+    }
+
+    return { newConvsCreated, conversationsResynced: conversations.length };
+  }
+
+  // ─── onApplicationBootstrap (fix principal) ─────────────────────
+  // Executado uma vez quando o servidor sobe. Dispara o resync para cada
+  // instância cadastrada, cobrindo o cenário em que o CRM caiu enquanto a
+  // Evolution API continuou rodando: nesse caso o webhook `connection.update`
+  // NUNCA é disparado (do ponto de vista da Evolution, nada mudou), então
+  // o único jeito de recuperar as mensagens é o próprio CRM disparar o sync
+  // ao voltar do ar.
+
+  async onApplicationBootstrap(): Promise<void> {
+    // Delay de 20s para garantir que Redis/Prisma/BullMQ estejam 100% prontos
+    // e dar tempo da Evolution API reentregar webhooks que estavam em retry.
+    const BOOT_DELAY = 20000;
+
+    this.logger.log(`[BOOT] Resync de startup agendado para daqui a ${BOOT_DELAY / 1000}s`);
+
+    setTimeout(async () => {
+      try {
+        const instances = await this.prisma.instance.findMany({
+          where: { type: 'whatsapp' },
+          select: { name: true },
+        });
+
+        if (!instances.length) {
+          this.logger.log('[BOOT] Nenhuma instância de WhatsApp cadastrada — skip');
+          return;
+        }
+
+        this.logger.log(
+          `[BOOT] Disparando resync de startup para ${instances.length} instância(s): ${instances.map(i => i.name).join(', ')}`,
+        );
+
+        for (const inst of instances) {
+          try {
+            const result = await this.scheduleResyncAfterReconnect(inst.name, {
+              cutoffHours: 24, // recupera mensagens das últimas 24h
+              stabilizeDelayMs: 5000, // já esperamos 20s de boot, 5s extras por job bastam
+              triggerReason: 'startup',
+            });
+            this.logger.log(
+              `[BOOT] ${inst.name}: ${result.newConvsCreated} conversa(s) nova(s), ` +
+                `${result.conversationsResynced} conversa(s) enfileirada(s) para resync`,
+            );
+          } catch (e: any) {
+            this.logger.warn(`[BOOT] Resync falhou para ${inst.name}: ${e.message}`);
+          }
+        }
+      } catch (e: any) {
+        this.logger.error(`[BOOT] Erro no hook de startup: ${e.message}`);
+      }
+    }, BOOT_DELAY);
+  }
+
+  // ─── Cron de rede de segurança ──────────────────────────────────
+  // A cada 15 minutos faz um resync leve (cutoff 2h) de todas as instâncias.
+  // Protege contra webhooks que falharam silenciosamente: timeout de rede,
+  // instabilidade da Evolution API, reinicialização do Redis, etc.
+  // É idempotente — a UNIQUE em `external_message_id` garante que mensagens
+  // já importadas são descartadas via `findUnique` antes de qualquer insert.
+
+  @Cron('*/15 * * * *', { name: 'evolution-resync-safety-net' })
+  async resyncPeriodicSafetyNet(): Promise<void> {
+    try {
+      const instances = await this.prisma.instance.findMany({
+        where: { type: 'whatsapp' },
+        select: { name: true },
+      });
+
+      if (!instances.length) return;
+
+      this.logger.log(`[CRON] Resync de segurança para ${instances.length} instância(s)`);
+
+      for (const inst of instances) {
+        try {
+          await this.scheduleResyncAfterReconnect(inst.name, {
+            cutoffHours: 2, // janela curta — última fatia
+            stabilizeDelayMs: 0,
+            triggerReason: 'cron',
+          });
+        } catch (e: any) {
+          this.logger.warn(`[CRON] Resync falhou para ${inst.name}: ${e.message}`);
+        }
+      }
+    } catch (e: any) {
+      this.logger.error(`[CRON] Erro no resync periódico: ${e.message}`);
     }
   }
 
