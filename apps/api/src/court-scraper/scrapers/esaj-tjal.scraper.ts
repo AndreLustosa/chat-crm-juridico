@@ -332,39 +332,23 @@ export class EsajTjalScraper {
   // ─── Parser de Detalhes ────────────────────────────────────
 
   private parseCaseDetail($: cheerio.CheerioAPI, fallbackDigits: string): CourtCaseData | null {
-    // Helper: buscar valor por label na tabela .secaoFormBody
-    const getFieldValue = (label: string): string => {
-      let value = '';
-      $('td.label, th.label, span.label').each((_, el) => {
-        const labelText = $(el).text().trim().replace(/:$/, '');
-        if (labelText.toLowerCase() === label.toLowerCase()) {
-          const valueTd = $(el).next('td, span');
-          value = valueTd.text().trim();
-        }
-      });
+    // Helper: lê o texto de um elemento pelo ID (padrão SAJ/CPOPG).
+    // O SAJ (plataforma usada por TJAL, TJSP, TJAC, TJBA, TJMS, TJMT, TJMG,
+    // TJPB, TJPE, TJPR, TJRS, TJSC etc.) expõe cada campo com um ID próprio
+    // e rotula com <span class="unj-label">. Buscar por rótulo (como o
+    // parser antigo fazia via "td.label") não funciona.
+    const getById = (id: string): string =>
+      $(`#${id}`).first().text().replace(/\s+/g, ' ').trim();
 
-      // Fallback: buscar no formato div com labels
-      if (!value) {
-        $('div, tr').each((_, el) => {
-          const text = $(el).text().trim();
-          const regex = new RegExp(`${label}\\s*:?\\s*(.+)`, 'i');
-          const match = text.match(regex);
-          if (match && !value) {
-            value = match[1].trim().split('\n')[0].trim();
-          }
-        });
-      }
-
-      return value;
-    };
-
-    // Extrair número do processo
-    let caseNumberRaw = getFieldValue('Processo') || getFieldValue('Número');
+    // Extrair número do processo — ID padrão do SAJ
+    let caseNumberRaw = getById('numeroProcesso');
     if (!caseNumberRaw) {
-      // Tentar pelo título da página
-      const titleText = $('h2, .titulo, #numeroProcesso').first().text().trim();
-      const digitsMatch = titleText.match(/(\d[\d.\-\/]+\d)/);
-      if (digitsMatch) caseNumberRaw = digitsMatch[1];
+      // Fallback 1: span.unj-larger-1 no cabeçalho da entidade
+      caseNumberRaw = $('.unj-entity-header .unj-larger-1').first().text().trim();
+    }
+    if (!caseNumberRaw) {
+      // Fallback 2: qualquer elemento com atributo contendo numeroProcesso
+      caseNumberRaw = $('[id*="numeroProcesso"]').first().text().trim();
     }
 
     const digits = (caseNumberRaw || fallbackDigits).replace(/\D/g, '');
@@ -375,19 +359,22 @@ export class EsajTjalScraper {
       return null;
     }
 
-    // Dados básicos
-    const actionType = getFieldValue('Classe');
-    const areaText = getFieldValue('Área') || getFieldValue('Area');
-    const subject = getFieldValue('Assunto');
-    const court = getFieldValue('Vara') || getFieldValue('Foro');
-    const judge = getFieldValue('Juiz') || getFieldValue('Juíz');
-    const statusText = getFieldValue('Situação') || getFieldValue('Situacao');
-    const distributionDate = getFieldValue('Distribuição') || getFieldValue('Distribuicao');
+    // Dados básicos — IDs padrão do SAJ
+    const actionType = getById('classeProcesso');
+    const areaText   = getById('areaProcesso'); // pode não existir — ok
+    const subject    = getById('assuntoProcesso');
+    const foro       = getById('foroProcesso');
+    const vara       = getById('varaProcesso');
+    const court      = [foro, vara].filter(Boolean).join(' - ') || vara || foro;
+    const judge      = getById('juizProcesso');
+    const statusText = getById('situacaoProcesso');
+    const distributionDate = getById('dataHoraDistribuicaoProcesso');
 
     // Valor da causa
     let claimValue: number | null = null;
-    const valorText = getFieldValue('Valor da ação') || getFieldValue('Valor da Ação');
+    const valorText = getById('valorAcaoProcesso');
     if (valorText) {
+      // Remove "R$", espaços e separadores de milhar, troca vírgula decimal por ponto
       const cleaned = valorText.replace(/[R$\s.]/g, '').replace(',', '.');
       const parsed = parseFloat(cleaned);
       if (!isNaN(parsed)) claimValue = parsed;
@@ -462,7 +449,27 @@ export class EsajTjalScraper {
       tribunal: 'TJAL',
     };
 
-    this.logger.log(`[PARSE] Processo ${caseNumber}: ${actionType} | ${court} | ${parties.length} partes | ${movements.length} movs`);
+    // Diagnóstico: se algum campo crítico vier vazio, logar os IDs faltantes.
+    // Facilita detectar divergências pontuais do TJAL sem precisar dump de HTML.
+    const missing: string[] = [];
+    if (!actionType)  missing.push('classeProcesso');
+    if (!subject)     missing.push('assuntoProcesso');
+    if (!court)       missing.push('foroProcesso/varaProcesso');
+    if (!judge)       missing.push('juizProcesso');
+    if (claimValue == null) missing.push('valorAcaoProcesso');
+    if (!filedAt)     missing.push('dataHoraDistribuicaoProcesso');
+    if (parties.length === 0)   missing.push('tableTodasPartes');
+    if (movements.length === 0) missing.push('tabelaTodasMovimentacoes');
+
+    if (missing.length > 0) {
+      this.logger.warn(
+        `[PARSE] Processo ${caseNumber}: campos vazios = [${missing.join(', ')}]`,
+      );
+    }
+
+    this.logger.log(
+      `[PARSE] Processo ${caseNumber}: ${actionType || '(sem classe)'} | ${court || '(sem vara)'} | ${parties.length} partes | ${movements.length} movs`,
+    );
     return result;
   }
 }
