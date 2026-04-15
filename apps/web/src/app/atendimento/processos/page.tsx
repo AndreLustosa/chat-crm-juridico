@@ -23,6 +23,7 @@ import {
   countActiveFilters,
   type ProcessosFilters,
 } from './components/ProcessosFilterDrawer';
+import { AgendaView } from './components/AgendaView';
 import {
   loadSavedViews,
   persistSavedViews,
@@ -3717,7 +3718,7 @@ function ProcessosPageContent() {
   const setSearchQuery = (v: string) => setFilters(f => ({ ...f, search: v }));
 
   const [view, setView] = useState<'active' | 'archived'>('active');
-  const [displayView, setDisplayView] = useState<'kanban' | 'tabela'>('kanban');
+  const [displayView, setDisplayView] = useState<'kanban' | 'tabela' | 'agenda'>('kanban');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState<LegalCase | null>(null);
@@ -4168,7 +4169,7 @@ function ProcessosPageContent() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* View toggle (kanban/tabela) — só para processos ativos */}
+            {/* View toggle (kanban/tabela/agenda) — só para processos ativos */}
             {view === 'active' && (
               <div className="flex rounded-lg border border-border overflow-hidden">
                 <button
@@ -4188,6 +4189,15 @@ function ProcessosPageContent() {
                   title="Tabela"
                 >
                   <LayoutList size={13} />
+                </button>
+                <button
+                  onClick={() => setDisplayView('agenda')}
+                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-colors border-l border-border ${
+                    displayView === 'agenda' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  title="Agenda (prazos e audiências)"
+                >
+                  <Calendar size={13} />
                 </button>
               </div>
             )}
@@ -4571,6 +4581,15 @@ function ProcessosPageContent() {
             onToggleColumn={handleToggleColumn}
             sort={tableSort}
             onSortChange={handleSortChange}
+          />
+        ) : displayView === 'agenda' ? (
+          /* ─── Agenda View (cockpit de prazos) ─── */
+          <AgendaView
+            cases={filteredCases}
+            onSelectCase={id => {
+              const c = filteredCases.find(x => x.id === id);
+              if (c) setSelectedCase(c);
+            }}
           />
         ) : (
           /* ─── Kanban + DJEN Panel ─── */
