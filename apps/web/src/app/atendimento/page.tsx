@@ -275,16 +275,7 @@ export default function Dashboard() {
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
 
-  // Unlock AudioContext on first user gesture so notification sounds play from inbox view
-  useEffect(() => {
-    const unlock = () => unlockAudioContext();
-    document.addEventListener('click', unlock, { once: true });
-    document.addEventListener('keydown', unlock, { once: true });
-    return () => {
-      document.removeEventListener('click', unlock);
-      document.removeEventListener('keydown', unlock);
-    };
-  }, []);
+  // unlockAudioContext agora é feito pelo SocketProvider (sem duplicação)
 
   // Detect mobile (<768px) for responsive layout
   useEffect(() => {
