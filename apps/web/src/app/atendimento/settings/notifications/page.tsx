@@ -16,6 +16,7 @@ import {
 } from '@/lib/desktopNotifications';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import api from '@/lib/api';
+import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush } from '@/lib/pushSubscription';
 
 // ─── Tipos de evento com labels e ícones ──────────────────────────
 const EVENT_TYPES = [
@@ -48,6 +49,9 @@ export default function NotificationsSettingsPage() {
   const [mutedUntil, setMutedUntil] = useState<string | null>(null);
   const [desktopEnabled, setDesktopEnabled] = useState(false);
   const [permissionState, setPermissionState] = useState<'default' | 'granted' | 'denied'>('default');
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
 
   // ─── Fetch settings do servidor ──────────────────────────────
@@ -68,6 +72,12 @@ export default function NotificationsSettingsPage() {
     if (isDesktopNotifSupported()) {
       setPermissionState(getDesktopNotifPermission());
       setDesktopEnabled(isDesktopNotifEnabled());
+    }
+
+    // Web Push
+    setPushSupported(isPushSupported());
+    if (isPushSupported()) {
+      isPushSubscribed().then(setPushEnabled);
     }
   }, []);
 
@@ -308,6 +318,45 @@ export default function NotificationsSettingsPage() {
         )}
         {permissionState === 'default' && (
           <p className="text-[12px] text-muted-foreground mt-2">Clique no toggle para solicitar permissão ao navegador.</p>
+        )}
+
+        {/* Web Push toggle */}
+        {pushSupported && (
+          <>
+            <div className="h-px bg-border my-4" />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[14px] font-semibold">Notificações Push (aba fechada)</p>
+                <p className="text-[12px] text-muted-foreground">
+                  Receba alertas mesmo quando o navegador estiver fechado ou minimizado
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setPushLoading(true);
+                  if (pushEnabled) {
+                    const ok = await unsubscribeFromPush();
+                    if (ok) setPushEnabled(false);
+                  } else {
+                    const ok = await subscribeToPush();
+                    if (ok) setPushEnabled(true);
+                  }
+                  setPushLoading(false);
+                }}
+                disabled={pushLoading}
+                className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
+                  pushEnabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                } ${pushLoading ? 'opacity-50' : ''}`}
+              >
+                <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                  pushEnabled ? 'translate-x-5' : ''
+                }`} />
+              </button>
+            </div>
+            {pushEnabled && (
+              <p className="text-[12px] text-emerald-400 mt-1">✓ Push ativo neste dispositivo</p>
+            )}
+          </>
         )}
       </div>
 

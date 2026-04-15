@@ -16,6 +16,7 @@ import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { SettingsModule } from './settings/settings.module';
 import { NotificationSettingsModule } from './notification-settings/notification-settings.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PushModule } from './push/push.module';
 import { InboxesModule } from './inboxes/inboxes.module';
 import { SectorsModule } from './sectors/sectors.module';
 import { MediaModule } from './media/media.module';
@@ -114,6 +115,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     NotaFiscalModule,
     NotificationSettingsModule,
     NotificationsModule,
+    PushModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

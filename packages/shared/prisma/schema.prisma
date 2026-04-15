@@ -85,6 +85,7 @@ model User {
   notification_setting     NotificationSetting?
   conversation_mutes       ConversationMute[]
   notifications            Notification[]
+  push_subscriptions       PushSubscription[]
 }
 
 model Lead {
@@ -1518,4 +1519,19 @@ model Notification {
 
   @@index([user_id, read_at])
   @@index([user_id, created_at])
+}
+
+/// Subscriptions de Web Push — permite notificações com a aba do navegador fechada.
+model PushSubscription {
+  id         String   @id @default(uuid())
+  user_id    String
+  endpoint   String   @unique
+  keys_p256dh String
+  keys_auth   String
+  user_agent  String?
+  created_at  DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }

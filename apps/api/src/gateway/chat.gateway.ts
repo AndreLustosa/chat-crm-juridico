@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InboxesService } from '../inboxes/inboxes.service';
 import { NotificationSettingsService, type NotifEventType } from '../notification-settings/notification-settings.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PushService } from '../push/push.service';
 
 @Injectable()
 export class ChatGateway {
@@ -26,6 +27,7 @@ export class ChatGateway {
     private inboxesService: InboxesService,
     private notifSettings: NotificationSettingsService,
     private notificationsService: NotificationsService,
+    private pushService: PushService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -318,6 +320,17 @@ export class ChatGateway {
         body: 'Nova mensagem recebida',
         data: { conversationId: data.conversationId },
       }).catch(() => {});
+
+      // Web Push (fire-and-forget) — notifica mesmo com aba fechada
+      if (!isMuted) {
+        this.pushService.sendToUser(assignedUserId, {
+          title: data.contactName || 'Nova mensagem',
+          body: 'Nova mensagem recebida',
+          tag: `msg-${data.conversationId}`,
+          url: `/atendimento`,
+          data: { conversationId: data.conversationId },
+        }).catch(() => {});
+      }
 
       // Para clientes: notifica também o advogado responsável (se diferente do operador)
       if (isClient && assignedLawyerId && assignedLawyerId !== assignedUserId) {
