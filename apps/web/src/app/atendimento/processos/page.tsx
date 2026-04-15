@@ -204,9 +204,9 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string; borderColo
   },
   NORMAL: {
     label: 'Normal',
-    color: '#f59e0b',
-    borderColor: 'border-l-amber-500',
-    badgeClass: 'bg-amber-500/12 text-amber-400 border-amber-500/20',
+    color: '#0ea5e9',
+    borderColor: 'border-l-sky-500',
+    badgeClass: 'bg-sky-500/12 text-sky-400 border-sky-500/20',
   },
   BAIXA: {
     label: 'Baixa',
@@ -4350,7 +4350,7 @@ function ProcessosPageContent() {
             {/* DJEN link → página dedicada */}
             <button
               onClick={() => router.push('/atendimento/djen')}
-              className="text-[11px] font-semibold text-amber-500 hover:text-amber-400 flex items-center gap-1.5 px-3 py-1.5 border border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors"
+              className="text-[11px] font-semibold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 px-3 py-1.5 border border-sky-500/30 rounded-lg hover:bg-sky-500/5 transition-colors"
             >
               <Bell size={13} /> DJEN
             </button>

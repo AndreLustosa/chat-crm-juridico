@@ -369,7 +369,7 @@ export default function OfficeSettingsPage() {
                               updated[idx] = { ...slot, lunch_start: e.target.value };
                               setSchedule(updated);
                             }}
-                            className="px-2 py-1.5 text-sm bg-amber-500/10 border border-amber-500/30 rounded-lg text-foreground"
+                            className="px-2 py-1.5 text-sm bg-sky-500/10 border border-sky-500/30 rounded-lg text-foreground"
                           />
                           <span className="text-muted-foreground text-xs">até</span>
                           <input
@@ -380,7 +380,7 @@ export default function OfficeSettingsPage() {
                               updated[idx] = { ...slot, lunch_end: e.target.value };
                               setSchedule(updated);
                             }}
-                            className="px-2 py-1.5 text-sm bg-amber-500/10 border border-amber-500/30 rounded-lg text-foreground"
+                            className="px-2 py-1.5 text-sm bg-sky-500/10 border border-sky-500/30 rounded-lg text-foreground"
                           />
                         </>
                       )}

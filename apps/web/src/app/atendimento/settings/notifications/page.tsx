@@ -190,7 +190,7 @@ export default function NotificationsSettingsPage() {
         {isDND ? (
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[14px] font-semibold text-amber-400">🔕 Modo silencioso ativo</p>
+              <p className="text-[14px] font-semibold text-sky-400">🔕 Modo silencioso ativo</p>
               <p className="text-[12px] text-muted-foreground">
                 Sons e notificações desktop pausados por {dndRemaining > 60 ? `${Math.floor(dndRemaining / 60)}h ${dndRemaining % 60}min` : `${dndRemaining} min`}. Badges continuam atualizando.
               </p>

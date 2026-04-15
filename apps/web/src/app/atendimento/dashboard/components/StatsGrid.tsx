@@ -166,8 +166,8 @@ export function StatsGrid({ data, aggressive, funnel, responseTime, velocity }: 
         icon={Users}
         label="Leads no Funil"
         value={totalLeads}
-        color="text-amber-400 bg-amber-500/10"
-        trendColor="#fbbf24"
+        color="text-sky-400 bg-sky-500/10"
+        trendColor="#38bdf8"
         large
       />
       <AggressiveCard

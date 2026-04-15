@@ -149,7 +149,7 @@ const TASK_STATUSES = [
 
 const PRIORITIES = [
   { id: 'URGENTE', label: 'Urgente', color: '#ef4444', bg: 'bg-red-500/12',  text: 'text-red-400',  border: 'border-red-500/20'  },
-  { id: 'NORMAL',  label: 'Normal',  color: '#f59e0b', bg: 'bg-amber-500/12', text: 'text-amber-400', border: 'border-amber-500/20' },
+  { id: 'NORMAL',  label: 'Normal',  color: '#0ea5e9', bg: 'bg-sky-500/12', text: 'text-sky-400', border: 'border-sky-500/20' },
   { id: 'BAIXA',   label: 'Baixa',   color: '#6b7280', bg: 'bg-gray-500/12', text: 'text-gray-400', border: 'border-gray-500/20' },
 ];
 
@@ -1338,9 +1338,9 @@ function CaseDetailPanel({
 
                   {/* Aviso Audiência → Agenda automática */}
                   {newEventType === 'AUDIENCIA' && newEventDate && (
-                    <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/8 border border-amber-500/20 rounded-lg">
-                      <Calendar size={12} className="text-amber-400 shrink-0" />
-                      <p className="text-[11px] text-amber-400">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-sky-500/8 border border-sky-500/20 rounded-lg">
+                      <Calendar size={12} className="text-sky-400 shrink-0" />
+                      <p className="text-[11px] text-sky-400">
                         Será criado automaticamente na <strong>Agenda</strong> com lembrete 24h antes.
                       </p>
                     </div>

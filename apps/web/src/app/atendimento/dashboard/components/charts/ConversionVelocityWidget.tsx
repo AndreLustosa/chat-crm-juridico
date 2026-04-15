@@ -14,7 +14,7 @@ export function ConversionVelocityWidget({ data, loading }: Props) {
   return (
     <WidgetCard
       title="Velocidade de Conversao"
-      icon={<Zap size={15} className="text-amber-500" />}
+      icon={<Zap size={15} className="text-sky-400" />}
       loading={loading}
     >
       {!data ? (

@@ -264,14 +264,14 @@ export default function TabResumo({ data, onRefresh }: { data: WorkspaceData; on
           </div>
         )}
         <div className="bg-card border border-border rounded-2xl overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-amber-500/5">
+          <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-sky-500/5">
             <h2 className="text-[13px] font-bold text-foreground flex items-center gap-2">
-              <Sparkles size={14} className="text-amber-400" /> Briefing IA
+              <Sparkles size={14} className="text-sky-400" /> Briefing IA
             </h2>
             <button
               onClick={handleGenerateBriefing}
               disabled={generatingBriefing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 text-[10px] font-bold transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 text-[10px] font-bold transition-colors disabled:opacity-50"
             >
               {generatingBriefing ? <><Loader2 size={11} className="animate-spin" /> Gerando...</>
                 : briefing ? <><RefreshCw size={11} /> Regenerar</>

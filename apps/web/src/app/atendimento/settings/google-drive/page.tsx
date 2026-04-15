@@ -440,14 +440,14 @@ export default function GoogleDriveSettingsPage() {
       {/* Papel Timbrado (Letterhead Template)                   */}
       {/* ═══════════════════════════════════════════════════════ */}
       {config?.oauthConnected && (
-        <div className="bg-card border-2 border-amber-500/30 rounded-xl p-5 space-y-4">
+        <div className="bg-card border-2 border-sky-500/30 rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-amber-500/10 rounded-lg">
-              <Stamp className="w-4 h-4 text-amber-500" />
+            <div className="p-1.5 bg-sky-500/10 rounded-lg">
+              <Stamp className="w-4 h-4 text-sky-400" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">Papel Timbrado</h3>
-              <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+              <p className="text-[11px] text-sky-600 dark:text-sky-400 font-medium">
                 Todas as petições serão criadas com seu cabeçalho/rodapé
               </p>
             </div>
@@ -508,13 +508,13 @@ export default function GoogleDriveSettingsPage() {
                   onChange={(e) => setLetterheadSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearchLetterhead()}
                   placeholder="Ex: papel timbrado, letterhead, cabeçalho..."
-                  className="w-full text-xs bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-muted-foreground/50"
+                  className="w-full text-xs bg-background border border-border rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-sky-500/30 placeholder:text-muted-foreground/50"
                 />
               </div>
               <button
                 onClick={handleSearchLetterhead}
                 disabled={searchingFiles || !letterheadSearch.trim()}
-                className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors disabled:opacity-50"
               >
                 {searchingFiles ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
                 Buscar
@@ -547,7 +547,7 @@ export default function GoogleDriveSettingsPage() {
                     <button
                       onClick={() => handleSetLetterhead(file.id)}
                       disabled={settingLetterhead === file.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 shrink-0"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors disabled:opacity-50 shrink-0"
                     >
                       {settingLetterhead === file.id ? (
                         <Loader2 className="w-3 h-3 animate-spin" />

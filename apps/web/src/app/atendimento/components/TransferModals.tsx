@@ -206,7 +206,7 @@ export function TransferModals({
             {/* Header */}
             <div className={`px-5 pt-5 pb-3 border-b border-border/60 ${
               reasonPopupContext === 'lawyer' ? 'bg-violet-500/5' :
-              reasonPopupContext === 'return' ? 'bg-amber-500/5' :
+              reasonPopupContext === 'return' ? 'bg-sky-500/5' :
               'bg-sky-500/5'
             }`}>
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-0.5">
@@ -221,7 +221,7 @@ export function TransferModals({
 
             {/* Caixa unificada: textarea + gravador de audio */}
             <div className={`m-4 rounded-xl border bg-muted/40 overflow-hidden transition-colors ${
-              reasonPopupContext === 'return' ? 'border-amber-500/30 focus-within:border-amber-500/60' :
+              reasonPopupContext === 'return' ? 'border-sky-500/30 focus-within:border-sky-500/60' :
               'border-border focus-within:border-violet-500/50'
             }`}>
               <textarea
@@ -272,7 +272,7 @@ export function TransferModals({
                   reasonPopupContext === 'lawyer'
                     ? 'bg-violet-500/15 border border-violet-500/40 text-violet-300 hover:bg-violet-500/25'
                     : reasonPopupContext === 'return'
-                    ? 'bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25'
+                    ? 'bg-sky-500/15 border border-sky-500/40 text-sky-300 hover:bg-sky-500/25'
                     : 'bg-sky-500 text-white hover:bg-sky-600'
                 }`}
               >
@@ -289,7 +289,7 @@ export function TransferModals({
       {/* ── Incoming Transfer Popup ── */}
       {incomingTransfer && (
         <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-card border-2 border-amber-500/40 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]">
+          <div className="bg-card border-2 border-sky-500/40 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[90vh]">
             {/* Header fixo */}
             <div className="flex items-center gap-3 px-6 pt-6 pb-4 shrink-0">
               <span className="text-2xl">{"📨"}</span>

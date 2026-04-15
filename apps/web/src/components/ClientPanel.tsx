@@ -106,12 +106,12 @@ function DocIcon({ mimeType }: { mimeType: string }) {
   if (mimeType.startsWith('image/')) return <ImageIcon size={15} className="text-blue-400" />;
   if (mimeType.startsWith('audio/')) return <Mic size={15} className="text-purple-400" />;
   if (mimeType.startsWith('video/')) return <Video size={15} className="text-emerald-400" />;
-  return <FileText size={15} className="text-amber-400" />;
+  return <FileText size={15} className="text-sky-400" />;
 }
 
 const CASE_STAGE_MAP: Record<string, { label: string; color: string }> = {
   VIABILIDADE:  { label: 'Viabilidade',  color: 'bg-blue-500/15 text-blue-400 border-blue-500/20' },
-  ANDAMENTO:    { label: 'Em Andamento', color: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
+  ANDAMENTO:    { label: 'Em Andamento', color: 'bg-sky-500/15 text-sky-400 border-sky-500/20' },
   CONCLUSAO:    { label: 'Conclusão',    color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' },
   ARQUIVADO:    { label: 'Arquivado',    color: 'bg-gray-500/15 text-gray-400 border-gray-500/20' },
 };
@@ -719,7 +719,7 @@ export function ClientPanel({
                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Perguntas em Aberto</p>
                         <ul className="flex flex-col gap-1.5">
                           {factsJson.open_questions.slice(0, 4).map((q: string, i: number) => (
-                            <li key={i} className="flex items-start gap-2 text-[12px] text-amber-400">
+                            <li key={i} className="flex items-start gap-2 text-[12px] text-sky-400">
                               <span className="mt-0.5 shrink-0">?</span>
                               <span>{q}</span>
                             </li>
@@ -1077,9 +1077,9 @@ export function ClientPanel({
                           {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(financeSummary.received)}
                         </p>
                       </div>
-                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-center">
-                        <p className="text-[9px] text-amber-400 uppercase tracking-wider font-medium">Pendente</p>
-                        <p className="text-sm font-bold text-amber-400 mt-0.5">
+                      <div className="bg-sky-500/10 border border-sky-500/20 rounded-lg p-2.5 text-center">
+                        <p className="text-[9px] text-sky-400 uppercase tracking-wider font-medium">Pendente</p>
+                        <p className="text-sm font-bold text-sky-400 mt-0.5">
                           {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(financeSummary.pending)}
                         </p>
                       </div>
@@ -1104,7 +1104,7 @@ export function ClientPanel({
                 onClick={() => setNegHonOpen(!negHonOpen)}
               >
                 <div className="flex items-center gap-2.5">
-                  <Handshake size={15} className="text-amber-400" />
+                  <Handshake size={15} className="text-sky-400" />
                   <span className="text-[13px] font-bold text-foreground">Honorários Negociados</span>
                   {negHonorarios.length > 0 && (
                     <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{negHonorarios.length}</span>
@@ -1125,7 +1125,7 @@ export function ClientPanel({
                       {/* Lista de honorários com parcelas */}
                       {negHonorarios.map((h: any) => {
                         const statusColors: Record<string, string> = {
-                          NEGOCIANDO: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+                          NEGOCIANDO: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
                           ACEITO: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
                           RECUSADO: 'bg-red-500/15 text-red-400 border-red-500/30',
                           CONVERTIDO: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
@@ -1174,7 +1174,7 @@ export function ClientPanel({
                                       <span className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold ${
                                         pay.status === 'PAGO' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20' :
                                         pay.status === 'ATRASADO' ? 'bg-red-500/15 text-red-400 border-red-500/20' :
-                                        'bg-amber-500/15 text-amber-400 border-amber-500/20'
+                                        'bg-sky-500/15 text-sky-400 border-sky-500/20'
                                       }`}>{pay.status}</span>
                                     </div>
                                     {pay.status !== 'PAGO' && h.status !== 'CONVERTIDO' && (
@@ -1266,7 +1266,7 @@ export function ClientPanel({
                           <div>
                             <div className="flex items-center justify-between mb-1">
                               <label className="text-[10px] text-muted-foreground uppercase">Parcelas</label>
-                              <button onClick={handleDividirIgual} disabled={!negHonValue} className="text-[10px] text-amber-400 hover:text-amber-300 disabled:opacity-30">
+                              <button onClick={handleDividirIgual} disabled={!negHonValue} className="text-[10px] text-sky-400 hover:text-sky-300 disabled:opacity-30">
                                 Dividir igual
                               </button>
                             </div>
@@ -1289,7 +1289,7 @@ export function ClientPanel({
                               ))}
                             </div>
                             <button onClick={() => setNegHonParcelas([...negHonParcelas, { amount: '', due_date: '' }])}
-                              className="text-[10px] text-amber-400 hover:text-amber-300 mt-1 flex items-center gap-1">
+                              className="text-[10px] text-sky-400 hover:text-sky-300 mt-1 flex items-center gap-1">
                               <Plus size={10} /> Adicionar parcela
                             </button>
                             {negHonValue && (
@@ -1312,14 +1312,14 @@ export function ClientPanel({
                             <button onClick={() => { setShowNegHonForm(false); resetNegHonForm(); }}
                               className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5">Cancelar</button>
                             <button onClick={createNegHonorario} disabled={negHonSaving || !negHonValue}
-                              className="text-xs bg-amber-600 hover:bg-amber-500 text-white px-4 py-1.5 rounded-md disabled:opacity-50 flex items-center gap-1.5">
+                              className="text-xs bg-sky-600 hover:bg-sky-500 text-white px-4 py-1.5 rounded-md disabled:opacity-50 flex items-center gap-1.5">
                               {negHonSaving && <Loader2 size={12} className="animate-spin" />} Salvar
                             </button>
                           </div>
                         </div>
                       ) : (
                         <button onClick={() => setShowNegHonForm(true)}
-                          className="w-full flex items-center justify-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 py-2 border border-dashed border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors">
+                          className="w-full flex items-center justify-center gap-1.5 text-xs text-sky-400 hover:text-sky-300 py-2 border border-dashed border-sky-500/30 rounded-lg hover:bg-sky-500/5 transition-colors">
                           <Plus size={13} /> Adicionar Honorário
                         </button>
                       )}
@@ -1374,7 +1374,7 @@ export function ClientPanel({
                 onClick={() => setNotesOpen(!notesOpen)}
               >
                 <div className="flex items-center gap-2.5">
-                  <StickyNote size={15} className="text-amber-400" />
+                  <StickyNote size={15} className="text-sky-400" />
                   <span className="text-[13px] font-bold text-foreground">Notas Internas</span>
                   {notes.length > 0 && (
                     <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">{notes.length}</span>
@@ -1392,12 +1392,12 @@ export function ClientPanel({
                       onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitNote(); }}
                       placeholder="Adicionar nota interna… (Ctrl+Enter para enviar)"
                       rows={2}
-                      className="flex-1 resize-none bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-amber-400/30"
+                      className="flex-1 resize-none bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-sky-400/30"
                     />
                     <button
                       onClick={submitNote}
                       disabled={!noteText.trim() || addingNote}
-                      className="h-9 px-3 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/20 hover:bg-amber-500/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-[12px] font-medium shrink-0"
+                      className="h-9 px-3 rounded-xl bg-sky-500/15 text-sky-400 border border-sky-500/20 hover:bg-sky-500/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-[12px] font-medium shrink-0"
                     >
                       {addingNote ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                     </button>
@@ -1411,7 +1411,7 @@ export function ClientPanel({
                       {notes.map(note => (
                         <div key={note.id} className="group bg-foreground/[0.03] border border-border rounded-xl p-3.5 relative">
                           <div className="flex items-center justify-between gap-2 mb-1.5">
-                            <span className="text-[11px] font-bold text-amber-400">{note.user.name}</span>
+                            <span className="text-[11px] font-bold text-sky-400">{note.user.name}</span>
                             <span className="text-[10px] text-muted-foreground/60">{formatDate(note.created_at)}</span>
                           </div>
                           <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{note.text}</p>
@@ -1465,11 +1465,11 @@ export function ClientPanel({
                             <div className={`absolute left-0 w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
                               item.type === 'stage_change'
                                 ? 'border-sky-500/40 bg-sky-500/10'
-                                : 'border-amber-500/40 bg-amber-500/10'
+                                : 'border-sky-500/40 bg-sky-500/10'
                             }`}>
                               {item.type === 'stage_change'
                                 ? <ArrowRight size={10} className="text-sky-400" />
-                                : <StickyNote size={10} className="text-amber-400" />
+                                : <StickyNote size={10} className="text-sky-400" />
                               }
                             </div>
 
@@ -1498,7 +1498,7 @@ export function ClientPanel({
                                   )}
                                 </p>
                               ) : (
-                                <p className="text-[12px] text-foreground bg-amber-500/5 border border-amber-500/15 rounded-lg px-2.5 py-1.5 leading-snug">
+                                <p className="text-[12px] text-foreground bg-sky-500/5 border border-sky-500/15 rounded-lg px-2.5 py-1.5 leading-snug">
                                   {item.text}
                                 </p>
                               )}
@@ -1579,7 +1579,7 @@ export function ClientPanel({
                 <div className="border-t border-border">
                   <button className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors" onClick={() => setFichaOpen(!fichaOpen)}>
                     <div className="flex items-center gap-2.5">
-                      <ClipboardList size={15} className="text-amber-500" />
+                      <ClipboardList size={15} className="text-sky-400" />
                       <span className="text-[13px] font-bold text-foreground">Ficha Trabalhista</span>
                     </div>
                     {fichaOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}

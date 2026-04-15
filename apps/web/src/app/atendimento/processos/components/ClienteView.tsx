@@ -348,7 +348,7 @@ export function ClienteView({ cases, onSelectCase, onSelectLead }: Props) {
 
                   {g.nextEvent && (
                     <div className="text-center min-w-[70px]">
-                      <div className="text-[11px] font-bold text-amber-400 leading-none">
+                      <div className="text-[11px] font-bold text-sky-400 leading-none">
                         {relativeDay(g.nextEvent.start)}
                       </div>
                       <div className="text-[9px] text-muted-foreground uppercase tracking-wider mt-0.5 truncate max-w-[80px]">
@@ -385,7 +385,7 @@ export function ClienteView({ cases, onSelectCase, onSelectLead }: Props) {
                         ? 'text-red-400'
                         : c.priority === 'BAIXA'
                         ? 'text-muted-foreground'
-                        : 'text-amber-400';
+                        : 'text-sky-400';
                     const value = Number(c.claim_value) || 0;
                     return (
                       <button

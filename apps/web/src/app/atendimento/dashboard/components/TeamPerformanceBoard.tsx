@@ -26,7 +26,7 @@ export function TeamPerformanceBoard({ data, loading }: Props) {
 
   if (loading) {
     return (
-      <WidgetCard title="Performance da Equipe" icon={<Trophy size={15} className="text-amber-500" />} loading>
+      <WidgetCard title="Performance da Equipe" icon={<Trophy size={15} className="text-sky-400" />} loading>
         <div />
       </WidgetCard>
     );
@@ -34,7 +34,7 @@ export function TeamPerformanceBoard({ data, loading }: Props) {
 
   if (!data || data.members.length === 0) {
     return (
-      <WidgetCard title="Performance da Equipe" icon={<Trophy size={15} className="text-amber-500" />}>
+      <WidgetCard title="Performance da Equipe" icon={<Trophy size={15} className="text-sky-400" />}>
         <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
           Sem dados de equipe
         </div>
@@ -59,7 +59,7 @@ export function TeamPerformanceBoard({ data, loading }: Props) {
   return (
     <WidgetCard
       title="Performance da Equipe"
-      icon={<Trophy size={15} className="text-amber-500" />}
+      icon={<Trophy size={15} className="text-sky-400" />}
       badge={`${data.members.length} membros`}
     >
       {/* Tab bar */}

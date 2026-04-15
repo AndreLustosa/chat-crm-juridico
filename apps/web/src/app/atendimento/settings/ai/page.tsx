@@ -583,7 +583,7 @@ export default function AiSettingsPage() {
                   </label>
                   <p className="text-[11px] text-muted-foreground">
                     Permite controlar o CRM enviando mensagens para o número do escritório.
-                    {!adminBotEnabled && <span className="text-amber-500 font-semibold ml-1">Desativado — admins serão atendidos como clientes normais.</span>}
+                    {!adminBotEnabled && <span className="text-sky-400 font-semibold ml-1">Desativado — admins serão atendidos como clientes normais.</span>}
                   </p>
                 </div>
                 <button

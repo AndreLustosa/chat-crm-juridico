@@ -140,7 +140,7 @@ const AREA_COLORS: Record<string, string> = {
   Consumidor: 'bg-emerald-500/15 text-emerald-400',
   Penal: 'bg-red-500/15 text-red-400',
   'Familia': 'bg-pink-500/15 text-pink-400',
-  'Previdenciario': 'bg-amber-500/15 text-amber-400',
+  'Previdenciario': 'bg-sky-500/15 text-sky-400',
   Empresarial: 'bg-cyan-500/15 text-cyan-400',
   'Imobiliario': 'bg-orange-500/15 text-orange-400',
 };

@@ -115,18 +115,18 @@ function MessageBubbleInner({
     );
   }
 
-  // Nota interna: renderização especial em amber sem envio ao WhatsApp
+  // Nota interna: renderização especial em sky sem envio ao WhatsApp
   if (msg.type === 'internal_note') {
     return (
       <div id={`msg-${msg.id}`} className="w-full flex justify-end">
         <div className="max-w-[80%] flex flex-col gap-1">
           <div className="flex items-center gap-1.5 justify-end">
-            <span className="text-[9px] font-bold text-amber-400/70 uppercase tracking-wider">🔒 nota interna</span>
+            <span className="text-[9px] font-bold text-sky-400/70 uppercase tracking-wider">🔒 nota interna</span>
           </div>
-          <div className="bg-amber-500/15 border border-amber-500/30 rounded-2xl rounded-tr-sm px-4 py-2.5 shadow-sm">
-            <p className="text-sm text-amber-100/90 leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+          <div className="bg-sky-500/15 border border-sky-500/30 rounded-2xl rounded-tr-sm px-4 py-2.5 shadow-sm">
+            <p className="text-sm text-sky-100/90 leading-relaxed whitespace-pre-wrap">{msg.text}</p>
             <div className="flex justify-end mt-1">
-              <span className="text-[10px] text-amber-400/50">{formatTime(msg.created_at)}</span>
+              <span className="text-[10px] text-sky-400/50">{formatTime(msg.created_at)}</span>
             </div>
           </div>
         </div>

@@ -524,7 +524,7 @@ export default function UsersSettingsPage() {
                   })}
                 </div>
                 {form.roles.length === 0 && (
-                  <p className="text-[10px] text-amber-400 ml-1">Selecione ao menos um perfil de acesso.</p>
+                  <p className="text-[10px] text-sky-400 ml-1">Selecione ao menos um perfil de acesso.</p>
                 )}
               </div>
 

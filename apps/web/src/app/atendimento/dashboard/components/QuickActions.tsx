@@ -8,7 +8,7 @@ const ALL_ACTIONS = [
   { label: 'Atendimento', icon: MessageSquare, href: '/atendimento', color: 'text-blue-500 bg-blue-500/10', roles: ['ADMIN', 'OPERADOR', 'COMERCIAL', 'ADVOGADO'] },
   { label: 'Novo Caso', icon: Scale, href: '/atendimento/advogado', color: 'text-purple-500 bg-purple-500/10', roles: ['ADMIN', 'ADVOGADO'] },
   { label: 'Agenda', icon: Calendar, href: '/atendimento/agenda', color: 'text-rose-500 bg-rose-500/10', roles: ['ADMIN', 'ADVOGADO', 'OPERADOR', 'COMERCIAL', 'ESTAGIARIO'] },
-  { label: 'CRM', icon: Briefcase, href: '/atendimento/crm', color: 'text-amber-500 bg-amber-500/10', roles: ['ADMIN', 'OPERADOR', 'COMERCIAL'] },
+  { label: 'CRM', icon: Briefcase, href: '/atendimento/crm', color: 'text-sky-400 bg-sky-500/10', roles: ['ADMIN', 'OPERADOR', 'COMERCIAL'] },
   { label: 'Processos', icon: BookOpen, href: '/atendimento/processos', color: 'text-teal-500 bg-teal-500/10', roles: ['ADMIN', 'ADVOGADO', 'ESTAGIARIO'] },
   { label: 'Financeiro', icon: Settings, href: '/atendimento/financeiro', color: 'text-emerald-500 bg-emerald-500/10', roles: ['ADMIN', 'FINANCEIRO'] },
   { label: 'Manual', icon: HelpCircle, href: '/atendimento/manual', color: 'text-violet-500 bg-violet-500/10', roles: ['ADMIN', 'ADVOGADO', 'OPERADOR', 'COMERCIAL', 'ESTAGIARIO', 'FINANCEIRO'] },

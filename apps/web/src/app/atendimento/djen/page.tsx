@@ -82,7 +82,7 @@ const TIPO_COLORS: Record<string, { bg: string; text: string }> = {
   'Intimação':        { bg: 'bg-blue-500/10',    text: 'text-blue-400' },
   'Citação':          { bg: 'bg-red-500/10',      text: 'text-red-400' },
   'Sentença':         { bg: 'bg-purple-500/10',   text: 'text-purple-400' },
-  'Despacho':         { bg: 'bg-amber-500/10',    text: 'text-amber-400' },
+  'Despacho':         { bg: 'bg-sky-500/10',      text: 'text-sky-400' },
   'Acórdão':          { bg: 'bg-violet-500/10',   text: 'text-violet-400' },
   'Lista de distribuição': { bg: 'bg-emerald-500/10', text: 'text-emerald-400' },
 };
@@ -1489,7 +1489,7 @@ function DjenPageContent() {
       <header className="px-6 py-4 border-b border-border shrink-0 flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Gavel size={20} className="text-amber-500" />
+            <Gavel size={20} className="text-sky-400" />
             DJEN — Publicações
             {unreadCount > 0 && (
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/12 text-amber-400 border border-amber-500/20">
@@ -1529,7 +1529,7 @@ function DjenPageContent() {
           <button
             onClick={handleSync}
             disabled={syncing}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-500 hover:text-amber-400 px-3 py-1.5 border border-amber-500/30 rounded-lg hover:bg-amber-500/5 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-400 hover:text-sky-300 px-3 py-1.5 border border-sky-500/30 rounded-lg hover:bg-sky-500/5 transition-colors disabled:opacity-50"
           >
             <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
             Sincronizar

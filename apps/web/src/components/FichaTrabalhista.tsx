@@ -465,7 +465,7 @@ export default function FichaTrabalhista({
     const disabled = readOnly;
 
     const baseClasses =
-      'w-full bg-background border border-border rounded-lg px-3 text-foreground focus:border-amber-500 outline-none transition-colors placeholder-muted-foreground text-sm';
+      'w-full bg-background border border-border rounded-lg px-3 text-foreground focus:border-sky-500 outline-none transition-colors placeholder-muted-foreground text-sm';
 
     const onBlur = () => handleAutoSave(field.key, value);
 
@@ -535,7 +535,7 @@ export default function FichaTrabalhista({
                   className={`p-1.5 rounded-lg transition-colors ${
                     isFieldListening
                       ? 'text-red-400 bg-red-500/20 animate-pulse'
-                      : 'text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10'
+                      : 'text-muted-foreground hover:text-sky-400 hover:bg-sky-500/10'
                   }`}
                 >
                   {isFieldListening ? <MicOff size={14} /> : <Mic size={14} />}
@@ -587,7 +587,7 @@ export default function FichaTrabalhista({
               className={`${baseClasses} h-12 sm:h-10 pr-10`}
             />
             {loadingCep ? (
-              <Loader2 size={14} className="absolute right-3 top-3 animate-spin text-amber-500" />
+              <Loader2 size={14} className="absolute right-3 top-3 animate-spin text-sky-400" />
             ) : (
               <button
                 type="button"
@@ -688,7 +688,7 @@ export default function FichaTrabalhista({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 size={24} className="animate-spin text-amber-500" />
+        <Loader2 size={24} className="animate-spin text-sky-400" />
         <span className="ml-2 text-[13px] text-muted-foreground">Carregando ficha...</span>
       </div>
     );
@@ -715,7 +715,7 @@ export default function FichaTrabalhista({
         <div className="flex items-center gap-3">
           <div className="flex-1 h-2 bg-border rounded-full overflow-hidden">
             <div
-              className="h-full bg-amber-500 rounded-full transition-all duration-500"
+              className="h-full bg-sky-500 rounded-full transition-all duration-500"
               style={{ width: `${completionPct}%` }}
             />
           </div>
@@ -723,7 +723,7 @@ export default function FichaTrabalhista({
             {completionPct}%
           </span>
           {saving && (
-            <span className="flex items-center gap-1 text-xs text-amber-500">
+            <span className="flex items-center gap-1 text-xs text-sky-400">
               <Loader2 size={12} className="animate-spin" /> Salvando...
             </span>
           )}
@@ -769,7 +769,7 @@ export default function FichaTrabalhista({
             className="w-full px-4 py-4 sm:py-3 flex items-center justify-between hover:bg-accent/30 transition-colors"
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-500 shrink-0">
+              <div className="p-1.5 bg-sky-500/10 rounded-lg text-sky-400 shrink-0">
                 {ICON_MAP[section.icon] || <FileText size={18} />}
               </div>
               <span className="text-sm font-bold text-foreground">
@@ -816,7 +816,7 @@ export default function FichaTrabalhista({
           onClick={handleFinalize}
           disabled={finalizing}
           className="w-full py-4 sm:py-3 rounded-xl font-bold text-base sm:text-[14px] transition-colors flex items-center justify-center gap-2
-            bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {finalizing ? (
             <>

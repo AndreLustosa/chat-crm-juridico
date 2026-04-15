@@ -692,7 +692,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
                     onClick={handleSendFormLink}
                     disabled={sending}
                     title="Enviar link do formulário trabalhista ao lead"
-                    className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2 disabled:opacity-50"
+                    className="px-3 py-2 text-sm font-semibold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-xl hover:bg-sky-500/20 transition-colors flex items-center gap-2 disabled:opacity-50"
                   >
                     <ClipboardList size={16} />
                     Enviar Formulário
@@ -724,7 +724,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
               <button
                 onClick={handleReturnToOrigin}
                 title="Devolver ao atendente comercial de origem"
-                className="px-3 py-2 text-sm font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl hover:bg-amber-500/20 transition-colors flex items-center gap-2"
+                className="px-3 py-2 text-sm font-semibold text-sky-400 bg-sky-500/10 border border-sky-500/20 rounded-xl hover:bg-sky-500/20 transition-colors flex items-center gap-2"
               >
                 <CornerUpLeft size={16} />
                 Devolver
@@ -747,13 +747,13 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         {(() => {
           const openQ = (lead?.memory?.facts_json as any)?.open_questions;
           return openQ?.length > 0 ? (
-            <div className="px-4 py-2.5 border-b border-amber-500/20 bg-amber-500/5 flex gap-3 items-start">
-              <span className="text-amber-400 text-xs font-bold mt-0.5 shrink-0">?</span>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-amber-400/90">
+            <div className="px-4 py-2.5 border-b border-sky-500/20 bg-sky-500/5 flex gap-3 items-start">
+              <span className="text-sky-400 text-xs font-bold mt-0.5 shrink-0">?</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-sky-400/90">
                 {openQ.slice(0, 6).map((q: string, i: number) => (
                   <span key={i} className="whitespace-nowrap">{q}</span>
                 ))}
-                {openQ.length > 6 && <span className="text-amber-400/50">+{openQ.length - 6} mais</span>}
+                {openQ.length > 6 && <span className="text-sky-400/50">+{openQ.length - 6} mais</span>}
               </div>
             </div>
           ) : null;
@@ -1244,8 +1244,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             {/* Header do painel */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0 bg-card/80 backdrop-blur-sm">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                  <ClipboardList size={16} className="text-amber-500" />
+                <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                  <ClipboardList size={16} className="text-sky-400" />
                 </div>
                 <div>
                   <h2 className="font-bold text-foreground text-sm">Ficha Trabalhista</h2>

@@ -403,7 +403,7 @@ export function Sidebar() {
     ) : dbStatus === 'offline' ? (
       <span className="text-red-500">Offline</span>
     ) : (
-      <span className="text-amber-500">Verificando</span>
+      <span className="text-sky-400">Verificando</span>
     );
 
   return (
@@ -532,7 +532,7 @@ export function Sidebar() {
                 ? 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]'
                 : dbStatus === 'offline'
                 ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.5)] animate-pulse'
-                : 'bg-amber-500 animate-pulse'
+                : 'bg-sky-500 animate-pulse'
             }`}
           />
           {expanded && (
