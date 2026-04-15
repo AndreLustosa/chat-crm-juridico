@@ -103,10 +103,8 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
     s.on('disconnect', () => setConnected(false));
 
     // ─── Notificação centralizada de nova mensagem ───────────────
-    // page.tsx cuida do UI quando o usuário está no chat (badges, mensagens).
-    // Aqui tocamos o som e mostramos desktop notification em QUALQUER rota.
-    // Guard: se page.tsx está ativo, ele já tem handler de inbox — não toca som
-    // duplamente. page.tsx NÃO deve tocar som no handler de newMessage.
+    // ÚNICO ponto que toca som para incoming_message_notification.
+    // page.tsx NÃO registra handler próprio nem toca som em newMessage.
     s.on('incoming_message_notification', (data: { conversationId?: string; contactName?: string }) => {
       const onChatPage = pathnameRef.current === '/atendimento' ||
         pathnameRef.current.startsWith('/atendimento/chat');
@@ -123,20 +121,20 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
         } catch {}
       }
 
-      // Som + toast + desktop notification apenas fora da tela de chat
-      // (page.tsx cuida do som quando o usuário está no inbox)
-      if (onChatPage) return;
-
+      // Som SEMPRE toca (é o único ponto — corrige bug de som duplo)
       playNotificationSound();
 
+      // Desktop notification sempre (lib já checa document.hasFocus)
       const name = data?.contactName || 'Novo contato';
-      toast(`Nova mensagem de ${name}`, { icon: '💬', duration: 4000 });
-
       showDesktopNotification({
         title: name,
         body: 'Nova mensagem recebida',
         tag: `msg-${data?.conversationId || 'unknown'}`,
       });
+
+      // Toast apenas fora do chat (no chat o user já vê a mensagem inline)
+      if (onChatPage) return;
+      toast(`Nova mensagem de ${name}`, { icon: '💬', duration: 4000 });
     });
 
     // ─── Transferências: toast + som fora do chat ────────────────

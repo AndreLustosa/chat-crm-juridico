@@ -13,7 +13,7 @@ import { AuthAudioPlayer } from '@/components/AuthAudioPlayer';
 import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
 import { ClientPanel } from '@/components/ClientPanel';
-import { playNotificationSound, unlockAudioContext } from '@/lib/notificationSounds';
+import { playNotificationSound } from '@/lib/notificationSounds';
 import {
   isDesktopNotifSupported,
   getDesktopNotifPermission,
@@ -21,7 +21,7 @@ import {
   showDesktopNotification,
 } from '@/lib/desktopNotifications';
 import api from '@/lib/api';
-import { io, Socket } from 'socket.io-client';
+import { useSocket } from '@/lib/SocketProvider';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import { STAGE_TEMPLATES } from '@/lib/crmTemplates';
 import { showError, showSuccess } from '@/lib/toast';
@@ -45,24 +45,7 @@ const SLASH_COMMANDS = [
   },
 ] as const;
 
-function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
-  if (apiUrl.startsWith('http')) {
-    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
-  }
-  return typeof window !== 'undefined' ? window.location.origin : '';
-}
-
-/** Em dev o socket.io está diretamente em /socket.io/ (sem proxy).
- *  Em produção o Traefik tem um router dedicado (crm-ws) que escuta /socket.io/
- *  e rota diretamente para a API sem nenhum middleware — isso garante que o
- *  upgrade de WebSocket funcione (passar por strip-api/outros middlewares quebra o upgrade). */
-function getSocketPath(): string {
-  if (process.env.NEXT_PUBLIC_SOCKET_PATH) return process.env.NEXT_PUBLIC_SOCKET_PATH;
-  // Sempre usar /socket.io/ direto — o router crm-ws no Traefik cuida disso sem middleware
-  return '/socket.io/';
-}
+// getWsUrl/getSocketPath agora em @/lib/socketConfig.ts (usados pelo SocketProvider)
 
 function getDateKey(dateStr: string): string {
   return new Date(dateStr).toDateString();
@@ -129,7 +112,7 @@ export default function Dashboard() {
   const [msgCurrentPage, setMsgCurrentPage] = useState(1);
   const [loadingMoreMsgs, setLoadingMoreMsgs] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [socketConnected, setSocketConnected] = useState(true);
+  // socketConnected vem do useSocket() acima
   const [isOnline, setIsOnline] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -269,7 +252,9 @@ export default function Dashboard() {
   const isScrolledUpRef = useRef(false);
   // Ref de mensagens para acesso em keyboard handlers sem depender de closure
   const messagesRef = useRef<MessageItem[]>([]);
-  const socketRef = useRef<Socket | null>(null);
+  // Socket compartilhado do SocketProvider (sem io() local)
+  const { socket: sharedSocket, connected: socketConnected } = useSocket();
+  const socketRef = useRef(sharedSocket);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef(0);
@@ -668,65 +653,37 @@ export default function Dashboard() {
     };
   }, []);
 
-  // WebSocket connection (once, does not reconnect on filter changes)
+  // ─── Socket compartilhado do SocketProvider (sem io() local) ────────────
+  // Sincroniza ref para uso em callbacks + registra eventos de chat
   useEffect(() => {
-    const wsUrl = getWsUrl();
-    console.log('[SOCKET] Connecting to:', wsUrl);
-    const socket = io(wsUrl, {
-      path: getSocketPath(),
-      transports: ['polling', 'websocket'],
-      auth: { token: localStorage.getItem('token') || '' },
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      timeout: 10000,
-    });
+    socketRef.current = sharedSocket;
+  }, [sharedSocket]);
 
-    socket.on('connect', () => {
-      console.log('[SOCKET] Connected to dashboard ID:', socket.id);
-      setSocketConnected(true);
-      // Re-join current conversation room on reconnect
-      const currentConvoId = selectedIdRef.current;
-      if (currentConvoId && !currentConvoId.startsWith('demo-')) {
-        socket.emit('join_conversation', currentConvoId);
-        // Re-fetch messages to recover any missed during disconnection
-        setMsgRefreshKey(k => k + 1);
-      }
-      // Refresh sidebar to catch up on missed inboxUpdate events
-      fetchConversations(selectedInboxIdRef.current, true);
-      fetchAdiadoConversations(selectedInboxIdRef.current);
-      // Join personal user room for transfer notifications
-      const token = localStorage.getItem('token');
-      if (token) {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-          if (payload?.sub) socket.emit('join_user', payload.sub);
-        } catch {}
-      }
-    });
+  // Re-join conversation room + refresh sidebar ao reconectar
+  useEffect(() => {
+    if (!sharedSocket || !socketConnected) return;
+    const currentConvoId = selectedIdRef.current;
+    if (currentConvoId && !currentConvoId.startsWith('demo-')) {
+      sharedSocket.emit('join_conversation', currentConvoId);
+      setMsgRefreshKey(k => k + 1);
+    }
+    fetchConversations(selectedInboxIdRef.current, true);
+    fetchAdiadoConversations(selectedInboxIdRef.current);
+  }, [socketConnected, sharedSocket, fetchConversations, fetchAdiadoConversations]);
 
-    socket.on('disconnect', () => {
-      console.log('[SOCKET] Disconnected from dashboard');
-      setSocketConnected(false);
-    });
+  // Eventos de chat registrados no socket compartilhado
+  useEffect(() => {
+    if (!sharedSocket) return;
 
-    socket.on('connect_error', (err) => {
-      console.error('[SOCKET] Connection error:', err);
-    });
-
-    // Debounce inboxUpdate — após reconexão do WhatsApp, dezenas de contacts.update
-    // chegam em sequência rápida. Sem debounce, o frontend refaz a listagem 50+ vezes.
+    // Debounce inboxUpdate
     let inboxUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-    socket.on('inboxUpdate', () => {
+    const onInboxUpdate = () => {
       if (inboxUpdateTimer) clearTimeout(inboxUpdateTimer);
       inboxUpdateTimer = setTimeout(() => {
         inboxUpdateTimer = null;
-        console.log('[SOCKET] inboxUpdate received (debounced), fetching conversations...');
-        // silent=true: 401 nestas chamadas de background não redireciona todos os usuários
         fetchConversations(selectedInboxIdRef.current, true);
         fetchAdiadoConversations(selectedInboxIdRef.current);
         fetchPendingTransfers(true);
-        // Re-fetch unread counts para sincronizar badges após mudanças de outros operadores
         api.get('/conversations/unread-counts', { _silent401: true } as any)
           .then(r => {
             if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
@@ -735,31 +692,24 @@ export default function Dashboard() {
           })
           .catch(() => {});
       }, 1500);
-    });
+    };
 
-    // Nota criada em uma conversa — marcar hasNotes=true na lista
-    socket.on('newNote', (note: any) => {
+    const onNewNote = (note: any) => {
       if (note?.conversation_id) {
         setConversations(prev => prev.map(c => c.id === note.conversation_id ? { ...c, hasNotes: true } : c));
         setAdiadoConversations(prev => prev.map(c => c.id === note.conversation_id ? { ...c, hasNotes: true } : c));
       }
-    });
+    };
 
-    // Typing indicator
-    socket.on('typing_indicator', (data: { userId: string; userName: string; isTyping: boolean }) => {
+    const onTypingIndicator = (data: { userId: string; userName: string; isTyping: boolean }) => {
       const myId = currentUserIdRef.current;
-      if (data.userId === myId) return; // ignore own typing
+      if (data.userId === myId) return;
       setTypingUsers(prev => {
         const next = { ...prev };
         if (data.isTyping) {
-          // Clear previous timeout for this user
           if (next[data.userId]) clearTimeout(next[data.userId].timeout);
           const timeout = setTimeout(() => {
-            setTypingUsers(p => {
-              const n = { ...p };
-              delete n[data.userId];
-              return n;
-            });
+            setTypingUsers(p => { const n = { ...p }; delete n[data.userId]; return n; });
           }, 4000);
           next[data.userId] = { userName: data.userName, timeout };
         } else {
@@ -768,31 +718,25 @@ export default function Dashboard() {
         }
         return next;
       });
-    });
+    };
 
-    // Incoming message notification — backend envia apenas para o user room do atendente
-    // atribuído (ou para o tenant se sem atribuição). Se chegou aqui, é para mim.
-    socket.on('incoming_message_notification', (data: { conversationId: string; contactName?: string }) => {
-      playNotificationSound();
-      showDesktopNotification({
-        title: data?.contactName || 'Nova mensagem',
-        body: 'Nova mensagem recebida',
-        tag: `msg-${data.conversationId}`,
-        onClick: () => setSelectedId(data.conversationId),
-      });
+    // incoming_message_notification: SOM + DESKTOP agora centralizados no SocketProvider.
+    // Aqui só atualizamos o estado local de unreadCounts para os badges do sidebar.
+    const onIncomingNotif = (data: { conversationId: string; contactName?: string }) => {
       if (data?.conversationId && data.conversationId !== selectedIdRef.current) {
         setUnreadCounts(prev => ({
           ...prev,
           [data.conversationId]: (prev[data.conversationId] || 0) + 1,
         }));
       }
-    });
+    };
 
-    // Transfer request: incoming popup + sound for target operator
-    socket.on('transfer_request', (data: { conversationId: string; fromUserName: string; contactName: string; reason: string | null; audioIds?: string[] }) => {
+    // Transfer request: popup UI (som já tocou no SocketProvider se fora do chat,
+    // aqui toca som quando estamos NO chat porque SocketProvider pula transferências no chat)
+    const onTransferRequest = (data: { conversationId: string; fromUserName: string; contactName: string; reason: string | null; audioIds?: string[] }) => {
       playNotificationSound();
       showDesktopNotification({
-        title: 'Transferencia recebida',
+        title: 'Transferência recebida',
         body: `${data.fromUserName} transferiu "${data.contactName}"`,
         tag: `transfer-${data.conversationId}`,
         onClick: () => setSelectedId(data.conversationId),
@@ -802,18 +746,15 @@ export default function Dashboard() {
       setShowDeclineInput(false);
       setDeclineReason('');
       fetchPendingTransfers(true);
-    });
+    };
 
-    // Transfer cancelled by sender: close popup on recipient's screen
-    socket.on('transfer_cancelled', (data: { conversationId: string }) => {
+    const onTransferCancelled = (data: { conversationId: string }) => {
       setIncomingTransfer(prev => prev?.conversationId === data.conversationId ? null : prev);
       setPendingTransfers(prev => prev.filter(pt => pt.conversationId !== data.conversationId));
       fetchPendingTransfers(true);
-    });
+    };
 
-    // Transfer response: notification for the sender
-    socket.on('transfer_response', (data: { accepted: boolean; userName?: string; reason?: string; contactName: string }) => {
-      // Limpa estado de transferência pendente
+    const onTransferResponse = (data: { accepted: boolean; userName?: string; reason?: string; contactName: string }) => {
       setPendingTransferMap({});
       setTransferSentMsg(null);
       if (data.accepted) {
@@ -823,11 +764,10 @@ export default function Dashboard() {
       }
       fetchConversations(selectedInboxIdRef.current, true);
       setTimeout(() => setTransferResponseMsg(null), 6000);
-    });
+    };
 
-    socket.on('transfer_returned', (data: { conversationId: string; fromUserName: string; contactName: string; reason: string | null; audioIds?: string[] }) => {
+    const onTransferReturned = (data: { conversationId: string; fromUserName: string; contactName: string; reason: string | null; audioIds?: string[] }) => {
       setTransferResponseMsg(`↩ ${data.fromUserName} devolveu "${data.contactName}"${data.reason ? ': ' + data.reason : ''}`);
-      // Guardar contexto de retorno para exibir no chat
       if (data.reason || (data.audioIds && data.audioIds.length > 0)) {
         setTransferContextMap(prev => ({
           ...prev,
@@ -840,30 +780,23 @@ export default function Dashboard() {
       }
       fetchConversations(selectedInboxIdRef.current, true);
       setTimeout(() => setTransferResponseMsg(null), 8000);
-    });
+    };
 
-    // Contrato assinado digitalmente (Clicksign)
-    socket.on('contract:signed', (data: { conversationId: string; leadName: string; signedAt: string }) => {
+    const onContractSigned = (data: { leadName: string }) => {
       showSuccess(`✅ Contrato assinado por ${data.leadName}!`);
-    });
+    };
 
-    // Erro biométrico na assinatura (Clicksign) — tutorial enviado ao cliente automaticamente
-    socket.on('contract:biometric_error', (data: { conversationId: string; leadName: string; eventName: string; errorType: string }) => {
+    const onBiometricError = (data: { leadName: string; errorType: string }) => {
       showError(`⚠️ Erro de ${data.errorType} para ${data.leadName}. Tutorial enviado ao cliente via WhatsApp.`);
-    });
+    };
 
-    // WhatsApp instance connection status (connect/disconnect)
-    socket.on('connection_status_update', (data: { instanceName: string; state: string }) => {
+    const onConnectionStatus = (data: { instanceName: string; state: string }) => {
       setInstanceStatuses(prev => ({ ...prev, [data.instanceName]: data.state }));
-      if (data.state === 'close') {
-        showError(`WhatsApp desconectado: ${data.instanceName}`);
-      } else if (data.state === 'open') {
-        showSuccess(`WhatsApp reconectado: ${data.instanceName}`);
-      }
-    });
+      if (data.state === 'close') showError(`WhatsApp desconectado: ${data.instanceName}`);
+      else if (data.state === 'open') showSuccess(`WhatsApp reconectado: ${data.instanceName}`);
+    };
 
-    // Lembrete de tarefa agendada (PUSH via calendar cron)
-    socket.on('calendar_reminder', (data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) => {
+    const onCalendarReminder = (data: { eventId: string; title: string; type: string; start_at: string; minutesBefore: number }) => {
       setTaskReminderToast(data);
       try { playNotificationSound(); } catch {}
       showDesktopNotification({
@@ -871,15 +804,37 @@ export default function Dashboard() {
         body: data.title,
       });
       setTimeout(() => setTaskReminderToast(null), 12000);
-    });
+    };
 
-    socketRef.current = socket;
+    sharedSocket.on('inboxUpdate', onInboxUpdate);
+    sharedSocket.on('newNote', onNewNote);
+    sharedSocket.on('typing_indicator', onTypingIndicator);
+    sharedSocket.on('incoming_message_notification', onIncomingNotif);
+    sharedSocket.on('transfer_request', onTransferRequest);
+    sharedSocket.on('transfer_cancelled', onTransferCancelled);
+    sharedSocket.on('transfer_response', onTransferResponse);
+    sharedSocket.on('transfer_returned', onTransferReturned);
+    sharedSocket.on('contract:signed', onContractSigned);
+    sharedSocket.on('contract:biometric_error', onBiometricError);
+    sharedSocket.on('connection_status_update', onConnectionStatus);
+    sharedSocket.on('calendar_reminder', onCalendarReminder);
 
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      if (inboxUpdateTimer) clearTimeout(inboxUpdateTimer);
+      sharedSocket.off('inboxUpdate', onInboxUpdate);
+      sharedSocket.off('newNote', onNewNote);
+      sharedSocket.off('typing_indicator', onTypingIndicator);
+      sharedSocket.off('incoming_message_notification', onIncomingNotif);
+      sharedSocket.off('transfer_request', onTransferRequest);
+      sharedSocket.off('transfer_cancelled', onTransferCancelled);
+      sharedSocket.off('transfer_response', onTransferResponse);
+      sharedSocket.off('transfer_returned', onTransferReturned);
+      sharedSocket.off('contract:signed', onContractSigned);
+      sharedSocket.off('contract:biometric_error', onBiometricError);
+      sharedSocket.off('connection_status_update', onConnectionStatus);
+      sharedSocket.off('calendar_reminder', onCalendarReminder);
     };
-  }, [fetchConversations, fetchAdiadoConversations]);
+  }, [sharedSocket, fetchConversations, fetchAdiadoConversations]);
 
   // Carrega contadores de não-lidos do servidor na montagem (badges persistem entre refreshes)
   useEffect(() => {
@@ -1049,7 +1004,8 @@ export default function Dashboard() {
               }
               return [...prev, msg];
             });
-            if (msg.direction === 'in') playNotificationSound();
+            // Som NÃO toca aqui — o SocketProvider já tocou via incoming_message_notification
+            // (corrige bug de som duplo: antes tocava aqui E no handler de notification)
             // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
             if ((msg as any).type === 'audio' && (msg as any).media?.s3_key) {
               import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
