@@ -3990,27 +3990,37 @@ function ProcessosPageContent() {
   const openCadastroForOabItem = useCallback(async (item: { processo_codigo: string; foro: string; case_number: string }) => {
     try {
       const res = await api.get('/court-scraper/search', { params: { caseNumber: item.case_number }, timeout: 30000 });
-      const data = res.data;
-      const opposingParty = (data.parties || [])
-        .filter((p: any) => /r[eé]u|requerido|executado/i.test(p.role))
-        .map((p: any) => p.name)
-        .join(', ') || '';
-      const assuntoNotes = [
-        data.subject ? `Assunto: ${data.subject}` : '',
-        ...(data.parties || []).slice(0, 6).map((p: any) => `${p.role}: ${p.name}`),
-      ].filter(Boolean).join('\n');
-      setPrefillData({
-        case_number: data.case_number,
-        legal_area: data.legal_area,
-        action_type: data.action_type,
-        court: data.court,
-        judge: data.judge,
-        claim_value: data.claim_value,
-        filed_at: data.filed_at,
-        tracking_stage: data.tracking_stage || 'DISTRIBUIDO',
-        notes: assuntoNotes,
-        opposing_party: opposingParty,
-      });
+      // Backend retorna { found, already_registered, data: CourtCaseData, tribunal }.
+      // Os dados do processo ficam DENTRO de payload.data — ler direto res.data
+      // resultava em case_number/parties/etc. undefined e modal vazio.
+      const payload = res.data;
+      const data = payload?.data;
+
+      if (!data) {
+        // found=false ou already_registered=true — cai no fallback com o case_number da listagem
+        setPrefillData({ case_number: item.case_number });
+      } else {
+        const opposingParty = (data.parties || [])
+          .filter((p: any) => /r[eé]u|requerido|executado/i.test(p.role))
+          .map((p: any) => p.name)
+          .join(', ') || '';
+        const assuntoNotes = [
+          data.subject ? `Assunto: ${data.subject}` : '',
+          ...(data.parties || []).slice(0, 6).map((p: any) => `${p.role}: ${p.name}`),
+        ].filter(Boolean).join('\n');
+        setPrefillData({
+          case_number: data.case_number || item.case_number,
+          legal_area: data.legal_area,
+          action_type: data.action_type,
+          court: data.court,
+          judge: data.judge,
+          claim_value: data.claim_value,
+          filed_at: data.filed_at,
+          tracking_stage: data.tracking_stage || 'DISTRIBUIDO',
+          notes: assuntoNotes,
+          opposing_party: opposingParty,
+        });
+      }
     } catch {
       // Fallback: abre com dados parciais disponíveis do resultado OAB
       setPrefillData({ case_number: item.case_number });
@@ -4820,8 +4830,12 @@ function ProcessosPageContent() {
       )}
 
       {/* Modal Cadastrar Processo Existente */}
+      {/* key: força remount a cada item do lote — os states do form sao inicializados
+          via useState(prefillData?.xxx), que so roda no mount. Sem a key, items 2..N
+          do cadastro em lote reusariam os inputs do primeiro item. */}
       {showCadastrarModal && (
         <CadastrarProcessoModal
+          key={prefillData?.case_number || 'manual'}
           onClose={() => { setShowCadastrarModal(false); setPrefillData(null); setOabCadastroQueue([]); setOabCadastroProgress(null); }}
           onSuccess={handleCadastroModalSuccess}
           prefillData={prefillData}
