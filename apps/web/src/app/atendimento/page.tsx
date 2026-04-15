@@ -2404,13 +2404,13 @@ export default function Dashboard() {
               )}
             {/* Banner de perguntas em aberto — orienta o operador */}
             {openQuestions.length > 0 && (
-              <div className="absolute top-0 left-0 right-0 z-20 px-4 py-2 border-b border-amber-500/20 bg-card/95 backdrop-blur-sm flex gap-3 items-start">
-                <span className="text-amber-400 text-xs font-bold mt-0.5 shrink-0">?</span>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-amber-400/90">
+              <div className="absolute top-0 left-0 right-0 z-20 px-4 py-2 border-b border-sky-500/30 bg-card/95 backdrop-blur-sm flex gap-3 items-start">
+                <span className="text-sky-400 text-xs font-bold mt-0.5 shrink-0">?</span>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-sky-300">
                   {openQuestions.slice(0, 6).map((q: string, i: number) => (
                     <span key={i}>{q}</span>
                   ))}
-                  {openQuestions.length > 6 && <span className="text-amber-400/50">+{openQuestions.length - 6} mais</span>}
+                  {openQuestions.length > 6 && <span className="text-sky-400/60">+{openQuestions.length - 6} mais</span>}
                 </div>
               </div>
             )}
