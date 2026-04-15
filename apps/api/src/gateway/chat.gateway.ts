@@ -31,15 +31,23 @@ export class ChatGateway {
   ) {}
 
   handleConnection(client: Socket) {
-    this.logger.log(`[SOCKET] Client connected: ${client.id} (transport: ${client.conn?.transport?.name})`);
+    const transport = client.conn?.transport?.name ?? 'unknown';
+    const recovered = (client as any).recovered ? ' (recovered)' : '';
+    this.logger.log(`[SOCKET] Client connected: ${client.id} transport=${transport}${recovered}`);
+    // Observa upgrades polling→websocket (ajuda a diagnosticar quando o
+    // cliente nao consegue subir pra WS e fica preso em long-polling).
+    client.conn?.on('upgrade', (t: any) => {
+      this.logger.log(`[SOCKET] Transport upgrade: ${client.id} → ${t?.name ?? 'unknown'}`);
+    });
     const socketUser = (client as any).user;
     if (socketUser?.sub) {
       this.trackUserOnline(socketUser.sub, client.id);
     }
   }
 
-  handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
+  handleDisconnect(client: Socket, reason?: string) {
+    const transport = client.conn?.transport?.name ?? 'unknown';
+    this.logger.log(`[SOCKET] Client disconnected: ${client.id} reason="${reason ?? 'unknown'}" transport=${transport}`);
     const socketUser = (client as any).user;
     if (socketUser?.sub) {
       this.trackUserOffline(socketUser.sub, client.id);

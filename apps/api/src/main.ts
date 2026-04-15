@@ -96,6 +96,18 @@ async function bootstrap() {
     addTrailingSlash: false,
     transports: ['polling', 'websocket'],
     maxHttpBufferSize: 1e6,  // 1MB max payload — previne abuse
+    // Heartbeat generoso: tolera throttling de aba background (Chrome reduz
+    // timers a 1Hz) e oscilacoes breves de WiFi/4G. Default era 20s → caia
+    // em ~45s no primeiro pong perdido. Agora aguenta ate ~85s.
+    pingInterval: 25000,
+    pingTimeout: 60000,
+    // Sobrevive a disconnects breves (ate 2min) sem perder room/buffer de
+    // eventos. skipMiddlewares=true evita re-validar JWT na recovery.
+    // Requer Socket.IO >= 4.6 (instalado: 4.8.3).
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000,
+      skipMiddlewares: true,
+    },
   });
 
   chatGateway.server = io;
@@ -168,9 +180,9 @@ async function bootstrap() {
       socket.join(`tenant:${socketUser.tenant_id}`);
     }
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       socketRateLimits.delete(socket.id);
-      chatGateway.handleDisconnect(socket);
+      chatGateway.handleDisconnect(socket, reason);
     });
     socket.on('join_conversation', (conversationId) => {
       if (!checkSocketRateLimit(socket.id, 'join_conversation', 30)) {
