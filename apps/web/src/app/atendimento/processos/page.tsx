@@ -2590,7 +2590,8 @@ function CadastrarProcessoModal({
     case_number?: string;
     legal_area?: string;
     action_type?: string;
-    opposing_party?: string;
+    author?: string;          // nome(s) do(s) autor(es) no processo
+    opposing_party?: string;  // nome(s) do(s) reu(s) no processo
     court?: string;
     judge?: string;
     claim_value?: number | null;
@@ -2658,7 +2659,13 @@ function CadastrarProcessoModal({
   const [caseNumber, setCaseNumber] = useState(prefillData?.case_number || '');
   const [legalArea, setLegalArea] = useState(prefillData?.legal_area || '');
   const [actionType, setActionType] = useState(prefillData?.action_type || '');
+  // author e opposingParty representam SEMPRE os lados do processo
+  // (autor no polo ativo, reu no polo passivo). Quem e o cliente do
+  // escritorio e definido pela flag clientIsAuthor — o handleSubmit faz
+  // o swap para preencher legalCase.opposing_party corretamente.
+  const [author, setAuthor] = useState(prefillData?.author || '');
   const [opposingParty, setOpposingParty] = useState(prefillData?.opposing_party || '');
+  const [clientIsAuthor, setClientIsAuthor] = useState(true);
   const [court, setCourt] = useState(prefillData?.court || '');
   const [judge, setJudge] = useState(prefillData?.judge || '');
   const [claimValue, setClaimValue] = useState(prefillData?.claim_value ? String(prefillData.claim_value) : '');
@@ -2697,6 +2704,20 @@ function CadastrarProcessoModal({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Pre-preenche a busca/criacao de cliente com o nome da parte selecionada
+  // pelo toggle "escritorio representa Autor/Reu". Roda no mount (quando o
+  // prefillData chega do scraper) e cada vez que o usuario alterna.
+  // Deps intencionalmente so com clientIsAuthor: nao queremos re-fire quando
+  // o usuario edita o nome nos campos de Autor/Reu manualmente.
+  useEffect(() => {
+    const partyName = clientIsAuthor ? author : opposingParty;
+    if (!partyName) return;
+    setLeadSearch(partyName);
+    setNewLeadName(partyName);
+    setSelectedLead(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientIsAuthor]);
+
   // Máscara CNJ
   const handleCaseNumberChange = (val: string) => {
     const digits = val.replace(/\D/g, '').slice(0, 20);
@@ -2718,11 +2739,16 @@ function CadastrarProcessoModal({
     setSaving(true);
     setError('');
     try {
+      // Quem e o "outro lado" depende de quem o escritorio representa:
+      // - representa autor -> opposing_party = reu
+      // - representa reu   -> opposing_party = autor
+      const opposingPartyForApi = clientIsAuthor ? opposingParty : author;
+
       await api.post('/legal-cases/direct', {
         case_number: caseNumber.trim(),
         legal_area: legalArea || undefined,
         action_type: actionType || undefined,
-        opposing_party: opposingParty || undefined,
+        opposing_party: opposingPartyForApi || undefined,
         court: court || undefined,
         judge: judge || undefined,
         claim_value: claimValue ? parseFloat(claimValue) : undefined,
@@ -2782,7 +2808,7 @@ function CadastrarProcessoModal({
           <div className="rounded-xl border border-border bg-accent/20 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                <User size={11} /> Cliente / Parte Autora
+                <User size={11} /> Cliente / {clientIsAuthor ? 'Parte Autora' : 'Parte Ré'}
               </p>
               {/* Toggle */}
               <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-semibold">
@@ -3048,18 +3074,70 @@ function CadastrarProcessoModal({
               </div>
             </div>
 
-            {/* Parte Contrária */}
-            <div>
-              <label className={`${labelCls} flex items-center gap-1`}>
-                <Scale size={11} /> Parte Contrária
-              </label>
-              <input
-                type="text"
-                value={opposingParty}
-                onChange={e => setOpposingParty(e.target.value)}
-                className={inputCls}
-                placeholder="Nome do réu / reclamado"
-              />
+            {/* Partes do Processo + toggle de quem o escritorio representa */}
+            <div className="rounded-xl border border-border bg-accent/20 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Scale size={11} /> Partes do Processo
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground">Escritório representa:</span>
+                  <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setClientIsAuthor(true)}
+                      className={`px-3 py-1 transition-colors ${clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                    >
+                      Autor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClientIsAuthor(false)}
+                      className={`px-3 py-1 transition-colors ${!clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                    >
+                      Réu
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Campo: Autor */}
+              <div>
+                <label className={`${labelCls} flex items-center gap-1.5`}>
+                  <User size={11} /> Autor
+                  {clientIsAuthor && (
+                    <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[9px] font-bold uppercase tracking-wider">
+                      Cliente
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={author}
+                  onChange={e => setAuthor(e.target.value)}
+                  className={`${inputCls} ${clientIsAuthor ? 'border-primary/40 bg-primary/5' : ''}`}
+                  placeholder="Nome do autor / requerente / reclamante"
+                />
+              </div>
+
+              {/* Campo: Réu */}
+              <div>
+                <label className={`${labelCls} flex items-center gap-1.5`}>
+                  <Scale size={11} /> Réu
+                  {!clientIsAuthor && (
+                    <span className="px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[9px] font-bold uppercase tracking-wider">
+                      Cliente
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={opposingParty}
+                  onChange={e => setOpposingParty(e.target.value)}
+                  className={`${inputCls} ${!clientIsAuthor ? 'border-primary/40 bg-primary/5' : ''}`}
+                  placeholder="Nome do réu / requerido / reclamado"
+                />
+              </div>
             </div>
 
             {/* Vara + Juiz */}
@@ -4000,14 +4078,24 @@ function ProcessosPageContent() {
         // found=false ou already_registered=true — cai no fallback com o case_number da listagem
         setPrefillData({ case_number: item.case_number });
       } else {
-        const opposingParty = (data.parties || [])
-          .filter((p: any) => /r[eé]u|requerido|executado/i.test(p.role))
+        // Extrai autor(es) e reu(s) das partes. Regex separados — litisconsorcio e
+        // terminologia variam (autor/requerente/exequente/reclamante no polo ativo,
+        // reu/requerido/executado/reclamado/denunciado no polo passivo).
+        const parties = data.parties || [];
+        const authorNames = parties
+          .filter((p: any) => /autor|requerente|exequente|reclamante/i.test(p.role))
           .map((p: any) => p.name)
-          .join(', ') || '';
+          .join(', ');
+        const defendantNames = parties
+          .filter((p: any) => /r[eé]u|requerido|executado|reclamado|denunciado/i.test(p.role))
+          .map((p: any) => p.name)
+          .join(', ');
+
         const assuntoNotes = [
           data.subject ? `Assunto: ${data.subject}` : '',
-          ...(data.parties || []).slice(0, 6).map((p: any) => `${p.role}: ${p.name}`),
+          ...parties.slice(0, 6).map((p: any) => `${p.role}: ${p.name}`),
         ].filter(Boolean).join('\n');
+
         setPrefillData({
           case_number: data.case_number || item.case_number,
           legal_area: data.legal_area,
@@ -4018,7 +4106,8 @@ function ProcessosPageContent() {
           filed_at: data.filed_at,
           tracking_stage: data.tracking_stage || 'DISTRIBUIDO',
           notes: assuntoNotes,
-          opposing_party: opposingParty,
+          author: authorNames,
+          opposing_party: defendantNames,
         });
       }
     } catch {
