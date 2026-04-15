@@ -91,6 +91,7 @@ const K_VIEWS = 'processos.savedViews.v1';
 const K_COLUMNS = 'processos.tableColumns.v1';
 const K_SORT = 'processos.tableSort.v1';
 const K_DASHBOARD = 'processos.dashboardVisible.v1';
+const K_DISPLAY_VIEW = 'processos.displayView.v1';
 
 // ─── Filtros → serializável ──────────────────────────────────
 
@@ -193,5 +194,29 @@ export const loadDashboardVisible = (): boolean => {
 export const persistDashboardVisible = (visible: boolean) => {
   try {
     window.localStorage.setItem(K_DASHBOARD, String(visible));
+  } catch {}
+};
+
+// ─── Display view (kanban / tabela / agenda / clientes) ─────
+
+export type DisplayView = 'kanban' | 'tabela' | 'agenda' | 'clientes';
+
+const isDisplayView = (v: unknown): v is DisplayView =>
+  v === 'kanban' || v === 'tabela' || v === 'agenda' || v === 'clientes';
+
+export const loadDisplayView = (): DisplayView => {
+  if (typeof window === 'undefined') return 'kanban';
+  try {
+    const raw = window.localStorage.getItem(K_DISPLAY_VIEW);
+    if (raw && isDisplayView(raw)) return raw;
+    return 'kanban';
+  } catch {
+    return 'kanban';
+  }
+};
+
+export const persistDisplayView = (v: DisplayView) => {
+  try {
+    window.localStorage.setItem(K_DISPLAY_VIEW, v);
   } catch {}
 };

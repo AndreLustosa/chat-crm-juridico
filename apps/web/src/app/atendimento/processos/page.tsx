@@ -38,12 +38,15 @@ import {
   persistSort,
   loadDashboardVisible,
   persistDashboardVisible,
+  loadDisplayView,
+  persistDisplayView,
   DEFAULT_COLUMNS,
   COLUMN_LABELS,
   type SavedView,
   type TableColumnsState,
   type SortState,
   type SortField,
+  type DisplayView,
 } from './components/processosStorage';
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -3747,7 +3750,15 @@ function ProcessosPageContent() {
   const setSearchQuery = (v: string) => setFilters(f => ({ ...f, search: v }));
 
   const [view, setView] = useState<'active' | 'archived'>('active');
-  const [displayView, setDisplayView] = useState<'kanban' | 'tabela' | 'agenda' | 'clientes'>('kanban');
+  const [displayView, setDisplayViewState] = useState<DisplayView>('kanban');
+  // Hidrata preferência de view persistida após mount (evita hidration mismatch SSR)
+  useEffect(() => {
+    setDisplayViewState(loadDisplayView());
+  }, []);
+  const setDisplayView = useCallback((v: DisplayView) => {
+    setDisplayViewState(v);
+    persistDisplayView(v);
+  }, []);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState<LegalCase | null>(null);
@@ -4198,44 +4209,48 @@ function ProcessosPageContent() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* View toggle (kanban/tabela/agenda) — só para processos ativos */}
+            {/* View toggle (kanban / tabela / agenda / clientes) — só para processos ativos */}
             {view === 'active' && (
               <div className="flex rounded-lg border border-border overflow-hidden">
                 <button
                   onClick={() => setDisplayView('kanban')}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-colors ${
+                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1.5 transition-colors ${
                     displayView === 'kanban' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
                   }`}
-                  title="Kanban"
+                  title="Kanban — fluxo por etapa"
                 >
                   <LayoutGrid size={13} />
+                  <span className="hidden sm:inline">Kanban</span>
                 </button>
                 <button
                   onClick={() => setDisplayView('tabela')}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-colors border-l border-border ${
+                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1.5 transition-colors border-l border-border ${
                     displayView === 'tabela' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
                   }`}
-                  title="Tabela"
+                  title="Tabela — colunas ordenáveis e filtráveis"
                 >
                   <LayoutList size={13} />
+                  <span className="hidden sm:inline">Tabela</span>
                 </button>
                 <button
                   onClick={() => setDisplayView('agenda')}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-colors border-l border-border ${
+                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1.5 transition-colors border-l border-border ${
                     displayView === 'agenda' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
                   }`}
-                  title="Agenda (prazos e audiências)"
+                  title="Agenda — prazos e audiências por data"
                 >
                   <Calendar size={13} />
+                  <span className="hidden sm:inline">Agenda</span>
                 </button>
                 <button
                   onClick={() => setDisplayView('clientes')}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-colors border-l border-border ${
+                  className={`px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1.5 transition-colors border-l border-border ${
                     displayView === 'clientes' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
                   }`}
-                  title="Visão por cliente"
+                  title="Visão por cliente — processos agrupados por lead"
                 >
                   <User size={13} />
+                  <span className="hidden sm:inline">Clientes</span>
                 </button>
               </div>
             )}
