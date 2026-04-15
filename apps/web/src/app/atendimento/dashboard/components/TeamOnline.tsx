@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Users, Wifi, WifiOff } from 'lucide-react';
+import { Users, Wifi } from 'lucide-react';
 import api from '@/lib/api';
-import { io, Socket } from 'socket.io-client';
+import { useSocket } from '@/lib/SocketProvider';
 
 interface UserInfo {
   id: string;
@@ -20,6 +20,7 @@ const ROLE_LABELS: Record<string, string> = {
 export function TeamOnline() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const { socket } = useSocket();
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -48,33 +49,19 @@ export function TeamOnline() {
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  // Escutar eventos de presença em tempo real
+  // Escutar eventos de presença no socket compartilhado
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    if (!token) return;
+    if (!socket) return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || (apiUrl.startsWith('http') ? new URL(apiUrl).origin : apiUrl);
-    const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
-    const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || (isDev ? '/socket.io/' : '/api/socket.io/');
+    const onPresence = (data: { userId: string; online: boolean }) => {
+      setUsers(prev => prev.map(u =>
+        u.id === data.userId ? { ...u, online: data.online } : u
+      ).sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0) || a.name.localeCompare(b.name)));
+    };
 
-    let socket: Socket;
-    try {
-      socket = io(wsUrl, {
-        path: socketPath,
-        transports: ['polling', 'websocket'],
-        auth: { token },
-      });
-
-      socket.on('user_presence', (data: { userId: string; online: boolean }) => {
-        setUsers(prev => prev.map(u =>
-          u.id === data.userId ? { ...u, online: data.online } : u
-        ).sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0) || a.name.localeCompare(b.name)));
-      });
-
-      return () => { socket.disconnect(); };
-    } catch {}
-  }, []);
+    socket.on('user_presence', onPresence);
+    return () => { socket.off('user_presence', onPresence); };
+  }, [socket]);
 
   const onlineCount = users.filter(u => u.online).length;
 
@@ -96,17 +83,12 @@ export function TeamOnline() {
         <div className="space-y-1.5">
           {users.map(user => (
             <div key={user.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-accent/30 transition-colors">
-              {/* Dot de presença */}
               <div className={`w-2 h-2 rounded-full shrink-0 ${user.online ? 'bg-emerald-500' : 'bg-gray-600'}`} />
-
-              {/* Avatar */}
               <div className="w-7 h-7 rounded-full bg-accent border border-border flex items-center justify-center shrink-0">
                 <span className="text-[10px] font-bold text-muted-foreground">
                   {user.name[0]?.toUpperCase() || '?'}
                 </span>
               </div>
-
-              {/* Info */}
               <div className="flex-1 min-w-0">
                 <p className={`text-[11px] font-semibold truncate ${user.online ? 'text-foreground' : 'text-muted-foreground'}`}>
                   {user.name}
@@ -115,8 +97,6 @@ export function TeamOnline() {
                   {user.roles.map(r => ROLE_LABELS[r] || r).join(', ')}
                 </p>
               </div>
-
-              {/* Status */}
               <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
                 user.online ? 'bg-emerald-500/15 text-emerald-400' : 'bg-gray-500/10 text-gray-500'
               }`}>

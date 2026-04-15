@@ -16,8 +16,8 @@ import {
   LayoutGrid, CalendarDays as CalendarViewIcon, CheckSquare, List,
   BookOpen, ExternalLink,
 } from 'lucide-react';
-import { io } from 'socket.io-client';
 import api, { API_BASE_URL } from '@/lib/api';
+import { useSocket } from '@/lib/SocketProvider';
 import { showError, showSuccess } from '@/lib/toast';
 import { playNotificationSound } from '@/lib/notificationSounds';
 import { AvailabilityPicker } from '@/components/AvailabilityPicker';
@@ -133,22 +133,6 @@ const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 function getEventColor(type: string) {
   return EVENT_TYPES.find(t => t.id === type)?.color || '#6b7280';
-}
-
-function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  const apiUrl = API_BASE_URL;
-  if (apiUrl.startsWith('http')) {
-    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
-  }
-  return apiUrl;
-}
-
-function getSocketPath(): string {
-  if (process.env.NEXT_PUBLIC_SOCKET_PATH) return process.env.NEXT_PUBLIC_SOCKET_PATH;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-  const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
-  return isDev ? '/socket.io/' : '/api/socket.io/';
 }
 
 function toLocalDateTime(isoStr: string): string {
@@ -319,6 +303,7 @@ function MiniCalendar({ onDateSelect }: { onDateSelect: (dateStr: string) => voi
 
 export default function AgendaPage() {
   const router = useRouter();
+  const { socket: sharedSocket } = useSocket();
 
   // Lê o tab da URL no client side sem useSearchParams (evita prerender error do Next.js)
   const [activeTab, setActiveTab] = useState<'calendar' | 'tasks'>('calendar');
@@ -704,27 +689,9 @@ export default function AgendaPage() {
     }
   }, [filterUserId, showAllUsers, fetchEvents]);
 
-  // ─── Socket.io Real-Time ─────────────────────────────
+  // ─── Socket.io Real-Time (shared socket from SocketProvider) ─────
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;  // sem token, não tenta conectar
-
-    const wsUrl = getWsUrl();
-    const socket = io(wsUrl, {
-      path: getSocketPath(),
-      transports: ['polling', 'websocket'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      timeout: 10000,
-      auth: { token },  // necessário para o middleware JWT do socket
-    });
-
-    socket.on('connect', () => {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-        if (payload?.sub) socket.emit('join_user', payload.sub);
-      } catch {}
-    });
+    if (!sharedSocket) return;
 
     const handleCalendarUpdate = () => {
       if (rangeRef.current) fetchEvents(rangeRef.current.start, rangeRef.current.end);
@@ -736,15 +703,14 @@ export default function AgendaPage() {
       setTimeout(() => setReminderToast(null), 10000);
     };
 
-    socket.on('calendar_update', handleCalendarUpdate);
-    socket.on('calendar_reminder', handleCalendarReminder);
+    sharedSocket.on('calendar_update', handleCalendarUpdate);
+    sharedSocket.on('calendar_reminder', handleCalendarReminder);
 
     return () => {
-      socket.off('calendar_update', handleCalendarUpdate);
-      socket.off('calendar_reminder', handleCalendarReminder);
-      socket.disconnect();
+      sharedSocket.off('calendar_update', handleCalendarUpdate);
+      sharedSocket.off('calendar_reminder', handleCalendarReminder);
     };
-  }, [fetchEvents]);
+  }, [sharedSocket, fetchEvents]);
 
   // ─── Modal Handlers ─────────────────────────────────
 

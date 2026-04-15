@@ -12,6 +12,7 @@ import api from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
+import { useSocket } from '@/lib/SocketProvider';
 import dynamic from 'next/dynamic';
 
 const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
@@ -1814,6 +1815,7 @@ function CaseDetailPanel({
 
 export default function AdvogadoPage() {
   const router = useRouter();
+  const { socket } = useSocket();
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [incoming, setIncoming] = useState<IncomingLead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1949,43 +1951,19 @@ export default function AdvogadoPage() {
 
   // WebSocket: atualização em tempo real quando petição muda de status
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-    if (!token) return;
+    if (!socket) return;
 
-    let socket: any;
-    const initSocket = async () => {
-      const { io } = await import('socket.io-client');
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || '';
-      socket = io(wsUrl, {
-        path: '/socket.io/',
-        transports: ['polling', 'websocket'],
-        auth: { token },
-        reconnection: true,
-      });
+    const onPetitionStatusChange = () => { fetchCases(true); };
+    const onPetitionCreated = () => { fetchCases(true); };
 
-      socket.on('connect', () => {
-        const payload = token.split('.')[1];
-        if (payload) {
-          try {
-            const decoded = JSON.parse(atob(payload));
-            if (decoded.sub) socket.emit('join_user', decoded.sub);
-          } catch {}
-        }
-      });
+    socket.on('petition_status_change', onPetitionStatusChange);
+    socket.on('petition_created', onPetitionCreated);
 
-      // Petição mudou de status → refresh silencioso
-      socket.on('petition_status_change', () => {
-        fetchCases(true);
-      });
-
-      socket.on('petition_created', () => {
-        fetchCases(true);
-      });
+    return () => {
+      socket.off('petition_status_change', onPetitionStatusChange);
+      socket.off('petition_created', onPetitionCreated);
     };
-
-    initSocket();
-    return () => { socket?.disconnect(); };
-  }, [fetchCases]);
+  }, [socket, fetchCases]);
 
   const executeMoveToStage = async (caseId: string, newStage: string) => {
     // Optimistic update

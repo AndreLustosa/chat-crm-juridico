@@ -1,34 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import api from '@/lib/api';
-import { playNotificationSound } from '@/lib/notificationSounds';
+import { useSocket } from '@/lib/SocketProvider';
+import { decodeUserId } from '@/lib/socketConfig';
 import { showError } from '@/lib/toast';
-
-function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
-  if (apiUrl.startsWith('http')) {
-    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
-  }
-  return typeof window !== 'undefined' ? window.location.origin : '';
-}
-
-function getSocketPath(): string {
-  if (process.env.NEXT_PUBLIC_SOCKET_PATH) return process.env.NEXT_PUBLIC_SOCKET_PATH;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-  const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
-  return isDev ? '/socket.io/' : '/api/socket.io/';
-}
-
-function decodeUserId(): string | null {
-  if (typeof window === 'undefined') return null;
-  const token = localStorage.getItem('token');
-  if (!token) return null;
-  try {
-    return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub || null;
-  } catch { return null; }
-}
 
 interface UseChatSocketResult {
   messages: any[];
@@ -52,8 +28,8 @@ interface UseChatSocketResult {
 }
 
 /**
- * Hook que encapsula toda a logica de conexao, fetch de dados e eventos do socket.
- * Extrai ~120 linhas do page.tsx do chat.
+ * Hook que encapsula toda a logica de fetch de dados e eventos do socket.
+ * Usa o socket compartilhado do SocketProvider (sem io() local).
  */
 export function useChatSocket(leadId: string): UseChatSocketResult {
   const router = useRouter();
@@ -70,13 +46,16 @@ export function useChatSocket(leadId: string): UseChatSocketResult {
   const [loading, setLoading] = useState(true);
   const [currentUserId] = useState<string | null>(decodeUserId);
 
+  const { socket: sharedSocket } = useSocket();
   const socketRef = useRef<Socket | null>(null);
 
+  // Sincroniza ref para componentes que consomem socketRef
+  useEffect(() => { socketRef.current = sharedSocket; }, [sharedSocket]);
+
+  // Fetch de dados + listeners de conversa
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) { router.push('/atendimento/login'); return; }
-
-    const wsUrl = getWsUrl();
 
     const fetchData = async () => {
       try {
@@ -109,60 +88,43 @@ export function useChatSocket(leadId: string): UseChatSocketResult {
             })
             .catch(() => {});
 
-          socketRef.current = io(wsUrl, {
-            path: getSocketPath(),
-            transports: ['polling', 'websocket'],
-            reconnection: true,
-            reconnectionAttempts: Infinity,
-            reconnectionDelay: 1000,
-            timeout: 10000,
-            auth: { token: localStorage.getItem('token') || '' },
-          });
+          // Registrar listeners no socket compartilhado
+          if (sharedSocket) {
+            sharedSocket.emit('join_conversation', convo.id);
 
-          socketRef.current.on('connect', () => {
-            socketRef.current?.emit('join_conversation', convo.id);
-            if (currentUserId) socketRef.current?.emit('join_user', currentUserId);
-          });
+            // Som NÃO toca aqui — SocketProvider já toca via incoming_message_notification
 
-          // Backend já filtra por atribuição — se chegou, é para mim.
-          socketRef.current.on('incoming_message_notification', (data: any) => {
-            if (data?.conversationId !== convo.id) {
-              playNotificationSound();
-            }
-          });
-
-          socketRef.current.on('newMessage', (msg: any) => {
-            const addMsg = () => setMessages(prev => {
-              const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
-              if (exists) return prev;
-              return [...prev, msg];
-            });
-            if (msg.direction === 'in') {
-              playNotificationSound();
-              api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
-            }
-            // Áudio com mídia pronta: pré-busca o blob para exibir já reproduzível
-            if (msg.type === 'audio' && msg.media?.s3_key) {
-              import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
-                const timeout = setTimeout(addMsg, 8000); // garante exibição mesmo se pré-fetch demorar
-                preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+            sharedSocket.on('newMessage', (msg: any) => {
+              const addMsg = () => setMessages(prev => {
+                const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
+                if (exists) return prev;
+                return [...prev, msg];
               });
-            } else {
-              addMsg();
-            }
-          });
+              if (msg.direction === 'in') {
+                api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
+              }
+              if (msg.type === 'audio' && msg.media?.s3_key) {
+                import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
+                  const timeout = setTimeout(addMsg, 8000);
+                  preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+                });
+              } else {
+                addMsg();
+              }
+            });
 
-          socketRef.current.on('messageUpdate', (updatedMsg: any) => {
-            setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
-          });
+            sharedSocket.on('messageUpdate', (updatedMsg: any) => {
+              setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
+            });
 
-          socketRef.current.on('messageReaction', (data: { messageId: string; reactions: any[] }) => {
-            setMessages(prev => prev.map((m: any) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
-          });
+            sharedSocket.on('messageReaction', (data: { messageId: string; reactions: any[] }) => {
+              setMessages(prev => prev.map((m: any) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
+            });
 
-          socketRef.current.on('contact_presence', (data: { presence: string }) => {
-            setContactPresence(data.presence);
-          });
+            sharedSocket.on('contact_presence', (data: { presence: string }) => {
+              setContactPresence(data.presence);
+            });
+          }
         }
       } catch (e: any) {
         console.error('Erro ao inicializar chat:', e);
@@ -174,18 +136,14 @@ export function useChatSocket(leadId: string): UseChatSocketResult {
 
     fetchData();
     return () => {
-      const s = socketRef.current;
-      if (s) {
-        s.off('connect');
-        s.off('incoming_message_notification');
-        s.off('newMessage');
-        s.off('messageUpdate');
-        s.off('messageReaction');
-        s.off('contact_presence');
-        s.disconnect();
+      if (sharedSocket) {
+        sharedSocket.off('newMessage');
+        sharedSocket.off('messageUpdate');
+        sharedSocket.off('messageReaction');
+        sharedSocket.off('contact_presence');
       }
     };
-  }, [leadId, router, currentUserId]);
+  }, [leadId, router, currentUserId, sharedSocket]);
 
   return {
     messages,

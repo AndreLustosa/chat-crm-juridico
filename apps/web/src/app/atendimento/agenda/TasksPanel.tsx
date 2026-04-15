@@ -7,8 +7,8 @@ import {
   CheckSquare, Filter, RotateCcw, CalendarDays, Sparkles,
   Zap, TrendingDown, LayoutGrid, List, Printer,
 } from 'lucide-react';
-import { io } from 'socket.io-client';
 import api from '@/lib/api';
+import { useSocket } from '@/lib/SocketProvider';
 import { showError, showSuccess, showInfo } from '@/lib/toast';
 import { TaskDrawer } from './TaskDrawer';
 import { KanbanBoard } from './KanbanBoard';
@@ -84,6 +84,7 @@ function formatDue(due: string | null) {
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export function TasksPanel() {
+  const { socket } = useSocket();
   const { role, isAdmin, isAdvogado } = useRole();
   const canViewAll = isAdmin || isAdvogado;
 
@@ -185,32 +186,20 @@ export function TasksPanel() {
     api.get('/tasks/workload').then(r => setWorkload(r.data || [])).catch(() => {});
   }, [fetchStats]);
 
-  // Sprint 4: Socket.IO — alertas de tarefas vencidas em tempo real
+  // Sprint 4: Socket.IO — alertas de tarefas vencidas em tempo real (shared socket)
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL
-        || (apiUrl.startsWith('http') ? new URL(apiUrl).origin : apiUrl);
-      const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
-      const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || (isDev ? '/socket.io/' : '/api/socket.io/');
-      const socket = io(wsUrl, {
-        path: socketPath,
-        transports: ['polling', 'websocket'],
-        auth: { token },
+    if (!socket) return;
+    const handler = (data: any) => {
+      setOverdueAlerts(prev => {
+        if (prev.some(a => a.taskId === data.taskId)) return prev;
+        return [data, ...prev].slice(0, 5);
       });
-      socket.on('task_overdue_alert', (data: any) => {
-        setOverdueAlerts(prev => {
-          if (prev.some(a => a.taskId === data.taskId)) return prev;
-          return [data, ...prev].slice(0, 5);
-        });
-        if (data.level === 'critical') showError(`🚨 Tarefa crítica em atraso: ${data.title}`);
-        else if (data.level === 'urgent') showInfo(`⚠️ Tarefa urgente vencida: ${data.title}`);
-      });
-      return () => { socket.disconnect(); };
-    } catch {}
-  }, []);
+      if (data.level === 'critical') showError(`🚨 Tarefa crítica em atraso: ${data.title}`);
+      else if (data.level === 'urgent') showInfo(`⚠️ Tarefa urgente vencida: ${data.title}`);
+    };
+    socket.on('task_overdue_alert', handler);
+    return () => { socket.off('task_overdue_alert', handler); };
+  }, [socket]);
 
   useEffect(() => {
     setPage(1);

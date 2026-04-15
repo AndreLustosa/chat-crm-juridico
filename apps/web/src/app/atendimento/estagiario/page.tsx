@@ -10,6 +10,7 @@ import {
   LayoutGrid, List, GripVertical, Eye, Pencil, BadgeCheck, Stamp,
 } from 'lucide-react';
 import api from '@/lib/api';
+import { useSocket } from '@/lib/SocketProvider';
 
 // ─── Tipos (Lista / Dashboard) ─────────────────────────────────
 
@@ -534,6 +535,7 @@ function KanbanPetitionCard({
 
 function KanbanView() {
   const router = useRouter();
+  const { socket } = useSocket();
   const [data, setData] = useState<KanbanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -585,38 +587,16 @@ function KanbanView() {
 
   // WebSocket: refresh quando petição muda de status (devolvida/aprovada)
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-    if (!token) return;
+    if (!socket) return;
 
-    let socket: any;
-    const initSocket = async () => {
-      const { io } = await import('socket.io-client');
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || '';
-      socket = io(wsUrl, {
-        path: '/socket.io/',
-        transports: ['polling', 'websocket'],
-        auth: { token },
-        reconnection: true,
-      });
+    const onPetitionStatusChange = () => { fetchKanban(); };
 
-      socket.on('connect', () => {
-        const payload = token.split('.')[1];
-        if (payload) {
-          try {
-            const decoded = JSON.parse(atob(payload));
-            if (decoded.sub) socket.emit('join_user', decoded.sub);
-          } catch {}
-        }
-      });
+    socket.on('petition_status_change', onPetitionStatusChange);
 
-      socket.on('petition_status_change', () => {
-        fetchKanban();
-      });
+    return () => {
+      socket.off('petition_status_change', onPetitionStatusChange);
     };
-
-    initSocket();
-    return () => { socket?.disconnect(); };
-  }, [fetchKanban]);
+  }, [socket, fetchKanban]);
 
   const handleDrop = async (targetColumn: KanbanColumnKey) => {
     if (!draggingId || targetColumn !== 'EM_REVISAO') return;

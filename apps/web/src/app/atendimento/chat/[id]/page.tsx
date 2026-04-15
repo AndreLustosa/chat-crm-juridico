@@ -9,30 +9,12 @@ import { EmojiPickerButton } from '@/components/EmojiPickerButton';
 import { SophIAButton } from '@/components/SophIAButton';
 import { LinkPreview } from '@/components/LinkPreview';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
-import { playNotificationSound } from '@/lib/notificationSounds';
+import { useSocket } from '@/lib/SocketProvider';
 import api from '@/lib/api';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import { formatPhone } from '@/lib/utils';
 import { showError } from '@/lib/toast';
 import { getDateKey, formatDateLabel, formatTime as formatTimeUtil, getInitial as getInitialUtil, isEmojiOnly, extractFirstUrl, getDocLabel } from '@/lib/chatUtils';
-
-function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
-  if (apiUrl.startsWith('http')) {
-    try { return new URL(apiUrl).origin; } catch { /* fall through */ }
-  }
-  return typeof window !== 'undefined' ? window.location.origin : '';
-}
-
-/** Em dev o socket.io está diretamente em /socket.io/ (sem proxy).
- *  Em produção o Nginx proxia /api/ → API, então o path é /api/socket.io/ */
-function getSocketPath(): string {
-  if (process.env.NEXT_PUBLIC_SOCKET_PATH) return process.env.NEXT_PUBLIC_SOCKET_PATH;
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-  const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
-  return isDev ? '/socket.io/' : '/api/socket.io/';
-}
 
 function StatusIcon({ status, isOut }: { status: string; isOut: boolean }) {
   if (!isOut) return null;
@@ -83,6 +65,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     } catch { return null; }
   });
 
+  // Shared socket from SocketProvider (handles connect, join_user, sound, notifications)
+  const { socket: sharedSocket } = useSocket();
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -90,6 +75,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const dragCounterRef = useRef(0);
   const lastPresenceSentRef = useRef(0);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep socketRef in sync with the shared socket (legacy refs may read socketRef.current)
+  useEffect(() => { socketRef.current = sharedSocket; }, [sharedSocket]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -432,8 +420,6 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     const token = localStorage.getItem('token');
     if (!token) { router.push('/atendimento/login'); return; }
 
-    const wsUrl = getWsUrl();
-
     const fetchData = async () => {
       try {
         const convoRes = await api.get(`/conversations/lead/${params.id}`);
@@ -474,72 +460,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
             })
             .catch(() => { /* silently ignore sync errors */ });
 
-          socketRef.current = io(wsUrl, {
-            path: getSocketPath(),
-            transports: ['polling', 'websocket'],
-            reconnection: true,
-            reconnectionAttempts: Infinity,
-            reconnectionDelay: 1000,
-            timeout: 10000,
-            auth: { token: localStorage.getItem('token') || '' },
-          });
-
-          socketRef.current.on('connect', () => {
-            socketRef.current?.emit('join_conversation', convo.id);
-            // Join personal user room so incoming_message_notification reaches this page too
-            if (currentUserId) socketRef.current?.emit('join_user', currentUserId);
-          });
-
-          // Som para mensagens de OUTRAS conversas (backend já filtra por atribuição).
-          // Mensagens da conversa atual são cobertas pelo handler 'newMessage'.
-          socketRef.current.on('incoming_message_notification', (data: any) => {
-            if (data?.conversationId !== convo.id) {
-              playNotificationSound();
-            }
-          });
-
-          socketRef.current.on('newMessage', (msg: any) => {
-            const addMsg = () => setMessages(prev => {
-              const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
-              if (exists) return prev;
-              return [...prev, msg];
-            });
-            if (msg.direction === 'in') {
-              playNotificationSound();
-              // Auto mark-read since operator is viewing the chat
-              api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
-            }
-            // Refetch memória após cada mensagem (IA: 3s, humano: 18s para cobrir debounce)
-            const memDelay = (msg.skill_id || msg.skill) ? 3000 : 18000;
-            setTimeout(() => {
-              api.get(`/leads/${convo.lead.id}`).then((r) => {
-                if (r.data?.memory) {
-                  setLead((prev: any) => ({ ...prev, memory: r.data.memory }));
-                }
-              }).catch(() => {});
-            }, memDelay);
-            // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
-            if (msg.type === 'audio' && msg.media?.s3_key) {
-              import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
-                const timeout = setTimeout(addMsg, 8000);
-                preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
-              });
-            } else {
-              addMsg();
-            }
-          });
-
-          socketRef.current.on('messageUpdate', (updatedMsg: any) => {
-            setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
-          });
-
-          socketRef.current.on('messageReaction', (data: { messageId: string; reactions: any[] }) => {
-            setMessages(prev => prev.map((m: any) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
-          });
-
-          socketRef.current.on('contact_presence', (data: { presence: string }) => {
-            setContactPresence(data.presence);
-          });
+          // Socket listeners are registered in a separate effect that depends on sharedSocket + convoId.
         }
       } catch (e: any) {
         // 401 handled globally by api.ts interceptor
@@ -549,19 +470,79 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
     fetchData();
     return () => {
-      const s = socketRef.current;
-      if (s) {
-        s.off('connect');
-        s.off('incoming_message_notification');
-        s.off('newMessage');
-        s.off('messageUpdate');
-        s.off('messageReaction');
-        s.off('contact_presence');
-        s.disconnect();
-      }
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
     };
   }, [params.id, router]);
+
+  // ── Socket listeners via shared socket ──────────────────────────────────
+  // Depends on sharedSocket (from SocketProvider) and convoId (set by fetchData above).
+  // SocketProvider already handles connect, join_user, sound for incoming_message_notification.
+  useEffect(() => {
+    if (!sharedSocket || !convoId) return;
+
+    // Join the conversation room (re-emitted on reconnect via SocketProvider connect)
+    sharedSocket.emit('join_conversation', convoId);
+
+    // Re-join conversation room on reconnect
+    const handleConnect = () => {
+      sharedSocket.emit('join_conversation', convoId);
+    };
+    sharedSocket.on('connect', handleConnect);
+
+    const handleNewMessage = (msg: any) => {
+      const addMsg = () => setMessages(prev => {
+        const exists = prev.some((m: any) => m.id === msg.id || (m.external_message_id && m.external_message_id === msg.external_message_id));
+        if (exists) return prev;
+        return [...prev, msg];
+      });
+      if (msg.direction === 'in') {
+        // Auto mark-read since operator is viewing the chat
+        api.post(`/conversations/${convoId}/mark-read`).catch(() => {});
+      }
+      // Refetch memória após cada mensagem (IA: 3s, humano: 18s para cobrir debounce)
+      const memDelay = (msg.skill_id || msg.skill) ? 3000 : 18000;
+      setTimeout(() => {
+        api.get(`/leads/${lead?.id}`).then((r: any) => {
+          if (r.data?.memory) {
+            setLead((prev: any) => ({ ...prev, memory: r.data.memory }));
+          }
+        }).catch(() => {});
+      }, memDelay);
+      // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
+      if (msg.type === 'audio' && msg.media?.s3_key) {
+        import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
+          const timeout = setTimeout(addMsg, 8000);
+          preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });
+        });
+      } else {
+        addMsg();
+      }
+    };
+    sharedSocket.on('newMessage', handleNewMessage);
+
+    const handleMessageUpdate = (updatedMsg: any) => {
+      setMessages(prev => prev.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
+    };
+    sharedSocket.on('messageUpdate', handleMessageUpdate);
+
+    const handleMessageReaction = (data: { messageId: string; reactions: any[] }) => {
+      setMessages(prev => prev.map((m: any) => m.id === data.messageId ? { ...m, reactions: data.reactions } : m));
+    };
+    sharedSocket.on('messageReaction', handleMessageReaction);
+
+    const handleContactPresence = (data: { presence: string }) => {
+      setContactPresence(data.presence);
+    };
+    sharedSocket.on('contact_presence', handleContactPresence);
+
+    return () => {
+      sharedSocket.off('connect', handleConnect);
+      sharedSocket.off('newMessage', handleNewMessage);
+      sharedSocket.off('messageUpdate', handleMessageUpdate);
+      sharedSocket.off('messageReaction', handleMessageReaction);
+      sharedSocket.off('contact_presence', handleContactPresence);
+    };
+  }, [sharedSocket, convoId, lead?.id]);
 
   // Smart scroll: so auto-scroll se o usuario esta perto do final (< 150px).
   // Evita perder posicao ao ler mensagens antigas quando chega uma nova.

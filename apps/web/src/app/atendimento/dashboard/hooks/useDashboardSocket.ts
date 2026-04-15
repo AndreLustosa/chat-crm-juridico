@@ -1,20 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useSocket } from '@/lib/SocketProvider';
 import type { DashboardData } from '../types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
 /**
- * Connects to the dashboard socket room and listens for incremental updates.
- * Falls back to polling every 5 minutes if the socket disconnects.
+ * Listens for dashboard updates on the shared socket.
+ * Falls back to polling every 5 minutes if socket is not connected.
  */
 export function useDashboardSocket(
   onUpdate: (partial: Partial<DashboardData>) => void,
   refetch: () => void,
 ) {
-  const socketRef = useRef<Socket | null>(null);
+  const { socket, connected } = useSocket();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startPolling = useCallback(() => {
@@ -30,33 +28,26 @@ export function useDashboardSocket(
   }, []);
 
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    if (!token) { startPolling(); return; }
+    if (!socket) { startPolling(); return; }
 
-    const socket = io(API_URL, {
-      auth: { token },
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionDelay: 5000,
-    });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
+    if (connected) {
       socket.emit('dashboard:join');
       stopPolling();
-    });
-
-    socket.on('dashboard:update', (data: Partial<DashboardData>) => {
-      onUpdate(data);
-    });
-
-    socket.on('disconnect', () => {
+    } else {
       startPolling();
-    });
+    }
+
+    const onDashboardUpdate = (data: Partial<DashboardData>) => {
+      onUpdate(data);
+    };
+
+    socket.on('dashboard:update', onDashboardUpdate);
+    socket.on('disconnect', startPolling);
 
     return () => {
-      socket.disconnect();
+      socket.off('dashboard:update', onDashboardUpdate);
+      socket.off('disconnect', startPolling);
       stopPolling();
     };
-  }, [onUpdate, startPolling, stopPolling]);
+  }, [socket, connected, onUpdate, startPolling, stopPolling]);
 }

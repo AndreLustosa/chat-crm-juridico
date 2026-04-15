@@ -3,10 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, Calendar, Scale, UserCheck, Download, CheckSquare, Square, X as XIcon, LayoutList, Columns, Phone, Mail, Tag, Clock, ChevronRight, Copy, Send, BarChart2, TrendingUp, AlertCircle, Briefcase } from 'lucide-react';
-import { io } from 'socket.io-client';
-
-function getWsUrl() { return typeof window !== 'undefined' ? window.location.origin : ''; }
-function getSocketPath() { return process.env.NEXT_PUBLIC_SOCKET_PATH ?? '/socket.io/'; }
+import { useSocket } from '@/lib/SocketProvider';
 import api, { API_BASE_URL } from '@/lib/api';
 import { formatPhone } from '@/lib/utils';
 import { CRM_STAGES, normalizeStage, findStage } from '@/lib/crmStages';
@@ -1083,6 +1080,7 @@ function CrmAnalyticsPanel({ leads, onClose }: { leads: CrmLead[]; onClose: () =
 
 export default function CrmPage() {
   const router = useRouter();
+  const { socket } = useSocket();
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1226,42 +1224,36 @@ export default function CrmPage() {
       if (document.visibilityState === 'visible') fetchLeads(true);
     }, 30_000);
 
-    // Decode userId para join_user
-    let myId: string | null = null;
-    try {
-      let b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      while (b64.length % 4) b64 += '=';
-      myId = JSON.parse(atob(b64)).sub || null;
-    } catch { /* ignora */ }
-
-    // Socket: atualiza o CRM em tempo real quando há novos leads/mensagens
-    const socket = io(getWsUrl(), {
-      path: getSocketPath(),
-      transports: ['polling', 'websocket'],
-      auth: { token },
-    });
-    // Entrar no room user:${myId} para receber notificações direcionadas
-    socket.on('connect', () => {
-      if (myId) socket.emit('join_user', myId);
-    });
-    socket.on('inboxUpdate', () => {
-      if (document.visibilityState === 'visible') fetchLeads(true);
-    });
-    socket.on('incoming_message_notification', (data: { contactName?: string }) => {
-      if (document.visibilityState === 'visible') {
-        fetchLeads(true);
-        if (data?.contactName) showSuccess(`Nova mensagem de ${data.contactName}`);
-      }
-    });
-
     const onLogout = () => router.push('/atendimento/login');
     window.addEventListener('auth:logout', onLogout);
     return () => {
       clearInterval(interval);
-      socket.disconnect();
       window.removeEventListener('auth:logout', onLogout);
     };
   }, [router, fetchLeads]);
+
+  // Socket: atualiza o CRM em tempo real quando há novos leads/mensagens
+  useEffect(() => {
+    if (!socket) return;
+
+    const onInboxUpdate = () => {
+      if (document.visibilityState === 'visible') fetchLeads(true);
+    };
+    const onIncomingMessage = (data: { contactName?: string }) => {
+      if (document.visibilityState === 'visible') {
+        fetchLeads(true);
+        if (data?.contactName) showSuccess(`Nova mensagem de ${data.contactName}`);
+      }
+    };
+
+    socket.on('inboxUpdate', onInboxUpdate);
+    socket.on('incoming_message_notification', onIncomingMessage);
+
+    return () => {
+      socket.off('inboxUpdate', onInboxUpdate);
+      socket.off('incoming_message_notification', onIncomingMessage);
+    };
+  }, [socket, fetchLeads]);
 
   // Fallback global: garante que o estado de drag é limpo sempre que o drag terminar,
   // independentemente de onde o usuário soltou o card (fixed overlay, fora da janela, etc.)
