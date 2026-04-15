@@ -3,6 +3,40 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, User } from '@crm/shared';
 import * as argon2 from 'argon2';
 
+/**
+ * Normaliza valores legados de role (nomes de departamento em PT-BR, plurais,
+ * variações de acentuação) para o enum canônico usado pelo sistema de permissões.
+ *
+ * Motivação: historicamente o formulário de usuários salvava o nome do
+ * departamento como role (ex: "Advogados", "Estagiário", "Atendente Comercial").
+ * Isso quebrava todos os checks de permissão (`roles.includes('ADVOGADO')` etc.).
+ * Essa camada garante que, independente do que chegue via API, o banco só
+ * receba os 6 enums canônicos suportados por useRole.ts.
+ */
+const CANONICAL_ROLES = ['ADMIN', 'ADVOGADO', 'OPERADOR', 'COMERCIAL', 'ESTAGIARIO', 'FINANCEIRO'] as const;
+type CanonicalRole = typeof CANONICAL_ROLES[number];
+
+function normalizeRole(raw: string): CanonicalRole {
+  if (!raw) return 'OPERADOR';
+  const upper = raw.toString().toUpperCase().trim();
+  if (upper === 'ADMIN') return 'ADMIN';
+  if (upper === 'ADVOGADO' || upper === 'ADVOGADOS') return 'ADVOGADO';
+  if (upper === 'OPERADOR' || upper === 'OPERADORES') return 'OPERADOR';
+  if (upper === 'COMERCIAL' || upper === 'ATENDENTE COMERCIAL') return 'COMERCIAL';
+  if (upper === 'ESTAGIARIO' || upper === 'ESTAGIÁRIO' || upper === 'ESTAGIARIOS' || upper === 'ESTAGIÁRIOS') return 'ESTAGIARIO';
+  if (upper === 'FINANCEIRO') return 'FINANCEIRO';
+  return 'OPERADOR'; // fallback seguro
+}
+
+function normalizeRoles(roles: string[] | undefined | null, legacyRole?: string): CanonicalRole[] {
+  const source = (roles && roles.length > 0 ? roles : legacyRole ? [legacyRole] : []).filter(Boolean);
+  if (source.length === 0) return ['OPERADOR'];
+  const normalized = source.map(normalizeRole);
+  // Dedup mantendo ordem
+  const seen = new Set<CanonicalRole>();
+  return normalized.filter(r => (seen.has(r) ? false : (seen.add(r), true)));
+}
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -76,22 +110,27 @@ export class UsersService {
     }
   }
 
-  async create(data: { name: string; email: string; password: string; role: string; tenant_id?: string; inboxIds?: string[]; phone?: string }): Promise<Omit<User, 'password_hash'>> {
+  async create(data: { name: string; email: string; password: string; role?: string; roles?: string[]; tenant_id?: string; inboxIds?: string[]; specialties?: string[]; phone?: string; oab_number?: string; oab_uf?: string }): Promise<Omit<User, 'password_hash'>> {
     const password_hash = await argon2.hash(data.password);
+    // Normaliza para o enum canônico. Aceita tanto `roles[]` (forma nova) quanto `role` (legado).
+    const normalizedRoles = normalizeRoles(data.roles, data.role);
     const user = await this.prisma.user.create({
       data: {
         name: data.name,
         email: data.email,
         phone: data.phone || null,
         password_hash,
-        roles: data.role ? [data.role] : ['OPERADOR'],
+        roles: normalizedRoles,
+        specialties: data.specialties ?? [],
+        oab_number: data.oab_number || null,
+        oab_uf: data.oab_uf || null,
         tenant_id: data.tenant_id,
         inboxes: data.inboxIds ? { connect: data.inboxIds.map(id => ({ id })) } : undefined
       },
       include: { inboxes: { select: { id: true, name: true } } }
     });
-    // Auto-sync department based on role
-    await this.syncSector(user.id, data.role);
+    // Auto-sync department based on primary role
+    await this.syncSector(user.id, normalizedRoles[0]);
     const { password_hash: _, ...result } = user;
     return result as any;
   }
@@ -101,11 +140,11 @@ export class UsersService {
     const updateData: Prisma.UserUpdateInput = {};
     if (data.name) updateData.name = data.name;
     if (data.email) updateData.email = data.email;
-    // Multi-role: aceita roles[] (array) OU role (string legado)
-    if (data.roles && data.roles.length > 0) {
-      (updateData as any).roles = { set: data.roles };
-    } else if (data.role) {
-      (updateData as any).roles = { set: [data.role] };
+    // Multi-role: aceita roles[] (array) OU role (string legado). Sempre normaliza p/ enum canônico.
+    let normalizedRoles: CanonicalRole[] | undefined;
+    if ((data.roles && data.roles.length > 0) || data.role) {
+      normalizedRoles = normalizeRoles(data.roles, data.role);
+      (updateData as any).roles = { set: normalizedRoles };
     }
     if (data.phone !== undefined) updateData.phone = data.phone || null;
     if (data.password) updateData.password_hash = await argon2.hash(data.password);
@@ -124,9 +163,9 @@ export class UsersService {
       data: updateData,
       include: { inboxes: { select: { id: true, name: true } } }
     });
-    // Auto-sync department when role changes
-    if (data.role) {
-      await this.syncSector(id, data.role);
+    // Auto-sync department when primary role changes
+    if (normalizedRoles && normalizedRoles.length > 0) {
+      await this.syncSector(id, normalizedRoles[0]);
     }
     const { password_hash, ...result } = user;
     return result as any;

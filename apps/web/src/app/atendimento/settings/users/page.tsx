@@ -7,14 +7,60 @@ import api from '@/lib/api';
 
 const SPECIALTY_SUGGESTIONS = ['Trabalhista', 'Civil', 'Criminal', 'Tributário', 'Família', 'Empresarial', 'Previdenciário', 'Imobiliário', 'Consumidor'];
 
-function roleBadge(role: string) {
-  if (role === 'ADMIN') {
-    return <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg border bg-red-900/30 text-red-300 border-red-800/30">Administrador</span>;
-  }
-  if (role === 'FINANCEIRO') {
-    return <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg border bg-emerald-900/30 text-emerald-300 border-emerald-800/30">Financeiro</span>;
-  }
-  return <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg border bg-primary/10 text-primary border-primary/20">{role}</span>;
+// Roles canônicos aceitos pelo sistema. DEVEM bater com AppRole em apps/web/src/lib/useRole.ts
+// e com os checks do backend (Guards/Roles). Qualquer valor fora dessa lista quebra permissões.
+type RoleKey = 'ADMIN' | 'ADVOGADO' | 'OPERADOR' | 'COMERCIAL' | 'ESTAGIARIO' | 'FINANCEIRO';
+
+const ROLE_OPTIONS: { key: RoleKey; label: string; emoji: string; description: string }[] = [
+  { key: 'ADMIN', label: 'Administrador', emoji: '🛡️', description: 'Acesso total ao sistema' },
+  { key: 'ADVOGADO', label: 'Advogado', emoji: '⚖️', description: 'Processos, DJEN, petições' },
+  { key: 'OPERADOR', label: 'Operador', emoji: '💬', description: 'Atendimento no chat e CRM' },
+  { key: 'COMERCIAL', label: 'Comercial', emoji: '💼', description: 'Captação e pré-venda' },
+  { key: 'ESTAGIARIO', label: 'Estagiário', emoji: '🎓', description: 'Tarefas supervisionadas' },
+  { key: 'FINANCEIRO', label: 'Financeiro', emoji: '💰', description: 'Honorários e receitas' },
+];
+
+// Mapeia rótulos legados (nomes de departamento) para o enum canônico. Qualquer valor
+// desconhecido cai em OPERADOR, garantindo que um usuário antigo não fique sem nenhum role.
+function normalizeLegacyRole(raw: string): RoleKey {
+  if (!raw) return 'OPERADOR';
+  const upper = raw.toUpperCase().trim();
+  if (upper === 'ADMIN') return 'ADMIN';
+  if (upper === 'ADVOGADO' || upper === 'ADVOGADOS') return 'ADVOGADO';
+  if (upper === 'OPERADOR' || upper === 'OPERADORES') return 'OPERADOR';
+  if (upper === 'COMERCIAL' || upper === 'ATENDENTE COMERCIAL') return 'COMERCIAL';
+  if (upper === 'ESTAGIARIO' || upper === 'ESTAGIÁRIO' || upper === 'ESTAGIARIOS' || upper === 'ESTAGIÁRIOS') return 'ESTAGIARIO';
+  if (upper === 'FINANCEIRO') return 'FINANCEIRO';
+  return 'OPERADOR';
+}
+
+function roleBadges(roles: string[] | undefined | null) {
+  const normalized = (roles && roles.length > 0 ? roles : ['OPERADOR']).map(normalizeLegacyRole);
+  // Dedup mantendo ordem
+  const seen = new Set<string>();
+  const unique = normalized.filter(r => (seen.has(r) ? false : seen.add(r)));
+  return (
+    <div className="flex flex-wrap gap-1">
+      {unique.map(r => {
+        const opt = ROLE_OPTIONS.find(o => o.key === r);
+        const cls =
+          r === 'ADMIN'
+            ? 'bg-red-900/30 text-red-300 border-red-800/30'
+            : r === 'FINANCEIRO'
+              ? 'bg-emerald-900/30 text-emerald-300 border-emerald-800/30'
+              : r === 'ADVOGADO'
+                ? 'bg-violet-900/30 text-violet-300 border-violet-800/30'
+                : r === 'ESTAGIARIO'
+                  ? 'bg-amber-900/30 text-amber-300 border-amber-800/30'
+                  : 'bg-primary/10 text-primary border-primary/20';
+        return (
+          <span key={r} className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border ${cls}`}>
+            {opt?.emoji} {opt?.label ?? r}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 interface UserForm {
@@ -22,7 +68,7 @@ interface UserForm {
   email: string;
   phone: string;
   password: string;
-  role: string;
+  roles: RoleKey[];
   inboxIds: string[];
   specialties: string[];
   supervisorIds: string[];
@@ -32,13 +78,12 @@ interface UserForm {
 
 const UF_OPTIONS = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
 
-const emptyForm: UserForm = { name: '', email: '', phone: '', password: '', role: '', inboxIds: [], specialties: [], supervisorIds: [], oab_number: '', oab_uf: 'AL' };
+const emptyForm: UserForm = { name: '', email: '', phone: '', password: '', roles: [], inboxIds: [], specialties: [], supervisorIds: [], oab_number: '', oab_uf: 'AL' };
 
 export default function UsersSettingsPage() {
   const router = useRouter();
   const [users, setUsers] = useState<any[]>([]);
   const [inboxes, setInboxes] = useState<any[]>([]);
-  const [sectors, setSectors] = useState<{ id: string; name: string }[]>([]);
   const [lawyers, setLawyers] = useState<{ id: string; name: string; specialties: string[] }[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -59,7 +104,6 @@ export default function UsersSettingsPage() {
   const fetchData = async () => {
     fetchUsers();
     fetchInboxes();
-    fetchSectors();
     fetchLawyers();
   };
 
@@ -69,15 +113,6 @@ export default function UsersSettingsPage() {
       setInboxes(res.data);
     } catch (e) {
       console.error('Erro ao buscar inboxes:', e);
-    }
-  };
-
-  const fetchSectors = async () => {
-    try {
-      const res = await api.get('/sectors');
-      setSectors(res.data || []);
-    } catch (e) {
-      console.error('Erro ao buscar departamentos:', e);
     }
   };
 
@@ -112,12 +147,18 @@ export default function UsersSettingsPage() {
 
   const openEdit = (user: any) => {
     setEditingId(user.id);
+    // Backend pode devolver `roles` (array canônico) ou `role` (legado). Normaliza e deduplica.
+    const rawRoles: string[] = Array.isArray(user.roles) && user.roles.length > 0
+      ? user.roles
+      : user.role ? [user.role] : [];
+    const normalized = rawRoles.map(normalizeLegacyRole);
+    const uniqueRoles = Array.from(new Set(normalized)) as RoleKey[];
     setForm({
       name: user.name,
       email: user.email,
       phone: user.phone || '',
       password: '',
-      role: user.role,
+      roles: uniqueRoles,
       inboxIds: user.inboxes?.map((i: any) => i.id) || [],
       specialties: user.specialties || [],
       supervisorIds: user.supervisors?.map((s: any) => s.id) || [],
@@ -127,6 +168,15 @@ export default function UsersSettingsPage() {
     setSpecialtyInput('');
     setError('');
     setShowModal(true);
+  };
+
+  const toggleRole = (role: RoleKey) => {
+    setForm(f => ({
+      ...f,
+      roles: f.roles.includes(role)
+        ? f.roles.filter(r => r !== role)
+        : [...f.roles, role],
+    }));
   };
 
   const addSpecialty = (value: string) => {
@@ -145,13 +195,19 @@ export default function UsersSettingsPage() {
     setLoading(true);
     setError('');
 
+    if (form.roles.length === 0) {
+      setError('Selecione ao menos um perfil de acesso.');
+      setLoading(false);
+      return;
+    }
+
     try {
       if (editingId) {
         const payload: any = {
           name: form.name,
           email: form.email,
           phone: form.phone || null,
-          role: form.role,
+          roles: form.roles,
           inboxIds: form.inboxIds,
           specialties: form.specialties,
           oab_number: form.oab_number || null,
@@ -167,7 +223,17 @@ export default function UsersSettingsPage() {
           setLoading(false);
           return;
         }
-        const res = await api.post('/users', form);
+        const res = await api.post('/users', {
+          name: form.name,
+          email: form.email,
+          phone: form.phone || null,
+          password: form.password,
+          roles: form.roles,
+          inboxIds: form.inboxIds,
+          specialties: form.specialties,
+          oab_number: form.oab_number || null,
+          oab_uf: form.oab_uf || null,
+        });
         // Salvar vínculo de supervisores para novo usuário
         if (form.supervisorIds.length > 0 && res.data?.id) {
           await api.patch(`/users/${res.data.id}/supervisors`, { lawyerIds: form.supervisorIds });
@@ -278,7 +344,7 @@ export default function UsersSettingsPage() {
                           </div>
                           <div>
                             <span className="text-[14px] font-semibold text-foreground tracking-tight">{user.name}</span>
-                            <div className="mt-0.5">{roleBadge(user.role)}</div>
+                            <div className="mt-0.5">{roleBadges(user.roles || (user.role ? [user.role] : []))}</div>
                           </div>
                         </div>
                       </td>
@@ -424,32 +490,46 @@ export default function UsersSettingsPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Departamento</label>
-                <select
-                  required
-                  value={form.role}
-                  onChange={e => setForm({ ...form, role: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-border rounded-xl bg-background text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
-                >
-                  <option value="" disabled className="bg-card text-muted-foreground">Selecione um departamento...</option>
-                  <option value="ADMIN" className="bg-card text-foreground">🛡️ Administrador</option>
-                  <option value="Advogados" className="bg-card text-foreground">⚖️ Advogados</option>
-                  <option value="Atendente Comercial" className="bg-card text-foreground">💼 Atendente Comercial</option>
-                  <option value="FINANCEIRO" className="bg-card text-foreground">💰 Financeiro</option>
-                  <option value="Estagiário" className="bg-card text-foreground">🎓 Estagiário</option>
-                  {(() => {
-                    // normaliza para singular lowercase: "Estagiários" → "estagiário", "Advogados" → "advogado"
-                    const norm = (s: string) => { const l = s.toLowerCase(); return l.endsWith('s') ? l.slice(0, -1) : l; };
-                    const FIXED = new Set(['advogados', 'atendente comercial', 'estagiário'].map(norm));
-                    return sectors.filter(s => !FIXED.has(norm(s.name))).map(s => (
-                      <option key={s.id} value={s.name} className="bg-card text-foreground">{s.name}</option>
-                    ));
-                  })()}
-                </select>
+                <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">
+                  Perfis de acesso <span className="text-muted-foreground/60 normal-case font-medium">(selecione um ou mais)</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 border border-border rounded-xl bg-background/50">
+                  {ROLE_OPTIONS.map(opt => {
+                    const checked = form.roles.includes(opt.key);
+                    return (
+                      <label
+                        key={opt.key}
+                        className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                          checked
+                            ? 'border-primary/40 bg-primary/5'
+                            : 'border-border/60 hover:border-border hover:bg-accent/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleRole(opt.key)}
+                          className="w-4 h-4 mt-0.5 rounded border-border text-primary focus:ring-primary/20 shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold text-foreground leading-tight">
+                            {opt.emoji} {opt.label}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                            {opt.description}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                {form.roles.length === 0 && (
+                  <p className="text-[10px] text-amber-400 ml-1">Selecione ao menos um perfil de acesso.</p>
+                )}
               </div>
 
-              {/* OAB — visível para todos (admin e advogados podem ter OAB) */}
-              {(form.role === 'Advogados' || form.role === 'ADMIN' || form.oab_number) && (
+              {/* OAB — visível para advogados e admins (ambos podem ter OAB) */}
+              {(form.roles.includes('ADVOGADO') || form.roles.includes('ADMIN') || form.oab_number) && (
                 <div className="space-y-1.5">
                   <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Registro OAB</label>
                   <div className="flex gap-2">
@@ -499,7 +579,7 @@ export default function UsersSettingsPage() {
                   )}
                 </div>
               </div>
-              {form.role && (
+              {form.roles.length > 0 && (
                 <div className="space-y-1.5">
                   <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">
                     ⚖️ Especialidades Jurídicas

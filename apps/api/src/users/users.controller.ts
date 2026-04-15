@@ -46,7 +46,21 @@ export class UsersController {
 
   @Post()
   @Roles('ADMIN')
-  create(@Request() req: any, @Body() data: { name: string; email: string; password: string; role: string; phone?: string }) {
+  create(
+    @Request() req: any,
+    @Body() data: {
+      name: string;
+      email: string;
+      password: string;
+      role?: string;
+      roles?: string[];
+      phone?: string;
+      inboxIds?: string[];
+      specialties?: string[];
+      oab_number?: string;
+      oab_uf?: string;
+    },
+  ) {
     return this.usersService.create({ ...data, tenant_id: req.user.tenant_id });
   }
 
