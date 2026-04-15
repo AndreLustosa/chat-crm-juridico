@@ -1,14 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @InjectQueue('notification-email') private emailQueue: Queue,
+  ) {}
 
-  /** Cria uma notificação persistente (fire-and-forget, chamado pelo ChatGateway) */
+  /** Cria uma notificação persistente (fire-and-forget, chamado pelo ChatGateway).
+   *  Enfileira email fallback com delay de 5min — se a notificação for lida
+   *  via socket/push antes do delay, o email não é enviado. */
   async create(params: {
     userId: string;
     tenantId?: string | null;
@@ -18,7 +25,7 @@ export class NotificationsService {
     data?: Record<string, any>;
   }) {
     try {
-      return await (this.prisma as any).notification.create({
+      const notification = await (this.prisma as any).notification.create({
         data: {
           user_id: params.userId,
           tenant_id: params.tenantId || null,
@@ -28,6 +35,16 @@ export class NotificationsService {
           data: params.data || null,
         },
       });
+
+      // Enfileira email fallback com delay de 5 minutos
+      // O processor checa: já lida? Email habilitado? Dedup 30min por conversa?
+      this.emailQueue.add(
+        'send-notification-email',
+        { notificationId: notification.id, userId: params.userId },
+        { delay: 5 * 60 * 1000, removeOnComplete: true, removeOnFail: 10 },
+      ).catch(() => {});
+
+      return notification;
     } catch (e: any) {
       this.logger.warn(`[Notifications] Falha ao criar: ${e.message}`);
       return null;

@@ -103,7 +103,7 @@ export default function NotificationsSettingsPage() {
     saveToServer({ sound_id: id });
   };
 
-  const togglePref = (eventKey: string, channel: 'sound' | 'desktop') => {
+  const togglePref = (eventKey: string, channel: 'sound' | 'desktop' | 'email') => {
     setPrefs(prev => {
       const current = prev[eventKey] || { sound: true, desktop: true, email: false };
       const updated = { ...prev, [eventKey]: { ...current, [channel]: !current[channel] } };
@@ -232,10 +232,11 @@ export default function NotificationsSettingsPage() {
         </div>
 
         {/* Header */}
-        <div className="grid grid-cols-[1fr_60px_60px] gap-2 mb-2 px-1">
+        <div className="grid grid-cols-[1fr_60px_60px_60px] gap-2 mb-2 px-1">
           <div />
           <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">Som</div>
           <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">Desktop</div>
+          <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">Email</div>
         </div>
 
         <div className="space-y-1">
@@ -243,7 +244,7 @@ export default function NotificationsSettingsPage() {
             const Icon = evt.icon;
             const p = prefs[evt.key] || { sound: true, desktop: true, email: false };
             return (
-              <div key={evt.key} className="grid grid-cols-[1fr_60px_60px] gap-2 items-center px-3 py-2.5 rounded-xl hover:bg-muted/30 transition-colors">
+              <div key={evt.key} className="grid grid-cols-[1fr_60px_60px_60px] gap-2 items-center px-3 py-2.5 rounded-xl hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
                   <Icon size={15} className="text-muted-foreground shrink-0" />
                   <div className="min-w-0">
@@ -267,6 +268,15 @@ export default function NotificationsSettingsPage() {
                     className={`w-9 h-5 rounded-full transition-colors relative ${p.desktop ? 'bg-primary' : 'bg-muted-foreground/30'}`}
                   >
                     <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${p.desktop ? 'translate-x-4' : ''}`} />
+                  </button>
+                </div>
+                {/* Email toggle */}
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => togglePref(evt.key, 'email')}
+                    className={`w-9 h-5 rounded-full transition-colors relative ${p.email ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                  >
+                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${p.email ? 'translate-x-4' : ''}`} />
                   </button>
                 </div>
               </div>
