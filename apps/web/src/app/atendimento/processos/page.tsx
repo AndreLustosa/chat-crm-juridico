@@ -2540,6 +2540,7 @@ function CadastrarProcessoModal({
   onClose,
   onSuccess,
   prefillData,
+  batchProgress,
 }: {
   onClose: () => void;
   onSuccess: () => void;
@@ -2555,6 +2556,7 @@ function CadastrarProcessoModal({
     tracking_stage?: string;
     notes?: string;
   } | null;
+  batchProgress?: { current: number; total: number } | null;
 }) {
   const { isAdmin } = useRole();
 
@@ -2719,8 +2721,12 @@ function CadastrarProcessoModal({
             <FolderPlus size={18} className="text-primary" />
           </div>
           <div className="flex-1">
-            <h2 className="text-base font-bold text-foreground">Cadastrar Processo em Andamento</h2>
-            <p className="text-[11px] text-muted-foreground">Para processos que já existem no tribunal</p>
+            <h2 className="text-base font-bold text-foreground">
+              {batchProgress ? `Cadastrar Processo ${batchProgress.current} de ${batchProgress.total}` : 'Cadastrar Processo em Andamento'}
+            </h2>
+            <p className="text-[11px] text-muted-foreground">
+              {batchProgress ? 'Importação em lote via OAB — preencha os dados e salve' : 'Para processos que já existem no tribunal'}
+            </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all">
             <X size={18} />
@@ -3245,7 +3251,10 @@ function TabelaView({
 
 // ─── OAB Import Modal ──────────────────────────────────────────
 
-function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function OabImportModal({ onClose, onStartCadastro }: {
+  onClose: () => void;
+  onStartCadastro: (items: Array<{ processo_codigo: string; foro: string; case_number: string }>) => void;
+}) {
   const UF_LIST = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
   const [lawyers, setLawyers] = useState<Array<{ id: string; name: string; oab_number: string | null; oab_uf: string | null }>>([]);
   const [selectedOabs, setSelectedOabs] = useState<Set<string>>(new Set());
@@ -3255,10 +3264,8 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
   const [searchProgress, setSearchProgress] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [selectedForImport, setSelectedForImport] = useState<Set<string>>(new Set());
-  const [importing, setImporting] = useState(false);
-  const [importingOne, setImportingOne] = useState<string | null>(null);
-  const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
-  const [importedSet, setImportedSet] = useState<Set<string>>(new Set());
+  const [sendingToCadastro, setSendingToCadastro] = useState<string | null>(null);
+  const [sentSet, setSentSet] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -3289,8 +3296,7 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
     setError(null);
     setResults([]);
     setSelectedForImport(new Set());
-    setImportedSet(new Set());
-    setImportResult(null);
+    setSentSet(new Set());
     try {
       const res = await api.get('/court-scraper/search-oab', {
         params: { oabs: oabEntries.join(',') },
@@ -3309,54 +3315,25 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
     }
   };
 
-  const handleImportBatch = async () => {
+  const handleStartBatchCadastro = () => {
     const items = results
-      .filter(c => selectedForImport.has(c.processo_codigo) && !c.already_registered && !importedSet.has(c.processo_codigo))
-      .map(c => ({ processo_codigo: c.processo_codigo, foro: c.foro || '1' }));
-    if (items.length === 0) { setError('Nenhum processo selecionado para importar'); return; }
-
-    setImporting(true);
-    setError(null);
-    try {
-      const res = await api.post('/court-scraper/import', { items }, { timeout: 600000 });
-      setImportResult(res.data);
-      // Marcar importados
-      const newImported = new Set(importedSet);
-      items.forEach(item => newImported.add(item.processo_codigo));
-      setImportedSet(newImported);
-      if (res.data.imported > 0) setTimeout(() => onSuccess(), 2500);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Erro ao importar processos');
-    } finally {
-      setImporting(false);
-    }
+      .filter(c => selectedForImport.has(c.processo_codigo) && !c.already_registered && !sentSet.has(c.processo_codigo))
+      .map(c => ({ processo_codigo: c.processo_codigo, foro: c.foro || '1', case_number: c.case_number }));
+    if (items.length === 0) { setError('Nenhum processo selecionado'); return; }
+    onStartCadastro(items);
   };
 
-  const handleImportOne = async (c: any) => {
-    if (!c.processo_codigo || c.already_registered || importedSet.has(c.processo_codigo)) return;
-    setImportingOne(c.processo_codigo);
-    setError(null);
-    try {
-      const res = await api.post('/court-scraper/import', {
-        items: [{ processo_codigo: c.processo_codigo, foro: c.foro || '1' }],
-      }, { timeout: 60000 });
-      if (res.data.imported > 0) {
-        setImportedSet(prev => { const n = new Set(prev); n.add(c.processo_codigo); return n; });
-      } else if (res.data.errors?.length > 0) {
-        setError(res.data.errors[0]);
-      }
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Erro ao importar processo');
-    } finally {
-      setImportingOne(null);
-    }
+  const handleStartOneCadastro = (c: any) => {
+    if (!c.processo_codigo || c.already_registered || sentSet.has(c.processo_codigo)) return;
+    setSendingToCadastro(c.processo_codigo);
+    onStartCadastro([{ processo_codigo: c.processo_codigo, foro: c.foro || '1', case_number: c.case_number }]);
   };
 
   const toggleImport = (codigo: string) => {
     setSelectedForImport(prev => { const n = new Set(prev); n.has(codigo) ? n.delete(codigo) : n.add(codigo); return n; });
   };
 
-  const notRegistered = results.filter(c => !c.already_registered && !importedSet.has(c.processo_codigo));
+  const notRegistered = results.filter(c => !c.already_registered && !sentSet.has(c.processo_codigo));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -3432,19 +3409,13 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
             </div>
           )}
 
-          {/* Resultado da importação em lote */}
-          {importResult && (
+          {/* Processos enviados para cadastro */}
+          {sentSet.size > 0 && (
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800 rounded-lg text-xs">
               <p className="font-semibold text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 size={14} className="inline mr-1" />
-                {importResult.imported} processo(s) importado(s) com sucesso!
+                {sentSet.size} processo(s) enviado(s) para pré-cadastro!
               </p>
-              {importResult.errors.length > 0 && (
-                <div className="mt-1 text-muted-foreground">
-                  {importResult.errors.slice(0, 5).map((e, i) => <p key={i}>• {e}</p>)}
-                  {importResult.errors.length > 5 && <p>... e mais {importResult.errors.length - 5} erro(s)</p>}
-                </div>
-              )}
             </div>
           )}
 
@@ -3459,9 +3430,9 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
                       ({results.filter(c => c.already_registered).length} já cadastrados)
                     </span>
                   )}
-                  {importedSet.size > 0 && (
+                  {sentSet.size > 0 && (
                     <span className="text-emerald-500 font-normal ml-1">
-                      ({importedSet.size} importado(s) agora)
+                      ({sentSet.size} enviado(s) para cadastro)
                     </span>
                   )}
                 </label>
@@ -3471,8 +3442,8 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
               </div>
               <div className="space-y-1.5 max-h-[350px] overflow-y-auto">
                 {results.map((c: any, i: number) => {
-                  const isImported = importedSet.has(c.processo_codigo);
-                  const isRegistered = c.already_registered || isImported;
+                  const isSent = sentSet.has(c.processo_codigo);
+                  const isRegistered = c.already_registered || isSent;
                   return (
                     <div
                       key={i}
@@ -3497,9 +3468,9 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
                           {c.already_registered && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-bold">Já cadastrado</span>
                           )}
-                          {isImported && !c.already_registered && (
+                          {isSent && !c.already_registered && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold flex items-center gap-0.5">
-                              <CheckCircle2 size={10} /> Importado
+                              <CheckCircle2 size={10} /> Enviado para cadastro
                             </span>
                           )}
                         </div>
@@ -3517,16 +3488,16 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
                           </div>
                         )}
                       </div>
-                      {/* Botão importar individual */}
+                      {/* Botão cadastrar individual */}
                       {!isRegistered && c.processo_codigo && (
                         <button
-                          onClick={() => handleImportOne(c)}
-                          disabled={importingOne === c.processo_codigo}
+                          onClick={() => handleStartOneCadastro(c)}
+                          disabled={sendingToCadastro === c.processo_codigo}
                           className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 transition-all"
-                          title="Importar este processo"
+                          title="Abrir pré-cadastro"
                         >
-                          {importingOne === c.processo_codigo ? <Loader2 size={11} className="animate-spin" /> : <FolderPlus size={11} />}
-                          Importar
+                          {sendingToCadastro === c.processo_codigo ? <Loader2 size={11} className="animate-spin" /> : <FolderPlus size={11} />}
+                          Cadastrar
                         </button>
                       )}
                     </div>
@@ -3544,12 +3515,12 @@ function OabImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess
               Cancelar
             </button>
             <button
-              onClick={handleImportBatch}
-              disabled={importing || selectedForImport.size === 0}
+              onClick={handleStartBatchCadastro}
+              disabled={selectedForImport.size === 0}
               className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50"
             >
-              {importing ? <Loader2 size={12} className="animate-spin" /> : <FolderPlus size={12} />}
-              {importing ? 'Importando...' : `Importar ${selectedForImport.size} processo(s) em lote`}
+              <FolderPlus size={12} />
+              {`Cadastrar ${selectedForImport.size} processo(s) em lote`}
             </button>
           </div>
         )}
@@ -3587,6 +3558,8 @@ function ProcessosPageContent() {
   const [esajError, setEsajError] = useState<string | null>(null);
   const [prefillData, setPrefillData] = useState<any>(null);
   const [showOabImportModal, setShowOabImportModal] = useState(false);
+  const [oabCadastroQueue, setOabCadastroQueue] = useState<Array<{ processo_codigo: string; foro: string; case_number: string }>>([]);
+  const [oabCadastroProgress, setOabCadastroProgress] = useState<{ current: number; total: number } | null>(null);
 
   const [pendingClosure, setPendingClosure] = useState<any[]>([]);
 
@@ -3797,6 +3770,59 @@ function ProcessosPageContent() {
     setShowCadastrarModal(true);
     setEsajResult(null);
   };
+
+  const openCadastroForOabItem = useCallback(async (item: { processo_codigo: string; foro: string; case_number: string }) => {
+    try {
+      const res = await api.get('/court-scraper/search', { params: { caseNumber: item.case_number }, timeout: 30000 });
+      const data = res.data;
+      const opposingParty = (data.parties || [])
+        .filter((p: any) => /r[eé]u|requerido|executado/i.test(p.role))
+        .map((p: any) => p.name)
+        .join(', ') || '';
+      const assuntoNotes = [
+        data.subject ? `Assunto: ${data.subject}` : '',
+        ...(data.parties || []).slice(0, 6).map((p: any) => `${p.role}: ${p.name}`),
+      ].filter(Boolean).join('\n');
+      setPrefillData({
+        case_number: data.case_number,
+        legal_area: data.legal_area,
+        action_type: data.action_type,
+        court: data.court,
+        judge: data.judge,
+        claim_value: data.claim_value,
+        filed_at: data.filed_at,
+        tracking_stage: data.tracking_stage || 'DISTRIBUIDO',
+        notes: assuntoNotes,
+        opposing_party: opposingParty,
+      });
+    } catch {
+      // Fallback: abre com dados parciais disponíveis do resultado OAB
+      setPrefillData({ case_number: item.case_number });
+    }
+    setShowCadastrarModal(true);
+  }, []);
+
+  const handleStartOabCadastro = useCallback(async (items: Array<{ processo_codigo: string; foro: string; case_number: string }>) => {
+    setShowOabImportModal(false);
+    if (items.length === 0) return;
+    setOabCadastroQueue(items.slice(1));
+    setOabCadastroProgress({ current: 1, total: items.length });
+    await openCadastroForOabItem(items[0]);
+  }, [openCadastroForOabItem]);
+
+  const handleCadastroModalSuccess = useCallback(() => {
+    fetchCases(true);
+    if (oabCadastroQueue.length > 0) {
+      const [next, ...remaining] = oabCadastroQueue;
+      setOabCadastroQueue(remaining);
+      setOabCadastroProgress(prev => prev ? { ...prev, current: prev.current + 1 } : null);
+      openCadastroForOabItem(next);
+    } else {
+      setShowCadastrarModal(false);
+      setPrefillData(null);
+      setOabCadastroProgress(null);
+    }
+  }, [oabCadastroQueue, openCadastroForOabItem, fetchCases]);
 
   // Filters
   const allAreas = [...new Set(cases.map(c => c.legal_area).filter(Boolean))].sort() as string[];
@@ -4294,9 +4320,10 @@ function ProcessosPageContent() {
       {/* Modal Cadastrar Processo Existente */}
       {showCadastrarModal && (
         <CadastrarProcessoModal
-          onClose={() => { setShowCadastrarModal(false); setPrefillData(null); }}
-          onSuccess={() => fetchCases(true)}
+          onClose={() => { setShowCadastrarModal(false); setPrefillData(null); setOabCadastroQueue([]); setOabCadastroProgress(null); }}
+          onSuccess={handleCadastroModalSuccess}
           prefillData={prefillData}
+          batchProgress={oabCadastroProgress}
         />
       )}
 
@@ -4354,7 +4381,7 @@ function ProcessosPageContent() {
       {showOabImportModal && (
         <OabImportModal
           onClose={() => setShowOabImportModal(false)}
-          onSuccess={() => { setShowOabImportModal(false); fetchCases(true); }}
+          onStartCadastro={handleStartOabCadastro}
         />
       )}
     </div>
