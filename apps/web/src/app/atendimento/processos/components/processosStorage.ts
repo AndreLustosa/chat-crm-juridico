@@ -90,6 +90,7 @@ export const COLUMN_LABELS: Record<keyof TableColumnsState, string> = {
 const K_VIEWS = 'processos.savedViews.v1';
 const K_COLUMNS = 'processos.tableColumns.v1';
 const K_SORT = 'processos.tableSort.v1';
+const K_DASHBOARD = 'processos.dashboardVisible.v1';
 
 // ─── Filtros → serializável ──────────────────────────────────
 
@@ -173,5 +174,24 @@ export const loadSort = (): SortState => {
 export const persistSort = (s: SortState) => {
   try {
     window.localStorage.setItem(K_SORT, JSON.stringify(s));
+  } catch {}
+};
+
+// ─── Dashboard strip (visibilidade) ─────────────────────────
+
+export const loadDashboardVisible = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = window.localStorage.getItem(K_DASHBOARD);
+    if (raw === null) return true; // default: visível
+    return raw === 'true';
+  } catch {
+    return true;
+  }
+};
+
+export const persistDashboardVisible = (visible: boolean) => {
+  try {
+    window.localStorage.setItem(K_DASHBOARD, String(visible));
   } catch {}
 };

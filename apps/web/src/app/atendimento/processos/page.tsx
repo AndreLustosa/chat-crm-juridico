@@ -25,6 +25,7 @@ import {
 } from './components/ProcessosFilterDrawer';
 import { AgendaView } from './components/AgendaView';
 import { ClienteView } from './components/ClienteView';
+import { DashboardStrip, DashboardStripReopenButton } from './components/DashboardStrip';
 import {
   loadSavedViews,
   persistSavedViews,
@@ -34,6 +35,8 @@ import {
   persistColumns,
   loadSort,
   persistSort,
+  loadDashboardVisible,
+  persistDashboardVisible,
   DEFAULT_COLUMNS,
   COLUMN_LABELS,
   type SavedView,
@@ -3707,11 +3710,24 @@ function ProcessosPageContent() {
   const [tablePageSize, setTablePageSize] = useState<number>(50);
   const [tablePage, setTablePage] = useState<number>(1);
 
+  // ─── Dashboard KPI strip (visibilidade persistida) ─────────
+  const [dashboardVisible, setDashboardVisible] = useState<boolean>(true);
+
   // Hidratar estado a partir de localStorage após mount (evita SSR mismatch)
   useEffect(() => {
     setTableColumns(loadColumns());
     setTableSort(loadSort());
     setSavedViews(loadSavedViews());
+    setDashboardVisible(loadDashboardVisible());
+  }, []);
+
+  const hideDashboard = useCallback(() => {
+    setDashboardVisible(false);
+    persistDashboardVisible(false);
+  }, []);
+  const showDashboard = useCallback(() => {
+    setDashboardVisible(true);
+    persistDashboardVisible(true);
   }, []);
 
   // Alias para busca textual (mantém compat com handlers existentes)
@@ -4212,6 +4228,11 @@ function ProcessosPageContent() {
               </div>
             )}
 
+            {/* Botão para reexibir o dashboard de KPIs quando oculto */}
+            {view === 'active' && !dashboardVisible && (
+              <DashboardStripReopenButton onClick={showDashboard} />
+            )}
+
             {/* Filtros avançados */}
             {view === 'active' && (
               <button
@@ -4453,6 +4474,18 @@ function ProcessosPageContent() {
               Limpar tudo
             </button>
           </div>
+        )}
+
+        {/* ─── Dashboard Strip (KPIs operacionais) ────────────── */}
+        {view === 'active' && dashboardVisible && (
+          <DashboardStrip
+            cases={filteredCases}
+            onClose={hideDashboard}
+            onFilterUrgent={() => setFilters(f => ({ ...f, priorities: new Set(['URGENTE']) }))}
+            onFilterWithoutMovement={() => setFilters(f => ({ ...f, withoutMovementDays: 30 }))}
+            onFilterNext7Days={() => setFilters(f => ({ ...f, nextDeadlineDays: 7 }))}
+            onSwitchToAgenda={() => setDisplayView('agenda')}
+          />
         )}
 
         {/* ─── ESAJ Result Banner ─────────────────────────────── */}
