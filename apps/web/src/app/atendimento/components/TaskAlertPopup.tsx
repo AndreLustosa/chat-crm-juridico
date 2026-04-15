@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { io, Socket } from 'socket.io-client';
-import { AlertTriangle, Clock, CheckCircle2, X, Bell } from 'lucide-react';
+import { useSocketEvent } from '@/lib/SocketProvider';
+import { playNotificationSound } from '@/lib/notificationSounds';
+import { AlertTriangle, Clock, X } from 'lucide-react';
 
 interface TaskAlert {
   taskId: string;
@@ -22,12 +23,13 @@ interface TaskAlert {
  *
  * Reaparece a cada 30 min enquanto a tarefa não for concluída.
  * O usuário pode dispensar (some por 30 min) ou marcar como vista.
+ *
+ * Usa o socket compartilhado do SocketProvider (sem io() local).
  */
 export function TaskAlertPopup() {
   const router = useRouter();
   const [alerts, setAlerts] = useState<TaskAlert[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  const [socket, setSocket] = useState<Socket | null>(null);
 
   // Ao clicar no card do alerta, abre na agenda com o evento selecionado
   const openTask = useCallback((taskId: string) => {
@@ -35,71 +37,34 @@ export function TaskAlertPopup() {
     router.push('/atendimento/agenda');
   }, [router]);
 
-  // Conectar ao socket
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
+  // ─── Socket events via SocketProvider (sem io() local) ─────────
+  useSocketEvent('task_overdue_alert', (data: any) => {
+    setAlerts(prev => {
+      if (prev.some(a => a.taskId === data.taskId)) return prev;
+      const alert: TaskAlert = {
+        taskId: data.taskId,
+        title: data.title,
+        level: data.level || 'urgent',
+        message: data.message || '',
+        client: data.client,
+        caseNumber: data.caseNumber,
+        receivedAt: Date.now(),
+      };
+      return [alert, ...prev].slice(0, 10);
+    });
 
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL
-        || (apiUrl.startsWith('http') ? new URL(apiUrl).origin : apiUrl);
-      const isDev = apiUrl.includes('localhost') || /https?:\/\/[^/]+:\d{4,}/.test(apiUrl);
-      const socketPath = process.env.NEXT_PUBLIC_SOCKET_PATH || (isDev ? '/socket.io/' : '/api/socket.io/');
+    // Usa o sistema de som sintetizado (respeita preferência do usuário)
+    playNotificationSound();
+  });
 
-      const s = io(wsUrl, {
-        path: socketPath,
-        transports: ['polling', 'websocket'],
-        auth: { token },
-      });
-
-      // Entrar no room do usuário para receber alertas
-      s.on('connect', () => {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-          if (payload?.sub) s.emit('join_user', payload.sub);
-        } catch {}
-      });
-
-      s.on('task_overdue_alert', (data: any) => {
-        setAlerts(prev => {
-          // Evitar duplicata do mesmo task
-          if (prev.some(a => a.taskId === data.taskId)) return prev;
-          const alert: TaskAlert = {
-            taskId: data.taskId,
-            title: data.title,
-            level: data.level || 'urgent',
-            message: data.message || '',
-            client: data.client,
-            caseNumber: data.caseNumber,
-            receivedAt: Date.now(),
-          };
-          return [alert, ...prev].slice(0, 10);
-        });
-
-        // Som de notificação
-        try {
-          const audio = new Audio('/sounds/notification.mp3');
-          audio.volume = 0.5;
-          audio.play().catch(() => {});
-        } catch {}
-      });
-
-      s.on('notification_update', () => {
-        // Refresh silencioso — só limpa dismissed para permitir re-alertas
-        setDismissed(new Set());
-      });
-
-      setSocket(s);
-      return () => { s.disconnect(); };
-    } catch {}
-  }, []);
+  useSocketEvent('notification_update', () => {
+    setDismissed(new Set());
+  });
 
   // Dismiss temporário (30 min)
   const dismissAlert = useCallback((taskId: string) => {
     setDismissed(prev => new Set(prev).add(taskId));
     setAlerts(prev => prev.filter(a => a.taskId !== taskId));
-    // Re-permitir após 30 min
     setTimeout(() => {
       setDismissed(prev => {
         const next = new Set(prev);
@@ -118,7 +83,6 @@ export function TaskAlertPopup() {
       ids.forEach(id => next.add(id));
       return next;
     });
-    // Re-permitir após 30 min
     setTimeout(() => {
       setDismissed(prev => {
         const next = new Set(prev);
@@ -128,14 +92,12 @@ export function TaskAlertPopup() {
     }, 30 * 60 * 1000);
   }, [alerts]);
 
-  // Filtrar dismissed
   const visibleAlerts = alerts.filter(a => !dismissed.has(a.taskId));
 
   if (visibleAlerts.length === 0) return null;
 
   return (
     <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
-      {/* Botão dismiss all */}
       {visibleAlerts.length > 1 && (
         <button
           onClick={dismissAll}
@@ -156,7 +118,6 @@ export function TaskAlertPopup() {
           }`}
         >
           <div className="flex items-start gap-3">
-            {/* Icon */}
             <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${
               alert.level === 'critical' ? 'bg-red-500/20' : 'bg-amber-500/20'
             }`}>
@@ -166,7 +127,6 @@ export function TaskAlertPopup() {
               }
             </div>
 
-            {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
                 <span className={`text-[10px] font-bold uppercase tracking-wider ${
@@ -188,7 +148,6 @@ export function TaskAlertPopup() {
               )}
             </div>
 
-            {/* Dismiss */}
             <button
               onClick={(e) => { e.stopPropagation(); dismissAlert(alert.taskId); }}
               className="shrink-0 p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-colors"
