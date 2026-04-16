@@ -1370,6 +1370,11 @@ function DjenPageContent() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncDateFrom, setSyncDateFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  const [syncDateTo, setSyncDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const syncRef = useRef<HTMLDivElement>(null);
   const [markingAll, setMarkingAll] = useState(false);
   const [days, setDays] = useState(30);
   const [selectedPub, setSelectedPub] = useState<DjenPublication | null>(null);
@@ -1405,11 +1410,47 @@ function DjenPageContent() {
 
   const handleSync = async () => {
     setSyncing(true);
+    setSyncResult(null);
     try {
-      await api.post('/djen/sync');
+      // Gerar array de datas entre syncDateFrom e syncDateTo
+      const from = new Date(syncDateFrom + 'T12:00:00');
+      const to = new Date(syncDateTo + 'T12:00:00');
+      if (from > to) { setSyncResult('Data inicial maior que final'); setSyncing(false); return; }
+      const dates: string[] = [];
+      const d = new Date(from);
+      while (d <= to) {
+        dates.push(d.toISOString().slice(0, 10));
+        d.setDate(d.getDate() + 1);
+      }
+      if (dates.length > 30) { setSyncResult('Máximo 30 dias por vez'); setSyncing(false); return; }
+
+      let totalSaved = 0;
+      let totalErrors = 0;
+      for (const date of dates) {
+        try {
+          const res = await api.post('/djen/sync', { date });
+          totalSaved += res.data?.saved || 0;
+          totalErrors += res.data?.errors || 0;
+        } catch {
+          totalErrors++;
+        }
+      }
       await fetchPubs(true);
-    } catch {} finally { setSyncing(false); }
+      setSyncResult(`${totalSaved} publicações salvas${totalErrors > 0 ? `, ${totalErrors} erros` : ''} (${dates.length} dia${dates.length > 1 ? 's' : ''})`);
+    } catch {
+      setSyncResult('Erro na sincronização');
+    } finally { setSyncing(false); }
   };
+
+  // Fechar popover ao clicar fora
+  useEffect(() => {
+    if (!syncOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (syncRef.current && !syncRef.current.contains(e.target as Node)) setSyncOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [syncOpen]);
 
   const handleMarkAllViewed = async () => {
     setMarkingAll(true);
@@ -1526,14 +1567,54 @@ function DjenPageContent() {
             </button>
           )}
 
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-400 hover:text-sky-300 px-3 py-1.5 border border-sky-500/30 rounded-lg hover:bg-sky-500/5 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
-            Sincronizar
-          </button>
+          <div className="relative" ref={syncRef}>
+            <button
+              onClick={() => { setSyncOpen(!syncOpen); setSyncResult(null); }}
+              disabled={syncing}
+              className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-400 hover:text-sky-300 px-3 py-1.5 border border-sky-500/30 rounded-lg hover:bg-sky-500/5 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
+              Sincronizar
+            </button>
+            {syncOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl p-4 w-[280px]">
+                <p className="text-[11px] font-semibold text-foreground mb-3">Buscar publicações por período</p>
+                <div className="flex flex-col gap-2 mb-3">
+                  <label className="text-[10px] text-muted-foreground font-medium">
+                    De
+                    <input
+                      type="date"
+                      value={syncDateFrom}
+                      onChange={e => setSyncDateFrom(e.target.value)}
+                      className="mt-0.5 w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[11px] text-foreground"
+                    />
+                  </label>
+                  <label className="text-[10px] text-muted-foreground font-medium">
+                    Até
+                    <input
+                      type="date"
+                      value={syncDateTo}
+                      onChange={e => setSyncDateTo(e.target.value)}
+                      className="mt-0.5 w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[11px] text-foreground"
+                    />
+                  </label>
+                </div>
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold text-white bg-sky-600 hover:bg-sky-500 px-3 py-2 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  {syncing ? 'Sincronizando...' : 'Buscar'}
+                </button>
+                {syncResult && (
+                  <p className={`mt-2 text-[10px] font-medium ${syncResult.includes('Erro') || syncResult.includes('Máximo') || syncResult.includes('maior') ? 'text-red-400' : 'text-emerald-400'}`}>
+                    {syncResult}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
