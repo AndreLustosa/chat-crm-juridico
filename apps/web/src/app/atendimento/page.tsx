@@ -618,7 +618,14 @@ export default function Dashboard() {
     }
   };
 
+  // Guard para nao empilhar requests (se a API demorar >intervalo do polling)
+  const pendingTransfersInFlightRef = useRef(false);
   const fetchPendingTransfers = useCallback(async (silent = false) => {
+    // Pula se offline — evita avalanche de Network Error no console
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    // Pula se ja existe request em andamento
+    if (pendingTransfersInFlightRef.current) return;
+    pendingTransfersInFlightRef.current = true;
     try {
       const res = await api.get('/conversations/pending-transfers', {
         ...(silent ? { _silent401: true } as any : {}),
@@ -628,6 +635,8 @@ export default function Dashboard() {
       if (e.response?.status !== 401 || !silent) {
         console.error('Failed to fetch pending transfers', e);
       }
+    } finally {
+      pendingTransfersInFlightRef.current = false;
     }
   }, []);
 
@@ -848,14 +857,20 @@ export default function Dashboard() {
   }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId, clientMode]);
 
   // Polling de transferências pendentes (30s) — resiliência caso o socket perca o evento
+  // Pula quando offline para nao gerar cascata de Network Error no console
   useEffect(() => {
-    const interval = setInterval(() => fetchPendingTransfers(true), 30_000);
+    const interval = setInterval(() => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+      fetchPendingTransfers(true);
+    }, 30_000);
     return () => clearInterval(interval);
   }, [fetchPendingTransfers]);
 
   // Polling de conversas (60s) — resiliência para mensagens recebidas quando offline
+  // Pula quando offline (o reconnect do socket ja re-sincroniza quando voltar)
   useEffect(() => {
     const interval = setInterval(() => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       fetchConversations(selectedInboxIdRef.current, true);
     }, 60_000);
     return () => clearInterval(interval);
@@ -923,14 +938,9 @@ export default function Dashboard() {
       .catch(() => {});
   }, [selectedId, conversations]);
 
-  // Polling de transferências pendentes: fallback quando o evento socket direto é perdido
-  // silent=true: nunca causa logout — se o token expirar, só o load inicial ou ação do usuário redireciona
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchPendingTransfers(true);
-    }, 12000);
-    return () => clearInterval(interval);
-  }, [fetchPendingTransfers]);
+  // (Duplicata removida — polling de pending-transfers ja acontece a cada 30s acima.
+  // Havia um segundo setInterval de 12s aqui que gerava cascata de Network Error
+  // no console quando a rede oscilava. Ficou so o de 30s.)
 
   // Auto-abrir popup para transferências ainda não exibidas ao usuário
   useEffect(() => {

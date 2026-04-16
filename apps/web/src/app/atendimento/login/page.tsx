@@ -64,8 +64,9 @@ export default function LoginPage() {
     };
 
     checkDb();
-    // Verifica a cada 10 segundos — sem reset de contador
-    const interval = setInterval(checkDb, 10000);
+    // Verifica a cada 30 segundos — sem reset de contador
+    // (antes era 10s, gerava ruido e carga inutil sem o usuario nem estar logado)
+    const interval = setInterval(checkDb, 30000);
     return () => clearInterval(interval);
   }, []);
 
