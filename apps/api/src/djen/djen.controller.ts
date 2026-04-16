@@ -92,10 +92,10 @@ export class DjenController {
     );
   }
 
-  /** Análise por IA da publicação */
+  /** Análise por IA da publicação (usa cache; force=true para reanalisar) */
   @Post(':id/analyze')
-  analyze(@Param('id') id: string) {
-    return this.djenService.analyzePublication(id);
+  analyze(@Param('id') id: string, @Body() body?: { force?: boolean }) {
+    return this.djenService.analyzePublication(id, body?.force ?? false);
   }
 
   /** Sugerir leads que correspondam às partes da publicação */

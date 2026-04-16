@@ -1130,21 +1130,20 @@ function AiPanel({
   const [movingStage, setMovingStage] = useState(false);
   const [stageMoved, setStageMoved] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const runAnalysis = (force = false) => {
     setLoading(true);
     setError(null);
     setAnalysis(null);
     setTaskCreated(false);
     setStageMoved(false);
 
-    api.post(`/djen/${pub.id}/analyze`)
-      .then(res => { if (!cancelled) setAnalysis(res.data); })
-      .catch(() => { if (!cancelled) setError('Erro ao analisar. Verifique se a OPENAI_API_KEY está configurada.'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    api.post(`/djen/${pub.id}/analyze`, { force })
+      .then(res => setAnalysis(res.data))
+      .catch(() => setError('Erro ao analisar. Verifique se a OPENAI_API_KEY está configurada.'))
+      .finally(() => setLoading(false));
+  };
 
-    return () => { cancelled = true; };
-  }, [pub.id]);
+  useEffect(() => { runAnalysis(); }, [pub.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCreateTask = async () => {
     if (!analysis) return;
@@ -1198,9 +1197,20 @@ function AiPanel({
             </p>
           </div>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          {analysis && !loading && (
+            <button
+              onClick={() => runAnalysis(true)}
+              title="Reanalisar com IA (gasta tokens)"
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors"
+            >
+              <RefreshCw size={13} />
+            </button>
+          )}
+          <button onClick={onClose} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Content: scrollable grid */}

@@ -913,7 +913,7 @@ export class DjenService {
     return legalCase;
   }
 
-  async analyzePublication(id: string): Promise<{
+  async analyzePublication(id: string, force = false): Promise<{
     resumo: string;
     urgencia: 'URGENTE' | 'NORMAL' | 'BAIXA';
     tipo_acao: string;
@@ -941,6 +941,16 @@ export class DjenService {
         },
       },
     });
+
+    // Cache: retorna análise salva se existir e não for forçada reanálise
+    const CACHE_HOURS = 24;
+    if (!force && (pub as any).analysis_json && (pub as any).analyzed_at) {
+      const age = Date.now() - new Date((pub as any).analyzed_at).getTime();
+      if (age < CACHE_HOURS * 3600000) {
+        this.logger.log(`[DJEN] Análise em cache (${Math.round(age / 60000)}min) para publicação ${id}`);
+        return (pub as any).analysis_json;
+      }
+    }
 
     // Sem processo vinculado: análise ocorre normalmente, mas event_type será forçado a TAREFA no retorno
     const hasLinkedCase = !!pub.legal_case_id;
@@ -1078,16 +1088,16 @@ ${pub.conteudo.slice(0, 6000)}`;
       data_prazo: parsed.data_prazo || null,
     };
 
-    // Persistir parte_autora e parte_rea na publicação para matching futuro com leads
-    if (result.parte_autora || result.parte_rea) {
-      await this.prisma.djenPublication.update({
-        where: { id },
-        data: {
-          parte_autora: result.parte_autora || null,
-          parte_rea: result.parte_rea || null,
-        },
-      }).catch(e => this.logger.warn(`[DJEN] Falha ao salvar partes na publicação ${id}: ${e.message}`));
-    }
+    // Persistir análise completa + partes na publicação (cache + matching com leads)
+    await this.prisma.djenPublication.update({
+      where: { id },
+      data: {
+        analysis_json: result as any,
+        analyzed_at: new Date(),
+        parte_autora: result.parte_autora || null,
+        parte_rea: result.parte_rea || null,
+      },
+    }).catch(e => this.logger.warn(`[DJEN] Falha ao salvar análise na publicação ${id}: ${e.message}`));
 
     // Salva insights da análise na memória do lead para enriquecer contexto futuro da IA
     const leadId = (pub.legal_case as any)?.lead?.id;
