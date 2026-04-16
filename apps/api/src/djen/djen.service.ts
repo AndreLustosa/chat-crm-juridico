@@ -197,21 +197,28 @@ export class DjenService {
     });
 
     let items: any[] = [];
-    try {
-      const res = await fetch(`${this.API_BASE}?${params}`, {
-        headers: { accept: 'application/json' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!res.ok) {
-        this.logger.warn(`[DJEN] API retornou ${res.status} para ${date}`);
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const timeoutMs = attempt === 1 ? 30000 : 60000; // 30s na 1ª, 60s nos retries
+        const res = await fetch(`${this.API_BASE}?${params}`, {
+          headers: { accept: 'application/json' },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!res.ok) {
+          this.logger.warn(`[DJEN] API retornou ${res.status} para ${date} (tentativa ${attempt}/${MAX_RETRIES})`);
+          if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, 5000)); continue; }
+          return { date, saved: 0, errors: 1, tasksCreated: 0 };
+        }
+        const data: any = await res.json();
+        items = data?.items || data?.content || data?.data || (Array.isArray(data) ? data : []);
+        this.logger.log(`[DJEN] ${items.length} publicações encontradas para ${date}`);
+        break; // sucesso, sair do loop
+      } catch (e) {
+        this.logger.error(`[DJEN] Erro ao consultar API para ${date} (tentativa ${attempt}/${MAX_RETRIES}): ${e}`);
+        if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, 5000)); continue; }
         return { date, saved: 0, errors: 1, tasksCreated: 0 };
       }
-      const data: any = await res.json();
-      items = data?.items || data?.content || data?.data || (Array.isArray(data) ? data : []);
-      this.logger.log(`[DJEN] ${items.length} publicações encontradas para ${date}`);
-    } catch (e) {
-      this.logger.error(`[DJEN] Erro ao consultar API para ${date}: ${e}`);
-      return { date, saved: 0, errors: 1, tasksCreated: 0 };
     }
 
     let saved = 0;
