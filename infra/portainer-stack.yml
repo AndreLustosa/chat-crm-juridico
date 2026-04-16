@@ -1,5 +1,20 @@
 version: '3.8'
 
+# ===============================================================
+# NOTA IMPORTANTE — Portainer e fonte-da-verdade
+# ===============================================================
+# O Portainer mantem a PROPRIA copia deste yml (no volume dele).
+# Push no repo NAO atualiza a stack em producao automaticamente —
+# precisa colar este yml manualmente no painel do Portainer e
+# clicar "Update the stack".
+#
+# Variaveis de ambiente definidas no painel do Portainer
+# SOBRESCREVEM os defaults deste arquivo a cada restart. Se o
+# login quebrar apos redeploy, checar se POSTGRES_DB/DATABASE_URL
+# estao apontando para o banco correto (lustosa, nao lexcrm).
+# Ver: memory/arquitetura_stacks_vps.md
+# ===============================================================
+
 services:
   # ------ Banco de Dados ------
   postgres:
@@ -103,14 +118,14 @@ services:
         - "traefik.http.routers.crm-api.middlewares=strip-api"
         - "traefik.http.services.crm-api.loadbalancer.server.port=3001"
         - "traefik.http.routers.crm-api.entrypoints=websecure"
-        - "traefik.http.routers.crm-api.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.crm-api.tls.certresolver=letsencryptresolver"
         # --- WebSocket router (main domain) ---
         - "traefik.http.routers.crm-ws.rule=Host(`andrelustosaadvogados.com.br`) && PathPrefix(`/socket.io`)"
         - "traefik.http.routers.crm-ws.service=crm-ws"
         - "traefik.http.routers.crm-ws.priority=100"
         - "traefik.http.services.crm-ws.loadbalancer.server.port=3001"
         - "traefik.http.routers.crm-ws.entrypoints=websecure"
-        - "traefik.http.routers.crm-ws.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.crm-ws.tls.certresolver=letsencryptresolver"
         - "traefik.docker.network=OrionNet"
 
   # ------ NestJS Worker (Mídias e IA) ------
@@ -162,11 +177,11 @@ services:
         - "traefik.http.routers.crm-web.rule=Host(`andrelustosaadvogados.com.br`)"
         - "traefik.http.services.crm-web.loadbalancer.server.port=3000"
         - "traefik.http.routers.crm-web.entrypoints=websecure"
-        - "traefik.http.routers.crm-web.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.crm-web.tls.certresolver=letsencryptresolver"
         # --- Redirect old atendimento subdomain → new path ---
         - "traefik.http.routers.crm-web-old.rule=Host(`atendimento.andrelustosaadvogados.com.br`)"
         - "traefik.http.routers.crm-web-old.entrypoints=websecure"
-        - "traefik.http.routers.crm-web-old.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.crm-web-old.tls.certresolver=letsencryptresolver"
         - "traefik.http.middlewares.redirect-atendimento.redirectregex.regex=^https://atendimento\\.andrelustosaadvogados\\.com\\.br/(.*)"
         - "traefik.http.middlewares.redirect-atendimento.redirectregex.replacement=https://andrelustosaadvogados.com.br/atendimento/$${1}"
         - "traefik.http.middlewares.redirect-atendimento.redirectregex.permanent=true"
