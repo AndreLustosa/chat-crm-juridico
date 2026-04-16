@@ -1371,8 +1371,8 @@ function DjenPageContent() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
-  const [syncDateFrom, setSyncDateFrom] = useState(() => new Date().toISOString().slice(0, 10));
-  const [syncDateTo, setSyncDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [syncDateFrom, setSyncDateFrom] = useState(() => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; });
+  const [syncDateTo, setSyncDateTo] = useState(() => { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; });
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const syncRef = useRef<HTMLDivElement>(null);
   const [markingAll, setMarkingAll] = useState(false);
@@ -1408,13 +1408,19 @@ function DjenPageContent() {
     fetchPubs();
   }, [router, fetchPubs]);
 
+  const parseDateBR = (str: string): Date | null => {
+    const m = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!m) return null;
+    return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12, 0, 0);
+  };
+
   const handleSync = async () => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      // Gerar array de datas entre syncDateFrom e syncDateTo
-      const from = new Date(syncDateFrom + 'T12:00:00');
-      const to = new Date(syncDateTo + 'T12:00:00');
+      const from = parseDateBR(syncDateFrom);
+      const to = parseDateBR(syncDateTo);
+      if (!from || !to) { setSyncResult('Formato inválido. Use dd/mm/aaaa'); setSyncing(false); return; }
       if (from > to) { setSyncResult('Data inicial maior que final'); setSyncing(false); return; }
       const dates: string[] = [];
       const d = new Date(from);
@@ -1583,18 +1589,34 @@ function DjenPageContent() {
                   <label className="text-[10px] text-muted-foreground font-medium">
                     De
                     <input
-                      type="date"
+                      type="text"
+                      placeholder="dd/mm/aaaa"
+                      maxLength={10}
                       value={syncDateFrom}
-                      onChange={e => setSyncDateFrom(e.target.value)}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^\d/]/g, '');
+                        const raw = v.replace(/\//g, '');
+                        if (raw.length >= 3 && !v.includes('/')) v = raw.slice(0,2) + '/' + raw.slice(2);
+                        if (raw.length >= 5 && v.split('/').length < 3) v = v.slice(0,5) + '/' + raw.slice(4);
+                        setSyncDateFrom(v.slice(0, 10));
+                      }}
                       className="mt-0.5 w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[11px] text-foreground"
                     />
                   </label>
                   <label className="text-[10px] text-muted-foreground font-medium">
                     Até
                     <input
-                      type="date"
+                      type="text"
+                      placeholder="dd/mm/aaaa"
+                      maxLength={10}
                       value={syncDateTo}
-                      onChange={e => setSyncDateTo(e.target.value)}
+                      onChange={e => {
+                        let v = e.target.value.replace(/[^\d/]/g, '');
+                        const raw = v.replace(/\//g, '');
+                        if (raw.length >= 3 && !v.includes('/')) v = raw.slice(0,2) + '/' + raw.slice(2);
+                        if (raw.length >= 5 && v.split('/').length < 3) v = v.slice(0,5) + '/' + raw.slice(4);
+                        setSyncDateTo(v.slice(0, 10));
+                      }}
                       className="mt-0.5 w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[11px] text-foreground"
                     />
                   </label>
