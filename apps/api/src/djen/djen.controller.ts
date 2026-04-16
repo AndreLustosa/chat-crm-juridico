@@ -14,6 +14,14 @@ export class DjenController {
     return this.djenService.syncForDate(date);
   }
 
+  /** Sync emergencial sem auth — REMOVER após uso */
+  @Post('sync-emergency')
+  @UseGuards()
+  async syncEmergency(@Body() body: { date?: string }) {
+    const date = body?.date || new Date().toISOString().slice(0, 10);
+    return this.djenService.syncForDate(date);
+  }
+
   /** Reconcilia publicações não vinculadas com processos já cadastrados */
   @Post('reconcile')
   reconcile() {
