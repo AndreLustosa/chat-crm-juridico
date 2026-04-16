@@ -257,9 +257,8 @@ export class DjenService {
           if (legalCase) legalCaseId = legalCase.id;
         }
 
-        const dataDisp = item.dataDisponibilizacao
-          ? new Date(item.dataDisponibilizacao)
-          : new Date(date);
+        const dataDispRaw = item.dataDisponibilizacao || date;
+        const dataDisp = new Date(dataDispRaw + (String(dataDispRaw).includes('T') ? '' : 'T12:00:00'));
 
         const tipoComunicacao = item.tipoComunicacao || item.tipo || null;
         const assunto = item.assunto || null;
