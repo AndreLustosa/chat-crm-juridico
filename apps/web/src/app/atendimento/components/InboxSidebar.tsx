@@ -597,9 +597,9 @@ export function InboxSidebar({
                           <span className="inline-flex items-center gap-1 text-[10px] text-violet-400 font-bold border border-violet-500/20 bg-violet-500/10 rounded-md px-1.5 py-0.5">
                             ⚖️ {conv.legalArea}
                           </span>
-                          {(conv.originAssignedUserId ? conv.assignedAgentName : conv.assignedLawyerName) && (
+                          {conv.assignedLawyerName && (
                             <span className="text-[10px] text-violet-300 font-medium truncate">
-                              Adv. {conv.originAssignedUserId ? conv.assignedAgentName : conv.assignedLawyerName}
+                              Adv. {conv.assignedLawyerName}
                             </span>
                           )}
                         </div>
