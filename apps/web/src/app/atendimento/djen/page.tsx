@@ -8,7 +8,7 @@ import {
   ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
   ArrowRight, CheckSquare, AlertCircle, ChevronDown,
-  Search, User, UserCheck, Scale, Ban,
+  Search, User, UserCheck, Scale, Ban, Users, Trash2, Save,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -1383,6 +1383,13 @@ function DjenPageContent() {
   const [createModalPub, setCreateModalPub] = useState<DjenPublication | null>(null);
   const [createModalAnalysis, setCreateModalAnalysis] = useState<AiAnalysis | null>(null);
 
+  // Modal de advogados monitorados
+  const [lawyersOpen, setLawyersOpen] = useState(false);
+  const [lawyers, setLawyers] = useState<Array<{ oab: string; uf: string; nome: string }>>([]);
+  const [savingLawyers, setSavingLawyers] = useState(false);
+  const [lawyersMsg, setLawyersMsg] = useState<string | null>(null);
+  const [newLawyer, setNewLawyer] = useState({ nome: '', oab: '', uf: 'AL' });
+
   const fetchPubs = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -1457,6 +1464,38 @@ function DjenPageContent() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [syncOpen]);
+
+  // ─── Advogados monitorados ─────────────────────────
+  const loadLawyers = async () => {
+    try {
+      const res = await api.get('/settings/djen-lawyers');
+      setLawyers(Array.isArray(res.data) ? res.data : []);
+    } catch { setLawyers([]); }
+  };
+
+  const saveLawyers = async () => {
+    setSavingLawyers(true);
+    setLawyersMsg(null);
+    try {
+      await api.patch('/settings/djen-lawyers', { lawyers });
+      setLawyersMsg('Salvo com sucesso');
+    } catch {
+      setLawyersMsg('Erro ao salvar');
+    } finally { setSavingLawyers(false); }
+  };
+
+  const addLawyer = () => {
+    if (!newLawyer.nome.trim() || !newLawyer.oab.trim()) return;
+    if (lawyers.some(l => l.oab === newLawyer.oab.trim() && l.uf === newLawyer.uf)) return;
+    setLawyers([...lawyers, { nome: newLawyer.nome.trim(), oab: newLawyer.oab.trim(), uf: newLawyer.uf }]);
+    setNewLawyer({ nome: '', oab: '', uf: 'AL' });
+    setLawyersMsg(null);
+  };
+
+  const removeLawyer = (idx: number) => {
+    setLawyers(lawyers.filter((_, i) => i !== idx));
+    setLawyersMsg(null);
+  };
 
   const handleMarkAllViewed = async () => {
     setMarkingAll(true);
@@ -1572,6 +1611,14 @@ function DjenPageContent() {
               Marcar tudo como visto
             </button>
           )}
+
+          <button
+            onClick={() => { setLawyersOpen(true); loadLawyers(); setLawyersMsg(null); }}
+            className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-400 hover:text-violet-300 px-3 py-1.5 border border-violet-500/30 rounded-lg hover:bg-violet-500/5 transition-colors"
+          >
+            <Users size={12} />
+            Advogados
+          </button>
 
           <div className="relative" ref={syncRef}>
             <button
@@ -1730,6 +1777,92 @@ function DjenPageContent() {
             fetchPubs(true);
           }}
         />
+      )}
+
+      {/* Modal Advogados Monitorados */}
+      {lawyersOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setLawyersOpen(false)}>
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                <Scale size={16} className="text-violet-400" />
+                Advogados Monitorados
+              </h2>
+              <button onClick={() => setLawyersOpen(false)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+            </div>
+
+            <div className="px-5 py-4 max-h-[60vh] overflow-y-auto space-y-3">
+              {lawyers.length === 0 && (
+                <p className="text-[11px] text-muted-foreground text-center py-4">Nenhum advogado cadastrado</p>
+              )}
+              {lawyers.map((l, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 bg-background/50 border border-border rounded-lg px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] font-semibold text-foreground truncate">{l.nome}</p>
+                    <p className="text-[10px] text-muted-foreground">OAB {l.oab}/{l.uf}</p>
+                  </div>
+                  <button onClick={() => removeLawyer(i)} className="text-red-400 hover:text-red-300 shrink-0 p-1 rounded hover:bg-red-500/10 transition-colors">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+
+              <div className="border-t border-border pt-3 mt-3">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Adicionar advogado</p>
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Nome completo"
+                    value={newLawyer.nome}
+                    onChange={e => setNewLawyer({ ...newLawyer, nome: e.target.value })}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-[11px] text-foreground placeholder:text-muted-foreground/50"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nº OAB"
+                      value={newLawyer.oab}
+                      onChange={e => setNewLawyer({ ...newLawyer, oab: e.target.value.replace(/\D/g, '') })}
+                      className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-[11px] text-foreground placeholder:text-muted-foreground/50"
+                    />
+                    <select
+                      value={newLawyer.uf}
+                      onChange={e => setNewLawyer({ ...newLawyer, uf: e.target.value })}
+                      className="w-20 bg-background border border-border rounded-lg px-2 py-2 text-[11px] text-foreground"
+                    >
+                      {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(uf => (
+                        <option key={uf} value={uf}>{uf}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={addLawyer}
+                    disabled={!newLawyer.nome.trim() || !newLawyer.oab.trim()}
+                    className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold text-violet-400 hover:text-violet-300 px-3 py-2 border border-violet-500/30 rounded-lg hover:bg-violet-500/5 transition-colors disabled:opacity-30"
+                  >
+                    <Plus size={12} />
+                    Adicionar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-border flex items-center justify-between">
+              {lawyersMsg && (
+                <p className={`text-[10px] font-medium ${lawyersMsg.includes('Erro') ? 'text-red-400' : 'text-emerald-400'}`}>{lawyersMsg}</p>
+              )}
+              {!lawyersMsg && <span />}
+              <button
+                onClick={saveLawyers}
+                disabled={savingLawyers}
+                className="flex items-center gap-1.5 text-[11px] font-semibold text-white bg-violet-600 hover:bg-violet-500 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {savingLawyers ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

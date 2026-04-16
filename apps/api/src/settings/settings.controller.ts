@@ -40,6 +40,29 @@ export class SettingsController {
     return this.settingsService.upsert(data.key, data.value);
   }
 
+  // ─── DJEN Lawyers ──────────────────────────────────────
+
+  @Get('djen-lawyers')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getDjenLawyers() {
+    const raw = await this.settingsService.get('DJEN_LAWYERS');
+    if (raw) {
+      try { return JSON.parse(raw); } catch {}
+    }
+    // Fallback: montar a partir dos settings legados
+    const oab  = (await this.settingsService.get('DJEN_OAB_NUMBER'))  || '14209';
+    const uf   = (await this.settingsService.get('DJEN_OAB_UF'))      || 'AL';
+    const nome = (await this.settingsService.get('DJEN_LAWYER_NAME')) || 'André Freire Lustosa';
+    return [{ oab, uf, nome }];
+  }
+
+  @Patch('djen-lawyers')
+  @Roles('ADMIN')
+  async saveDjenLawyers(@Body() body: { lawyers: Array<{ oab: string; uf: string; nome: string }> }) {
+    await this.settingsService.upsert('DJEN_LAWYERS', JSON.stringify(body.lawyers));
+    return { message: 'Advogados DJEN salvos com sucesso', count: body.lawyers.length };
+  }
+
   @Get('whatsapp-config/health')
   @Roles('ADMIN')
   async checkHealth() {
