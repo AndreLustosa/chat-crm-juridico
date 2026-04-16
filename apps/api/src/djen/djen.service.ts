@@ -932,6 +932,15 @@ export class DjenService {
     valor_causa: string | null;
     data_audiencia: string | null;
     data_prazo: string | null;
+    // Campos CLIENT (linguagem acessível) — só usados internamente p/ notificação WhatsApp
+    client: {
+      resumo_cliente: string | null;
+      proximo_passo_cliente: string | null;
+      fase_processo_cliente: string | null;
+      orientacao_cliente: string | null;
+      prazo_cliente: string | null;
+      local_evento: string | null;
+    };
   }> {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({
       where: { id },
@@ -944,11 +953,18 @@ export class DjenService {
 
     // Cache: retorna análise salva se existir e não for forçada reanálise
     const CACHE_HOURS = 24;
-    if (!force && (pub as any).analysis_json && (pub as any).analyzed_at) {
-      const age = Date.now() - new Date((pub as any).analyzed_at).getTime();
+    const pubAny = pub as any;
+    if (!force && pubAny.lawyer_analysis && pubAny.analyzed_at) {
+      const age = Date.now() - new Date(pubAny.analyzed_at).getTime();
       if (age < CACHE_HOURS * 3600000) {
         this.logger.log(`[DJEN] Análise em cache (${Math.round(age / 60000)}min) para publicação ${id}`);
-        return (pub as any).analysis_json;
+        return {
+          ...pubAny.lawyer_analysis,
+          client: pubAny.client_analysis || {
+            resumo_cliente: null, proximo_passo_cliente: null, fase_processo_cliente: null,
+            orientacao_cliente: null, prazo_cliente: null, local_evento: null,
+          },
+        };
       }
     }
 
@@ -1066,7 +1082,8 @@ ${pub.conteudo.slice(0, 6000)}`;
     let parsed: any = {};
     try { parsed = JSON.parse(raw); } catch { parsed = {}; }
 
-    const result = {
+    // ─── Separar campos LAWYER (estratégicos/internos) e CLIENT (público) ─────
+    const lawyerFields = {
       resumo: parsed.resumo || 'Não foi possível gerar o resumo.',
       urgencia: (['URGENTE', 'NORMAL', 'BAIXA'].includes(parsed.urgencia) ? parsed.urgencia : 'NORMAL') as any,
       tipo_acao: parsed.tipo_acao || 'Verificar publicação',
@@ -1075,10 +1092,8 @@ ${pub.conteudo.slice(0, 6000)}`;
       tarefa_titulo: parsed.tarefa_titulo || 'Verificar publicação DJEN',
       tarefa_descricao: parsed.tarefa_descricao || '',
       orientacoes: parsed.orientacoes || '',
-      // Sem processo vinculado: não sugerir criação de eventos de audiência/prazo
       event_type: (!hasLinkedCase ? 'TAREFA' : (['AUDIENCIA', 'PRAZO', 'TAREFA'].includes(parsed.event_type) ? parsed.event_type : 'TAREFA')) as 'AUDIENCIA' | 'PRAZO' | 'TAREFA',
       model_used: configuredModel,
-      // Dados extraídos
       parte_autora: parsed.parte_autora || null,
       parte_rea: parsed.parte_rea || null,
       juizo: parsed.juizo || null,
@@ -1088,15 +1103,27 @@ ${pub.conteudo.slice(0, 6000)}`;
       data_prazo: parsed.data_prazo || null,
     };
 
-    // Persistir análise completa + partes na publicação (cache + matching com leads)
+    const clientFields = {
+      resumo_cliente: parsed.resumo_cliente || null,
+      proximo_passo_cliente: parsed.proximo_passo_cliente || null,
+      fase_processo_cliente: parsed.fase_processo_cliente || null,
+      orientacao_cliente: parsed.orientacao_cliente || null,
+      prazo_cliente: parsed.prazo_cliente || null,
+      local_evento: parsed.local_evento || null,
+    };
+
+    const result = { ...lawyerFields, client: clientFields };
+
+    // Persistir análise em DOIS campos separados (evita vazamento para área do cliente)
     await this.prisma.djenPublication.update({
       where: { id },
       data: {
-        analysis_json: result as any,
+        lawyer_analysis: lawyerFields as any,
+        client_analysis: clientFields as any,
         analyzed_at: new Date(),
-        parte_autora: result.parte_autora || null,
-        parte_rea: result.parte_rea || null,
-      },
+        parte_autora: lawyerFields.parte_autora || null,
+        parte_rea: lawyerFields.parte_rea || null,
+      } as any,
     }).catch(e => this.logger.warn(`[DJEN] Falha ao salvar análise na publicação ${id}: ${e.message}`));
 
     // Salva insights da análise na memória do lead para enriquecer contexto futuro da IA
@@ -1337,12 +1364,14 @@ ${pub.conteudo.slice(0, 6000)}`;
     const processoFmt = numeroProcesso.length > 20 ? numeroProcesso.slice(0, 20) + '…' : numeroProcesso;
 
     // Campos orientados ao CLIENTE (gerados pela IA)
-    const resumoCliente = aiAnalysis?.resumo_cliente || aiAnalysis?.resumo || '';
-    const proximoPassoCliente = aiAnalysis?.proximo_passo_cliente || '';
-    const faseProcessoCliente = aiAnalysis?.fase_processo_cliente || '';
-    const orientacaoCliente = aiAnalysis?.orientacao_cliente || '';
-    const prazoCliente = aiAnalysis?.prazo_cliente || '';
-    const localEvento = aiAnalysis?.local_evento || '';
+    // Campos do cliente vêm agora em aiAnalysis.client.* (separados dos internos)
+    const clientData = aiAnalysis?.client || {};
+    const resumoCliente = clientData.resumo_cliente || aiAnalysis?.resumo || '';
+    const proximoPassoCliente = clientData.proximo_passo_cliente || '';
+    const faseProcessoCliente = clientData.fase_processo_cliente || '';
+    const orientacaoCliente = clientData.orientacao_cliente || '';
+    const prazoCliente = clientData.prazo_cliente || '';
+    const localEvento = clientData.local_evento || '';
 
     const customTemplate = await this.settings.getDjenNotifyTemplate();
 

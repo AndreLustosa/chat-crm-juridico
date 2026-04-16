@@ -621,7 +621,8 @@ model DjenPublication {
   auto_task_id          String?
   parte_autora          String?
   parte_rea             String?
-  analysis_json         Json?
+  lawyer_analysis       Json?
+  client_analysis       Json?
   analyzed_at           DateTime?
   client_notified_at    DateTime?
   created_at            DateTime   @default(now())
