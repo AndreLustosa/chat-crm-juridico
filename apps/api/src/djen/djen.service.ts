@@ -183,11 +183,8 @@ export class DjenService {
     this.logger.log('[DJEN] Sync diário concluído.');
   }
 
-  async syncForDate(date: string): Promise<{ date: string; saved: number; errors: number; tasksCreated: number }> {
-    const oabNumber  = (await this.settings.get('DJEN_OAB_NUMBER'))  || '14209';
-    const oabUf      = (await this.settings.get('DJEN_OAB_UF'))      || 'AL';
-    const lawyerName = (await this.settings.get('DJEN_LAWYER_NAME')) || 'André Freire Lustosa';
-
+  /** Busca items da API DJEN para uma OAB específica em uma data, com retry */
+  private async fetchDjenItems(oabNumber: string, oabUf: string, lawyerName: string, date: string): Promise<any[]> {
     const params = new URLSearchParams({
       numeroOab: oabNumber,
       ufOab: oabUf,
@@ -196,30 +193,63 @@ export class DjenService {
       dataDisponibilizacaoFim: date,
     });
 
-    let items: any[] = [];
     const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const timeoutMs = attempt === 1 ? 30000 : 60000; // 30s na 1ª, 60s nos retries
+        const timeoutMs = attempt === 1 ? 30000 : 60000;
         const res = await fetch(`${this.API_BASE}?${params}`, {
           headers: { accept: 'application/json' },
           signal: AbortSignal.timeout(timeoutMs),
         });
         if (!res.ok) {
-          this.logger.warn(`[DJEN] API retornou ${res.status} para ${date} (tentativa ${attempt}/${MAX_RETRIES})`);
+          this.logger.warn(`[DJEN] API retornou ${res.status} para OAB ${oabNumber}/${oabUf} em ${date} (tentativa ${attempt}/${MAX_RETRIES})`);
           if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, 5000)); continue; }
-          return { date, saved: 0, errors: 1, tasksCreated: 0 };
+          return [];
         }
         const data: any = await res.json();
-        items = data?.items || data?.content || data?.data || (Array.isArray(data) ? data : []);
-        this.logger.log(`[DJEN] ${items.length} publicações encontradas para ${date}`);
-        break; // sucesso, sair do loop
+        const items = data?.items || data?.content || data?.data || (Array.isArray(data) ? data : []);
+        this.logger.log(`[DJEN] ${items.length} publicações para OAB ${oabNumber}/${oabUf} em ${date}`);
+        return items;
       } catch (e) {
-        this.logger.error(`[DJEN] Erro ao consultar API para ${date} (tentativa ${attempt}/${MAX_RETRIES}): ${e}`);
+        this.logger.error(`[DJEN] Erro OAB ${oabNumber}/${oabUf} em ${date} (tentativa ${attempt}/${MAX_RETRIES}): ${e}`);
         if (attempt < MAX_RETRIES) { await new Promise(r => setTimeout(r, 5000)); continue; }
-        return { date, saved: 0, errors: 1, tasksCreated: 0 };
+        return [];
       }
     }
+    return [];
+  }
+
+  /** Carrega lista de advogados do settings. Formato DJEN_LAWYERS: JSON array [{oab,uf,nome},...] */
+  private async getOabList(): Promise<Array<{ oab: string; uf: string; nome: string }>> {
+    const lawyersJson = await this.settings.get('DJEN_LAWYERS');
+    if (lawyersJson) {
+      try {
+        const parsed = JSON.parse(lawyersJson);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch { /* fallback para settings individuais */ }
+    }
+    // Fallback: settings legados de advogado único
+    const oab  = (await this.settings.get('DJEN_OAB_NUMBER'))  || '14209';
+    const uf   = (await this.settings.get('DJEN_OAB_UF'))      || 'AL';
+    const nome = (await this.settings.get('DJEN_LAWYER_NAME')) || 'André Freire Lustosa';
+    return [{ oab, uf, nome }];
+  }
+
+  async syncForDate(date: string): Promise<{ date: string; saved: number; errors: number; tasksCreated: number }> {
+    const lawyers = await this.getOabList();
+    this.logger.log(`[DJEN] Sincronizando ${date} para ${lawyers.length} advogado(s): ${lawyers.map(l => `${l.nome} (${l.oab}/${l.uf})`).join(', ')}`);
+
+    // Buscar publicações de todas as OABs e deduplicar por comunicacao_id
+    const itemsMap = new Map<number | string, any>();
+    for (const lawyer of lawyers) {
+      const items = await this.fetchDjenItems(lawyer.oab, lawyer.uf, lawyer.nome, date);
+      for (const item of items) {
+        const cid = item.id ?? item.idComunicacao ?? item.comunicacaoId;
+        if (cid && !itemsMap.has(cid)) itemsMap.set(cid, item);
+      }
+    }
+    const items = Array.from(itemsMap.values());
+    this.logger.log(`[DJEN] ${items.length} publicações únicas para ${date} (após deduplicação)`);
 
     let saved = 0;
     let errors = 0;
@@ -275,7 +305,7 @@ export class DjenService {
             assunto,
             tipo_comunicacao: tipoComunicacao,
             conteudo,
-            nome_advogado: item.nomeAdvogado || lawyerName,
+            nome_advogado: item.nomeAdvogado || lawyers.map(l => l.nome).join(', '),
             raw_json: item,
             legal_case_id: legalCaseId,
           },
