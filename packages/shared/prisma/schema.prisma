@@ -228,12 +228,13 @@ model MessageReaction {
 model Media {
   id            String   @id @default(uuid())
   message_id    String   @unique
-  s3_key        String
+  s3_key        String?  /// DEPRECATED: path no MinIO (mídias antigas). Novo: usar file_path.
+  file_path     String?  /// Path relativo a MEDIA_STORAGE_PATH (ex: "2026/04/uuid.ogg")
   mime_type     String
   size          Int?
   duration      Int?
   checksum      String?
-  original_url  String?
+  original_url  String?  /// URL temporária Evolution CDN (fallback, expira ~48h)
   original_name String?
   created_at    DateTime @default(now())
   message       Message  @relation(fields: [message_id], references: [id], onDelete: Cascade)

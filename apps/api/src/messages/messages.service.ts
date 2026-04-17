@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { MediaS3Service } from '../media/s3.service';
+import { FileStorageService } from '../media/filesystem.service';
 import { SettingsService } from '../settings/settings.service';
 import { Readable } from 'stream';
 import OpenAI, { toFile } from 'openai';
@@ -57,6 +58,7 @@ export class MessagesService {
     private whatsapp: WhatsappService,
     private chatGateway: ChatGateway,
     private s3: MediaS3Service,
+    private fileStorage: FileStorageService,
     private settings: SettingsService,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
   ) {}
@@ -369,16 +371,16 @@ export class MessagesService {
       },
     });
 
-    // 2. Upload para S3 usando o ID da mensagem como chave
+    // 2. Escreve no filesystem local (substitui MinIO)
     const ext = mimeToExt(file.mimetype);
-    const s3Key = `media/${msg.id}.${ext}`;
-    await this.s3.uploadBuffer(s3Key, file.buffer, file.mimetype);
+    const filePath = this.fileStorage.generatePath(msg.id, ext);
+    await this.fileStorage.write(filePath, file.buffer);
 
     // 3. Criar registro de mídia
     await this.prisma.media.create({
       data: {
         message_id: msg.id,
-        s3_key: s3Key,
+        file_path: filePath,
         mime_type: file.mimetype,
         size: file.size,
       },
@@ -481,13 +483,13 @@ export class MessagesService {
     });
 
     const ext = mimeToExt(mime);
-    const s3Key = `media/${msg.id}.${ext}`;
-    await this.s3.uploadBuffer(s3Key, file.buffer, mime);
+    const filePath = this.fileStorage.generatePath(msg.id, ext);
+    await this.fileStorage.write(filePath, file.buffer);
 
     await this.prisma.media.create({
       data: {
         message_id: msg.id,
-        s3_key: s3Key,
+        file_path: filePath,
         mime_type: mime,
         size: file.size,
         original_name: file.originalname || null,
@@ -640,9 +642,19 @@ export class MessagesService {
     const { apiKey: openAiKey } = await this.settings.getAiConfig();
     if (!openAiKey) throw new BadRequestException('OPENAI_API_KEY não configurada');
 
-    // Download do S3
-    const { stream, contentType } = await this.s3.getObjectStream(message.media.s3_key);
-    const buffer = await this.streamToBuffer(stream);
+    // Dual-read: prefere filesystem (novo), cai no S3/MinIO (legado)
+    let buffer: Buffer;
+    let contentType: string | undefined;
+    if (message.media.file_path) {
+      buffer = await this.fileStorage.read(message.media.file_path);
+      contentType = message.media.mime_type;
+    } else if (message.media.s3_key) {
+      const s3Result = await this.s3.getObjectStream(message.media.s3_key);
+      buffer = await this.streamToBuffer(s3Result.stream);
+      contentType = s3Result.contentType;
+    } else {
+      throw new BadRequestException('Mídia sem file_path nem s3_key — inconsistente');
+    }
 
     const mimeBase = (contentType || message.media.mime_type).split(';')[0].trim();
     const ext = mimeBase.split('/')[1] || 'ogg';

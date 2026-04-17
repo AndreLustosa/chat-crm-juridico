@@ -3,6 +3,7 @@
 import React, { memo } from 'react';
 import { Download, Mic, FileText, Trash2, Reply, Pencil, CheckCheck, Check, Bot, Loader2 } from 'lucide-react';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { MediaLoadingState } from './MediaLoadingState';
 import { LinkPreview } from '@/components/LinkPreview';
 import type { MessageItem } from '../types';
 
@@ -267,10 +268,7 @@ function MessageBubbleInner({
                 messageId={msg.id}
               />
             ) : (
-              <div className={`flex items-center gap-2 min-w-[160px] text-[11px] ${isOut ? 'text-white/60' : 'text-muted-foreground'}`}>
-                <Loader2 size={13} className="animate-spin shrink-0" />
-                <span>Aguardando áudio...</span>
-              </div>
+              <MediaLoadingState messageId={msg.id} type="audio" isOutgoing={isOut} />
             )}
             {msg.text ? (
               <p className={`text-[12px] mt-2 leading-snug italic ${isOut ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
@@ -307,13 +305,13 @@ function MessageBubbleInner({
               </button>
             </div>
           ) : (
-            <p className="text-sm italic opacity-70">&#128444;&#65039; Imagem processando...</p>
+            <MediaLoadingState messageId={msg.id} type="image" isOutgoing={isOut} />
           )
         ) : msg.type === 'video' ? (
           msg.media ? (
             <video src={`/api/media/${msg.id}`} controls className="max-w-full rounded-lg" />
           ) : (
-            <p className="text-sm italic opacity-70">&#127916; Video processando...</p>
+            <MediaLoadingState messageId={msg.id} type="video" isOutgoing={isOut} />
           )
         ) : msg.type === 'document' ? (
           msg.media ? (
@@ -338,7 +336,7 @@ function MessageBubbleInner({
               </button>
             </div>
           ) : (
-            <p className="text-sm italic opacity-70">&#128196; Documento processando...</p>
+            <MediaLoadingState messageId={msg.id} type="document" isOutgoing={isOut} />
           )
         ) : msg.type === 'sticker' ? (
           msg.media ? (

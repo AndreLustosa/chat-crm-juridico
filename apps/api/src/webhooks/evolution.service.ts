@@ -440,57 +440,27 @@ export class EvolutionService implements OnApplicationBootstrap {
         data: { last_message_at: new Date() },
       });
 
-      // ─── 4. Mídia: download síncrono (estilo Chatwoot) ───────────────────
-      // Para mensagens com mídia, tenta baixar ANTES de emitir WebSocket.
-      // Se o download falhar, emite sem mídia e enfileira fallback no BullMQ.
-      let msgToEmit: any = msg;
+      // ─── 4. Emit newMessage IMEDIATAMENTE (frontend vê a mensagem já) ───
+      // Para mídia: emite sem media record, frontend mostra "Baixando..." por 10s
+      // depois botão "Recarregar" se ainda não chegou.
+      this.chatGateway.emitNewMessage(conv.id, msg);
 
+      // ─── 5. Download de mídia em background (mesmo processo, não-await) ──
+      // MediaDownloadService faz retry interno (3x com backoff 2s/5s/10s)
+      // e emite messageUpdate ao final (sucesso ou falha final).
+      // Sem worker BullMQ — fluxo simplificado estilo Chatwoot.
       if (msgType !== 'text') {
         const mediaData = (data.message as any)?.[messageType];
-        try {
-          const mediaRecord = await this.mediaDownloadService.downloadAndStore({
-            messageId: msg.id,
-            conversationId: conv.id,
-            externalMessageId,
-            instanceName,
-            mediaData,
-          });
-
-          if (mediaRecord) {
-            // Busca mensagem completa com mídia para emitir via WebSocket
-            const fullMsg = await this.prisma.message.findUnique({
-              where: { id: msg.id },
-              include: { media: true, skill: { select: { id: true, name: true, area: true } } },
-            });
-            if (fullMsg) msgToEmit = fullMsg;
-          } else {
-            // Download retornou null — enfileira fallback no worker
-            this.logger.warn(`[MEDIA-SYNC] Fallback BullMQ para msg ${msg.id}`);
-            await this.mediaQueue.add('download_media', {
-              message_id: msg.id,
-              conversation_id: conv.id,
-              media_data: mediaData,
-              remote_jid: remoteJid,
-              msg_id: externalMessageId,
-              instance_name: instanceName,
-            }, { delay: 5000 });
-          }
-        } catch (err: any) {
-          // Erro inesperado — enfileira fallback
+        this.mediaDownloadService.downloadAndStore({
+          messageId: msg.id,
+          conversationId: conv.id,
+          externalMessageId,
+          instanceName,
+          mediaData,
+        }).catch(err => {
           this.logger.error(`[MEDIA-SYNC] Erro inesperado para msg ${msg.id}: ${err.message}`);
-          await this.mediaQueue.add('download_media', {
-            message_id: msg.id,
-            conversation_id: conv.id,
-            media_data: mediaData,
-            remote_jid: remoteJid,
-            msg_id: externalMessageId,
-            instance_name: instanceName,
-          }, { delay: 5000 });
-        }
+        });
       }
-
-      // ─── 5. Emit WebSocket (com mídia se download foi OK) ─────────────
-      this.chatGateway.emitNewMessage(conv.id, msgToEmit);
       this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
 
       // Notify operator(s) about incoming message (sound + unread badge)
