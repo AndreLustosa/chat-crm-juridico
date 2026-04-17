@@ -70,10 +70,13 @@ export class DashboardService {
       ? { honorario: { legal_case: { ...tw } } }
       : { honorario: { legal_case: { lawyer_id: userId, ...tw } } };
 
-    // ─── Leads em atendimento: com cs_user_id atribuído e ainda não cliente ──
+    // ─── Leads em atendimento: leads ainda ativos (não-clientes, fora de
+    // PERDIDO/FINALIZADO). Mesmo filtro usado pelo Inbox (Leads tab).
+    // Não-admin ve apenas os leads atribuidos a ele via cs_user_id.
     const leadsInServiceWhere: any = {
-      cs_user_id: isAdmin ? { not: null } : userId,
       is_client: false,
+      stage: { notIn: ['PERDIDO', 'FINALIZADO'] },
+      ...(isAdmin ? {} : { cs_user_id: userId }),
       ...tw,
     };
 
@@ -465,7 +468,11 @@ export class DashboardService {
     for (const w of windows) {
       const [leadsTotal, leadsInService, leadsConverted, leadsLost, cases, tracking, overdue] = await Promise.all([
         countLeads('created_at', { stage: { not: 'PERDIDO' } }, w.start, w.end),
-        countLeads('stage_entered_at', { cs_user_id: { not: null }, is_client: false }, w.start, w.end),
+        countLeads(
+          'stage_entered_at',
+          { is_client: false, stage: { notIn: ['PERDIDO', 'FINALIZADO'] } },
+          w.start, w.end,
+        ),
         countLeads('became_client_at', { is_client: true }, w.start, w.end),
         countLeads('stage_entered_at', { stage: 'PERDIDO' }, w.start, w.end),
         countCases(w.start, w.end),
