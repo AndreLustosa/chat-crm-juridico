@@ -70,11 +70,35 @@ export class DashboardService {
       ? { honorario: { legal_case: { ...tw } } }
       : { honorario: { legal_case: { lawyer_id: userId, ...tw } } };
 
+    // ─── Leads em atendimento: com cs_user_id atribuído e ainda não cliente ──
+    const leadsInServiceWhere: any = {
+      cs_user_id: isAdmin ? { not: null } : userId,
+      is_client: false,
+      ...tw,
+    };
+
+    // ─── Leads no geral: todos os leads exceto os PERDIDOs (inclui ativos + FINALIZADOs) ──
+    const leadsTotalWhere: any = {
+      stage: { not: 'PERDIDO' },
+      ...(isAdmin ? {} : { cs_user_id: userId }),
+      ...tw,
+    };
+
+    // ─── Leads perdidos: stage = PERDIDO ──
+    const leadsLostWhere: any = {
+      stage: 'PERDIDO',
+      ...(isAdmin ? {} : { cs_user_id: userId }),
+      ...tw,
+    };
+
     // ─── Run all queries in parallel ──
     const [
       userName,
       openConvCount,
       pendingTransferCount,
+      leadsInServiceCount,
+      leadsTotalCount,
+      leadsLostCount,
       leadPipelineRaw,
       legalCasesRaw,
       trackingCasesRaw,
@@ -102,6 +126,12 @@ export class DashboardService {
       this.prisma.conversation.count({ where: convWhere }),
       // 3. Pending transfers
       this.prisma.conversation.count({ where: pendingTransferWhere }),
+      // 3b. Leads em atendimento (cs_user_id atribuído e ainda não cliente)
+      this.prisma.lead.count({ where: leadsInServiceWhere }),
+      // 3c. Leads no geral (exclui PERDIDO — inclui ativos + FINALIZADOs)
+      this.prisma.lead.count({ where: leadsTotalWhere }),
+      // 3d. Leads perdidos (stage = PERDIDO)
+      this.prisma.lead.count({ where: leadsLostWhere }),
       // 4. Lead pipeline
       this.prisma.lead.groupBy({
         by: ['stage'],
@@ -309,6 +339,9 @@ export class DashboardService {
         open: openConvCount,
         pendingTransfers: pendingTransferCount,
       },
+      leadsInService: leadsInServiceCount,
+      leadsTotal: leadsTotalCount,
+      leadsLost: leadsLostCount,
       leadPipeline: leadPipelineRaw.map((g) => ({
         stage: g.stage || 'INICIAL',
         count: g._count,
@@ -364,6 +397,135 @@ export class DashboardService {
         closedThisWeek,
         closedThisMonth,
       },
+    };
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Comparações — retorna as 6 métricas do StatsGrid em 3 janelas:
+   *   - current: [start, end]
+   *   - previousPeriod: período equivalente imediatamente anterior
+   *   - previousYear: mesmo [start, end] de um ano atrás
+   * ────────────────────────────────────────────────────────────────── */
+  async comparisons(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
+    const isAdmin = roleArr.includes('ADMIN');
+    const tw = this.tenantWhere(tenantId);
+    const now = new Date();
+
+    const end = endDate ? new Date(endDate) : now;
+    const start = startDate ? new Date(startDate) : new Date(end.getTime() - 30 * 86400000);
+    const periodMs = end.getTime() - start.getTime();
+    const prevEnd = new Date(start.getTime());
+    const prevStart = new Date(start.getTime() - periodMs);
+
+    const yearEnd = new Date(end); yearEnd.setFullYear(yearEnd.getFullYear() - 1);
+    const yearStart = new Date(start); yearStart.setFullYear(yearStart.getFullYear() - 1);
+
+    const userFilter = isAdmin ? {} : { cs_user_id: userId };
+    const lawyerFilter = isAdmin ? {} : { lawyer_id: userId };
+    const taskUserFilter = isAdmin ? {} : { assigned_user_id: userId };
+
+    // Helper: conta leads dentro de uma janela por um campo de data
+    const countLeads = (dateField: string, extraWhere: any, wStart: Date, wEnd: Date) =>
+      this.prisma.lead.count({
+        where: { ...extraWhere, ...userFilter, ...tw, [dateField]: { gte: wStart, lte: wEnd } },
+      });
+    const countCases = (wStart: Date, wEnd: Date) =>
+      this.prisma.legalCase.count({
+        where: { archived: false, ...lawyerFilter, ...tw, created_at: { gte: wStart, lte: wEnd } },
+      });
+    const countTracking = (wStart: Date, wEnd: Date) =>
+      this.prisma.legalCase.count({
+        where: { in_tracking: true, archived: false, ...lawyerFilter, ...tw, created_at: { gte: wStart, lte: wEnd } },
+      });
+    const countOverdueTasks = (wStart: Date, wEnd: Date) =>
+      this.prisma.calendarEvent.count({
+        where: {
+          type: 'TAREFA',
+          status: { in: ['AGENDADO', 'CONFIRMADO'] },
+          start_at: { gte: wStart, lte: wEnd },
+          ...taskUserFilter,
+          ...tw,
+        },
+      });
+
+    const windows: { key: 'current' | 'previousPeriod' | 'previousYear'; start: Date; end: Date }[] = [
+      { key: 'current', start, end },
+      { key: 'previousPeriod', start: prevStart, end: prevEnd },
+      { key: 'previousYear', start: yearStart, end: yearEnd },
+    ];
+
+    const perWindow: Record<string, any> = {};
+    for (const w of windows) {
+      const [leadsTotal, leadsInService, leadsConverted, leadsLost, cases, tracking, overdue] = await Promise.all([
+        countLeads('created_at', { stage: { not: 'PERDIDO' } }, w.start, w.end),
+        countLeads('stage_entered_at', { cs_user_id: { not: null }, is_client: false }, w.start, w.end),
+        countLeads('became_client_at', { is_client: true }, w.start, w.end),
+        countLeads('stage_entered_at', { stage: 'PERDIDO' }, w.start, w.end),
+        countCases(w.start, w.end),
+        countTracking(w.start, w.end),
+        countOverdueTasks(w.start, w.end),
+      ]);
+
+      const convRate = leadsTotal > 0 ? Math.round((leadsConverted / leadsTotal) * 1000) / 10 : 0;
+
+      perWindow[w.key] = {
+        leadsTotal,
+        leadsInService,
+        leadsConverted,
+        leadsLost,
+        conversionRate: convRate,
+        overdueTasks: overdue,
+        activeCases: cases,
+        trackingCases: tracking,
+      };
+    }
+
+    const pct = (curr: number, prev: number): number | null => {
+      if (prev === 0) return curr === 0 ? 0 : null; // null = sem base de comparação
+      return Math.round(((curr - prev) / prev) * 1000) / 10;
+    };
+
+    const metricKeys = [
+      { key: 'leadsTotal', label: 'Leads Geral' },
+      { key: 'leadsInService', label: 'Leads em Atendimento' },
+      { key: 'leadsConverted', label: 'Leads Convertidos' },
+      { key: 'leadsLost', label: 'Leads Perdidos' },
+      { key: 'conversionRate', label: 'Taxa de Conversão', suffix: '%' as const },
+      { key: 'overdueTasks', label: 'Tarefas Atrasadas' },
+      { key: 'activeCases', label: 'Casos Ativos' },
+      { key: 'trackingCases', label: 'Processos' },
+    ];
+
+    const metrics = metricKeys.map((m) => {
+      const c = perWindow.current[m.key];
+      const p = perWindow.previousPeriod[m.key];
+      const y = perWindow.previousYear[m.key];
+      return {
+        key: m.key,
+        label: m.label,
+        suffix: (m as any).suffix,
+        current: c,
+        previousPeriod: p,
+        previousYear: y,
+        pctVsPrev: pct(c, p),
+        pctVsYear: pct(c, y),
+      };
+    });
+
+    return {
+      windows: {
+        current: { start: start.toISOString(), end: end.toISOString() },
+        previousPeriod: { start: prevStart.toISOString(), end: prevEnd.toISOString() },
+        previousYear: { start: yearStart.toISOString(), end: yearEnd.toISOString() },
+      },
+      metrics,
     };
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import type { DashboardScope } from './dashboard-analytics.service';
 
 type Quartile = 'TOP' | 'MID' | 'LOW';
 
@@ -15,9 +16,29 @@ export class TeamPerformanceService {
       : {};
   }
 
-  async getPerformance(userId: string, roles: string | string[], tenantId?: string, startDate?: string, endDate?: string) {
+  async getPerformance(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+    scope?: DashboardScope,
+  ) {
     const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
-    if (!roleArr.includes('ADMIN')) return { members: [], teamAverages: {}, period: {}, previousPeriod: {} };
+    const isAdmin = roleArr.includes('ADMIN');
+    const isAdvogado = roleArr.includes('ADVOGADO');
+    const isComercial = roleArr.includes('OPERADOR') || roleArr.includes('COMERCIAL');
+
+    // Autorização: ADMIN sempre; outros só com scope apropriado ao seu papel
+    const allowed =
+      isAdmin ||
+      (scope === 'comercial' && (isComercial || isAdvogado)) ||
+      (scope === 'juridico' && isAdvogado) ||
+      (scope === 'estagiarios' && isAdvogado);
+
+    if (!allowed) {
+      return { members: [], teamAverages: {}, period: {}, previousPeriod: {} };
+    }
 
     const tw = this.tenantWhere(tenantId);
     const now = new Date();
@@ -27,9 +48,27 @@ export class TeamPerformanceService {
     const prevEnd = new Date(start.getTime());
     const prevStart = new Date(start.getTime() - periodMs);
 
-    // ─── 1. Get all team members ──
+    // ─── 1. Get team members — filtrado por escopo, se aplicável ──
+    let userWhere: any = { ...tw };
+    if (scope === 'comercial') {
+      userWhere = { ...tw, roles: { hasSome: ['OPERADOR', 'COMERCIAL'] } };
+    } else if (scope === 'juridico') {
+      if (isAdmin) {
+        userWhere = { ...tw, roles: { has: 'ADVOGADO' } };
+      } else {
+        userWhere = { ...tw, id: userId };
+      }
+    } else if (scope === 'estagiarios') {
+      if (isAdmin) {
+        userWhere = { ...tw, roles: { has: 'ESTAGIARIO' } };
+      } else {
+        // Advogado: apenas estagiários supervisionados
+        userWhere = { ...tw, supervisors: { some: { id: userId } } };
+      }
+    }
+
     const users = await this.prisma.user.findMany({
-      where: tw,
+      where: userWhere,
       select: { id: true, name: true, roles: true },
       orderBy: { name: 'asc' },
     });

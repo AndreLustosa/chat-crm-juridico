@@ -4,9 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 import type {
   PeriodFilter, RevenueTrendData, LeadFunnelData, TaskCompletionData,
-  CaseDurationData, FinancialAgingData, AiUsageData, LeadSourcesData,
+  CaseDurationData, CasesByAreaData, FinancialAgingData, AiUsageData, LeadSourcesData,
   ResponseTimeData, ConversionVelocityData,
 } from '../types';
+import type { Scope } from '../sectionVisibility';
 
 function useAnalyticsEndpoint<T>(endpoint: string, params?: Record<string, string>, enabled = true) {
   const [data, setData] = useState<T | null>(null);
@@ -40,38 +41,73 @@ function periodParams(period?: PeriodFilter): Record<string, string> {
   return { startDate: period.startDate, endDate: period.endDate };
 }
 
-export function useRevenueTrend(months = 12) {
-  return useAnalyticsEndpoint<RevenueTrendData>('/dashboard/revenue-trend', { months: String(months) });
+function withScope(params: Record<string, string>, scope?: Scope): Record<string, string> {
+  return scope ? { ...params, scope } : params;
 }
 
-export function useLeadFunnel(period?: PeriodFilter) {
-  return useAnalyticsEndpoint<LeadFunnelData>('/dashboard/lead-funnel', periodParams(period));
+export function useRevenueTrend(months = 12, scope?: Scope) {
+  return useAnalyticsEndpoint<RevenueTrendData>(
+    '/dashboard/revenue-trend',
+    withScope({ months: String(months) }, scope),
+  );
 }
 
-export function useTaskCompletion(period?: PeriodFilter) {
-  return useAnalyticsEndpoint<TaskCompletionData>('/dashboard/task-completion', periodParams(period));
+export function useLeadFunnel(period?: PeriodFilter, scope?: Scope) {
+  return useAnalyticsEndpoint<LeadFunnelData>(
+    '/dashboard/lead-funnel',
+    withScope(periodParams(period), scope),
+  );
 }
 
-export function useCaseDuration() {
-  return useAnalyticsEndpoint<CaseDurationData>('/dashboard/case-duration');
+export function useTaskCompletion(period?: PeriodFilter, scope?: Scope) {
+  return useAnalyticsEndpoint<TaskCompletionData>(
+    '/dashboard/task-completion',
+    withScope(periodParams(period), scope),
+  );
 }
 
-export function useFinancialAging() {
-  return useAnalyticsEndpoint<FinancialAgingData>('/dashboard/financial-aging');
+export function useCaseDuration(scope?: Scope) {
+  return useAnalyticsEndpoint<CaseDurationData>(
+    '/dashboard/case-duration',
+    withScope({}, scope),
+  );
+}
+
+export function useCasesByArea(scope?: Scope) {
+  return useAnalyticsEndpoint<CasesByAreaData>(
+    '/dashboard/cases-by-area',
+    withScope({}, scope),
+  );
+}
+
+export function useFinancialAging(scope?: Scope) {
+  return useAnalyticsEndpoint<FinancialAgingData>(
+    '/dashboard/financial-aging',
+    withScope({}, scope),
+  );
 }
 
 export function useAiUsage(months = 6, enabled = true) {
   return useAnalyticsEndpoint<AiUsageData>('/dashboard/ai-usage', { months: String(months) }, enabled);
 }
 
-export function useLeadSources(period?: PeriodFilter) {
-  return useAnalyticsEndpoint<LeadSourcesData>('/dashboard/lead-sources', periodParams(period));
+export function useLeadSources(period?: PeriodFilter, scope?: Scope) {
+  return useAnalyticsEndpoint<LeadSourcesData>(
+    '/dashboard/lead-sources',
+    withScope(periodParams(period), scope),
+  );
 }
 
-export function useResponseTime(period?: PeriodFilter) {
-  return useAnalyticsEndpoint<ResponseTimeData>('/dashboard/response-time', periodParams(period));
+export function useResponseTime(period?: PeriodFilter, scope?: Scope) {
+  return useAnalyticsEndpoint<ResponseTimeData>(
+    '/dashboard/response-time',
+    withScope(periodParams(period), scope),
+  );
 }
 
-export function useConversionVelocity(period?: PeriodFilter) {
-  return useAnalyticsEndpoint<ConversionVelocityData>('/dashboard/conversion-velocity', periodParams(period));
+export function useConversionVelocity(period?: PeriodFilter, scope?: Scope) {
+  return useAnalyticsEndpoint<ConversionVelocityData>(
+    '/dashboard/conversion-velocity',
+    withScope(periodParams(period), scope),
+  );
 }

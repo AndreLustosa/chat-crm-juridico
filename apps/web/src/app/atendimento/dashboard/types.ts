@@ -13,6 +13,37 @@ export interface TimeSeriesPoint {
   value: number;
 }
 
+/* ─── Cases by Legal Area ─── */
+
+export interface CasesByAreaData {
+  total: number;
+  areas: { area: string; count: number; percentage: number }[];
+}
+
+/* ─── Comparisons (vs período anterior e vs ano passado) ─── */
+
+export interface ComparisonMetric {
+  key: string;
+  label: string;
+  suffix?: string;
+  current: number;
+  previousPeriod: number;
+  previousYear: number;
+  /** Percentual de variação vs período anterior. null = sem base. */
+  pctVsPrev: number | null;
+  /** Percentual de variação vs mesmo período do ano passado. null = sem base. */
+  pctVsYear: number | null;
+}
+
+export interface ComparisonsData {
+  windows: {
+    current: { start: string; end: string };
+    previousPeriod: { start: string; end: string };
+    previousYear: { start: string; end: string };
+  };
+  metrics: ComparisonMetric[];
+}
+
 /* ─── Core dashboard data (existing API shape) ─── */
 
 export interface TeamMember {
@@ -30,6 +61,12 @@ export interface TeamMember {
 export interface DashboardData {
   user: { id: string; name: string; role: string };
   conversations: { open: number; pendingTransfers: number };
+  /** Leads com atendente comercial atribuído e ainda não convertidos em cliente. */
+  leadsInService: number;
+  /** Total de leads excluindo apenas os marcados como PERDIDO (inclui ativos + FINALIZADOs). */
+  leadsTotal: number;
+  /** Leads marcados como PERDIDO (stage = 'PERDIDO'). */
+  leadsLost: number;
   leadPipeline: { stage: string; count: number }[];
   legalCases: { total: number; byStage: { stage: string; count: number }[] };
   trackingCases: { total: number; byStage: { stage: string; count: number }[] };

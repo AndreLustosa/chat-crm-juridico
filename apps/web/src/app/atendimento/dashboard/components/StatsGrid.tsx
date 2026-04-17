@@ -1,11 +1,11 @@
 'use client';
 
 import {
-  MessageSquare, ListTodo, Scale, BookOpen, ArrowLeftRight,
-  Users, UserCheck, TrendingUp, Clock, Zap, AlertTriangle,
+  ListTodo, Scale, BookOpen,
+  Users, UserCheck, UserX, TrendingUp, AlertTriangle,
 } from 'lucide-react';
 import { Area, AreaChart, ResponsiveContainer } from 'recharts';
-import type { DashboardData, LeadFunnelData, ResponseTimeData, ConversionVelocityData, TimeSeriesPoint } from '../types';
+import type { DashboardData, LeadFunnelData, TimeSeriesPoint } from '../types';
 
 /* ─── Stat Card inline (evita dependencia circular) ─── */
 
@@ -65,19 +65,9 @@ interface Props {
   data: DashboardData;
   aggressive?: boolean;
   funnel?: LeadFunnelData | null;
-  responseTime?: ResponseTimeData | null;
-  velocity?: ConversionVelocityData | null;
 }
 
 /* ─── Helpers ─── */
-
-function formatMinutes(min: number): string {
-  if (min < 1) return '<1';
-  if (min < 60) return `${Math.round(min)}`;
-  const h = Math.floor(min / 60);
-  const m = Math.round(min % 60);
-  return m > 0 ? `${h}h${m}` : `${h}h`;
-}
 
 function conversionColor(rate: number): string {
   if (rate >= 30) return 'text-emerald-400 bg-emerald-500/10';
@@ -87,17 +77,16 @@ function conversionColor(rate: number): string {
 
 /* ─── Component ─── */
 
-export function StatsGrid({ data, aggressive, funnel, responseTime, velocity }: Props) {
+export function StatsGrid({ data, aggressive, funnel }: Props) {
   // Default grid for roles without aggressive dashboard
   if (!aggressive) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <AggressiveCard
-          icon={MessageSquare}
-          label="Conversas Abertas"
-          value={data.conversations.open}
+          icon={UserCheck}
+          label="Leads em Atendimento"
+          value={data.leadsInService}
           color="text-blue-500 bg-blue-500/10"
-          sub={data.conversations.pendingTransfers > 0 ? `${data.conversations.pendingTransfers} transferencia(s)` : undefined}
           trendColor="#3b82f6"
         />
         <AggressiveCard
@@ -126,49 +115,27 @@ export function StatsGrid({ data, aggressive, funnel, responseTime, velocity }: 
     );
   }
 
-  // ─── ADMIN/OPERADOR: 8 cards agressivos ───
-  const totalLeads = data.leadPipeline.reduce((s, p) => s + p.count, 0);
+  // ─── ADMIN/OPERADOR: cards agressivos ───
   const conversionRate = funnel?.overallConversionRate ?? 0;
-  const medianResponse = responseTime?.medianMinutes ?? 0;
-  const avgConvDays = velocity?.avgDays ?? 0;
-
-  // Build sparkline from response time byDay
-  const responseTrend: TimeSeriesPoint[] = responseTime?.byDay
-    ? responseTime.byDay.slice(-7).map(d => ({ date: d.date, value: d.avgMinutes }))
-    : [];
-
-  // Build sparkline from velocity byMonth
-  const velocityTrend: TimeSeriesPoint[] = velocity?.byMonth
-    ? velocity.byMonth.slice(-6).map(d => ({ date: d.month, value: d.avgDays }))
-    : [];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {/* Row 1 */}
       <AggressiveCard
-        icon={MessageSquare}
-        label="Conversas Abertas"
-        value={data.conversations.open}
+        icon={UserCheck}
+        label="Leads em Atendimento"
+        value={data.leadsInService}
         color="text-blue-400 bg-blue-500/10"
         trendColor="#60a5fa"
         large
       />
       <AggressiveCard
-        icon={ArrowLeftRight}
-        label="Transferencias"
-        value={data.conversations.pendingTransfers}
-        color="text-orange-400 bg-orange-500/10"
-        trendColor="#fb923c"
-        sub={data.conversations.pendingTransfers > 0 ? 'pendentes' : 'nenhuma'}
-        pulse={data.conversations.pendingTransfers > 0}
-      />
-      <AggressiveCard
         icon={Users}
-        label="Leads no Funil"
-        value={totalLeads}
-        color="text-sky-400 bg-sky-500/10"
-        trendColor="#38bdf8"
-        large
+        label="Leads Geral"
+        value={data.leadsTotal}
+        color="text-indigo-400 bg-indigo-500/10"
+        trendColor="#818cf8"
+        sub="exclui perdidos"
       />
       <AggressiveCard
         icon={UserCheck}
@@ -177,6 +144,13 @@ export function StatsGrid({ data, aggressive, funnel, responseTime, velocity }: 
         color="text-emerald-400 bg-emerald-500/10"
         trendColor="#34d399"
         sub={funnel ? `de ${funnel.totalLeads} total` : undefined}
+      />
+      <AggressiveCard
+        icon={UserX}
+        label="Leads Perdidos"
+        value={data.leadsLost}
+        color="text-rose-400 bg-rose-500/10"
+        trendColor="#fb7185"
       />
 
       {/* Row 2 */}
@@ -190,25 +164,6 @@ export function StatsGrid({ data, aggressive, funnel, responseTime, velocity }: 
         large
       />
       <AggressiveCard
-        icon={Clock}
-        label="Tempo Resposta"
-        value={formatMinutes(medianResponse)}
-        suffix="min"
-        color="text-cyan-400 bg-cyan-500/10"
-        trendColor="#22d3ee"
-        trend={responseTrend}
-        sub={medianResponse > 30 ? 'acima do ideal' : medianResponse > 0 ? 'bom ritmo' : undefined}
-      />
-      <AggressiveCard
-        icon={Zap}
-        label="Vel. Conversao"
-        value={avgConvDays > 0 ? Math.round(avgConvDays) : '—'}
-        suffix={avgConvDays > 0 ? 'dias' : undefined}
-        color="text-violet-400 bg-violet-500/10"
-        trendColor="#a78bfa"
-        trend={velocityTrend}
-      />
-      <AggressiveCard
         icon={AlertTriangle}
         label="Tarefas Atrasadas"
         value={data.tasks.overdue}
@@ -217,6 +172,14 @@ export function StatsGrid({ data, aggressive, funnel, responseTime, velocity }: 
         pulse={data.tasks.overdue > 0}
         large
         sub={data.tasks.overdue > 0 ? 'requer atencao!' : 'tudo em dia'}
+      />
+      <AggressiveCard
+        icon={BookOpen}
+        label="Processos"
+        value={data.trackingCases.total}
+        color="text-teal-400 bg-teal-500/10"
+        trendColor="#2dd4bf"
+        sub={`${data.legalCases.total} em prepara\u00e7\u00e3o`}
       />
     </div>
   );

@@ -7,8 +7,7 @@ import {
   LogOut, Users, Briefcase, Settings, Palette, Check,
   MessageSquare, BarChart2, Scale, BookOpen, Calendar,
   LayoutDashboard, Gavel, Wallet, HelpCircle,
-  ChevronRight, Plus, UserPlus, CheckSquare,
-  CalendarPlus, FolderPlus, ClipboardList, Sparkles,
+  ChevronRight, ClipboardList, Sparkles,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
@@ -43,7 +42,6 @@ export function Sidebar() {
 
   const [expanded, setExpanded] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
-  const [showCreateMenu, setShowCreateMenu] = useState(false);
   const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   const [overdueCount, setOverdueCount] = useState<number>(0);
@@ -55,12 +53,9 @@ export function Sidebar() {
 
   // Fixed-position menu states
   const [themeMenuPos, setThemeMenuPos] = useState<{ top: number; left: number } | null>(null);
-  const [createMenuPos, setCreateMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   const themePopupRef = useRef<HTMLDivElement>(null);
   const themeButtonRef = useRef<HTMLButtonElement>(null);
-  const createMenuRef = useRef<HTMLDivElement>(null);
-  const createButtonRef = useRef<HTMLButtonElement>(null);
 
   // Load expanded state + mount
   useEffect(() => {
@@ -86,13 +81,6 @@ export function Sidebar() {
       ) {
         setShowThemeMenu(false);
         setThemeMenuPos(null);
-      }
-      if (
-        createMenuRef.current && !createMenuRef.current.contains(target) &&
-        createButtonRef.current && !createButtonRef.current.contains(target)
-      ) {
-        setShowCreateMenu(false);
-        setCreateMenuPos(null);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -347,15 +335,6 @@ export function Sidebar() {
     },
   ].filter(g => g.items.length > 0);
 
-  // ─── Quick Create items ───────────────────────────────────────────
-  const quickCreateItems = [
-    { label: 'Novo Lead', href: '/atendimento/crm', icon: <Briefcase size={15} /> },
-    { label: 'Novo Contato', href: '/atendimento/contacts', icon: <UserPlus size={15} /> },
-    { label: 'Nova Tarefa', href: '/atendimento/agenda', icon: <CheckSquare size={15} /> },
-    { label: 'Novo Evento', href: '/atendimento/agenda', icon: <CalendarPlus size={15} /> },
-    ...(perms.canViewLegalCases ? [{ label: 'Novo Processo', href: '/atendimento/processos', icon: <FolderPlus size={15} /> }] : []),
-  ];
-
   // ─── Tooltip helpers (somente quando recolhido) ───────────────────
   const showTooltip = (e: React.MouseEvent, label: React.ReactNode) => {
     if (expanded) return;
@@ -379,19 +358,6 @@ export function Sidebar() {
         : rawTop;
       setThemeMenuPos({ top, left: rect.right + 8 });
       setShowThemeMenu(true);
-    }
-    hideTooltip();
-  };
-
-  // ─── Create menu toggle ───────────────────────────────────────────
-  const toggleCreateMenu = (e: React.MouseEvent) => {
-    if (showCreateMenu) {
-      setShowCreateMenu(false);
-      setCreateMenuPos(null);
-    } else {
-      const rect = e.currentTarget.getBoundingClientRect();
-      setCreateMenuPos({ top: rect.bottom + 6, left: rect.left });
-      setShowCreateMenu(true);
     }
     hideTooltip();
   };
@@ -433,21 +399,6 @@ export function Sidebar() {
             strokeWidth={2.5}
             className={`transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
           />
-        </button>
-      </div>
-
-      {/* ─── Global Create Button ──────────────────────────────────── */}
-      <div className="w-full px-3 mb-3">
-        <button
-          ref={createButtonRef}
-          onClick={toggleCreateMenu}
-          onMouseEnter={(e) => showTooltip(e, 'Criar novo')}
-          onMouseLeave={hideTooltip}
-          className={`w-full flex items-center gap-2 rounded-xl px-2 py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors font-semibold text-[13px] ${expanded ? 'justify-start' : 'justify-center'}`}
-          aria-label="Criar novo"
-        >
-          <Plus size={16} strokeWidth={2.5} className="shrink-0" />
-          {expanded && <span>Criar novo</span>}
         </button>
       </div>
 
@@ -623,29 +574,6 @@ export function Sidebar() {
         document.body
       )}
 
-      {/* ─── Quick Create popup portal ───────────────────────────────── */}
-      {mounted && showCreateMenu && createMenuPos && createPortal(
-        <div
-          ref={createMenuRef}
-          style={{ position: 'fixed', top: createMenuPos.top, left: createMenuPos.left, zIndex: 9999 }}
-          className="bg-card border border-border rounded-xl p-2 flex flex-col gap-0.5 min-w-[180px] shadow-2xl"
-        >
-          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-2 pb-1 pt-0.5">
-            Criar novo
-          </p>
-          {quickCreateItems.map((item) => (
-            <button
-              key={item.label}
-              onClick={() => { router.push(item.href); setShowCreateMenu(false); setCreateMenuPos(null); }}
-              className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[13px] font-medium text-foreground hover:bg-accent transition-colors text-left"
-            >
-              <span className="text-muted-foreground shrink-0">{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
     </aside>
   );
 }

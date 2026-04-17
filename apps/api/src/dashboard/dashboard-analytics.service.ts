@@ -1,6 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+export type DashboardScope = 'comercial' | 'juridico' | 'financeiro' | 'estagiarios';
+
+/** Resultado da resolução de escopo. `userIds: null` = sem filtro (todos). */
+export interface ResolvedScope {
+  userIds: string[] | null;
+  /** Se true, sobrepõe a lógica padrão "não-admin vê só o próprio". */
+  bypass: boolean;
+}
+
 @Injectable()
 export class DashboardAnalyticsService {
   constructor(private prisma: PrismaService) {}
@@ -11,20 +20,108 @@ export class DashboardAnalyticsService {
       : {};
   }
 
+  /**
+   * Resolve quais IDs de usuário devem ser considerados para o escopo.
+   * - `scope` ausente → retorna null (aplicar lógica padrão do método).
+   * - Retorna `{ userIds: null }` para "todos do tenant" (ex: ADMIN em scope=financeiro).
+   * - Retorna `{ userIds: [...] }` para filtrar por um conjunto específico.
+   * - Retorna null se o requisitante não tem permissão para o escopo pedido (fallback para default).
+   */
+  async resolveScope(
+    scope: DashboardScope | undefined,
+    requesterId: string,
+    requesterRoles: string[],
+    tenantId?: string,
+  ): Promise<ResolvedScope | null> {
+    if (!scope) return null;
+
+    const isAdmin = requesterRoles.includes('ADMIN');
+    const isAdvogado = requesterRoles.includes('ADVOGADO');
+    const isComercial = requesterRoles.includes('COMERCIAL') || requesterRoles.includes('OPERADOR');
+    const isFinanceiro = requesterRoles.includes('FINANCEIRO');
+
+    const tenantFilter = tenantId ? { tenant_id: tenantId } : {};
+
+    switch (scope) {
+      case 'comercial': {
+        if (!isAdmin && !isComercial && !isAdvogado) return null;
+        const users = await this.prisma.user.findMany({
+          where: { ...tenantFilter, roles: { hasSome: ['OPERADOR', 'COMERCIAL'] } },
+          select: { id: true },
+        });
+        return { userIds: users.map((u) => u.id), bypass: true };
+      }
+
+      case 'juridico': {
+        if (isAdmin) {
+          const users = await this.prisma.user.findMany({
+            where: { ...tenantFilter, roles: { has: 'ADVOGADO' } },
+            select: { id: true },
+          });
+          return { userIds: users.map((u) => u.id), bypass: true };
+        }
+        if (isAdvogado) return { userIds: [requesterId], bypass: true };
+        return null;
+      }
+
+      case 'financeiro': {
+        if (isAdmin) return { userIds: null, bypass: true };
+        if (isAdvogado) return { userIds: [requesterId], bypass: true };
+        if (isFinanceiro) return { userIds: [requesterId], bypass: true };
+        return null;
+      }
+
+      case 'estagiarios': {
+        if (isAdmin) {
+          const users = await this.prisma.user.findMany({
+            where: { ...tenantFilter, roles: { has: 'ESTAGIARIO' } },
+            select: { id: true },
+          });
+          return { userIds: users.map((u) => u.id), bypass: true };
+        }
+        if (isAdvogado) {
+          const interns = await this.prisma.user.findMany({
+            where: { supervisors: { some: { id: requesterId } } },
+            select: { id: true },
+          });
+          return { userIds: interns.map((u) => u.id), bypass: true };
+        }
+        return null;
+      }
+    }
+    return null;
+  }
+
   /* ─── Revenue Trend (monthly) ─── */
-  async revenueTrend(userId: string, roles: string | string[], tenantId?: string, months = 12) {
+  async revenueTrend(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    months = 12,
+    scope?: DashboardScope,
+  ) {
     const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const isAdmin = roleArr.includes('ADMIN');
     const tw = this.tenantWhere(tenantId);
     const since = new Date();
     since.setMonth(since.getMonth() - months);
 
-    const caseFilter = isAdmin
-      ? { legal_case: { ...tw } }
-      : { legal_case: { lawyer_id: userId, ...tw } };
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
 
-    // Contracted: group CaseHonorario by month of contract_date
-    const lawyerClause = isAdmin ? '' : `AND lc.lawyer_id = '${userId}'`;
+    // Monta cláusula SQL de lawyer_id baseada no escopo resolvido ou lógica padrão
+    let lawyerClause = '';
+    if (resolved?.bypass) {
+      if (resolved.userIds === null) {
+        lawyerClause = ''; // todos
+      } else if (resolved.userIds.length === 0) {
+        lawyerClause = `AND lc.lawyer_id IN ('__none__')`; // nenhum
+      } else {
+        const ids = resolved.userIds.map((id) => `'${id}'`).join(',');
+        lawyerClause = `AND lc.lawyer_id IN (${ids})`;
+      }
+    } else {
+      lawyerClause = isAdmin ? '' : `AND lc.lawyer_id = '${userId}'`;
+    }
 
     const contracted = await this.prisma.$queryRawUnsafe<{ month: string; total: number }[]>(
       `SELECT TO_CHAR(ch.contract_date, 'YYYY-MM') as month, SUM(ch.total_value)::float as total
@@ -78,21 +175,49 @@ export class DashboardAnalyticsService {
   }
 
   /* ─── Lead Funnel ─── */
-  async leadFunnel(userId: string, roles: string | string[], tenantId?: string, startDate?: string, endDate?: string) {
+  async leadFunnel(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+    scope?: DashboardScope,
+  ) {
+    const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const tw = this.tenantWhere(tenantId);
     const dateFilter = startDate && endDate
       ? { created_at: { gte: new Date(startDate), lte: new Date(endDate) } }
       : {};
 
+    // Scope: filtra por cs_user_id dos usuários do escopo
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    const scopeFilter: any = resolved?.bypass && resolved.userIds !== null
+      ? { cs_user_id: { in: resolved.userIds.length ? resolved.userIds : ['__none__'] } }
+      : {};
+
     const pipeline = await this.prisma.lead.groupBy({
       by: ['stage'],
       _count: true,
-      where: { ...tw, ...dateFilter },
+      where: { ...tw, ...dateFilter, ...scopeFilter },
     });
 
     const totalLeads = pipeline.reduce((s, g) => s + g._count, 0);
+
+    // Conversões: filtra por became_client_at (quando virou cliente de fato),
+    // não por created_at (quando foi criado). Isso reflete corretamente
+    // "quantos viraram clientes no período".
+    const clientDateFilter = startDate && endDate
+      ? { became_client_at: { gte: new Date(startDate), lte: new Date(endDate) } }
+      : {};
     const clientCount = await this.prisma.lead.count({
-      where: { is_client: true, ...tw, ...dateFilter },
+      where: { is_client: true, ...tw, ...clientDateFilter, ...scopeFilter },
+    });
+
+    // Taxa de conversão: métrica de coorte — dos leads CRIADOS no período,
+    // quantos já viraram clientes. Usa o mesmo filtro de created_at do pipeline
+    // para ser numericamente coerente (rate nunca excede 100%).
+    const cohortConverted = await this.prisma.lead.count({
+      where: { is_client: true, ...tw, ...dateFilter, ...scopeFilter },
     });
 
     // Stage history for conversion rates
@@ -112,14 +237,29 @@ export class DashboardAnalyticsService {
       stages,
       totalLeads,
       totalClients: clientCount,
-      overallConversionRate: totalLeads > 0 ? Math.round((clientCount / totalLeads) * 100) : 0,
+      // Taxa usa coorte (leads criados no período que já converteram) para
+      // manter rate entre 0 e 100% independente do filtro.
+      overallConversionRate: totalLeads > 0 ? Math.round((cohortConverted / totalLeads) * 100) : 0,
     };
   }
 
   /* ─── Conversion Velocity ─── */
-  async conversionVelocity(userId: string, roles: string | string[], tenantId?: string, startDate?: string, endDate?: string) {
+  async conversionVelocity(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+    scope?: DashboardScope,
+  ) {
+    const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const tw = this.tenantWhere(tenantId);
-    const dateFilter: any = { is_client: true, became_client_at: { not: null }, ...tw };
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    const scopeFilter: any = resolved?.bypass && resolved.userIds !== null
+      ? { cs_user_id: { in: resolved.userIds.length ? resolved.userIds : ['__none__'] } }
+      : {};
+
+    const dateFilter: any = { is_client: true, became_client_at: { not: null }, ...tw, ...scopeFilter };
     if (startDate && endDate) {
       dateFilter.became_client_at = { gte: new Date(startDate), lte: new Date(endDate) };
     }
@@ -164,12 +304,32 @@ export class DashboardAnalyticsService {
   }
 
   /* ─── Task Completion ─── */
-  async taskCompletion(userId: string, roles: string | string[], tenantId?: string, startDate?: string, endDate?: string) {
+  async taskCompletion(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+    scope?: DashboardScope,
+  ) {
     const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const isAdmin = roleArr.includes('ADMIN');
     const tw = this.tenantWhere(tenantId);
     const baseWhere: any = { type: 'TAREFA', ...tw };
-    if (!isAdmin) baseWhere.assigned_user_id = userId;
+
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    if (resolved?.bypass) {
+      if (resolved.userIds === null) {
+        // ADMIN em scope=financeiro: sem filtro por usuário
+      } else {
+        baseWhere.assigned_user_id = {
+          in: resolved.userIds.length ? resolved.userIds : ['__none__'],
+        };
+      }
+    } else if (!isAdmin) {
+      baseWhere.assigned_user_id = userId;
+    }
+
     if (startDate && endDate) {
       baseWhere.created_at = { gte: new Date(startDate), lte: new Date(endDate) };
     }
@@ -191,17 +351,80 @@ export class DashboardAnalyticsService {
     };
   }
 
-  /* ─── Case Duration ─── */
-  async caseDuration(userId: string, roles: string | string[], tenantId?: string) {
+  /* ─── Cases by Legal Area ─── */
+  async casesByArea(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    scope?: DashboardScope,
+  ) {
     const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const isAdmin = roleArr.includes('ADMIN');
     const tw = this.tenantWhere(tenantId);
+
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    let lawyerFilter: any = {};
+    if (resolved?.bypass) {
+      if (resolved.userIds !== null) {
+        lawyerFilter = {
+          lawyer_id: { in: resolved.userIds.length ? resolved.userIds : ['__none__'] },
+        };
+      }
+    } else if (!isAdmin) {
+      lawyerFilter = { lawyer_id: userId };
+    }
+
+    const grouped = await this.prisma.legalCase.groupBy({
+      by: ['legal_area'],
+      _count: true,
+      where: {
+        archived: false,
+        ...lawyerFilter,
+        ...tw,
+      },
+    });
+
+    const total = grouped.reduce((s, g) => s + g._count, 0);
+
+    const areas = grouped
+      .map((g) => ({
+        area: g.legal_area || 'Não classificado',
+        count: g._count,
+        percentage: total > 0 ? Math.round((g._count / total) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return { total, areas };
+  }
+
+  /* ─── Case Duration ─── */
+  async caseDuration(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    scope?: DashboardScope,
+  ) {
+    const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
+    const isAdmin = roleArr.includes('ADMIN');
+    const tw = this.tenantWhere(tenantId);
+
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    let lawyerFilter: any = {};
+    if (resolved?.bypass) {
+      if (resolved.userIds !== null) {
+        lawyerFilter = {
+          lawyer_id: { in: resolved.userIds.length ? resolved.userIds : ['__none__'] },
+        };
+      }
+    } else if (!isAdmin) {
+      lawyerFilter = { lawyer_id: userId };
+    }
 
     const cases = await this.prisma.legalCase.findMany({
       where: {
         in_tracking: true,
         archived: false,
-        ...(isAdmin ? {} : { lawyer_id: userId }),
+        ...lawyerFilter,
         ...tw,
       },
       select: { tracking_stage: true, stage_changed_at: true, created_at: true },
@@ -227,17 +450,35 @@ export class DashboardAnalyticsService {
   }
 
   /* ─── Financial Aging ─── */
-  async financialAging(userId: string, roles: string | string[], tenantId?: string) {
+  async financialAging(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    scope?: DashboardScope,
+  ) {
     const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const isAdmin = roleArr.includes('ADMIN');
     const tw = this.tenantWhere(tenantId);
     const now = new Date();
 
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    let caseFilter: any = isAdmin ? { ...tw } : { lawyer_id: userId, ...tw };
+    if (resolved?.bypass) {
+      if (resolved.userIds === null) {
+        caseFilter = { ...tw };
+      } else {
+        caseFilter = {
+          lawyer_id: { in: resolved.userIds.length ? resolved.userIds : ['__none__'] },
+          ...tw,
+        };
+      }
+    }
+
     const overdue = await this.prisma.honorarioPayment.findMany({
       where: {
         status: 'PENDENTE',
         due_date: { lt: now },
-        honorario: { legal_case: isAdmin ? { ...tw } : { lawyer_id: userId, ...tw } },
+        honorario: { legal_case: caseFilter },
       },
       select: { amount: true, due_date: true },
     });
@@ -309,16 +550,29 @@ export class DashboardAnalyticsService {
   }
 
   /* ─── Lead Sources ─── */
-  async leadSources(userId: string, roles: string | string[], tenantId?: string, startDate?: string, endDate?: string) {
+  async leadSources(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+    scope?: DashboardScope,
+  ) {
+    const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const tw = this.tenantWhere(tenantId);
     const dateFilter = startDate && endDate
       ? { created_at: { gte: new Date(startDate), lte: new Date(endDate) } }
       : {};
 
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    const scopeFilter: any = resolved?.bypass && resolved.userIds !== null
+      ? { cs_user_id: { in: resolved.userIds.length ? resolved.userIds : ['__none__'] } }
+      : {};
+
     const leads = await this.prisma.lead.groupBy({
       by: ['origin'],
       _count: true,
-      where: { ...tw, ...dateFilter },
+      where: { ...tw, ...dateFilter, ...scopeFilter },
     });
 
     const total = leads.reduce((s, g) => s + g._count, 0);
@@ -334,13 +588,31 @@ export class DashboardAnalyticsService {
   }
 
   /* ─── Response Time ─── */
-  async responseTime(userId: string, roles: string | string[], tenantId?: string, startDate?: string, endDate?: string) {
+  async responseTime(
+    userId: string,
+    roles: string | string[],
+    tenantId?: string,
+    startDate?: string,
+    endDate?: string,
+    scope?: DashboardScope,
+  ) {
     const roleArr = Array.isArray(roles) ? roles : (roles ? [roles] : []);
     const isAdmin = roleArr.includes('ADMIN');
     const tw = this.tenantWhere(tenantId);
 
     const convWhere: any = { ...tw };
-    if (!isAdmin) convWhere.assigned_user_id = userId;
+
+    const resolved = await this.resolveScope(scope, userId, roleArr, tenantId);
+    if (resolved?.bypass) {
+      if (resolved.userIds !== null) {
+        convWhere.assigned_user_id = {
+          in: resolved.userIds.length ? resolved.userIds : ['__none__'],
+        };
+      }
+    } else if (!isAdmin) {
+      convWhere.assigned_user_id = userId;
+    }
+
     if (startDate && endDate) {
       convWhere.last_message_at = { gte: new Date(startDate), lte: new Date(endDate) };
     }

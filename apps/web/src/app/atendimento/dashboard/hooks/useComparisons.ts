@@ -2,11 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
-import type { PeriodFilter, TeamPerformanceResponse } from '../types';
-import type { Scope } from '../sectionVisibility';
+import type { PeriodFilter, ComparisonsData } from '../types';
 
-export function useTeamPerformance(period?: PeriodFilter, enabled = true, scope?: Scope) {
-  const [data, setData] = useState<TeamPerformanceResponse | null>(null);
+export function useComparisons(period?: PeriodFilter, enabled = true) {
+  const [data, setData] = useState<ComparisonsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,15 +19,14 @@ export function useTeamPerformance(period?: PeriodFilter, enabled = true, scope?
         params.startDate = period.startDate;
         params.endDate = period.endDate;
       }
-      if (scope) params.scope = scope;
-      const r = await api.get('/dashboard/team-performance', { params });
+      const r = await api.get('/dashboard/comparisons', { params });
       setData(r.data);
     } catch {
-      setError('Erro ao carregar performance da equipe');
+      setError('Erro ao carregar comparações');
     } finally {
       setLoading(false);
     }
-  }, [period?.startDate, period?.endDate, enabled, scope]);
+  }, [period?.startDate, period?.endDate, enabled]);
 
   useEffect(() => { fetch(); }, [fetch]);
 

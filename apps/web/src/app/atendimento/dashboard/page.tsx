@@ -1,13 +1,22 @@
 'use client';
 
+import { useState } from 'react';
+import {
+  LayoutDashboard, Scale, BarChart2, Wallet, Users, Download,
+} from 'lucide-react';
 import { useRole } from '@/lib/useRole';
+import { exportDashboardPdf } from './exportDashboardPdf';
 import { useDashboardData } from './hooks/useDashboardData';
 import { usePeriodFilter } from './hooks/usePeriodFilter';
 import { useTeamPerformance } from './hooks/useTeamPerformance';
+import { useComparisons } from './hooks/useComparisons';
 import { MotionWidget } from './components/MotionWidget';
+import { DashboardSection } from './components/DashboardSection';
+import { SectionNav } from './components/SectionNav';
+import { visibleSections } from './sectionVisibility';
 import {
   useRevenueTrend, useLeadFunnel, useTaskCompletion,
-  useCaseDuration, useFinancialAging, useAiUsage,
+  useCaseDuration, useCasesByArea, useFinancialAging, useAiUsage,
   useLeadSources, useResponseTime, useConversionVelocity,
 } from './hooks/useAnalyticsData';
 
@@ -18,8 +27,8 @@ import { InboxStats } from './components/InboxStats';
 import { FinancialStats } from './components/FinancialStats';
 import { LeadPipeline } from './components/LeadPipeline';
 import { LegalCasesPipeline } from './components/LegalCasesPipeline';
-import { TeamMetrics } from './components/TeamMetrics';
 import { TeamPerformanceBoard } from './components/TeamPerformanceBoard';
+import { ComparisonsBoard } from './components/ComparisonsBoard';
 import { UpcomingEvents } from './components/UpcomingEvents';
 import { DjenPublications } from './components/DjenPublications';
 import { QuickActions } from './components/QuickActions';
@@ -30,6 +39,7 @@ import { RevenueTrendChart } from './components/charts/RevenueTrendChart';
 import { LeadFunnelChart } from './components/charts/LeadFunnelChart';
 import { TaskCompletionChart } from './components/charts/TaskCompletionChart';
 import { CaseDurationChart } from './components/charts/CaseDurationChart';
+import { CasesByAreaChart } from './components/charts/CasesByAreaChart';
 import { FinancialAgingChart } from './components/charts/FinancialAgingChart';
 import { AiUsageChart } from './components/charts/AiUsageChart';
 import { LeadSourcesChart } from './components/charts/LeadSourcesChart';
@@ -37,47 +47,88 @@ import { ConversionVelocityWidget } from './components/charts/ConversionVelocity
 import { ResponseTimeWidget } from './components/charts/ResponseTimeWidget';
 
 /* ═══════════════════════════════════════════════════════════════
-   Dashboard — Composicao principal
+   Dashboard — Organização por seções de perfil
    ═══════════════════════════════════════════════════════════════ */
 export default function DashboardPage() {
   const roleInfo = useRole();
-  const { isAdmin, isAdvogado, isOperador, isEstagiario, isFinanceiro } = roleInfo;
+  const { isAdmin } = roleInfo;
+  const sections = visibleSections(roleInfo);
 
   const { period, setPeriod, setCustomRange } = usePeriodFilter('30d');
   const { data, loading } = useDashboardData(period);
 
-  // Analytics hooks — cada widget carrega independentemente
-  const revenue = useRevenueTrend(12);
-  const funnel = useLeadFunnel(period);
-  const tasks = useTaskCompletion(period);
-  const caseDuration = useCaseDuration();
-  const aging = useFinancialAging();
+  const showGeral = sections.includes('geral');
+  const showAdvogados = sections.includes('advogados');
+  const showComercial = sections.includes('comercial');
+  const showFinanceiro = sections.includes('financeiro');
+  const showEstagiarios = sections.includes('estagiarios');
+
+  /* ──────────────────────────────────────────────────────────────────
+   * Analytics — cada seção busca dados com seu scope específico.
+   * Para ADMIN (vê Geral + outras): as hooks "overview" carregam sem scope
+   * para alimentar StatsGrid; as hooks scopadas alimentam seções específicas.
+   * Para papéis não-admin (veem só uma seção): scope=default da seção.
+   * ────────────────────────────────────────────────────────────────── */
+
+  // === Overview (Geral) — sem scope, só carrega quando Geral está visível ===
+  const funnelOverview = useLeadFunnel(period);
+
+  // === Comercial — scope=comercial ===
+  const funnelComercial = useLeadFunnel(period, showComercial ? 'comercial' : undefined);
+  const sourcesComercial = useLeadSources(period, showComercial ? 'comercial' : undefined);
+  const responseTimeComercial = useResponseTime(period, showComercial ? 'comercial' : undefined);
+  const velocityComercial = useConversionVelocity(period, showComercial ? 'comercial' : undefined);
+  const tasksComercial = useTaskCompletion(period, showComercial ? 'comercial' : undefined);
+
+  // === Advogados — scope=juridico ===
+  const caseDuration = useCaseDuration(showAdvogados ? 'juridico' : undefined);
+  const casesByArea = useCasesByArea(showAdvogados ? 'juridico' : undefined);
+
+  // === Financeiro — scope=financeiro ===
+  const revenue = useRevenueTrend(12, showFinanceiro ? 'financeiro' : undefined);
+  const aging = useFinancialAging(showFinanceiro ? 'financeiro' : undefined);
+
+  // === Estagiários — scope=estagiarios ===
+  const tasksEstagiarios = useTaskCompletion(period, showEstagiarios ? 'estagiarios' : undefined);
+
+  // === AI Usage (admin-only) ===
   const aiUsage = useAiUsage(6, isAdmin);
-  const sources = useLeadSources(period);
-  const responseTime = useResponseTime(period);
-  const velocity = useConversionVelocity(period);
-  const teamPerf = useTeamPerformance(period, isAdmin);
 
-  // Dashboard agressivo para ADMIN e OPERADOR
-  const aggressive = isAdmin || isOperador;
+  // === Comparisons (só carrega se Geral estiver visível) ===
+  const comparisons = useComparisons(period, showGeral);
 
-  // Visibility per role
-  const showInbox = isAdmin || isOperador;
-  const showFinancials = isAdmin || isAdvogado || isFinanceiro;
-  const showRevenue = isAdmin || isAdvogado || isFinanceiro;
-  const showFunnel = isAdmin || isOperador;
-  const showTasks = isAdmin || isAdvogado || isOperador || isEstagiario;
-  const showPipeline = isAdmin || isOperador;
-  const showCases = isAdmin || isAdvogado || isEstagiario;
-  const showCaseDuration = isAdmin || isAdvogado;
-  const showAging = isAdmin || isAdvogado || isFinanceiro;
-  const showVelocity = isAdmin || isOperador;
-  const showResponse = isAdmin || isOperador;
-  const showSources = isAdmin || isOperador;
-  const showAi = isAdmin;
-  const showTeam = isAdmin;
-  const showEvents = isAdmin || isAdvogado || isOperador || isEstagiario;
-  const showDjen = isAdmin || isAdvogado || isEstagiario;
+  // === Export PDF ===
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const handleExportPdf = async () => {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      const periodLabels: Record<string, string> = {
+        today: 'Hoje',
+        '7d': 'Últimos 7 dias',
+        '30d': 'Últimos 30 dias',
+        '90d': 'Últimos 90 dias',
+        custom: 'Período personalizado',
+      };
+      await exportDashboardPdf({
+        sectionIds: ['pdf-stats-grid', 'pdf-comparisons', 'pdf-team-perf'],
+        periodLabel: periodLabels[period.key] ?? period.key,
+        userName: data?.user.name,
+      });
+    } catch (err) {
+      console.error('[dashboard] erro ao exportar PDF', err);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  // === TeamPerformance: uma instância por contexto ===
+  // Geral: sem scope (agrega todos os papéis)
+  const teamPerfGeral = useTeamPerformance(period, showGeral);
+  // Comercial: scope=comercial (ranking dos comerciais)
+  const teamPerfComercial = useTeamPerformance(period, showComercial && !showGeral, 'comercial');
+  // Estagiários: scope=estagiarios (ranking dos estagiários supervisionados)
+  const teamPerfEstagiarios = useTeamPerformance(period, showEstagiarios && !showGeral, 'estagiarios');
 
   // Full-page loading
   if (loading && !data) {
@@ -111,146 +162,173 @@ export default function DashboardPage() {
 
   return (
     <div className="h-full overflow-y-auto bg-background">
-      <div className="max-w-7xl mx-auto p-4 md:p-6 space-y-4 pb-28 md:pb-6">
+      <div className="max-w-7xl mx-auto p-4 md:p-6 pb-28 md:pb-6 space-y-4">
 
-        {/* Row 1: Header + Period Selector */}
+        {/* Cabeçalho + filtro de período (sempre visíveis) */}
         <MotionWidget>
           <div className="space-y-3">
-            <DashboardHeader data={data} isAdmin={isAdmin} />
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <DashboardHeader data={data} isAdmin={isAdmin} />
+              </div>
+              {showGeral && (
+                <button
+                  onClick={handleExportPdf}
+                  disabled={exportingPdf}
+                  className="shrink-0 inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 text-[12px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Baixar PDF"
+                >
+                  <Download size={14} strokeWidth={2.5} />
+                  {exportingPdf ? 'Gerando...' : 'Baixar PDF'}
+                </button>
+              )}
+            </div>
             <PeriodSelector active={period.key} onSelect={setPeriod} onCustomRange={setCustomRange} />
           </div>
         </MotionWidget>
 
-        {/* Row 2: Stats Grid — agressivo (8 cards) para ADMIN/OPERADOR, padrao para demais */}
-        <MotionWidget delay={0.05}>
-          <StatsGrid
-            data={data}
-            aggressive={aggressive}
-            funnel={aggressive ? funnel.data : undefined}
-            responseTime={aggressive ? responseTime.data : undefined}
-            velocity={aggressive ? velocity.data : undefined}
-          />
-        </MotionWidget>
+        {/* Navegação entre seções (sticky) */}
+        <SectionNav sections={sections} />
 
-        {/* Row 3: Performance Strip (ADMIN + OPERADOR) */}
-        {aggressive && (
-          <MotionWidget delay={0.08}>
-            <OperatorPerformanceStrip
-              funnel={funnel.data}
-              responseTime={responseTime.data}
-              tasks={tasks.data}
-            />
-          </MotionWidget>
-        )}
+        <div className="space-y-8">
 
-        {/* Row 4: Inbox Stats (com metas) + Financial Stats */}
-        <MotionWidget delay={0.12}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {showInbox && data.inboxStats && (
-              <InboxStats
-                closedToday={data.inboxStats.closedToday}
-                closedThisWeek={data.inboxStats.closedThisWeek}
-                closedThisMonth={data.inboxStats.closedThisMonth}
-                isOperador={aggressive}
-              />
-            )}
-            {showFinancials && (
-              <div className={showInbox && data.inboxStats ? '' : 'md:col-span-2'}>
-                <FinancialStats financials={data.financials} />
+          {/* ═══════════ SEÇÃO: GERAL ═══════════ */}
+          {showGeral && (
+            <DashboardSection
+              id="geral"
+              title="Visão Geral"
+              subtitle="KPIs consolidados do escritório"
+              icon={<LayoutDashboard size={20} strokeWidth={2} />}
+            >
+              <div id="pdf-stats-grid">
+                <StatsGrid
+                  data={data}
+                  aggressive={true}
+                  funnel={funnelOverview.data}
+                />
               </div>
-            )}
-          </div>
-        </MotionWidget>
 
-        {/* Row 5: Revenue Trend (full width) */}
-        {showRevenue && (
-          <MotionWidget delay={0.15}>
-            <RevenueTrendChart data={revenue.data} loading={revenue.loading} />
-          </MotionWidget>
-        )}
+              <div id="pdf-comparisons">
+                <ComparisonsBoard data={comparisons.data} loading={comparisons.loading} />
+              </div>
 
-        {/* Row 6: Lead Funnel + Lead Sources (2 col) */}
-        <MotionWidget delay={0.18}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {showFunnel && <LeadFunnelChart data={funnel.data} loading={funnel.loading} />}
-            {showSources ? <LeadSourcesChart data={sources.data} loading={sources.loading} /> : showTasks && <TaskCompletionChart data={tasks.data} loading={tasks.loading} />}
-          </div>
-        </MotionWidget>
+              {data.inboxStats && (
+                <InboxStats
+                  closedToday={data.inboxStats.closedToday}
+                  closedThisWeek={data.inboxStats.closedThisWeek}
+                  closedThisMonth={data.inboxStats.closedThisMonth}
+                  isOperador={true}
+                />
+              )}
 
-        {/* Row 7: Response Time + Conversion Velocity (2 col) */}
-        {(showResponse || showVelocity) && (
-          <MotionWidget delay={0.22}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {showResponse && <ResponseTimeWidget data={responseTime.data} loading={responseTime.loading} />}
-              {showVelocity && <ConversionVelocityWidget data={velocity.data} loading={velocity.loading} />}
-            </div>
-          </MotionWidget>
-        )}
+              <div id="pdf-team-perf">
+                <TeamPerformanceBoard data={teamPerfGeral.data} loading={teamPerfGeral.loading} />
+              </div>
 
-        {/* Row 8: Lead Pipeline (full width) */}
-        {showPipeline && (
-          <MotionWidget delay={0.25}>
-            <LeadPipeline pipeline={data.leadPipeline} />
-          </MotionWidget>
-        )}
+              {isAdmin && <AiUsageChart data={aiUsage.data} loading={aiUsage.loading} />}
 
-        {/* Row 9: Task Completion (se nao foi mostrado acima) */}
-        {showTasks && showSources && (
-          <MotionWidget delay={0.28}>
-            <TaskCompletionChart data={tasks.data} loading={tasks.loading} />
-          </MotionWidget>
-        )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <UpcomingEvents events={data.upcomingEvents} />
+                <TeamOnline />
+              </div>
+            </DashboardSection>
+          )}
 
-        {/* Row 10: Legal Cases Pipeline (2 columns) */}
-        {showCases && (
-          <MotionWidget delay={0.3}>
-            <LegalCasesPipeline legalCases={data.legalCases} trackingCases={data.trackingCases} />
-          </MotionWidget>
-        )}
+          {/* ═══════════ SEÇÃO: ADVOGADOS ═══════════ */}
+          {showAdvogados && (
+            <DashboardSection
+              id="advogados"
+              title="Advogados"
+              subtitle="Processos, prazos e publicações"
+              icon={<Scale size={20} strokeWidth={2} />}
+            >
+              <LegalCasesPipeline
+                legalCases={data.legalCases}
+                trackingCases={data.trackingCases}
+              />
 
-        {/* Row 11: Case Duration + Financial Aging */}
-        {(showCaseDuration || showAging) && (
-          <MotionWidget delay={0.33}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {showCaseDuration && <CaseDurationChart data={caseDuration.data} loading={caseDuration.loading} />}
-              {showAging && <FinancialAgingChart data={aging.data} loading={aging.loading} />}
-            </div>
-          </MotionWidget>
-        )}
+              <CasesByAreaChart data={casesByArea.data} loading={casesByArea.loading} />
 
-        {/* Row 12: AI Usage (admin) */}
-        {showAi && (
-          <MotionWidget delay={0.36}>
-            <AiUsageChart data={aiUsage.data} loading={aiUsage.loading} />
-          </MotionWidget>
-        )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CaseDurationChart data={caseDuration.data} loading={caseDuration.loading} />
+                <DjenPublications items={data.recentDjen} />
+              </div>
+            </DashboardSection>
+          )}
 
-        {/* Row 13: Team Performance (admin) — comparacoes agressivas */}
-        {showTeam && (
-          <MotionWidget delay={0.39}>
-            <TeamPerformanceBoard data={teamPerf.data} loading={teamPerf.loading} />
-          </MotionWidget>
-        )}
+          {/* ═══════════ SEÇÃO: COMERCIAL ═══════════ */}
+          {showComercial && (
+            <DashboardSection
+              id="comercial"
+              title="Comercial"
+              subtitle="Leads, conversão e atendimento"
+              icon={<BarChart2 size={20} strokeWidth={2} />}
+            >
+              <OperatorPerformanceStrip
+                funnel={funnelComercial.data}
+                responseTime={responseTimeComercial.data}
+                tasks={tasksComercial.data}
+              />
 
-        {/* Row 14: Events + DJEN (2 columns) */}
-        <MotionWidget delay={0.42}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {showEvents && <UpcomingEvents events={data.upcomingEvents} />}
-            {showDjen && <DjenPublications items={data.recentDjen} />}
-          </div>
-        </MotionWidget>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <LeadFunnelChart data={funnelComercial.data} loading={funnelComercial.loading} />
+                <LeadSourcesChart data={sourcesComercial.data} loading={sourcesComercial.loading} />
+              </div>
 
-        {/* Row 15: Quick Actions */}
-        <MotionWidget delay={0.45}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <ResponseTimeWidget data={responseTimeComercial.data} loading={responseTimeComercial.loading} />
+                <ConversionVelocityWidget data={velocityComercial.data} loading={velocityComercial.loading} />
+              </div>
+
+              <LeadPipeline pipeline={data.leadPipeline} />
+
+              {/* Ranking dos comerciais — exibido apenas quando o usuário não vê
+                  a Geral (onde o TeamPerformanceBoard consolidado já aparece). */}
+              {!showGeral && (
+                <TeamPerformanceBoard data={teamPerfComercial.data} loading={teamPerfComercial.loading} />
+              )}
+            </DashboardSection>
+          )}
+
+          {/* ═══════════ SEÇÃO: FINANCEIRO ═══════════ */}
+          {showFinanceiro && (
+            <DashboardSection
+              id="financeiro"
+              title="Financeiro"
+              subtitle="Receita, recebimentos e aging"
+              icon={<Wallet size={20} strokeWidth={2} />}
+            >
+              <FinancialStats financials={data.financials} />
+              <RevenueTrendChart data={revenue.data} loading={revenue.loading} />
+              <FinancialAgingChart data={aging.data} loading={aging.loading} />
+            </DashboardSection>
+          )}
+
+          {/* ═══════════ SEÇÃO: ESTAGIÁRIOS ═══════════ */}
+          {showEstagiarios && (
+            <DashboardSection
+              id="estagiarios"
+              title="Estagiários"
+              subtitle="Tarefas e produtividade"
+              icon={<Users size={20} strokeWidth={2} />}
+            >
+              <TaskCompletionChart data={tasksEstagiarios.data} loading={tasksEstagiarios.loading} />
+
+              {/* Estagiários supervisionados — TeamPerformanceBoard com scope=estagiarios.
+                  Exibido apenas quando não está na Geral (para evitar duplicação). */}
+              {!showGeral && (
+                <TeamPerformanceBoard data={teamPerfEstagiarios.data} loading={teamPerfEstagiarios.loading} />
+              )}
+
+              <UpcomingEvents events={data.upcomingEvents} />
+            </DashboardSection>
+          )}
+        </div>
+
+        {/* Ações rápidas no rodapé (sempre) */}
+        <MotionWidget delay={0.1}>
           <QuickActions roleInfo={roleInfo} />
         </MotionWidget>
-
-        {/* Row 16: Equipe Online (ADMIN only) */}
-        {isAdmin && (
-          <MotionWidget delay={0.5}>
-            <TeamOnline />
-          </MotionWidget>
-        )}
       </div>
     </div>
   );
