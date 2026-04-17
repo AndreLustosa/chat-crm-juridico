@@ -132,10 +132,30 @@ export class SettingsService {
     const dbWebhookUrl = await this.get('WEBHOOK_URL');
 
     return {
-      apiUrl: dbApiUrl || process.env.EVOLUTION_API_URL,
+      apiUrl: this.normalizeHttpUrl(dbApiUrl || process.env.EVOLUTION_API_URL, 'EVOLUTION_API_URL'),
       apiKey: dbApiKey || process.env.EVOLUTION_GLOBAL_APIKEY,
       webhookUrl: dbWebhookUrl || `${process.env.PUBLIC_API_URL || 'https://andrelustosaadvogados.com.br/api'}/webhooks/evolution`,
     };
+  }
+
+  /**
+   * Normaliza URLs vindas do banco: se o usuário salvou sem protocolo
+   * (ex: "api.example.com" em vez de "https://api.example.com"), adiciona
+   * https:// automaticamente. Evita erro "Invalid URL" silencioso em
+   * axios/fetch que quebra downloads de mídia e outras integrações.
+   */
+  private normalizeHttpUrl(url: string | undefined | null, keyName: string): string | undefined {
+    if (!url) return undefined;
+    const trimmed = url.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed.replace(/\/+$/, ''); // remove trailing slash
+    }
+    // Sem protocolo: adiciona https:// + loga warn pra ajudar diagnóstico
+    this.logger.warn(
+      `[Settings] ${keyName} salvo sem protocolo ("${trimmed}") — normalizado para "https://${trimmed}". Corrija o valor no banco para evitar este warn.`,
+    );
+    return `https://${trimmed}`.replace(/\/+$/, '');
   }
 
   async setWhatsAppConfig(apiUrl: string, apiKey?: string, webhookUrl?: string) {

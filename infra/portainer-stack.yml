@@ -102,6 +102,12 @@ services:
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://andrelustosaadvogados.com.br}
       - WEBHOOK_HMAC_REQUIRED=${WEBHOOK_HMAC_REQUIRED:-false}
+      # Armazenamento de mídia em filesystem local (novo fluxo — substitui MinIO)
+      - MEDIA_STORAGE_PATH=/var/lib/crm-media
+    volumes:
+      # Persiste áudios/documentos/imagens entre restarts do container.
+      # Sem este volume, mídias são perdidas ao reiniciar o container.
+      - crm_media:/var/lib/crm-media
     networks:
       - default
       - OrionNet
@@ -147,6 +153,11 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
+      - MEDIA_STORAGE_PATH=/var/lib/crm-media
+    volumes:
+      # Compartilha o MESMO volume do crm-api: worker precisa ler/escrever mídia
+      # (TTS cria áudio, transcrição lê áudio, etc).
+      - crm_media:/var/lib/crm-media
     networks:
       - default
       - OrionNet
@@ -196,3 +207,7 @@ volumes:
   pgdata_v2:
   redisdata:
   minio_data:
+  # Volume para mídias (áudios, documentos, imagens) do CRM.
+  # Compartilhado entre crm-api (escreve+lê) e crm-worker (lê p/ TTS, transcrição).
+  # Backup: adicionar /var/lib/docker/volumes/*_crm_media ao rsync da VPS.
+  crm_media:
