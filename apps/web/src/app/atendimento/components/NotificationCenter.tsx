@@ -110,8 +110,9 @@ export function NotificationCenter() {
   });
   // Quando conversa e marcada como lida no backend (operador abriu via sidebar),
   // o markAsRead tambem marca notifs de incoming_message dessa conversa como
-  // lidas e emite inboxUpdate. Refetcha para sincronizar o badge do sino.
-  useSocketEvent('inboxUpdate', () => {
+  // lidas e emite conversation_read direto para o user (todas as abas).
+  // Refetcha para sincronizar o badge do sino.
+  useSocketEvent('conversation_read', () => {
     fetchUnreadCount();
   });
 

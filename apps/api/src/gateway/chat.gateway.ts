@@ -253,6 +253,17 @@ export class ChatGateway {
   }
 
   /**
+   * Sinaliza ao user (em todas as abas/dispositivos) que uma conversa foi
+   * marcada como lida — permite frontend zerar o badge daquela conversa sem
+   * disparar refetch completo via inboxUpdate. Evita overhead de atualizar
+   * toda a lista do tenant por conta de uma leitura individual.
+   */
+  emitConversationRead(userId: string, conversationId: string) {
+    this.logger.log(`[SOCKET] Emitting conversation_read to user:${userId} for conv ${conversationId}`);
+    this.server.to(`user:${userId}`).emit('conversation_read', { conversationId });
+  }
+
+  /**
    * Emite inboxUpdate com debounce para evitar flood.
    * Múltiplas chamadas dentro de 2s resultam em UMA única emissão.
    * Use immediate=true para emitir instantaneamente (ex: nova mensagem).

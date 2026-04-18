@@ -831,10 +831,35 @@ export default function Dashboard() {
       setTimeout(() => setTaskReminderToast(null), 12000);
     };
 
+    // conversation_read: emitido pelo backend apos POST /mark-read.
+    // Chega ao user em TODAS as abas/dispositivos — permite zerar o badge
+    // daquela conversa sem esperar o refetch debounced do inboxUpdate (que
+    // antes era disparado por mark-read para o tenant inteiro).
+    const onConversationRead = (data: { conversationId: string }) => {
+      if (!data?.conversationId) return;
+      setUnreadCounts(prev => {
+        if (!prev[data.conversationId]) return prev;
+        const next = { ...prev };
+        delete next[data.conversationId];
+        return next;
+      });
+      api.get('/conversations/unread-summary', { _silent401: true } as any)
+        .then(r => {
+          if (r.data && typeof r.data === 'object') {
+            setUnreadSummary({
+              leads: Number(r.data.leads) || 0,
+              clients: Number(r.data.clients) || 0,
+            });
+          }
+        })
+        .catch(() => {});
+    };
+
     sharedSocket.on('inboxUpdate', onInboxUpdate);
     sharedSocket.on('newNote', onNewNote);
     sharedSocket.on('typing_indicator', onTypingIndicator);
     sharedSocket.on('incoming_message_notification', onIncomingNotif);
+    sharedSocket.on('conversation_read', onConversationRead);
     sharedSocket.on('transfer_request', onTransferRequest);
     sharedSocket.on('transfer_cancelled', onTransferCancelled);
     sharedSocket.on('transfer_response', onTransferResponse);
@@ -850,6 +875,7 @@ export default function Dashboard() {
       sharedSocket.off('newNote', onNewNote);
       sharedSocket.off('typing_indicator', onTypingIndicator);
       sharedSocket.off('incoming_message_notification', onIncomingNotif);
+      sharedSocket.off('conversation_read', onConversationRead);
       sharedSocket.off('transfer_request', onTransferRequest);
       sharedSocket.off('transfer_cancelled', onTransferCancelled);
       sharedSocket.off('transfer_response', onTransferResponse);

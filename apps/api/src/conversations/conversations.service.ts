@@ -851,8 +851,14 @@ export class ConversationsService {
       data: { status: 'lido' },
     });
 
-    // Emitir atualização para todos os clientes conectados (limpar badge de não-lidas)
-    if (convo.tenant_id) {
+    // Sinaliza ao proprio user (todas as abas/dispositivos) que esta conversa
+    // foi lida — frontend zera o badge sem precisar de refetch completo.
+    // Outros operadores do tenant nao precisam saber: cada um ve os proprios
+    // badges (filtrados por role em getUnreadCounts).
+    if (userId) {
+      this.chatGateway.emitConversationRead(userId, conversationId);
+    } else if (convo.tenant_id) {
+      // Fallback para callers internos sem userId: mantem comportamento antigo.
       this.chatGateway.emitConversationsUpdate(convo.tenant_id);
     }
 
