@@ -5,9 +5,11 @@ import { PrismaService } from '../prisma/prisma.service';
 /**
  * AfterHoursService
  * ─────────────────
- * Liga a IA automaticamente em todas as conversas abertas fora do horário
- * de expediente (ex.: noites, sábados e domingos) e desliga quando o
- * expediente volta.
+ * Liga a IA fora do expediente APENAS em conversas de CLIENTES
+ * (lead.is_client=true) — eles usam a skill "Acompanhamento de Cliente" e
+ * esperam atendimento humano durante o dia. Leads (is_client=false) são
+ * atendidos 24/7 pela IA com skills de triagem normais, então o cron NÃO
+ * mexe neles.
  *
  * Diferencia conversas que foram ativadas MANUALMENTE pelo operador —
  * essas NUNCA são mexidas pelo cron. Só as ativadas pelo próprio cron
@@ -60,13 +62,15 @@ export class AfterHoursService {
   // ─── Core logic ────────────────────────────────────────────────────
 
   private async activateAfterHours(): Promise<void> {
-    // Só mexe em conversas que NÃO estão em modo MANUAL.
-    // Liga IA em conversas abertas que estão com ai_mode=false sem origem manual.
+    // Só age em conversas de CLIENTES (lead.is_client=true).
+    // Leads são atendidos 24/7 pela IA com skills de triagem — o cron não toca.
+    // Também só mexe em conversas que NÃO estão em modo MANUAL.
     const result = await this.prisma.conversation.updateMany({
       where: {
         status: { notIn: ['FECHADO', 'ENCERRADO'] },
         ai_mode: false,
         ai_mode_source: { not: 'MANUAL' },
+        lead: { is_client: true },
       },
       data: {
         ai_mode: true,
@@ -76,13 +80,14 @@ export class AfterHoursService {
     });
 
     if (result.count > 0) {
-      this.logger.log(`[AfterHours] 🌙 Modo noturno ativado: ${result.count} conversa(s) com IA ligada`);
+      this.logger.log(`[AfterHours] 🌙 Modo noturno ativado: ${result.count} conversa(s) de cliente com IA ligada`);
     }
   }
 
   private async restoreBusinessHours(): Promise<void> {
     // Volta IA para desligada APENAS em conversas que foram ligadas pelo cron.
     // Conversas com ai_mode_source='MANUAL' (operador ativou dentro do expediente) são preservadas.
+    // Leads nem precisam ser filtrados aqui porque o ativateAfterHours nunca ligou neles.
     const result = await this.prisma.conversation.updateMany({
       where: {
         ai_mode: true,

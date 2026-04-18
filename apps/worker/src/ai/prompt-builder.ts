@@ -3,9 +3,13 @@ import type { LLMToolDef } from './llm-client';
 
 /**
  * Injeção de comportamento fora do expediente.
- * Inserida no system prompt quando a IA foi ativada pelo cron AfterHours
- * (conversation.ai_mode_source = 'CRON_AFTER_HOURS'). Define o papel de
- * plantão noturno sem dar orientação jurídica e foca em agendamento.
+ * Inserida no system prompt quando:
+ *   1. A conversa é de CLIENTE (lead.is_client=true) — leads nunca recebem
+ *      esta injeção, são atendidos 24/7 com skills de triagem normais.
+ *   2. A IA foi ativada pelo cron AfterHours (ai_mode_source='CRON_AFTER_HOURS').
+ *
+ * Sobrescreve a skill "Acompanhamento de Cliente" no período noturno para
+ * focar em agendamento e escalar urgências, sem dar parecer jurídico.
  */
 export const AFTER_HOURS_PROMPT_INJECTION = `
 

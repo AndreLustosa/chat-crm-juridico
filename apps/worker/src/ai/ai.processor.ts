@@ -1455,9 +1455,13 @@ STATUS DA FICHA:
 `;
 
 
-      const afterHoursMode = (convo as any).ai_mode_source === 'CRON_AFTER_HOURS';
+      // Prompt noturno só se aplica a CONVERSAS DE CLIENTE ligadas pelo cron.
+      // Leads (is_client=false) são atendidos 24/7 com skills normais, sem restrição.
+      const afterHoursMode =
+        (convo as any).ai_mode_source === 'CRON_AFTER_HOURS' &&
+        (convo as any).lead?.is_client === true;
       if (afterHoursMode) {
-        this.logger.log(`[AI] Conversa ${convo.id} em modo noturno — injetando AFTER_HOURS_PROMPT`);
+        this.logger.log(`[AI] Cliente ${convo.lead.id} em modo noturno — injetando AFTER_HOURS_PROMPT`);
       }
 
       if (skill) {
