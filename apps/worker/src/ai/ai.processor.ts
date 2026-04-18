@@ -1386,13 +1386,23 @@ IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investig
       // Variável dinâmica: bloco informativo sobre horário de expediente.
       // Vazio se dentro do expediente; multi-linha (inclui motivo + próximo
       // horário útil) se fora. A skill decide como usar via {{business_hours_info}}.
+      // Passa null quando tenant_id é string vazia/UUID dummy — evita filtrar
+      // holidays por tenant inexistente.
+      const rawTenantId = (convo as any).tenant_id;
+      const tenantIdForBH =
+        rawTenantId && rawTenantId !== '00000000-0000-0000-0000-000000000000'
+          ? rawTenantId
+          : null;
       const businessHoursInfo = await computeBusinessHoursInfo(
         this.prisma,
-        (convo as any).tenant_id ?? null,
+        tenantIdForBH,
       ).catch((e: any) => {
         this.logger.warn(`[AI] Falha ao calcular business_hours_info: ${e.message}`);
         return '';
       });
+      this.logger.log(
+        `[AI] business_hours_info len=${businessHoursInfo.length} tenant="${tenantIdForBH}" preview="${businessHoursInfo.slice(0, 120).replace(/\n/g, '\\n')}"`,
+      );
 
       const vars: Record<string, string> = {
         lead_name: convo.lead.name || 'Desconhecido',
@@ -1482,6 +1492,13 @@ STATUS DA FICHA:
           maxContextTokens: skill.max_context_tokens || 4000,
           vars,
         });
+        // DEBUG temporário: confirma se {{business_hours_info}} foi substituído
+        // no prompt final enviado ao LLM.
+        const hasLiteralVar = systemPrompt.includes('{{business_hours_info}}');
+        const hasResolved = systemPrompt.includes('ESCRITÓRIO FECHADO');
+        this.logger.log(
+          `[AI] systemPrompt: literal_var=${hasLiteralVar} resolved_block=${hasResolved} length=${systemPrompt.length}`,
+        );
         model = this.normalizeModelId(skill.model || (await this.settings.getDefaultModel()));
         maxTokens = Math.max(skill.max_tokens || 500, 800);
         temperature = skill.temperature ?? 0.7;
