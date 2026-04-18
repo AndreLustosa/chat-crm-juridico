@@ -90,6 +90,7 @@ const TEMPLATE_VARS = [
   { key: '{{conversation_id}}', desc: 'ID da conversa (para URLs)' },
   { key: '{{history_summary}}', desc: 'Resumo do histórico' },
   { key: '{{site_url}}', desc: 'URL base do site (ex: para links de LP)' },
+  { key: '{{business_hours_info}}', desc: 'Status do expediente: vazio se aberto; bloco com motivo e próximo horário se fechado/feriado/fim de semana' },
 ];
 
 const BLANK_FORM: SkillForm = {

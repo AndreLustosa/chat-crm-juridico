@@ -11,6 +11,7 @@ import { ToolExecutor } from './tool-executor';
 import { PromptBuilder } from './prompt-builder';
 import { buildHandlerMap } from './tool-handlers';
 import { createLLMClient, calculateCost, type LLMProvider } from './llm-client';
+import { computeBusinessHoursInfo } from './business-hours.util';
 
 // Modelos com suporte a visão (imagens)
 const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5', 'claude-'];
@@ -1382,6 +1383,17 @@ IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investig
 `;
       }
 
+      // Variável dinâmica: bloco informativo sobre horário de expediente.
+      // Vazio se dentro do expediente; multi-linha (inclui motivo + próximo
+      // horário útil) se fora. A skill decide como usar via {{business_hours_info}}.
+      const businessHoursInfo = await computeBusinessHoursInfo(
+        this.prisma,
+        (convo as any).tenant_id ?? null,
+      ).catch((e: any) => {
+        this.logger.warn(`[AI] Falha ao calcular business_hours_info: ${e.message}`);
+        return '';
+      });
+
       const vars: Record<string, string> = {
         lead_name: convo.lead.name || 'Desconhecido',
         lead_phone: convo.lead.phone || '',
@@ -1407,6 +1419,7 @@ IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investig
         operator_notes: operatorNotesBlock,
         ai_notes: aiNotesBlock,
         active_cases_info: activeCasesInfoBlock,
+        business_hours_info: businessHoursInfo,
       };
 
       // Cabeçalho fixo de capacidades — injetado antes de qualquer skill prompt
@@ -1455,15 +1468,6 @@ STATUS DA FICHA:
 `;
 
 
-      // Prompt noturno só se aplica a CONVERSAS DE CLIENTE ligadas pelo cron.
-      // Leads (is_client=false) são atendidos 24/7 com skills normais, sem restrição.
-      const afterHoursMode =
-        (convo as any).ai_mode_source === 'CRON_AFTER_HOURS' &&
-        (convo as any).lead?.is_client === true;
-      if (afterHoursMode) {
-        this.logger.log(`[AI] Cliente ${convo.lead.id} em modo noturno — injetando AFTER_HOURS_PROMPT`);
-      }
-
       if (skill) {
         // Injetar references (SkillAssets com inject_mode=full_text) no prompt via PromptBuilder
         const references = (skill.assets || [])
@@ -1477,7 +1481,6 @@ STATUS DA FICHA:
           references,
           maxContextTokens: skill.max_context_tokens || 4000,
           vars,
-          afterHoursMode,
         });
         model = this.normalizeModelId(skill.model || (await this.settings.getDefaultModel()));
         maxTokens = Math.max(skill.max_tokens || 500, 800);
@@ -1510,7 +1513,6 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           references: [],
           maxContextTokens: 4000,
           vars,
-          afterHoursMode,
         });
         model = await this.settings.getDefaultModel();
         maxTokens = 1500;

@@ -2,71 +2,6 @@ import { Logger } from '@nestjs/common';
 import type { LLMToolDef } from './llm-client';
 
 /**
- * Injeção de comportamento fora do expediente.
- * Inserida no system prompt quando:
- *   1. A conversa é de CLIENTE (lead.is_client=true) — leads nunca recebem
- *      esta injeção, são atendidos 24/7 com skills de triagem normais.
- *   2. A IA foi ativada pelo cron AfterHours (ai_mode_source='CRON_AFTER_HOURS').
- *
- * Sobrescreve a skill "Acompanhamento de Cliente" no período noturno para
- * focar em agendamento e escalar urgências, sem dar parecer jurídico.
- */
-export const AFTER_HOURS_PROMPT_INJECTION = `
-
-═══════════════════════════════════════════════════════════════════════
-CONTEXTO: FORA DO HORÁRIO DE EXPEDIENTE
-═══════════════════════════════════════════════════════════════════════
-
-Você está atendendo FORA do horário de expediente do escritório
-André Lustosa Advogados.
-
-HORÁRIO DE FUNCIONAMENTO: segunda a sexta, das 8h às 18h.
-SITUAÇÃO ATUAL: o escritório está fechado — você é a assistente virtual
-de plantão.
-
-REGRAS PARA ATENDIMENTO NOTURNO:
-
-1. NA PRIMEIRA interação da conversa nesta janela, informe ao cliente:
-   - Que o escritório funciona de segunda a sexta, das 8h às 18h.
-   - Que você pode ajudar com informações sobre processos e
-     agendamentos.
-   - Que, em caso de urgência (prisão, flagrante, medida protetiva),
-     você aciona o advogado de plantão.
-
-2. VOCÊ PODE:
-   - Informar andamento de processos já existentes do cliente.
-   - Informar datas de audiências e prazos já marcados.
-   - Agendar reuniões/consultas usando a tool book_appointment.
-   - Receber documentos/informações para triagem posterior.
-   - Responder dúvidas sobre o escritório (endereço, áreas, contato).
-
-3. VOCÊ NÃO PODE:
-   - Dar parecer jurídico ou orientação estratégica sobre o caso.
-   - Tomar decisões em nome do advogado.
-   - Prometer resultados ou prazos.
-   - Informar valores de honorários.
-
-4. SE O CLIENTE QUISER FALAR COM O ADVOGADO:
-   - Use check_availability para buscar horários reais do próximo dia
-     útil. NUNCA invente horários.
-   - Ofereça 2-3 opções ao cliente.
-   - Quando ele confirmar, use book_appointment para registrar a
-     reunião. O advogado responsável será notificado automaticamente.
-
-5. SE FOR URGÊNCIA (prisão, flagrante, ameaça, violência doméstica,
-   medida protetiva):
-   - Use escalate_to_human IMEDIATAMENTE com reason =
-     "URGÊNCIA NOTURNA: [descrição curta]".
-   - Informe ao cliente que está acionando o advogado de plantão.
-   - Confirme o número para contato, se ainda não tiver.
-
-6. TOM: cordial, acolhedor, profissional. Assuma explicitamente o
-   papel de "assistente virtual do Escritório André Lustosa Advogados".
-   Nunca finja estar no horário comercial — transparência sobre o
-   horário ajuda a confiança do cliente.
-`;
-
-/**
  * PromptBuilder: monta o system prompt final e as definições de tools
  * a partir da skill selecionada, suas references e variáveis de contexto.
  */
@@ -76,6 +11,9 @@ export class PromptBuilder {
   /**
    * Monta o system prompt completo para uma chamada LLM.
    * Composição: MEDIA_CAPABILITIES + BEHAVIOR_RULES + skill.system_prompt + references
+   *
+   * Regras específicas de plantão noturno não ficam aqui — a skill decide
+   * via variável {{business_hours_info}} (injetada por ai.processor.ts).
    */
   buildSystemPrompt(params: {
     mediaCapabilities: string;
@@ -85,17 +23,12 @@ export class PromptBuilder {
     maxContextTokens: number;
     vars: Record<string, string>;
     extraInjections?: string; // ex: FORM_DATA_INJECTION legado
-    afterHoursMode?: boolean; // true quando conversation.ai_mode_source = 'CRON_AFTER_HOURS'
   }): string {
-    const { mediaCapabilities, behaviorRules, skillPrompt, references, maxContextTokens, vars, extraInjections, afterHoursMode } = params;
+    const { mediaCapabilities, behaviorRules, skillPrompt, references, maxContextTokens, vars, extraInjections } = params;
 
     let prompt = mediaCapabilities + '\n\n';
     prompt += this.injectVariables(behaviorRules, vars) + '\n\n';
     prompt += this.injectVariables(skillPrompt, vars);
-
-    if (afterHoursMode) {
-      prompt += '\n' + this.injectVariables(AFTER_HOURS_PROMPT_INJECTION, vars);
-    }
 
     // Inject references within token budget
     if (references.length > 0) {
