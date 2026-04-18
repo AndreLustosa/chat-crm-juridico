@@ -97,6 +97,23 @@ export class NotificationsService {
     });
   }
 
+  /** Marca notificacoes de mensagens relacionadas a uma conversa como lidas.
+   *  Chamado quando o operador abre a conversa (via ConversationsService.markAsRead)
+   *  para zerar o badge do sino em sincronia com o desaparecimento do badge
+   *  da sidebar — antes o sino ficava desacoplado e so decrescia ao clicar
+   *  diretamente nos itens do NotificationCenter. */
+  async markByConversation(userId: string, conversationId: string) {
+    return (this.prisma as any).notification.updateMany({
+      where: {
+        user_id: userId,
+        read_at: null,
+        notification_type: 'incoming_message',
+        data: { path: ['conversationId'], equals: conversationId },
+      },
+      data: { read_at: new Date() },
+    });
+  }
+
   /** Retenção: remove notificações com mais de X dias (cron diário às 3h) */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async handleCleanupCron() {

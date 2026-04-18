@@ -139,8 +139,8 @@ export class ConversationsController {
   }
 
   @Post(':id/mark-read')
-  markAsRead(@Param('id') id: string) {
-    return this.conversationsService.markAsRead(id);
+  markAsRead(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.markAsRead(id, req.user?.id);
   }
 
   @Post(':id/presence')

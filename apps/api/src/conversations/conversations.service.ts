@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, BadRequestException, Logger, NotFoundEx
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Prisma, Conversation } from '@crm/shared';
 import { effectiveRole } from '../common/utils/permissions.util';
 
@@ -13,6 +14,7 @@ export class ConversationsService {
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
     private whatsappService: WhatsappService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async create(data: Prisma.ConversationCreateInput): Promise<Conversation> {
@@ -797,13 +799,17 @@ export class ConversationsService {
     return { leads, clients };
   }
 
-  async markAsRead(conversationId: string) {
+  async markAsRead(conversationId: string, userId?: string) {
     const convo = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       include: { lead: true },
     });
 
     if (!convo || !convo.lead?.phone || !convo.instance_name) {
+      // Mesmo sem phone/instance (conversa demo ou incompleta), sincroniza o sino
+      if (userId) {
+        await this.notificationsService.markByConversation(userId, conversationId).catch(() => {});
+      }
       return { marked: 0 };
     }
 
@@ -816,6 +822,14 @@ export class ConversationsService {
       },
       select: { id: true, external_message_id: true },
     });
+
+    // Marca notificacoes do sino relacionadas a esta conversa como lidas —
+    // sincroniza com o desaparecimento do badge da sidebar. Mesmo que nao
+    // haja mensagens "recebido/entregue" (user ja havia aberto), pode haver
+    // notificacoes persistidas pendentes do NotificationCenter.
+    if (userId) {
+      await this.notificationsService.markByConversation(userId, conversationId).catch(() => {});
+    }
 
     if (unreadMessages.length === 0) return { marked: 0 };
 

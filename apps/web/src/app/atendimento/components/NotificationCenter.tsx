@@ -4,6 +4,7 @@ import { Bell, X, MessageSquare, ArrowRightLeft, Clock, Calendar, Scale, FileTex
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useSocketEvent } from '@/lib/SocketProvider';
+import { activeConversationRef } from '@/lib/activeConversation';
 
 interface NotifItem {
   id: string;
@@ -89,12 +90,29 @@ export function NotificationCenter() {
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 
-  // Incrementa badge em tempo real quando chega notificação
-  useSocketEvent('incoming_message_notification', () => {
+  // Incrementa badge em tempo real quando chega notificação.
+  // Se a msg chega na conversa que o operador ja esta lendo com a aba em foco,
+  // o backend ja marcou como lida via mark-read automatico do listener newMessage
+  // (page.tsx); aqui apenas suprimimos o +1 visual para evitar badge flicker.
+  useSocketEvent('incoming_message_notification', (data: { conversationId?: string }) => {
+    if (
+      data?.conversationId &&
+      activeConversationRef.current === data.conversationId &&
+      typeof document !== 'undefined' &&
+      document.hasFocus()
+    ) {
+      return;
+    }
     setUnreadCount(prev => prev + 1);
   });
   useSocketEvent('new_lead_notification', () => {
     setUnreadCount(prev => prev + 1);
+  });
+  // Quando conversa e marcada como lida no backend (operador abriu via sidebar),
+  // o markAsRead tambem marca notifs de incoming_message dessa conversa como
+  // lidas e emite inboxUpdate. Refetcha para sincronizar o badge do sino.
+  useSocketEvent('inboxUpdate', () => {
+    fetchUnreadCount();
   });
 
   const load = async () => {
