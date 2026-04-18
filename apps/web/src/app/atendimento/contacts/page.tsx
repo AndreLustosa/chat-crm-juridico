@@ -43,12 +43,19 @@ const CHAT_STATUS_BADGE: Record<NonNullable<ChatStatus>, { label: string; classe
   WAITING: { label: 'Aguardando',     classes: 'bg-blue-500/10   text-blue-600   border-blue-500/20',   dot: 'bg-blue-500' },
 };
 
+// Aceita tanto tokens novos (payload.roles: string[]) quanto antigos
+// (payload.role: string). Também normaliza base64url → base64 para
+// funcionar com JWTs que usam '-'/'_'. Mesma lógica de useRole.ts.
 function getIsAdminFromToken(): boolean {
   try {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (!token) return false;
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload?.role === 'ADMIN';
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64));
+    const roles: string[] = Array.isArray(payload?.roles)
+      ? payload.roles
+      : (payload?.role ? [payload.role] : []);
+    return roles.includes('ADMIN');
   } catch {
     return false;
   }
