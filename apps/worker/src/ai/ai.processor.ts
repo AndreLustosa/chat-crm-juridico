@@ -1455,6 +1455,11 @@ STATUS DA FICHA:
 `;
 
 
+      const afterHoursMode = (convo as any).ai_mode_source === 'CRON_AFTER_HOURS';
+      if (afterHoursMode) {
+        this.logger.log(`[AI] Conversa ${convo.id} em modo noturno — injetando AFTER_HOURS_PROMPT`);
+      }
+
       if (skill) {
         // Injetar references (SkillAssets com inject_mode=full_text) no prompt via PromptBuilder
         const references = (skill.assets || [])
@@ -1468,6 +1473,7 @@ STATUS DA FICHA:
           references,
           maxContextTokens: skill.max_context_tokens || 4000,
           vars,
+          afterHoursMode,
         });
         model = this.normalizeModelId(skill.model || (await this.settings.getDefaultModel()));
         maxTokens = Math.max(skill.max_tokens || 500, 800);
@@ -1500,6 +1506,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           references: [],
           maxContextTokens: 4000,
           vars,
+          afterHoursMode,
         });
         model = await this.settings.getDefaultModel();
         maxTokens = 1500;

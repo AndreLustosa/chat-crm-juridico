@@ -318,12 +318,14 @@ export class ConversationsService {
   }
 
   async setAiMode(id: string, ai_mode: boolean): Promise<Conversation> {
+    // Toggle do operador SEMPRE marca como MANUAL — protege a conversa do
+    // cron AfterHours, que só mexe em entradas sem origem manual.
     return this.prisma.conversation.update({
       where: { id },
       data: {
         ai_mode,
-        // Registra timestamp quando desligou; limpa quando religou
         ai_mode_disabled_at: ai_mode ? null : new Date(),
+        ai_mode_source: 'MANUAL',
       },
     });
   }
@@ -331,7 +333,12 @@ export class ConversationsService {
   async assign(id: string, userId: string): Promise<Conversation> {
     return this.prisma.conversation.update({
       where: { id },
-      data: { assigned_user_id: userId, ai_mode: false, ai_mode_disabled_at: new Date() },
+      data: {
+        assigned_user_id: userId,
+        ai_mode: false,
+        ai_mode_disabled_at: new Date(),
+        ai_mode_source: 'MANUAL',
+      },
     });
   }
 
@@ -446,6 +453,7 @@ export class ConversationsService {
             origin_assigned_user_id: current.pending_transfer_from_id,
             ai_mode: false,
             ai_mode_disabled_at: new Date(),
+            ai_mode_source: 'MANUAL',
             pending_transfer_to_id: null,
             pending_transfer_from_id: null,
             pending_transfer_reason: null,
@@ -602,6 +610,7 @@ export class ConversationsService {
           origin_assigned_user_id: null,
           ai_mode: false,
           ai_mode_disabled_at: new Date(),
+          ai_mode_source: 'MANUAL',
           linked_agent_ids: { push: linkedIds },
         },
       });
