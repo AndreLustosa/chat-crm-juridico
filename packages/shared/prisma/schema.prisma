@@ -37,6 +37,8 @@ model Tenant {
   djen_ignored_processes    DjenIgnoredProcess[]
   lead_honorarios           LeadHonorario[]
   notifications             Notification[]
+  memories                  Memory[]
+  lead_profiles             LeadProfile[]
 }
 
 model User {
@@ -115,6 +117,7 @@ model Lead {
   google_drive_folder_id String?
 
   memory               AiMemory?
+  profile              LeadProfile?
   conversations        Conversation[]
   tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   tasks                Task[]
@@ -1541,4 +1544,76 @@ model PushSubscription {
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
+}
+
+// ===============================================
+// Memory System — Lead + Organization memories
+// ===============================================
+
+/// Memória persistente sobre leads e sobre o escritório. Cada Memory é uma
+/// unidade atômica de conhecimento (1 frase / fato). A coluna `embedding`
+/// (pgvector) é adicionada via migration SQL — Prisma não suporta vector
+/// nativamente. Use $queryRaw/$executeRaw para operações envolvendo embedding.
+model Memory {
+  id            String    @id @default(uuid())
+  tenant_id     String
+
+  /// "lead" | "organization"
+  scope         String
+  /// ID do lead (scope=lead) ou ID do tenant (scope=organization)
+  scope_id      String
+
+  /// "semantic" | "episodic" | "procedural"
+  type          String    @default("semantic")
+  /// Subcategoria (scope=organization): office_info | team | fees | procedures | court_info | legal_knowledge | contacts | rules
+  subcategory   String?
+
+  content       String    @db.Text
+
+  // Proveniência
+  /// "batch" | "manual" | "system" | "retroactive"
+  source_type   String
+  /// ID da conversa que originou (quando source_type=batch)
+  source_id     String?
+  confidence    Float     @default(1.0)
+
+  // Ciclo de vida
+  /// "active" | "superseded" | "archived"
+  status        String    @default("active")
+  /// Razão da substituição ou ID da memória substituta
+  superseded_by String?
+  access_count  Int       @default(0)
+  last_accessed DateTime?
+  expires_at    DateTime?
+
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  tenant        Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, scope, scope_id])
+  @@index([status])
+  @@index([tenant_id, subcategory])
+}
+
+/// Perfil consolidado do lead — summary em texto corrido + facts JSON.
+/// Regenerado pelo cron noturno após extração de memórias. É o "cartão" que
+/// a IA lê antes de responder para já conhecer o cliente sem repetir perguntas.
+model LeadProfile {
+  id            String    @id @default(uuid())
+  tenant_id     String
+  lead_id       String    @unique
+  lead          Lead      @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  tenant        Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  /// Texto corrido (~300 palavras) — injetado no system prompt
+  summary       String    @db.Text
+  /// JSON estruturado: name, cpf, cases[], preferences, pending, sentiment, risk_flags…
+  facts         Json      @default("{}")
+
+  generated_at  DateTime  @default(now())
+  message_count Int       @default(0)
+  version       Int       @default(1)
+
+  @@index([tenant_id])
 }

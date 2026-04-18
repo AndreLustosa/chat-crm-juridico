@@ -12,6 +12,8 @@ export interface ToolContext {
   whatsappService?: any;
   skillAssets?: any[];
   reminderQueue?: any; // Bull queue for WhatsApp reminders (optional)
+  memoryRetrieval?: any; // MemoryRetrievalService (para tool search_memory)
+  tenantId?: string; // Tenant atual (para search_memory escopar por tenant)
 }
 
 export interface ToolHandler {

@@ -6,6 +6,7 @@ import { WebhookHandler } from './webhook-handler';
 import { BookAppointmentHandler } from './book-appointment';
 import { CheckAvailabilityHandler } from './check-availability';
 import { SearchReferencesHandler } from './search-references';
+import { SearchMemoryHandler } from './search-memory';
 
 /**
  * Registry central de tool handlers built-in.
@@ -20,6 +21,7 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new BookAppointmentHandler(),
   new CheckAvailabilityHandler(),
   new SearchReferencesHandler(),
+  new SearchMemoryHandler(),
 ];
 
 /**

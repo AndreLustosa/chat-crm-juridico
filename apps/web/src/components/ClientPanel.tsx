@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake, CreditCard } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
+import { LeadMemoryPanel } from '@/components/LeadMemoryPanel';
 import { useRouter } from 'next/navigation';
 import api, { getMediaUrl } from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -732,6 +733,9 @@ export function ClientPanel({
                 )}
               </div>
             )}
+
+            {/* Sistema de Memória Inteligente (novo) */}
+            {lead && <LeadMemoryPanel leadId={lead.id} canEdit={isAdmin} />}
 
             {/* Banco de Documentos */}
             <div className="border-t border-border">

@@ -13,6 +13,7 @@ import { TaskAlertsModule } from './task/task-alerts.module';
 import { FinanceiroRecurringModule } from './financeiro/financeiro-recurring.module';
 import { NotificationWhatsappModule } from './notification-whatsapp/notification-whatsapp.module';
 import { AfterHoursModule } from './after-hours/after-hours.module';
+import { MemoryModule } from './memory/memory.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { AfterHoursModule } from './after-hours/after-hours.module';
     FinanceiroRecurringModule,
     NotificationWhatsappModule,
     AfterHoursModule,
+    MemoryModule,
   ],
 })
 export class AppModule {}

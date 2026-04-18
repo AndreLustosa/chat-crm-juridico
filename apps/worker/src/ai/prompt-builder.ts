@@ -2,11 +2,86 @@ import { Logger } from '@nestjs/common';
 import type { LLMToolDef } from './llm-client';
 
 /**
+ * Rotulos legiveis das subcategorias de memoria organizacional.
+ * Usado para compor o bloco "Informacoes do Escritorio" no prompt.
+ */
+const ORG_SUBCATEGORY_LABELS: Record<string, string> = {
+  office_info: 'Escritorio',
+  team: 'Equipe',
+  fees: 'Honorarios',
+  procedures: 'Procedimentos',
+  court_info: 'Foruns e Varas',
+  legal_knowledge: 'Conhecimento Local',
+  contacts: 'Contatos Uteis',
+  rules: 'Regras',
+  geral: 'Geral',
+};
+
+/**
  * PromptBuilder: monta o system prompt final e as definições de tools
  * a partir da skill selecionada, suas references e variáveis de contexto.
  */
 export class PromptBuilder {
   private readonly logger = new Logger(PromptBuilder.name);
+
+  /**
+   * Compoe o bloco de "Informacoes do Escritorio" a partir das memorias
+   * organizacionais ativas (agrupadas por subcategoria).
+   * Retorna null quando nao ha memorias suficientes.
+   *
+   * Token budget: truncado em ~2000 chars (~500 tokens).
+   */
+  buildOrganizationMemoryBlock(memories: Array<{ content: string; subcategory: string | null }>): string | null {
+    if (!memories || memories.length === 0) return null;
+
+    const grouped: Record<string, string[]> = {};
+    for (const m of memories) {
+      const cat = m.subcategory || 'geral';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(m.content);
+    }
+
+    let block = '';
+    for (const [cat, items] of Object.entries(grouped)) {
+      const label = ORG_SUBCATEGORY_LABELS[cat] || cat;
+      block += `**${label}:** ${items.join('. ')}.\n`;
+    }
+
+    if (block.length > 2000) {
+      block = block.substring(0, 2000) + '\n[...memorias omitidas por espaco]';
+    }
+    return block.trim();
+  }
+
+  /**
+   * Compoe as 3 camadas de memoria que vao no inicio do system prompt:
+   *   1. Informacoes do Escritorio (memorias organizacionais)
+   *   2. Perfil do Cliente (LeadProfile.summary)
+   *   3. Interacoes Recentes (memorias episodicas)
+   */
+  buildMemoryLayers(params: {
+    orgMemories?: Array<{ content: string; subcategory: string | null }>;
+    leadProfileSummary?: string | null;
+    recentEpisodes?: Array<{ content: string }>;
+  }): string {
+    const parts: string[] = [];
+
+    const orgBlock = this.buildOrganizationMemoryBlock(params.orgMemories || []);
+    if (orgBlock) {
+      parts.push(`## Informacoes do Escritorio (use naturalmente, nao cite como "base de dados"):\n${orgBlock}`);
+    }
+
+    if (params.leadProfileSummary && params.leadProfileSummary.trim()) {
+      parts.push(`## Perfil do Cliente (use naturalmente, nao cite como "ficha"):\n${params.leadProfileSummary.trim()}`);
+    }
+
+    if (params.recentEpisodes && params.recentEpisodes.length > 0) {
+      const lines = params.recentEpisodes.map((m) => `- ${m.content}`).join('\n');
+      parts.push(`## Interacoes Recentes:\n${lines}`);
+    }
+
+    return parts.length > 0 ? parts.join('\n\n') : '';
+  }
 
   /**
    * Monta o system prompt completo para uma chamada LLM.
@@ -23,12 +98,17 @@ export class PromptBuilder {
     maxContextTokens: number;
     vars: Record<string, string>;
     extraInjections?: string; // ex: FORM_DATA_INJECTION legado
+    memoryBlock?: string; // 3 camadas de memoria (org + perfil + episodios)
   }): string {
-    const { mediaCapabilities, behaviorRules, skillPrompt, references, maxContextTokens, vars, extraInjections } = params;
+    const { mediaCapabilities, behaviorRules, skillPrompt, references, maxContextTokens, vars, extraInjections, memoryBlock } = params;
 
     let prompt = mediaCapabilities + '\n\n';
     prompt += this.injectVariables(behaviorRules, vars) + '\n\n';
     prompt += this.injectVariables(skillPrompt, vars);
+
+    if (memoryBlock && memoryBlock.trim()) {
+      prompt += '\n\n' + memoryBlock;
+    }
 
     // Inject references within token budget
     if (references.length > 0) {

@@ -5,6 +5,7 @@ import {
   UserCog, Bot, Shield, ChevronLeft, MessageSquare, Layout, Briefcase,
   Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch,
   CreditCard, FileText, Building2, Users, Wallet, Cpu, Link2, HardDrive,
+  Brain,
 } from 'lucide-react';
 import { useRole } from '@/lib/useRole';
 import { RouteGuard } from '@/components/RouteGuard';
@@ -59,6 +60,7 @@ const settingsSections: MenuSection[] = [
           { label: 'Custos IA', href: '/atendimento/settings/costs', icon: DollarSign },
         ],
       },
+      { label: 'Base de Conhecimento', href: '/atendimento/settings/knowledge', icon: Brain },
     ],
   },
   {
@@ -77,6 +79,7 @@ const adminOnlyPaths = new Set([
   '/atendimento/settings/permissions',
   '/atendimento/settings/ai',
   '/atendimento/settings/costs',
+  '/atendimento/settings/knowledge',
   '/atendimento/settings/whatsapp',
   '/atendimento/settings/automations',
   '/atendimento/settings/google-drive',

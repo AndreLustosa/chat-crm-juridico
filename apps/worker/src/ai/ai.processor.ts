@@ -12,6 +12,7 @@ import { PromptBuilder } from './prompt-builder';
 import { buildHandlerMap } from './tool-handlers';
 import { createLLMClient, calculateCost, type LLMProvider } from './llm-client';
 import { computeBusinessHoursInfo } from '@crm/shared';
+import { MemoryRetrievalService } from '../memory/memory-retrieval.service';
 
 // Modelos com suporte a visão (imagens)
 const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5', 'claude-'];
@@ -71,6 +72,7 @@ export class AiProcessor extends WorkerHost {
     private settings: SettingsService,
     private s3: S3Service,
     @InjectQueue('calendar-reminders') private reminderQueue: Queue,
+    private memoryRetrieval: MemoryRetrievalService,
   ) {
     super();
   }
@@ -1478,6 +1480,59 @@ STATUS DA FICHA:
 `;
 
 
+      // ─── Sistema de memoria (3 camadas) ──────────────────────────────
+      // Camada 1: Memorias organizacionais (escritorio) — so com tenant valido
+      // Camada 2: LeadProfile.summary (perfil consolidado do cliente)
+      // Camada 3: Memorias episodicas recentes do lead
+      // Fallback: caso o sistema novo ainda nao tenha memorias populadas,
+      // o bloco fica vazio e o prompt usa o {{lead_memory}} antigo (case_state).
+      let memoryBlock = '';
+      try {
+        const leadIdForMem = convo.lead_id || convo.lead?.id || null;
+        if (tenantIdForBH && leadIdForMem) {
+          const [orgMems, profile, recentEpisodes] = await Promise.all([
+            this.prisma.memory.findMany({
+              where: {
+                tenant_id: tenantIdForBH,
+                scope: 'organization',
+                scope_id: tenantIdForBH,
+                status: 'active',
+              },
+              orderBy: [{ subcategory: 'asc' }, { confidence: 'desc' }],
+              select: { content: true, subcategory: true },
+            }),
+            this.prisma.leadProfile.findUnique({
+              where: { lead_id: leadIdForMem },
+              select: { summary: true },
+            }),
+            this.prisma.memory.findMany({
+              where: {
+                tenant_id: tenantIdForBH,
+                scope: 'lead',
+                scope_id: leadIdForMem,
+                status: 'active',
+                type: 'episodic',
+              },
+              orderBy: { created_at: 'desc' },
+              take: 5,
+              select: { content: true },
+            }),
+          ]);
+          memoryBlock = this.promptBuilder.buildMemoryLayers({
+            orgMemories: orgMems,
+            leadProfileSummary: profile?.summary ?? null,
+            recentEpisodes,
+          });
+          if (memoryBlock) {
+            this.logger.log(
+              `[AI] memoryBlock: org=${orgMems.length} profile=${profile ? 1 : 0} episodes=${recentEpisodes.length} chars=${memoryBlock.length}`,
+            );
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`[AI] Falha ao montar memoryBlock: ${e.message}`);
+      }
+
       if (skill) {
         // Injetar references (SkillAssets com inject_mode=full_text) no prompt via PromptBuilder
         const references = (skill.assets || [])
@@ -1491,6 +1546,7 @@ STATUS DA FICHA:
           references,
           maxContextTokens: skill.max_context_tokens || 4000,
           vars,
+          memoryBlock,
         });
         // DEBUG temporário: confirma se {{business_hours_info}} foi substituído
         // no prompt final enviado ao LLM.
@@ -1530,6 +1586,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           references: [],
           maxContextTokens: 4000,
           vars,
+          memoryBlock,
         });
         model = await this.settings.getDefaultModel();
         maxTokens = 1500;
@@ -1706,6 +1763,8 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             s3: this.s3,
             skillAssets: skill.assets || [],
             reminderQueue: this.reminderQueue,
+            memoryRetrieval: this.memoryRetrieval,
+            tenantId: tenantIdForBH || undefined,
           },
         });
 

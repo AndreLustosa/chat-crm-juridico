@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { AiProcessor } from './ai.processor';
 import { AiReactivationCronService } from './ai-reactivation-cron.service';
+import { MemoryModule } from '../memory/memory.module';
 
 const defaultJobOptions = {
   attempts: 3,
@@ -14,6 +15,7 @@ const defaultJobOptions = {
   imports: [
     BullModule.registerQueue({ name: 'ai-jobs', defaultJobOptions }),
     BullModule.registerQueue({ name: 'calendar-reminders', defaultJobOptions }),
+    MemoryModule,
   ],
   providers: [AiProcessor, AiReactivationCronService],
 })
