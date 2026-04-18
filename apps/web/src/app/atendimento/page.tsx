@@ -3235,6 +3235,11 @@ export default function Dashboard() {
           leadId={clientPanelLeadId}
           onClose={() => setClientPanelLeadId(null)}
           onLightbox={setLightbox}
+          isAdmin={isAdmin}
+          onDeleteSuccess={(id) => {
+            setClientPanelLeadId(null);
+            setConversations((prev) => prev.filter((c) => c.leadId !== id));
+          }}
         />
       )}
 
