@@ -78,7 +78,8 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
           const total = Object.values(data as Record<string, number>).reduce((s: number, n: number) => s + n, 0);
           setUnreadTotal(total);
           window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
-          try { sessionStorage.setItem('unreadCounts', JSON.stringify(data)); } catch {}
+          // Nao persistimos mais em sessionStorage: page.tsx apaga no mount
+          // e ninguem le — escrita era dead code que gerava poluicao.
         }
       })
       .catch(() => {});

@@ -112,17 +112,10 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
         pathnameRef.current.startsWith('/atendimento/chat');
       const prefs = data._prefs || {};
 
-      // Sempre atualiza contagem de não-lidas (independe de prefs)
-      if (data?.conversationId) {
-        try {
-          const raw = sessionStorage.getItem('unreadCounts');
-          const counts: Record<string, number> = raw ? JSON.parse(raw) : {};
-          counts[data.conversationId] = (counts[data.conversationId] || 0) + 1;
-          sessionStorage.setItem('unreadCounts', JSON.stringify(counts));
-          const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
-          window.dispatchEvent(new CustomEvent('unread_count_update', { detail: { total } }));
-        } catch {}
-      }
+      // O contador de nao-lidas e mantido por page.tsx (unreadCounts state) e
+      // ele mesmo dispara 'unread_count_update' com o total correto — que ja
+      // considera conversa ativa. Emitir daqui com valores de sessionStorage
+      // causaria race e badge inflado (o sessionStorage nunca e lido por ninguem).
 
       // Msg da conversa que o operador ja esta lendo com a aba focada:
       // nao toca som (evita distrair quem ja viu a mensagem aparecer inline).
