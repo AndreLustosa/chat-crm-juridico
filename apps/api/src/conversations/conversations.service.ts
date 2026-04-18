@@ -771,6 +771,32 @@ export class ConversationsService {
     return result;
   }
 
+  /**
+   * Resumo global de não-lidas agrupado por lead.is_client.
+   * Usado pelos badges das abas Leads/Clientes da InboxSidebar, que precisam
+   * mostrar o total de cada categoria INDEPENDENTE do clientMode ativo
+   * (a lista de conversas só traz uma aba por vez; o badge é global).
+   */
+  async getUnreadSummary(tenantId?: string, userId?: string): Promise<{ leads: number; clients: number }> {
+    const counts = await this.getUnreadCounts(tenantId, userId);
+    const convIds = Object.keys(counts);
+    if (convIds.length === 0) return { leads: 0, clients: 0 };
+
+    const convs = await this.prisma.conversation.findMany({
+      where: { id: { in: convIds } },
+      select: { id: true, lead: { select: { is_client: true } } },
+    });
+
+    let leads = 0;
+    let clients = 0;
+    for (const c of convs) {
+      const n = counts[c.id] || 0;
+      if ((c as any).lead?.is_client) clients += n;
+      else leads += n;
+    }
+    return { leads, clients };
+  }
+
   async markAsRead(conversationId: string) {
     const convo = await this.prisma.conversation.findUnique({
       where: { id: conversationId },

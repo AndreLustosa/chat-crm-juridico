@@ -225,6 +225,9 @@ export default function Dashboard() {
     if (typeof window !== 'undefined') try { sessionStorage.removeItem('unreadCounts'); } catch {} // limpar dados antigos
     return {};
   });
+  // Badges globais Leads/Clientes — independentes do clientMode ativo (a lista
+  // só contém a aba ativa, mas os badges do topo da sidebar mostram as duas).
+  const [unreadSummary, setUnreadSummary] = useState<{ leads: number; clients: number }>({ leads: 0, clients: 0 });
   // Current user ID decoded from JWT (lazy init, never changes)
   const [currentUserId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -687,7 +690,23 @@ export default function Dashboard() {
         api.get('/conversations/unread-counts', { _silent401: true } as any)
           .then(r => {
             if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
-              setUnreadCounts(r.data as Record<string, number>);
+              const fresh = { ...(r.data as Record<string, number>) };
+              // Conversa aberta no momento permanece com zero local — o markAsRead
+              // é assíncrono e pode não ter terminado antes do refetch; sem esta
+              // proteção o badge reaparece na sidebar enquanto o operador lê.
+              const activeId = selectedIdRef.current;
+              if (activeId && fresh[activeId]) delete fresh[activeId];
+              setUnreadCounts(fresh);
+            }
+          })
+          .catch(() => {});
+        api.get('/conversations/unread-summary', { _silent401: true } as any)
+          .then(r => {
+            if (r.data && typeof r.data === 'object') {
+              setUnreadSummary({
+                leads: Number(r.data.leads) || 0,
+                clients: Number(r.data.clients) || 0,
+              });
             }
           })
           .catch(() => {});
@@ -841,10 +860,23 @@ export default function Dashboard() {
     api.get('/conversations/unread-counts', { _silent401: true } as any)
       .then(r => {
         if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
-          setUnreadCounts(r.data as Record<string, number>);
+          const fresh = { ...(r.data as Record<string, number>) };
+          const activeId = selectedIdRef.current;
+          if (activeId && fresh[activeId]) delete fresh[activeId];
+          setUnreadCounts(fresh);
         }
       })
       .catch(() => {}); // falha silenciosa — badges partem do zero se API indisponível
+    api.get('/conversations/unread-summary', { _silent401: true } as any)
+      .then(r => {
+        if (r.data && typeof r.data === 'object') {
+          setUnreadSummary({
+            leads: Number(r.data.leads) || 0,
+            clients: Number(r.data.clients) || 0,
+          });
+        }
+      })
+      .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initial data load + refetch on inbox filter change or clientMode change
@@ -988,6 +1020,11 @@ export default function Dashboard() {
           socketRef.current.on('newMessage', (msg: MessageItem) => {
             // Guard estrito: ignora mensagens de outra conversa
             if (msg.conversation_id !== selectedIdRef.current) return;
+            // Msg recebida na conversa ATIVA: marca como lida imediatamente para
+            // que o refetch debounced de /unread-counts não traga o badge de volta.
+            if (msg.direction === 'in') {
+              api.post(`/conversations/${msg.conversation_id}/mark-read`, {}, { _silent401: true } as any).catch(() => {});
+            }
             const addMsg = () => setMessages(prev => {
               // Dedup: já existe pelo ID real
               if (prev.some(m => m.id === msg.id)) return prev;
@@ -2163,6 +2200,7 @@ export default function Dashboard() {
         userInboxes={userInboxes}
         pendingTransfers={pendingTransfers}
         unreadCounts={unreadCounts}
+        unreadSummary={unreadSummary}
         currentUserId={currentUserId}
         selectedId={selectedId}
         selectedInboxId={selectedInboxId}

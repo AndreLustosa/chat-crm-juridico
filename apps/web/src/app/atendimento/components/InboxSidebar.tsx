@@ -98,6 +98,8 @@ export interface InboxSidebarProps {
   userInboxes: { id: string; name: string }[];
   pendingTransfers: { conversationId: string; contactName: string; fromUserName: string; reason: string | null; audioIds?: string[] }[];
   unreadCounts: Record<string, number>;
+  /** Totais globais de não-lidas por categoria (Leads/Clientes), independentes do clientMode ativo. */
+  unreadSummary: { leads: number; clients: number };
   currentUserId: string | null;
   // State
   selectedId: string | null;
@@ -138,6 +140,7 @@ export function InboxSidebar({
   userInboxes,
   pendingTransfers,
   unreadCounts,
+  unreadSummary,
   currentUserId,
   selectedId,
   selectedInboxId,
@@ -170,9 +173,11 @@ export function InboxSidebar({
   const myActiveConvs = (c: ConversationSummary) =>
     (c.status === 'ACTIVE' || c.status === 'MONITORING') && c.assignedAgentId === currentUserId;
 
-  // Contadores de nao-lidos por modo (Leads vs Clientes)
-  const unreadLeadsCount = conversations.filter(c => !c.isClient && (unreadCounts[c.id] ?? 0) > 0).reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
-  const unreadClientsCount = conversations.filter(c => c.isClient && (unreadCounts[c.id] ?? 0) > 0).reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
+  // Contadores GLOBAIS de não-lidos por categoria (vêm do backend, independem
+  // do clientMode ativo). A lista `conversations` contém só a aba corrente, então
+  // derivar daqui zeraria o badge da aba oposta.
+  const unreadLeadsCount = unreadSummary.leads;
+  const unreadClientsCount = unreadSummary.clients;
 
   // ─── Saved Filters ────────────────────────────────────────────
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
