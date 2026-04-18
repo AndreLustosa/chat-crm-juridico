@@ -1570,6 +1570,14 @@ model Memory {
 
   content       String    @db.Text
 
+  /// Embedding OpenAI text-embedding-3-small (1536 dim). Tipo pgvector —
+  /// Prisma nao suporta nativamente, entao usamos Unsupported. Isso impede
+  /// que `prisma db push` REMOVA a coluna por nao reconhece-la no schema.
+  /// Leitura/escrita sempre via $queryRawUnsafe/$executeRawUnsafe.
+  /// IMPORTANTE: a extensao pgvector deve estar habilitada no Postgres antes
+  /// do primeiro `db push` em ambientes novos — ver manual-sql/2026-04-18-memory-system.sql.
+  embedding     Unsupported("vector(1536)")?
+
   // Proveniência
   /// "batch" | "manual" | "system" | "retroactive"
   source_type   String
