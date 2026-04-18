@@ -65,12 +65,19 @@ export class AfterHoursService {
     // Só age em conversas de CLIENTES (lead.is_client=true).
     // Leads são atendidos 24/7 pela IA com skills de triagem — o cron não toca.
     // Também só mexe em conversas que NÃO estão em modo MANUAL.
+    //
+    // Lógica 3-valores do SQL: `ai_mode_source <> 'MANUAL'` retorna NULL quando
+    // a coluna é NULL, o que é tratado como false no WHERE — excluindo conversas
+    // novas. Precisamos cobrir NULL explicitamente.
     const result = await this.prisma.conversation.updateMany({
       where: {
         status: { notIn: ['FECHADO', 'ENCERRADO'] },
         ai_mode: false,
-        ai_mode_source: { not: 'MANUAL' },
         lead: { is_client: true },
+        OR: [
+          { ai_mode_source: null },
+          { ai_mode_source: { not: 'MANUAL' } },
+        ],
       },
       data: {
         ai_mode: true,
