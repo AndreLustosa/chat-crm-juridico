@@ -75,6 +75,17 @@ export default function OfficeSettingsPage() {
   const [smtpSaved, setSmtpSaved] = useState(false);
   const [smtpSaving, setSmtpSaving] = useState(false);
 
+  // ─── Horário do Escritório (GlobalSetting — cron + {{business_hours_info}}) ───
+  const [officeHours, setOfficeHours] = useState({
+    ai_enabled: true,
+    open_time: '08:00',
+    close_time: '17:00',
+    business_days: [1, 2, 3, 4, 5] as number[],
+    timezone: 'America/Maceio',
+  });
+  const [officeHoursSaved, setOfficeHoursSaved] = useState(false);
+  const [officeHoursSaving, setOfficeHoursSaving] = useState(false);
+
   // ─── Load Data ─────────────────────────────────────
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -94,6 +105,7 @@ export default function OfficeSettingsPage() {
     loadAppTypes();
     loadHolidays();
     loadSmtpConfig();
+    loadOfficeHours();
   }, []);
 
   const loadUsers = async () => {
@@ -153,6 +165,38 @@ export default function OfficeSettingsPage() {
         date: h.date.split('T')[0],
       })));
     } catch {}
+  };
+
+  const loadOfficeHours = async () => {
+    try {
+      const res = await api.get('/settings/office-hours');
+      setOfficeHours({
+        ai_enabled: !!res.data?.ai_enabled,
+        open_time: res.data?.open_time || '08:00',
+        close_time: res.data?.close_time || '17:00',
+        business_days: Array.isArray(res.data?.business_days) ? res.data.business_days : [1, 2, 3, 4, 5],
+        timezone: res.data?.timezone || 'America/Maceio',
+      });
+    } catch {}
+  };
+
+  const saveOfficeHours = async () => {
+    setOfficeHoursSaving(true);
+    try {
+      await api.put('/settings/office-hours', officeHours);
+      setOfficeHoursSaved(true);
+      setTimeout(() => setOfficeHoursSaved(false), 2000);
+    } catch {}
+    setOfficeHoursSaving(false);
+  };
+
+  const toggleBusinessDay = (dow: number) => {
+    setOfficeHours((prev) => {
+      const set = new Set(prev.business_days);
+      if (set.has(dow)) set.delete(dow);
+      else set.add(dow);
+      return { ...prev, business_days: Array.from(set).sort() };
+    });
   };
 
   const loadSmtpConfig = async () => {
@@ -254,6 +298,117 @@ export default function OfficeSettingsPage() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-8 pb-8 space-y-6">
+        {/* ═══════ Seção 0: Horário do Escritório (global) ═══════ */}
+        {isAdmin && (
+          <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-primary" />
+                <h2 className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Horário do Escritório (Global)
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                {officeHoursSaved && (
+                  <span className="text-xs text-primary font-semibold animate-fade-in">✓ Salvo</span>
+                )}
+                <button
+                  onClick={saveOfficeHours}
+                  disabled={officeHoursSaving}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  <Save size={12} />
+                  {officeHoursSaving ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[12px] text-muted-foreground mb-4">
+              Define quando o escritório está &quot;aberto&quot;. Fora desse horário, a IA Sophia é ativada automaticamente
+              para atender clientes (via cron AfterHours) e a variável <code className="text-[11px] bg-muted/40 px-1.5 py-0.5 rounded">{'{{business_hours_info}}'}</code> no
+              prompt das skills traz contexto pra IA avisar o cliente sobre o horário.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                  Abertura
+                </label>
+                <input
+                  type="time"
+                  value={officeHours.open_time}
+                  onChange={(e) => setOfficeHours({ ...officeHours, open_time: e.target.value })}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                  Fechamento
+                </label>
+                <input
+                  type="time"
+                  value={officeHours.close_time}
+                  onChange={(e) => setOfficeHours({ ...officeHours, close_time: e.target.value })}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                Dias úteis
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {DAY_NAMES.map((name, i) => {
+                  const checked = officeHours.business_days.includes(i);
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => toggleBusinessDay(i)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                        checked
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-background text-muted-foreground border-border hover:bg-muted/40'
+                      }`}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                  Fuso horário
+                </label>
+                <input
+                  type="text"
+                  value={officeHours.timezone}
+                  onChange={(e) => setOfficeHours({ ...officeHours, timezone: e.target.value })}
+                  placeholder="America/Maceio"
+                  className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={officeHours.ai_enabled}
+                    onChange={(e) => setOfficeHours({ ...officeHours, ai_enabled: e.target.checked })}
+                    className="w-4 h-4 rounded border-border"
+                  />
+                  <span className="text-sm text-foreground">
+                    Ativar IA automaticamente fora do expediente
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ═══════ Seção 1: Horários de Trabalho ═══════ */}
         <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
           <div className="flex items-center justify-between mb-5">

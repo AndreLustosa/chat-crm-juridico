@@ -63,6 +63,62 @@ export class SettingsController {
     return { message: 'Advogados DJEN salvos com sucesso', count: body.lawyers.length };
   }
 
+  // ─── Horário do Escritório (afeta cron AfterHours e {{business_hours_info}}) ───
+
+  @Get('office-hours')
+  @Roles('ADMIN')
+  async getOfficeHours() {
+    const [enabled, start, end, days, tz] = await Promise.all([
+      this.settingsService.get('AFTER_HOURS_AI_ENABLED'),
+      this.settingsService.get('AFTER_HOURS_START'),
+      this.settingsService.get('AFTER_HOURS_END'),
+      this.settingsService.get('BUSINESS_DAYS'),
+      this.settingsService.get('TIMEZONE'),
+    ]);
+    return {
+      // NOTA: na var `AFTER_HOURS_START` está a hora que o escritório FECHA.
+      // Na UI exportamos como "close" pra não confundir o admin.
+      ai_enabled: (enabled ?? 'true').toLowerCase() !== 'false',
+      open_time:  end   ?? '08:00', // AFTER_HOURS_END  = abertura
+      close_time: start ?? '17:00', // AFTER_HOURS_START = fechamento
+      business_days: (days ?? '1,2,3,4,5')
+        .split(',')
+        .map((v) => Number.parseInt(v.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n >= 0 && n <= 6),
+      timezone: tz ?? 'America/Maceio',
+    };
+  }
+
+  @Put('office-hours')
+  @Roles('ADMIN')
+  async saveOfficeHours(@Body() body: {
+    ai_enabled?: boolean;
+    open_time?: string;
+    close_time?: string;
+    business_days?: number[];
+    timezone?: string;
+  }) {
+    if (typeof body.ai_enabled === 'boolean') {
+      await this.settingsService.upsert('AFTER_HOURS_AI_ENABLED', body.ai_enabled ? 'true' : 'false');
+    }
+    if (body.open_time && /^\d{2}:\d{2}$/.test(body.open_time)) {
+      await this.settingsService.upsert('AFTER_HOURS_END', body.open_time);
+    }
+    if (body.close_time && /^\d{2}:\d{2}$/.test(body.close_time)) {
+      await this.settingsService.upsert('AFTER_HOURS_START', body.close_time);
+    }
+    if (Array.isArray(body.business_days)) {
+      const clean = body.business_days
+        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+        .join(',');
+      if (clean) await this.settingsService.upsert('BUSINESS_DAYS', clean);
+    }
+    if (body.timezone && body.timezone.length > 0) {
+      await this.settingsService.upsert('TIMEZONE', body.timezone);
+    }
+    return { message: 'Horário do escritório salvo' };
+  }
+
   @Get('whatsapp-config/health')
   @Roles('ADMIN')
   async checkHealth() {
