@@ -467,6 +467,7 @@ export class EvolutionService implements OnApplicationBootstrap {
       if (!isOutgoing) {
         this.chatGateway.emitIncomingMessageNotification(
           conv.tenant_id ?? null,
+          conv.inbox_id ?? null,
           conv.assigned_user_id || null,
           { conversationId: conv.id, contactName: lead.name || lead.phone },
           conv.assigned_lawyer_id || null,

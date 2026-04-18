@@ -146,6 +146,48 @@ export class ChatGateway {
     return (this.onlineUsers.get(userId)?.size ?? 0) > 0;
   }
 
+  /**
+   * Ao conectar, o socket entra nas rooms `inbox:{id}` relevantes.
+   * Operadores: apenas seus inboxes atribuidos.
+   * ADMINs: todos os inboxes do tenant (veem tudo).
+   * Usado para isolar o broadcast de "pool" (conversa sem operador atribuido)
+   * aos operadores daquele setor, em vez de inundar o tenant inteiro.
+   */
+  async autoJoinInboxRooms(userId: string, tenantId: string | null | undefined, client: Socket): Promise<void> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { inboxes: { select: { id: true } } },
+      });
+      if (!user) return;
+
+      const userRoles: string[] = Array.isArray(user.roles)
+        ? (user.roles as string[])
+        : (user.roles ? [user.roles as string] : []);
+      const isAdmin = userRoles.includes('ADMIN');
+
+      let inboxIds: string[];
+      if (isAdmin && tenantId) {
+        const all = await this.prisma.inbox.findMany({
+          where: { tenant_id: tenantId },
+          select: { id: true },
+        });
+        inboxIds = all.map(i => i.id);
+      } else {
+        inboxIds = (user.inboxes || []).map((i: any) => i.id);
+      }
+
+      for (const id of inboxIds) {
+        client.join(`inbox:${id}`);
+      }
+      if (inboxIds.length > 0) {
+        this.logger.log(`[SOCKET] ${client.id} joined ${inboxIds.length} inbox room(s) (admin=${isAdmin})`);
+      }
+    } catch (e: any) {
+      this.logger.warn(`[SOCKET] autoJoinInboxRooms falhou para user ${userId}: ${e.message}`);
+    }
+  }
+
   async handleJoinConversation(conversationId: string, client: Socket) {
     const socketUser = client.data.user;
     if (!socketUser?.sub) {
@@ -308,10 +350,12 @@ export class ChatGateway {
    * Regra de negócio:
    *  - Lead com operador atribuído   → notifica SOMENTE o operador (assigned_user_id)
    *  - Cliente com operador atribuído → notifica operador E advogado (assigned_lawyer_id), se distintos
-   *  - Sem operador atribuído        → notifica todo o tenant para alguém assumir
+   *  - Sem operador atribuído + inboxId → notifica apenas operadores daquele setor (room inbox:{id})
+   *  - Sem operador e sem inbox (legado) → fallback tenant (como antes)
    */
   async emitIncomingMessageNotification(
     tenantId: string | null,
+    inboxId: string | null,
     assignedUserId: string | null,
     data: { conversationId: string; contactName?: string },
     assignedLawyerId?: string | null,
@@ -370,9 +414,14 @@ export class ChatGateway {
           data: { conversationId: data.conversationId },
         }).catch(() => {});
       }
+    } else if (inboxId) {
+      // Sem operador: isola o pool aos operadores daquele setor (room inbox:{id}).
+      // ADMINs fazem auto-join em todos os inboxes do tenant, entao continuam vendo.
+      this.logger.log(`[SOCKET] incoming_message_notification → inbox:${inboxId} (pool do setor)`);
+      this.server.to(`inbox:${inboxId}`).emit('incoming_message_notification', basePayload);
     } else if (tenantId) {
-      // Sem operador: notifica todos do tenant (sem _prefs individuais — usa defaults no frontend)
-      this.logger.log(`[SOCKET] incoming_message_notification → tenant:${tenantId} (sem atribuicao)`);
+      // Conversa legada sem inbox_id: fallback para tenant (comportamento antigo).
+      this.logger.log(`[SOCKET] incoming_message_notification → tenant:${tenantId} (sem inbox, fallback)`);
       this.server.to(`tenant:${tenantId}`).emit('incoming_message_notification', basePayload);
     } else {
       this.prisma.tenant.findFirst().then((t) => {

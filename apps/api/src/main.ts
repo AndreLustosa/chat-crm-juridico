@@ -184,6 +184,12 @@ async function bootstrap() {
     if (socketUser?.tenant_id) {
       socket.join(`tenant:${socketUser.tenant_id}`);
     }
+    // Auto-join inbox rooms: permite broadcasts de "pool" (conversa sem operador)
+    // chegarem apenas aos operadores do setor correto. ADMINs entram em todas
+    // as rooms do tenant para manterem visibilidade global.
+    if (socketUser?.sub) {
+      chatGateway.autoJoinInboxRooms(socketUser.sub, socketUser.tenant_id, socket).catch(() => {});
+    }
 
     socket.on('disconnect', (reason) => {
       socketRateLimits.delete(socket.id);
