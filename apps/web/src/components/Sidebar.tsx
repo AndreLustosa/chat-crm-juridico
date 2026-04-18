@@ -12,6 +12,7 @@ import {
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
 import { NotificationCenter } from '@/app/atendimento/components/NotificationCenter';
+import { NotificationToggle } from '@/components/NotificationToggle';
 import { useRole } from '@/lib/useRole';
 import { THEMES } from '@/components/ThemeSwitcher';
 
@@ -504,6 +505,13 @@ export function Sidebar() {
             <span className="text-[13px] font-medium text-muted-foreground">Notificações</span>
           )}
         </div>
+
+        {/* Notification on/off toggle (DND permanente) */}
+        <NotificationToggle
+          variant={expanded ? 'sidebar-expanded' : 'sidebar-collapsed'}
+          onMouseEnter={(e) => !expanded && showTooltip(e, 'Notificações')}
+          onMouseLeave={hideTooltip}
+        />
 
         {/* Theme picker */}
         <button

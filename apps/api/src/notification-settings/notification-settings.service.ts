@@ -3,14 +3,15 @@ import { PrismaService } from '../prisma/prisma.service';
 
 /** Defaults aplicados quando o usuário não tem registro ainda */
 const DEFAULT_PREFERENCES = {
-  incoming_message:  { sound: true,  desktop: true,  email: false },
-  transfer_request:  { sound: true,  desktop: true,  email: false },
-  task_overdue:      { sound: true,  desktop: true,  email: false },
-  calendar_reminder: { sound: true,  desktop: true,  email: false },
-  legal_case_update: { sound: false, desktop: true,  email: false },
-  petition_status:   { sound: false, desktop: true,  email: false },
-  contract_signed:   { sound: true,  desktop: true,  email: false },
-  connection_status: { sound: false, desktop: false, email: false },
+  incoming_message:  { sound: true,  desktop: true,  whatsapp: false },
+  transfer_request:  { sound: true,  desktop: true,  whatsapp: false },
+  task_overdue:      { sound: true,  desktop: true,  whatsapp: false },
+  calendar_reminder: { sound: true,  desktop: true,  whatsapp: false },
+  legal_case_update: { sound: false, desktop: true,  whatsapp: false },
+  petition_status:   { sound: false, desktop: true,  whatsapp: false },
+  contract_signed:   { sound: true,  desktop: true,  whatsapp: false },
+  connection_status: { sound: false, desktop: false, whatsapp: false },
+  new_lead:          { sound: true,  desktop: true,  whatsapp: true  },
 };
 
 export type NotifPreferences = typeof DEFAULT_PREFERENCES;

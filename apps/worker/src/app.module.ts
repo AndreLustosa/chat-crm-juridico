@@ -11,7 +11,7 @@ import { FollowupModule } from './followup/followup.module';
 import { PaymentAlertsModule } from './payment/payment-alerts.module';
 import { TaskAlertsModule } from './task/task-alerts.module';
 import { FinanceiroRecurringModule } from './financeiro/financeiro-recurring.module';
-import { NotificationEmailModule } from './notification-email/notification-email.module';
+import { NotificationWhatsappModule } from './notification-whatsapp/notification-whatsapp.module';
 
 @Module({
   imports: [
@@ -36,7 +36,7 @@ import { NotificationEmailModule } from './notification-email/notification-email
     PaymentAlertsModule,
     TaskAlertsModule,
     FinanceiroRecurringModule,
-    NotificationEmailModule,
+    NotificationWhatsappModule,
   ],
 })
 export class AppModule {}

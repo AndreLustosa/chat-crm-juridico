@@ -144,6 +144,27 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
       toast(`Nova mensagem de ${name}`, { icon: '💬', duration: 4000 });
     });
 
+    // ─── Novo lead chegou: toast + som + desktop (respeita _prefs) ────
+    s.on('new_lead_notification', (data: { leadId?: string; leadName?: string | null; phone?: string | null; origin?: string | null; _prefs?: { skipSound?: boolean; skipDesktop?: boolean } }) => {
+      const prefs = data._prefs || {};
+      const name = data?.leadName || data?.phone || 'Novo contato';
+      const via = data?.origin ? ` via ${data.origin}` : '';
+
+      if (!prefs.skipSound) {
+        playNotificationSound();
+      }
+
+      if (!prefs.skipDesktop) {
+        showDesktopNotification({
+          title: 'Novo lead',
+          body: `${name}${via}`,
+          tag: `new-lead-${data?.leadId || 'unknown'}`,
+        });
+      }
+
+      toast(`Novo lead: ${name}${via}`, { icon: '🆕', duration: 5000 });
+    });
+
     // ─── Transferências: toast + som (respeita _prefs) ──────────
     s.on('transfer_request', (data: { contactName?: string; fromUserName?: string; _prefs?: { skipSound?: boolean; skipDesktop?: boolean } }) => {
       const onChatPage = pathnameRef.current === '/atendimento' ||

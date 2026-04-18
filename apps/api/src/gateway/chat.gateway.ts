@@ -384,6 +384,69 @@ export class ChatGateway {
     this.server.to(`user:${lawyerId}`).emit('new_legal_case', data);
   }
 
+  /**
+   * Emit new lead notification.
+   *
+   * Regra de negócio:
+   *  - Lead com atendente vinculado (cs_user_id) → notifica SOMENTE o atendente
+   *  - Lead sem atendente                        → broadcast ao tenant (alguém precisa assumir)
+   *
+   * Dispara socket + persistência + Web Push (respeita mute/preferências).
+   */
+  async emitNewLeadNotification(
+    tenantId: string | null,
+    assignedUserId: string | null,
+    data: { leadId: string; leadName?: string | null; phone?: string | null; origin?: string | null },
+  ) {
+    const contactName = data.leadName || data.phone || 'Novo lead';
+    const title = 'Novo lead';
+    const body = data.origin
+      ? `${contactName} chegou via ${data.origin}`
+      : `${contactName} acabou de chegar`;
+    const basePayload = { ...data, assignedUserId };
+
+    if (assignedUserId) {
+      const prefs = await this.notifSettings
+        .getNotifFlags(assignedUserId, 'new_lead' as NotifEventType)
+        .catch(() => ({ skipSound: false, skipDesktop: false }));
+      const payload = { ...basePayload, _prefs: prefs };
+
+      this.logger.log(`[SOCKET] new_lead_notification → user:${assignedUserId} (sound=${!prefs.skipSound}, desktop=${!prefs.skipDesktop})`);
+      this.server.to(`user:${assignedUserId}`).emit('new_lead_notification', payload);
+
+      this.notificationsService.create({
+        userId: assignedUserId,
+        tenantId,
+        type: 'new_lead',
+        title,
+        body,
+        data: { leadId: data.leadId },
+      }).catch(() => {});
+
+      this.pushService.sendToUser(assignedUserId, {
+        title,
+        body,
+        tag: `new-lead-${data.leadId}`,
+        url: `/atendimento/crm`,
+        data: { leadId: data.leadId },
+      }).catch(() => {});
+      return;
+    }
+
+    const broadcastToTenant = (resolvedTenantId: string) => {
+      this.logger.log(`[SOCKET] new_lead_notification → tenant:${resolvedTenantId} (sem atendente)`);
+      this.server.to(`tenant:${resolvedTenantId}`).emit('new_lead_notification', basePayload);
+    };
+
+    if (tenantId) {
+      broadcastToTenant(tenantId);
+    } else {
+      this.prisma.tenant.findFirst().then((t) => {
+        if (t) broadcastToTenant(t.id);
+      }).catch(() => {});
+    }
+  }
+
   emitTaskComment(userId: string, data: { taskId: string; text: string; fromUserName: string }) {
     this.logger.log(`[SOCKET] Emitting task_comment to user:${userId}`);
     this.server.to(`user:${userId}`).emit('task_comment', data);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Bell, Volume2, Play, Monitor, Palette, Moon, MessageSquare, ArrowRightLeft, Clock, Calendar, Scale, FileText, Wifi, FileCheck, Loader2 } from 'lucide-react';
+import { Bell, Volume2, Play, Monitor, Palette, Moon, MessageSquare, ArrowRightLeft, Clock, Calendar, Scale, FileText, Wifi, FileCheck, Loader2, UserPlus } from 'lucide-react';
 import {
   NOTIFICATION_SOUNDS,
   playNotificationSound,
@@ -20,6 +20,7 @@ import { isPushSupported, isPushSubscribed, subscribeToPush, unsubscribeFromPush
 
 // ─── Tipos de evento com labels e ícones ──────────────────────────
 const EVENT_TYPES = [
+  { key: 'new_lead',          label: 'Novo lead',             icon: UserPlus,       description: 'Lead novo chegou (atribuído a você ou ao time)' },
   { key: 'incoming_message',  label: 'Novas mensagens',       icon: MessageSquare,  description: 'Mensagem recebida de lead/cliente' },
   { key: 'transfer_request',  label: 'Transferências',        icon: ArrowRightLeft, description: 'Recebeu uma transferência de conversa' },
   { key: 'task_overdue',      label: 'Tarefas vencendo',      icon: Clock,          description: 'Tarefa prestes a vencer ou vencida' },
@@ -39,7 +40,7 @@ const DND_OPTIONS = [
   { label: 'Até amanhã', ms: 0 }, // calculado dinamicamente
 ];
 
-type Prefs = Record<string, { sound: boolean; desktop: boolean; email: boolean }>;
+type Prefs = Record<string, { sound: boolean; desktop: boolean; whatsapp: boolean }>;
 
 export default function NotificationsSettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -88,6 +89,8 @@ export default function NotificationsSettingsPage() {
       await api.patch('/users/me/notification-settings', data);
       setSavedMsg('Salvo');
       setTimeout(() => setSavedMsg(''), 2000);
+      // Notifica toggle global (Sidebar / menu mobile) pra refletir mudança
+      window.dispatchEvent(new CustomEvent('notification_settings_changed'));
     } catch {
       setSavedMsg('Erro ao salvar');
       setTimeout(() => setSavedMsg(''), 3000);
@@ -103,9 +106,9 @@ export default function NotificationsSettingsPage() {
     saveToServer({ sound_id: id });
   };
 
-  const togglePref = (eventKey: string, channel: 'sound' | 'desktop' | 'email') => {
+  const togglePref = (eventKey: string, channel: 'sound' | 'desktop' | 'whatsapp') => {
     setPrefs(prev => {
-      const current = prev[eventKey] || { sound: true, desktop: true, email: false };
+      const current = prev[eventKey] || { sound: true, desktop: true, whatsapp: false };
       const updated = { ...prev, [eventKey]: { ...current, [channel]: !current[channel] } };
       saveToServer({ preferences: updated });
       return updated;
@@ -232,19 +235,19 @@ export default function NotificationsSettingsPage() {
         </div>
 
         {/* Header */}
-        <div className="grid grid-cols-[1fr_60px_60px_60px] gap-2 mb-2 px-1">
+        <div className="grid grid-cols-[1fr_60px_60px_72px] gap-2 mb-2 px-1">
           <div />
           <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">Som</div>
           <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">Desktop</div>
-          <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">Email</div>
+          <div className="text-[10px] font-bold text-muted-foreground uppercase text-center">WhatsApp</div>
         </div>
 
         <div className="space-y-1">
           {EVENT_TYPES.map(evt => {
             const Icon = evt.icon;
-            const p = prefs[evt.key] || { sound: true, desktop: true, email: false };
+            const p = prefs[evt.key] || { sound: true, desktop: true, whatsapp: false };
             return (
-              <div key={evt.key} className="grid grid-cols-[1fr_60px_60px_60px] gap-2 items-center px-3 py-2.5 rounded-xl hover:bg-muted/30 transition-colors">
+              <div key={evt.key} className="grid grid-cols-[1fr_60px_60px_72px] gap-2 items-center px-3 py-2.5 rounded-xl hover:bg-muted/30 transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
                   <Icon size={15} className="text-muted-foreground shrink-0" />
                   <div className="min-w-0">
@@ -270,13 +273,13 @@ export default function NotificationsSettingsPage() {
                     <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${p.desktop ? 'translate-x-4' : ''}`} />
                   </button>
                 </div>
-                {/* Email toggle */}
+                {/* WhatsApp toggle */}
                 <div className="flex justify-center">
                   <button
-                    onClick={() => togglePref(evt.key, 'email')}
-                    className={`w-9 h-5 rounded-full transition-colors relative ${p.email ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                    onClick={() => togglePref(evt.key, 'whatsapp')}
+                    className={`w-9 h-5 rounded-full transition-colors relative ${p.whatsapp ? 'bg-primary' : 'bg-muted-foreground/30'}`}
                   >
-                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${p.email ? 'translate-x-4' : ''}`} />
+                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${p.whatsapp ? 'translate-x-4' : ''}`} />
                   </button>
                 </div>
               </div>

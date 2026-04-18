@@ -6,7 +6,7 @@ import { NotificationsController } from './notifications.controller';
 @Global()
 @Module({
   imports: [
-    BullModule.registerQueue({ name: 'notification-email' }),
+    BullModule.registerQueue({ name: 'notification-whatsapp' }),
   ],
   providers: [NotificationsService],
   controllers: [NotificationsController],

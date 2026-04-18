@@ -43,7 +43,22 @@ export class LeadsService {
     this.automationsService.onNewLead(lead.id, lead.tenant_id ?? undefined).catch(err =>
       this.logger.warn(`onNewLead automation error for lead ${lead.id}: ${err}`),
     );
+    this.notifyNewLead(lead);
     return lead;
+  }
+
+  /** Dispara notificação de novo lead para o atendente vinculado (ou tenant, se sem atribuição). */
+  private notifyNewLead(lead: Lead): void {
+    this.chatGateway.emitNewLeadNotification(
+      lead.tenant_id ?? null,
+      lead.cs_user_id ?? null,
+      {
+        leadId: lead.id,
+        leadName: lead.name,
+        phone: lead.phone,
+        origin: lead.origin,
+      },
+    ).catch(err => this.logger.warn(`[notifyNewLead] ${lead.id}: ${err}`));
   }
 
   async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number, search?: string, stage?: string, userId?: string) {
@@ -232,11 +247,20 @@ export class LeadsService {
       updateData.profile_picture_url = incomingPhoto;
     }
 
-    return this.prisma.lead.upsert({
+    // Detecta se é criação (lead novo) para disparar notificação ao atendente
+    const existing = await this.prisma.lead.findUnique({ where: { phone }, select: { id: true } });
+
+    const lead = await this.prisma.lead.upsert({
       where: { phone },
       update: updateData,
       create: { ...data, phone },
     });
+
+    if (!existing) {
+      this.notifyNewLead(lead);
+    }
+
+    return lead;
   }
 
   async findByPhone(phone: string): Promise<Lead | null> {

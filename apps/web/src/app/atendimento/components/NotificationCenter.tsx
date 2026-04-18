@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bell, X, MessageSquare, ArrowRightLeft, Clock, Calendar, Scale, FileText, Check, CheckCheck, Loader2 } from 'lucide-react';
+import { Bell, X, MessageSquare, ArrowRightLeft, Clock, Calendar, Scale, FileText, Check, CheckCheck, Loader2, UserPlus } from 'lucide-react';
 import api from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import { useSocketEvent } from '@/lib/SocketProvider';
@@ -23,6 +23,7 @@ const TYPE_ICONS: Record<string, any> = {
   legal_case_update: Scale,
   petition_status:   FileText,
   contract_signed:   FileText,
+  new_lead:          UserPlus,
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -33,11 +34,13 @@ const TYPE_LABELS: Record<string, string> = {
   legal_case_update: 'Processo',
   petition_status:   'Petição',
   contract_signed:   'Contrato',
+  new_lead:          'Novo lead',
 };
 
 const TABS = [
   { key: 'all',      label: 'Todas' },
   { key: 'messages', label: 'Mensagens', types: ['incoming_message'] },
+  { key: 'leads',    label: 'Leads',     types: ['new_lead'] },
   { key: 'tasks',    label: 'Tarefas',   types: ['task_overdue', 'calendar_reminder'] },
   { key: 'cases',    label: 'Processos', types: ['legal_case_update', 'petition_status', 'contract_signed'] },
 ] as const;
@@ -90,6 +93,9 @@ export function NotificationCenter() {
   useSocketEvent('incoming_message_notification', () => {
     setUnreadCount(prev => prev + 1);
   });
+  useSocketEvent('new_lead_notification', () => {
+    setUnreadCount(prev => prev + 1);
+  });
 
   const load = async () => {
     setLoading(true);
@@ -128,6 +134,9 @@ export function NotificationCenter() {
       setOpen(false);
     } else if (item.notification_type === 'legal_case_update' || item.notification_type === 'petition_status') {
       router.push('/atendimento/processos');
+      setOpen(false);
+    } else if (item.notification_type === 'new_lead') {
+      router.push('/atendimento/crm');
       setOpen(false);
     }
   };

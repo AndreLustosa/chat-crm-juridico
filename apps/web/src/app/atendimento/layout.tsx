@@ -13,6 +13,7 @@ import {
 import { useTheme } from 'next-themes';
 import { useRole } from '@/lib/useRole';
 import { SocketProvider } from '@/lib/SocketProvider';
+import { NotificationToggle } from '@/components/NotificationToggle';
 
 import { THEMES } from '@/components/ThemeSwitcher';
 
@@ -277,6 +278,11 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
                     ))}
                   </div>
                 )}
+
+                <div className="h-px bg-border my-1.5" />
+
+                {/* Toggle global de notificações */}
+                <NotificationToggle variant="mobile-menu" />
 
                 <div className="h-px bg-border my-1.5" />
 
