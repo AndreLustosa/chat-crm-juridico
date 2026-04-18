@@ -31,10 +31,12 @@ CREATE INDEX IF NOT EXISTS idx_memory_lead_active
   WHERE scope = 'lead' AND status = 'active';
 
 -- 6) Tabela de log de acesso (auditoria LGPD / debug)
+-- NOTA: Memory.id, User.id etc. sao TEXT no schema Prisma (uuid como string),
+-- nao UUID nativo — por isso a FK usa TEXT.
 CREATE TABLE IF NOT EXISTS memory_access_log (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  memory_id     UUID        REFERENCES "Memory"(id) ON DELETE CASCADE,
-  accessed_by   UUID,
+  memory_id     TEXT        REFERENCES "Memory"(id) ON DELETE CASCADE,
+  accessed_by   TEXT,
   access_type   VARCHAR(20) NOT NULL,  -- 'read' | 'inject' | 'update' | 'delete'
   context       TEXT,
   created_at    TIMESTAMPTZ DEFAULT NOW()
