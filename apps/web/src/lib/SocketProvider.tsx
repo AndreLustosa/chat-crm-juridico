@@ -5,6 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import { getWsUrl, getSocketPath, getAuthToken, decodeUserId } from './socketConfig';
 import { playNotificationSound, unlockAudioContext } from './notificationSounds';
 import { showDesktopNotification } from './desktopNotifications';
+import { activeConversationRef } from './activeConversation';
 import toast from 'react-hot-toast';
 
 // ─── Context ──────────────────────────────────────────────────────
@@ -123,8 +124,17 @@ export function SocketProvider({ children, pathname }: SocketProviderProps) {
         } catch {}
       }
 
+      // Msg da conversa que o operador ja esta lendo com a aba focada:
+      // nao toca som (evita distrair quem ja viu a mensagem aparecer inline).
+      // Desktop notification ja e suprimida por document.hasFocus() internamente.
+      const isActiveFocused =
+        !!data?.conversationId &&
+        activeConversationRef.current === data.conversationId &&
+        typeof document !== 'undefined' &&
+        document.hasFocus();
+
       // Som: respeita preferência do servidor
-      if (!prefs.skipSound) {
+      if (!prefs.skipSound && !isActiveFocused) {
         playNotificationSound();
       }
 

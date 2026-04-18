@@ -22,6 +22,7 @@ import {
 } from '@/lib/desktopNotifications';
 import api from '@/lib/api';
 import { useSocket } from '@/lib/SocketProvider';
+import { activeConversationRef } from '@/lib/activeConversation';
 import { CRM_STAGES, findStage, normalizeStage } from '@/lib/crmStages';
 import { STAGE_TEMPLATES } from '@/lib/crmTemplates';
 import { showError, showSuccess } from '@/lib/toast';
@@ -275,7 +276,12 @@ export default function Dashboard() {
   // Keep refs in sync
   useEffect(() => { selectedInboxIdRef.current = selectedInboxId; }, [selectedInboxId]);
   useEffect(() => { clientModeRef.current = clientMode; }, [clientMode]);
-  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    // Expoe para o SocketProvider silenciar som quando msg chega na conversa
+    // em foco (cross-module via lib/activeConversation.ts).
+    activeConversationRef.current = selectedId;
+  }, [selectedId]);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
 
   // unlockAudioContext agora é feito pelo SocketProvider (sem duplicação)
