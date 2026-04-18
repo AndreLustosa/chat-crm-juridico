@@ -11,15 +11,20 @@ import { PrismaService } from '../prisma/prisma.service';
  * atendidos 24/7 pela IA com skills de triagem normais, então o cron NÃO
  * mexe neles.
  *
- * Diferencia conversas que foram ativadas MANUALMENTE pelo operador —
- * essas NUNCA são mexidas pelo cron. Só as ativadas pelo próprio cron
- * (ai_mode_source = 'CRON_AFTER_HOURS') voltam ao estado anterior quando
- * abre o expediente.
+ * COMPORTAMENTO DA TRANSIÇÃO:
+ *  - Fora do expediente → liga IA (`ai_mode=true, source='CRON_AFTER_HOURS'`).
+ *    O prompt noturno (plantão, sem parecer jurídico) é injetado enquanto
+ *    essa origem estiver ativa.
+ *  - Entrada no expediente → NÃO desliga a IA. Apenas limpa
+ *    `ai_mode_source=NULL` para o prompt voltar ao modo diurno. IA
+ *    permanece ligada até o operador desligar manualmente.
+ *
+ * Conversas em modo MANUAL nunca são mexidas pelo cron.
  *
  * Configurações lidas de GlobalSetting (com fallback para defaults):
  *  - AFTER_HOURS_AI_ENABLED   (default: "true")
  *  - AFTER_HOURS_START        (default: "17:00") — quando IA noturna liga
- *  - AFTER_HOURS_END          (default: "08:00") — quando IA noturna desliga
+ *  - AFTER_HOURS_END          (default: "08:00") — quando modo diurno entra
  *  - BUSINESS_DAYS            (default: "1,2,3,4,5") — seg=1 ... dom=0
  *  - TIMEZONE                 (default: "America/Maceio")
  */
@@ -92,23 +97,23 @@ export class AfterHoursService {
   }
 
   private async restoreBusinessHours(): Promise<void> {
-    // Volta IA para desligada APENAS em conversas que foram ligadas pelo cron.
-    // Conversas com ai_mode_source='MANUAL' (operador ativou dentro do expediente) são preservadas.
-    // Leads nem precisam ser filtrados aqui porque o ativateAfterHours nunca ligou neles.
+    // Entrada no expediente: IA continua ligada nos clientes, apenas limpa
+    // a origem CRON_AFTER_HOURS para desligar o prompt de plantão noturno.
+    // Operador desliga manualmente quando quiser assumir.
+    //
+    // Conversas em ai_mode_source='MANUAL' nunca são tocadas.
     const result = await this.prisma.conversation.updateMany({
       where: {
         ai_mode: true,
         ai_mode_source: 'CRON_AFTER_HOURS',
       },
       data: {
-        ai_mode: false,
         ai_mode_source: null,
-        ai_mode_disabled_at: new Date(),
       },
     });
 
     if (result.count > 0) {
-      this.logger.log(`[AfterHours] ☀️  Modo diurno restaurado: ${result.count} conversa(s) com IA desligada`);
+      this.logger.log(`[AfterHours] ☀️  Transição diurna: ${result.count} conversa(s) de cliente mantêm IA ligada (prompt noturno removido)`);
     }
   }
 
