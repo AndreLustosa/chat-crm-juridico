@@ -85,12 +85,16 @@ const TEMPLATE_VARS = [
   { key: '{{lead_phone}}', desc: 'Telefone' },
   { key: '{{legal_area}}', desc: 'Área jurídica detectada' },
   { key: '{{firm_name}}', desc: 'Nome do escritório' },
-  { key: '{{lead_memory}}', desc: 'Memória do lead (resumo + fatos)' },
+  { key: '{{lead_memory}}', desc: 'Memória antiga do lead (case_state — será substituída por {{lead_profile}})' },
   { key: '{{lead_summary}}', desc: 'Resumo do caso' },
   { key: '{{conversation_id}}', desc: 'ID da conversa (para URLs)' },
   { key: '{{history_summary}}', desc: 'Resumo do histórico' },
   { key: '{{site_url}}', desc: 'URL base do site (ex: para links de LP)' },
   { key: '{{business_hours_info}}', desc: 'Status do expediente: vazio se aberto; bloco com motivo e próximo horário se fechado/feriado/fim de semana' },
+  { key: '{{office_memories}}', desc: 'Memórias organizacionais (escritório): endereço, equipe, honorários, regras — agrupadas por categoria' },
+  { key: '{{lead_profile}}', desc: 'Perfil consolidado do cliente (LeadProfile.summary) — gerado toda noite a partir das memórias acumuladas' },
+  { key: '{{recent_episodes}}', desc: 'Últimas 5 interações episódicas do lead (lista com bullet points)' },
+  { key: '{{memory_block}}', desc: 'Bloco completo das 3 camadas juntas (office + profile + episódios). Use quando quiser injetar tudo de uma vez' },
 ];
 
 /** Extrai a chave sem as chaves duplas — "{{business_hours_info}}" → "business_hours_info" */

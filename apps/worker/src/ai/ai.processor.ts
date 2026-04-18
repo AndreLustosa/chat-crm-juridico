@@ -1484,9 +1484,20 @@ STATUS DA FICHA:
       // Camada 1: Memorias organizacionais (escritorio) — so com tenant valido
       // Camada 2: LeadProfile.summary (perfil consolidado do cliente)
       // Camada 3: Memorias episodicas recentes do lead
+      //
+      // Distribuicao:
+      //   - Bloco completo (memoryBlock) anexado automaticamente ao final do
+      //     system prompt APENAS se a skill nao referenciar as variaveis novas
+      //     (ver PromptBuilder.buildSystemPrompt — detecta uso das {{...}})
+      //   - Cada camada tambem e exposta como variavel {{office_memories}},
+      //     {{lead_profile}}, {{recent_episodes}} e {{memory_block}} para
+      //     skill writers controlarem o posicionamento manualmente.
       // Fallback: caso o sistema novo ainda nao tenha memorias populadas,
-      // o bloco fica vazio e o prompt usa o {{lead_memory}} antigo (case_state).
+      // strings ficam vazias e o prompt usa o {{lead_memory}} antigo (case_state).
       let memoryBlock = '';
+      let officeMemoriesStr = '';
+      let leadProfileStr = '';
+      let recentEpisodesStr = '';
       try {
         const leadIdForMem = convo.lead_id || convo.lead?.id || null;
         if (tenantIdForBH && leadIdForMem) {
@@ -1523,6 +1534,11 @@ STATUS DA FICHA:
             leadProfileSummary: profile?.summary ?? null,
             recentEpisodes,
           });
+          officeMemoriesStr = this.promptBuilder.buildOrganizationMemoryBlock(orgMems) || '';
+          leadProfileStr = profile?.summary?.trim() || '';
+          recentEpisodesStr = recentEpisodes.length
+            ? recentEpisodes.map((m) => `- ${m.content}`).join('\n')
+            : '';
           if (memoryBlock) {
             this.logger.log(
               `[AI] memoryBlock: org=${orgMems.length} profile=${profile ? 1 : 0} episodes=${recentEpisodes.length} chars=${memoryBlock.length}`,
@@ -1532,6 +1548,14 @@ STATUS DA FICHA:
       } catch (e: any) {
         this.logger.warn(`[AI] Falha ao montar memoryBlock: ${e.message}`);
       }
+
+      // Expoe as 3 camadas como variaveis do template — skill writer pode
+      // usar {{office_memories}}, {{lead_profile}}, {{recent_episodes}} ou
+      // {{memory_block}} (bloco completo) em qualquer posicao do system prompt.
+      vars.office_memories = officeMemoriesStr;
+      vars.lead_profile = leadProfileStr;
+      vars.recent_episodes = recentEpisodesStr;
+      vars.memory_block = memoryBlock;
 
       if (skill) {
         // Injetar references (SkillAssets com inject_mode=full_text) no prompt via PromptBuilder

@@ -106,8 +106,16 @@ export class PromptBuilder {
     prompt += this.injectVariables(behaviorRules, vars) + '\n\n';
     prompt += this.injectVariables(skillPrompt, vars);
 
+    // Injeta bloco de memoria automaticamente APENAS se a skill nao referenciar
+    // nenhuma das variaveis de memoria novas ({{office_memories}},
+    // {{lead_profile}}, {{recent_episodes}}, {{memory_block}}).
+    // Assim skills adaptadas controlam o posicionamento via {{...}}, e skills
+    // antigas continuam recebendo a memoria no final por retrocompatibilidade.
     if (memoryBlock && memoryBlock.trim()) {
-      prompt += '\n\n' + memoryBlock;
+      const usesNewVars = /\{\{(office_memories|lead_profile|recent_episodes|memory_block)\}\}/.test(skillPrompt);
+      if (!usesNewVars) {
+        prompt += '\n\n' + memoryBlock;
+      }
     }
 
     // Inject references within token budget
