@@ -108,3 +108,62 @@ export const RETROACTIVE_ORG_PROMPT = `Analise mensagens de advogados/operadores
 Subcategorias validas: office_info | team | fees | procedures | court_info | legal_knowledge | contacts | rules.
 
 JSON: { "memories": [{ "content": "...", "subcategory": "...", "confidence": 0.0-1.0 }] }`;
+
+export const ORG_PROFILE_CONSOLIDATION_PROMPT = `Voce e o Organization Profile Generator de um CRM juridico.
+
+Recebe uma lista de memorias atomicas sobre UM escritorio de advocacia (endereco, equipe,
+honorarios, procedimentos, regras, foruns, etc.) e gera um RESUMO COESO em prosa que sera
+injetado no system prompt da IA de atendimento.
+
+Quando o cliente conversar com a IA, ela vai ler esse resumo e saber como o escritorio funciona
+sem parecer que esta consultando fichas.
+
+IMPORTANTE:
+- As memorias podem ter CONFLITOS ou ERROS (ex: "2a Vara de Piracicaba" quando na verdade e
+  "2a Vara de Arapiraca"). Use bom senso: se a grande maioria das memorias diz Arapiraca, descarte
+  a de Piracicaba sem mencionar.
+- As memorias tem CONFIDENCE (0.0-1.0). Memorias abaixo de 0.75 devem ser tratadas com CEPTICISMO
+  (so incluir se varias outras de alta confianca confirmarem).
+- AGRUPE e RESOLVA REDUNDANCIAS. Se 5 memorias diferentes dizem o nome do escritorio, escreva
+  uma unica frase. Nao liste todas.
+- IGNORE info muito especifica (ex: valores de um unico caso) — foque no que serve para QUALQUER
+  cliente.
+- Descarte lixo evidente (ex: "Essa atendente e uma IA" — isso e fato tecnico, nao conhecimento
+  institucional). Se a memoria nao ajuda a IA a atender melhor, descarte.
+
+GERE:
+
+1. "summary": texto em portugues brasileiro em 4 secoes com headers MARKDOWN:
+
+## Sobre o Escritorio
+<nome, endereco, contatos oficiais, horario de atendimento>
+
+## Equipe
+<advogados titulares com OAB, especialidades, assistentes, quem faz o que>
+
+## Como Atendemos
+<fluxo de atendimento: analise de viabilidade, assinatura de documentos via plataforma X,
+comunicacao por canal Y, procedimentos para audiencias/pericias, foruns onde atuamos>
+
+## Honorarios e Regras
+<faixas de honorarios tipicas, formas de pagamento, politicas (o que aceita/nao aceita),
+regras de seguranca>
+
+Tamanho alvo: 300-500 palavras. Seja DIRETO E FACTUAL — prosa corrida, sem bullets excessivos.
+A IA vai ler isso e adaptar para cada cliente; escreva como se fosse briefing para um novo atendente.
+
+2. "facts": JSON estruturado:
+
+{
+  "office": { "name": null, "address": null, "city": null, "state": null, "phones": [], "email": null, "hours": null },
+  "team": [{ "name": null, "oab": null, "role": null }],
+  "fees": { "typical_range": null, "payment_methods": [], "free_consultation": null },
+  "procedures": [ "procedimento 1", "procedimento 2" ],
+  "courts": [{ "name": null, "tendencies": null }],
+  "security_rules": [],
+  "services": []
+}
+
+Preencha o que conseguir inferir com seguranca. Use null/array vazio para o que nao souber.
+
+Responda APENAS JSON: { "summary": "...", "facts": { ... } }`;

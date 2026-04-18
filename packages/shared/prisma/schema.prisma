@@ -39,6 +39,7 @@ model Tenant {
   notifications             Notification[]
   memories                  Memory[]
   lead_profiles             LeadProfile[]
+  organization_profile      OrganizationProfile?
 }
 
 model User {
@@ -1624,4 +1625,32 @@ model LeadProfile {
   version       Int       @default(1)
 
   @@index([tenant_id])
+}
+
+/// Perfil consolidado do ESCRITORIO — resumo em prosa (4 secoes) que substitui
+/// a injecao crua das memorias organizacionais no prompt. Mesmo padrao do
+/// LeadProfile mas para tenant. 1 registro por tenant.
+///
+/// Regenerado:
+///   - Diariamente as 02h (OrgProfileConsolidationProcessor)
+///   - Sob demanda apos create/update/delete de memoria organizacional (debounce)
+///   - Via botao manual na tela /atendimento/settings/knowledge
+///
+/// Na injecao, substitui `{{office_memories}}` no prompt — reduz ruido,
+/// resolve conflitos e descarta memorias de baixa confianca.
+model OrganizationProfile {
+  id            String   @id @default(uuid())
+  tenant_id     String   @unique
+  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  /// Texto estruturado em 4 secoes (About, Team, Procedures, Rules) — ~500 palavras
+  summary       String   @db.Text
+  /// JSON estruturado: office_info, team[], fees, procedures[], rules[], etc.
+  facts         Json     @default("{}")
+
+  /// Quantas memorias ativas foram usadas como fonte na ultima geracao
+  source_memory_count Int @default(0)
+
+  generated_at  DateTime @default(now())
+  version       Int      @default(1)
 }

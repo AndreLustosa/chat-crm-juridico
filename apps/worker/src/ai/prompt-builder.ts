@@ -55,20 +55,31 @@ export class PromptBuilder {
 
   /**
    * Compoe as 3 camadas de memoria que vao no inicio do system prompt:
-   *   1. Informacoes do Escritorio (memorias organizacionais)
+   *   1. Informacoes do Escritorio (OrganizationProfile.summary OU fallback
+   *      bloco agrupado de memorias organizacionais cruas)
    *   2. Perfil do Cliente (LeadProfile.summary)
    *   3. Interacoes Recentes (memorias episodicas)
+   *
+   * Aceita:
+   *   - `orgSummary` (preferido) — texto ja consolidado pronto para injetar
+   *   - `orgMemories` (fallback) — lista crua para agrupar via buildOrganizationMemoryBlock
    */
   buildMemoryLayers(params: {
+    orgSummary?: string | null;
     orgMemories?: Array<{ content: string; subcategory: string | null }>;
     leadProfileSummary?: string | null;
     recentEpisodes?: Array<{ content: string }>;
   }): string {
     const parts: string[] = [];
 
-    const orgBlock = this.buildOrganizationMemoryBlock(params.orgMemories || []);
-    if (orgBlock) {
-      parts.push(`## Informacoes do Escritorio (use naturalmente, nao cite como "base de dados"):\n${orgBlock}`);
+    let orgText: string | null = null;
+    if (params.orgSummary && params.orgSummary.trim()) {
+      orgText = params.orgSummary.trim();
+    } else if (params.orgMemories && params.orgMemories.length > 0) {
+      orgText = this.buildOrganizationMemoryBlock(params.orgMemories);
+    }
+    if (orgText) {
+      parts.push(`## Informacoes do Escritorio (use naturalmente, nao cite como "base de dados"):\n${orgText}`);
     }
 
     if (params.leadProfileSummary && params.leadProfileSummary.trim()) {

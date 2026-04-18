@@ -22,6 +22,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -60,6 +62,15 @@ interface OrgStats {
   total: number;
   by_subcategory: Record<string, number>;
   last_extraction: string | null;
+}
+
+interface OrgProfile {
+  id: string;
+  summary: string;
+  facts: any;
+  source_memory_count: number;
+  generated_at: string;
+  version: number;
 }
 
 function formatSourceLabel(src: string): string {
@@ -110,18 +121,23 @@ export default function KnowledgeSettingsPage() {
   const [batchEnabled, setBatchEnabled] = useState(true);
   const [extracting, setExtracting] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'ok' | 'err' } | null>(null);
+  const [orgProfile, setOrgProfile] = useState<OrgProfile | null>(null);
+  const [profileOpen, setProfileOpen] = useState(true);
+  const [regeneratingProfile, setRegeneratingProfile] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [memsRes, statsRes, settingsRes] = await Promise.all([
+      const [memsRes, statsRes, settingsRes, profileRes] = await Promise.all([
         api.get<OrgMemoriesResponse>('/memories/organization'),
         api.get<OrgStats>('/memories/organization/stats'),
         api.get('/settings'),
+        api.get<OrgProfile | null>('/memories/organization/profile'),
       ]);
       setGroups(memsRes.data.groups || {});
       setStats(statsRes.data);
+      setOrgProfile(profileRes.data);
       const rows = Array.isArray(settingsRes.data) ? settingsRes.data : [];
       const flag = rows.find((r: any) => r?.key === 'MEMORY_BATCH_ENABLED');
       setBatchEnabled((flag?.value ?? 'true').toLowerCase() !== 'false');
@@ -236,6 +252,20 @@ export default function KnowledgeSettingsPage() {
     }
   };
 
+  const handleRegenerateProfile = async () => {
+    setRegeneratingProfile(true);
+    try {
+      await api.post('/memories/organization/regenerate-profile');
+      showFeedback('Regeneração disparada — atualiza em ~1 minuto');
+      // Recarrega depois de 8s pra pegar o resultado
+      setTimeout(() => loadData(), 8000);
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao regenerar', 'err');
+    } finally {
+      setRegeneratingProfile(false);
+    }
+  };
+
   return (
     <div className="p-6 md:p-8 max-w-5xl mx-auto">
       {/* Header */}
@@ -287,6 +317,81 @@ export default function KnowledgeSettingsPage() {
           {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           Rodar extração agora
         </button>
+      </div>
+
+      {/* Profile consolidado card */}
+      <div className="bg-gradient-to-br from-primary/5 via-card to-card border border-primary/20 rounded-xl mb-4 overflow-hidden">
+        <div className="flex items-center">
+          <button
+            onClick={() => setProfileOpen(!profileOpen)}
+            className="flex-1 px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.03] transition-colors text-left"
+          >
+            <Sparkles className="w-4 h-4 text-primary" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">Resumo Consolidado do Escritório</span>
+                {orgProfile && (
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    v{orgProfile.version}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {orgProfile
+                  ? `Gerado a partir de ${orgProfile.source_memory_count} memórias — injetado em {{office_memories}} no prompt da IA`
+                  : 'Ainda não foi gerado. A IA está usando as memórias cruas agrupadas.'}
+              </p>
+            </div>
+            {profileOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+          <button
+            onClick={handleRegenerateProfile}
+            disabled={regeneratingProfile}
+            className="px-3 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+            title="Regenerar perfil agora"
+          >
+            {regeneratingProfile ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+
+        {profileOpen && (
+          <div className="border-t border-primary/10 bg-background/40 px-5 py-4">
+            {orgProfile ? (
+              <>
+                <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] text-foreground whitespace-pre-wrap leading-relaxed">
+                  {orgProfile.summary}
+                </div>
+                <p className="mt-3 text-[10px] text-muted-foreground">
+                  Última geração: {formatDate(orgProfile.generated_at)}
+                </p>
+              </>
+            ) : (
+              <div className="text-center py-4 text-sm text-muted-foreground">
+                <p>Nenhum perfil consolidado gerado ainda.</p>
+                <button
+                  onClick={handleRegenerateProfile}
+                  disabled={regeneratingProfile}
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 disabled:opacity-50"
+                >
+                  {regeneratingProfile ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3 h-3" />
+                  )}
+                  Gerar agora
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Search */}

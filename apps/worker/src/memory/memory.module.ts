@@ -4,6 +4,7 @@ import { EmbeddingService } from './embedding.service';
 import { MemoryRetrievalService } from './memory-retrieval.service';
 import { DailyMemoryBatchProcessor } from './daily-memory-batch.processor';
 import { ProfileConsolidationProcessor } from './profile-consolidation.processor';
+import { OrgProfileConsolidationProcessor } from './org-profile-consolidation.processor';
 import { MemoryDedupService } from './memory-dedup.service';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -24,6 +25,7 @@ const defaultJobOptions = {
     MemoryRetrievalService,
     DailyMemoryBatchProcessor,
     ProfileConsolidationProcessor,
+    OrgProfileConsolidationProcessor,
     MemoryDedupService,
   ],
   exports: [EmbeddingService, MemoryRetrievalService],

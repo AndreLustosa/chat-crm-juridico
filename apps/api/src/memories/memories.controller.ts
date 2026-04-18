@@ -36,6 +36,18 @@ export class MemoriesController {
     return this.memoriesService.getOrganizationStats(req.user?.tenant_id);
   }
 
+  @Get('organization/profile')
+  async getOrgProfile(@Request() req: any) {
+    return this.memoriesService.getOrganizationProfile(req.user?.tenant_id);
+  }
+
+  @Post('organization/regenerate-profile')
+  @Roles('ADMIN', 'ADVOGADO')
+  async regenerateOrgProfile(@Request() req: any) {
+    if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.regenerateOrganizationProfile(req.user.tenant_id);
+  }
+
   @Post('organization')
   @Roles('ADMIN', 'ADVOGADO')
   async createOrg(

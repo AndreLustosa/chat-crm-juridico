@@ -1,8 +1,12 @@
 import { Injectable, Logger, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+
+const ORG_PROFILE_DEBOUNCE_MS = 60_000; // 60s — evita regenerar a cada edit
 
 const VALID_ORG_SUBCATEGORIES = new Set([
   'office_info',
@@ -34,7 +38,33 @@ export class MemoriesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    @InjectQueue('memory-jobs') private readonly memoryQueue: Queue,
   ) {}
+
+  /**
+   * Enfileira regeneracao debounced do OrganizationProfile apos CRUD.
+   * Usa jobId com minuto truncado: varias edicoes em 60s resultam no mesmo
+   * jobId (BullMQ deduplica e mantem so o primeiro).
+   */
+  private async triggerOrgProfileRegen(tenantId: string, reason: string) {
+    try {
+      const bucket = Math.floor(Date.now() / ORG_PROFILE_DEBOUNCE_MS);
+      const jobId = `org-profile-${tenantId}-${bucket}`;
+      await this.memoryQueue.add(
+        'consolidate-org-profile',
+        { tenant_id: tenantId, reason },
+        {
+          jobId,
+          delay: ORG_PROFILE_DEBOUNCE_MS,
+          removeOnComplete: true,
+          attempts: 2,
+        },
+      );
+    } catch (e: any) {
+      // Nao bloqueia o CRUD se a fila falhar
+      this.logger.warn(`[OrgProfile] Falha ao enfileirar regen: ${e.message}`);
+    }
+  }
 
   private async getOpenAI(): Promise<OpenAI> {
     if (this.openaiClient) return this.openaiClient;
@@ -157,6 +187,7 @@ export class MemoriesService {
       this.toVectorLiteral(embedding),
       confidence,
     );
+    await this.triggerOrgProfileRegen(tenantId, 'create-org');
     return { success: true };
   }
 
@@ -198,6 +229,9 @@ export class MemoriesService {
     } else {
       await this.prisma.memory.update({ where: { id }, data: patch });
     }
+    if (existing.scope === 'organization') {
+      await this.triggerOrgProfileRegen(tenantId, 'update-org');
+    }
     return { success: true };
   }
 
@@ -207,7 +241,32 @@ export class MemoriesService {
     });
     if (!existing) throw new NotFoundException('Memoria nao encontrada');
     await this.prisma.memory.delete({ where: { id } });
+    if (existing.scope === 'organization') {
+      await this.triggerOrgProfileRegen(tenantId, 'delete-org');
+    }
     return { success: true };
+  }
+
+  // ─── Organization Profile (consolidado em prosa) ─────────
+
+  async getOrganizationProfile(tenantId: string) {
+    if (!tenantId) return null;
+    const profile = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+    });
+    return profile || null;
+  }
+
+  /** Forca regeneracao imediata (sem debounce). Usado pelo botao "Regenerar agora". */
+  async regenerateOrganizationProfile(tenantId: string) {
+    if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
+    const jobId = `org-profile-force-${tenantId}-${Date.now()}`;
+    await this.memoryQueue.add(
+      'consolidate-org-profile',
+      { tenant_id: tenantId, reason: 'manual-force' },
+      { jobId, removeOnComplete: true, attempts: 2 },
+    );
+    return { success: true, job_id: jobId };
   }
 
   async getOrganizationStats(tenantId: string) {

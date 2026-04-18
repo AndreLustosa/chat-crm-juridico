@@ -1501,7 +1501,13 @@ STATUS DA FICHA:
       try {
         const leadIdForMem = convo.lead_id || convo.lead?.id || null;
         if (tenantIdForBH && leadIdForMem) {
-          const [orgMems, profile, recentEpisodes] = await Promise.all([
+          const [orgProfile, orgMems, profile, recentEpisodes] = await Promise.all([
+            // OrganizationProfile consolidado (prosa) — fonte principal
+            this.prisma.organizationProfile.findUnique({
+              where: { tenant_id: tenantIdForBH },
+              select: { summary: true },
+            }),
+            // Memorias org cruas — fallback se perfil nao existir ainda
             this.prisma.memory.findMany({
               where: {
                 tenant_id: tenantIdForBH,
@@ -1529,19 +1535,26 @@ STATUS DA FICHA:
               select: { content: true },
             }),
           ]);
-          memoryBlock = this.promptBuilder.buildMemoryLayers({
-            orgMemories: orgMems,
-            leadProfileSummary: profile?.summary ?? null,
-            recentEpisodes,
-          });
-          officeMemoriesStr = this.promptBuilder.buildOrganizationMemoryBlock(orgMems) || '';
+
+          // Prioridade: OrgProfile.summary (prosa consolidada, ~500 palavras)
+          // Fallback: bloco agrupado cru quando perfil ainda nao foi gerado
+          if (orgProfile?.summary?.trim()) {
+            officeMemoriesStr = orgProfile.summary.trim();
+          } else {
+            officeMemoriesStr = this.promptBuilder.buildOrganizationMemoryBlock(orgMems) || '';
+          }
           leadProfileStr = profile?.summary?.trim() || '';
           recentEpisodesStr = recentEpisodes.length
             ? recentEpisodes.map((m) => `- ${m.content}`).join('\n')
             : '';
+          memoryBlock = this.promptBuilder.buildMemoryLayers({
+            orgSummary: officeMemoriesStr || null,
+            leadProfileSummary: leadProfileStr || null,
+            recentEpisodes,
+          });
           if (memoryBlock) {
             this.logger.log(
-              `[AI] memoryBlock: org=${orgMems.length} profile=${profile ? 1 : 0} episodes=${recentEpisodes.length} chars=${memoryBlock.length}`,
+              `[AI] memoryBlock: orgProfile=${orgProfile ? 1 : 0} orgMemsRaw=${orgMems.length} profile=${profile ? 1 : 0} episodes=${recentEpisodes.length} chars=${memoryBlock.length}`,
             );
           }
         }
