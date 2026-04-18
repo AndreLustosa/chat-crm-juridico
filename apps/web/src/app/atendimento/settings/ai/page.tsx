@@ -93,6 +93,23 @@ const TEMPLATE_VARS = [
   { key: '{{business_hours_info}}', desc: 'Status do expediente: vazio se aberto; bloco com motivo e próximo horário se fechado/feriado/fim de semana' },
 ];
 
+/** Extrai a chave sem as chaves duplas — "{{business_hours_info}}" → "business_hours_info" */
+const bareVarKey = (k: string) => k.replace(/^\{\{|\}\}$/g, '');
+
+/**
+ * Formata o preview para exibição ao lado da pill.
+ * - Sem valor (variável não exposta pelo backend): null
+ * - String vazia: "(vazio agora)"
+ * - String longa: trunca em 80 chars
+ */
+function formatPreview(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  if (value === '') return '(vazio agora)';
+  const single = value.replace(/\s+/g, ' ').trim();
+  const truncated = single.length > 80 ? single.slice(0, 80) + '…' : single;
+  return `(${truncated})`;
+}
+
 const BLANK_FORM: SkillForm = {
   id: null,
   name: '',
@@ -206,15 +223,21 @@ export default function AiSettingsPage() {
   const [savingSkill, setSavingSkill] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Preview das variáveis dinâmicas (calculadas em tempo real pelo backend)
+  // — ex: business_hours_info mostra bloco "ESCRITÓRIO FECHADO..." se fora do expediente
+  const [variablePreview, setVariablePreview] = useState<Record<string, string>>({});
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [configRes, skillsRes, ttsRes] = await Promise.all([
+      const [configRes, skillsRes, ttsRes, varPreviewRes] = await Promise.all([
         api.get('/settings/ai-config'),
         api.get('/settings/skills'),
         api.get('/settings/tts'),
+        api.get('/settings/variable-preview').catch(() => ({ data: {} })),
       ]);
+      setVariablePreview(varPreviewRes.data || {});
       setIsConfigured(configRes.data.isConfigured);
       setIsAdminKeyConfigured(configRes.data.isAdminKeyConfigured ?? false);
       setIsAnthropicKeyConfigured(configRes.data.isAnthropicKeyConfigured ?? false);
@@ -879,6 +902,7 @@ export default function AiSettingsPage() {
                       tools={skills.find(s => s.id === form.id)?.tools || []}
                       assets={skills.find(s => s.id === form.id)?.assets || []}
                       onRefresh={fetchData}
+                      variablePreview={variablePreview}
                     />
                   )}
                 </div>
@@ -902,6 +926,7 @@ export default function AiSettingsPage() {
                     tools={[]}
                     assets={[]}
                     onRefresh={fetchData}
+                    variablePreview={variablePreview}
                   />
                 </div>
               )}
@@ -1062,14 +1087,22 @@ export default function AiSettingsPage() {
             <ChevronDown size={13} /> Variáveis disponíveis nos prompts
           </h4>
           <div className="grid grid-cols-2 gap-2">
-            {TEMPLATE_VARS.map((v) => (
-              <div key={v.key} className="flex items-center gap-2 text-xs">
-                <code className="font-mono text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded text-[11px]">
-                  {v.key}
-                </code>
-                <span className="text-muted-foreground">{v.desc}</span>
-              </div>
-            ))}
+            {TEMPLATE_VARS.map((v) => {
+              const preview = formatPreview(variablePreview[bareVarKey(v.key)]);
+              return (
+                <div key={v.key} className="flex items-center gap-2 text-xs">
+                  <code className="font-mono text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded text-[11px]">
+                    {v.key}
+                  </code>
+                  <span className="text-muted-foreground">{v.desc}</span>
+                  {preview && (
+                    <span className="text-[10px] text-violet-300/70 truncate" title={variablePreview[bareVarKey(v.key)]}>
+                      {preview}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <p className="text-[11px] text-muted-foreground">
             Use <code className="font-mono">ESCALAR_HUMANO</code> (ou qualquer palavra configurada em &quot;Sinal de escalada&quot;) para que a IA transfira a conversa de volta ao atendente humano.
@@ -1094,6 +1127,7 @@ function SkillEditor({
   tools,
   assets,
   onRefresh,
+  variablePreview,
 }: {
   form: SkillForm;
   setForm: React.Dispatch<React.SetStateAction<SkillForm>>;
@@ -1106,6 +1140,7 @@ function SkillEditor({
   tools: SkillTool[];
   assets: SkillAsset[];
   onRefresh: () => void;
+  variablePreview: Record<string, string>;
 }) {
   return (
     <div className="p-5 bg-card border-t border-border/50 space-y-4">
@@ -1233,20 +1268,26 @@ function SkillEditor({
 
       {/* System Prompt */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">System Prompt</label>
+        <div className="flex items-start justify-between gap-4">
+          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide shrink-0 mt-1">System Prompt</label>
           <div className="flex gap-1 flex-wrap justify-end">
-            {TEMPLATE_VARS.map((v) => (
-              <button
-                key={v.key}
-                type="button"
-                onClick={() => insertVar(v.key)}
-                title={v.desc}
-                className="font-mono text-violet-400 border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 rounded px-1.5 text-[10px] transition-all"
-              >
-                {v.key}
-              </button>
-            ))}
+            {TEMPLATE_VARS.map((v) => {
+              const preview = formatPreview(variablePreview[bareVarKey(v.key)]);
+              return (
+                <button
+                  key={v.key}
+                  type="button"
+                  onClick={() => insertVar(v.key)}
+                  title={preview ? `${v.desc}\n\nAgora resolve para: ${variablePreview[bareVarKey(v.key)] || '(vazio)'}` : v.desc}
+                  className="font-mono text-violet-400 border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 rounded px-1.5 text-[10px] transition-all flex items-center gap-1"
+                >
+                  <span>{v.key}</span>
+                  {preview && (
+                    <span className="font-sans text-violet-300/70 font-normal">{preview}</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
         <textarea

@@ -11,7 +11,7 @@ import { ToolExecutor } from './tool-executor';
 import { PromptBuilder } from './prompt-builder';
 import { buildHandlerMap } from './tool-handlers';
 import { createLLMClient, calculateCost, type LLMProvider } from './llm-client';
-import { computeBusinessHoursInfo } from './business-hours.util';
+import { computeBusinessHoursInfo } from '@crm/shared';
 
 // Modelos com suporte a visão (imagens)
 const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5', 'claude-'];

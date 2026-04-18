@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   computeBusinessHoursStatus,
   loadBusinessHoursSettings,
-} from '../ai/business-hours.util';
+} from '@crm/shared';
 
 /**
  * AfterHoursService

@@ -7,6 +7,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { S3Service } from '../s3/s3.service';
 import { CreateSkillDto, UpdateSkillDto, CreateSkillToolDto, UpdateSkillToolDto } from './dto/settings.dto';
+import { PrismaService } from '../prisma/prisma.service';
+import { computeBusinessHoursInfo } from '@crm/shared';
 
 /** Mascara uma chave de API, mostrando apenas os primeiros 4 e últimos 4 caracteres */
 function maskApiKey(key: string | null | undefined): string | null {
@@ -24,6 +26,7 @@ export class SettingsController {
     private readonly settingsService: SettingsService,
     private readonly whatsappService: WhatsappService,
     private readonly s3Service: S3Service,
+    private readonly prisma: PrismaService,
   ) {}
 
   // ─── Generic Settings ─────────────────────────────────
@@ -117,6 +120,23 @@ export class SettingsController {
       await this.settingsService.upsert('TIMEZONE', body.timezone);
     }
     return { message: 'Horário do escritório salvo' };
+  }
+
+  /**
+   * Preview das variáveis DINÂMICAS do sistema (calculadas em tempo real).
+   * Usado pela UI de skills para mostrar ao editor o que cada variável
+   * resolveria AGORA — evita surpresa no prompt final.
+   *
+   * Só inclui variáveis globais (não por-lead). Para variáveis por-lead
+   * (lead_name, lead_memory, etc), mostrar "ex:" em vez de preview real.
+   */
+  @Get('variable-preview')
+  @Roles('ADMIN')
+  async getVariablePreview() {
+    const businessHoursInfo = await computeBusinessHoursInfo(this.prisma).catch(() => '');
+    return {
+      business_hours_info: businessHoursInfo,
+    };
   }
 
   @Get('whatsapp-config/health')
