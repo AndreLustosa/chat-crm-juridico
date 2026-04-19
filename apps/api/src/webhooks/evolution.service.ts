@@ -204,11 +204,14 @@ export class EvolutionService implements OnApplicationBootstrap {
       // 1. Upsert Lead (via LeadsService para garantir normalização)
       // stage não é passado: o upsert nunca sobrescreve stage em updates existentes,
       // e em creates o campo usa o default 'NOVO' definido no schema Prisma.
-      const lead = await this.leadsService.upsert({
-        phone,
-        name: pushName,
-        origin: 'whatsapp',
-      });
+      const lead = await this.leadsService.upsert(
+        {
+          phone,
+          name: pushName,
+          origin: 'whatsapp',
+        },
+        inboxId, // isola notificacao de lead novo ao inbox do setor
+      );
 
       // 1b. Lead PERDIDO/FINALIZADO voltou a falar → reativar para QUALIFICANDO
       // Sem isso, a conversa existe mas fica invisível no inbox (filtro de stage).
@@ -1075,13 +1078,16 @@ export class EvolutionService implements OnApplicationBootstrap {
         const pushName = (chat.pushName as string) || (chat.name as string) || null;
         if (!existingLead && !pushName) continue; // Sem lead e sem nome → ignorar
 
-        const lead = await this.leadsService.upsert({
-          phone,
-          name: existingLead?.name ? null : pushName,
-          ...(chat.profilePicUrl ? { profile_picture_url: chat.profilePicUrl as string } : {}),
-          origin: 'whatsapp',
-          ...(tenantId ? { tenant: { connect: { id: tenantId } } } : {}),
-        });
+        const lead = await this.leadsService.upsert(
+          {
+            phone,
+            name: existingLead?.name ? null : pushName,
+            ...(chat.profilePicUrl ? { profile_picture_url: chat.profilePicUrl as string } : {}),
+            origin: 'whatsapp',
+            ...(tenantId ? { tenant: { connect: { id: tenantId } } } : {}),
+          },
+          inboxId, // isola notificacao de lead novo ao inbox do setor (resync pos-reconexao)
+        );
 
         // Reabrir conversa fechada ou criar nova
         let conv = await this.prisma.conversation.findFirst({

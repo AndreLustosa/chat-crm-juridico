@@ -147,13 +147,18 @@ export class ChatGateway {
   }
 
   /**
-   * Ao conectar, o socket entra nas rooms `inbox:{id}` relevantes.
-   * Operadores: apenas seus inboxes atribuidos.
-   * ADMINs: todos os inboxes do tenant (veem tudo).
-   * Usado para isolar o broadcast de "pool" (conversa sem operador atribuido)
-   * aos operadores daquele setor, em vez de inundar o tenant inteiro.
+   * Ao conectar, o socket entra em rooms de escopo de notificacao:
+   *   - inbox:{id}       → conversas pool daquele setor (membros do inbox + ADMINs)
+   *   - operators:{tenantId} → novo lead sem inbox (ADMIN + OPERADOR/COMERCIAL;
+   *                            ADVOGADO puro nao entra, evitando ding de lead
+   *                            que ele nao vai atender)
+   *
+   * Regra:
+   *  - OPERADOR/COMERCIAL: joina seus inboxes + operators room
+   *  - ADVOGADO puro: nenhuma inbox, nenhum operators room (so user:{id})
+   *  - ADMIN: joina TODOS inboxes do tenant + operators room (ve tudo)
    */
-  async autoJoinInboxRooms(userId: string, tenantId: string | null | undefined, client: Socket): Promise<void> {
+  async autoJoinRooms(userId: string, tenantId: string | null | undefined, client: Socket): Promise<void> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -165,7 +170,12 @@ export class ChatGateway {
         ? (user.roles as string[])
         : (user.roles ? [user.roles as string] : []);
       const isAdmin = userRoles.includes('ADMIN');
+      const isOperador =
+        userRoles.includes('OPERADOR') ||
+        userRoles.includes('COMERCIAL') ||
+        userRoles.includes('Atendente Comercial');
 
+      // Inbox rooms
       let inboxIds: string[];
       if (isAdmin && tenantId) {
         const all = await this.prisma.inbox.findMany({
@@ -176,15 +186,21 @@ export class ChatGateway {
       } else {
         inboxIds = (user.inboxes || []).map((i: any) => i.id);
       }
-
       for (const id of inboxIds) {
         client.join(`inbox:${id}`);
       }
-      if (inboxIds.length > 0) {
-        this.logger.log(`[SOCKET] ${client.id} joined ${inboxIds.length} inbox room(s) (admin=${isAdmin})`);
+
+      // Operators room (pool de leads sem inbox — formulario web, criacao manual via CRM)
+      const joinOperators = !!tenantId && (isAdmin || isOperador);
+      if (joinOperators) {
+        client.join(`operators:${tenantId}`);
       }
+
+      this.logger.log(
+        `[SOCKET] ${client.id} rooms: ${inboxIds.length} inbox(es), operators=${joinOperators} (admin=${isAdmin}, operador=${isOperador})`,
+      );
     } catch (e: any) {
-      this.logger.warn(`[SOCKET] autoJoinInboxRooms falhou para user ${userId}: ${e.message}`);
+      this.logger.warn(`[SOCKET] autoJoinRooms falhou para user ${userId}: ${e.message}`);
     }
   }
 
@@ -456,6 +472,7 @@ export class ChatGateway {
   async emitNewLeadNotification(
     tenantId: string | null,
     assignedUserId: string | null,
+    inboxId: string | null,
     data: { leadId: string; leadName?: string | null; phone?: string | null; origin?: string | null },
   ) {
     const contactName = data.leadName || data.phone || 'Novo lead';
@@ -493,16 +510,21 @@ export class ChatGateway {
       return;
     }
 
-    const broadcastToTenant = (resolvedTenantId: string) => {
-      this.logger.log(`[SOCKET] new_lead_notification → tenant:${resolvedTenantId} (sem atendente)`);
-      this.server.to(`tenant:${resolvedTenantId}`).emit('new_lead_notification', basePayload);
+    // Sem atendente: prioridade inbox (pool do setor) → operators (fallback
+    // sem inbox — lead via formulario, API externa, criacao manual). Nunca
+    // tenant: advogados puros nao devem receber ding de lead novo.
+    const emitTo = (room: string) => {
+      this.logger.log(`[SOCKET] new_lead_notification → ${room}`);
+      this.server.to(room).emit('new_lead_notification', basePayload);
     };
 
-    if (tenantId) {
-      broadcastToTenant(tenantId);
+    if (inboxId) {
+      emitTo(`inbox:${inboxId}`);
+    } else if (tenantId) {
+      emitTo(`operators:${tenantId}`);
     } else {
       this.prisma.tenant.findFirst().then((t) => {
-        if (t) broadcastToTenant(t.id);
+        if (t) emitTo(`operators:${t.id}`);
       }).catch(() => {});
     }
   }

@@ -36,22 +36,23 @@ export class LeadsService {
     private googleDriveService: GoogleDriveService,
   ) {}
 
-  async create(data: Prisma.LeadCreateInput): Promise<Lead> {
+  async create(data: Prisma.LeadCreateInput, inboxId?: string | null): Promise<Lead> {
     if (data.phone) data = { ...data, phone: to12Digits(data.phone) };
     const lead = await this.prisma.lead.create({ data });
     // Fire automation hooks asynchronously (don't block the response)
     this.automationsService.onNewLead(lead.id, lead.tenant_id ?? undefined).catch(err =>
       this.logger.warn(`onNewLead automation error for lead ${lead.id}: ${err}`),
     );
-    this.notifyNewLead(lead);
+    this.notifyNewLead(lead, inboxId);
     return lead;
   }
 
-  /** Dispara notificação de novo lead para o atendente vinculado (ou tenant, se sem atribuição). */
-  private notifyNewLead(lead: Lead): void {
+  /** Dispara notificação de novo lead: atendente vinculado > inbox > operators do tenant. */
+  private notifyNewLead(lead: Lead, inboxId?: string | null): void {
     this.chatGateway.emitNewLeadNotification(
       lead.tenant_id ?? null,
       lead.cs_user_id ?? null,
+      inboxId ?? null,
       {
         leadId: lead.id,
         leadName: lead.name,
@@ -221,7 +222,7 @@ export class LeadsService {
     return lead;
   }
 
-  async upsert(data: Prisma.LeadCreateInput): Promise<Lead> {
+  async upsert(data: Prisma.LeadCreateInput, inboxId?: string | null): Promise<Lead> {
     const phone = to12Digits(data.phone);
     // No UPDATE nunca sobrescreve nome, stage nem foto com valores piores:
     // - nome: só atualiza se o lead ainda não tem nome (null/vazio) E veio um nome no payload.
@@ -257,7 +258,7 @@ export class LeadsService {
     });
 
     if (!existing) {
-      this.notifyNewLead(lead);
+      this.notifyNewLead(lead, inboxId);
     }
 
     return lead;

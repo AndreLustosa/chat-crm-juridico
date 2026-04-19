@@ -184,11 +184,11 @@ async function bootstrap() {
     if (socketUser?.tenant_id) {
       socket.join(`tenant:${socketUser.tenant_id}`);
     }
-    // Auto-join inbox rooms: permite broadcasts de "pool" (conversa sem operador)
-    // chegarem apenas aos operadores do setor correto. ADMINs entram em todas
-    // as rooms do tenant para manterem visibilidade global.
+    // Auto-join rooms de notificacao (inbox:{id} e operators:{tenantId}).
+    // Broadcasts de pool (conversa/lead sem operador) so chegam aos operadores
+    // do setor correto; ADVOGADO puro nao entra no pool de leads.
     if (socketUser?.sub) {
-      chatGateway.autoJoinInboxRooms(socketUser.sub, socketUser.tenant_id, socket).catch(() => {});
+      chatGateway.autoJoinRooms(socketUser.sub, socketUser.tenant_id, socket).catch(() => {});
     }
 
     socket.on('disconnect', (reason) => {
