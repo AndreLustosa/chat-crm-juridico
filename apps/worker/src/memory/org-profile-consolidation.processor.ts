@@ -4,7 +4,10 @@ import { Job } from 'bullmq';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-import { ORG_PROFILE_CONSOLIDATION_PROMPT } from './memory-prompts';
+import {
+  ORG_PROFILE_CONSOLIDATION_PROMPT,
+  ORG_PROFILE_INCREMENTAL_PROMPT,
+} from './memory-prompts';
 
 const MIN_CONFIDENCE_FOR_INCLUSION = 0.6;
 
@@ -47,12 +50,14 @@ export class OrgProfileConsolidationProcessor {
   }
 
   /**
-   * Consolida o perfil organizacional de TODOS os tenants ativos.
+   * Consolida INCREMENTALMENTE o perfil organizacional de TODOS os tenants ativos.
    * Pula tenants com edicao manual (manually_edited_at IS NOT NULL) — nesses
-   * casos, so regenera se admin clicar "Regenerar" explicitamente (que limpa
-   * o flag via API).
+   * casos, so atualiza se admin clicar "Regenerar" explicitamente.
+   *
+   * Padrao: INCREMENTAL — LLM recebe summary atual + memorias novas/deletadas
+   * desde a ultima incorporacao. Se nao houver mudancas, summary permanece igual.
    */
-  async consolidateAll(): Promise<{ tenants: number; skipped: number }> {
+  async consolidateAll(): Promise<{ tenants: number; skipped: number; changed: number }> {
     const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
     const manuallyEdited = await this.prisma.organizationProfile.findMany({
       where: { manually_edited_at: { not: null } },
@@ -62,6 +67,7 @@ export class OrgProfileConsolidationProcessor {
 
     let processed = 0;
     let skipped = 0;
+    let changed = 0;
     for (const t of tenants) {
       if (skipSet.has(t.id)) {
         skipped++;
@@ -69,8 +75,9 @@ export class OrgProfileConsolidationProcessor {
         continue;
       }
       try {
-        await this.consolidateProfile(t.id);
+        const result = await this.consolidateIncremental(t.id);
         processed++;
+        if (result?.changed) changed++;
       } catch (e: any) {
         this.logger.warn(
           `[OrgProfileConsolidation] Falha tenant ${t.id}: ${e.message}`,
@@ -78,20 +85,147 @@ export class OrgProfileConsolidationProcessor {
       }
     }
     this.logger.log(
-      `[OrgProfileConsolidation] ${processed}/${tenants.length} perfis regenerados (${skipped} com edicao manual, pulados)`,
+      `[OrgProfileConsolidation] Cron diario: ${processed}/${tenants.length} tenants processados (${changed} com mudancas, ${skipped} com edicao manual pulados)`,
     );
-    return { tenants: processed, skipped };
+    return { tenants: processed, skipped, changed };
   }
 
+  /**
+   * Job incremental disparado por CRUD de memoria org ou por regen manual.
+   * Usa o modo INCREMENTAL (preserva summary, so aplica mudancas).
+   */
   async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
+    const { tenant_id } = job.data as { tenant_id: string };
+    await this.consolidateIncremental(tenant_id);
+    return { ok: true };
+  }
+
+  /**
+   * Job "Refazer do zero" — ignora summary existente e regenera a partir
+   * de TODAS as memorias ativas. Usado apenas quando admin clica explicitamente
+   * em "Refazer do zero" na UI.
+   */
+  async rebuildFromScratch(job: Job): Promise<{ ok: boolean }> {
     const { tenant_id } = job.data as { tenant_id: string };
     await this.consolidateProfile(tenant_id);
     return { ok: true };
   }
 
   /**
-   * Regenera o OrganizationProfile de um tenant a partir das memorias
-   * organizacionais ativas com confidence >= MIN_CONFIDENCE_FOR_INCLUSION.
+   * INCREMENTAL: atualiza o summary existente aplicando apenas as memorias
+   * criadas/deletadas desde `last_incorporated_at`. Se nao houver mudancas
+   * relevantes, o summary permanece identico.
+   *
+   * Fallback: se nao existe OrganizationProfile ainda para este tenant,
+   * delega ao consolidateProfile (from-scratch — primeira geracao).
+   */
+  async consolidateIncremental(tenantId: string): Promise<{ changed: boolean }> {
+    const existing = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+    });
+
+    // Primeira geracao ou profile zerado: from-scratch obrigatorio
+    if (!existing || !existing.summary || existing.summary.trim().length < 50) {
+      await this.consolidateProfile(tenantId);
+      return { changed: true };
+    }
+
+    const since = existing.last_incorporated_at ?? existing.generated_at;
+
+    // Memorias NOVAS desde a ultima incorporacao
+    const newMemories = await this.prisma.memory.findMany({
+      where: {
+        tenant_id: tenantId,
+        scope: 'organization',
+        scope_id: tenantId,
+        status: 'active',
+        confidence: { gte: MIN_CONFIDENCE_FOR_INCLUSION },
+        created_at: { gt: since },
+      },
+      orderBy: { created_at: 'asc' },
+      select: { content: true, subcategory: true, confidence: true, created_at: true },
+    });
+
+    // Memorias que SAIRAM (superseded ou archived) desde a ultima incorporacao
+    const deletedMemories = await this.prisma.memory.findMany({
+      where: {
+        tenant_id: tenantId,
+        scope: 'organization',
+        scope_id: tenantId,
+        status: { in: ['superseded', 'archived'] },
+        updated_at: { gt: since },
+      },
+      orderBy: { updated_at: 'asc' },
+      select: { content: true, subcategory: true },
+    });
+
+    if (newMemories.length === 0 && deletedMemories.length === 0) {
+      this.logger.log(
+        `[OrgProfileConsolidation] Tenant ${tenantId}: sem mudancas desde ${since.toISOString()}, pulando`,
+      );
+      // Avanca o marker mesmo sem chamar LLM — evita reconsulta inutil amanha
+      await this.prisma.organizationProfile.update({
+        where: { tenant_id: tenantId },
+        data: { last_incorporated_at: new Date() },
+      });
+      return { changed: false };
+    }
+
+    const payload = {
+      current_summary: existing.summary,
+      new_memories: newMemories.map((m) => ({
+        content: m.content,
+        subcategory: m.subcategory,
+        confidence: m.confidence,
+      })),
+      deleted_memories: deletedMemories.map((m) => ({
+        content: m.content,
+        subcategory: m.subcategory,
+      })),
+    };
+
+    const result = await this.callLLM(payload, 'incremental');
+    if (!result) return { changed: false };
+
+    // Contar total de memorias ativas atuais (para source_memory_count)
+    const activeCount = await this.prisma.memory.count({
+      where: {
+        tenant_id: tenantId,
+        scope: 'organization',
+        scope_id: tenantId,
+        status: 'active',
+      },
+    });
+
+    const changed = result.summary.trim() !== existing.summary.trim();
+
+    await this.prisma.organizationProfile.update({
+      where: { tenant_id: tenantId },
+      data: {
+        summary: result.summary,
+        facts: result.facts ?? existing.facts,
+        source_memory_count: activeCount,
+        version: changed ? { increment: 1 } : undefined,
+        generated_at: changed ? new Date() : undefined,
+        last_incorporated_at: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `[OrgProfileConsolidation] Tenant ${tenantId}: incremental — ${newMemories.length} novas + ${deletedMemories.length} deletadas${changed ? ` → summary atualizado (${result.summary.length} chars)` : ' → sem mudanca no texto'}`,
+    );
+
+    return { changed };
+  }
+
+  /**
+   * FROM-SCRATCH: regenera o OrganizationProfile do ZERO a partir de TODAS
+   * as memorias organizacionais ativas com confidence >= MIN_CONFIDENCE_FOR_INCLUSION.
+   *
+   * Usado em:
+   *   - Primeira geracao (profile nao existe)
+   *   - Botao "Refazer do zero" na UI
+   *   - Fallback quando incremental nao e possivel
    */
   async consolidateProfile(tenantId: string): Promise<void> {
     const memories = await this.prisma.memory.findMany({
@@ -121,7 +255,7 @@ export class OrgProfileConsolidationProcessor {
       })),
     };
 
-    const result = await this.callLLM(payload);
+    const result = await this.callLLM(payload, 'from-scratch');
     if (!result) return;
 
     await this.prisma.organizationProfile.upsert({
@@ -132,6 +266,7 @@ export class OrgProfileConsolidationProcessor {
         facts: result.facts,
         source_memory_count: memories.length,
         version: 1,
+        last_incorporated_at: new Date(),
       },
       update: {
         summary: result.summary,
@@ -139,15 +274,24 @@ export class OrgProfileConsolidationProcessor {
         source_memory_count: memories.length,
         version: { increment: 1 },
         generated_at: new Date(),
+        last_incorporated_at: new Date(),
+        manually_edited_at: null, // rebuild explicito descarta edicao manual
       },
     });
 
     this.logger.log(
-      `[OrgProfileConsolidation] Tenant ${tenantId}: ${memories.length} memorias → ${result.summary.length} chars`,
+      `[OrgProfileConsolidation] Tenant ${tenantId}: from-scratch — ${memories.length} memorias → ${result.summary.length} chars`,
     );
   }
 
-  private async callLLM(payload: any): Promise<{ summary: string; facts: any } | null> {
+  /**
+   * Chama o LLM com o prompt apropriado ao modo.
+   * Retorna `{ summary, facts, changes_applied? }` ou null em caso de erro.
+   */
+  private async callLLM(
+    payload: any,
+    mode: 'from-scratch' | 'incremental',
+  ): Promise<{ summary: string; facts: any; changes_applied?: string[] } | null> {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) {
       this.logger.warn('[OrgProfileConsolidation] OPENAI_API_KEY ausente');
@@ -157,13 +301,17 @@ export class OrgProfileConsolidationProcessor {
       where: { key: 'MEMORY_EXTRACTION_MODEL' },
     });
     const model = modelRow?.value || 'gpt-4.1';
+    const systemPrompt =
+      mode === 'incremental'
+        ? ORG_PROFILE_INCREMENTAL_PROMPT
+        : ORG_PROFILE_CONSOLIDATION_PROMPT;
 
     const client = new OpenAI({ apiKey });
     try {
       const response = await client.chat.completions.create({
         model,
         messages: [
-          { role: 'system', content: ORG_PROFILE_CONSOLIDATION_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: JSON.stringify(payload) },
         ],
         response_format: { type: 'json_object' },
@@ -174,9 +322,13 @@ export class OrgProfileConsolidationProcessor {
       if (!content) return null;
       const parsed = JSON.parse(content);
       if (!parsed.summary || typeof parsed.summary !== 'string') return null;
-      return { summary: parsed.summary, facts: parsed.facts ?? {} };
+      return {
+        summary: parsed.summary,
+        facts: parsed.facts ?? {},
+        changes_applied: Array.isArray(parsed.changes_applied) ? parsed.changes_applied : [],
+      };
     } catch (e: any) {
-      this.logger.error(`[OrgProfileConsolidation] LLM erro: ${e.message}`);
+      this.logger.error(`[OrgProfileConsolidation] LLM erro (${mode}): ${e.message}`);
       return null;
     }
   }

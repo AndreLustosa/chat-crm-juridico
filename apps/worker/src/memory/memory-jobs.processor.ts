@@ -51,6 +51,9 @@ export class MemoryJobsProcessor extends WorkerHost {
       case 'consolidate-org-profile':
         return this.orgProfile.consolidateSingle(job);
 
+      case 'rebuild-org-profile':
+        return this.orgProfile.rebuildFromScratch(job);
+
       default:
         this.logger.warn(`[MemoryJobs] Job desconhecido: ${job.name}`);
         return null;

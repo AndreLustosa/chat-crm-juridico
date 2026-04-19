@@ -48,6 +48,13 @@ export class MemoriesController {
     return this.memoriesService.regenerateOrganizationProfile(req.user.tenant_id);
   }
 
+  @Post('organization/rebuild-profile')
+  @Roles('ADMIN')
+  async rebuildOrgProfile(@Request() req: any) {
+    if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.rebuildOrganizationProfile(req.user.tenant_id);
+  }
+
   @Put('organization/profile')
   @Roles('ADMIN', 'ADVOGADO')
   async updateOrgProfile(

@@ -27,6 +27,7 @@ import {
   Save,
   X,
   Lock,
+  RotateCcw,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -131,6 +132,7 @@ export default function KnowledgeSettingsPage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [editProfileContent, setEditProfileContent] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [rebuildingProfile, setRebuildingProfile] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -263,20 +265,36 @@ export default function KnowledgeSettingsPage() {
     // Se tem edição manual, confirma antes de sobrescrever
     if (orgProfile?.manually_edited_at) {
       const ok = confirm(
-        'Este perfil tem edição manual salva. Regenerar vai SOBRESCREVER sua edição com uma nova versão gerada pela IA. Continuar?',
+        'Este perfil tem edição manual salva. A atualização incremental pode ajustar seu texto com memórias novas. Continuar?',
       );
       if (!ok) return;
     }
     setRegeneratingProfile(true);
     try {
       await api.post('/memories/organization/regenerate-profile');
-      showFeedback('Regeneração disparada — atualiza em ~1 minuto');
-      // Recarrega depois de 8s pra pegar o resultado
+      showFeedback('Atualização incremental disparada — atualiza em ~1 minuto');
       setTimeout(() => loadData(), 8000);
     } catch (e: any) {
       showFeedback(e?.response?.data?.message || 'Erro ao regenerar', 'err');
     } finally {
       setRegeneratingProfile(false);
+    }
+  };
+
+  const handleRebuildProfile = async () => {
+    const ok = confirm(
+      'REFAZER DO ZERO vai DESCARTAR o texto atual (incluindo edições manuais) e gerar um resumo completamente novo a partir de todas as memórias. Use apenas quando o texto atual acumulou problemas ou ficou muito desatualizado.\n\nContinuar?',
+    );
+    if (!ok) return;
+    setRebuildingProfile(true);
+    try {
+      await api.post('/memories/organization/rebuild-profile');
+      showFeedback('Reconstrução disparada — atualiza em ~1 minuto');
+      setTimeout(() => loadData(), 8000);
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao refazer', 'err');
+    } finally {
+      setRebuildingProfile(false);
     }
   };
 
@@ -393,7 +411,7 @@ export default function KnowledgeSettingsPage() {
               </div>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 {orgProfile
-                  ? `Gerado a partir de ${orgProfile.source_memory_count} memórias — injetado em {{office_memories}} no prompt da IA`
+                  ? `Atualiza cirurgicamente toda noite com mudanças nas ${orgProfile.source_memory_count} memórias — injetado em {{office_memories}} no prompt da IA`
                   : 'Ainda não foi gerado. A IA está usando as memórias cruas agrupadas.'}
               </p>
             </div>
@@ -477,11 +495,26 @@ export default function KnowledgeSettingsPage() {
                 <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] text-foreground whitespace-pre-wrap leading-relaxed">
                   {orgProfile.summary}
                 </div>
-                <p className="mt-3 text-[10px] text-muted-foreground">
-                  {orgProfile.manually_edited_at
-                    ? `Editado manualmente em ${formatDate(orgProfile.manually_edited_at)}`
-                    : `Última geração: ${formatDate(orgProfile.generated_at)}`}
-                </p>
+                <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                  <p className="text-[10px] text-muted-foreground">
+                    {orgProfile.manually_edited_at
+                      ? `Editado manualmente em ${formatDate(orgProfile.manually_edited_at)}`
+                      : `Última atualização: ${formatDate(orgProfile.generated_at)}`}
+                  </p>
+                  <button
+                    onClick={handleRebuildProfile}
+                    disabled={rebuildingProfile}
+                    className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-50"
+                    title="Descartar o texto atual e gerar do zero a partir de todas as memórias"
+                  >
+                    {rebuildingProfile ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3 h-3" />
+                    )}
+                    Refazer do zero
+                  </button>
+                </div>
               </>
             ) : (
               <div className="text-center py-4 text-sm text-muted-foreground">

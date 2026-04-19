@@ -257,11 +257,14 @@ export class MemoriesService {
     return profile || null;
   }
 
-  /** Forca regeneracao imediata (sem debounce). Usado pelo botao "Regenerar agora". */
+  /**
+   * Regen INCREMENTAL imediata (modo padrao).
+   * Se houver edicao manual, limpa o flag primeiro — admin abdicou dela ao
+   * clicar "Regenerar". Atualizacao cirurgica: LLM recebe summary + mudancas
+   * desde a ultima incorporacao.
+   */
   async regenerateOrganizationProfile(tenantId: string) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
-    // Ao regenerar explicitamente, o admin abdicou da edicao manual — limpa
-    // o flag pra que o cron automatico volte a processar este tenant.
     await this.prisma.organizationProfile.updateMany({
       where: { tenant_id: tenantId, manually_edited_at: { not: null } },
       data: { manually_edited_at: null },
@@ -272,7 +275,27 @@ export class MemoriesService {
       { tenant_id: tenantId, reason: 'manual-force' },
       { jobId, removeOnComplete: true, attempts: 2 },
     );
-    return { success: true, job_id: jobId };
+    return { success: true, job_id: jobId, mode: 'incremental' };
+  }
+
+  /**
+   * Refazer do ZERO — descarta summary atual e regenera a partir de todas
+   * as memorias ativas. Usado pelo botao "Refazer do zero" (operacao cara
+   * e irreversivel — perde qualquer edicao manual e o texto atual).
+   */
+  async rebuildOrganizationProfile(tenantId: string) {
+    if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
+    await this.prisma.organizationProfile.updateMany({
+      where: { tenant_id: tenantId, manually_edited_at: { not: null } },
+      data: { manually_edited_at: null },
+    });
+    const jobId = `org-profile-rebuild-${tenantId}-${Date.now()}`;
+    await this.memoryQueue.add(
+      'rebuild-org-profile',
+      { tenant_id: tenantId, reason: 'manual-rebuild' },
+      { jobId, removeOnComplete: true, attempts: 2 },
+    );
+    return { success: true, job_id: jobId, mode: 'from-scratch' };
   }
 
   /**
