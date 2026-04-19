@@ -5,6 +5,12 @@ import { createHash } from 'crypto';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import {
+  DEFAULT_ORG_PROFILE_INCREMENTAL_PROMPT,
+  DEFAULT_ORG_PROFILE_REBUILD_PROMPT,
+  DEFAULT_ORG_MODEL,
+  AVAILABLE_ORG_MODELS,
+} from './memory-prompts-defaults';
 
 const ORG_PROFILE_DEBOUNCE_MS = 60_000; // 60s — evita regenerar a cada edit
 
@@ -424,5 +430,113 @@ export class MemoriesService {
       where: { tenant_id: tenantId, lead_id: leadId },
     });
     return { success: true, deleted_count: deleted.count };
+  }
+
+  // ─── Configuracoes do OrganizationProfile (prompt + modelo) ──────
+
+  /**
+   * Le configuracoes atuais do pipeline de consolidacao do OrgProfile.
+   * Retorna valores customizados (se admin editou via UI) + defaults (sempre
+   * expostos para o frontend mostrar "restaurar padrao").
+   *
+   * Keys GlobalSetting:
+   *   - MEMORY_ORG_MODEL: modelo usado (ex: gpt-4.1). Fallback: MEMORY_EXTRACTION_MODEL
+   *   - MEMORY_ORG_INCREMENTAL_PROMPT: prompt da atualizacao incremental
+   *   - MEMORY_ORG_REBUILD_PROMPT: prompt do "Refazer do zero"
+   */
+  async getOrganizationProfileSettings() {
+    const [modelPrimary, modelLegacy, customIncremental, customRebuild] =
+      await Promise.all([
+        this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_MODEL' } }),
+        this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_EXTRACTION_MODEL' } }),
+        this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_INCREMENTAL_PROMPT' } }),
+        this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_REBUILD_PROMPT' } }),
+      ]);
+
+    return {
+      model: modelPrimary?.value || modelLegacy?.value || DEFAULT_ORG_MODEL,
+      model_default: DEFAULT_ORG_MODEL,
+      available_models: AVAILABLE_ORG_MODELS,
+      incremental_prompt: customIncremental?.value || '',
+      incremental_prompt_default: DEFAULT_ORG_PROFILE_INCREMENTAL_PROMPT,
+      incremental_is_custom: !!(customIncremental?.value && customIncremental.value.trim()),
+      rebuild_prompt: customRebuild?.value || '',
+      rebuild_prompt_default: DEFAULT_ORG_PROFILE_REBUILD_PROMPT,
+      rebuild_is_custom: !!(customRebuild?.value && customRebuild.value.trim()),
+    };
+  }
+
+  /**
+   * Atualiza configuracoes do pipeline. Cada campo e opcional.
+   * Passar string vazia em *_prompt equivale a "restaurar padrao" (apaga a key).
+   */
+  async updateOrganizationProfileSettings(body: {
+    model?: string;
+    incremental_prompt?: string;
+    rebuild_prompt?: string;
+  }) {
+    const ops: Promise<any>[] = [];
+
+    if (typeof body.model === 'string') {
+      const m = body.model.trim();
+      if (!m) throw new BadRequestException('model nao pode ser vazio');
+      const isValid = AVAILABLE_ORG_MODELS.some((opt) => opt.value === m);
+      if (!isValid) {
+        throw new BadRequestException(
+          `modelo invalido. Opcoes: ${AVAILABLE_ORG_MODELS.map((o) => o.value).join(', ')}`,
+        );
+      }
+      ops.push(
+        this.prisma.globalSetting.upsert({
+          where: { key: 'MEMORY_ORG_MODEL' },
+          create: { key: 'MEMORY_ORG_MODEL', value: m },
+          update: { value: m },
+        }),
+      );
+    }
+
+    if (typeof body.incremental_prompt === 'string') {
+      const p = body.incremental_prompt.trim();
+      if (p === '') {
+        // Restaurar padrao — apaga a key
+        ops.push(
+          this.prisma.globalSetting.deleteMany({ where: { key: 'MEMORY_ORG_INCREMENTAL_PROMPT' } }),
+        );
+      } else {
+        if (p.length < 100) {
+          throw new BadRequestException('incremental_prompt muito curto (min. 100 chars)');
+        }
+        ops.push(
+          this.prisma.globalSetting.upsert({
+            where: { key: 'MEMORY_ORG_INCREMENTAL_PROMPT' },
+            create: { key: 'MEMORY_ORG_INCREMENTAL_PROMPT', value: p },
+            update: { value: p },
+          }),
+        );
+      }
+    }
+
+    if (typeof body.rebuild_prompt === 'string') {
+      const p = body.rebuild_prompt.trim();
+      if (p === '') {
+        ops.push(
+          this.prisma.globalSetting.deleteMany({ where: { key: 'MEMORY_ORG_REBUILD_PROMPT' } }),
+        );
+      } else {
+        if (p.length < 100) {
+          throw new BadRequestException('rebuild_prompt muito curto (min. 100 chars)');
+        }
+        ops.push(
+          this.prisma.globalSetting.upsert({
+            where: { key: 'MEMORY_ORG_REBUILD_PROMPT' },
+            create: { key: 'MEMORY_ORG_REBUILD_PROMPT', value: p },
+            update: { value: p },
+          }),
+        );
+      }
+    }
+
+    await Promise.all(ops);
+    return this.getOrganizationProfileSettings();
   }
 }

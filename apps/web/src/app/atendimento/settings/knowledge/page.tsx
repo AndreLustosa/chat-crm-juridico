@@ -28,6 +28,9 @@ import {
   X,
   Lock,
   RotateCcw,
+  Settings,
+  Cpu,
+  FileCode2,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -76,6 +79,23 @@ interface OrgProfile {
   generated_at: string;
   version: number;
   manually_edited_at: string | null;
+}
+
+interface ModelOption {
+  value: string;
+  label: string;
+}
+
+interface OrgProfileSettings {
+  model: string;
+  model_default: string;
+  available_models: ModelOption[];
+  incremental_prompt: string;
+  incremental_prompt_default: string;
+  incremental_is_custom: boolean;
+  rebuild_prompt: string;
+  rebuild_prompt_default: string;
+  rebuild_is_custom: boolean;
 }
 
 function formatSourceLabel(src: string): string {
@@ -133,6 +153,16 @@ export default function KnowledgeSettingsPage() {
   const [editProfileContent, setEditProfileContent] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [rebuildingProfile, setRebuildingProfile] = useState(false);
+
+  // Configuracoes avancadas (modelo + prompts)
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [settings, setSettings] = useState<OrgProfileSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [editModel, setEditModel] = useState('');
+  const [editIncremental, setEditIncremental] = useState('');
+  const [editRebuild, setEditRebuild] = useState('');
+  const [activePromptTab, setActivePromptTab] = useState<'incremental' | 'rebuild'>('incremental');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -296,6 +326,70 @@ export default function KnowledgeSettingsPage() {
     } finally {
       setRebuildingProfile(false);
     }
+  };
+
+  // ─── Configurações avançadas ──────────────────────────────────────
+
+  const loadSettings = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const res = await api.get<OrgProfileSettings>('/memories/organization/settings');
+      setSettings(res.data);
+      setEditModel(res.data.model);
+      setEditIncremental(res.data.incremental_is_custom ? res.data.incremental_prompt : '');
+      setEditRebuild(res.data.rebuild_is_custom ? res.data.rebuild_prompt : '');
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao carregar configurações', 'err');
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (advancedOpen && !settings) loadSettings();
+  }, [advancedOpen, settings, loadSettings]);
+
+  const handleSaveSettings = async () => {
+    if (!settings) return;
+    setSettingsSaving(true);
+    try {
+      const payload: any = {};
+      if (editModel !== settings.model) payload.model = editModel;
+      // Compara contra o valor atual (pode ser string vazia se está usando default)
+      const currentIncremental = settings.incremental_is_custom ? settings.incremental_prompt : '';
+      if (editIncremental !== currentIncremental) payload.incremental_prompt = editIncremental;
+      const currentRebuild = settings.rebuild_is_custom ? settings.rebuild_prompt : '';
+      if (editRebuild !== currentRebuild) payload.rebuild_prompt = editRebuild;
+
+      if (Object.keys(payload).length === 0) {
+        showFeedback('Nenhuma alteração a salvar', 'err');
+        return;
+      }
+      const res = await api.put<OrgProfileSettings>('/memories/organization/settings', payload);
+      setSettings(res.data);
+      setEditModel(res.data.model);
+      setEditIncremental(res.data.incremental_is_custom ? res.data.incremental_prompt : '');
+      setEditRebuild(res.data.rebuild_is_custom ? res.data.rebuild_prompt : '');
+      showFeedback('Configurações salvas');
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao salvar', 'err');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleResetPrompt = (which: 'incremental' | 'rebuild') => {
+    const name = which === 'incremental' ? 'incremental' : 'Refazer do zero';
+    const ok = confirm(`Restaurar o prompt "${name}" para o padrão do sistema? Sua customização será perdida.`);
+    if (!ok) return;
+    if (which === 'incremental') setEditIncremental('');
+    else setEditRebuild('');
+  };
+
+  const handleLoadDefaultPrompt = (which: 'incremental' | 'rebuild') => {
+    if (!settings) return;
+    if (which === 'incremental') setEditIncremental(settings.incremental_prompt_default);
+    else setEditRebuild(settings.rebuild_prompt_default);
   };
 
   const handleStartEditProfile = () => {
@@ -741,6 +835,201 @@ export default function KnowledgeSettingsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Configurações Avançadas */}
+      {!loading && (
+        <div className="mt-6 bg-card border border-border rounded-xl overflow-hidden">
+          <button
+            onClick={() => setAdvancedOpen(!advancedOpen)}
+            className="w-full px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.03] transition-colors text-left"
+          >
+            <Settings className="w-4 h-4 text-muted-foreground" />
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium">Configurações Avançadas</span>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Modelo de IA e prompts usados pela consolidação do resumo
+              </p>
+            </div>
+            {advancedOpen ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+
+          {advancedOpen && (
+            <div className="border-t border-border bg-foreground/[0.02] px-5 py-4">
+              {settingsLoading ? (
+                <div className="flex items-center justify-center py-6 text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Carregando configurações...
+                </div>
+              ) : settings ? (
+                <div className="space-y-6">
+                  {/* Modelo da IA */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Cpu className="w-3.5 h-3.5 text-primary" />
+                      <label className="text-[12px] font-semibold">Modelo da IA</label>
+                      {editModel !== settings.model_default && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full">
+                          personalizado
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={editModel}
+                      onChange={(e) => setEditModel(e.target.value)}
+                      className="w-full text-sm p-2 rounded-lg bg-card border border-border focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {settings.available_models.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Modelo usado em cada consolidação do resumo (incremental + "Refazer do zero"). Padrão: {settings.model_default}.
+                    </p>
+                  </div>
+
+                  {/* Prompts */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileCode2 className="w-3.5 h-3.5 text-primary" />
+                      <label className="text-[12px] font-semibold">Prompts</label>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="flex border-b border-border mb-3">
+                      <button
+                        onClick={() => setActivePromptTab('incremental')}
+                        className={`px-3 py-2 text-[12px] font-medium border-b-2 transition-colors -mb-px ${
+                          activePromptTab === 'incremental'
+                            ? 'border-primary text-primary'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Incremental (padrão)
+                        {editIncremental.trim() !== '' && (
+                          <span className="ml-1.5 text-[9px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1 rounded">●</span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => setActivePromptTab('rebuild')}
+                        className={`px-3 py-2 text-[12px] font-medium border-b-2 transition-colors -mb-px ${
+                          activePromptTab === 'rebuild'
+                            ? 'border-primary text-primary'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        Refazer do zero
+                        {editRebuild.trim() !== '' && (
+                          <span className="ml-1.5 text-[9px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1 rounded">●</span>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Incremental tab */}
+                    {activePromptTab === 'incremental' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[11px] text-muted-foreground">
+                            Usado toda noite (02h) para atualizar o resumo com memórias novas/deletadas do dia.{' '}
+                            {editIncremental.trim() === '' && (
+                              <span className="text-foreground font-medium">Usando padrão do sistema.</span>
+                            )}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleLoadDefaultPrompt('incremental')}
+                              className="text-[10px] text-primary hover:underline"
+                            >
+                              Ver/copiar padrão
+                            </button>
+                            {editIncremental.trim() !== '' && (
+                              <button
+                                onClick={() => handleResetPrompt('incremental')}
+                                className="text-[10px] text-muted-foreground hover:text-red-500"
+                              >
+                                Restaurar padrão
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <textarea
+                          value={editIncremental}
+                          onChange={(e) => setEditIncremental(e.target.value)}
+                          placeholder={settings.incremental_prompt_default}
+                          className="w-full min-h-[300px] text-[11px] p-3 rounded-lg bg-card border border-border focus:outline-none focus:ring-1 focus:ring-primary resize-y font-mono leading-relaxed"
+                        />
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Deixar vazio = usar o padrão do sistema. Mínimo 100 caracteres quando customizado.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Rebuild tab */}
+                    {activePromptTab === 'rebuild' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[11px] text-muted-foreground">
+                            Usado quando admin clica "Refazer do zero" — gera resumo completamente novo a partir de todas as memórias.{' '}
+                            {editRebuild.trim() === '' && (
+                              <span className="text-foreground font-medium">Usando padrão do sistema.</span>
+                            )}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleLoadDefaultPrompt('rebuild')}
+                              className="text-[10px] text-primary hover:underline"
+                            >
+                              Ver/copiar padrão
+                            </button>
+                            {editRebuild.trim() !== '' && (
+                              <button
+                                onClick={() => handleResetPrompt('rebuild')}
+                                className="text-[10px] text-muted-foreground hover:text-red-500"
+                              >
+                                Restaurar padrão
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <textarea
+                          value={editRebuild}
+                          onChange={(e) => setEditRebuild(e.target.value)}
+                          placeholder={settings.rebuild_prompt_default}
+                          className="w-full min-h-[300px] text-[11px] p-3 rounded-lg bg-card border border-border focus:outline-none focus:ring-1 focus:ring-primary resize-y font-mono leading-relaxed"
+                        />
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Deixar vazio = usar o padrão do sistema. Mínimo 100 caracteres quando customizado.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Botão salvar */}
+                  <div className="flex items-center justify-end pt-2 border-t border-border">
+                    <button
+                      onClick={handleSaveSettings}
+                      disabled={settingsSaving}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {settingsSaving ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5" />
+                      )}
+                      Salvar alterações
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       )}
 

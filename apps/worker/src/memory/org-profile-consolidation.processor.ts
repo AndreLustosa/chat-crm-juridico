@@ -287,6 +287,11 @@ export class OrgProfileConsolidationProcessor {
   /**
    * Chama o LLM com o prompt apropriado ao modo.
    * Retorna `{ summary, facts, changes_applied? }` ou null em caso de erro.
+   *
+   * Prompts sao lidos da GlobalSetting (editaveis pelo admin na UI) com
+   * fallback para os defaults hardcoded em memory-prompts.ts.
+   * Modelo via GlobalSetting MEMORY_ORG_MODEL (prioridade) ou
+   * MEMORY_EXTRACTION_MODEL (fallback legado).
    */
   private async callLLM(
     payload: any,
@@ -297,14 +302,20 @@ export class OrgProfileConsolidationProcessor {
       this.logger.warn('[OrgProfileConsolidation] OPENAI_API_KEY ausente');
       return null;
     }
-    const modelRow = await this.prisma.globalSetting.findUnique({
-      where: { key: 'MEMORY_EXTRACTION_MODEL' },
-    });
-    const model = modelRow?.value || 'gpt-4.1';
+
+    const [modelPrimary, modelFallback, customIncremental, customRebuild] = await Promise.all([
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_MODEL' } }),
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_EXTRACTION_MODEL' } }),
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_INCREMENTAL_PROMPT' } }),
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_REBUILD_PROMPT' } }),
+    ]);
+
+    const model = modelPrimary?.value || modelFallback?.value || 'gpt-4.1';
+
     const systemPrompt =
       mode === 'incremental'
-        ? ORG_PROFILE_INCREMENTAL_PROMPT
-        : ORG_PROFILE_CONSOLIDATION_PROMPT;
+        ? (customIncremental?.value?.trim() || ORG_PROFILE_INCREMENTAL_PROMPT)
+        : (customRebuild?.value?.trim() || ORG_PROFILE_CONSOLIDATION_PROMPT);
 
     const client = new OpenAI({ apiKey });
     try {
@@ -328,7 +339,7 @@ export class OrgProfileConsolidationProcessor {
         changes_applied: Array.isArray(parsed.changes_applied) ? parsed.changes_applied : [],
       };
     } catch (e: any) {
-      this.logger.error(`[OrgProfileConsolidation] LLM erro (${mode}): ${e.message}`);
+      this.logger.error(`[OrgProfileConsolidation] LLM erro (${mode}, model=${model}): ${e.message}`);
       return null;
     }
   }

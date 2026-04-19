@@ -55,6 +55,20 @@ export class MemoriesController {
     return this.memoriesService.rebuildOrganizationProfile(req.user.tenant_id);
   }
 
+  @Get('organization/settings')
+  @Roles('ADMIN')
+  async getOrgSettings() {
+    return this.memoriesService.getOrganizationProfileSettings();
+  }
+
+  @Put('organization/settings')
+  @Roles('ADMIN')
+  async updateOrgSettings(
+    @Body() body: { model?: string; incremental_prompt?: string; rebuild_prompt?: string },
+  ) {
+    return this.memoriesService.updateOrganizationProfileSettings(body);
+  }
+
   @Put('organization/profile')
   @Roles('ADMIN', 'ADVOGADO')
   async updateOrgProfile(
