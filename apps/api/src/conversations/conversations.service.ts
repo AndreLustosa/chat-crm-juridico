@@ -688,16 +688,18 @@ export class ConversationsService {
   /**
    * Retorna a contagem real de mensagens não lidas por conversa (fonte: banco de dados).
    *
-   * Regra de negócio (notificações — mais restritiva que visibilidade):
+   * Regra de negócio (notificações — badges alinhados com o ding recebido via socket):
    *  - ADMIN: badges apenas das conversas atribuídas a ele (assigned_user_id)
-   *  - ADVOGADO: badges apenas de clientes atribuídos a ele (assigned_lawyer_id)
-   *  - OPERADOR: badges apenas de leads/clientes atribuídos a ele (assigned_user_id)
-   *  - ADVOGADO+OPERADOR: combina ambos (clientes como advogado + leads como operador)
+   *  - ADVOGADO: badges apenas de clientes atribuídos como advogado (assigned_lawyer_id, is_client=true)
+   *  - OPERADOR: conversas atribuídas + POOL do inbox (assigned_user_id=null nos inboxes dele) —
+   *              espelha o ding que ele recebe via room inbox:{id} (FIX #6)
+   *  - ADVOGADO+OPERADOR: união (clientes como advogado + atribuídas + pool do inbox)
    *  - Exclui leads PERDIDO/FINALIZADO
    *
    * Nota: findAll() controla VISIBILIDADE (o que aparece na lista).
    *       getUnreadCounts() controla NOTIFICAÇÃO (o que mostra badge vermelho).
-   *       Admin pode ver todas as conversas mas só recebe badge das suas.
+   *       Admin pode ver todas as conversas mas só recebe badge das suas — evita
+   *       poluição visual com o pool inteiro do tenant.
    */
   async getUnreadCounts(tenantId?: string, userId?: string) {
     let conversationIds: string[] | undefined;
@@ -714,6 +716,7 @@ export class ConversationsService {
       const isAdvogadoUser = userRoles.includes('ADVOGADO') || userRoles.includes('Advogados');
       const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL') || userRoles.includes('Atendente Comercial');
       const isAdminUser = userRoles.includes('ADMIN');
+      const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
 
       // Filtro base: tenant + exclui leads PERDIDO/FINALIZADO
       const convWhere: any = {
@@ -738,6 +741,16 @@ export class ConversationsService {
 
         // Conversas atribuídas diretamente (qualquer role)
         orConditions.push({ assigned_user_id: userId });
+
+        // OPERADOR: também inclui pool do inbox (conversas sem operador nos
+        // seus inboxes). Alinha o badge visual com o ding que ele recebe via
+        // room inbox:{id} (FIX #6) — antes ouvia som mas contador nao mostrava.
+        if (isOperadorUser && userInboxIds.length > 0) {
+          orConditions.push({
+            inbox_id: { in: userInboxIds },
+            assigned_user_id: null,
+          });
+        }
       }
 
       // Fallback (estagiário puro, financeiro)
