@@ -373,6 +373,24 @@ O sistema antigo (`AiMemory` + `case_state`) continua funcionando em paralelo. P
 - Fase 3 (+1 mês): desativar update-memory legado. `AiMemory` vira backup somente-leitura por 3 meses.
 - Fase 4: deletar `AiMemory` do schema.
 
+### 9.7 Uma fila BullMQ = um `@Processor` (CRÍTICO)
+
+**Regra:** jamais registrar múltiplos `@Processor(<mesma-fila>)` com `switch (job.name)` divergente.
+
+BullMQ distribui cada job a UM worker disponível da fila. Se múltiplos processors escutam a mesma fila e tratam `job.name` diferentes no `switch` de cada um, o worker que "vencer" a corrida e não reconhecer aquele name vai retornar `null` — e o job é marcado como completo silenciosamente. Resultado: jobs descartados aleatoriamente conforme o workload.
+
+**Correto:** um único `@Processor` por fila, que roteia por `job.name` para services especializados. Ver [memory-jobs.processor.ts](apps/worker/src/memory/memory-jobs.processor.ts) como modelo — DailyMemoryBatch, ProfileConsolidation e OrgProfileConsolidation são `@Injectable` sem decorador `@Processor`; o MemoryJobsProcessor é o único que escuta a fila.
+
+**Caso diferente (aceitável):** múltiplos processors escutando a mesma fila, todos com IMPLEMENTAÇÃO IDÊNTICA dos mesmos `job.name`. Aí BullMQ usa como load balancing e qualquer um processa. Mas isso cheira a duplicação de código — preferir o padrão single-processor com `@Injectable` services.
+
+**Auditoria rápida:**
+```bash
+grep -r "@Processor" apps/worker/src apps/api/src | sort -t "'" -k2
+```
+Se aparecer 2+ processors para a mesma string de fila, investigar — pode ser bug latente ou código duplicado.
+
+**Ponto descoberto em 2026-04-18:** a fila `calendar-reminders` tem 2 processors (api + worker) com lógica equivalente mas divergindo em extensão (779 vs 371 linhas). Não é bug ativo (ambos reconhecem os mesmos job.names), mas é candidato a consolidação.
+
 ---
 
 ## 10. Arquivos relevantes
