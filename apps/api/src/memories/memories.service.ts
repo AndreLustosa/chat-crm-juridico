@@ -11,6 +11,7 @@ import {
   DEFAULT_ORG_MODEL,
   AVAILABLE_ORG_MODELS,
 } from './memory-prompts-defaults';
+import { applyMemoryVarsMigration } from './skill-migration.util';
 
 const ORG_PROFILE_DEBOUNCE_MS = 60_000; // 60s — evita regenerar a cada edit
 
@@ -464,6 +465,60 @@ export class MemoriesService {
       rebuild_prompt_default: DEFAULT_ORG_PROFILE_REBUILD_PROMPT,
       rebuild_is_custom: !!(customRebuild?.value && customRebuild.value.trim()),
     };
+  }
+
+  /**
+   * Migra skills ativas: injeta o bloco de variaveis de memoria no topo do
+   * system_prompt de cada skill que ainda nao as use. Idempotente e seguro —
+   * so ADICIONA o header, nao toca no corpo.
+   *
+   * Retorna lista de skills processadas com flag `changed`.
+   */
+  async migrateSkillsToMemoryVars() {
+    const skills = await (this.prisma as any).promptSkill.findMany({
+      select: { id: true, name: true, area: true, system_prompt: true, active: true },
+      orderBy: { order: 'asc' },
+    });
+
+    const report: Array<{
+      id: string;
+      name: string;
+      area: string;
+      active: boolean;
+      changed: boolean;
+      reason: string;
+      old_length: number;
+      new_length: number;
+    }> = [];
+
+    for (const skill of skills) {
+      const result = applyMemoryVarsMigration(skill.system_prompt || '');
+      const entry = {
+        id: skill.id,
+        name: skill.name,
+        area: skill.area,
+        active: skill.active,
+        changed: result.changed,
+        reason: result.reason || 'unknown',
+        old_length: (skill.system_prompt || '').length,
+        new_length: result.updated.length,
+      };
+      if (result.changed) {
+        await (this.prisma as any).promptSkill.update({
+          where: { id: skill.id },
+          data: { system_prompt: result.updated },
+        });
+      }
+      report.push(entry);
+    }
+
+    const summary = {
+      total_skills: skills.length,
+      migrated: report.filter((r) => r.changed).length,
+      already_migrated: report.filter((r) => r.reason === 'already_migrated').length,
+    };
+
+    return { summary, report };
   }
 
   /**

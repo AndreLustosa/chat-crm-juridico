@@ -61,6 +61,19 @@ export class MemoriesController {
     return this.memoriesService.getOrganizationProfileSettings();
   }
 
+  /**
+   * Migra todas as skills ativas para usar as variaveis do sistema de memoria.
+   * Idempotente: so adiciona o bloco `{{office_memories}} / {{lead_profile}} /
+   * {{recent_episodes}}` no topo das skills que ainda nao as usam.
+   *
+   * Seguro: nao remove nem reescreve o corpo existente.
+   */
+  @Post('migrate-skills-to-memory-vars')
+  @Roles('ADMIN')
+  async migrateSkills() {
+    return this.memoriesService.migrateSkillsToMemoryVars();
+  }
+
   @Put('organization/settings')
   @Roles('ADMIN')
   async updateOrgSettings(
