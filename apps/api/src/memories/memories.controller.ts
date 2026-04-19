@@ -48,6 +48,19 @@ export class MemoriesController {
     return this.memoriesService.regenerateOrganizationProfile(req.user.tenant_id);
   }
 
+  @Put('organization/profile')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateOrgProfile(
+    @Request() req: any,
+    @Body() body: { summary: string },
+  ) {
+    if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.updateOrganizationProfileSummary(
+      req.user.tenant_id,
+      body.summary,
+    );
+  }
+
   @Post('organization')
   @Roles('ADMIN', 'ADVOGADO')
   async createOrg(

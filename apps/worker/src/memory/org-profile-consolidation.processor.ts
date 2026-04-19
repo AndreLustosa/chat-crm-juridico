@@ -46,11 +46,28 @@ export class OrgProfileConsolidationProcessor {
     await this.consolidateAll();
   }
 
-  /** Consolida o perfil organizacional de TODOS os tenants ativos. */
-  async consolidateAll(): Promise<{ tenants: number }> {
+  /**
+   * Consolida o perfil organizacional de TODOS os tenants ativos.
+   * Pula tenants com edicao manual (manually_edited_at IS NOT NULL) — nesses
+   * casos, so regenera se admin clicar "Regenerar" explicitamente (que limpa
+   * o flag via API).
+   */
+  async consolidateAll(): Promise<{ tenants: number; skipped: number }> {
     const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
+    const manuallyEdited = await this.prisma.organizationProfile.findMany({
+      where: { manually_edited_at: { not: null } },
+      select: { tenant_id: true },
+    });
+    const skipSet = new Set(manuallyEdited.map((p) => p.tenant_id));
+
     let processed = 0;
+    let skipped = 0;
     for (const t of tenants) {
+      if (skipSet.has(t.id)) {
+        skipped++;
+        this.logger.log(`[OrgProfileConsolidation] Tenant ${t.id}: pulado (editado manualmente)`);
+        continue;
+      }
       try {
         await this.consolidateProfile(t.id);
         processed++;
@@ -60,8 +77,10 @@ export class OrgProfileConsolidationProcessor {
         );
       }
     }
-    this.logger.log(`[OrgProfileConsolidation] ${processed}/${tenants.length} perfis regenerados`);
-    return { tenants: processed };
+    this.logger.log(
+      `[OrgProfileConsolidation] ${processed}/${tenants.length} perfis regenerados (${skipped} com edicao manual, pulados)`,
+    );
+    return { tenants: processed, skipped };
   }
 
   async consolidateSingle(job: Job): Promise<{ ok: boolean }> {

@@ -260,6 +260,12 @@ export class MemoriesService {
   /** Forca regeneracao imediata (sem debounce). Usado pelo botao "Regenerar agora". */
   async regenerateOrganizationProfile(tenantId: string) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
+    // Ao regenerar explicitamente, o admin abdicou da edicao manual — limpa
+    // o flag pra que o cron automatico volte a processar este tenant.
+    await this.prisma.organizationProfile.updateMany({
+      where: { tenant_id: tenantId, manually_edited_at: { not: null } },
+      data: { manually_edited_at: null },
+    });
     const jobId = `org-profile-force-${tenantId}-${Date.now()}`;
     await this.memoryQueue.add(
       'consolidate-org-profile',
@@ -267,6 +273,37 @@ export class MemoriesService {
       { jobId, removeOnComplete: true, attempts: 2 },
     );
     return { success: true, job_id: jobId };
+  }
+
+  /**
+   * Atualiza o texto do OrganizationProfile manualmente (edicao do admin).
+   * Marca `manually_edited_at` para proteger contra sobrescrita pelo cron.
+   */
+  async updateOrganizationProfileSummary(tenantId: string, summary: string) {
+    if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
+    const clean = (summary || '').trim();
+    if (clean.length < 50) {
+      throw new BadRequestException('Resumo muito curto (min. 50 caracteres)');
+    }
+    if (clean.length > 10000) {
+      throw new BadRequestException('Resumo muito longo (max. 10.000 caracteres)');
+    }
+    const existing = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Perfil ainda nao foi gerado — use "Regenerar" primeiro');
+    }
+    const updated = await this.prisma.organizationProfile.update({
+      where: { tenant_id: tenantId },
+      data: {
+        summary: clean,
+        version: { increment: 1 },
+        generated_at: new Date(),
+        manually_edited_at: new Date(),
+      },
+    });
+    return updated;
   }
 
   async getOrganizationStats(tenantId: string) {

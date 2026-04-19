@@ -24,6 +24,9 @@ import {
   AlertCircle,
   Sparkles,
   RefreshCw,
+  Save,
+  X,
+  Lock,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -71,6 +74,7 @@ interface OrgProfile {
   source_memory_count: number;
   generated_at: string;
   version: number;
+  manually_edited_at: string | null;
 }
 
 function formatSourceLabel(src: string): string {
@@ -124,6 +128,9 @@ export default function KnowledgeSettingsPage() {
   const [orgProfile, setOrgProfile] = useState<OrgProfile | null>(null);
   const [profileOpen, setProfileOpen] = useState(true);
   const [regeneratingProfile, setRegeneratingProfile] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editProfileContent, setEditProfileContent] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -253,6 +260,13 @@ export default function KnowledgeSettingsPage() {
   };
 
   const handleRegenerateProfile = async () => {
+    // Se tem edição manual, confirma antes de sobrescrever
+    if (orgProfile?.manually_edited_at) {
+      const ok = confirm(
+        'Este perfil tem edição manual salva. Regenerar vai SOBRESCREVER sua edição com uma nova versão gerada pela IA. Continuar?',
+      );
+      if (!ok) return;
+    }
     setRegeneratingProfile(true);
     try {
       await api.post('/memories/organization/regenerate-profile');
@@ -263,6 +277,37 @@ export default function KnowledgeSettingsPage() {
       showFeedback(e?.response?.data?.message || 'Erro ao regenerar', 'err');
     } finally {
       setRegeneratingProfile(false);
+    }
+  };
+
+  const handleStartEditProfile = () => {
+    if (!orgProfile) return;
+    setEditProfileContent(orgProfile.summary);
+    setEditingProfile(true);
+  };
+
+  const handleCancelEditProfile = () => {
+    setEditingProfile(false);
+    setEditProfileContent('');
+  };
+
+  const handleSaveProfile = async () => {
+    const summary = editProfileContent.trim();
+    if (summary.length < 50) {
+      showFeedback('Resumo muito curto (mín. 50 caracteres)', 'err');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      await api.put('/memories/organization/profile', { summary });
+      setEditingProfile(false);
+      setEditProfileContent('');
+      await loadData();
+      showFeedback('Resumo atualizado — cron automático não vai mais sobrescrever');
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao salvar', 'err');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -323,16 +368,26 @@ export default function KnowledgeSettingsPage() {
       <div className="bg-gradient-to-br from-primary/5 via-card to-card border border-primary/20 rounded-xl mb-4 overflow-hidden">
         <div className="flex items-center">
           <button
-            onClick={() => setProfileOpen(!profileOpen)}
-            className="flex-1 px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.03] transition-colors text-left"
+            onClick={() => !editingProfile && setProfileOpen(!profileOpen)}
+            disabled={editingProfile}
+            className="flex-1 px-4 py-3 flex items-center gap-3 hover:bg-foreground/[0.03] transition-colors text-left disabled:cursor-default"
           >
             <Sparkles className="w-4 h-4 text-primary" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold">Resumo Consolidado do Escritório</span>
                 {orgProfile && (
                   <span className="text-[10px] text-muted-foreground font-mono">
                     v{orgProfile.version}
+                  </span>
+                )}
+                {orgProfile?.manually_edited_at && (
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full"
+                    title="Este perfil foi editado manualmente — cron automático NÃO vai sobrescrever"
+                  >
+                    <Lock className="w-2.5 h-2.5" />
+                    editado manualmente
                   </span>
                 )}
               </div>
@@ -342,35 +397,90 @@ export default function KnowledgeSettingsPage() {
                   : 'Ainda não foi gerado. A IA está usando as memórias cruas agrupadas.'}
               </p>
             </div>
-            {profileOpen ? (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            {!editingProfile && (
+              profileOpen ? (
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              )
             )}
           </button>
-          <button
-            onClick={handleRegenerateProfile}
-            disabled={regeneratingProfile}
-            className="px-3 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-            title="Regenerar perfil agora"
-          >
-            {regeneratingProfile ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
-          </button>
+          {!editingProfile && orgProfile && (
+            <button
+              onClick={handleStartEditProfile}
+              className="px-3 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              title="Editar manualmente"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
+          {!editingProfile && (
+            <button
+              onClick={handleRegenerateProfile}
+              disabled={regeneratingProfile}
+              className="px-3 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+              title={orgProfile?.manually_edited_at ? 'Regenerar (sobrescreve edição manual)' : 'Regenerar perfil agora'}
+            >
+              {regeneratingProfile ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+            </button>
+          )}
         </div>
 
-        {profileOpen && (
+        {(profileOpen || editingProfile) && (
           <div className="border-t border-primary/10 bg-background/40 px-5 py-4">
-            {orgProfile ? (
+            {editingProfile ? (
+              <div>
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  Edite o resumo que a IA usa nos atendimentos. Enquanto existir edição manual, o cron automático das 02h <strong>não sobrescreve</strong> este texto. Para voltar à geração automática, clique em "Regenerar".
+                </p>
+                <textarea
+                  value={editProfileContent}
+                  onChange={(e) => setEditProfileContent(e.target.value)}
+                  className="w-full min-h-[400px] text-[13px] p-3 rounded-lg bg-card border border-border focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y font-mono"
+                  placeholder="## Sobre o Escritório..."
+                  autoFocus
+                />
+                <div className="flex items-center justify-between mt-3">
+                  <span className="text-[10px] text-muted-foreground">
+                    {editProfileContent.length} caracteres
+                    {editProfileContent.length < 50 && ' (mín. 50)'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCancelEditProfile}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-foreground/[0.05]"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSaveProfile}
+                      disabled={savingProfile || editProfileContent.trim().length < 50}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {savingProfile ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5" />
+                      )}
+                      Salvar edição
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : orgProfile ? (
               <>
                 <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] text-foreground whitespace-pre-wrap leading-relaxed">
                   {orgProfile.summary}
                 </div>
                 <p className="mt-3 text-[10px] text-muted-foreground">
-                  Última geração: {formatDate(orgProfile.generated_at)}
+                  {orgProfile.manually_edited_at
+                    ? `Editado manualmente em ${formatDate(orgProfile.manually_edited_at)}`
+                    : `Última geração: ${formatDate(orgProfile.generated_at)}`}
                 </p>
               </>
             ) : (

@@ -1651,6 +1651,11 @@ model OrganizationProfile {
   /// Quantas memorias ativas foram usadas como fonte na ultima geracao
   source_memory_count Int @default(0)
 
+  /// Timestamp da ultima edicao manual do admin. Quando nao-null, o cron
+  /// automatico das 02h PULA este tenant (nao sobrescreve a edicao). Limpo
+  /// quando o admin clica "Regenerar" explicitamente via UI/API.
+  manually_edited_at  DateTime?
+
   generated_at  DateTime @default(now())
   version       Int      @default(1)
 }

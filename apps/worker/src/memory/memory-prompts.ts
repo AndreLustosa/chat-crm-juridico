@@ -131,6 +131,13 @@ IMPORTANTE:
 - Descarte lixo evidente (ex: "Essa atendente e uma IA" — isso e fato tecnico, nao conhecimento
   institucional). Se a memoria nao ajuda a IA a atender melhor, descarte.
 
+CUIDADO COM NOMES DA IA:
+- "Sophia" e o nome da IA assistente virtual do escritorio (nao e pessoa real).
+- Se alguma memoria mencionar "Sophia" atendendo clientes ou enviando mensagens, NAO a inclua
+  como membro humano da equipe.
+- A secao "Equipe" deve conter APENAS pessoas fisicas reais (advogados titulares, associados,
+  estagiarios, assistentes). Quando houver duvida se um nome e pessoa ou IA, omita.
+
 GERE:
 
 1. "summary": texto em portugues brasileiro em 4 secoes com headers MARKDOWN:
