@@ -1,4 +1,4 @@
-import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 import { Cron } from '@nestjs/schedule';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
@@ -46,8 +46,7 @@ interface ExtractionResult {
  *   4. Ao final: enfileira consolidate-profiles-after-batch
  */
 @Injectable()
-@Processor('memory-jobs')
-export class DailyMemoryBatchProcessor extends WorkerHost {
+export class DailyMemoryBatchProcessor {
   private readonly logger = new Logger(DailyMemoryBatchProcessor.name);
 
   constructor(
@@ -56,9 +55,7 @@ export class DailyMemoryBatchProcessor extends WorkerHost {
     private readonly embedding: EmbeddingService,
     private readonly retrieval: MemoryRetrievalService,
     @InjectQueue('memory-jobs') private readonly memoryQueue: Queue,
-  ) {
-    super();
-  }
+  ) {}
 
   // ─── Cron: agenda todos os tenants meia-noite ─────────────
 
@@ -94,20 +91,6 @@ export class DailyMemoryBatchProcessor extends WorkerHost {
       where: { key: 'MEMORY_BATCH_ENABLED' },
     });
     return (row?.value ?? 'true').toLowerCase() !== 'false';
-  }
-
-  // ─── Processador BullMQ ───────────────────────────────────
-
-  async process(job: Job): Promise<any> {
-    switch (job.name) {
-      case 'daily-batch-extract':
-        return this.processTenantBatch(job);
-      case 'manual-extract':
-        return this.processTenantBatch(job);
-      default:
-        this.logger.warn(`[MemoryBatch] Job desconhecido: ${job.name}`);
-        return null;
-    }
   }
 
   /** Processa um tenant inteiro: itera conversas do dia e extrai memorias. */

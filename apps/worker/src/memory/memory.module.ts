@@ -5,6 +5,7 @@ import { MemoryRetrievalService } from './memory-retrieval.service';
 import { DailyMemoryBatchProcessor } from './daily-memory-batch.processor';
 import { ProfileConsolidationProcessor } from './profile-consolidation.processor';
 import { OrgProfileConsolidationProcessor } from './org-profile-consolidation.processor';
+import { MemoryJobsProcessor } from './memory-jobs.processor';
 import { MemoryDedupService } from './memory-dedup.service';
 import { SettingsModule } from '../settings/settings.module';
 
@@ -23,9 +24,13 @@ const defaultJobOptions = {
   providers: [
     EmbeddingService,
     MemoryRetrievalService,
+    // Services especializados — NAO sao @Processor, apenas @Injectable com
+    // metodos chamados pelo MemoryJobsProcessor (o unico que escuta a fila).
     DailyMemoryBatchProcessor,
     ProfileConsolidationProcessor,
     OrgProfileConsolidationProcessor,
+    // Dispatcher unico — previne corrida de workers na fila memory-jobs.
+    MemoryJobsProcessor,
     MemoryDedupService,
   ],
   exports: [EmbeddingService, MemoryRetrievalService],

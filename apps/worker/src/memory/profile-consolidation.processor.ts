@@ -1,4 +1,3 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import OpenAI from 'openai';
@@ -16,30 +15,15 @@ import { PROFILE_CONSOLIDATION_PROMPT } from './memory-prompts';
  *   - Manualmente via endpoint (job consolidate-profile) — botao "Regenerar" no frontend
  */
 @Injectable()
-@Processor('memory-jobs')
-export class ProfileConsolidationProcessor extends WorkerHost {
+export class ProfileConsolidationProcessor {
   private readonly logger = new Logger(ProfileConsolidationProcessor.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
-  ) {
-    super();
-  }
+  ) {}
 
-  async process(job: Job): Promise<any> {
-    switch (job.name) {
-      case 'consolidate-profiles-after-batch':
-        return this.consolidateAfterBatch(job);
-      case 'consolidate-profile':
-        return this.consolidateSingle(job);
-      default:
-        // Nao e nosso — deixa outro processor lidar
-        return null;
-    }
-  }
-
-  private async consolidateAfterBatch(job: Job): Promise<{ leads: number }> {
+  async consolidateAfterBatch(job: Job): Promise<{ leads: number }> {
     const { tenant_id } = job.data as { tenant_id: string };
 
     const rows = await this.prisma.$queryRaw<{ lead_id: string }[]>`
@@ -70,7 +54,7 @@ export class ProfileConsolidationProcessor extends WorkerHost {
     return { leads: rows.length };
   }
 
-  private async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
+  async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
     const { tenant_id, lead_id } = job.data as {
       tenant_id: string;
       lead_id: string;

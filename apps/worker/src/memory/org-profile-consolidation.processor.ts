@@ -1,4 +1,3 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Cron } from '@nestjs/schedule';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
@@ -27,27 +26,13 @@ const MIN_CONFIDENCE_FOR_INCLUSION = 0.6;
  * Custo estimado: ~$0.04 por tenant por regeneracao (GPT-4.1, ~500 tokens saida).
  */
 @Injectable()
-@Processor('memory-jobs')
-export class OrgProfileConsolidationProcessor extends WorkerHost {
+export class OrgProfileConsolidationProcessor {
   private readonly logger = new Logger(OrgProfileConsolidationProcessor.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
-  ) {
-    super();
-  }
-
-  async process(job: Job): Promise<any> {
-    switch (job.name) {
-      case 'consolidate-org-profile':
-        return this.consolidateSingle(job);
-      case 'consolidate-org-profiles-all':
-        return this.consolidateAll();
-      default:
-        return null;
-    }
-  }
+  ) {}
 
   // ─── Cron: roda diariamente as 02h ────────────────────────
 
@@ -79,7 +64,7 @@ export class OrgProfileConsolidationProcessor extends WorkerHost {
     return { tenants: processed };
   }
 
-  private async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
+  async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
     const { tenant_id } = job.data as { tenant_id: string };
     await this.consolidateProfile(tenant_id);
     return { ok: true };
