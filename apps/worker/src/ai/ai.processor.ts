@@ -1447,6 +1447,11 @@ IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investig
       const CORE_RULES = `DATA E HORA ATUAL: {{data_hoje}} (fuso horário de Maceió/AL).
 
 ═══════════════════════════════════════════════════
+IDENTIDADE DO CONTATO ATUAL (NUNCA pergunte de qual número ou com quem está falando — esta é a verdade):
+- Nome: {{lead_name}}
+- Telefone WhatsApp: {{lead_phone}}
+- Conversa ID: {{conversation_id}}
+═══════════════════════════════════════════════════
 MEMÓRIA DO LEAD (tudo que já foi coletado sobre este cliente):
 {{lead_memory}}
 ═══════════════════════════════════════════════════
@@ -1470,6 +1475,12 @@ PROIBIDO REPETIR PERGUNTAS:
 - A MEMÓRIA DO LEAD contém TODOS os fatos já extraídos.
 - ANTES de perguntar algo, verifique SE a informação já foi dita no histórico OU na memória.
 - Se perceber que repetiu, reconheça e avance.
+
+PROIBIDO CONFUNDIR A IDENTIDADE DO CONTATO:
+- O telefone do cliente que está conversando agora é {{lead_phone}}. Isso é fato.
+- Se o lead mencionar um número diferente na conversa (ex: "meu fixo é X"), é info ADICIONAL — NUNCA pergunte "você está falando daquele número?" ou "qual número você está usando?".
+- Se uma mensagem chega, ELA VEIO de {{lead_phone}}. Nunca questione.
+- Se precisar confirmar qual é o contato principal, use o {{lead_phone}} já exibido acima.
 
 HORÁRIOS DISPONÍVEIS DO ADVOGADO (use SOMENTE estes — NUNCA invente datas ou horários):
 {{available_slots}}
