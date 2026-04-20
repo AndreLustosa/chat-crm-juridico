@@ -32,10 +32,19 @@ export const CLEANUP_RULES: CleanupRule[] = [
     pattern: /^Endereço:\s*Rua Francisco Rodrigues Viana[^\n]*\n?/gm,
   },
   {
-    description: 'Bloco Seguranca com telefones + endereco hardcoded (8 skills especialistas)',
-    // "Segurança: (82) 99913-0127, (82) 99631-6935, (82) 99639-0799. Endereço: Rua Francisco Rodrigues Viana, 242 — Baixa Grande — Arapiraca/AL."
-    // Linha inteira — nao e regra tipografica, e info institucional duplicada.
+    description: 'Bloco Seguranca no INICIO de linha (Consumidor, Previdenciario)',
+    // "Segurança: (82) 99913-0127, ..." como linha inteira dedicada.
+    // Remove a linha inteira + \n final.
     pattern: /^Segurança:\s*\(82\)[^\n]*\n?/gm,
+  },
+  {
+    description: 'Bloco Seguranca INLINE em meio de linha (6 skills especialistas: Imobiliario, Civil, Geral, Familia, Penal, Empresarial)',
+    // "...obrigatório. Segurança: (82) 99913-0127, ..." dentro de uma linha maior.
+    // Remove DE " Segurança:" ate o fim da linha, SEM consumir o \n.
+    // Evita juntar linhas: " +" exige pelo menos um espaco antes (nao casa se
+    // "Segurança:" esta no inicio de linha, pois ai nao ha espaco — esse caso
+    // ja e coberto pela regra anterior).
+    pattern: / +Segurança:\s*\(82\)[^\n]*/g,
   },
 ];
 
