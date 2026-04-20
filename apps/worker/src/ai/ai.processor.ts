@@ -17,49 +17,15 @@ import { MemoryRetrievalService } from '../memory/memory-retrieval.service';
 // Modelos com suporte a visão (imagens)
 const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5', 'claude-'];
 
-// ─── Long Memory System Prompt (infraestrutura interna, não é skill) ───
-const LONG_MEMORY_SYSTEM_PROMPT = `Você é uma IA especializada em gerenciamento de memória de longo prazo (LONG MEMORY) de leads e casos jurídicos, multiárea.
-
-Objetivo:
-Manter um "case_state" estruturado, enxuto e acionável para:
-1) Redação de petições (ex.: inicial) com base em fatos e documentos.
-2) Atendimento contínuo do cliente ao longo do tempo.
-
-Você SEMPRE receberá:
-- old_memory: a memória anterior (pode estar vazia).
-- new_event: uma nova informação para guardar.
-
-REGRAS OBRIGATÓRIAS:
-1) NUNCA apague fatos já registrados.
-2) Você PODE atualizar o estado atual ("current") quando houver informação mais específica ou correção, MAS deve registrar a mudança em "timeline" como "retificação/atualização" com data e origem.
-3) NÃO copie o transcript inteiro. NÃO salve "oi", "ok", cumprimentos, nem falas irrelevantes.
-4) Para rastreabilidade, quando possível inclua "source_ref".
-5) Seja multiárea: não presuma área; só preencha se vier no new_event.
-
-DEDUPE E CONTROLE DE TAMANHO:
-- Deduplicar fatos repetidos.
-- "summary" no máximo 800 caracteres.
-- "core_facts" no máximo 25 itens. "open_questions" no máximo 20.
-- Se exceder, consolidar: manter o essencial e registrar o excesso como "consolidação".
-
-ORIGEM (origin) deve ser UMA destas strings:
-"Lead" | "AtendenteHumano" | "AgenteSDR"
-
-Retorne SOMENTE o JSON no schema:
-{
-  "lead": { "first_name": null, "full_name": null, "mother_name": null, "cpf": null, "phones": [], "emails": [], "city": null, "state": null },
-  "case": { "area": null, "subarea": null, "status": "triage", "summary": null, "tags": [] },
-  "parties": { "client_role": null, "counterparty_name": null, "counterparty_id": null, "counterparty_type": null },
-  "facts": {
-    "current": { "employment_status": null, "main_issue": null, "key_dates": {}, "key_values": {} },
-    "core_facts": [],
-    "timeline": [{ "date": null, "event": null, "origin": null, "source_ref": null }]
-  },
-  "evidence": { "has_evidence": null, "items": [{ "type": null, "status": "unknown", "notes": null, "source_ref": null }] },
-  "open_questions": [],
-  "next_actions": [],
-  "meta": { "last_updated_at": null, "memory_version": 1 }
-}`;
+// LONG_MEMORY_SYSTEM_PROMPT REMOVIDO em 2026-04-20 (Divida 2 do MEMORY_SYSTEM.md).
+//
+// O sistema antigo (updateLongMemory + AiMemory.facts_json com case_state)
+// foi substituido pelo sistema novo: extracao batch noturna + Memory entries
+// + ProfileConsolidationProcessor (incremental 02h) + LeadProfile (prosa).
+//
+// Leitura de AiMemory permanece como fallback para ~19 leads legacy sem
+// tenant_id que nao puderam ser migrados em massa — quando eles interagem
+// de novo, a extracao noturna cria Memory entries e LeadProfile automaticamente.
 
 @Processor('ai-jobs')
 export class AiProcessor extends WorkerHost {
@@ -482,22 +448,15 @@ export class AiProcessor extends WorkerHost {
       }
     }
 
-    // d. lead_summary → AiMemory.summary
-    if (updates.lead_summary) {
-      await this.prisma.aiMemory.upsert({
-        where: { lead_id: leadId },
-        create: {
-          lead_id: leadId,
-          summary: updates.lead_summary,
-          facts_json: {},
-        },
-        update: {
-          summary: updates.lead_summary,
-          last_updated_at: new Date(),
-          version: { increment: 1 },
-        },
-      });
-    }
+    // d. lead_summary → AiMemory: REMOVIDO em 2026-04-20
+    //
+    // O sistema novo (LeadProfile + Memory entries via extracao batch noturna
+    // e ProfileConsolidationProcessor) agora e a fonte unica de verdade para
+    // contexto do lead. Ver MEMORY_SYSTEM.md secao 9.6 (migracao case_state).
+    //
+    // A leitura de AiMemory continua na linha ~970 como fallback para leads
+    // sem LeadProfile (principalmente os 19 leads legacy sem tenant_id que
+    // nao puderam ser migrados em massa).
 
     // e. next_step + notes → Conversation
     const convUpdate: any = {};
@@ -800,77 +759,16 @@ export class AiProcessor extends WorkerHost {
     return counts[0]?.id ?? null;
   }
 
-  // ─── Atualiza Long Memory estruturada com GPT-4.1 ───
-  private async updateLongMemory(
-    ai: OpenAI,
-    leadId: string,
-    historyText: string,
-    latestUpdates: any,
-  ) {
-    const existing = await this.prisma.aiMemory.findUnique({
-      where: { lead_id: leadId },
-    });
-    const oldMemory = (existing?.facts_json as any) || {};
-
-    const memoryModel = await this.settings.getMemoryModel();
-
-    const newEvent = `Últimas mensagens:\n${historyText.slice(-3000)}\n\nUpdates do agente: ${JSON.stringify(latestUpdates || {})}`;
-
-    const memoryResult = await ai.chat.completions.create({
-      model: memoryModel,
-      messages: [
-        { role: 'system', content: LONG_MEMORY_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            old_memory: oldMemory,
-            new_event: newEvent,
-          }),
-        },
-      ],
-      ...this.tokenParam(memoryModel, 4000),
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-    });
-
-    const rawContent =
-      memoryResult.choices[0]?.message?.content || '{}';
-
-    // Registra uso de tokens da memória para dashboard de custos
-    await this.saveUsage({
-      model: memoryModel,
-      call_type: 'memory',
-      usage: memoryResult.usage,
-    });
-
-    const parsed = JSON.parse(rawContent);
-
-    if (parsed.lead || parsed.case || parsed.facts) {
-      // Prioridade para summary: updates do agente AI > gerado pelo modelo de memória > anterior
-      const newSummary =
-        latestUpdates?.lead_summary ||
-        parsed?.case?.summary ||
-        existing?.summary ||
-        '';
-      await this.prisma.aiMemory.upsert({
-        where: { lead_id: leadId },
-        create: {
-          lead_id: leadId,
-          summary: newSummary,
-          facts_json: parsed,
-        },
-        update: {
-          facts_json: parsed,
-          summary: newSummary,
-          last_updated_at: new Date(),
-          version: { increment: 1 },
-        },
-      });
-      this.logger.log(
-        `[AI] Long Memory atualizada (v${(existing?.version || 0) + 1}) para lead ${leadId} (model=${memoryModel})`,
-      );
-    }
-  }
+  // updateLongMemory() REMOVIDO em 2026-04-20 — Divida 2 do MEMORY_SYSTEM.md.
+  //
+  // Sistema antigo: chamada GPT-4.1 a cada mensagem pra atualizar AiMemory.
+  // Custo: ~$0.03 por mensagem recebida. Escrevia case_state em JSON verboso.
+  //
+  // Sistema novo: extracao batch noturna (DailyMemoryBatchProcessor 00h)
+  // processa TODAS as conversas do dia de uma vez. Memory entries sao
+  // consolidadas pelo ProfileConsolidationProcessor (incremental 02h) em
+  // LeadProfile.summary (prosa natural). Custo: ~$0.01/dia por tenant
+  // (constante, ~70% menor).
 
   // ─── Processo principal ───
   async process(job: Job<any, any, string>): Promise<any> {
@@ -910,39 +808,13 @@ export class AiProcessor extends WorkerHost {
       // 3. Verificar ai_mode ativo
       if (!convo) return;
 
-      // 3a. Mesmo sem ai_mode, atualiza Long Memory para conversas do operador humano.
-      // Isso garante que o "Resumo dos Fatos" seja atualizado mesmo quando um humano atende.
+      // 3a. Quando ai_mode=false (operador humano atende), nada a fazer aqui.
+      //
+      // O sistema antigo atualizava AiMemory sincronamente neste ponto. Hoje,
+      // a extracao batch noturna (DailyMemoryBatchProcessor 00h) processa as
+      // conversas de operadores humanos junto com as da IA, gerando Memory
+      // entries e atualizando LeadProfile automaticamente.
       if (!convo.ai_mode) {
-        if (convo.messages.length > 0) {
-          try {
-            const aiForMemory = new OpenAI({ apiKey: openAiKey });
-            const chronologicalMemory = [...convo.messages].reverse();
-            const historyForMemory = chronologicalMemory
-              .map((m: any) => {
-                const sender =
-                  m.direction === 'in'
-                    ? 'Cliente'
-                    : m.external_message_id?.startsWith('sys_')
-                      ? 'Sophia'
-                      : 'Operador';
-                const content =
-                  m.text ||
-                  (m.type === 'audio'
-                    ? '[áudio sem transcrição]'
-                    : m.type === 'image'
-                      ? `[imagem${m.media?.original_name ? ': ' + m.media.original_name : ''}]`
-                      : m.type === 'document'
-                        ? `[documento${m.media?.original_name ? ': ' + m.media.original_name : ''}]`
-                        : '[mídia]');
-                return `${sender}: ${content}`;
-              })
-              .join('\n');
-            await this.updateLongMemory(aiForMemory, convo.lead_id, historyForMemory, null);
-            this.logger.log(`[AI] Long Memory atualizada para conversa do operador humano (conv ${conversation_id})`);
-          } catch (memErr: any) {
-            this.logger.warn(`[AI] Falha ao atualizar Long Memory (modo operador): ${memErr.message}`);
-          }
-        }
         return;
       }
 
@@ -2280,24 +2152,14 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         }
       }
 
-      // 19. Atualizar Long Memory (TODA mensagem recebida — sem economizar tokens)
-      const inboundTotal = convo.messages.filter(
-        (m) => m.direction === 'in',
-      ).length;
-      if (inboundTotal > 0) {
-        try {
-          await this.updateLongMemory(
-            ai,
-            convo.lead_id,
-            historyText,
-            updates,
-          );
-        } catch (memErr: any) {
-          this.logger.warn(
-            `[AI] Falha ao atualizar Long Memory: ${memErr.message}`,
-          );
-        }
-      }
+      // 19. Sistema antigo (updateLongMemory/AiMemory) REMOVIDO em 2026-04-20.
+      //
+      // Substituido por: extracao batch noturna (00h) -> Memory entries ->
+      // ProfileConsolidationProcessor (02h incremental) -> LeadProfile.
+      // Ver MEMORY_SYSTEM.md secao 9.6 (migracao case_state -> LeadProfile).
+      //
+      // Leitura de AiMemory permanece como fallback na linha ~970 para
+      // leads legacy sem tenant_id que nao puderam ser migrados em massa.
 
       // 20. Retorna IDs para o AiEventsService da API emitir WebSocket em tempo real
       return { conversationId: convo.id, messageId: savedMsg.id };
