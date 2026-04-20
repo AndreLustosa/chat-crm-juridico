@@ -24,7 +24,8 @@ interface WorkspaceData {
     name: string | null;
     phone: string;
     email: string | null;
-    memory: { summary: string; facts_json: any } | null;
+    // memory (AiMemory) removido 2026-04-20. Substituido por profile (LeadProfile).
+    profile: { summary: string; facts: any } | null;
     ficha_trabalhista: { data: any; completion_pct: number; finalizado: boolean } | null;
   };
   lawyer: { id: string; name: string; email: string };
@@ -141,7 +142,8 @@ export default function TabResumo({ data, onRefresh }: { data: WorkspaceData; on
     }
   };
 
-  const memory = data.lead?.memory;
+  // Substituido em 2026-04-20 (fase 2d): lead.memory -> lead.profile.
+  const profile = data.lead?.profile;
   const ficha = data.lead?.ficha_trabalhista;
   const pctReceived = caseFin && caseFin.honorarios > 0 ? Math.round((caseFin.received / caseFin.honorarios) * 100) : 0;
 
@@ -251,15 +253,15 @@ export default function TabResumo({ data, onRefresh }: { data: WorkspaceData; on
 
       {/* Row 3: IA Memory + Briefing */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {memory && (
+        {profile && (
           <div className="bg-card border border-violet-500/20 rounded-2xl overflow-hidden">
             <div className="px-5 py-3.5 border-b border-violet-500/20 bg-violet-500/5">
               <h2 className="text-[13px] font-bold text-violet-300 flex items-center gap-2">
-                <Brain size={14} /> Memoria da IA
+                <Brain size={14} /> Perfil do Cliente
               </h2>
             </div>
             <div className="p-5 text-[12px] text-foreground/80 leading-relaxed whitespace-pre-line max-h-[280px] overflow-y-auto custom-scrollbar">
-              {memory.summary}
+              {profile.summary}
             </div>
           </div>
         )}

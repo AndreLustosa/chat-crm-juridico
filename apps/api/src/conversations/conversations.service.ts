@@ -230,7 +230,9 @@ export class ConversationsService {
       orderBy: { last_message_at: 'desc' },
       include: {
         lead: {
-          include: { memory: { select: { facts_json: true } } },
+          // memory (AiMemory) removido em 2026-04-20 (fase 2d). Consumidores que
+          // precisem de contexto do lead devem consultar LeadProfile separadamente.
+          include: { profile: { select: { summary: true, facts: true } } },
         },
         messages: { orderBy: { created_at: 'asc' }, take: 100, include: { media: true, skill: { select: { id: true, name: true, area: true } } } },
         assigned_user: { select: { id: true, name: true } },

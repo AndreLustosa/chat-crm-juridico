@@ -189,7 +189,9 @@ export class LeadsService {
     const lead = await this.prisma.lead.findUnique({
       where: { id },
       include: {
-        memory: true,
+        // memory (AiMemory) removido em 2026-04-20 (fase 2d da remocao total).
+        // Quem precisa do perfil agora consulta LeadProfile via include { profile }.
+        profile: { select: { summary: true, facts: true, generated_at: true } },
         conversations: {
           orderBy: { last_message_at: 'desc' },
           include: {

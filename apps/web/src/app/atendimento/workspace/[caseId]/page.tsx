@@ -60,7 +60,8 @@ interface WorkspaceData {
     phone: string;
     email: string | null;
     profile_picture_url: string | null;
-    memory: { summary: string; facts_json: any } | null;
+    // memory (AiMemory) removido 2026-04-20. Substituido por profile (LeadProfile).
+    profile: { summary: string; facts: any } | null;
     ficha_trabalhista: { data: any; completion_pct: number; finalizado: boolean } | null;
   };
   conversation: {
