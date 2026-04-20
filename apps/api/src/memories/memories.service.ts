@@ -12,6 +12,7 @@ import {
   AVAILABLE_ORG_MODELS,
 } from './memory-prompts-defaults';
 import { applyMemoryVarsMigration } from './skill-migration.util';
+import { cleanHardcodedOrgInfo } from './skill-cleanup.util';
 
 const ORG_PROFILE_DEBOUNCE_MS = 60_000; // 60s — evita regenerar a cada edit
 
@@ -465,6 +466,66 @@ export class MemoriesService {
       rebuild_prompt_default: DEFAULT_ORG_PROFILE_REBUILD_PROMPT,
       rebuild_is_custom: !!(customRebuild?.value && customRebuild.value.trim()),
     };
+  }
+
+  /**
+   * Remove linhas hardcoded do corpo das skills que duplicam dados institucionais
+   * agora providos pela variavel {{office_memories}} (numeros oficiais e endereco).
+   *
+   * @param dryRun Se true (default), apenas mostra o que SERIA removido sem aplicar.
+   */
+  async cleanSkillHardcodedOrgInfo(dryRun = true) {
+    const skills = await (this.prisma as any).promptSkill.findMany({
+      select: { id: true, name: true, area: true, system_prompt: true, active: true },
+      orderBy: { order: 'asc' },
+    });
+
+    const report: Array<{
+      id: string;
+      name: string;
+      area: string;
+      active: boolean;
+      changed: boolean;
+      chars_removed: number;
+      matches: Array<{ rule: string; matched_text: string; line_number: number }>;
+      old_length: number;
+      new_length: number;
+      applied: boolean;
+    }> = [];
+
+    for (const skill of skills) {
+      const result = cleanHardcodedOrgInfo(skill.system_prompt || '');
+      const entry = {
+        id: skill.id,
+        name: skill.name,
+        area: skill.area,
+        active: skill.active,
+        changed: result.changed,
+        chars_removed: result.chars_removed,
+        matches: result.matches,
+        old_length: (skill.system_prompt || '').length,
+        new_length: result.updated.length,
+        applied: false,
+      };
+      if (result.changed && !dryRun) {
+        await (this.prisma as any).promptSkill.update({
+          where: { id: skill.id },
+          data: { system_prompt: result.updated },
+        });
+        entry.applied = true;
+      }
+      report.push(entry);
+    }
+
+    const summary = {
+      dry_run: dryRun,
+      total_skills: skills.length,
+      would_change: report.filter((r) => r.changed).length,
+      applied_changes: report.filter((r) => r.applied).length,
+      total_chars_removed: report.reduce((sum, r) => sum + (r.applied ? r.chars_removed : 0), 0),
+    };
+
+    return { summary, report };
   }
 
   /**

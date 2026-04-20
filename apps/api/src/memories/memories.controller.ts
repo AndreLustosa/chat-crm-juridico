@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Request,
   UseGuards,
   BadRequestException,
@@ -72,6 +73,31 @@ export class MemoriesController {
   @Roles('ADMIN')
   async migrateSkills() {
     return this.memoriesService.migrateSkillsToMemoryVars();
+  }
+
+  /**
+   * Remove linhas hardcoded (numeros oficiais, endereco) dos corpos das skills,
+   * que viraram redundantes com {{office_memories}}.
+   *
+   * Query params:
+   *   - dry_run=true (default): so mostra o que seria removido, NAO aplica
+   *   - dry_run=false: aplica as mudancas no banco
+   *
+   * Exemplo:
+   *   GET /memories/skills/clean-hardcoded-org-info           (dry run — preview)
+   *   POST /memories/skills/clean-hardcoded-org-info?dry_run=false  (apply)
+   */
+  @Get('skills/clean-hardcoded-org-info')
+  @Roles('ADMIN')
+  async previewCleanSkillsHardcoded() {
+    return this.memoriesService.cleanSkillHardcodedOrgInfo(true);
+  }
+
+  @Post('skills/clean-hardcoded-org-info')
+  @Roles('ADMIN')
+  async applyCleanSkillsHardcoded(@Query('dry_run') dryRunParam?: string) {
+    const dryRun = dryRunParam !== 'false';
+    return this.memoriesService.cleanSkillHardcodedOrgInfo(dryRun);
   }
 
   @Put('organization/settings')
