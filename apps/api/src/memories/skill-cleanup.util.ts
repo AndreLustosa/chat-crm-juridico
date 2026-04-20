@@ -31,6 +31,12 @@ export const CLEANUP_RULES: CleanupRule[] = [
     // "Endereço: Rua Francisco Rodrigues Viana..."
     pattern: /^Endereço:\s*Rua Francisco Rodrigues Viana[^\n]*\n?/gm,
   },
+  {
+    description: 'Bloco Seguranca com telefones + endereco hardcoded (8 skills especialistas)',
+    // "Segurança: (82) 99913-0127, (82) 99631-6935, (82) 99639-0799. Endereço: Rua Francisco Rodrigues Viana, 242 — Baixa Grande — Arapiraca/AL."
+    // Linha inteira — nao e regra tipografica, e info institucional duplicada.
+    pattern: /^Segurança:\s*\(82\)[^\n]*\n?/gm,
+  },
 ];
 
 export interface CleanupMatch {
