@@ -67,18 +67,16 @@ export class ProfileConsolidationProcessor {
    * Gera/atualiza LeadProfile de 1 lead.
    *
    * Fontes consideradas (em ordem de prioridade):
-   *   1. Memory entries (scope=lead) — sistema novo
-   *   2. AiMemory (case_state JSON legado) — sistema antigo, usado na migracao
-   *   3. Lead data (nome, phone, stage, casos ativos, conversas recentes)
-   *   4. LeadProfile existente (pra preservar continuidade)
+   *   1. Memory entries (scope=lead) — sistema novo, principal fonte
+   *   2. Lead data (nome, phone, stage, casos ativos, conversas recentes)
+   *   3. LeadProfile existente (pra preservar continuidade)
    *
-   * A fonte AiMemory e fundida com Memory no payload pro LLM. Isso permite
-   * migrar leads que so tem sistema antigo (~83% da base atual) sem perder
-   * historico. Apos fase 3 da migracao (AiMemory desligado), essa fonte fica
-   * null para leads novos.
+   * A fonte AiMemory legada (case_state JSON) foi REMOVIDA em 2026-04-20
+   * (fase 2d-1 da remocao total). Migracao ja concluida: 122/132 leads com
+   * AiMemory foram consolidados em LeadProfile na Fase 1.
    */
   async consolidateProfile(tenantId: string, leadId: string): Promise<void> {
-    const [memories, lead, existing, legacyMemory] = await Promise.all([
+    const [memories, lead, existing] = await Promise.all([
       this.prisma.memory.findMany({
         where: { tenant_id: tenantId, scope: 'lead', scope_id: leadId, status: 'active' },
         orderBy: { created_at: 'desc' },
@@ -110,12 +108,11 @@ export class ProfileConsolidationProcessor {
         },
       }),
       this.prisma.leadProfile.findUnique({ where: { lead_id: leadId } }),
-      this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }),
     ]);
 
     if (!lead) return;
-    if (memories.length === 0 && !existing && !legacyMemory) {
-      // Sem memorias, sem perfil, sem legacy — nao ha o que consolidar
+    if (memories.length === 0 && !existing) {
+      // Sem memorias e sem perfil — nao ha o que consolidar
       return;
     }
 
@@ -134,13 +131,6 @@ export class ProfileConsolidationProcessor {
         type: m.type,
         created_at: m.created_at,
       })),
-      legacy_memory: legacyMemory
-        ? {
-            summary: legacyMemory.summary,
-            facts: legacyMemory.facts_json,
-            last_updated_at: legacyMemory.last_updated_at,
-          }
-        : null,
       recent_messages: lead.conversations.flatMap((c) =>
         c.messages.map((m) => ({
           direction: m.direction,

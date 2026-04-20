@@ -499,16 +499,10 @@ export class DjenService {
             this.logger.warn(`[DJEN] Falha ao notificar lead: ${e.message}`),
           );
 
-          // ─── Atualizar memória da IA com a análise completa ─────────
-          if (legalCase.lead?.id) {
-            this.saveAnalysisToMemory(legalCase.lead.id, pub, aiAnalysis || {
-              resumo: `${tipoComunicacao || 'Publicação'}${assunto ? ': ' + assunto : ''}`,
-              estagio_sugerido: null, juizo: null,
-              parte_autora: pub.parte_autora || null,
-              parte_rea: pub.parte_rea || null,
-              urgencia: 'NORMAL',
-            }).catch(e => this.logger.warn(`[DJEN] Falha ao atualizar memória do lead: ${e.message}`));
-          }
+          // saveAnalysisToMemory REMOVIDO em 2026-04-20 (fase 2d-1). A analise
+          // ja fica salva em DjenPublication.ai_analysis (acessivel pelo
+          // ProfileConsolidationProcessor). Os insights sao propagados ao
+          // LeadProfile.summary via consolidacao noturna.
         }
       } catch (e) {
         this.logger.error(`[DJEN] Erro ao salvar publicação: ${e}`);
@@ -895,16 +889,9 @@ export class DjenService {
     });
 
     // ─── Atualizar memória da IA com dados do processo e publicação ─────────
-    this.initializeProcessMemory(lead.id, {
-      caseNumber: pub.numero_processo,
-      legalArea: resolvedLegalArea,
-      trackingStage: finalTrackingStage,
-      tipoComunicacao: pub.tipo_comunicacao,
-      assunto: pub.assunto,
-      parteAutora: pub.parte_autora,
-      parteRea: pub.parte_rea,
-      dataDisponibilizacao: pub.data_disponibilizacao,
-    }).catch(e => this.logger.warn(`[DJEN] Falha ao inicializar memória do lead ${lead.id}: ${e.message}`));
+    // initializeProcessMemory REMOVIDO em 2026-04-20 (fase 2d-1). O processo
+    // criado fica no LegalCase (lead.legal_cases). O ProfileConsolidationProcessor
+    // le legal_cases e inclui no LeadProfile.summary automaticamente.
 
     this.logger.log(
       `[DJEN] Processo ${legalCase.id} criado a partir da publicação ${id} | ` +
@@ -1126,179 +1113,16 @@ ${pub.conteudo.slice(0, 6000)}`;
       } as any,
     }).catch(e => this.logger.warn(`[DJEN] Falha ao salvar análise na publicação ${id}: ${e.message}`));
 
-    // Salva insights da análise na memória do lead para enriquecer contexto futuro da IA
-    const leadId = (pub.legal_case as any)?.lead?.id;
-    if (leadId) {
-      this.saveAnalysisToMemory(leadId, pub, result).catch(e =>
-        this.logger.warn(`[DJEN] Falha ao salvar análise na memória do lead ${leadId}: ${e.message}`),
-      );
-    }
+    // saveAnalysisToMemory REMOVIDO em 2026-04-20 (fase 2d-1). Insights ficam
+    // em DjenPublication.ai_analysis. ProfileConsolidationProcessor propaga.
 
     return result;
   }
 
-  /** Salva os insights da análise DJEN na AiMemory do lead */
-  private async saveAnalysisToMemory(leadId: string, pub: any, analysis: any): Promise<void> {
-    const pubDate = new Date(pub.data_disponibilizacao).toISOString().slice(0, 10);
-    const pubEntry = {
-      date: pubDate,
-      tipo: pub.tipo_comunicacao || 'Publicação',
-      assunto: pub.assunto || null,
-      resumo: analysis.resumo,
-      estagio: analysis.estagio_sugerido || null,
-      juizo: analysis.juizo || null,
-      parte_autora: analysis.parte_autora || null,
-      parte_rea: analysis.parte_rea || null,
-      urgencia: analysis.urgencia,
-    };
-
-    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } });
-    let facts: any = {};
-    try {
-      facts = existing?.facts_json
-        ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json)
-        : {};
-    } catch { facts = {}; }
-
-    const djenHistory: any[] = facts.djen_publications || [];
-    // Evitar duplicata (mesmo dia + mesmo tipo + mesmo assunto)
-    const isDuplicate = djenHistory.some(
-      d => d.date === pubEntry.date && d.tipo === pubEntry.tipo && d.assunto === pubEntry.assunto,
-    );
-    if (!isDuplicate) {
-      djenHistory.unshift(pubEntry); // mais recente primeiro
-      if (djenHistory.length > 15) djenHistory.splice(15);
-    }
-    facts.djen_publications = djenHistory;
-
-    const summaryLine = `[${pubDate}] ${pubEntry.tipo}${pubEntry.assunto ? ` — ${pubEntry.assunto}` : ''}: ${analysis.resumo}`;
-    const prevSummary = existing?.summary || '';
-    const newSummary = (summaryLine + (prevSummary ? '\n\n' + prevSummary : '')).slice(0, 2000);
-
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: leadId },
-        data: { summary: newSummary, facts_json: facts, last_updated_at: new Date() },
-      });
-    } else {
-      await this.prisma.aiMemory.create({
-        data: { lead_id: leadId, summary: newSummary, facts_json: facts },
-      });
-    }
-    this.logger.log(`[DJEN] Análise salva na memória do lead ${leadId}`);
-  }
-
-  // ─── Inicializar/atualizar memória da IA com dados do processo ────────────
-
-  /**
-   * Atualiza a AiMemory do lead com informações do processo DJEN.
-   * Preenche campos estruturados (case, parties, facts.timeline, djen_publications)
-   * para que a Sophia tenha contexto sobre o processo do cliente.
-   */
-  private async initializeProcessMemory(leadId: string, data: {
-    caseNumber: string;
-    legalArea: string;
-    trackingStage: string;
-    tipoComunicacao?: string | null;
-    assunto?: string | null;
-    parteAutora?: string | null;
-    parteRea?: string | null;
-    dataDisponibilizacao?: Date | null;
-  }): Promise<void> {
-    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } });
-    let facts: any = {};
-    try {
-      facts = existing?.facts_json
-        ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json)
-        : {};
-    } catch { facts = {}; }
-
-    // ─── Migrar facts.case (singular) para facts.cases (array) se necessário ──
-    if (facts.case && !facts.cases) {
-      facts.cases = [facts.case];
-      delete facts.case;
-    }
-    facts.cases = facts.cases || [];
-
-    // Verificar se este processo já existe na memória (evitar duplicata)
-    const existingCase = facts.cases.find((c: any) => c.case_number === data.caseNumber);
-    if (existingCase) {
-      // Atualizar processo existente
-      existingCase.tracking_stage = data.trackingStage;
-      existingCase.status = 'processo_ativo';
-      if (data.parteRea && !existingCase.opposing_party) existingCase.opposing_party = data.parteRea;
-    } else {
-      // Adicionar novo processo
-      facts.cases.push({
-        case_number: data.caseNumber,
-        area: this.normalizeAreaForMemory(data.legalArea),
-        status: 'processo_ativo',
-        tracking_stage: data.trackingStage,
-        summary: `Processo nº ${data.caseNumber} — ${this.normalizeAreaForMemory(data.legalArea)}`,
-        opposing_party: data.parteRea || null,
-        client_role: data.parteAutora ? 'Parte autora' : null,
-      });
-    }
-
-    // Manter compatibilidade: facts.case aponta para o mais recente (IA legada)
-    facts.case = facts.cases[facts.cases.length - 1];
-
-    // Atualizar partes do caso mais recente
-    if (data.parteAutora || data.parteRea) {
-      facts.parties = facts.parties || {};
-      if (data.parteAutora && !facts.parties.client_role) facts.parties.client_role = 'Parte autora';
-      if (data.parteRea && !facts.parties.counterparty_name) facts.parties.counterparty_name = data.parteRea;
-    }
-
-    // Adicionar timeline
-    facts.facts = facts.facts || {};
-    facts.facts.timeline = facts.facts.timeline || [];
-    const dateStr = data.dataDisponibilizacao
-      ? new Date(data.dataDisponibilizacao).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
-    facts.facts.timeline.push({
-      date: dateStr,
-      event: `Processo ${data.caseNumber} cadastrado via DJEN — ${data.tipoComunicacao || 'publicação'}${data.assunto ? ': ' + data.assunto : ''}`,
-      origin: 'DJEN',
-    });
-    if (facts.facts.timeline.length > 20) facts.facts.timeline = facts.facts.timeline.slice(-20);
-
-    // Adicionar à lista de publicações DJEN
-    const djenHistory: any[] = facts.djen_publications || [];
-    const pubEntry = {
-      date: dateStr,
-      tipo: data.tipoComunicacao || 'Publicação',
-      assunto: data.assunto || null,
-      resumo: `Processo ${data.caseNumber} cadastrado — ${this.normalizeAreaForMemory(data.legalArea)}`,
-      estagio: data.trackingStage,
-      parte_autora: data.parteAutora || null,
-      parte_rea: data.parteRea || null,
-      urgencia: 'NORMAL',
-    };
-    djenHistory.unshift(pubEntry);
-    if (djenHistory.length > 15) djenHistory.splice(15);
-    facts.djen_publications = djenHistory;
-
-    // Montar summary
-    const casesCount = facts.cases.length;
-    const summaryLine = casesCount > 1
-      ? `[${dateStr}] ${casesCount} processos ativos. Último: ${data.caseNumber} (${this.normalizeAreaForMemory(data.legalArea)}) — ${data.trackingStage}.`
-      : `[${dateStr}] Processo ${data.caseNumber} (${this.normalizeAreaForMemory(data.legalArea)}) cadastrado via DJEN. Estágio: ${data.trackingStage}.`;
-    const prevSummary = existing?.summary || '';
-    const newSummary = (summaryLine + (prevSummary ? '\n\n' + prevSummary : '')).slice(0, 2000);
-
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: leadId },
-        data: { summary: newSummary, facts_json: facts, last_updated_at: new Date() },
-      });
-    } else {
-      await this.prisma.aiMemory.create({
-        data: { lead_id: leadId, summary: newSummary, facts_json: facts },
-      });
-    }
-    this.logger.log(`[DJEN] Memória da IA atualizada para lead ${leadId} — ${facts.cases.length} processo(s), último: ${data.caseNumber}`);
-  }
+  // saveAnalysisToMemory() e initializeProcessMemory() REMOVIDOS em 2026-04-20
+  // (fase 2d-1 da remocao total do AiMemory). Insights DJEN ficam em
+  // DjenPublication.ai_analysis + legal_cases. O ProfileConsolidationProcessor
+  // tem acesso a essas fontes e propaga ao LeadProfile.summary naturalmente.
 
   /** Normaliza área jurídica para formato legível */
   private normalizeAreaForMemory(area: string): string {

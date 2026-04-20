@@ -170,41 +170,13 @@ function buildContext(event: any, memory: any, legalCase: any, ficha: any, djenP
     if (legalCase.notes) lines.push(`Notas do advogado: ${legalCase.notes}`);
   }
 
-  // Memória do cliente (AiMemory)
-  if (memory) {
-    lines.push(`\n## MEMÓRIA DO CASO (histórico do atendimento)`);
-    if (memory.summary) lines.push(`Resumo: ${memory.summary}`);
-
-    let facts: any = {};
-    try { facts = typeof memory.facts_json === 'string' ? JSON.parse(memory.facts_json) : (memory.facts_json || {}); } catch { facts = {}; }
-
-    if (facts.case?.area) lines.push(`Área detectada: ${facts.case.area}`);
-    if (facts.case?.subarea) lines.push(`Subárea: ${facts.case.subarea}`);
-    if (facts.parties?.counterparty_name) lines.push(`Empresa/parte adversa: ${facts.parties.counterparty_name}`);
-    if (facts.facts?.current?.main_issue) lines.push(`Problema principal: ${facts.facts.current.main_issue}`);
-    if (facts.facts?.current?.employment_status) lines.push(`Situação trabalhista: ${facts.facts.current.employment_status}`);
-
-    const keyDates = facts.facts?.current?.key_dates || {};
-    const dateEntries = Object.entries(keyDates).filter(([, v]) => v);
-    if (dateEntries.length > 0) {
-      lines.push(`Datas importantes: ${dateEntries.map(([k, v]) => `${k}=${v}`).join(', ')}`);
-    }
-
-    const keyVals = facts.facts?.current?.key_values || {};
-    const valEntries = Object.entries(keyVals).filter(([, v]) => v);
-    if (valEntries.length > 0) {
-      lines.push(`Valores relevantes: ${valEntries.map(([k, v]) => `${k}=${v}`).join(', ')}`);
-    }
-
-    const coreFacts: string[] = facts.facts?.core_facts || [];
-    if (coreFacts.length > 0) {
-      lines.push(`Fatos-chave: ${coreFacts.slice(0, 10).join(' | ')}`);
-    }
-
-    const openQuestions: string[] = facts.open_questions || [];
-    if (openQuestions.length > 0) {
-      lines.push(`Dúvidas abertas do cliente: ${openQuestions.slice(0, 5).join(' | ')}`);
-    }
+  // Perfil do cliente (LeadProfile - sistema novo desde 2026-04-20, fase 2d-1).
+  // Antes construia secoes detalhadas a partir do AiMemory.facts_json; agora
+  // usa o summary consolidado (prosa natural de ~300 palavras cobrindo area,
+  // situacao, pendencias, preferencias, proximos passos).
+  if (memory?.summary) {
+    lines.push(`\n## PERFIL DO CLIENTE (consolidado pela IA)`);
+    lines.push(memory.summary);
   }
 
   // Ficha trabalhista (resumo)
@@ -347,12 +319,13 @@ export class CalendarReminderWorker extends WorkerHost {
   private async sendWhatsAppReminders(event: any, minutesBefore: number) {
     const isAudiencia = event.type === 'AUDIENCIA' || event.type === 'PERICIA';
 
-    // Carrega contexto adicional do cliente (memória + ficha + publicações DJEN)
+    // Carrega contexto adicional do cliente (perfil + ficha + publicações DJEN).
+    // Atualizado em 2026-04-20 (fase 2d-1): le LeadProfile em vez de AiMemory.
     const leadId = event.lead?.id;
     const legalCaseId = event.legal_case?.id;
     const [memory, ficha, djenPubs] = await Promise.all([
       leadId
-        ? this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }).catch(() => null)
+        ? this.prisma.leadProfile.findUnique({ where: { lead_id: leadId } }).catch(() => null)
         : null,
       leadId && (event.legal_case?.legal_area?.toUpperCase().includes('TRABALHIST'))
         ? this.prisma.fichaTrabalhista.findUnique({ where: { lead_id: leadId } }).catch(() => null)
@@ -496,7 +469,7 @@ export class CalendarReminderWorker extends WorkerHost {
     const leadId = event.lead.id;
     const legalCaseId = event.legal_case?.id;
     const [memory, ficha, djenPubs] = await Promise.all([
-      this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }).catch(() => null),
+      this.prisma.leadProfile.findUnique({ where: { lead_id: leadId } }).catch(() => null),
       event.legal_case?.legal_area?.toUpperCase().includes('TRABALHIST')
         ? this.prisma.fichaTrabalhista.findUnique({ where: { lead_id: leadId } }).catch(() => null)
         : null,

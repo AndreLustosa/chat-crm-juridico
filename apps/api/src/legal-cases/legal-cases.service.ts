@@ -38,24 +38,28 @@ export class LegalCasesService {
     legal_area?: string;
     tenant_id?: string;
   }) {
-    // Pré-preencher com dados da memória da IA (Sophia já coletou durante atendimento)
+    // Pré-preencher com dados do LeadProfile (sistema novo).
+    //
+    // Atualizado em 2026-04-20 (fase 2d-1): antes lia AiMemory.facts_json.
+    // LeadProfile.facts tem cases[] mas NAO tem opposing_party — advogado
+    // preenche manualmente se precisar.
     let opposing_party: string | null = null;
     let notes: string | null = null;
     let resolvedArea = data.legal_area || null;
 
     try {
-      const memory = await this.prisma.aiMemory.findUnique({ where: { lead_id: data.lead_id } });
-      if (memory) {
-        const facts: any = (typeof memory.facts_json === 'string' ? JSON.parse(memory.facts_json as string) : memory.facts_json) || {};
-        const caseData = facts.cases?.[0] || facts.case || {};
-        const parties = facts.parties || {};
-
-        opposing_party = parties.counterparty_name || null;
-        if (!resolvedArea && caseData.area) resolvedArea = caseData.area;
-        if (memory.summary) notes = memory.summary.slice(0, 500);
+      const profile = await this.prisma.leadProfile.findUnique({
+        where: { lead_id: data.lead_id },
+        select: { summary: true, facts: true },
+      });
+      if (profile) {
+        const facts: any = profile.facts || {};
+        const caseData = facts.cases?.[0] || {};
+        if (!resolvedArea && caseData.type) resolvedArea = caseData.type;
+        if (profile.summary) notes = profile.summary.slice(0, 500);
       }
     } catch (e: any) {
-      this.logger.warn(`[LEGAL] Falha ao pré-preencher caso com memória IA: ${e.message}`);
+      this.logger.warn(`[LEGAL] Falha ao pré-preencher caso com LeadProfile: ${e.message}`);
     }
 
     const legalCase = await this.prisma.legalCase.create({
@@ -429,27 +433,9 @@ export class LegalCasesService {
       this.logger.log(`[ARCHIVE] Lead ${legalCase.lead_id} marcado como encerrado`);
     }
 
-    // Limpar memória da IA: marcar caso como arquivado em facts.cases[]
-    try {
-      const memory = await this.prisma.aiMemory.findUnique({ where: { lead_id: legalCase.lead_id } });
-      if (memory) {
-        const facts: any = (typeof memory.facts_json === 'string' ? JSON.parse(memory.facts_json as string) : memory.facts_json) || {};
-        const cases: any[] = facts.cases || (facts.case ? [facts.case] : []);
-        const caseToArchive = cases.find((c: any) => c.case_number === legalCase.case_number);
-        if (caseToArchive) {
-          caseToArchive.status = 'arquivado';
-          caseToArchive.archive_reason = reason;
-        }
-        facts.cases = cases;
-        facts.case = cases.find((c: any) => c.status !== 'arquivado') || cases[0] || null;
-        await this.prisma.aiMemory.update({
-          where: { lead_id: legalCase.lead_id },
-          data: { facts_json: facts, last_updated_at: new Date() },
-        });
-      }
-    } catch (e: any) {
-      this.logger.warn(`[ARCHIVE] Falha ao limpar memória IA: ${e.message}`);
-    }
+    // Sync da memoria IA ao arquivar caso REMOVIDO em 2026-04-20 (fase 2d-1).
+    // O campo LegalCase.archived = true ja e suficiente — ProfileConsolidationProcessor
+    // filtra por `where: { archived: false }` ao incluir casos no LeadProfile.
 
     return legalCase;
   }
@@ -1181,39 +1167,14 @@ export class LegalCasesService {
     }
 
     if (current?.lead_id) {
-      this.appendCaseStageToMemory(current.lead_id, current.tracking_stage, trackingStage, valid.label, current.case_number, current.legal_area).catch(err =>
-        this.logger.warn(`[MEMORY] Falha ao registrar etapa do processo na memória: ${err}`),
-      );
+      // appendCaseStageToMemory REMOVIDO em 2026-04-20 (fase 2d-1). O historico
+      // de etapas fica em LegalCase.tracking_stage — consulta direta.
     }
 
     return result;
   }
 
-  private async appendCaseStageToMemory(leadId: string, fromStage: string | null, toStage: string, toLabel: string, caseNumber: string | null, legalArea: string | null): Promise<void> {
-    const today = new Date().toISOString().slice(0, 10);
-    const fromLabel = TRACKING_STAGES.find(s => s.id === fromStage)?.label || fromStage || 'início';
-    const entry = { from: fromStage, to: toStage, date: today, case_number: caseNumber, legal_area: legalArea };
-
-    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } });
-    let facts: any = {};
-    try { facts = existing?.facts_json ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json) : {}; } catch { facts = {}; }
-    const timeline: any[] = facts.case_timeline || [];
-    timeline.push(entry);
-    if (timeline.length > 30) timeline.splice(0, timeline.length - 30);
-    facts.case_timeline = timeline;
-
-    const summaryLine = `[PROCESSO ${today}] ${fromLabel} → ${toLabel}${caseNumber ? ` (Proc. ${caseNumber})` : ''}`;
-    const newSummary = (summaryLine + (existing?.summary ? '\n' + existing.summary : '')).slice(0, 2000);
-
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: leadId },
-        data: { facts_json: facts, summary: newSummary, last_updated_at: new Date(), version: { increment: 1 } },
-      });
-    } else {
-      await this.prisma.aiMemory.create({ data: { lead_id: leadId, summary: newSummary, facts_json: facts } });
-    }
-  }
+  // appendCaseStageToMemory() REMOVIDO em 2026-04-20 (fase 2d-1).
 
   // ─── WORKSPACE ──────────────────────────────────────────────────
 
@@ -1225,7 +1186,8 @@ export class LegalCasesService {
       include: {
         lead: {
           include: {
-            memory: { select: { summary: true, facts_json: true } },
+            // `memory` (AiMemory) removido em 2026-04-20 (fase 2d-1).
+            // Clientes que precisem do perfil devem consultar LeadProfile separado.
             ficha_trabalhista: { select: { data: true, completion_pct: true, finalizado: true } },
           },
         },
@@ -1380,7 +1342,7 @@ export class LegalCasesService {
       include: {
         lead: {
           include: {
-            memory: { select: { summary: true } },
+            profile: { select: { summary: true } }, // LeadProfile (sistema novo — 2026-04-20)
             ficha_trabalhista: { select: { completion_pct: true, finalizado: true } },
           },
         },
@@ -1433,8 +1395,8 @@ IDENTIFICAÇÃO
 - Acompanhamento processual: ${legalCase.in_tracking ? `Sim (${legalCase.tracking_stage || '—'})` : 'Não'}
 - Data de abertura: ${fmtDate(legalCase.created_at)}
 
-MEMÓRIA DA IA (histórico de conversas com o cliente):
-${legalCase.lead?.memory?.summary || 'Sem memória registrada'}
+PERFIL DO CLIENTE (consolidado automaticamente pela IA):
+${legalCase.lead?.profile?.summary || 'Sem perfil consolidado — cliente novo ou sem conversa recente'}
 
 NOTAS INTERNAS:
 ${legalCase.notes || 'Sem anotações'}

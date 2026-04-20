@@ -267,12 +267,9 @@ export class PetitionsService {
       select: { id: true, status: true, updated_at: true },
     });
 
-    // Salva na memória quando petição é aprovada ou protocolada
-    if (newStatus === 'APROVADA' || newStatus === 'PROTOCOLADA') {
-      this.appendPetitionToMemory(petition, newStatus).catch(err =>
-        this.logger.warn(`[MEMORY] Falha ao registrar petição na memória: ${err}`),
-      );
-    }
+    // appendPetitionToMemory REMOVIDO em 2026-04-20 (fase 2d-1 da remocao total).
+    // Historico de peticoes fica na propria tabela Petition (consultavel por
+    // lead_id via JOIN com LegalCase).
 
     // WebSocket: notificar advogado quando petição enviada para revisão
     if (newStatus === 'EM_REVISAO') {
@@ -314,37 +311,9 @@ export class PetitionsService {
     }
   }
 
-  private async appendPetitionToMemory(petition: any, newStatus: string): Promise<void> {
-    const legalCase = await this.prisma.legalCase.findUnique({
-      where: { id: petition.legal_case_id },
-      select: { lead_id: true, case_number: true },
-    });
-    if (!legalCase?.lead_id) return;
-
-    const today = new Date().toISOString().slice(0, 10);
-    const entry = { type: petition.type, title: petition.title, status: newStatus, date: today, case_number: legalCase.case_number };
-
-    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: legalCase.lead_id } });
-    let facts: any = {};
-    try { facts = existing?.facts_json ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json) : {}; } catch { facts = {}; }
-    const petitions: any[] = facts.petitions || [];
-    petitions.push(entry);
-    if (petitions.length > 20) petitions.splice(0, petitions.length - 20);
-    facts.petitions = petitions;
-
-    const STATUS_LABEL: Record<string, string> = { APROVADA: 'aprovada', PROTOCOLADA: 'protocolada' };
-    const summaryLine = `[PETIÇÃO ${today}] ${petition.type} ${STATUS_LABEL[newStatus] || newStatus}: ${petition.title}`;
-    const newSummary = (summaryLine + (existing?.summary ? '\n' + existing.summary : '')).slice(0, 2000);
-
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: legalCase.lead_id },
-        data: { facts_json: facts, summary: newSummary, last_updated_at: new Date(), version: { increment: 1 } },
-      });
-    } else {
-      await this.prisma.aiMemory.create({ data: { lead_id: legalCase.lead_id, summary: newSummary, facts_json: facts } });
-    }
-  }
+  // appendPetitionToMemory() REMOVIDO em 2026-04-20 (fase 2d-1). Historico
+  // de peticoes fica em Petition.status / Petition.updated_at — consulta via
+  // JOIN LegalCase -> Petition sempre que precisar.
 
   /**
    * Review de petição pelo advogado: aprovar ou devolver com notas.
@@ -373,9 +342,7 @@ export class PetitionsService {
         select: { id: true, status: true, review_notes: true, updated_at: true },
       });
 
-      this.appendPetitionToMemory(petition, 'APROVADA').catch(err =>
-        this.logger.warn(`[MEMORY] Falha ao registrar petição na memória: ${err}`),
-      );
+      // appendPetitionToMemory REMOVIDO em 2026-04-20 (fase 2d-1).
 
       // WebSocket: notificar estagiário que petição foi aprovada
       this.notifyPetitionStatusChange(petition, 'APROVADA', 'EM_REVISAO', notes).catch(() => {});

@@ -129,24 +129,32 @@ export class LeadsCleanupService {
         data: { lead_id: targetLeadId },
       });
 
-      // 3. Tratar AiMemory (unique por lead_id)
-      const sourceMemory = await tx.aiMemory.findUnique({
+      // 3. Tratar LeadProfile (unique por lead_id) — atualizado em 2026-04-20
+      //    (fase 2d-1): antes manipulava AiMemory. Agora trabalha com o sistema
+      //    novo (LeadProfile). Memory entries (scope='lead') tambem sao migradas.
+      const sourceProfile = await tx.leadProfile.findUnique({
         where: { lead_id: sourceLeadId },
       });
-      const targetMemory = await tx.aiMemory.findUnique({
+      const targetProfile = await tx.leadProfile.findUnique({
         where: { lead_id: targetLeadId },
       });
 
-      if (sourceMemory && !targetMemory) {
-        await tx.aiMemory.update({
+      if (sourceProfile && !targetProfile) {
+        await tx.leadProfile.update({
           where: { lead_id: sourceLeadId },
           data: { lead_id: targetLeadId },
         });
-      } else if (sourceMemory && targetMemory) {
-        await tx.aiMemory.delete({
+      } else if (sourceProfile && targetProfile) {
+        await tx.leadProfile.delete({
           where: { lead_id: sourceLeadId },
         });
       }
+
+      // Memory entries scope=lead — reassignar scope_id
+      await tx.memory.updateMany({
+        where: { scope: 'lead', scope_id: sourceLeadId },
+        data: { scope_id: targetLeadId },
+      });
 
       // 4. Preencher campos vazios do target com dados do source
       const sourceLead = await tx.lead.findUnique({

@@ -124,10 +124,10 @@ export class FichaTrabalhistaService {
       finalizado: updated.finalizado,
     });
 
-    // Sincronizar dados da ficha → AiMemory (não bloqueia o retorno)
-    this.syncToMemory(leadId, merged).catch((err) =>
-      this.logger.warn(`[Ficha] Falha ao sincronizar memória: ${err.message}`),
-    );
+    // syncToMemory() REMOVIDO em 2026-04-20 (remocao total do AiMemory).
+    // Dados da ficha ficam apenas no modelo FichaTrabalhista. O sistema novo
+    // (LeadProfile) e populado automaticamente via extracao batch noturna a
+    // partir das conversas — nao precisa de sync direto da ficha.
 
     // Se ficha já finalizada e edição veio do lead, notificar via WhatsApp (debounce 1 por ficha)
     if (existing.finalizado && filledBy === 'lead') {
@@ -139,94 +139,11 @@ export class FichaTrabalhistaService {
     return updated;
   }
 
-  /** Sincroniza campos da ficha → AiMemory (facts_json) */
-  private async syncToMemory(leadId: string, fichaData: Record<string, any>) {
-    // Mapear ficha → facts_json (inverso do fillFromMemory)
-    const hasValue = (v: any) => v !== null && v !== undefined && v !== '';
-
-    const leadFacts: Record<string, any> = {};
-    if (hasValue(fichaData.nome_completo)) leadFacts.full_name = fichaData.nome_completo;
-    if (hasValue(fichaData.cpf)) leadFacts.cpf = fichaData.cpf;
-    if (hasValue(fichaData.nome_mae)) leadFacts.mother_name = fichaData.nome_mae;
-    if (hasValue(fichaData.cidade)) leadFacts.city = fichaData.cidade;
-    if (hasValue(fichaData.estado_uf)) leadFacts.state = fichaData.estado_uf;
-    if (hasValue(fichaData.telefone)) leadFacts.phones = [fichaData.telefone];
-    if (hasValue(fichaData.email)) leadFacts.emails = [fichaData.email];
-
-    const partiesFacts: Record<string, any> = {};
-    if (hasValue(fichaData.nome_empregador)) partiesFacts.counterparty_name = fichaData.nome_empregador;
-    if (hasValue(fichaData.cnpjcpf_empregador)) partiesFacts.counterparty_id = fichaData.cnpjcpf_empregador;
-
-    const currentFacts: Record<string, any> = {};
-    if (hasValue(fichaData.situacao_atual)) currentFacts.employment_status = fichaData.situacao_atual;
-    if (hasValue(fichaData.motivos_reclamacao)) currentFacts.main_issue = fichaData.motivos_reclamacao;
-
-    const keyValues: Record<string, any> = {};
-    if (hasValue(fichaData.salario)) keyValues.salario = fichaData.salario;
-    if (hasValue(fichaData.funcao)) keyValues.funcao = fichaData.funcao;
-    if (hasValue(fichaData.cidade_trabalho)) keyValues.cidade_trabalho = fichaData.cidade_trabalho;
-
-    const keyDates: Record<string, any> = {};
-    if (hasValue(fichaData.data_admissao)) keyDates.admissao = fichaData.data_admissao;
-    if (hasValue(fichaData.data_saida)) keyDates.demissao = fichaData.data_saida;
-
-    // Só sincronizar se houver dados relevantes para a memória
-    if (
-      Object.keys(leadFacts).length === 0 &&
-      Object.keys(partiesFacts).length === 0 &&
-      Object.keys(currentFacts).length === 0 &&
-      Object.keys(keyValues).length === 0 &&
-      Object.keys(keyDates).length === 0
-    ) {
-      return;
-    }
-
-    // Buscar memória existente e fazer merge profundo
-    const existing = await this.prisma.aiMemory.findUnique({
-      where: { lead_id: leadId },
-    });
-
-    let facts: any = {};
-    try {
-      facts = existing?.facts_json
-        ? typeof existing.facts_json === 'string'
-          ? JSON.parse(existing.facts_json as string)
-          : existing.facts_json
-        : {};
-    } catch {
-      facts = {};
-    }
-
-    // Merge profundo preservando campos que a ficha não cobre
-    facts.lead = { ...(facts.lead || {}), ...leadFacts };
-    facts.parties = { ...(facts.parties || {}), ...partiesFacts };
-    if (!facts.facts) facts.facts = {};
-    facts.facts.current = { ...(facts.facts.current || {}), ...currentFacts };
-    facts.facts.current.key_values = { ...(facts.facts.current.key_values || {}), ...keyValues };
-    facts.facts.current.key_dates = { ...(facts.facts.current.key_dates || {}), ...keyDates };
-
-    // Upsert na AiMemory
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: leadId },
-        data: {
-          facts_json: facts,
-          last_updated_at: new Date(),
-          version: { increment: 1 },
-        },
-      });
-    } else {
-      await this.prisma.aiMemory.create({
-        data: {
-          lead_id: leadId,
-          summary: `Ficha trabalhista preenchida: ${fichaData.nome_completo || 'lead'}`,
-          facts_json: facts,
-        },
-      });
-    }
-
-    this.logger.log(`[Ficha] Memória sincronizada para lead ${leadId}`);
-  }
+  // syncToMemory() REMOVIDO em 2026-04-20 (fase 2d-1 da remocao total).
+  // Antes: sincronizava campos da ficha trabalhista para AiMemory.facts_json.
+  // Agora: dados da ficha ficam apenas no modelo FichaTrabalhista. Extracao
+  // batch noturna + ProfileConsolidationProcessor cuidam de propagar informacao
+  // relevante para o LeadProfile via conversas.
 
   /** Marca como finalizado + envia msg WhatsApp + avança stage CRM */
   async finalize(leadId: string) {
@@ -303,112 +220,45 @@ export class FichaTrabalhistaService {
     // 6. Emitir inboxUpdate para atualizar o CRM/Kanban
     this.gateway.emitConversationsUpdate(null);
 
-    // 7. Registrar na AiMemory que a ficha foi finalizada
-    this.syncFichaStatusToMemory(leadId, 'finalizada').catch((err) =>
-      this.logger.warn(`[Ficha] Falha ao registrar finalização na memória: ${err.message}`),
-    );
+    // syncFichaStatusToMemory() REMOVIDO em 2026-04-20 (fase 2d-1). Status da
+    // ficha esta disponivel via findByLeadId().finalizado.
 
     return ficha;
   }
 
-  /** Preenche ficha com dados da AiMemory (mapeamento facts_json → campos) */
+  /** Preenche ficha com dados do LeadProfile.facts (sistema novo).
+   *
+   *  Atualizado em 2026-04-20: antes lia AiMemory.facts_json (case_state).
+   *  LeadProfile.facts e menos granular — so temos name, cpf, phone, email.
+   *  Os campos especificos trabalhistas (nome_mae, empregador, salario,
+   *  datas admissao/demissao) precisam ser preenchidos manualmente ou
+   *  perguntados pela IA durante a conversa.
+   */
   async fillFromMemory(leadId: string) {
-    const memory = await this.prisma.aiMemory.findUnique({
+    const lp = await this.prisma.leadProfile.findUnique({
       where: { lead_id: leadId },
+      select: { facts: true },
     });
-    if (!memory?.facts_json) return null;
+    if (!lp?.facts) return null;
 
-    const facts = memory.facts_json as any;
+    const facts = lp.facts as any;
     const mappedData: UpdateFichaDto = {};
 
-    // Mapear lead data
-    if (facts.lead?.full_name) mappedData.nome_completo = facts.lead.full_name;
-    if (facts.lead?.cpf) mappedData.cpf = facts.lead.cpf;
-    if (facts.lead?.city) mappedData.cidade = facts.lead.city;
-    if (facts.lead?.state) mappedData.estado_uf = facts.lead.state;
-    if (facts.lead?.phones?.[0]) mappedData.telefone = facts.lead.phones[0];
-    if (facts.lead?.emails?.[0]) mappedData.email = facts.lead.emails[0];
-    if (facts.lead?.mother_name) mappedData.nome_mae = facts.lead.mother_name;
-
-    // Mapear parties (empregador)
-    if (facts.parties?.counterparty_name)
-      mappedData.nome_empregador = facts.parties.counterparty_name;
-    if (facts.parties?.counterparty_id)
-      mappedData.cnpjcpf_empregador = facts.parties.counterparty_id;
-
-    // Mapear facts.current
-    if (facts.facts?.current?.employment_status)
-      mappedData.situacao_atual = facts.facts.current.employment_status;
-    if (facts.facts?.current?.main_issue)
-      mappedData.motivos_reclamacao = facts.facts.current.main_issue;
-
-    // Mapear key_values (salário, etc.)
-    const kv = facts.facts?.current?.key_values || {};
-    if (kv.salario) mappedData.salario = String(kv.salario);
-
-    // Mapear key_dates
-    const kd = facts.facts?.current?.key_dates || {};
-    if (kd.admissao) mappedData.data_admissao = kd.admissao;
-    if (kd.demissao || kd.saida)
-      mappedData.data_saida = kd.demissao || kd.saida;
+    if (facts.name) mappedData.nome_completo = facts.name;
+    if (facts.cpf) mappedData.cpf = facts.cpf;
+    if (facts.phone) mappedData.telefone = facts.phone;
+    if (facts.email) mappedData.email = facts.email;
 
     if (Object.keys(mappedData).length > 0) {
       this.logger.log(
-        `[Ficha] Preenchendo ${Object.keys(mappedData).length} campos da memória para lead ${leadId}`,
+        `[Ficha] Preenchendo ${Object.keys(mappedData).length} campos do LeadProfile para lead ${leadId}`,
       );
       return this.updatePartial(leadId, mappedData, 'ai');
     }
     return null;
   }
 
-  /** Registra na AiMemory o status da ficha (finalizada/editada) */
-  private async syncFichaStatusToMemory(leadId: string, status: string) {
-    const existing = await this.prisma.aiMemory.findUnique({
-      where: { lead_id: leadId },
-    });
-
-    let facts: any = {};
-    try {
-      facts = existing?.facts_json
-        ? typeof existing.facts_json === 'string'
-          ? JSON.parse(existing.facts_json as string)
-          : existing.facts_json
-        : {};
-    } catch {
-      facts = {};
-    }
-
-    // Registrar status da ficha
-    facts.ficha_trabalhista = {
-      ...(facts.ficha_trabalhista || {}),
-      status,
-      updated_at: new Date().toISOString(),
-    };
-
-    const today = new Date().toISOString().slice(0, 10);
-    const summaryLine = `[FICHA ${today}] Ficha trabalhista ${status}`;
-    const newSummary = (
-      summaryLine + (existing?.summary ? '\n' + existing.summary : '')
-    ).slice(0, 2000);
-
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: leadId },
-        data: {
-          facts_json: facts,
-          summary: newSummary,
-          last_updated_at: new Date(),
-          version: { increment: 1 },
-        },
-      });
-    } else {
-      await this.prisma.aiMemory.create({
-        data: { lead_id: leadId, summary: newSummary, facts_json: facts },
-      });
-    }
-
-    this.logger.log(`[Ficha] Status "${status}" registrado na memória do lead ${leadId}`);
-  }
+  // syncFichaStatusToMemory() REMOVIDO em 2026-04-20 (fase 2d-1).
 
   /** Envia WhatsApp informando que a edição foi recebida (debounce por lead) */
   private editNotifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -446,8 +296,7 @@ export class FichaTrabalhistaService {
             this.logger.log(`[Ficha] Notificação de edição enviada para ${lead.phone}`);
           }
 
-          // Registrar na memória
-          this.syncFichaStatusToMemory(leadId, 'editada após finalização').catch(() => {});
+          // Registro de status da ficha na memoria REMOVIDO em 2026-04-20 (fase 2d-1).
         } catch (e: any) {
           this.logger.warn(`[Ficha] Falha ao notificar edição: ${e.message}`);
         }
