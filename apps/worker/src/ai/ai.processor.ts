@@ -514,6 +514,14 @@ export class AiProcessor extends WorkerHost {
     }
 
     // g. Se next_step = "formulario" e área = Trabalhista, preencher ficha com memória
+    //
+    // Atualizado em 2026-04-20 (remocao total do sistema antigo): le do LeadProfile.facts
+    // (sistema novo) em vez do AiMemory.facts_json (case_state legado, descontinuado).
+    //
+    // Escopo reduzido: LeadProfile.facts tem apenas campos comuns (nome, CPF, telefone,
+    // email). Os campos especificos trabalhistas (nome_mae, empregador, salario, datas
+    // admissao/demissao, situacao atual) que antes vinham do case_state agora precisam
+    // ser preenchidos manualmente pelo advogado ou perguntados pela IA durante a conversa.
     if (updates.next_step === 'formulario') {
       try {
         const conv = await (this.prisma as any).conversation.findUnique({
@@ -521,28 +529,17 @@ export class AiProcessor extends WorkerHost {
           select: { legal_area: true },
         });
         if (conv?.legal_area?.toLowerCase().includes('trabalhist')) {
-          const memory = await this.prisma.aiMemory.findUnique({
+          const leadProfile = await this.prisma.leadProfile.findUnique({
             where: { lead_id: leadId },
+            select: { facts: true },
           });
-          if (memory?.facts_json) {
-            const facts = memory.facts_json as any;
+          if (leadProfile?.facts) {
+            const facts = leadProfile.facts as any;
             const mappedData: Record<string, string> = {};
-            if (facts.lead?.full_name) mappedData.nome_completo = facts.lead.full_name;
-            if (facts.lead?.cpf) mappedData.cpf = facts.lead.cpf;
-            if (facts.lead?.city) mappedData.cidade = facts.lead.city;
-            if (facts.lead?.state) mappedData.estado_uf = facts.lead.state;
-            if (facts.lead?.phones?.[0]) mappedData.telefone = facts.lead.phones[0];
-            if (facts.lead?.emails?.[0]) mappedData.email = facts.lead.emails[0];
-            if (facts.lead?.mother_name) mappedData.nome_mae = facts.lead.mother_name;
-            if (facts.parties?.counterparty_name) mappedData.nome_empregador = facts.parties.counterparty_name;
-            if (facts.parties?.counterparty_id) mappedData.cnpjcpf_empregador = facts.parties.counterparty_id;
-            if (facts.facts?.current?.employment_status) mappedData.situacao_atual = facts.facts.current.employment_status;
-            if (facts.facts?.current?.main_issue) mappedData.motivos_reclamacao = facts.facts.current.main_issue;
-            const kv = facts.facts?.current?.key_values || {};
-            if (kv.salario) mappedData.salario = String(kv.salario);
-            const kd = facts.facts?.current?.key_dates || {};
-            if (kd.admissao) mappedData.data_admissao = kd.admissao;
-            if (kd.demissao || kd.saida) mappedData.data_saida = kd.demissao || kd.saida;
+            if (facts.name) mappedData.nome_completo = facts.name;
+            if (facts.cpf) mappedData.cpf = facts.cpf;
+            if (facts.phone) mappedData.telefone = facts.phone;
+            if (facts.email) mappedData.email = facts.email;
 
             if (Object.keys(mappedData).length > 0) {
               const ficha = await (this.prisma as any).fichaTrabalhista.upsert({
@@ -841,129 +838,18 @@ export class AiProcessor extends WorkerHost {
       // 5. Auto-transcrever áudios sem texto (Whisper) — salva no banco
       await this.autoTranscribeAudios(convo.messages as any[], ai);
 
-      // 6. Carregar AiMemory (Long Memory) do lead
-      const memory = await this.prisma.aiMemory.findUnique({
+      // 6. Carregar LeadProfile (sistema novo de memoria) para retrocompatibilidade
+      // com a variavel {{lead_memory}} do prompt wrapper.
+      //
+      // Atualizado em 2026-04-20 (remocao total do sistema antigo): le do LeadProfile.summary
+      // (prosa gerada pelo ProfileConsolidationProcessor) em vez de construir manualmente
+      // a partir do AiMemory.facts_json. A variavel {{lead_profile}} (dedicada) continua
+      // sendo a fonte primaria — {{lead_memory}} virou alias legado.
+      const lp = await this.prisma.leadProfile.findUnique({
         where: { lead_id: convo.lead_id },
+        select: { summary: true },
       });
-      const factsJson = (memory?.facts_json as any) || null;
-
-      // Montar memória legível COMPLETA para injeção no prompt
-      // Quanto mais detalhada, menos chance de repetir perguntas
-      let leadMemory = 'Nenhuma memória anterior — primeiro contato.';
-      if (memory && (memory.summary || factsJson)) {
-        const parts: string[] = [];
-        if (memory.summary) parts.push(`📋 Resumo: ${memory.summary}`);
-        // Dados do lead
-        if (factsJson?.lead) {
-          const l = factsJson.lead;
-          const leadParts: string[] = [];
-          if (l.full_name) leadParts.push(`Nome: ${l.full_name}`);
-          if (l.first_name && !l.full_name) leadParts.push(`Nome: ${l.first_name}`);
-          if (l.cpf) leadParts.push(`CPF: ${l.cpf}`);
-          if (l.mother_name) leadParts.push(`Mãe: ${l.mother_name}`);
-          if (l.city) leadParts.push(`Cidade: ${l.city}`);
-          if (l.state) leadParts.push(`Estado: ${l.state}`);
-          if (l.phones?.length) leadParts.push(`Telefone(s): ${l.phones.join(', ')}`);
-          if (l.emails?.length) leadParts.push(`Email(s): ${l.emails.join(', ')}`);
-          if (leadParts.length) parts.push(`👤 Dados do Lead: ${leadParts.join(' | ')}`);
-        }
-        // Caso
-        // Suporte a múltiplos processos (facts.cases[]) + backward compat (facts.case)
-        const allCases: any[] = factsJson?.cases || (factsJson?.case ? [factsJson.case] : []);
-        if (allCases.length === 1) {
-          const c = allCases[0];
-          const caseParts: string[] = [];
-          if (c.case_number) caseParts.push(`Nº: ${c.case_number}`);
-          if (c.area) caseParts.push(`Área: ${c.area}`);
-          if (c.tracking_stage) caseParts.push(`Estágio: ${c.tracking_stage}`);
-          if (c.status) caseParts.push(`Status: ${c.status}`);
-          if (c.summary) caseParts.push(`Resumo: ${c.summary}`);
-          if (c.opposing_party) caseParts.push(`Parte contrária: ${c.opposing_party}`);
-          if (c.subarea) caseParts.push(`Subárea: ${c.subarea}`);
-          if (c.tags?.length) caseParts.push(`Tags: ${c.tags.join(', ')}`);
-          if (caseParts.length) parts.push(`⚖️ Processo: ${caseParts.join(' | ')}`);
-        } else if (allCases.length > 1) {
-          const caseLines = allCases.map((c: any, i: number) => {
-            const p: string[] = [];
-            if (c.case_number) p.push(`Nº: ${c.case_number}`);
-            if (c.area) p.push(c.area);
-            if (c.tracking_stage) p.push(`Estágio: ${c.tracking_stage}`);
-            if (c.opposing_party) p.push(`vs ${c.opposing_party}`);
-            return `  ${i + 1}. ${p.join(' | ')}`;
-          });
-          parts.push(`⚖️ Processos (${allCases.length}):\n${caseLines.join('\n')}`);
-        }
-        // Partes
-        if (factsJson?.parties) {
-          const p = factsJson.parties;
-          const partyParts: string[] = [];
-          if (p.client_role) partyParts.push(`Papel do cliente: ${p.client_role}`);
-          if (p.counterparty_name) partyParts.push(`Parte contrária: ${p.counterparty_name}`);
-          if (p.counterparty_id) partyParts.push(`CNPJ/CPF contrária: ${p.counterparty_id}`);
-          if (p.counterparty_type) partyParts.push(`Tipo: ${p.counterparty_type}`);
-          if (partyParts.length) parts.push(`🏢 Partes: ${partyParts.join(' | ')}`);
-        }
-        // Fatos
-        if (factsJson?.facts) {
-          const f = factsJson.facts;
-          if (f.current) {
-            const curParts: string[] = [];
-            if (f.current.employment_status) curParts.push(`Situação: ${f.current.employment_status}`);
-            if (f.current.main_issue) curParts.push(`Problema: ${f.current.main_issue}`);
-            if (f.current.key_dates && Object.keys(f.current.key_dates).length) {
-              curParts.push(`Datas: ${Object.entries(f.current.key_dates).map(([k,v]) => `${k}=${v}`).join(', ')}`);
-            }
-            if (f.current.key_values && Object.keys(f.current.key_values).length) {
-              curParts.push(`Valores: ${Object.entries(f.current.key_values).map(([k,v]) => `${k}=${v}`).join(', ')}`);
-            }
-            if (curParts.length) parts.push(`📌 Situação atual: ${curParts.join(' | ')}`);
-          }
-          if (f.core_facts?.length)
-            parts.push(`📝 Fatos-chave:\n${f.core_facts.map((fact: string, i: number) => `  ${i+1}. ${fact}`).join('\n')}`);
-          if (f.timeline?.length) {
-            const events = f.timeline.filter((t: any) => t?.event).slice(-10);
-            if (events.length)
-              parts.push(`📅 Timeline:\n${events.map((t: any) => `  - ${t.date || '?'}: ${t.event} (${t.origin || '?'})`).join('\n')}`);
-          }
-        }
-        // Evidências
-        if (factsJson?.evidence?.items?.length) {
-          const evItems = factsJson.evidence.items
-            .filter((e: any) => e?.type)
-            .map((e: any) => `${e.type}(${e.status || '?'})${e.notes ? ': '+e.notes : ''}`);
-          if (evItems.length)
-            parts.push(`📎 Evidências: ${evItems.join('; ')}`);
-        }
-        // Perguntas pendentes
-        if (factsJson?.open_questions?.length)
-          parts.push(`❓ Perguntas AINDA pendentes (pergunte estas):\n${factsJson.open_questions.map((q: string, i: number) => `  ${i+1}. ${q}`).join('\n')}`);
-        // Próximas ações
-        if (factsJson?.next_actions?.length)
-          parts.push(`🎯 Próximas ações: ${factsJson.next_actions.join('; ')}`);
-
-        // Histórico de etapas CRM (kanban de leads)
-        if (factsJson?.crm_timeline?.length) {
-          const entries = (factsJson.crm_timeline as any[]).slice(-10);
-          parts.push(`🏷️ Jornada no CRM:\n${entries.map((e: any) => `  - ${e.date}: ${e.from || 'início'} → ${e.to}${e.loss_reason ? ` (${e.loss_reason})` : ''}`).join('\n')}`);
-        }
-        // Histórico de etapas do processo judicial
-        if (factsJson?.case_timeline?.length) {
-          const entries = (factsJson.case_timeline as any[]).slice(-10);
-          parts.push(`⚖️ Histórico do Processo:\n${entries.map((e: any) => `  - ${e.date}: ${e.from || 'início'} → ${e.to}${e.case_number ? ` (${e.case_number})` : ''}`).join('\n')}`);
-        }
-        // Petições protocoladas/aprovadas
-        if (factsJson?.petitions?.length) {
-          const pItems = (factsJson.petitions as any[]).slice(-5);
-          parts.push(`📄 Petições: ${pItems.map((p: any) => `${p.type}(${p.status})${p.date ? ' em '+p.date : ''}`).join('; ')}`);
-        }
-        // Publicações DJEN analisadas
-        if (factsJson?.djen_publications?.length) {
-          const dItems = (factsJson.djen_publications as any[]).slice(0, 5);
-          parts.push(`📰 DJEN (${dItems.length} pub.):\n${dItems.map((d: any) => `  - ${d.date}: ${d.tipo}${d.assunto ? ' — '+d.assunto : ''}. ${d.resumo || ''}`).join('\n')}`);
-        }
-
-        if (parts.length) leadMemory = parts.join('\n');
-      }
+      const leadMemory = lp?.summary || 'Nenhuma memória anterior — primeiro contato.';
 
       // 7. Montar histórico com rótulos (Cliente / Sophia / Operador)
       // Invertemos o array (que veio desc) para ordem cronológica correta
@@ -1284,7 +1170,7 @@ IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investig
         legal_area: legalArea || 'a ser identificada',
         firm_name: 'André Lustosa Advogados',
         lead_memory: leadMemory,
-        lead_summary: memory?.summary || '',
+        lead_summary: lp?.summary || '',
         conversation_id: convo.id,
         lead_id: convo.lead_id || convo.lead?.id || '',
         history_summary: historyText.slice(0, 2000),
@@ -1385,8 +1271,9 @@ STATUS DA FICHA:
       //   - Cada camada tambem e exposta como variavel {{office_memories}},
       //     {{lead_profile}}, {{recent_episodes}} e {{memory_block}} para
       //     skill writers controlarem o posicionamento manualmente.
-      // Fallback: caso o sistema novo ainda nao tenha memorias populadas,
-      // strings ficam vazias e o prompt usa o {{lead_memory}} antigo (case_state).
+      // Fallback: caso as variaveis dedicadas nao tenham dados ainda (ex: lead recem
+      // criado sem profile consolidado), strings ficam vazias e o prompt usa o
+      // {{lead_memory}} (alias legado que hoje aponta para LeadProfile.summary).
       let memoryBlock = '';
       let officeMemoriesStr = '';
       let leadProfileStr = '';
