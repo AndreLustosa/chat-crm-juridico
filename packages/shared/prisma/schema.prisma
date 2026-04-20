@@ -117,7 +117,6 @@ model Lead {
   // Google Drive
   google_drive_folder_id String?
 
-  memory               AiMemory?
   profile              LeadProfile?
   conversations        Conversation[]
   tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -295,15 +294,14 @@ model TaskPostponement {
   @@index([task_id])
 }
 
-model AiMemory {
-  id              String   @id @default(uuid())
-  lead_id         String   @unique
-  summary         String
-  facts_json      Json     @default("{}")
-  last_updated_at DateTime @default(now())
-  version         Int      @default(1)
-  lead            Lead     @relation(fields: [lead_id], references: [id], onDelete: Cascade)
-}
+// model AiMemory REMOVIDO em 2026-04-20 (fase 2d-3 da remocao total do sistema
+// antigo de memoria). Substituido pelo sistema novo: LeadProfile (perfil em
+// prosa consolidado pela IA) + Memory (entries individuais tipadas). Ver
+// MEMORY_SYSTEM.md secao 9.6 (migracao case_state -> LeadProfile).
+//
+// Migration SQL acompanha este commit em packages/shared/prisma/migrations/.
+// Dados anteriores (132 registros no banco de producao) foram migrados para
+// LeadProfile antes do DROP TABLE.
 
 model PromptSkill {
   id                 String       @id @default(uuid())

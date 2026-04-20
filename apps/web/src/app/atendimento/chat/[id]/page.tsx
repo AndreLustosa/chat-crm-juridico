@@ -743,20 +743,12 @@ export default function ChatPage({ params }: { params: { id: string } }) {
           </div>
         </header>
 
-        {/* Banner de perguntas em aberto — orienta o operador */}
+        {/* Banner de perguntas em aberto REMOVIDO em 2026-04-20 (fase 2d-2).
+            Dependia de AiMemory.facts_json.open_questions que nao existe no
+            sistema novo (LeadProfile). Se voltar a ser util, derivar de
+            LeadProfile.facts.pending[] ou de Memory entries tipo=episodic. */}
         {(() => {
-          const openQ = (lead?.memory?.facts_json as any)?.open_questions;
-          return openQ?.length > 0 ? (
-            <div className="px-4 py-2.5 border-b border-sky-500/20 bg-sky-500/5 flex gap-3 items-start">
-              <span className="text-sky-400 text-xs font-bold mt-0.5 shrink-0">?</span>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-sky-400/90">
-                {openQ.slice(0, 6).map((q: string, i: number) => (
-                  <span key={i} className="whitespace-nowrap">{q}</span>
-                ))}
-                {openQ.length > 6 && <span className="text-sky-400/50">+{openQ.length - 6} mais</span>}
-              </div>
-            </div>
-          ) : null;
+          return null;
         })()}
 
         {/* Messages — click em área vazia foca o textarea (UX WhatsApp Web) */}

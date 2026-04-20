@@ -47,7 +47,7 @@ export class PetitionAiService {
           include: {
             lead: {
               include: {
-                memory: true,
+                profile: true, // LeadProfile (sistema novo — 2026-04-20)
                 ficha_trabalhista: true,
               },
             },
@@ -197,16 +197,10 @@ REGRAS:
       if (ficha.descricao_problema) parts.push(`Descrição do problema: ${ficha.descricao_problema}`);
     }
 
-    // Memória da IA
-    if (lead.memory?.summary) {
-      parts.push('\n=== MEMÓRIA DO CASO (IA) ===');
-      parts.push(lead.memory.summary);
-      if (lead.memory.facts_json && typeof lead.memory.facts_json === 'object') {
-        const facts = lead.memory.facts_json;
-        if (facts.problema_juridico) parts.push(`Problema: ${facts.problema_juridico}`);
-        if (facts.pretensao) parts.push(`Pretensão: ${facts.pretensao}`);
-        if (facts.urgencia) parts.push(`Urgência: ${facts.urgencia}`);
-      }
+    // Perfil do cliente (LeadProfile — sistema novo desde 2026-04-20, fase 2d-2)
+    if (lead.profile?.summary) {
+      parts.push('\n=== PERFIL DO CLIENTE (consolidado pela IA) ===');
+      parts.push(lead.profile.summary);
     }
 
     // Detalhes do caso

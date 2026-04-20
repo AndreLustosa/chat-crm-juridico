@@ -212,37 +212,39 @@ export class ContractsService {
     variaveis: ContratoVariaveis;
     camposFaltando: string[];
   }> {
+    // Atualizado em 2026-04-20 (fase 2d-2): le LeadProfile.facts em vez de
+    // AiMemory.facts_json. LeadProfile tem menos campos (nome, cpf, phone,
+    // email) — campos especificos (nome_mae, city, state, subarea) agora so
+    // vem da ficha trabalhista.
     const convo = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: { lead: { include: { memory: true, ficha_trabalhista: true } } },
+      include: { lead: { include: { profile: true, ficha_trabalhista: true } } },
     });
     if (!convo?.lead) throw new BadRequestException('Conversa inválida');
 
     const lead = convo.lead;
     const ficha = (lead.ficha_trabalhista?.data as Record<string, any>) || {};
-    const mem = (lead.memory?.facts_json as any) || {};
+    const profileFacts = (lead.profile?.facts as any) || {};
 
     const v: ContratoVariaveis = {
       NOME_CONTRATANTE:
-        ficha.nome_completo || lead.name || mem?.lead?.full_name || '___________________',
+        ficha.nome_completo || lead.name || profileFacts.name || '___________________',
       NACIONALIDADE: ficha.nacionalidade || 'brasileiro(a)',
       ESTADO_CIVIL: ficha.estado_civil || '___________________',
       DATA_NASCIMENTO: formatarDataExtenso(ficha.data_nascimento),
-      NOME_MAE: ficha.nome_mae || mem?.lead?.mother_name || '___________________',
+      NOME_MAE: ficha.nome_mae || '___________________',
       NOME_PAI: ficha.nome_pai || '___________________',
-      CPF: ficha.cpf || mem?.lead?.cpf || '___.___.___-__',
-      ENDERECO: ficha.endereco || '___________________',
+      CPF: ficha.cpf || profileFacts.cpf || '___.___.___-__',
+      ENDERECO: ficha.endereco || profileFacts.address || '___________________',
       BAIRRO: ficha.bairro || '___________________',
       CEP: ficha.cep || '__.___-___',
       CIDADE_UF:
-        (ficha.cidade || mem?.lead?.city || 'Arapiraca') +
-        ' - ' +
-        (ficha.estado_uf || mem?.lead?.state || 'AL'),
+        (ficha.cidade || 'Arapiraca') + ' - ' + (ficha.estado_uf || 'AL'),
       PERCENTUAL: 30,
       PERCENTUAL_EXTENSO: 'trinta',
       DESCRICAO_CAUSA:
         ficha.situacao_atual ||
-        mem?.case?.subarea ||
+        profileFacts.cases?.[0]?.summary ||
         'processo de Reclamação Trabalhista, que tramita no Tribunal Regional do Trabalho da 19ª Região',
       DATA_CONTRATO: dataContrato(),
       CIDADE_CONTRATO: 'Arapiraca - AL',

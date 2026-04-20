@@ -355,10 +355,9 @@ export class LeadsService {
       },
     }).catch(err => this.logger.warn(`Failed to record stage history for lead ${id}: ${err}`));
 
-    // Salva avanço de etapa na memória do lead (contexto para IA)
-    this.appendLeadStageToMemory(id, current?.stage ?? null, stage, lossReason ?? null).catch(err =>
-      this.logger.warn(`[MEMORY] Falha ao registrar etapa CRM na memória do lead ${id}: ${err}`),
-    );
+    // appendLeadStageToMemory REMOVIDO em 2026-04-20 (fase 2d-2). Historico
+    // de etapas CRM fica em LeadStageHistory (tabela proppria — consultavel
+    // por timeline). A IA recebe o stage atual via lead.stage no payload.
 
     // Broadcast: notificar outros clientes sobre mudanca de stage do lead
     this.chatGateway.emitConversationsUpdate(tenantId ?? null);
@@ -430,7 +429,7 @@ export class LeadsService {
    * antes resetava apenas AiMemory. Agora reseta ambos em paralelo dentro
    * de transaction.
    */
-  async resetMemory(id: string, tenantId?: string): Promise<{ ok: boolean; deleted: { leadProfile: number; memories: number; aiMemory: number } }> {
+  async resetMemory(id: string, tenantId?: string): Promise<{ ok: boolean; deleted: { leadProfile: number; memories: number } }> {
     if (tenantId) {
       const lead = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
       if (lead?.tenant_id && lead.tenant_id !== tenantId) {
@@ -438,12 +437,9 @@ export class LeadsService {
       }
     }
 
-    const [lpResult, memResult, aiResult] = await this.prisma.$transaction([
+    const [lpResult, memResult] = await this.prisma.$transaction([
       this.prisma.leadProfile.deleteMany({ where: { lead_id: id } }),
       this.prisma.memory.deleteMany({ where: { scope: 'lead', scope_id: id } }),
-      // AiMemory e removido ate a tabela ser dropada (fase 2d da remocao total).
-      // Apos o DROP TABLE, esta linha deve ser removida.
-      this.prisma.aiMemory.deleteMany({ where: { lead_id: id } }),
     ]);
 
     return {
@@ -451,7 +447,6 @@ export class LeadsService {
       deleted: {
         leadProfile: lpResult.count,
         memories: memResult.count,
-        aiMemory: aiResult.count,
       },
     };
   }
@@ -535,8 +530,9 @@ export class LeadsService {
         await tx.conversation.deleteMany({ where: { id: { in: convIds } } });
       }
 
-      // Memória IA
-      await tx.aiMemory.deleteMany({ where: { lead_id: id } });
+      // Memoria IA: deleteMany(aiMemory) removido em 2026-04-20 (fase 2d-2).
+      // LeadProfile e Memory entries sao deletados em cascade via onDelete
+      // no schema (relacoes configuradas com Cascade).
 
       // Lead em si
       await tx.lead.delete({ where: { id } });
@@ -555,7 +551,13 @@ export class LeadsService {
       }
     }
 
-    const [stageHistory, notes, memory] = await Promise.all([
+    // Atualizado em 2026-04-20 (fase 2d-2): Timeline anterior incluia 3 fontes
+    // derivadas de AiMemory.facts_json (case_stage, petition, djen). Como
+    // AiMemory foi removido, timeline agora retorna apenas stage_history +
+    // notes (dados autoritativos). Eventos derivados de outras tabelas
+    // (Petition, DjenPublication, LegalCase) podem ser adicionados em uma
+    // iteracao futura consultando essas tabelas diretamente.
+    const [stageHistory, notes] = await Promise.all([
       this.prisma.leadStageHistory.findMany({
         where: { lead_id: leadId },
         orderBy: { created_at: 'desc' },
@@ -568,11 +570,7 @@ export class LeadsService {
         take: 100,
         include: { user: { select: { id: true, name: true } } },
       }),
-      this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } }),
     ]);
-
-    let facts: any = {};
-    try { facts = memory?.facts_json ? (typeof memory.facts_json === 'string' ? JSON.parse(memory.facts_json as string) : memory.facts_json) : {}; } catch { facts = {}; }
 
     const items: any[] = [
       ...stageHistory.map(h => ({
@@ -590,36 +588,6 @@ export class LeadsService {
         text: n.text,
         author: (n as any).user ?? null,
         created_at: n.created_at,
-      })),
-      // Etapas do processo judicial (de AiMemory)
-      ...(facts.case_timeline || []).map((e: any, i: number) => ({
-        type: 'case_stage',
-        id: `case_${i}`,
-        from_stage: e.from,
-        to_stage: e.to,
-        case_number: e.case_number,
-        legal_area: e.legal_area,
-        created_at: new Date(e.date + 'T12:00:00Z'),
-      })),
-      // Petições aprovadas/protocoladas (de AiMemory)
-      ...(facts.petitions || []).map((p: any, i: number) => ({
-        type: 'petition',
-        id: `petition_${i}`,
-        petition_type: p.type,
-        title: p.title,
-        status: p.status,
-        case_number: p.case_number,
-        created_at: new Date(p.date + 'T12:00:00Z'),
-      })),
-      // Publicações DJEN analisadas (de AiMemory)
-      ...(facts.djen_publications || []).map((d: any, i: number) => ({
-        type: 'djen',
-        id: `djen_${i}`,
-        djen_tipo: d.tipo,
-        djen_assunto: d.assunto,
-        resumo: d.resumo,
-        urgencia: d.urgencia,
-        created_at: new Date(d.date + 'T12:00:00Z'),
       })),
     ];
 
@@ -760,40 +728,6 @@ export class LeadsService {
     return [header.join(','), ...rows].join('\n');
   }
 
-  // ─── Memória: registra avanço de etapa CRM ────────────────────────────────
-
-  private async appendLeadStageToMemory(leadId: string, fromStage: string | null, toStage: string, lossReason: string | null): Promise<void> {
-    const STAGE_LABELS: Record<string, string> = {
-      NOVO: 'Novo', INICIAL: 'Inicial', QUALIFICANDO: 'Qualificando',
-      AGUARDANDO_FORM: 'Aguardando Formulário', REUNIAO_AGENDADA: 'Reunião Agendada',
-      AGUARDANDO_DOCS: 'Aguardando Documentos', AGUARDANDO_PROC: 'Aguardando Processo',
-      FINALIZADO: 'Finalizado', PERDIDO: 'Perdido',
-    };
-    const today = new Date().toISOString().slice(0, 10);
-    const entry = {
-      from: fromStage, to: toStage, date: today,
-      ...(lossReason ? { loss_reason: lossReason } : {}),
-    };
-    const existing = await this.prisma.aiMemory.findUnique({ where: { lead_id: leadId } });
-    let facts: any = {};
-    try { facts = existing?.facts_json ? (typeof existing.facts_json === 'string' ? JSON.parse(existing.facts_json as string) : existing.facts_json) : {}; } catch { facts = {}; }
-    const timeline: any[] = facts.crm_timeline || [];
-    timeline.push(entry);
-    if (timeline.length > 30) timeline.splice(0, timeline.length - 30);
-    facts.crm_timeline = timeline;
-
-    const fromLabel = STAGE_LABELS[fromStage ?? ''] || fromStage || 'início';
-    const toLabel = STAGE_LABELS[toStage] || toStage;
-    const summaryLine = `[CRM ${today}] ${fromLabel} → ${toLabel}${lossReason ? ` (Motivo: ${lossReason})` : ''}`;
-    const newSummary = (summaryLine + (existing?.summary ? '\n' + existing.summary : '')).slice(0, 2000);
-
-    if (existing) {
-      await this.prisma.aiMemory.update({
-        where: { lead_id: leadId },
-        data: { facts_json: facts, summary: newSummary, last_updated_at: new Date(), version: { increment: 1 } },
-      });
-    } else {
-      await this.prisma.aiMemory.create({ data: { lead_id: leadId, summary: newSummary, facts_json: facts } });
-    }
-  }
+  // appendLeadStageToMemory() REMOVIDO em 2026-04-20 (fase 2d-2). Historico
+  // de etapas fica na tabela LeadStageHistory (consultavel via getTimeline).
 }

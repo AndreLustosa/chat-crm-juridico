@@ -75,29 +75,10 @@ export class MemoriesController {
     return this.memoriesService.migrateSkillsToMemoryVars();
   }
 
-  /**
-   * Dispara migracao em lote: gera LeadProfile a partir de AiMemory (legado)
-   * para leads ativos que ainda nao tem perfil no sistema novo.
-   *
-   * Query params:
-   *   - limit: max de leads a processar (default 500)
-   *   - activeSince: ISO date (default 90 dias atras)
-   *
-   * Retorna apenas o summary do enfileiramento — processamento roda em background
-   * no worker (fila memory-jobs). Acompanhar progresso via SQL:
-   *   SELECT COUNT(*) FROM "LeadProfile" WHERE tenant_id = ...;
-   */
-  @Post('migrate-legacy-leads-to-profile')
-  @Roles('ADMIN')
-  async migrateLegacyLeads(
-    @Query('limit') limit?: string,
-    @Query('active_since') activeSince?: string,
-  ) {
-    return this.memoriesService.migrateLegacyLeadsToProfile({
-      limit: limit ? parseInt(limit, 10) : undefined,
-      activeSince,
-    });
-  }
+  // POST /memories/migrate-legacy-leads-to-profile REMOVIDO em 2026-04-20
+  // (fase 2d-2 da remocao total). Endpoint foi usado UMA unica vez para migrar
+  // 122/132 leads com AiMemory para LeadProfile. Virou dead code apos a
+  // migracao. Schema/tabela AiMemory e dropado na fase 2d-3.
 
   /**
    * Remove linhas hardcoded (numeros oficiais, endereco) dos corpos das skills,
