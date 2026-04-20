@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, Brain, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, RotateCcw, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake, CreditCard } from 'lucide-react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake, CreditCard } from 'lucide-react';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { LeadMemoryPanel } from '@/components/LeadMemoryPanel';
 import { useRouter } from 'next/navigation';
@@ -179,8 +179,8 @@ export function ClientPanel({
   const router = useRouter();
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [memoryOpen, setMemoryOpen] = useState(false);
-  const [resettingMemory, setResettingMemory] = useState(false);
+  // memoryOpen/resettingMemory removidos em 2026-04-20 — bloco "Histórico de
+  // Atendimento" (AiMemory legado) foi substituído pelo LeadMemoryPanel.
   const [editing, setEditing] = useState<'name' | 'email' | 'cpf_cnpj' | null>(null);
   const [saving, setSaving] = useState(false);
   const [resolvedAgent, setResolvedAgent] = useState<{ id: string; name: string } | null>(null);
@@ -521,21 +521,8 @@ export function ClientPanel({
   };
 
   const currentAgent = resolvedAgent ?? lead?.conversations?.[0]?.assigned_user ?? null;
-  const factsJson = lead?.memory?.facts_json as any;
-
-  const handleResetMemory = async () => {
-    if (!lead) return;
-    if (!window.confirm('Resetar a memória da IA para este contato? A IA começará do zero na próxima conversa.')) return;
-    setResettingMemory(true);
-    try {
-      await api.delete(`/leads/${lead.id}/memory`);
-      setLead(prev => prev ? { ...prev, memory: undefined } : prev);
-    } catch {
-      alert('Erro ao resetar memória. Tente novamente.');
-    } finally {
-      setResettingMemory(false);
-    }
-  };
+  // factsJson/handleResetMemory removidos em 2026-04-20 — reset da memória agora
+  // é feito via LeadMemoryPanel (atua em LeadProfile + Memory entries).
 
   const handleDeleteContact = async () => {
     if (!lead) return;
@@ -656,85 +643,7 @@ export function ClientPanel({
               </div>
             </div>
 
-            {/* Histórico de Atendimento */}
-            {lead.memory && (
-              <div className="border-b border-border">
-                <div className="flex items-center">
-                  <button className="flex-1 px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors" onClick={() => setMemoryOpen(!memoryOpen)}>
-                    <div className="flex items-center gap-2.5">
-                      <Brain size={15} className="text-violet-400" />
-                      <span className="text-[13px] font-bold text-foreground">Histórico de Atendimento</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">v{lead.memory.version}</span>
-                    </div>
-                    {memoryOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
-                  </button>
-                  <button onClick={handleResetMemory} disabled={resettingMemory} title="Resetar memória da IA" className="mr-4 p-1.5 rounded-lg text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-50">
-                    {resettingMemory ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                  </button>
-                </div>
-                {memoryOpen && (
-                  <div className="px-6 pb-5 flex flex-col gap-4">
-                    {lead.memory.summary && (
-                      <div>
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5">Resumo</p>
-                        <p className="text-[13px] text-foreground leading-relaxed bg-foreground/[0.03] rounded-xl p-3 border border-border">{lead.memory.summary}</p>
-                      </div>
-                    )}
-                    {factsJson && (
-                      <div className="grid grid-cols-2 gap-3">
-                        {factsJson.case?.area && (
-                          <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border">
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Área</p>
-                            <p className="text-[13px] font-semibold text-foreground">{factsJson.case.area}</p>
-                          </div>
-                        )}
-                        {factsJson.case?.status && (
-                          <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border">
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Status</p>
-                            <p className="text-[13px] font-semibold text-foreground">{factsJson.case.status}</p>
-                          </div>
-                        )}
-                        {factsJson.facts?.current?.main_issue && (
-                          <div className="col-span-2 bg-foreground/[0.03] rounded-xl p-3 border border-border">
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Problema Principal</p>
-                            <p className="text-[13px] text-foreground">{factsJson.facts.current.main_issue}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {factsJson?.facts?.core_facts?.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Fatos-chave</p>
-                        <ul className="flex flex-col gap-1.5">
-                          {factsJson.facts.core_facts.slice(0, 6).map((fact: string, i: number) => (
-                            <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
-                              <span className="text-primary mt-0.5 shrink-0">•</span>
-                              <span>{fact}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {factsJson?.open_questions?.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Perguntas em Aberto</p>
-                        <ul className="flex flex-col gap-1.5">
-                          {factsJson.open_questions.slice(0, 4).map((q: string, i: number) => (
-                            <li key={i} className="flex items-start gap-2 text-[12px] text-sky-400">
-                              <span className="mt-0.5 shrink-0">?</span>
-                              <span>{q}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <p className="text-[10px] text-muted-foreground">Atualizado em {formatDate(lead.memory.last_updated_at)}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Sistema de Memória Inteligente (novo) */}
+            {/* Sistema de Memória Inteligente — substituiu "Histórico de Atendimento" (AiMemory legado) em 2026-04-20 */}
             {lead && <LeadMemoryPanel leadId={lead.id} canEdit={isAdmin} />}
 
             {/* Banco de Documentos */}

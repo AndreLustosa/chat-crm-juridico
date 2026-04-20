@@ -418,15 +418,42 @@ export class LeadsService {
     return lead;
   }
 
-  async resetMemory(id: string, tenantId?: string): Promise<{ ok: boolean }> {
+  /**
+   * Reseta toda a memoria da IA para um lead — deleta LeadProfile (sistema
+   * novo), Memory entries (scope=lead) e AiMemory (sistema antigo, mantido
+   * apenas enquanto a tabela existir).
+   *
+   * Na proxima interacao do lead, o sistema novo cria LeadProfile do zero
+   * a partir das novas mensagens via extracao batch noturna + consolidacao.
+   *
+   * Atualizado em 2026-04-20 (remocao total do sistema antigo — fase 2c):
+   * antes resetava apenas AiMemory. Agora reseta ambos em paralelo dentro
+   * de transaction.
+   */
+  async resetMemory(id: string, tenantId?: string): Promise<{ ok: boolean; deleted: { leadProfile: number; memories: number; aiMemory: number } }> {
     if (tenantId) {
       const lead = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
       if (lead?.tenant_id && lead.tenant_id !== tenantId) {
         throw new ForbiddenException('Acesso negado a este recurso');
       }
     }
-    await this.prisma.aiMemory.deleteMany({ where: { lead_id: id } });
-    return { ok: true };
+
+    const [lpResult, memResult, aiResult] = await this.prisma.$transaction([
+      this.prisma.leadProfile.deleteMany({ where: { lead_id: id } }),
+      this.prisma.memory.deleteMany({ where: { scope: 'lead', scope_id: id } }),
+      // AiMemory e removido ate a tabela ser dropada (fase 2d da remocao total).
+      // Apos o DROP TABLE, esta linha deve ser removida.
+      this.prisma.aiMemory.deleteMany({ where: { lead_id: id } }),
+    ]);
+
+    return {
+      ok: true,
+      deleted: {
+        leadProfile: lpResult.count,
+        memories: memResult.count,
+        aiMemory: aiResult.count,
+      },
+    };
   }
 
   // ─── DELETE CONTACT (somente ADMIN) ──────────────────────────────────────
