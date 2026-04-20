@@ -99,6 +99,12 @@ REGRAS:
 - Seja factual. Nao invente. Use null para dados desconhecidos.
 - Se o perfil existente ja estiver bom, atualize apenas o que mudou.
 - Contradicoes: use a memoria mais recente.
+- Se receber um "legacy_memory" (sistema antigo case_state em JSON), extraia
+  as informacoes relevantes dele para compor o summary/facts — trate como
+  mais uma fonte equivalente a Memory entries. A estrutura contem:
+  * summary: resumo em texto livre do atendimento
+  * facts: JSON estruturado com lead.*, case.*, facts.core_facts[], etc.
+  Ignore metadata tecnica (version, last_updated_at).
 
 Responda APENAS: { "summary": "...", "facts": { ... } }`;
 

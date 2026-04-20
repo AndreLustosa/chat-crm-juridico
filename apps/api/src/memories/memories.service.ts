@@ -469,6 +469,75 @@ export class MemoriesService {
   }
 
   /**
+   * Migra em lote leads que ainda so tem AiMemory (sistema antigo) para gerar
+   * LeadProfile (sistema novo). Enfileira um job `consolidate-profile` por lead
+   * — o ProfileConsolidationProcessor agora le AiMemory como fonte adicional
+   * quando existe, permitindo a consolidacao sem perder historico.
+   *
+   * Idempotente: pula leads que ja tem LeadProfile.
+   * Custo estimado: ~$0.04 por lead (GPT-4.1 ~500 tokens saida).
+   *
+   * @param limit Maximo de leads a enfileirar (default 500)
+   * @param activeSince Apenas leads com conversa desde essa data (ISO string)
+   *                     — default: 90 dias atras
+   */
+  async migrateLegacyLeadsToProfile(params?: { limit?: number; activeSince?: string }) {
+    const limit = params?.limit ?? 500;
+    const since = params?.activeSince
+      ? new Date(params.activeSince)
+      : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+    // Leads com AiMemory mas SEM LeadProfile, ativos desde `since`
+    const candidates = await this.prisma.$queryRawUnsafe<
+      Array<{ id: string; tenant_id: string | null; name: string | null }>
+    >(
+      `
+      SELECT DISTINCT l.id, l.tenant_id, l.name
+      FROM "Lead" l
+      JOIN "AiMemory" am ON am.lead_id = l.id
+      LEFT JOIN "LeadProfile" lp ON lp.lead_id = l.id
+      WHERE lp.id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM "Conversation" c
+          JOIN "Message" m ON m.conversation_id = c.id
+          WHERE c.lead_id = l.id AND m.created_at >= $1
+        )
+      ORDER BY l.id
+      LIMIT $2
+      `,
+      since,
+      limit,
+    );
+
+    let enqueued = 0;
+    let skipped = 0;
+
+    for (const lead of candidates) {
+      if (!lead.tenant_id) {
+        skipped++;
+        continue;
+      }
+      const jobId = `migrate-legacy-${lead.id}-${Date.now()}`;
+      await this.memoryQueue.add(
+        'consolidate-profile',
+        { tenant_id: lead.tenant_id, lead_id: lead.id, reason: 'legacy-migration' },
+        { jobId, removeOnComplete: true, attempts: 2 },
+      );
+      enqueued++;
+    }
+
+    return {
+      summary: {
+        candidates_found: candidates.length,
+        enqueued,
+        skipped_no_tenant: skipped,
+        active_since: since.toISOString(),
+        limit,
+      },
+    };
+  }
+
+  /**
    * Remove linhas hardcoded do corpo das skills que duplicam dados institucionais
    * agora providos pela variavel {{office_memories}} (numeros oficiais e endereco).
    *
