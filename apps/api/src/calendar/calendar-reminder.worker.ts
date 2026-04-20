@@ -6,6 +6,44 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import * as nodemailer from 'nodemailer';
+
+// ─── Labels/emojis para lembretes EMAIL (portado do worker em 2026-04-20) ──
+const TYPE_LABEL: Record<string, string> = {
+  AUDIENCIA: 'Audiência',
+  PERICIA: 'Perícia',
+  PRAZO: 'Prazo',
+  TAREFA: 'Tarefa',
+  CONSULTA: 'Consulta',
+  OUTRO: 'Evento',
+};
+
+const TYPE_EMOJI: Record<string, string> = {
+  AUDIENCIA: '⚖️',
+  PERICIA: '🔬',
+  PRAZO: '⏰',
+  TAREFA: '✅',
+  CONSULTA: '🟣',
+  OUTRO: '📅',
+};
+
+function formatDateShort(d: Date): string {
+  return d.toLocaleDateString('pt-BR', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatTimeShort(d: Date): string {
+  return d.toLocaleTimeString('pt-BR', {
+    timeZone: 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 // ─── Formatação de datas em pt-BR ────────────────────────────────────────────
 
@@ -283,16 +321,25 @@ export class CalendarReminderWorker extends WorkerHost {
       return;
     }
 
+    // Envia pelo canal apropriado. Dedup defensivo: so marca sent_at se o
+    // envio foi bem-sucedido (evita perder o job quando ha falha transitoria).
+    let sent = false;
     if (channel === 'WHATSAPP') {
       await this.sendWhatsAppReminders(event, reminder.minutes_before);
+      sent = true; // sendWhatsAppReminders nao retorna flag, mas loga falhas internamente
+    } else if (channel === 'EMAIL') {
+      sent = await this.sendEmailReminder(event);
     }
 
-    await this.prisma.eventReminder.update({
-      where: { id: reminderId },
-      data: { sent_at: new Date() },
-    });
-
-    this.logger.log(`[REMINDER] ${channel} enviado para evento "${event.title}" (${eventId})`);
+    if (sent) {
+      await this.prisma.eventReminder.update({
+        where: { id: reminderId },
+        data: { sent_at: new Date() },
+      });
+      this.logger.log(`[REMINDER] ${channel} enviado para evento "${event.title}" (${eventId})`);
+    } else {
+      this.logger.warn(`[REMINDER] ${channel} falhou para evento "${event.title}" — nao marcado como sent_at`);
+    }
   }
 
   // ─── Orquestra os envios ──────────────────────────────────────────────────
@@ -775,5 +822,85 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
 
     this.logger.warn(`[INSTANCE] Lead ${leadId}: nenhuma instância WhatsApp encontrada. Envio pode falhar.`);
     return undefined;
+  }
+
+  // ─── Email reminder (portado do worker em 2026-04-20 — Divida 3) ────────
+  //
+  // Envia lembrete HTML por email para lead + advogado assigned ao evento.
+  // Le config SMTP via SettingsService.getSmtpConfig() (mesma fonte do worker).
+  // Retorna true se pelo menos 1 destinatario recebeu com sucesso.
+  private async sendEmailReminder(event: any): Promise<boolean> {
+    const recipients: { email: string; name: string }[] = [];
+    if (event.lead?.email) {
+      recipients.push({ email: event.lead.email, name: event.lead.name || event.lead.email });
+    }
+    if (event.assigned_user?.email) {
+      recipients.push({
+        email: event.assigned_user.email,
+        name: event.assigned_user.name || event.assigned_user.email,
+      });
+    }
+
+    if (recipients.length === 0) {
+      this.logger.warn(`Evento ${event.id} nao tem email de destino — lembrete email ignorado`);
+      return false;
+    }
+
+    const smtp = await this.settings.getSmtpConfig();
+    if (!smtp.host) {
+      this.logger.warn('SMTP nao configurado — lembrete email ignorado');
+      return false;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465,
+      auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
+    });
+
+    const typeEmoji = TYPE_EMOJI[event.type] || '📅';
+    const label = TYPE_LABEL[event.type] || 'Evento';
+    const dateStr = formatDateShort(event.start_at);
+    const timeStr = formatTimeShort(event.start_at);
+
+    let anySent = false;
+    for (const recipient of recipients) {
+      const html = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+          <div style="background: #1a1a2e; border-radius: 16px; padding: 24px; color: #e0e0e0;">
+            <h2 style="margin: 0 0 16px; color: #fff; font-size: 18px;">
+              ${typeEmoji} Lembrete de ${label}
+            </h2>
+            <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+              <p style="margin: 0 0 8px; font-weight: bold; font-size: 16px; color: #fff;">${event.title}</p>
+              <p style="margin: 0 0 4px; color: #a0a0b0;">📆 ${dateStr}</p>
+              <p style="margin: 0 0 4px; color: #a0a0b0;">⏰ ${timeStr}</p>
+              ${event.location ? `<p style="margin: 0; color: #a0a0b0;">📍 ${event.location}</p>` : ''}
+            </div>
+            <p style="margin: 0; color: #a0a0b0; font-size: 13px;">
+              Olá ${recipient.name}, este é um lembrete do seu compromisso agendado.
+            </p>
+          </div>
+          <p style="text-align: center; color: #888; font-size: 11px; margin-top: 16px;">
+            Enviado automaticamente pelo CRM — André Lustosa Advogados
+          </p>
+        </div>
+      `;
+
+      try {
+        await transporter.sendMail({
+          from: smtp.from || smtp.user,
+          to: recipient.email,
+          subject: `${typeEmoji} Lembrete: ${event.title} — ${dateStr} ${timeStr}`,
+          html,
+        });
+        this.logger.log(`Email lembrete enviado para ${recipient.email} (${recipient.name})`);
+        anySent = true;
+      } catch (err: any) {
+        this.logger.error(`Falha ao enviar email para ${recipient.email}: ${err.message}`);
+      }
+    }
+    return anySent;
   }
 }

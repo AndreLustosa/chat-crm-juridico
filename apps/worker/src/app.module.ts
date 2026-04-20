@@ -6,7 +6,9 @@ import { S3Module } from './s3/s3.module';
 import { SettingsModule } from './settings/settings.module';
 import { MediaModule } from './media/media.module';
 import { AiModule } from './ai/ai.module';
-import { ReminderModule } from './reminder/reminder.module';
+// ReminderModule removido em 2026-04-20 (Divida 3) — CalendarReminderWorker na API
+// passou a ser o processor unico da fila 'calendar-reminders'. O worker continua
+// ENFILEIRANDO jobs nessa fila (via ai.module.ts) mas nao processa mais.
 import { FollowupModule } from './followup/followup.module';
 import { PaymentAlertsModule } from './payment/payment-alerts.module';
 import { TaskAlertsModule } from './task/task-alerts.module';
@@ -33,7 +35,6 @@ import { MemoryModule } from './memory/memory.module';
     }),
     MediaModule,
     AiModule,
-    ReminderModule,
     FollowupModule,
     PaymentAlertsModule,
     TaskAlertsModule,
