@@ -10,6 +10,25 @@ export class FollowupController {
   @Get('stats')
   getStats(@Request() req: any) { return this.svc.getStats(req.user?.tenant_id); }
 
+  // ─── Fila de Followup (leads aptos a receber) ──────────────────────────
+  //
+  // Lista unificada de:
+  //   - Leads com FollowupEnrollment ATIVO (sequencias customizadas)
+  //   - Leads elegiveis ao cron legacy (stages AGUARDANDO_* / QUALIFICANDO,
+  //     sem enrollment ativo, inativos ha N dias)
+  // Para cada um: ultima mensagem enviada + proximo disparo programado.
+  @Get('queue')
+  getQueue(@Request() req: any) {
+    return this.svc.getQueue(req.user?.tenant_id);
+  }
+
+  // Dispara followup manual pra um lead especifico (antes do cron agendado).
+  // Funciona tanto pra enrollments quanto pro legacy.
+  @Post('queue/trigger/:leadId')
+  triggerQueue(@Param('leadId') leadId: string, @Request() req: any) {
+    return this.svc.triggerManualFollowup(leadId, req.user?.tenant_id);
+  }
+
   // ─── Sequências ──────────────────────────────────────────────────────────
   @Get('sequences')
   listSequences(@Query('tenant_id') tenantId?: string) {

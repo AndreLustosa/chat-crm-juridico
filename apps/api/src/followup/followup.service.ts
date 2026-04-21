@@ -111,6 +111,228 @@ export class FollowupService {
     return { ok: true };
   }
 
+  // ─── Fila de Followup (leads aptos a receber) ──────────────────────────
+
+  /**
+   * Retorna lista unificada de leads aptos a receber followup:
+   *
+   * 1. ENROLLMENTS: leads em sequencias customizadas com status='ATIVO'
+   *    — mostra step atual, ultima mensagem, next_send_at.
+   *
+   * 2. LEGACY: leads em stages {AGUARDANDO_DOCS, AGUARDANDO_PROC, AGUARDANDO_FORM,
+   *    QUALIFICANDO}, com is_client=false, inativos ha N dias (usando os mesmos
+   *    cutoffs do legacyStageFollowup), sem enrollment ativo.
+   *
+   * Ambos retornam formato unificado — frontend renderiza em uma unica tabela.
+   */
+  async getQueue(tenantId?: string) {
+    const enrollmentItems = await this.getQueueFromEnrollments(tenantId);
+    const legacyItems = await this.getQueueFromLegacy(tenantId);
+
+    return {
+      total: enrollmentItems.length + legacyItems.length,
+      enrollment_count: enrollmentItems.length,
+      legacy_count: legacyItems.length,
+      items: [...enrollmentItems, ...legacyItems].sort((a, b) => {
+        // Ordenar: primeiro os que tem next_send_at mais proximo/passado
+        const aNext = a.next_scheduled_at?.getTime() ?? Infinity;
+        const bNext = b.next_scheduled_at?.getTime() ?? Infinity;
+        return aNext - bNext;
+      }),
+    };
+  }
+
+  private async getQueueFromEnrollments(tenantId?: string) {
+    const enrollments = await this.prisma.followupEnrollment.findMany({
+      where: {
+        status: 'ATIVO',
+        ...(tenantId && { lead: { tenant_id: tenantId } }),
+      },
+      include: {
+        lead: { select: { id: true, name: true, phone: true, stage: true, is_client: true, updated_at: true } },
+        sequence: { include: { steps: { select: { id: true, position: true } } } },
+        messages: {
+          where: { status: { in: ['ENVIADO', 'APROVADO'] } },
+          orderBy: { created_at: 'desc' },
+          take: 1,
+          select: { sent_text: true, generated_text: true, sent_at: true, created_at: true, status: true },
+        },
+      },
+      orderBy: { next_send_at: 'asc' },
+    });
+
+    return enrollments
+      .filter((e: any) => !e.lead.is_client) // clientes nao aparecem na fila
+      .map((e: any) => {
+        const lastMsg = e.messages[0];
+        const totalSteps = e.sequence?.steps?.length || 0;
+        const daysInactive = e.lead.updated_at
+          ? Math.floor((Date.now() - new Date(e.lead.updated_at).getTime()) / 86400000)
+          : 0;
+        return {
+          lead_id: e.lead.id,
+          lead_name: e.lead.name,
+          lead_phone: e.lead.phone,
+          lead_stage: e.lead.stage,
+          source: 'enrollment' as const,
+          enrollment_id: e.id,
+          sequence_name: e.sequence?.name || null,
+          current_step: e.current_step,
+          total_steps: totalSteps,
+          last_followup: lastMsg
+            ? {
+                text: lastMsg.sent_text || lastMsg.generated_text,
+                sent_at: lastMsg.sent_at || lastMsg.created_at,
+                status: lastMsg.status,
+              }
+            : null,
+          next_scheduled_at: e.next_send_at,
+          days_inactive: daysInactive,
+        };
+      });
+  }
+
+  private async getQueueFromLegacy(tenantId?: string) {
+    // Mesmos cutoffs do FollowupCronService.legacyStageFollowup
+    const STALE_CONFIGS: Array<{ stage: string; days: number }> = [
+      { stage: 'AGUARDANDO_DOCS', days: 3 },
+      { stage: 'AGUARDANDO_PROC', days: 3 },
+      { stage: 'AGUARDANDO_FORM', days: 2 },
+      { stage: 'QUALIFICANDO', days: 5 },
+    ];
+
+    const items: any[] = [];
+    for (const config of STALE_CONFIGS) {
+      const cutoff = new Date(Date.now() - config.days * 86400000);
+      const leads: any[] = await (this.prisma as any).lead.findMany({
+        where: {
+          stage: config.stage,
+          updated_at: { lt: cutoff },
+          is_client: false,
+          followup_enrollments: { none: { status: 'ATIVO' } },
+          ...(tenantId && { tenant_id: tenantId }),
+        },
+        include: {
+          conversations: {
+            where: { status: 'ABERTO' },
+            take: 1,
+            orderBy: { last_message_at: 'desc' },
+            include: {
+              messages: {
+                where: { direction: 'out' },
+                orderBy: { created_at: 'desc' },
+                take: 1,
+                select: { text: true, created_at: true },
+              },
+            },
+          },
+        },
+      });
+
+      for (const lead of leads) {
+        if (!lead.conversations?.length) continue;
+        const convo = lead.conversations[0];
+        const lastOut = convo.messages?.[0];
+        const daysInactive = lead.updated_at
+          ? Math.floor((Date.now() - new Date(lead.updated_at).getTime()) / 86400000)
+          : 0;
+        items.push({
+          lead_id: lead.id,
+          lead_name: lead.name,
+          lead_phone: lead.phone,
+          lead_stage: lead.stage,
+          source: 'legacy' as const,
+          enrollment_id: null,
+          sequence_name: null,
+          current_step: null,
+          total_steps: null,
+          last_followup: lastOut
+            ? {
+                text: lastOut.text,
+                sent_at: lastOut.created_at,
+                status: 'ENVIADO',
+              }
+            : null,
+          // Legacy nao tem next_send_at — proximo cron sera 9h do proximo dia util.
+          next_scheduled_at: this.nextLegacyCronTime(),
+          days_inactive: daysInactive,
+        });
+      }
+    }
+    return items;
+  }
+
+  /** Calcula o proximo horario das 9h em dia util (seg-sex) em America/Maceio. */
+  private nextLegacyCronTime(): Date {
+    const now = new Date();
+    const maceio = new Date(now.getTime() - 3 * 3600000); // aprox UTC-3
+    const hour = maceio.getUTCHours();
+    const day = maceio.getUTCDay();
+
+    // Se ja passou das 9h hoje ou e fim de semana, avanca
+    let next = new Date(now);
+    if (day === 0 || day === 6 || hour >= 9) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+    // Pular fim de semana
+    let nextDay = next.getUTCDay();
+    while (nextDay === 0 || nextDay === 6) {
+      next.setUTCDate(next.getUTCDate() + 1);
+      nextDay = next.getUTCDay();
+    }
+    // Setar 12h UTC = 9h BRT
+    next.setUTCHours(12, 0, 0, 0);
+    return next;
+  }
+
+  /**
+   * Dispara followup manual pra um lead — antes do cron agendado.
+   * Funciona tanto pra enrollments (enfileira 'process-step') quanto pra
+   * legacy (enfileira 'manual-legacy-followup' que o worker processa igual
+   * ao cron mas pra um lead so).
+   */
+  async triggerManualFollowup(leadId: string, tenantId?: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true, tenant_id: true, is_client: true, stage: true },
+    });
+    if (!lead) throw new NotFoundException('Lead nao encontrado');
+    if (tenantId && lead.tenant_id && lead.tenant_id !== tenantId) {
+      throw new BadRequestException('Lead de outro tenant');
+    }
+    if (lead.is_client) {
+      throw new BadRequestException('Followup nao aplicavel — lead ja e cliente contratado');
+    }
+
+    // Se tem enrollment ativo, enfileira process-step pra rodar IMEDIATAMENTE
+    const enrollment = await this.prisma.followupEnrollment.findFirst({
+      where: { lead_id: leadId, status: 'ATIVO' },
+      select: { id: true },
+    });
+
+    if (enrollment) {
+      // Atualiza next_send_at pra agora e enfileira
+      await this.prisma.followupEnrollment.update({
+        where: { id: enrollment.id },
+        data: { next_send_at: new Date() },
+      });
+      await this.followupQueue.add(
+        'process-step',
+        { enrollment_id: enrollment.id },
+        { jobId: `manual-${enrollment.id}-${Date.now()}`, removeOnComplete: true, attempts: 2 },
+      );
+      return { ok: true, source: 'enrollment', enrollment_id: enrollment.id };
+    }
+
+    // Sem enrollment — trata como legacy. Enfileira job customizado pro worker.
+    await this.followupQueue.add(
+      'manual-legacy-followup',
+      { lead_id: leadId, stage: lead.stage },
+      { jobId: `manual-legacy-${leadId}-${Date.now()}`, removeOnComplete: true, attempts: 2 },
+    );
+    return { ok: true, source: 'legacy', lead_id: leadId };
+  }
+
   // ─── Enrollments ─────────────────────────────────────────────────────────
 
   async listEnrollments(filters: { status?: string; sequence_id?: string; lead_id?: string } = {}) {

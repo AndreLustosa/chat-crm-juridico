@@ -22,6 +22,105 @@ export class FollowupProcessor extends WorkerHost {
     if (job.name === 'process-step') return this.processStep(job.data.enrollment_id);
     if (job.name === 'send-message') return this.sendMessage(job.data.message_id);
     if (job.name === 'broadcast-send') return this.processBroadcastItem(job.data.broadcast_id, job.data.item_id, job.data.custom_prompt);
+    if (job.name === 'manual-legacy-followup') return this.processManualLegacy(job.data.lead_id, job.data.stage);
+  }
+
+  /**
+   * Handler: followup manual disparado pelo admin pra um lead legacy
+   * (sem sequencia customizada). Roda a mesma analise IA do cron
+   * (FollowupAnalyzerService) mas pra apenas 1 lead, ignorando cutoffs
+   * de dias inativos. Usado quando o admin aperta "Disparar agora" na
+   * aba Fila do menu Followup.
+   */
+  private async processManualLegacy(leadId: string, stage: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true, name: true, phone: true, stage: true, is_client: true },
+    });
+    if (!lead) {
+      this.logger.warn(`[FOLLOWUP-MANUAL] Lead ${leadId} nao encontrado`);
+      return;
+    }
+    if (lead.is_client) {
+      this.logger.log(`[FOLLOWUP-MANUAL] Lead ${leadId} virou cliente — abortando disparo`);
+      return;
+    }
+
+    const convo = await this.prisma.conversation.findFirst({
+      where: { lead_id: leadId, status: 'ABERTO' },
+      orderBy: { last_message_at: 'desc' },
+      select: { id: true, instance_name: true },
+    });
+    if (!convo) {
+      this.logger.warn(`[FOLLOWUP-MANUAL] Sem conversa aberta pra lead ${leadId}`);
+      return;
+    }
+
+    const decision = await this.analyzer.analyzeAndDecide({
+      leadId: lead.id,
+      conversationId: convo.id,
+      stage: lead.stage || stage,
+      stageHint: 'disparo manual pelo admin (botao Disparar Agora)',
+    });
+
+    if (decision.action === 'ARCHIVE') {
+      await this.prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          stage: 'PERDIDO',
+          loss_reason: decision.reason || 'IA detectou desengajamento no disparo manual',
+          last_followup_at: new Date(),
+        },
+      });
+      this.logger.log(`[FOLLOWUP-MANUAL] Lead ${lead.phone} ARQUIVADO: ${decision.reason}`);
+      return;
+    }
+
+    if (decision.action === 'SKIP') {
+      this.logger.log(`[FOLLOWUP-MANUAL] Lead ${lead.phone} PULADO (IA): ${decision.reason}`);
+      return;
+    }
+
+    if (decision.action === 'SEND' && decision.message) {
+      const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
+      if (!apiUrl) {
+        this.logger.warn(`[FOLLOWUP-MANUAL] EVOLUTION_API_URL nao configurada`);
+        return;
+      }
+      const instanceName = convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
+      const textToSend = `*Sophia:* ${decision.message}`;
+
+      const sendResult = await axios.post(
+        `${apiUrl}/message/sendText/${instanceName}`,
+        { number: lead.phone, text: textToSend },
+        { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
+      );
+      const evoMsgId = sendResult?.data?.key?.id || `out_followup_manual_${Date.now()}`;
+
+      await this.prisma.message.create({
+        data: {
+          conversation_id: convo.id,
+          direction: 'out',
+          type: 'text',
+          text: decision.message,
+          external_message_id: evoMsgId,
+          status: 'enviado',
+        },
+      });
+      await Promise.all([
+        this.prisma.conversation.update({
+          where: { id: convo.id },
+          data: { last_message_at: new Date() },
+        }),
+        this.prisma.lead.update({
+          where: { id: lead.id },
+          data: { last_followup_at: new Date() },
+        }),
+      ]);
+      this.logger.log(
+        `[FOLLOWUP-MANUAL] Lead ${lead.phone} ENVIADO: "${decision.message.slice(0, 60)}..."`,
+      );
+    }
   }
 
   // ─── Timezone helper — America/Maceio (UTC-3) ────────────────────────────

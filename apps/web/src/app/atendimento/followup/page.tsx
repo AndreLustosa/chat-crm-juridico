@@ -135,12 +135,39 @@ interface BroadcastItem {
   error?: string;
 }
 
+interface QueueItem {
+  lead_id: string;
+  lead_name?: string | null;
+  lead_phone: string;
+  lead_stage: string;
+  source: 'enrollment' | 'legacy';
+  enrollment_id: string | null;
+  sequence_name: string | null;
+  current_step: number | null;
+  total_steps: number | null;
+  last_followup: {
+    text: string;
+    sent_at: string;
+    status: string;
+  } | null;
+  next_scheduled_at: string | null;
+  days_inactive: number;
+}
+
+interface QueueResponse {
+  total: number;
+  enrollment_count: number;
+  legacy_count: number;
+  items: QueueItem[];
+}
+
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const API = API_BASE_URL;
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart2 },
+  { id: 'fila', label: 'Fila', icon: Clock },
   { id: 'sequencias', label: 'Sequências', icon: List },
   { id: 'enrollments', label: 'Enrollments', icon: Users },
   { id: 'aprovacoes', label: 'Aprovações', icon: MessageSquare },
@@ -1225,6 +1252,13 @@ export default function FollowupPage() {
   const [enrollFilter, setEnrollFilter] = useState('');
   const [enrollSearch, setEnrollSearch] = useState('');
 
+  // Fila de followup (leads aptos a receber)
+  const [queue, setQueue] = useState<QueueResponse | null>(null);
+  const [loadingQueue, setLoadingQueue] = useState(false);
+  const [triggeringLeadId, setTriggeringLeadId] = useState<string | null>(null);
+  const [queueSearch, setQueueSearch] = useState('');
+  const [queueSourceFilter, setQueueSourceFilter] = useState<'ALL' | 'enrollment' | 'legacy'>('ALL');
+
   // Disparos
   const [broadcastTargets, setBroadcastTargets] = useState<BroadcastTarget[]>([]);
   const [broadcasts, setBroadcasts] = useState<BroadcastJob[]>([]);
@@ -1289,6 +1323,34 @@ export default function FollowupPage() {
       setLoadingApprovals(false);
     }
   }, []);
+
+  const fetchQueue = useCallback(async () => {
+    setLoadingQueue(true);
+    try {
+      const data = await apiFetch('/followup/queue');
+      setQueue(data as QueueResponse);
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao carregar fila');
+    } finally {
+      setLoadingQueue(false);
+    }
+  }, []);
+
+  const handleTriggerQueue = async (item: QueueItem) => {
+    const label = item.lead_name || item.lead_phone;
+    if (!confirm(`Disparar followup agora para ${label}? A IA vai gerar a mensagem com base na conversa.`)) return;
+    setTriggeringLeadId(item.lead_id);
+    try {
+      await apiFetch(`/followup/queue/trigger/${item.lead_id}`, { method: 'POST' });
+      showSuccess(`Disparo enfileirado para ${label}`);
+      // Aguarda o worker processar e recarrega a fila
+      setTimeout(() => fetchQueue(), 2500);
+    } catch (err: unknown) {
+      showError(err instanceof Error ? err.message : 'Erro ao disparar');
+    } finally {
+      setTriggeringLeadId(null);
+    }
+  };
 
   // ── Broadcast fetch functions ────────────────────────────────────────────────
 
@@ -1385,11 +1447,12 @@ export default function FollowupPage() {
   // Fetch inicial por tab
   useEffect(() => {
     if (activeTab === 'dashboard') { fetchStats(); fetchEnrollments(); }
+    if (activeTab === 'fila') fetchQueue();
     if (activeTab === 'sequencias') fetchSequences();
     if (activeTab === 'enrollments') fetchEnrollments();
     if (activeTab === 'aprovacoes') fetchApprovals();
     if (activeTab === 'disparos') fetchBroadcasts();
-  }, [activeTab, fetchStats, fetchSequences, fetchEnrollments, fetchApprovals, fetchBroadcasts]);
+  }, [activeTab, fetchStats, fetchSequences, fetchEnrollments, fetchApprovals, fetchBroadcasts, fetchQueue]);
 
   useEffect(() => {
     if (activeTab === 'enrollments') fetchEnrollments();
@@ -1816,6 +1879,190 @@ export default function FollowupPage() {
                 >
                   Tentar novamente
                 </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── TAB: FILA ──────────────────────────────────────────────────────── */}
+        {activeTab === 'fila' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Fila de Followup</h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {queue
+                    ? `${queue.total} lead${queue.total !== 1 ? 's' : ''} aguardando — ${queue.enrollment_count} em sequência, ${queue.legacy_count} no cron legacy`
+                    : 'Leads aptos a receber o próximo disparo'}
+                </p>
+              </div>
+              <button
+                onClick={fetchQueue}
+                disabled={loadingQueue}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-sm font-medium transition-all duration-200 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={loadingQueue ? 'animate-spin' : ''} />
+                Atualizar
+              </button>
+            </div>
+
+            {/* Filtros */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="relative flex-1 min-w-[220px]">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={queueSearch}
+                  onChange={e => setQueueSearch(e.target.value)}
+                  placeholder="Buscar por nome, telefone ou sequência..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-muted border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+                />
+              </div>
+              <div className="flex items-center gap-1 bg-muted rounded-xl p-1">
+                {(['ALL', 'enrollment', 'legacy'] as const).map(src => (
+                  <button
+                    key={src}
+                    onClick={() => setQueueSourceFilter(src)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      queueSourceFilter === src
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {src === 'ALL' ? 'Todos' : src === 'enrollment' ? 'Sequência' : 'Cron legacy'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Lista */}
+            {loadingQueue ? (
+              <div className="flex items-center justify-center py-20 text-muted-foreground">
+                <RefreshCw size={20} className="animate-spin mr-2" />
+                Carregando fila...
+              </div>
+            ) : !queue || queue.total === 0 ? (
+              <div className="text-center py-20 text-muted-foreground bg-card border border-border rounded-2xl">
+                <CheckCircle size={40} className="mx-auto mb-3 opacity-30" />
+                <p className="font-medium text-foreground mb-1">Fila vazia</p>
+                <p className="text-sm">Nenhum lead precisa de followup no momento.</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-border bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+                      <tr>
+                        <th className="text-left px-4 py-3 font-medium">Lead</th>
+                        <th className="text-left px-4 py-3 font-medium">Fase</th>
+                        <th className="text-left px-4 py-3 font-medium">Última mensagem</th>
+                        <th className="text-left px-4 py-3 font-medium">Próximo disparo</th>
+                        <th className="text-right px-4 py-3 font-medium">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {queue.items
+                        .filter(item => {
+                          if (queueSourceFilter !== 'ALL' && item.source !== queueSourceFilter) return false;
+                          if (!queueSearch) return true;
+                          const q = queueSearch.toLowerCase();
+                          return (
+                            (item.lead_name || '').toLowerCase().includes(q) ||
+                            item.lead_phone.includes(q) ||
+                            (item.sequence_name || '').toLowerCase().includes(q) ||
+                            item.lead_stage.toLowerCase().includes(q)
+                          );
+                        })
+                        .map(item => {
+                          const triggering = triggeringLeadId === item.lead_id;
+                          return (
+                            <tr key={`${item.source}-${item.lead_id}-${item.enrollment_id || ''}`} className="hover:bg-muted/30 transition-colors">
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-foreground">
+                                  {item.lead_name || <span className="text-muted-foreground italic">sem nome</span>}
+                                </div>
+                                <div className="text-xs text-muted-foreground font-mono flex items-center gap-1.5 mt-0.5">
+                                  <Phone size={10} />
+                                  {item.lead_phone}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {item.source === 'enrollment' ? (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <Zap size={12} className="text-purple-400" />
+                                      <span className="text-xs font-medium text-purple-300">
+                                        {item.sequence_name || 'Sequência'}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      Step {(item.current_step ?? 0) + 1}
+                                      {item.total_steps ? ` de ${item.total_steps}` : ''}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <Clock size={12} className="text-yellow-400" />
+                                      <span className="text-xs font-medium text-yellow-300">Cron legacy</span>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">{item.lead_stage}</div>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 max-w-xs">
+                                {item.last_followup ? (
+                                  <div>
+                                    <div className="text-xs text-foreground truncate" title={item.last_followup.text}>
+                                      {item.last_followup.text}
+                                    </div>
+                                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                                      {formatDate(item.last_followup.sent_at)}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic">— nenhuma —</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {item.next_scheduled_at ? (
+                                  <div className="text-xs text-foreground">
+                                    {formatDate(item.next_scheduled_at)}
+                                    {item.days_inactive > 0 && (
+                                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                                        parado há {item.days_inactive}d
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <button
+                                  onClick={() => handleTriggerQueue(item)}
+                                  disabled={triggering}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-foreground text-xs font-medium transition-colors disabled:opacity-50"
+                                >
+                                  {triggering ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" />
+                                      Disparando...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Send size={12} />
+                                      Disparar agora
+                                    </>
+                                  )}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
