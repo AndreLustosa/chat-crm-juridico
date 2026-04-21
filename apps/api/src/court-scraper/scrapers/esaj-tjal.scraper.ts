@@ -413,22 +413,18 @@ export class EsajTjalScraper {
       });
     }
 
-    // Movimentacoes — 4 estrategias de extracao (do mais especifico pro mais
-    // generico). Cada tribunal SAJ pode usar layout ligeiramente diferente, e
-    // processos novos/antigos no mesmo tribunal podem ter estruturas distintas.
+    // Movimentacoes — multiplos parsers testados em paralelo, escolhe o melhor.
     //
-    // Atualizado em 2026-04-20: adicionadas estrategias 3 e 4 depois que o
-    // processo 0715582-51.2024.8.02.0058 retornou 0 movs com estrategias 1-2.
+    // Historia do algoritmo:
+    // - 2026-04-20 v1: 4 estrategias em cascata (fallback linear).
+    // - 2026-04-21 v2: priorizar #tabelaTodasMovimentacoes sobre Ultimas.
+    // - 2026-04-21 v3 (esta): aplicar multiplos PARSERS na tabela escolhida
+    //   e pegar o de maior retorno. Motivo: processo 0700223-79.2022.8.02.0204
+    //   tinha Todas=103 linhas mas o parser `tds[0]+tds[1]` extraia 0
+    //   (TDs com estrutura mais complexa — rowspan, divs aninhadas, etc.),
+    //   caindo no fallback date-heuristic que pegou so 22 de 103.
     //
-    // Atualizado em 2026-04-21: PRIORIDADE EXPLICITA para #tabelaTodasMovimentacoes.
-    // O HTML do e-SAJ tem DUAS tabelas:
-    //   - #tabelaUltimasMovimentacoes (~20 linhas, mostrada por default)
-    //   - #tabelaTodasMovimentacoes (todas, oculta ate "Ver todas")
-    // Antes usavamos selectAll([...]).first() que pegava a primeira no DOM
-    // (normalmente a "Ultimas"). Isso causava truncamento silencioso de
-    // processos com historico longo (ex: 0700223-79... trouxe 22 de ~80).
-    // Agora buscamos a "Todas" primeiro, so caindo na "Ultimas" se aquela
-    // nao existir.
+    // Logs detalhados mostram qual tabela + qual parser funcionou.
     const movements: Array<{ date: string; description: string }> = [];
     let extractionStrategy = 'none';
 
@@ -439,71 +435,105 @@ export class EsajTjalScraper {
       `[PARSE] Diagnostico tabelas: Todas=${tableTodasCount} Ultimas=${tableUltimasCount}`,
     );
 
-    // Estrategia 1a: #tabelaTodasMovimentacoes (PRIORIDADE MAXIMA — contem
-    // TODAS as movimentacoes do processo; so fica oculta visualmente)
+    // Seleciona a tabela de maior cobertura (Todas > Ultimas > regex "ovimenta").
     let movTable = $('#tabelaTodasMovimentacoes, #tableTodasMovimentacoes').first();
-    if (movTable.length) extractionStrategy = 'id-todas';
-
-    // Estrategia 1b: #tabelaUltimasMovimentacoes (apenas se Todas nao existir)
+    let tableLabel = 'tabelaTodas';
     if (!movTable.length) {
       movTable = $('#tabelaUltimasMovimentacoes, #tableUltimasMovimentacoes').first();
-      if (movTable.length) extractionStrategy = 'id-ultimas';
+      if (movTable.length) tableLabel = 'tabelaUltimas';
     }
-
-    // Estrategia 2: qualquer <table> cujo id contenha "ovimenta" (case-insensitive)
     if (!movTable.length) {
-      movTable = $('table').filter((_, el) => {
+      movTable = $('table, tbody').filter((_, el) => {
         const id = $(el).attr('id') || '';
         return /ovimenta/i.test(id);
       }).first();
-      if (movTable.length) extractionStrategy = 'id-contains';
+      if (movTable.length) tableLabel = 'id-contains';
     }
 
-    // Estrategia 3: buscar TRs com CELULAS nomeadas (td.dataMovimentacao +
-    // td.descricaoMovimentacao). Funciona mesmo quando a tabela pai nao
-    // tem ID ou esta dentro de outro container. Pega TODAS as TRs no DOM —
-    // inclui ambas tabelas se ambas usarem essas classes.
-    if (!movTable.length) {
-      const rowsByClass = $('tr').filter((_, row) => {
-        return $(row).find('td.dataMovimentacao').length > 0 &&
-               $(row).find('td.descricaoMovimentacao').length > 0;
-      });
-      if (rowsByClass.length > 0) {
-        extractionStrategy = 'td-class';
-        const seen = new Set<string>(); // dedup pra evitar contar 2x quando ambas tabelas usarem as classes
-        rowsByClass.each((_, row) => {
-          const dateText = $(row).find('td.dataMovimentacao').text().trim();
-          const description = $(row).find('td.descricaoMovimentacao').text().replace(/\s+/g, ' ').trim();
-          if (dateText && description) {
-            const key = `${dateText}|${description}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              movements.push({ date: dateText, description });
-            }
-          }
-        });
+    // Aplica varios parsers na tabela escolhida e pega o de maior retorno.
+    // Mais robusto contra variacoes de layout (rowspan, divs aninhadas,
+    // classes diferentes) porque qualquer um que funcione sera escolhido.
+    if (movTable.length) {
+      const parsers: Array<{ name: string; fn: () => typeof movements }> = [
+        // Parser A: td.dataMovimentacao + td.descricaoMovimentacao
+        {
+          name: 'td-classes',
+          fn: () => {
+            const out: typeof movements = [];
+            movTable.find('tr').each((_, row) => {
+              const dateText = $(row).find('td.dataMovimentacao').text().trim();
+              const description = $(row).find('td.descricaoMovimentacao').text().replace(/\s+/g, ' ').trim();
+              if (dateText && description) out.push({ date: dateText, description });
+            });
+            return out;
+          },
+        },
+        // Parser B: tds[0] + tds[1] (posicional)
+        {
+          name: 'td-position',
+          fn: () => {
+            const out: typeof movements = [];
+            movTable.find('tr').each((_, row) => {
+              const tds = $(row).find('td');
+              if (tds.length >= 2) {
+                const dateText = $(tds[0]).text().trim();
+                const description = $(tds[1]).text().replace(/\s+/g, ' ').trim();
+                if (dateText && description) out.push({ date: dateText, description });
+              }
+            });
+            return out;
+          },
+        },
+        // Parser C: regex dd/mm/yyyy em QUALQUER td da linha, descricao = texto
+        // restante. Robusto contra rowspan/colspan e estruturas aninhadas.
+        {
+          name: 'td-regex',
+          fn: () => {
+            const datePattern = /\d{2}\/\d{2}\/\d{4}/;
+            const out: typeof movements = [];
+            movTable.find('tr').each((_, row) => {
+              let foundDate = '';
+              const parts: string[] = [];
+              $(row).find('td').each((_, td) => {
+                const text = $(td).text().replace(/\s+/g, ' ').trim();
+                if (!text) return;
+                const match = text.match(datePattern);
+                if (!foundDate && match) {
+                  foundDate = match[0];
+                  // Se a celula tinha texto alem da data, adiciona o restante como descricao
+                  const rest = text.replace(datePattern, '').trim();
+                  if (rest) parts.push(rest);
+                } else {
+                  parts.push(text);
+                }
+              });
+              const description = parts.join(' ').trim();
+              if (foundDate && description) out.push({ date: foundDate, description });
+            });
+            return out;
+          },
+        },
+      ];
+
+      // Executa todos os parsers e pega o de maior retorno.
+      let bestParser = 'none';
+      for (const p of parsers) {
+        const result = p.fn();
+        this.logger.log(`[PARSE] Parser "${p.name}" extraiu ${result.length} movimentacoes`);
+        if (result.length > movements.length) {
+          movements.length = 0;
+          movements.push(...result);
+          bestParser = p.name;
+        }
+      }
+      if (movements.length > 0) {
+        extractionStrategy = `${tableLabel}:${bestParser}`;
       }
     }
 
-    // Estrategia 1/2: se encontrou tabela com ID, extrai movimentacoes pelo
-    // layout classico (primeira td = data, segunda td = descricao).
-    if (movTable.length && movements.length === 0) {
-      movTable.find('tr').each((_, row) => {
-        const tds = $(row).find('td');
-        if (tds.length >= 2) {
-          const dateText = $(tds[0]).text().trim();
-          const description = $(tds[1]).text().replace(/\s+/g, ' ').trim();
-          if (dateText && description) {
-            movements.push({ date: dateText, description });
-          }
-        }
-      });
-    }
-
-    // Estrategia 4 (ultima rede de seguranca): heuristica de dd/mm/yyyy na
-    // primeira celula. Pega QUALQUER tr em tables cuja primeira coluna bate
-    // o padrao de data brasileira. Dedupa automatico (a mesma mov pode
-    // aparecer nas 2 tabelas Todas + Ultimas).
+    // Fallback final (ultima rede de seguranca): date-heuristic global na pagina
+    // inteira. Usado apenas se a tabela escolhida nao rendeu nada OU se a tabela
+    // nem foi encontrada. Dedupa por (date|description).
     if (movements.length === 0) {
       const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
       const seen = new Set<string>();
@@ -523,7 +553,7 @@ export class EsajTjalScraper {
           }
         }
       });
-      if (movements.length > 0) extractionStrategy = 'date-heuristic';
+      if (movements.length > 0) extractionStrategy = 'date-heuristic-global';
     }
 
     if (movements.length > 0) {
