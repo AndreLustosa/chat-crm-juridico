@@ -32,6 +32,8 @@ export interface ClienteViewLegalCase {
   priority: string;
   claim_value: string | null;
   tracking_stage: string | null;
+  stage?: string | null; // VIABILIDADE | ACOMPANHAMENTO | FINALIZADO
+  created_at?: string;
   updated_at: string;
   opposing_party: string | null;
   court: string | null;
@@ -65,6 +67,8 @@ interface ClienteGroup {
   cases: ClienteViewLegalCase[];
   totalValue: number;
   urgentCount: number;
+  viabilidadeCount: number; // casos em triagem (stage=VIABILIDADE)
+  newViabilidadeCount: number; // dos em triagem, quantos abertos < 24h (IA recente)
   nextEvent: { start: Date; title: string; type: string } | null;
   lastUpdated: number;
 }
@@ -133,6 +137,8 @@ export function ClienteView({ cases, onSelectCase, onSelectLead }: Props) {
           cases: [],
           totalValue: 0,
           urgentCount: 0,
+          viabilidadeCount: 0,
+          newViabilidadeCount: 0,
           nextEvent: null,
           lastUpdated: 0,
         });
@@ -141,6 +147,12 @@ export function ClienteView({ cases, onSelectCase, onSelectLead }: Props) {
       g.cases.push(c);
       g.totalValue += Number(c.claim_value) || 0;
       if (c.priority === 'URGENTE') g.urgentCount++;
+      if (c.stage === 'VIABILIDADE') {
+        g.viabilidadeCount++;
+        if (c.created_at && (now - new Date(c.created_at).getTime()) < 24 * 3600 * 1000) {
+          g.newViabilidadeCount++;
+        }
+      }
 
       const updated = new Date(c.updated_at).getTime();
       if (updated > g.lastUpdated) g.lastUpdated = updated;
@@ -304,11 +316,25 @@ export function ClienteView({ cases, onSelectCase, onSelectLead }: Props) {
 
                 {/* Nome + telefone */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="text-[14px] font-bold text-foreground truncate">{g.name}</h4>
                     {hasUrgent && (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/12 text-red-400 border border-red-500/20">
                         {g.urgentCount} urgente{g.urgentCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {g.viabilidadeCount > 0 && (
+                      <span
+                        className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/12 text-amber-400 border border-amber-500/25 inline-flex items-center gap-1"
+                        title={`${g.viabilidadeCount} caso(s) em viabilidade — precisam de avaliacao do advogado`}
+                      >
+                        <Gavel size={9} />
+                        {g.viabilidadeCount} em triagem
+                        {g.newViabilidadeCount > 0 && (
+                          <span className="px-1 rounded-full bg-amber-400/40 text-amber-200 leading-tight">
+                            {g.newViabilidadeCount} nov{g.newViabilidadeCount !== 1 ? 'os' : 'o'}
+                          </span>
+                        )}
                       </span>
                     )}
                   </div>

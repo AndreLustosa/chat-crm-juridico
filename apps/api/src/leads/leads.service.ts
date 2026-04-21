@@ -179,6 +179,13 @@ export class LeadsService {
         take: 3,
         select: { id: true, type: true, title: true, start_at: true },
       },
+      // Casos em VIABILIDADE (triagem) — renderizados como badge no card
+      // de cliente. Inclui ID pra que o frontend possa linkar direto pro caso.
+      legal_cases: {
+        where: { stage: 'VIABILIDADE', archived: false },
+        select: { id: true, legal_area: true, created_at: true, priority: true },
+        orderBy: { created_at: 'desc' as const },
+      },
     };
 
     if (page && limit) {

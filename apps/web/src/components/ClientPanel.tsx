@@ -592,6 +592,32 @@ export function ClientPanel({
                       </>
                     )}
                   </div>
+                  {/* Badge de casos em VIABILIDADE — novo caso aberto (pela IA
+                      ou manualmente) que precisa de avaliacao do advogado. */}
+                  {(() => {
+                    const viabilidadeCases = (lead.legal_cases || []).filter(c => c.stage === 'VIABILIDADE');
+                    if (viabilidadeCases.length === 0) return null;
+                    // Detecta casos novos (< 24h) — abertos hoje pela IA
+                    const now = Date.now();
+                    const newCount = viabilidadeCases.filter(c =>
+                      c.created_at && (now - new Date(c.created_at).getTime()) < 24 * 3600 * 1000
+                    ).length;
+                    return (
+                      <button
+                        onClick={() => setCasesOpen(true)}
+                        className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold hover:bg-amber-500/15 transition-colors"
+                        title={`${viabilidadeCases.length} caso(s) aguardando avaliacao de viabilidade`}
+                      >
+                        <Scale size={11} />
+                        {viabilidadeCases.length} em triagem
+                        {newCount > 0 && (
+                          <span className="ml-1 px-1.5 py-0 rounded-full bg-amber-400/30 text-amber-200 text-[9px] font-bold leading-tight">
+                            {newCount} nov{newCount !== 1 ? 'os' : 'o'}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
                   <div className="mt-3 flex flex-col gap-1.5">
                     <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                       <Phone size={13} className="shrink-0" />
