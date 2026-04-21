@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   EsajTjalScraper,
@@ -6,6 +7,24 @@ import {
   CourtCaseListItem,
   CourtCaseListResult,
 } from './scrapers/esaj-tjal.scraper';
+
+// Converte data no formato "dd/mm/yyyy" (como o e-SAJ retorna) para Date.
+// Retorna null se a string nao parse. Hora fixa em 12:00 UTC para evitar
+// offsets de timezone.
+function parseEsajDate(dateStr: string): Date | null {
+  const m = dateStr?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  return new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00Z`);
+}
+
+// Gera hash SHA256(case_number|date|description) para dedup idempotente de
+// movimentacoes. Se o mesmo processo for re-scraped, as movimentacoes ja
+// salvas sao ignoradas (unique constraint em CaseEvent.movement_hash).
+function makeMovementHash(caseNumber: string, date: string, description: string): string {
+  return createHash('sha256')
+    .update(`${caseNumber}|${date}|${description}`)
+    .digest('hex');
+}
 
 // ─── Interfaces ──────────────────────────────────────────────
 
@@ -375,7 +394,7 @@ export class CourtScraperService {
         }
 
         // Criar legal case
-        await this.prisma.legalCase.create({
+        const legalCase = await this.prisma.legalCase.create({
           data: {
             tenant_id: tenantId || null,
             lead_id: leadId,
@@ -394,6 +413,34 @@ export class CourtScraperService {
             filed_at: data.filed_at ? new Date(data.filed_at) : null,
           },
         });
+
+        // Persistir movimentacoes como CaseEvent (type=MOVIMENTACAO, source=ESAJ).
+        //
+        // Atualizado em 2026-04-20: antes as movimentacoes extraidas pelo scraper
+        // eram descartadas. Agora sao salvas em batch, com movement_hash (dedup
+        // idempotente para re-scrape futuro). Prepara o caminho para UI timeline
+        // + cron de re-sync periodico.
+        if (data.movements && data.movements.length > 0) {
+          const movementRows = data.movements.map((m) => ({
+            case_id: legalCase.id,
+            type: 'MOVIMENTACAO',
+            source: 'ESAJ',
+            title: m.description.slice(0, 120), // primeiros 120 chars como titulo
+            description: m.description,
+            event_date: parseEsajDate(m.date),
+            movement_hash: makeMovementHash(data.case_number, m.date, m.description),
+            source_raw: { raw_date: m.date, raw_description: m.description } as any,
+          }));
+          // createMany com skipDuplicates garante idempotencia — se o hash ja
+          // existir (re-scrape posterior), row e ignorada silenciosamente.
+          const createResult = await this.prisma.caseEvent.createMany({
+            data: movementRows,
+            skipDuplicates: true,
+          });
+          this.logger.log(
+            `[IMPORT] Processo ${data.case_number}: ${createResult.count}/${data.movements.length} movimentacoes salvas (resto ja existia)`,
+          );
+        }
 
         imported.push(data.case_number);
         this.logger.log(`[IMPORT] Processo ${data.case_number} importado com sucesso`);

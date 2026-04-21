@@ -462,7 +462,12 @@ export class EsajTjalScraper {
       filed_at: filedAt,
       status: statusText || 'Ativo',
       parties,
-      movements: movements.slice(0, 20), // limitar a 20 movimentações
+      // Atualizado em 2026-04-20: retorna TODAS as movimentacoes extraidas
+      // do HTML (antes limitava a 20). O HTML do show.do do e-SAJ ja contem
+      // todas as movimentacoes no elemento #tabelaTodasMovimentacoes — so
+      // ficam ocultas via CSS ate o usuario clicar em "Ver todas". O scraper
+      // le o tbody inteiro sem precisar de AJAX adicional.
+      movements,
       tracking_stage: trackingStage,
       tribunal: 'TJAL',
     };
