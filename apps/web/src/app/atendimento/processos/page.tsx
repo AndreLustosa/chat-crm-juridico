@@ -1958,6 +1958,7 @@ function ProcessoDetailPanel({
               tasks={tasks}
               events={events}
               djenPubs={djenPubs}
+              onRefresh={fetchEvents}
             />
           )}
 

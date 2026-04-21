@@ -15,7 +15,7 @@
  * aparecem destacados no topo. Passado aparece em tom neutro.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   FileText,
   Calendar,
@@ -26,8 +26,12 @@ import {
   Newspaper,
   Clock,
   AlertCircle,
+  RefreshCw,
+  Loader2,
   type LucideIcon,
 } from 'lucide-react';
+import api from '@/lib/api';
+import { showError, showSuccess, showInfo } from '@/lib/toast';
 
 // ─── Tipos (subsets dos tipos em page.tsx) ───────────────────
 
@@ -79,6 +83,8 @@ interface Props {
   tasks: TimelineTask[];
   events: TimelineCaseEvent[];
   djenPubs: TimelineDjenPub[];
+  /** Callback chamado apos sucesso do resync — deve recarregar events da API. */
+  onRefresh?: () => void;
 }
 
 // ─── Estrutura interna ───────────────────────────────────────
@@ -187,7 +193,37 @@ const dayBucketLabel = (d: Date): string => {
 
 // ─── Componente ──────────────────────────────────────────────
 
-export function ProcessoTimeline({ legalCase, tasks, events, djenPubs }: Props) {
+export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh }: Props) {
+  const [syncingTjal, setSyncingTjal] = useState(false);
+
+  // Detecta se o processo e do TJAL (case_number com codigo 8.02 no digito 13-15).
+  // Apenas mostra o botao "Sincronizar TJAL" pra processos suportados.
+  const isTjal = useMemo(() => {
+    const digits = (legalCase.case_number || '').replace(/\D/g, '');
+    return digits.length === 20 && digits.slice(13, 16) === '802';
+  }, [legalCase.case_number]);
+
+  const handleResyncTjal = async () => {
+    setSyncingTjal(true);
+    try {
+      const res = await api.post(`/legal-cases/${legalCase.id}/resync-movements`);
+      const { created, already_existed, total_now, warning } = res.data || {};
+      if (warning) {
+        showInfo(`Consulta OK mas scraper nao encontrou movimentacoes — ${warning}`);
+      } else if (created === 0) {
+        showInfo(`Nada novo — ${already_existed} movimentacoes ja estavam sincronizadas (total: ${total_now})`);
+      } else {
+        showSuccess(`${created} nova(s) movimentacao(oes) sincronizada(s). Total agora: ${total_now}`);
+      }
+      onRefresh?.();
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Erro ao sincronizar';
+      showError(msg);
+    } finally {
+      setSyncingTjal(false);
+    }
+  };
+
   const items = useMemo<TimelineItem[]>(() => {
     const now = Date.now();
     const out: TimelineItem[] = [];
@@ -442,13 +478,28 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs }: Props) 
   return (
     <div className="p-5 space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-[13px] font-bold text-foreground">Linha do tempo</h3>
           <p className="text-[11px] text-muted-foreground mt-0.5">
             {items.length} evento{items.length !== 1 ? 's' : ''} na história deste processo
           </p>
         </div>
+        {isTjal && (
+          <button
+            onClick={handleResyncTjal}
+            disabled={syncingTjal}
+            title="Consulta o TJAL e importa todas as movimentações atuais"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-accent/50 border border-border text-foreground text-[11px] font-bold hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+          >
+            {syncingTjal ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <RefreshCw size={12} />
+            )}
+            {syncingTjal ? 'Sincronizando…' : 'Sincronizar TJAL'}
+          </button>
+        )}
       </div>
 
       {/* Eventos futuros (agrupados no topo) */}
