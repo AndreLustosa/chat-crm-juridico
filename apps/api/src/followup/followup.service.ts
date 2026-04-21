@@ -125,14 +125,22 @@ export class FollowupService {
    *
    * Ambos retornam formato unificado — frontend renderiza em uma unica tabela.
    */
-  async getQueue(tenantId?: string) {
+  /**
+   * Lista a fila unificada.
+   * @param tenantId Filtro de tenant (opcional).
+   * @param minDays Sobrescreve o cutoff de inatividade (em dias) pra todos os
+   *   stages do legacy. Se undefined/null: usa defaults por stage (3/3/2/5).
+   *   Se 0: mostra todos os leads dos 4 stages elegíveis sem exigir inatividade.
+   */
+  async getQueue(tenantId?: string, minDays?: number | null) {
     const enrollmentItems = await this.getQueueFromEnrollments(tenantId);
-    const legacyItems = await this.getQueueFromLegacy(tenantId);
+    const legacyItems = await this.getQueueFromLegacy(tenantId, minDays);
 
     return {
       total: enrollmentItems.length + legacyItems.length,
       enrollment_count: enrollmentItems.length,
       legacy_count: legacyItems.length,
+      min_days_applied: minDays ?? null,
       items: [...enrollmentItems, ...legacyItems].sort((a, b) => {
         // Ordenar: primeiro os que tem next_send_at mais proximo/passado
         const aNext = a.next_scheduled_at?.getTime() ?? Infinity;
@@ -192,22 +200,29 @@ export class FollowupService {
       });
   }
 
-  private async getQueueFromLegacy(tenantId?: string) {
-    // Mesmos cutoffs do FollowupCronService.legacyStageFollowup
-    const STALE_CONFIGS: Array<{ stage: string; days: number }> = [
+  private async getQueueFromLegacy(tenantId?: string, minDays?: number | null) {
+    // Cutoffs default por stage (mesmos do FollowupCronService.legacyStageFollowup).
+    // Se minDays for passado (>=0), sobrescreve todos com esse valor.
+    const DEFAULT_CONFIGS: Array<{ stage: string; days: number }> = [
       { stage: 'AGUARDANDO_DOCS', days: 3 },
       { stage: 'AGUARDANDO_PROC', days: 3 },
       { stage: 'AGUARDANDO_FORM', days: 2 },
       { stage: 'QUALIFICANDO', days: 5 },
     ];
+    const STALE_CONFIGS = minDays != null && minDays >= 0
+      ? DEFAULT_CONFIGS.map(c => ({ stage: c.stage, days: minDays }))
+      : DEFAULT_CONFIGS;
 
     const items: any[] = [];
     for (const config of STALE_CONFIGS) {
-      const cutoff = new Date(Date.now() - config.days * 86400000);
+      // Se days === 0, nao filtra por updated_at (mostra todos do stage).
+      const updatedAtFilter = config.days > 0
+        ? { updated_at: { lt: new Date(Date.now() - config.days * 86400000) } }
+        : {};
       const leads: any[] = await (this.prisma as any).lead.findMany({
         where: {
           stage: config.stage,
-          updated_at: { lt: cutoff },
+          ...updatedAtFilter,
           is_client: false,
           followup_enrollments: { none: { status: 'ATIVO' } },
           ...(tenantId && { tenant_id: tenantId }),

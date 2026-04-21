@@ -17,9 +17,18 @@ export class FollowupController {
   //   - Leads elegiveis ao cron legacy (stages AGUARDANDO_* / QUALIFICANDO,
   //     sem enrollment ativo, inativos ha N dias)
   // Para cada um: ultima mensagem enviada + proximo disparo programado.
+  //
+  // Query params opcionais:
+  //   - min_days: sobrescreve o cutoff de inatividade (default 3/3/2/5
+  //     por stage). Passe 0 pra mostrar TODOS os leads nos 4 stages sem
+  //     exigir dias parados.
   @Get('queue')
-  getQueue(@Request() req: any) {
-    return this.svc.getQueue(req.user?.tenant_id);
+  getQueue(@Query('min_days') minDays: string | undefined, @Request() req: any) {
+    const parsed = minDays != null && minDays !== '' ? parseInt(minDays, 10) : null;
+    return this.svc.getQueue(
+      req.user?.tenant_id,
+      parsed !== null && !Number.isNaN(parsed) ? parsed : null,
+    );
   }
 
   // Dispara followup manual pra um lead especifico (antes do cron agendado).

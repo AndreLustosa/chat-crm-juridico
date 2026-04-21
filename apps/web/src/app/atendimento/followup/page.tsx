@@ -1258,6 +1258,8 @@ export default function FollowupPage() {
   const [triggeringLeadId, setTriggeringLeadId] = useState<string | null>(null);
   const [queueSearch, setQueueSearch] = useState('');
   const [queueSourceFilter, setQueueSourceFilter] = useState<'ALL' | 'enrollment' | 'legacy'>('ALL');
+  // null = usa defaults por stage (3/3/2/5). 0 = todos sem cutoff. N = N dias pra todos.
+  const [queueMinDays, setQueueMinDays] = useState<number | null>(null);
 
   // Disparos
   const [broadcastTargets, setBroadcastTargets] = useState<BroadcastTarget[]>([]);
@@ -1327,14 +1329,15 @@ export default function FollowupPage() {
   const fetchQueue = useCallback(async () => {
     setLoadingQueue(true);
     try {
-      const data = await apiFetch('/followup/queue');
+      const qs = queueMinDays !== null ? `?min_days=${queueMinDays}` : '';
+      const data = await apiFetch(`/followup/queue${qs}`);
       setQueue(data as QueueResponse);
     } catch (err: unknown) {
       showError(err instanceof Error ? err.message : 'Erro ao carregar fila');
     } finally {
       setLoadingQueue(false);
     }
-  }, []);
+  }, [queueMinDays]);
 
   const handleTriggerQueue = async (item: QueueItem) => {
     const label = item.lead_name || item.lead_phone;
@@ -1892,7 +1895,9 @@ export default function FollowupPage() {
                 <h2 className="text-lg font-semibold text-foreground">Fila de Followup</h2>
                 <p className="text-sm text-muted-foreground mt-0.5">
                   {queue
-                    ? `${queue.total} lead${queue.total !== 1 ? 's' : ''} aguardando — ${queue.enrollment_count} em sequência, ${queue.legacy_count} no cron legacy`
+                    ? `${queue.total} lead${queue.total !== 1 ? 's' : ''} aguardando — ${queue.enrollment_count} em sequência, ${queue.legacy_count} no cron legacy${
+                        queueMinDays !== null ? ` · cutoff: ${queueMinDays}d` : ''
+                      }`
                     : 'Leads aptos a receber o próximo disparo'}
                 </p>
               </div>
@@ -1932,6 +1937,28 @@ export default function FollowupPage() {
                     {src === 'ALL' ? 'Todos' : src === 'enrollment' ? 'Sequência' : 'Cron legacy'}
                   </button>
                 ))}
+              </div>
+              {/* Cutoff customizavel — sobrescreve 3/3/2/5 default do cron legacy */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground whitespace-nowrap">Parado há:</label>
+                <select
+                  value={queueMinDays === null ? 'default' : String(queueMinDays)}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setQueueMinDays(v === 'default' ? null : parseInt(v, 10));
+                  }}
+                  className="px-3 py-2 rounded-xl bg-muted border border-border text-sm text-foreground focus:outline-none focus:border-primary"
+                >
+                  <option value="default">Padrão (3/3/2/5d)</option>
+                  <option value="0">0 dias (todos)</option>
+                  <option value="1">1 dia+</option>
+                  <option value="2">2 dias+</option>
+                  <option value="3">3 dias+</option>
+                  <option value="5">5 dias+</option>
+                  <option value="7">7 dias+</option>
+                  <option value="14">14 dias+</option>
+                  <option value="30">30 dias+</option>
+                </select>
               </div>
             </div>
 
