@@ -1,7 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EsajTjalScraper, inferTrackingStage } from '../court-scraper/scrapers/esaj-tjal.scraper';
@@ -41,7 +39,6 @@ export class EsajSyncService {
     private prisma: PrismaService,
     private whatsapp: WhatsappService,
     private settings: SettingsService,
-    @InjectQueue('memory-jobs') private memoryQueue: Queue,
   ) {}
 
   // ─── Cron Jobs ─────────────────────────────────────────────
@@ -65,12 +62,11 @@ export class EsajSyncService {
     synced: number;
     newMovements: number;
     notifications: number;
-    profilesReconsolidated: number;
     errors: string[];
   }> {
     if (this.syncing) {
       this.logger.warn('[SYNC] Já há um sync em andamento, ignorando');
-      return { total: 0, synced: 0, newMovements: 0, notifications: 0, profilesReconsolidated: 0, errors: ['Sync já em andamento'] };
+      return { total: 0, synced: 0, newMovements: 0, notifications: 0, errors: ['Sync já em andamento'] };
     }
 
     this.syncing = true;
@@ -79,9 +75,6 @@ export class EsajSyncService {
     let totalNewMovements = 0;
     let totalNotifications = 0;
     const errors: string[] = [];
-    // Leads cujo LeadProfile deve ser re-consolidado apos o loop (tiveram
-    // movimentacoes novas). Map para dedup quando 1 lead tem varios processos.
-    const leadsToReconsolidate = new Map<string, string>(); // leadId -> tenantId
 
     try {
       // Buscar todos os processos em acompanhamento com número CNJ
@@ -111,7 +104,7 @@ export class EsajSyncService {
         cookie = await this.scraper.initSession();
       } catch (err: any) {
         this.logger.error(`[SYNC] Falha ao iniciar sessão ESAJ: ${err.message}`);
-        return { total: cases.length, synced: 0, newMovements: 0, notifications: 0, profilesReconsolidated: 0, errors: [`Sessão ESAJ falhou: ${err.message}`] };
+        return { total: cases.length, synced: 0, newMovements: 0, notifications: 0, errors: [`Sessão ESAJ falhou: ${err.message}`] };
       }
 
       for (const legalCase of cases) {
@@ -163,12 +156,6 @@ export class EsajSyncService {
           if (newMovements.length === 0) continue;
           totalNewMovements += newMovements.length;
 
-          // Marcar lead pra re-consolidacao de perfil (IA ganha contexto novo).
-          // Usar Map dedupa caso o mesmo lead tenha multiplos processos.
-          if (legalCase.lead_id && legalCase.tenant_id) {
-            leadsToReconsolidate.set(legalCase.lead_id, legalCase.tenant_id);
-          }
-
           this.logger.log(
             `[SYNC] ${formatCNJ(digits)}: ${newMovements.length} nova(s) movimentação(ões)`,
           );
@@ -216,31 +203,10 @@ export class EsajSyncService {
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-      // Re-consolidar LeadProfile para todos os leads que tiveram movimentacoes
-      // novas. Isso garante que a IA no WhatsApp tenha contexto atualizado com
-      // o status real do processo na proxima mensagem do cliente.
-      // Custo LLM: ~$0.04 por lead. Tipicamente 5-20 leads afetados por sync.
-      let profilesReconsolidated = 0;
-      if (leadsToReconsolidate.size > 0) {
-        try {
-          const jobs = Array.from(leadsToReconsolidate.entries()).map(([leadId, tenantId]) => ({
-            name: 'consolidate-profile',
-            data: { tenant_id: tenantId, lead_id: leadId, reason: 'esaj-cron-sync' },
-            opts: {
-              jobId: `cron-resync-profile-${leadId}-${Date.now()}`,
-              removeOnComplete: true,
-              attempts: 2,
-            },
-          }));
-          await this.memoryQueue.addBulk(jobs);
-          profilesReconsolidated = jobs.length;
-          this.logger.log(
-            `[SYNC] ${profilesReconsolidated} LeadProfile(s) enfileirados para re-consolidacao`,
-          );
-        } catch (err: any) {
-          this.logger.warn(`[SYNC] Falha ao enfileirar consolidate-profile: ${err.message}`);
-        }
-      }
+      // Re-consolidacao de LeadProfile REMOVIDA em 2026-04-21. Pivotamos
+      // pra arquitetura on-demand: IA busca via tool call get_case_movements
+      // quando cliente pergunta. Movimentacoes ja estao persistidas em
+      // CaseEvent, ficam sempre acessiveis. Evita LLM desnecessario.
 
       // Salvar status do último sync
       try {
@@ -250,7 +216,6 @@ export class EsajSyncService {
           synced: totalSynced,
           newMovements: totalNewMovements,
           notifications: totalNotifications,
-          profilesReconsolidated,
           errors: errors.length,
           elapsed_seconds: elapsed,
         }));
@@ -258,8 +223,7 @@ export class EsajSyncService {
 
       this.logger.log(
         `[SYNC] Concluído em ${elapsed}s: ${totalSynced}/${cases.length} processos, ` +
-        `${totalNewMovements} movs novas, ${totalNotifications} notificacoes, ` +
-        `${profilesReconsolidated} perfis re-consolidados, ${errors.length} erros`,
+        `${totalNewMovements} movs novas, ${totalNotifications} notificacoes, ${errors.length} erros`,
       );
 
       return {
@@ -267,7 +231,6 @@ export class EsajSyncService {
         synced: totalSynced,
         newMovements: totalNewMovements,
         notifications: totalNotifications,
-        profilesReconsolidated,
         errors,
       };
     } finally {

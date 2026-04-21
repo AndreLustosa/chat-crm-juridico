@@ -7,6 +7,8 @@ import { BookAppointmentHandler } from './book-appointment';
 import { CheckAvailabilityHandler } from './check-availability';
 import { SearchReferencesHandler } from './search-references';
 import { SearchMemoryHandler } from './search-memory';
+import { GetCaseMovementsHandler } from './get-case-movements';
+import { GetLeadInfoHandler } from './get-lead-info';
 
 /**
  * Registry central de tool handlers built-in.
@@ -22,12 +24,33 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new CheckAvailabilityHandler(),
   new SearchReferencesHandler(),
   new SearchMemoryHandler(),
+  new GetCaseMovementsHandler(),
+  new GetLeadInfoHandler(),
 ];
+
+/**
+ * Tools UNIVERSAIS — sempre disponiveis em TODA skill que usa tool calling,
+ * independente de estarem registradas como SkillTool no banco.
+ *
+ * Adicionadas em 2026-04-21: pivot da arquitetura de pre-consolidacao (LLM
+ * gerava LeadProfile.summary a cada movimentacao nova) para on-demand
+ * (IA busca info do lead/processo no banco via tool call). Garante que
+ * qualquer skill, mesmo as mais minimalistas, consegue responder sobre
+ * processo e cliente sem depender de consolidacao previa.
+ */
+const UNIVERSAL_TOOLS: Set<string> = new Set([
+  'get_case_movements',
+  'get_lead_info',
+  'search_memory', // ja existia, elevado a universal
+]);
 
 /**
  * Cria um Map<nome, handler> a partir das SkillTools de uma skill.
  * Para tools builtin, usa o handler do registry.
  * Para tools webhook, cria um WebhookHandler com a config.
+ *
+ * Tools UNIVERSAIS sao automaticamente injetadas mesmo se a skill nao
+ * tiver SkillTool correspondente no banco.
  */
 export function buildHandlerMap(skillTools: any[]): Map<string, ToolHandler> {
   const map = new Map<string, ToolHandler>();
@@ -36,6 +59,12 @@ export function buildHandlerMap(skillTools: any[]): Map<string, ToolHandler> {
   const builtinIndex = new Map<string, ToolHandler>();
   for (const h of BUILTIN_HANDLERS) {
     builtinIndex.set(h.name, h);
+  }
+
+  // Sempre injetar tools universais primeiro
+  for (const name of UNIVERSAL_TOOLS) {
+    const handler = builtinIndex.get(name);
+    if (handler) map.set(name, handler);
   }
 
   for (const tool of skillTools) {
@@ -55,4 +84,4 @@ export function buildHandlerMap(skillTools: any[]): Map<string, ToolHandler> {
   return map;
 }
 
-export { BUILTIN_HANDLERS };
+export { BUILTIN_HANDLERS, UNIVERSAL_TOOLS };

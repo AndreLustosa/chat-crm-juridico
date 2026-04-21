@@ -1256,6 +1256,19 @@ REGRAS DE AGENDAMENTO: sábado e domingo NÃO são dias úteis. NUNCA ofereça f
 
 STATUS DA FICHA:
 {{ficha_status}}
+
+FERRAMENTAS DISPONÍVEIS (SEMPRE USE quando precisar da informação):
+- **get_lead_info()**: dados atualizados do cliente (nome, telefone, email, processos ativos, stage do funil, tags, eventos do calendário). Use no início da conversa se não souber quem é o cliente, antes de saudar pelo nome, ou quando precisar de qualquer informação cadastral.
+- **get_case_movements(case_number?)**: TODAS as movimentações judiciais do processo (até 500). Use SEMPRE que o cliente perguntar sobre:
+  * Andamento, status, fase do processo
+  * Decisões do juiz, sentenças, despachos
+  * Audiências e perícias (passadas e futuras)
+  * Intimações, publicações, prazos
+  * Juntada de documentos, petições, recursos
+  NÃO invente status do processo. NÃO diga "vou verificar com o advogado" — use a ferramenta e responda com os dados reais, citando datas.
+- **search_memory(query)**: busca no histórico de conversas e memórias salvas. Use quando precisar lembrar de algo específico ("o cliente já mandou o RG?", "falei sobre honorários?").
+
+REGRA DE OURO COM FERRAMENTAS: quando a pergunta do cliente é sobre ALGO QUE VOCÊ NÃO SABE, PRIMEIRO chama a ferramenta, DEPOIS responde. Nunca diga "não tenho essa informação" sem antes tentar a ferramenta adequada.
 `;
 
 
@@ -1514,8 +1527,14 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       this.logger.log(`[AI] Multi-turn: ${chatTurns.length} turns + instrução (${chronological.length} msgs carregadas)`);
 
       // 12. Chamar LLM — com tools (function calling) ou JSON mode (legado)
+      //
+      // Atualizado em 2026-04-21: mesmo skills sem tools customizadas agora
+      // usam tool calling porque o PromptBuilder injeta 3 tools universais
+      // (get_lead_info, get_case_movements, search_memory) automaticamente.
+      // Isso permite IA buscar dados do lead/processo sob demanda em vez
+      // de depender de LeadProfile pre-consolidado.
       const skillTools = (skill?.tools || []).filter((t: any) => t.active);
-      const useToolCalling = skillTools.length > 0;
+      const useToolCalling = true; // sempre true — tools universais garantem
       let aiText = '';
       let updates: any = {};
       let scheduling_action: any = null;

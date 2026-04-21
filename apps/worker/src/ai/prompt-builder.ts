@@ -163,10 +163,85 @@ export class PromptBuilder {
   }
 
   /**
-   * Converte SkillTool[] do banco para o formato OpenAI/Anthropic function calling.
+   * Tools UNIVERSAIS — adicionadas automaticamente em toda skill que usa
+   * tool calling. Cobrem busca de dados do lead/processo/memoria sem
+   * precisar que o admin configure SkillTool por skill.
+   *
+   * Motivacao (2026-04-21): antes pre-consolidavamos LeadProfile via LLM
+   * a cada movimentacao nova — alto custo e muitas vezes desperdicio.
+   * Agora a IA busca direto no banco quando o cliente pergunta. Input
+   * tokens sao baratos ($2/1M no GPT-4.1), entao pode trazer muita info.
+   */
+  private readonly UNIVERSAL_TOOL_DEFS: LLMToolDef[] = [
+    {
+      type: 'function',
+      function: {
+        name: 'get_lead_info',
+        description:
+          'Retorna dados cadastrais e situacao atual do lead: nome, telefone, email, ' +
+          'processos ativos (numero, area, vara, advogado), stage no funil, tags, ' +
+          'eventos do calendario. Use antes de saudar pelo nome ou quando precisar ' +
+          'de qualquer informacao basica sobre o cliente.',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_case_movements',
+        description:
+          'Retorna TODAS as movimentacoes judiciais do processo do lead (ate 500). ' +
+          'Use quando o cliente perguntar sobre status, andamento, decisoes, audiencias, ' +
+          'prazos, ou qualquer detalhe processual. Se o lead tem multiplos processos, ' +
+          'traz de todos. Pode filtrar por case_number opcional. Input tokens sao baratos, ' +
+          'entao nao se preocupe com volume — LLM filtra o relevante na hora de responder.',
+        parameters: {
+          type: 'object',
+          properties: {
+            case_number: {
+              type: 'string',
+              description:
+                'Opcional. Numero CNJ (ex: "0700223-79.2022.8.02.0204") para filtrar ' +
+                'apenas aquele processo. Se omitido, traz de todos os processos ativos do lead.',
+            },
+            limit: {
+              type: 'number',
+              description: 'Opcional. Max de movimentacoes a retornar. Default 200, max 500.',
+            },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'search_memory',
+        description:
+          'Busca semantica nas memorias do lead + organizacao + mensagens passadas. ' +
+          'Use quando precisar lembrar de algo especifico que foi dito no passado ' +
+          '(ex: "o cliente ja mandou o RG?", "falei com ele sobre honorarios?"). ' +
+          'Retorna trechos mais relevantes com fonte e data.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Termo de busca em portugues natural.',
+            },
+          },
+          required: ['query'],
+        },
+      },
+    },
+  ];
+
+  /**
+   * Converte SkillTool[] do banco para o formato OpenAI/Anthropic function calling
+   * e INJETA as tools universais (get_lead_info, get_case_movements, search_memory).
    */
   buildToolDefinitions(skillTools: any[]): LLMToolDef[] {
-    return skillTools
+    const skillDefs = skillTools
       .filter((t: any) => t.active)
       .map((t: any) => ({
         type: 'function' as const,
@@ -176,6 +251,15 @@ export class PromptBuilder {
           parameters: t.parameters_json || { type: 'object', properties: {} },
         },
       }));
+
+    // Tools universais sao injetadas se ainda nao estiverem presentes como
+    // SkillTool customizado no banco (evita duplicacao caso admin configure).
+    const skillNames = new Set(skillDefs.map((d) => d.function.name));
+    const universalToAdd = this.UNIVERSAL_TOOL_DEFS.filter(
+      (def) => !skillNames.has(def.function.name),
+    );
+
+    return [...skillDefs, ...universalToAdd];
   }
 
   /**
