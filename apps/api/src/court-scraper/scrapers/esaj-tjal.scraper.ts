@@ -418,19 +418,37 @@ export class EsajTjalScraper {
     // processos novos/antigos no mesmo tribunal podem ter estruturas distintas.
     //
     // Atualizado em 2026-04-20: adicionadas estrategias 3 e 4 depois que o
-    // processo 0715582-51.2024.8.02.0058 retornou 0 movs com estrategias 1-2
-    // (tabela existia com 105 linhas, mas sem ID).
+    // processo 0715582-51.2024.8.02.0058 retornou 0 movs com estrategias 1-2.
+    //
+    // Atualizado em 2026-04-21: PRIORIDADE EXPLICITA para #tabelaTodasMovimentacoes.
+    // O HTML do e-SAJ tem DUAS tabelas:
+    //   - #tabelaUltimasMovimentacoes (~20 linhas, mostrada por default)
+    //   - #tabelaTodasMovimentacoes (todas, oculta ate "Ver todas")
+    // Antes usavamos selectAll([...]).first() que pegava a primeira no DOM
+    // (normalmente a "Ultimas"). Isso causava truncamento silencioso de
+    // processos com historico longo (ex: 0700223-79... trouxe 22 de ~80).
+    // Agora buscamos a "Todas" primeiro, so caindo na "Ultimas" se aquela
+    // nao existir.
     const movements: Array<{ date: string; description: string }> = [];
     let extractionStrategy = 'none';
 
-    // Estrategia 1: IDs conhecidos da tabela de movimentacoes
-    let movTable = $([
-      '#tabelaTodasMovimentacoes',
-      '#tabelaUltimasMovimentacoes',
-      '#tableTodasMovimentacoes',
-      '#tableUltimasMovimentacoes',
-    ].join(', ')).first();
-    if (movTable.length) extractionStrategy = 'id-match';
+    // Log de diagnostico: quantas linhas tem cada tabela conhecida
+    const tableTodasCount = $('#tabelaTodasMovimentacoes, #tableTodasMovimentacoes').find('tr').length;
+    const tableUltimasCount = $('#tabelaUltimasMovimentacoes, #tableUltimasMovimentacoes').find('tr').length;
+    this.logger.log(
+      `[PARSE] Diagnostico tabelas: Todas=${tableTodasCount} Ultimas=${tableUltimasCount}`,
+    );
+
+    // Estrategia 1a: #tabelaTodasMovimentacoes (PRIORIDADE MAXIMA — contem
+    // TODAS as movimentacoes do processo; so fica oculta visualmente)
+    let movTable = $('#tabelaTodasMovimentacoes, #tableTodasMovimentacoes').first();
+    if (movTable.length) extractionStrategy = 'id-todas';
+
+    // Estrategia 1b: #tabelaUltimasMovimentacoes (apenas se Todas nao existir)
+    if (!movTable.length) {
+      movTable = $('#tabelaUltimasMovimentacoes, #tableUltimasMovimentacoes').first();
+      if (movTable.length) extractionStrategy = 'id-ultimas';
+    }
 
     // Estrategia 2: qualquer <table> cujo id contenha "ovimenta" (case-insensitive)
     if (!movTable.length) {
@@ -442,10 +460,9 @@ export class EsajTjalScraper {
     }
 
     // Estrategia 3: buscar TRs com CELULAS nomeadas (td.dataMovimentacao +
-    // td.descricaoMovimentacao). Isso funciona mesmo quando a tabela pai nao
-    // tem ID ou esta dentro de outro container. Vi que o SAJ usa esses
-    // nomes de classe consistentemente em tribunais que adotaram o layout
-    // mais recente.
+    // td.descricaoMovimentacao). Funciona mesmo quando a tabela pai nao
+    // tem ID ou esta dentro de outro container. Pega TODAS as TRs no DOM —
+    // inclui ambas tabelas se ambas usarem essas classes.
     if (!movTable.length) {
       const rowsByClass = $('tr').filter((_, row) => {
         return $(row).find('td.dataMovimentacao').length > 0 &&
@@ -453,11 +470,16 @@ export class EsajTjalScraper {
       });
       if (rowsByClass.length > 0) {
         extractionStrategy = 'td-class';
+        const seen = new Set<string>(); // dedup pra evitar contar 2x quando ambas tabelas usarem as classes
         rowsByClass.each((_, row) => {
           const dateText = $(row).find('td.dataMovimentacao').text().trim();
           const description = $(row).find('td.descricaoMovimentacao').text().replace(/\s+/g, ' ').trim();
           if (dateText && description) {
-            movements.push({ date: dateText, description });
+            const key = `${dateText}|${description}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              movements.push({ date: dateText, description });
+            }
           }
         });
       }
@@ -480,11 +502,11 @@ export class EsajTjalScraper {
 
     // Estrategia 4 (ultima rede de seguranca): heuristica de dd/mm/yyyy na
     // primeira celula. Pega QUALQUER tr em tables cuja primeira coluna bate
-    // o padrao de data brasileira. Risco de falsos positivos e baixo porque
-    // a pagina tem poucas tabelas com esse padrao (movimentacoes e talvez
-    // historico de distribuicao).
+    // o padrao de data brasileira. Dedupa automatico (a mesma mov pode
+    // aparecer nas 2 tabelas Todas + Ultimas).
     if (movements.length === 0) {
       const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
+      const seen = new Set<string>();
       $('tr').each((_, row) => {
         const tds = $(row).find('td');
         if (tds.length >= 2) {
@@ -492,7 +514,11 @@ export class EsajTjalScraper {
           if (datePattern.test(dateText)) {
             const description = $(tds[1]).text().replace(/\s+/g, ' ').trim();
             if (description) {
-              movements.push({ date: dateText, description });
+              const key = `${dateText}|${description}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                movements.push({ date: dateText, description });
+              }
             }
           }
         }
