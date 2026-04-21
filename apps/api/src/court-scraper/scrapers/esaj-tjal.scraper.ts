@@ -413,28 +413,59 @@ export class EsajTjalScraper {
       });
     }
 
-    // Movimentacoes
-    // Nota: o TJAL usa prefixo "table*" (ingles) tanto para partes quanto
-    // para movimentacoes, ao contrario de outros tribunais SAJ que usam
-    // "tabela*" (portugues). Tentamos ambos, mais um filtro por atributo
-    // contendo "ovimenta" como ultima rede de seguranca.
+    // Movimentacoes — 4 estrategias de extracao (do mais especifico pro mais
+    // generico). Cada tribunal SAJ pode usar layout ligeiramente diferente, e
+    // processos novos/antigos no mesmo tribunal podem ter estruturas distintas.
+    //
+    // Atualizado em 2026-04-20: adicionadas estrategias 3 e 4 depois que o
+    // processo 0715582-51.2024.8.02.0058 retornou 0 movs com estrategias 1-2
+    // (tabela existia com 105 linhas, mas sem ID).
     const movements: Array<{ date: string; description: string }> = [];
+    let extractionStrategy = 'none';
+
+    // Estrategia 1: IDs conhecidos da tabela de movimentacoes
     let movTable = $([
       '#tabelaTodasMovimentacoes',
       '#tabelaUltimasMovimentacoes',
       '#tableTodasMovimentacoes',
       '#tableUltimasMovimentacoes',
     ].join(', ')).first();
+    if (movTable.length) extractionStrategy = 'id-match';
 
-    // Fallback: qualquer <table> cujo id contenha "ovimenta" (case-insensitive)
+    // Estrategia 2: qualquer <table> cujo id contenha "ovimenta" (case-insensitive)
     if (!movTable.length) {
       movTable = $('table').filter((_, el) => {
         const id = $(el).attr('id') || '';
         return /ovimenta/i.test(id);
       }).first();
+      if (movTable.length) extractionStrategy = 'id-contains';
     }
 
-    if (movTable.length) {
+    // Estrategia 3: buscar TRs com CELULAS nomeadas (td.dataMovimentacao +
+    // td.descricaoMovimentacao). Isso funciona mesmo quando a tabela pai nao
+    // tem ID ou esta dentro de outro container. Vi que o SAJ usa esses
+    // nomes de classe consistentemente em tribunais que adotaram o layout
+    // mais recente.
+    if (!movTable.length) {
+      const rowsByClass = $('tr').filter((_, row) => {
+        return $(row).find('td.dataMovimentacao').length > 0 &&
+               $(row).find('td.descricaoMovimentacao').length > 0;
+      });
+      if (rowsByClass.length > 0) {
+        extractionStrategy = 'td-class';
+        rowsByClass.each((_, row) => {
+          const dateText = $(row).find('td.dataMovimentacao').text().trim();
+          const description = $(row).find('td.descricaoMovimentacao').text().replace(/\s+/g, ' ').trim();
+          if (dateText && description) {
+            movements.push({ date: dateText, description });
+          }
+        });
+      }
+    }
+
+    // Estrategia 1/2: se encontrou tabela com ID, extrai movimentacoes pelo
+    // layout classico (primeira td = data, segunda td = descricao).
+    if (movTable.length && movements.length === 0) {
       movTable.find('tr').each((_, row) => {
         const tds = $(row).find('td');
         if (tds.length >= 2) {
@@ -445,6 +476,32 @@ export class EsajTjalScraper {
           }
         }
       });
+    }
+
+    // Estrategia 4 (ultima rede de seguranca): heuristica de dd/mm/yyyy na
+    // primeira celula. Pega QUALQUER tr em tables cuja primeira coluna bate
+    // o padrao de data brasileira. Risco de falsos positivos e baixo porque
+    // a pagina tem poucas tabelas com esse padrao (movimentacoes e talvez
+    // historico de distribuicao).
+    if (movements.length === 0) {
+      const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
+      $('tr').each((_, row) => {
+        const tds = $(row).find('td');
+        if (tds.length >= 2) {
+          const dateText = $(tds[0]).text().trim();
+          if (datePattern.test(dateText)) {
+            const description = $(tds[1]).text().replace(/\s+/g, ' ').trim();
+            if (description) {
+              movements.push({ date: dateText, description });
+            }
+          }
+        }
+      });
+      if (movements.length > 0) extractionStrategy = 'date-heuristic';
+    }
+
+    if (movements.length > 0) {
+      this.logger.log(`[PARSE] Movimentacoes extraidas via estrategia="${extractionStrategy}" total=${movements.length}`);
     }
 
     // Inferir área e tracking stage
