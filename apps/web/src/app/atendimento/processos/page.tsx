@@ -9,7 +9,9 @@ import {
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, Bell, RefreshCcw, BookOpen,
   LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown, FolderPlus, Pencil, Trash2,
   Sparkles, AlertCircle, SlidersHorizontal, Columns3, BookmarkPlus, Bookmark, Star,
+  Undo2,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '@/lib/api';
 import { TRACKING_STAGES, findTrackingStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
@@ -3950,12 +3952,54 @@ function ProcessosPageContent() {
     }
   }, [searchParams, cases, router]);
 
-  const executeMoveCase = async (caseId: string, newTrackingStage: string, extra?: { sentence_value?: number; sentence_date?: string; sentence_type?: string }) => {
+  const executeMoveCase = async (
+    caseId: string,
+    newTrackingStage: string,
+    extra?: { sentence_value?: number; sentence_date?: string; sentence_type?: string },
+    options?: { showUndoToast?: boolean },
+  ) => {
+    // Captura o stage ANTES da atualização otimista — usado pelo botão "Desfazer".
+    const previousStage = cases.find(c => c.id === caseId)?.tracking_stage || null;
+
     setCases(prev => prev.map(c => c.id === caseId ? { ...c, tracking_stage: newTrackingStage } : c));
     try {
       await api.patch(`/legal-cases/${caseId}/tracking-stage`, { trackingStage: newTrackingStage, ...extra });
     } catch {
       fetchCases(true);
+      return;
+    }
+
+    // Toast com undo: so mostra se foi arraste manual (evita loop no proprio undo
+    // e evita mostrar quando o fluxo veio de modal de PERICIA/EXECUCAO etc).
+    const showUndo = options?.showUndoToast !== false && previousStage && previousStage !== newTrackingStage;
+    if (showUndo) {
+      const fromLabel = findTrackingStage(previousStage)?.label || previousStage;
+      const toLabel = findTrackingStage(newTrackingStage)?.label || newTrackingStage;
+      toast.custom(
+        (t) => (
+          <div
+            className={`bg-card border border-border rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 min-w-[320px] max-w-md ${
+              t.visible ? 'animate-in fade-in slide-in-from-bottom-2' : 'animate-out fade-out'
+            }`}
+          >
+            <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+            <div className="flex-1 text-[13px] text-foreground leading-tight">
+              Processo movido para <span className="font-semibold">{toLabel}</span>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Estava em: {fromLabel}</div>
+            </div>
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                void executeMoveCase(caseId, previousStage, undefined, { showUndoToast: false });
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-accent text-[12px] font-semibold text-foreground transition-colors"
+            >
+              <Undo2 size={14} /> Desfazer
+            </button>
+          </div>
+        ),
+        { duration: 8000, position: 'bottom-right' },
+      );
     }
   };
 
