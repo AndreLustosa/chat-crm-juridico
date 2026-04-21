@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { ToolHandler, ToolContext } from '../tool-executor';
 
 /**
@@ -9,14 +10,17 @@ import type { ToolHandler, ToolContext } from '../tool-executor';
  * titulo, descricao completa, fonte (ESAJ/DJEN/MANUAL) e data do evento.
  *
  * Se o lead tem multiplos processos, traz de todos. Se informar case_number,
- * filtra apenas aquele processo.
+ * filtra apenas aquele processo (comparacao e feita por digitos normalizados,
+ * independente de formatacao — "0706801-69.2026.8.02.0058", "07068016920268020058"
+ * e "0706801" todos batem).
  *
  * Input tokens sao baratos ($2/1M no GPT-4.1), entao a tool pode retornar
- * muitas movimentacoes (ate ~200) sem problema. O LLM filtra o relevante
+ * muitas movimentacoes (ate ~500) sem problema. O LLM filtra o relevante
  * na hora de responder ao cliente.
  */
 export class GetCaseMovementsHandler implements ToolHandler {
   name = 'get_case_movements';
+  private readonly logger = new Logger(GetCaseMovementsHandler.name);
 
   async execute(
     params: { case_number?: string; limit?: number },
@@ -32,19 +36,11 @@ export class GetCaseMovementsHandler implements ToolHandler {
       return { success: false, message: 'Lead nao identificado no contexto' };
     }
 
-    // Limite padrao 200 (cobre casos extremos). User pediu "todas" — input
-    // tokens sao baratos, deixar generoso.
     const limit = Math.min(params.limit ?? 200, 500);
 
-    // Buscar processos do lead
-    const legalCases = await prisma.legalCase.findMany({
-      where: {
-        lead_id: leadId,
-        archived: false,
-        ...(params.case_number
-          ? { case_number: { contains: params.case_number.replace(/\D/g, '').slice(0, 13) } }
-          : {}),
-      },
+    // Buscar TODOS os processos ativos do lead primeiro (normalmente <5)
+    const allCases = await prisma.legalCase.findMany({
+      where: { lead_id: leadId, archived: false },
       select: {
         id: true,
         case_number: true,
@@ -56,20 +52,41 @@ export class GetCaseMovementsHandler implements ToolHandler {
       },
     });
 
+    // Filtro por case_number (se informado) — normaliza ambos os lados
+    // removendo separadores (-.spaces) e compara por prefix dos digitos.
+    // Isso e robusto contra variacoes de formatacao que o LLM possa passar.
+    let legalCases = allCases;
+    if (params.case_number) {
+      const paramDigits = params.case_number.replace(/\D/g, '');
+      legalCases = allCases.filter((c: any) => {
+        const caseDigits = (c.case_number || '').replace(/\D/g, '');
+        // Match exato (20 digitos) ou prefix (user passou so parte do numero)
+        return caseDigits === paramDigits ||
+               (paramDigits.length > 0 && caseDigits.startsWith(paramDigits));
+      });
+
+      // Se o filtro nao achou nada mas o lead tem processos, retorna TODOS
+      // e avisa no message — melhor dar contexto ao LLM do que retornar vazio
+      // quando a pessoa so errou na formatacao do numero.
+      if (legalCases.length === 0 && allCases.length > 0) {
+        this.logger.warn(
+          `[get_case_movements] case_number="${params.case_number}" (digits=${paramDigits}) nao bateu com nenhum processo do lead ${leadId}. Retornando TODOS (${allCases.length}) pra nao perder contexto.`,
+        );
+        legalCases = allCases;
+      }
+    }
+
     if (legalCases.length === 0) {
       return {
         success: true,
         cases: [],
         movements: [],
-        message: params.case_number
-          ? `Nenhum processo encontrado com numero ${params.case_number}.`
-          : 'Lead nao tem processos cadastrados em acompanhamento.',
+        message: 'Lead nao tem processos cadastrados em acompanhamento.',
       };
     }
 
     const caseIds = legalCases.map((c: any) => c.id);
 
-    // Buscar CaseEvents (movimentacoes + eventos) dos processos
     const events = await prisma.caseEvent.findMany({
       where: {
         case_id: { in: caseIds },
@@ -86,7 +103,10 @@ export class GetCaseMovementsHandler implements ToolHandler {
       },
     });
 
-    // Mapa case_id -> case_number para referenciar no retorno
+    this.logger.log(
+      `[get_case_movements] lead=${leadId} cases=${legalCases.length} movs=${events.length} (case_number filter=${params.case_number || 'none'})`,
+    );
+
     const caseNumberById = new Map(legalCases.map((c: any) => [c.id, c.case_number]));
 
     return {
