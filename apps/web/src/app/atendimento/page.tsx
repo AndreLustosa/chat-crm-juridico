@@ -1640,7 +1640,7 @@ export default function Dashboard() {
     if (!lossModal || !lossReason.trim()) return;
     const { leadId } = lossModal;
     const conv = conversations.find(c => c.leadId === leadId) ?? adiadoConversations.find(c => c.leadId === leadId);
-    const prevStage = conv?.leadStage ?? 'INICIAL';
+    const prevStage = conv?.leadStage ?? 'QUALIFICANDO';
     setLossModal(null);
     // Otimismo: remove da lista e fecha painel — ambos os arrays
     setLeadStage('PERDIDO');

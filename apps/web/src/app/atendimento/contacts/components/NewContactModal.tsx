@@ -91,7 +91,7 @@ export default function NewContactModal({ onClose, onCreated }: {
         phone: normalized,
         ...(email.trim() ? { email: email.trim() } : {}),
         origin: 'manual',
-        stage: 'INICIAL',
+        stage: 'QUALIFICANDO',
       });
 
       // Criar conversa — instância sempre "whatsapp", atendente = quem cadastrou

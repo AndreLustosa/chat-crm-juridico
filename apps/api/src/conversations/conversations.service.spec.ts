@@ -149,7 +149,7 @@ describe('ConversationsService', () => {
         assigned_lawyer_id: 'lawyer1',
         origin_assigned_user_id: 'origin1',
         last_message_at: new Date(),
-        lead: { id: 'lead1', name: 'Test', phone: '551', email: null, stage: 'NOVO', profile_picture_url: null },
+        lead: { id: 'lead1', name: 'Test', phone: '551', email: null, stage: 'QUALIFICANDO', profile_picture_url: null },
         messages: [{ text: 'Hello' }],
         assigned_user: { id: 'user1', name: 'Agent' },
       }];

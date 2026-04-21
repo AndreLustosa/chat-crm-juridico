@@ -1422,9 +1422,9 @@ ROTEIRO (siga na ordem, UMA pergunta por vez):
 4. Pergunte se possui documentos ou provas (contrato, mensagens, fotos, etc.).
 5. Quando tiver informações suficientes, informe que o advogado vai analisar e oriente o próximo passo.
 
-Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"INICIAL","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":"","loss_reason":null,"form_data":null},"scheduling_action":null}
+Retorne SOMENTE JSON válido: {"reply":"texto para enviar","updates":{"name":null,"status":"QUALIFICANDO","area":null,"lead_summary":"resumo","next_step":"duvidas","notes":"","loss_reason":null,"form_data":null},"scheduling_action":null}
 
-Valores válidos para updates.status: INICIAL | QUALIFICANDO | AGUARDANDO_FORM | REUNIAO_AGENDADA | AGUARDANDO_DOCS | AGUARDANDO_PROC | FINALIZADO | PERDIDO
+Valores válidos para updates.status: QUALIFICANDO | AGUARDANDO_FORM | REUNIAO_AGENDADA | AGUARDANDO_DOCS | AGUARDANDO_PROC | FINALIZADO | PERDIDO
 Valores válidos para updates.next_step: duvidas | triagem_concluida | entrevista | formulario | reuniao | documentos | procuracao | encerrado | perdido
 updates.loss_reason: motivo da perda em português (ex: "Sem interesse"). Obrigatório quando next_step="perdido". Null nos demais casos.
 form_data: objeto com campos trabalhistas extraídos (só quando area=Trabalhista). Null quando não se aplica.

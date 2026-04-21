@@ -98,7 +98,7 @@ model Lead {
   phone                String               @unique
   email                String?
   origin               String?
-  stage                String               @default("NOVO")
+  stage                String               @default("QUALIFICANDO")
   stage_entered_at     DateTime             @default(now())
   loss_reason          String?
   profile_picture_url  String?

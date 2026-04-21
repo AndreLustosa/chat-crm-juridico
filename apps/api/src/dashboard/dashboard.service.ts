@@ -346,7 +346,7 @@ export class DashboardService {
       leadsTotal: leadsTotalCount,
       leadsLost: leadsLostCount,
       leadPipeline: leadPipelineRaw.map((g) => ({
-        stage: g.stage || 'INICIAL',
+        stage: g.stage || 'QUALIFICANDO',
         count: g._count,
       })),
       legalCases: {

@@ -203,7 +203,7 @@ export class EvolutionService implements OnApplicationBootstrap {
 
       // 1. Upsert Lead (via LeadsService para garantir normalização)
       // stage não é passado: o upsert nunca sobrescreve stage em updates existentes,
-      // e em creates o campo usa o default 'NOVO' definido no schema Prisma.
+      // e em creates o campo usa o default 'QUALIFICANDO' definido no schema Prisma.
       const lead = await this.leadsService.upsert(
         {
           phone,

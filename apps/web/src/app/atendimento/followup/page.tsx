@@ -184,7 +184,6 @@ const CATEGORIES = [
 ];
 
 const STAGES = [
-  { id: 'NOVO', label: 'Novo' },
   { id: 'QUALIFICANDO', label: 'Qualificando' },
   { id: 'AGUARDANDO_DOCS', label: 'Aguardando Docs' },
   { id: 'AGUARDANDO_PROC', label: 'Aguardando Proc.' },

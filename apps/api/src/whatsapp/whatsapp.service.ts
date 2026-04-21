@@ -566,7 +566,7 @@ export class WhatsappService {
           profile_picture_url: profilePictureUrl || null,
           origin: 'whatsapp',
           tenant: tenantId ? { connect: { id: tenantId } } : undefined,
-          stage: 'NOVO',
+          stage: 'QUALIFICANDO',
         });
 
         // Cria conversa se não existir ou atualiza metadados se faltarem

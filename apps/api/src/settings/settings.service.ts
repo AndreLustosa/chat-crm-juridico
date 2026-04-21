@@ -320,9 +320,9 @@ Se perguntar sobre vagas: pedir currículo, informar banco de talentos. Não age
 
 # Saída
 Retorne SOMENTE JSON válido:
-{"reply":"texto sem quebra de linha","updates":{"name":"Nome ou null","origin":"whatsapp","status":"INICIAL | QUALIFICANDO | PERDIDO","area":"área ou null","lead_summary":"resumo curto factual","next_step":"duvidas | triagem_concluida | perdido","notes":"","loss_reason":null}}
+{"reply":"texto sem quebra de linha","updates":{"name":"Nome ou null","origin":"whatsapp","status":"QUALIFICANDO | PERDIDO","area":"área ou null","lead_summary":"resumo curto factual","next_step":"duvidas | triagem_concluida | perdido","notes":"","loss_reason":null}}
 
-name: nunca inventar. origin: "whatsapp" padrão. area: só com base clara. status: INICIAL (sem dados), QUALIFICANDO (nome+área), PERDIDO (com loss_reason). lead_summary: nunca vazio. Se nome não informado, reply DEVE pedir o nome.`,
+name: nunca inventar. origin: "whatsapp" padrão. area: só com base clara. status: QUALIFICANDO (default pra leads em triagem/aberto), PERDIDO (com loss_reason). lead_summary: nunca vazio. Se nome não informado, reply DEVE pedir o nome.`,
           model: 'gpt-4.1-mini',
           max_tokens: 500,
           temperature: 0.5,

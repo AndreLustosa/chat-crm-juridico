@@ -1,11 +1,12 @@
 import { IsString, IsOptional, IsEmail, IsArray, IsIn } from 'class-validator';
 
 const VALID_STAGES = [
-  // Stages atuais do funil CRM
-  'INICIAL', 'QUALIFICANDO', 'AGUARDANDO_FORM', 'REUNIAO_AGENDADA',
+  // Stages atuais do funil CRM (QUALIFICANDO e o ponto de entrada padrao)
+  'QUALIFICANDO', 'AGUARDANDO_FORM', 'REUNIAO_AGENDADA',
   'AGUARDANDO_DOCS', 'AGUARDANDO_PROC', 'FINALIZADO', 'PERDIDO',
-  // Legado (ainda podem existir no banco)
-  'NOVO', 'QUALIFICADO', 'EM_ATENDIMENTO',
+  // Legado (ainda podem existir no banco — aceitos em PATCH mas nao expostos
+  // no funil; normalizeStage() no frontend os converte pra QUALIFICANDO).
+  'NOVO', 'INICIAL', 'QUALIFICADO', 'EM_ATENDIMENTO', 'CONTATADO',
 ];
 
 export class CreateLeadDto {

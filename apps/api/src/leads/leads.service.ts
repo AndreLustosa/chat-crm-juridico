@@ -229,7 +229,7 @@ export class LeadsService {
     // No UPDATE nunca sobrescreve nome, stage nem foto com valores piores:
     // - nome: só atualiza se o lead ainda não tem nome (null/vazio) E veio um nome no payload.
     //   Evita sobrescrever o nome real do cliente com o pushName do escritório.
-    // - stage: webhook sempre envia 'NOVO', mas o stage é gerenciado pela IA.
+    // - stage: webhook sempre envia 'QUALIFICANDO', mas o stage e gerenciado pela IA.
     // - profile_picture_url: só atualiza se o lead não tem foto OU se chegou uma URL válida.
     const { phone: _phone, name: incomingName, stage: _stage, profile_picture_url: incomingPhoto, ...updateData } = data as any;
 

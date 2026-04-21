@@ -899,7 +899,7 @@ Considere requer_humano=true se:
         name: 'Novo Lead — Captação',
         description: 'Sequência padrão para novos leads que ainda não contrataram',
         category: 'LEADS',
-        auto_enroll_stages: ['NOVO', 'QUALIFICANDO'],
+        auto_enroll_stages: ['QUALIFICANDO'],
         max_attempts: 9,
         steps: [
           { position: 1, delay_hours: 0, channel: 'whatsapp', tone: 'amigavel', objective: 'Apresentar o escritório e entender a necessidade do lead', auto_send: true },

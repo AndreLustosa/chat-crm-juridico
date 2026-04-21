@@ -133,7 +133,7 @@ export default function ContactsPage() {
         origin: lead.origin || 'crm',
         instanceName: lead.conversations?.[0]?.instance_name,
         profile_picture_url: lead.profile_picture_url,
-        stage: lead.stage || 'INICIAL',
+        stage: lead.stage || 'QUALIFICANDO',
         chatStatus: getChatStatus(lead.conversations?.[0]),
       }));
 
@@ -170,7 +170,7 @@ export default function ContactsPage() {
   const handleUnarchive = async (contactId: string) => {
     setArchivedLeads(prev => prev.filter(c => c.id !== contactId));
     try {
-      await api.patch(`/leads/${contactId}/stage`, { stage: 'INICIAL' });
+      await api.patch(`/leads/${contactId}/stage`, { stage: 'QUALIFICANDO' });
       showSuccess('Contato movido de volta para o CRM.');
     } catch {
       fetchArchivedContacts();
@@ -277,7 +277,7 @@ export default function ContactsPage() {
     const ids = Array.from(selectedIds);
     try {
       const results = await Promise.allSettled(
-        ids.map(id => api.patch(`/leads/${id}/stage`, { stage: 'INICIAL' }))
+        ids.map(id => api.patch(`/leads/${id}/stage`, { stage: 'QUALIFICANDO' }))
       );
       const failed    = results.filter(r => r.status === 'rejected').length;
       const succeeded = results.filter(r => r.status === 'fulfilled').length;

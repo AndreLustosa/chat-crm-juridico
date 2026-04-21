@@ -76,8 +76,10 @@ const NEXT_STEP_MAP: Record<string, { label: string; color: string }> = {
 
 // ─── Lead Score ─────────────────────────────────────────────────────────────
 
+// Legados NOVO/INICIAL/EM_ATENDIMENTO/QUALIFICADO sao todos normalizados pra
+// QUALIFICANDO via normalizeStage() — ja recebem score 35.
 const STAGE_BASE_SCORES: Record<string, number> = {
-  NOVO: 10, INICIAL: 15, EM_ATENDIMENTO: 25, QUALIFICANDO: 35, QUALIFICADO: 40,
+  QUALIFICANDO: 35,
   AGUARDANDO_FORM: 50, REUNIAO_AGENDADA: 65, AGUARDANDO_DOCS: 70,
   AGUARDANDO_PROC: 80, FINALIZADO: 100, PERDIDO: 0,
 };
@@ -939,9 +941,8 @@ function CrmAnalyticsPanel({ leads, onClose }: { leads: CrmLead[]; onClose: () =
   }, {});
   const sortedReasons = Object.entries(lossReasons).sort((a, b) => b[1] - a[1]);
 
-  // Funil simplificado
+  // Funil simplificado — leads antigos em NOVO/INICIAL sao normalizados pra QUALIFICANDO.
   const funnelStages = [
-    { label: 'Entrada', count: leads.filter(l => ['INICIAL', 'NOVO'].includes(normalizeStage(l.stage))).length, color: '#6b7280' },
     { label: 'Qualificando', count: leads.filter(l => normalizeStage(l.stage) === 'QUALIFICANDO').length, color: '#3b82f6' },
     { label: 'Formulário', count: leads.filter(l => normalizeStage(l.stage) === 'AGUARDANDO_FORM').length, color: '#f59e0b' },
     { label: 'Reunião', count: leads.filter(l => normalizeStage(l.stage) === 'REUNIAO_AGENDADA').length, color: '#8b5cf6' },
@@ -1293,7 +1294,7 @@ export default function CrmPage() {
     }
 
     const prev = lead.stage;
-    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
+    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'QUALIFICANDO' }));
     // Marca como em trânsito para proteger do auto-refresh
     movingLeads.current.add(leadId);
     // Atualização otimista imediata
@@ -1307,7 +1308,7 @@ export default function CrmPage() {
     } catch {
       // Rollback
       setLeads(cur => cur.map(l =>
-        l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
+        l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'QUALIFICANDO' } : l
       ));
       showError('Erro ao mover lead. Tente novamente.');
     } finally {
@@ -1320,7 +1321,7 @@ export default function CrmPage() {
     const { leadId } = lossModal;
     const lead = leads.find(l => l.id === leadId);
     const prev = lead?.stage;
-    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
+    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'QUALIFICANDO' }));
     movingLeads.current.add(leadId);
     setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: 'PERDIDO', stage_entered_at: new Date().toISOString() } : l));
     setLossModal(null);
@@ -1331,7 +1332,7 @@ export default function CrmPage() {
       }
     } catch {
       setLeads(cur => cur.map(l =>
-        l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l
+        l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'QUALIFICANDO' } : l
       ));
       showError('Erro ao mover lead. Tente novamente.');
     } finally {
@@ -1348,14 +1349,14 @@ export default function CrmPage() {
     const validationError = validateStageTransition(lead, 'FINALIZADO');
     if (validationError) { showError(validationError); return; }
     const prev = lead.stage;
-    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'INICIAL' }));
+    setPreviousStageMap(m => ({ ...m, [leadId]: prev ?? 'QUALIFICANDO' }));
     movingLeads.current.add(leadId);
     setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: 'FINALIZADO', stage_entered_at: new Date().toISOString() } : l));
     try {
       const res = await api.patch(`/leads/${leadId}/stage`, { stage: 'FINALIZADO' });
       if (res.data) setLeads(cur => cur.map(l => l.id === leadId ? { ...l, ...res.data } : l));
     } catch {
-      setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'INICIAL' } : l));
+      setLeads(cur => cur.map(l => l.id === leadId ? { ...l, stage: previousStageMap[leadId] ?? 'QUALIFICANDO' } : l));
       showError('Erro ao mover lead. Tente novamente.');
     } finally {
       movingLeads.current.delete(leadId);

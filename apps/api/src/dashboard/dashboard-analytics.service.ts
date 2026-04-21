@@ -221,7 +221,7 @@ export class DashboardAnalyticsService {
     });
 
     // Stage history for conversion rates
-    const stageOrder = ['INICIAL', 'QUALIFICANDO', 'AGUARDANDO_FORM', 'REUNIAO_AGENDADA', 'AGUARDANDO_DOCS', 'AGUARDANDO_PROC', 'FINALIZADO'];
+    const stageOrder = ['QUALIFICANDO', 'AGUARDANDO_FORM', 'REUNIAO_AGENDADA', 'AGUARDANDO_DOCS', 'AGUARDANDO_PROC', 'FINALIZADO'];
 
     const stages = stageOrder.map((stage, i) => {
       const count = pipeline.find((g) => g.stage === stage)?._count || 0;
