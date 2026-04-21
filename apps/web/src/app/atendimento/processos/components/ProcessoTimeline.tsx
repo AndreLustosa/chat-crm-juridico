@@ -100,6 +100,12 @@ type TimelineKind =
 interface TimelineItem {
   id: string;
   kind: TimelineKind;
+  /**
+   * Origem do evento — dita o filtro da UI:
+   * - 'processo': evento vindo do tribunal (DJEN, scraper TJAL)
+   * - 'sistema': evento criado no CRM (usuario, workflows, calendario, tarefas)
+   */
+  origin: 'processo' | 'sistema';
   date: Date;
   isFuture: boolean;
   icon: LucideIcon;
@@ -195,6 +201,13 @@ const dayBucketLabel = (d: Date): string => {
 
 export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh }: Props) {
   const [syncingTjal, setSyncingTjal] = useState(false);
+  /**
+   * Filtro da linha do tempo:
+   * - 'all': tudo junto (default)
+   * - 'processo': so eventos do tribunal (DJEN + scraper TJAL)
+   * - 'sistema': so eventos internos do CRM (criacao, mudanca etapa, tarefas, calendario)
+   */
+  const [filter, setFilter] = useState<'all' | 'processo' | 'sistema'>('all');
 
   // Detecta se o processo e do TJAL (case_number com codigo 8.02 no digito 13-15).
   // Apenas mostra o botao "Sincronizar TJAL" pra processos suportados.
@@ -235,6 +248,7 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
         out.push({
           id: `created-${legalCase.id}`,
           kind: 'created',
+          origin: 'sistema',
           date: d,
           isFuture: false,
           icon: FolderPlus,
@@ -260,6 +274,7 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
         out.push({
           id: `stage-${legalCase.id}`,
           kind: 'stage',
+          origin: 'sistema',
           date: d,
           isFuture: false,
           icon: ArrowRightCircle,
@@ -306,6 +321,7 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
       out.push({
         id: `cal-${ev.id}`,
         kind: 'calendar',
+        origin: 'sistema',
         date: d,
         isFuture: d.getTime() > now,
         icon,
@@ -326,6 +342,7 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
       out.push({
         id: `task-${t.id}`,
         kind: 'task',
+        origin: 'sistema',
         date: d,
         isFuture: d.getTime() > now,
         icon: CheckSquare,
@@ -339,13 +356,14 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
       });
     });
 
-    // 5. DJEN
+    // 5. DJEN — tribunal (publicações oficiais)
     djenPubs.forEach(p => {
       const d = new Date(p.data_disponibilizacao);
       if (Number.isNaN(d.getTime())) return;
       out.push({
         id: `djen-${p.id}`,
         kind: 'djen',
+        origin: 'processo',
         date: d,
         isFuture: false,
         icon: Newspaper,
@@ -361,14 +379,18 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
       });
     });
 
-    // 6. Eventos do processo (CaseEvent)
+    // 6. Eventos do processo (CaseEvent) — origem depende do source
+    // ESAJ e DJEN sao externos (processo); MANUAL e outros sao internos (sistema).
     events.forEach(e => {
       const rawDate = e.event_date || e.created_at;
       const d = new Date(rawDate);
       if (Number.isNaN(d.getTime())) return;
+      const sourceUpper = (e.source || '').toUpperCase();
+      const isExternal = sourceUpper === 'ESAJ' || sourceUpper === 'DJEN';
       out.push({
         id: `event-${e.id}`,
         kind: 'event',
+        origin: isExternal ? 'processo' : 'sistema',
         date: d,
         isFuture: false,
         icon: FileText,
@@ -388,9 +410,19 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
     return out;
   }, [legalCase, tasks, events, djenPubs]);
 
+  // Filtro por origem (Tudo | Processo | Sistema).
+  // Contagens calculadas antes do filtro pra mostrar nos chips.
+  const totalProcesso = useMemo(() => items.filter(i => i.origin === 'processo').length, [items]);
+  const totalSistema = useMemo(() => items.filter(i => i.origin === 'sistema').length, [items]);
+
+  const filteredItems = useMemo(() => {
+    if (filter === 'all') return items;
+    return items.filter(i => i.origin === filter);
+  }, [items, filter]);
+
   // Separa futuros e passados
-  const futureItems = items.filter(i => i.isFuture);
-  const pastItems = items.filter(i => !i.isFuture);
+  const futureItems = filteredItems.filter(i => i.isFuture);
+  const pastItems = filteredItems.filter(i => !i.isFuture);
 
   // Agrupa passados por dia
   const pastByDay = useMemo(() => {
@@ -482,7 +514,9 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
         <div>
           <h3 className="text-[13px] font-bold text-foreground">Linha do tempo</h3>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            {items.length} evento{items.length !== 1 ? 's' : ''} na história deste processo
+            {filter === 'all'
+              ? `${items.length} evento${items.length !== 1 ? 's' : ''} na história deste processo`
+              : `${filteredItems.length} de ${items.length} eventos (filtro: ${filter === 'processo' ? 'Processo' : 'Sistema'})`}
           </p>
         </div>
         {isTjal && (
@@ -500,6 +534,53 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
             {syncingTjal ? 'Sincronizando…' : 'Sincronizar TJAL'}
           </button>
         )}
+      </div>
+
+      {/* Filtros: Tudo / Processo / Sistema */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => setFilter('all')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border ${
+            filter === 'all'
+              ? 'bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20'
+              : 'bg-accent/30 text-foreground border-border hover:bg-accent'
+          }`}
+        >
+          Tudo
+          <span className={`text-[10px] font-mono ${filter === 'all' ? 'opacity-80' : 'text-muted-foreground'}`}>
+            {items.length}
+          </span>
+        </button>
+        <button
+          onClick={() => setFilter('processo')}
+          title="Movimentações que vieram do tribunal (TJAL + DJEN)"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border ${
+            filter === 'processo'
+              ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40 shadow-sm shadow-cyan-500/10'
+              : 'bg-accent/30 text-foreground border-border hover:bg-accent'
+          }`}
+        >
+          <Gavel size={11} />
+          Processo
+          <span className={`text-[10px] font-mono ${filter === 'processo' ? 'opacity-80' : 'text-muted-foreground'}`}>
+            {totalProcesso}
+          </span>
+        </button>
+        <button
+          onClick={() => setFilter('sistema')}
+          title="Eventos criados no CRM (criação, mudança de etapa, tarefas, calendário)"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors border ${
+            filter === 'sistema'
+              ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40 shadow-sm shadow-indigo-500/10'
+              : 'bg-accent/30 text-foreground border-border hover:bg-accent'
+          }`}
+        >
+          <FolderPlus size={11} />
+          Sistema
+          <span className={`text-[10px] font-mono ${filter === 'sistema' ? 'opacity-80' : 'text-muted-foreground'}`}>
+            {totalSistema}
+          </span>
+        </button>
       </div>
 
       {/* Eventos futuros (agrupados no topo) */}
@@ -548,6 +629,22 @@ export function ProcessoTimeline({ legalCase, tasks, events, djenPubs, onRefresh
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Empty state para filtro ativo sem resultados */}
+      {filteredItems.length === 0 && (
+        <div className="p-8 text-center border border-dashed border-border rounded-xl">
+          <Clock size={28} className="mx-auto text-muted-foreground opacity-40 mb-2" />
+          <p className="text-[13px] text-muted-foreground">
+            Nenhum evento {filter === 'processo' ? 'do tribunal' : 'do sistema'} neste processo.
+          </p>
+          <button
+            onClick={() => setFilter('all')}
+            className="mt-2 text-[11px] text-primary hover:underline"
+          >
+            Ver todos os eventos
+          </button>
         </div>
       )}
     </div>
