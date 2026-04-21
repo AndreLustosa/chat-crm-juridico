@@ -234,6 +234,52 @@ export class PromptBuilder {
         },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'abrir_caso_viabilidade',
+        description:
+          'USO EXCLUSIVO PARA CLIENTES JA CONTRATADOS (is_client=true). ' +
+          'Cria um novo caso em stage=VIABILIDADE quando o cliente menciona um ' +
+          'assunto juridico NOVO, diferente dos processos que ja tem no CRM. ' +
+          'Exemplos pra USAR: "agora tenho outro problema", "queria tirar duvida sobre ' +
+          'outro assunto", "meu vizinho esta me processando", "minha mae precisa aposentar". ' +
+          'NAO USE quando: lead ainda nao e cliente (a tool retorna erro); cliente pergunta ' +
+          'sobre processo existente (use get_lead_info / get_case_movements); cliente confirma ' +
+          'compromisso ou envia documento. O handler valida is_client=true antes de criar — ' +
+          'leads normais recebem erro. Tambem ha protecao contra duplicatas em 24h. ' +
+          'Apos criar, o advogado responsavel e notificado automaticamente.',
+        parameters: {
+          type: 'object',
+          properties: {
+            subject: {
+              type: 'string',
+              description:
+                'Descricao breve (1-2 frases) do novo assunto que o cliente mencionou. ' +
+                'Use as palavras dele o mais proximo possivel. Ex: "Vizinho esta me ' +
+                'processando por causa de cerca no terreno" ou "Quer entrar com acao ' +
+                'de aposentadoria pra mae dele de 62 anos".',
+            },
+            legal_area: {
+              type: 'string',
+              description:
+                'Opcional. Area juridica inferida. Valores aceitos: trabalhista, civel, ' +
+                'previdenciario, consumidor, familia, criminal, tributario, empresarial. ' +
+                'Se incerto, omita — o advogado classifica depois.',
+            },
+            urgency: {
+              type: 'string',
+              enum: ['baixa', 'media', 'alta'],
+              description:
+                'Opcional. Urgencia reportada: alta se ha prazo iminente ou risco de ' +
+                'dano grave; media se precisa resposta em dias; baixa se so quer ' +
+                'orcamento/avaliacao. Default: media.',
+            },
+          },
+          required: ['subject'],
+        },
+      },
+    },
   ];
 
   /**

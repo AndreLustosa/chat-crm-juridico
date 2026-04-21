@@ -9,6 +9,7 @@ import { SearchReferencesHandler } from './search-references';
 import { SearchMemoryHandler } from './search-memory';
 import { GetCaseMovementsHandler } from './get-case-movements';
 import { GetLeadInfoHandler } from './get-lead-info';
+import { AbrirCasoViabilidadeHandler } from './abrir-caso-viabilidade';
 
 /**
  * Registry central de tool handlers built-in.
@@ -26,6 +27,7 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new SearchMemoryHandler(),
   new GetCaseMovementsHandler(),
   new GetLeadInfoHandler(),
+  new AbrirCasoViabilidadeHandler(),
 ];
 
 /**
@@ -42,6 +44,7 @@ const UNIVERSAL_TOOLS: Set<string> = new Set([
   'get_case_movements',
   'get_lead_info',
   'search_memory', // ja existia, elevado a universal
+  'abrir_caso_viabilidade', // so chamada quando lead.is_client=true (handler valida)
 ]);
 
 /**
