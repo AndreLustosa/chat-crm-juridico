@@ -1193,7 +1193,9 @@ export default function CrmPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const res = await api.get('/leads');
+      // CRM Pipeline = funil de prospeccao: so leads, nunca clientes.
+      // Clientes aparecem na aba Clientes da tela de Processos.
+      const res = await api.get('/leads', { params: { is_client: 'false' } });
       const fresh: CrmLead[] = res.data || [];
       setLeads(prev => {
         // No refresh silencioso, preserva o estado otimista de leads em trânsito

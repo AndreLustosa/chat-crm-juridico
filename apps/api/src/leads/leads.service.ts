@@ -62,7 +62,16 @@ export class LeadsService {
     ).catch(err => this.logger.warn(`[notifyNewLead] ${lead.id}: ${err}`));
   }
 
-  async findAll(tenant_id?: string, inbox_id?: string, page?: number, limit?: number, search?: string, stage?: string, userId?: string) {
+  async findAll(
+    tenant_id?: string,
+    inbox_id?: string,
+    page?: number,
+    limit?: number,
+    search?: string,
+    stage?: string,
+    userId?: string,
+    isClient?: boolean,
+  ) {
     const baseWhere: any = tenant_id
       ? { OR: [{ tenant_id }, { tenant_id: null }] }
       : {};
@@ -75,6 +84,14 @@ export class LeadsService {
       baseWhere.stage = stage;
     } else {
       baseWhere.stage = { not: 'PERDIDO' };
+    }
+
+    // Filtro por tipo lead vs cliente:
+    //   - undefined: nao filtra (comportamento default — retorna tudo)
+    //   - false: so leads (CRM Pipeline usa — clientes saem)
+    //   - true: so clientes
+    if (isClient !== undefined) {
+      baseWhere.is_client = isClient;
     }
 
     // Busca server-side por nome ou telefone

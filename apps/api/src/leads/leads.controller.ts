@@ -25,6 +25,15 @@ export class LeadsController {
     });
   }
 
+  // GET /leads
+  //
+  // Query params:
+  //   - inboxId, page, limit, search, stage: filtros gerais
+  //   - is_client: 'true' | 'false'
+  //       * nao passado: retorna TUDO (comportamento default pra busca global,
+  //         agenda, djen, financeiro — onde faz sentido listar leads+clientes)
+  //       * 'false': SO leads (CRM Pipeline usa isso — clientes saem da tela)
+  //       * 'true': SO clientes
   @Get()
   findAll(
     @Request() req: any,
@@ -33,10 +42,14 @@ export class LeadsController {
     @Query('limit') limit?: string,
     @Query('search') search?: string,
     @Query('stage') stage?: string,
+    @Query('is_client') isClient?: string,
   ) {
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search, stage, req.user?.id);
+    let isClientBool: boolean | undefined = undefined;
+    if (isClient === 'true') isClientBool = true;
+    else if (isClient === 'false') isClientBool = false;
+    return this.leadsService.findAll(req.user?.tenant_id, inboxId, p, l, search, stage, req.user?.id, isClientBool);
   }
 
   @Get('check-phone')
