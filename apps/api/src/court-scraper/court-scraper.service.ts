@@ -379,7 +379,8 @@ export class CourtScraperService {
           leadId = existingLead?.id;
         }
 
-        // Se não encontrou lead, criar placeholder
+        // Se não encontrou lead, criar placeholder (ja como cliente — processo
+        // existente no tribunal = contrato previo fora do CRM).
         if (!leadId) {
           const lead = await this.prisma.lead.create({
             data: {
@@ -388,6 +389,8 @@ export class CourtScraperService {
               phone: `import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               origin: 'ESAJ_IMPORT',
               stage: 'FINALIZADO',
+              is_client: true,
+              became_client_at: new Date(),
             },
           });
           leadId = lead.id;
@@ -412,6 +415,24 @@ export class CourtScraperService {
             notes: notesLines.join('\n'),
             filed_at: data.filed_at ? new Date(data.filed_at) : null,
           },
+        });
+
+        // ── Promover lead a cliente (is_client=true) ─────────────────────
+        // Se o lead ja existia (reusado pela busca por nome acima), garante
+        // que vira cliente tambem. Importar processo pra alguem que nao e
+        // cliente e contradicao — tem processo = tem contrato.
+        // Idempotente: so atualiza quem ainda nao e cliente.
+        await this.prisma.lead.updateMany({
+          where: { id: leadId, is_client: false },
+          data: {
+            is_client: true,
+            became_client_at: new Date(),
+            stage: 'FINALIZADO',
+            stage_entered_at: new Date(),
+            loss_reason: null,
+          },
+        }).catch((e) => {
+          this.logger.warn(`[ESAJ] Falha ao promover lead ${leadId} a cliente: ${e.message}`);
         });
 
         // Persistir movimentacoes como CaseEvent (type=MOVIMENTACAO, source=ESAJ).
