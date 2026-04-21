@@ -105,6 +105,15 @@ REGRAS:
   * summary: resumo em texto livre do atendimento
   * facts: JSON estruturado com lead.*, case.*, facts.core_facts[], etc.
   Ignore metadata tecnica (version, last_updated_at).
+- Se receber "court_movements" (movimentacoes judiciais dos processos do
+  lead), INCORPORE ao summary a situacao atual do processo com base nelas.
+  Exemplos de uso:
+  * "Processo em fase de replica. Ultima audiencia foi em 25/11/2025 onde
+    foi extinto parcialmente o pedido de anulacao por perda de objeto."
+  * "Aguardando sentenca — conclusos para sentenca desde 02/02/2026."
+  * "Recurso de embargos de declaracao foi negado em 29/03/2026."
+  Sempre cite as datas mais recentes. Mencione tipo da ultima movimentacao.
+  Nao copie a descricao literal (pode ser enorme) — resuma de forma util.
 
 Responda APENAS: { "summary": "...", "facts": { ... } }`;
 

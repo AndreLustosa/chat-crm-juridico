@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
@@ -17,6 +19,7 @@ export class LegalCasesService {
     private chatGateway: ChatGateway,
     @Inject(forwardRef(() => WhatsappService)) private whatsappService: WhatsappService,
     private calendarService: CalendarService,
+    @InjectQueue('memory-jobs') private memoryQueue: Queue,
   ) {}
 
   private tenantWhere(tenantId?: string) {
@@ -630,7 +633,7 @@ export class LegalCasesService {
 
     const legalCase = await this.prisma.legalCase.findUnique({
       where: { id: caseId },
-      select: { id: true, case_number: true, court: true },
+      select: { id: true, case_number: true, court: true, lead_id: true, tenant_id: true },
     });
     if (!legalCase) throw new NotFoundException('Processo nao encontrado');
     if (!legalCase.case_number) {
@@ -704,6 +707,34 @@ export class LegalCasesService {
       `[RESYNC] ${legalCase.case_number}: ${createResult.count} novas / ${movements.length - createResult.count} ja existiam. Total agora: ${totalNow}`,
     );
 
+    // Re-consolidar LeadProfile APENAS quando houver movimentacoes novas.
+    // Evita chamada LLM desnecessaria no re-sync idempotente (ex: usuario
+    // clica 3x seguidas no botao "Sincronizar TJAL" e so a primeira traz
+    // novidade — as outras sao no-op). Custo LLM: ~$0.04 por consolidacao.
+    if (createResult.count > 0 && legalCase.lead_id && legalCase.tenant_id) {
+      try {
+        await this.memoryQueue.add(
+          'consolidate-profile',
+          {
+            tenant_id: legalCase.tenant_id,
+            lead_id: legalCase.lead_id,
+            reason: 'tjal-resync',
+          },
+          {
+            jobId: `resync-profile-${legalCase.lead_id}-${Date.now()}`,
+            removeOnComplete: true,
+            attempts: 2,
+          },
+        );
+        this.logger.log(
+          `[RESYNC] LeadProfile re-consolidation enqueued para lead ${legalCase.lead_id}`,
+        );
+      } catch (err: any) {
+        // Nao e erro critico — a proxima consolidacao noturna vai pegar.
+        this.logger.warn(`[RESYNC] Falha ao enfileirar consolidate-profile: ${err.message}`);
+      }
+    }
+
     return {
       scraped: movements.length,
       created: createResult.count,
@@ -711,6 +742,7 @@ export class LegalCasesService {
       total_now: totalNow,
       source: 'ESAJ_TJAL',
       duration_ms: Date.now() - startedAt,
+      profile_reconsolidation_enqueued: createResult.count > 0,
     };
   }
 

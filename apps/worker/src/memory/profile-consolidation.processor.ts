@@ -98,11 +98,14 @@ export class ProfileConsolidationProcessor {
           legal_cases: {
             where: { archived: false },
             select: {
+              id: true,
               case_number: true,
               legal_area: true,
               stage: true,
+              tracking_stage: true,
               court: true,
               action_type: true,
+              opposing_party: true,
             },
           },
         },
@@ -111,8 +114,29 @@ export class ProfileConsolidationProcessor {
     ]);
 
     if (!lead) return;
-    if (memories.length === 0 && !existing) {
-      // Sem memorias e sem perfil — nao ha o que consolidar
+
+    // Movimentacoes judiciais dos processos ativos (CaseEvent type=MOVIMENTACAO).
+    // Traz as 30 mais recentes pra dar contexto da tramitacao ao LLM.
+    // Atualizado em 2026-04-21: antes a IA nao tinha acesso a CaseEvents —
+    // o cliente perguntava "qual o status do processo" e ela nao sabia.
+    const caseIds = lead.legal_cases.map((c) => c.id);
+    const courtMovements = caseIds.length > 0
+      ? await this.prisma.caseEvent.findMany({
+          where: { case_id: { in: caseIds }, type: 'MOVIMENTACAO' },
+          orderBy: [{ event_date: 'desc' }, { created_at: 'desc' }],
+          take: 30,
+          select: {
+            event_date: true,
+            title: true,
+            description: true,
+            source: true,
+            case_id: true,
+          },
+        })
+      : [];
+
+    if (memories.length === 0 && !existing && courtMovements.length === 0) {
+      // Sem memorias, sem perfil e sem movimentacoes — nao ha o que consolidar
       return;
     }
 
@@ -130,6 +154,16 @@ export class ProfileConsolidationProcessor {
         content: m.content,
         type: m.type,
         created_at: m.created_at,
+      })),
+      // Ultimas 30 movimentacoes judiciais dos processos do lead. Inclui
+      // data, titulo (primeira linha do texto), descricao completa e fonte
+      // (ESAJ, DJEN, MANUAL). Permite ao LLM gerar resumo coerente com a
+      // situacao atual da tramitacao.
+      court_movements: courtMovements.map((ev) => ({
+        date: ev.event_date,
+        title: ev.title,
+        description: ev.description?.substring(0, 400) || null,
+        source: ev.source,
       })),
       recent_messages: lead.conversations.flatMap((c) =>
         c.messages.map((m) => ({
