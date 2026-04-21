@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { FollowupService } from './followup.service';
+import { FollowupAnalyzerService } from './followup-analyzer.service';
 import axios from 'axios';
 
 @Processor('followup-jobs')
@@ -14,6 +15,7 @@ export class FollowupProcessor extends WorkerHost {
     private prisma: PrismaService,
     private settings: SettingsService,
     private followupService: FollowupService,
+    private analyzer: FollowupAnalyzerService,
   ) { super(); }
 
   async process(job: Job) {
@@ -137,6 +139,22 @@ export class FollowupProcessor extends WorkerHost {
       return;
     }
 
+    // ─── Bloquear enrollment se lead virou cliente ────────────────────────
+    // Atualizado em 2026-04-21: clientes (is_client=true) nao devem receber
+    // followup automatico — so LEADS em qualificacao. Mesmo que o admin
+    // tenha criado uma sequencia pra um lead, se ele virou cliente no meio
+    // da sequencia, cancelamos.
+    if ((enrollment.lead as any).is_client) {
+      this.logger.log(
+        `[FOLLOWUP] Enrollment ${enrollmentId} cancelado — lead virou cliente`,
+      );
+      await this.prisma.followupEnrollment.update({
+        where: { id: enrollmentId },
+        data: { status: 'CANCELADO' },
+      });
+      return;
+    }
+
     // ─── Anti-spam: não enviar se houve mensagem na conversa nas últimas 12h ─
 
     const convo = await this.prisma.conversation.findFirst({
@@ -155,6 +173,56 @@ export class FollowupProcessor extends WorkerHost {
         });
         return;
       }
+    }
+
+    // ─── Analise contextual via IA: decidir ARCHIVE/SEND/SKIP ─────────────
+    // Antes de gerar a mensagem do step (que usa templates customizados do
+    // enrollment), checa via LLM se faz sentido enviar agora. Se o lead ja
+    // sinalizou desinteresse/desistencia, cancela a sequencia inteira e
+    // arquiva o lead. Se nao for momento certo, reagenda pra amanha.
+    if (convo) {
+      const decision = await this.analyzer.analyzeAndDecide({
+        leadId: enrollment.lead_id,
+        conversationId: convo.id,
+        stage: (enrollment.lead as any).stage || 'QUALIFICANDO',
+        stageHint: `enrollment em sequencia ${enrollment.sequence.name || ''} step ${enrollment.current_step}`,
+      });
+
+      if (decision.action === 'ARCHIVE') {
+        await this.prisma.$transaction([
+          this.prisma.followupEnrollment.update({
+            where: { id: enrollmentId },
+            data: { status: 'CANCELADO' },
+          }),
+          this.prisma.lead.update({
+            where: { id: enrollment.lead_id },
+            data: {
+              stage: 'PERDIDO',
+              loss_reason: decision.reason || 'Enrollment cancelado pelo analyzer IA',
+            },
+          }),
+        ]);
+        this.logger.log(
+          `[FOLLOWUP] Enrollment ${enrollmentId} cancelado + lead ${enrollment.lead_id} arquivado: ${decision.reason}`,
+        );
+        return;
+      }
+
+      if (decision.action === 'SKIP') {
+        // Reagendar pra amanha (mesmo horario)
+        const tomorrow = new Date(Date.now() + 24 * 3600000);
+        await this.prisma.followupEnrollment.update({
+          where: { id: enrollmentId },
+          data: { next_send_at: tomorrow },
+        });
+        this.logger.log(
+          `[FOLLOWUP] Enrollment ${enrollmentId} pulado: ${decision.reason}`,
+        );
+        return;
+      }
+
+      // decision.action === 'SEND' — prossegue com o fluxo de geracao normal
+      // (o step pode ter template customizado que o admin criou)
     }
 
     // ─── Gerar mensagem com IA ────────────────────────────────────────────

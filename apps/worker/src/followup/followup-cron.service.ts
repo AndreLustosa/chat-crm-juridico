@@ -4,10 +4,14 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { FollowupAnalyzerService } from './followup-analyzer.service';
 import axios from 'axios';
 
 interface StaleConfig {
-  stage: string; days: number; msg: string;
+  stage: string;
+  days: number;
+  /** Hint opcional que orienta o LLM sobre o motivo do followup */
+  hint?: string;
 }
 
 @Injectable()
@@ -17,6 +21,7 @@ export class FollowupCronService {
   constructor(
     private prisma: PrismaService,
     private settings: SettingsService,
+    private analyzer: FollowupAnalyzerService,
     @InjectQueue('followup-jobs') private followupQueue: Queue,
   ) {}
 
@@ -57,29 +62,26 @@ export class FollowupCronService {
    * Legacy: follow-up básico para stages hardcoded (fallback sem sequência configurada)
    */
   /**
-   * Palavras-chave que indicam que o lead NAO tem interesse — usado para pular
-   * followup automatico e sinalizar que o lead deve ser arquivado.
+   * Cron de followup automatico. Usa IA pra decidir o que fazer com cada lead
+   * elegivel — SEND (mensagem gerada pela IA), SKIP (nao envia agora) ou
+   * ARCHIVE (arquiva como PERDIDO).
+   *
+   * Atualizado em 2026-04-21: antes usava templates fixos + keywords hardcoded
+   * pra detectar "dead leads". Agora delega toda analise ao FollowupAnalyzerService
+   * que usa LLM com historico completo da conversa.
    */
-  private static readonly DEAD_LEAD_KEYWORDS = [
-    'não quero', 'nao quero',
-    'sem interesse', 'não tenho interesse', 'nao tenho interesse',
-    'desisti', 'ja contratei outro', 'já contratei outro',
-    'ja resolvi', 'já resolvi',
-    'não precisa mais', 'nao precisa mais',
-    'pare de me mandar', 'me deixa em paz',
-    'não me incomode', 'nao me incomode',
-  ];
-
   private async legacyStageFollowup() {
     const staleConfigs: StaleConfig[] = [
-      { stage: 'AGUARDANDO_DOCS', days: 3, msg: 'Olá {{name}}, tudo bem? Estamos aguardando os documentos para dar continuidade ao seu caso. Precisa de ajuda com isso?' },
-      { stage: 'AGUARDANDO_PROC', days: 3, msg: 'Olá {{name}}, a procuração ainda não foi assinada. Precisa de alguma orientação para finalizar?' },
-      { stage: 'AGUARDANDO_FORM', days: 2, msg: 'Olá {{name}}, você ainda não concluiu o formulário. Precisa de ajuda para preencher?' },
-      { stage: 'QUALIFICANDO', days: 5, msg: 'Olá {{name}}, estamos à disposição para continuar o atendimento do seu caso. Podemos prosseguir?' },
+      { stage: 'AGUARDANDO_DOCS', days: 3, hint: 'aguardando documentos pendentes' },
+      { stage: 'AGUARDANDO_PROC', days: 3, hint: 'procuracao ainda nao assinada' },
+      { stage: 'AGUARDANDO_FORM', days: 2, hint: 'ficha/formulario incompleto' },
+      { stage: 'QUALIFICANDO', days: 5, hint: 'em qualificacao, parou de responder' },
     ];
 
     let totalSent = 0;
     let totalSkipped = 0;
+    let totalArchived = 0;
+
     for (const config of staleConfigs) {
       try {
         const cutoff = new Date(Date.now() - config.days * 24 * 60 * 60 * 1000);
@@ -87,12 +89,9 @@ export class FollowupCronService {
           where: {
             stage: config.stage,
             updated_at: { lt: cutoff },
-            // Atualizado em 2026-04-21: SO envia pra LEADS (nao clientes).
-            // Clientes (is_client=true) nao devem receber followup comercial
-            // — se precisar reenviar mensagem pra cliente, eh caso de
-            // atendimento ativo, nao spam automatico.
+            // So envia pra LEADS (nao clientes contratados).
             is_client: false,
-            // Outras condicoes
+            // Pular leads ja em sequencia customizada ativa
             followup_enrollments: { none: { status: 'ATIVO' } },
           },
           include: {
@@ -100,14 +99,7 @@ export class FollowupCronService {
               where: { status: 'ABERTO' },
               take: 1,
               orderBy: { last_message_at: 'desc' },
-              include: {
-                // Pegar ultimas 5 mensagens pra analise de contexto
-                messages: {
-                  orderBy: { created_at: 'desc' },
-                  take: 5,
-                  select: { direction: true, text: true, created_at: true },
-                },
-              },
+              select: { id: true, instance_name: true, last_message_at: true },
             },
           },
         });
@@ -116,7 +108,8 @@ export class FollowupCronService {
           if (!lead.conversations?.length) continue;
           const convo = lead.conversations[0];
 
-          // Anti-spam: nao reenvia se ultima interacao foi < 24h atras
+          // Anti-spam basico: se ultima interacao foi < 24h atras, pula sem
+          // sequer gastar LLM.
           if (convo.last_message_at) {
             const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
             if (convo.last_message_at > oneDayAgo) {
@@ -125,101 +118,102 @@ export class FollowupCronService {
             }
           }
 
-          // Analise de contexto: detectar "lead morreu" pelas ultimas mensagens
-          const inboundTexts = (convo.messages || [])
-            .filter((m: any) => m.direction === 'in' && m.text)
-            .map((m: any) => m.text.toLowerCase());
+          // Delega decisao ao analyzer (usa IA com historico completo)
+          const decision = await this.analyzer.analyzeAndDecide({
+            leadId: lead.id,
+            conversationId: convo.id,
+            stage: config.stage,
+            stageHint: config.hint,
+          });
 
-          const deadLeadDetected = inboundTexts.some((text: string) =>
-            FollowupCronService.DEAD_LEAD_KEYWORDS.some((kw) => text.includes(kw)),
-          );
-
-          if (deadLeadDetected) {
-            // Arquivar automaticamente + sair
+          if (decision.action === 'ARCHIVE') {
             await this.prisma.lead.update({
               where: { id: lead.id },
               data: {
                 stage: 'PERDIDO',
-                loss_reason: 'Lead sinalizou desinteresse (arquivado automaticamente pelo followup)',
-                last_followup_at: new Date(), // evita ficar voltando
+                loss_reason: decision.reason || 'Arquivado automaticamente pelo followup (IA detectou desengajamento)',
+                last_followup_at: new Date(),
               },
             });
             this.logger.log(
-              `[FOLLOWUP-LEGACY] Lead ${lead.phone} arquivado (sinal de desinteresse detectado)`,
+              `[FOLLOWUP-IA] Lead ${lead.phone} ARQUIVADO: ${decision.reason}`,
+            );
+            totalArchived++;
+            continue;
+          }
+
+          if (decision.action === 'SKIP') {
+            this.logger.debug(
+              `[FOLLOWUP-IA] Lead ${lead.phone} PULADO: ${decision.reason}`,
             );
             totalSkipped++;
             continue;
           }
 
-          // Redundancia contextual: se IA ja fez followup recente (qualquer
-          // mensagem out nas ultimas 48h), pula — evita insistencia.
-          const outRecent = (convo.messages || []).some(
-            (m: any) =>
-              m.direction === 'out' &&
-              m.created_at > new Date(Date.now() - 48 * 60 * 60 * 1000),
-          );
-          if (outRecent) {
-            totalSkipped++;
-            continue;
-          }
-
-          try {
-            await this.sendLegacyFollowup(lead, convo, config.msg);
-            totalSent++;
-          } catch (err: any) {
-            this.logger.warn(`[FOLLOWUP-LEGACY] Falha em ${lead.phone}: ${err.message}`);
+          if (decision.action === 'SEND' && decision.message) {
+            try {
+              await this.sendGeneratedFollowup(lead, convo, decision.message);
+              totalSent++;
+              this.logger.log(
+                `[FOLLOWUP-IA] Lead ${lead.phone} ENVIADO: "${decision.message.slice(0, 60)}..."`,
+              );
+            } catch (err: any) {
+              this.logger.warn(`[FOLLOWUP-IA] Falha em ${lead.phone}: ${err.message}`);
+            }
           }
         }
       } catch (e: any) {
-        this.logger.error(`[FOLLOWUP-LEGACY] Erro stage ${config.stage}: ${e.message}`);
+        this.logger.error(`[FOLLOWUP-IA] Erro stage ${config.stage}: ${e.message}`);
       }
     }
-    if (totalSent > 0 || totalSkipped > 0) {
+
+    if (totalSent + totalSkipped + totalArchived > 0) {
       this.logger.log(
-        `[FOLLOWUP-LEGACY] ${totalSent} enviado(s), ${totalSkipped} pulado(s) (anti-spam/dead-lead/contexto)`,
+        `[FOLLOWUP-IA] Resumo: ${totalSent} enviado(s), ${totalSkipped} pulado(s), ${totalArchived} arquivado(s)`,
       );
     }
   }
 
-  private async sendLegacyFollowup(lead: any, convo: any, template: string) {
+  /**
+   * Envia mensagem de followup gerada pela IA via Evolution API.
+   * Usa o mesmo padrao do AI processor (prefixo *Sophia:*, captura do
+   * key.id retornado pela Evolution pra evitar duplicatas no banco).
+   */
+  private async sendGeneratedFollowup(lead: any, convo: any, generatedMessage: string) {
     const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
     if (!apiUrl) return;
     const instanceName = convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
-    const msg = template.replace(/\{\{name\}\}/g, lead.name || 'cliente');
 
-    // Enviar via Evolution API COM prefixo "Sophia:" (mesmo padrao do AI processor).
-    // IMPORTANTE: capturar o key.id retornado pela Evolution pra usar como
-    // external_message_id ao salvar. Sem isso, o webhook do Evolution recebe
-    // o eco da mensagem enviada e cria uma DUPLICATA no banco (o filtro de
-    // dedup do webhook so atualiza mensagens com prefixo "out_" — que e o
-    // que usaremos agora).
-    const textToSend = `*Sophia:* ${msg}`;
+    const textToSend = `*Sophia:* ${generatedMessage}`;
     const sendResult = await axios.post(
       `${apiUrl}/message/sendText/${instanceName}`,
       { number: lead.phone, text: textToSend },
       { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
     );
 
-    // Usa o ID real do WhatsApp se disponivel. Senao, placeholder 'out_followup_legacy_*'
-    // que pode ser atualizado pelo webhook posteriormente via filtro startsWith('out_').
     const evoMsgId =
       sendResult?.data?.key?.id ||
-      `out_followup_legacy_${Date.now()}`;
+      `out_followup_ia_${Date.now()}`;
 
     await this.prisma.message.create({
       data: {
         conversation_id: convo.id,
         direction: 'out',
         type: 'text',
-        text: msg,
+        text: generatedMessage,
         external_message_id: evoMsgId,
         status: 'enviado',
       },
     });
     await Promise.all([
-      this.prisma.conversation.update({ where: { id: convo.id }, data: { last_message_at: new Date() } }),
-      this.prisma.lead.update({ where: { id: lead.id }, data: { last_followup_at: new Date() } }),
+      this.prisma.conversation.update({
+        where: { id: convo.id },
+        data: { last_message_at: new Date() },
+      }),
+      this.prisma.lead.update({
+        where: { id: lead.id },
+        data: { last_followup_at: new Date() },
+      }),
     ]);
-    this.logger.log(`[FOLLOWUP-LEGACY] Enviado para ${lead.phone} (msgId=${evoMsgId.slice(0, 20)}...)`);
   }
 }
