@@ -642,15 +642,95 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
   async getStats(tenantId?: string) {
     const tenantFilter = tenantId ? { lead: { tenant_id: tenantId } } : {};
     const msgTenantFilter = tenantId ? { enrollment: { lead: { tenant_id: tenantId } } } : {};
-    const [total, ativos, pendentes, enviados, convertidos] = await Promise.all([
+    const [total, ativos, pendentes, enviados, convertidos, legacy] = await Promise.all([
       this.prisma.followupEnrollment.count({ where: tenantFilter }),
       this.prisma.followupEnrollment.count({ where: { status: 'ATIVO', ...tenantFilter } }),
       this.prisma.followupMessage.count({ where: { status: 'PENDENTE_APROVACAO', ...msgTenantFilter } }),
       this.prisma.followupMessage.count({ where: { status: 'ENVIADO', ...msgTenantFilter } }),
       this.prisma.followupEnrollment.count({ where: { status: 'CONVERTIDO', ...tenantFilter } }),
+      this.getLegacyStats(tenantId),
     ]);
     const taxaConversao = total > 0 ? Math.round((convertidos / total) * 1000) / 10 : 0;
-    return { total_enrollments: total, ativos, pendentes_aprovacao: pendentes, total_enviados: enviados, convertidos, taxa_conversao: taxaConversao };
+    return {
+      total_enrollments: total,
+      ativos,
+      pendentes_aprovacao: pendentes,
+      total_enviados: enviados,
+      convertidos,
+      taxa_conversao: taxaConversao,
+      legacy,
+    };
+  }
+
+  /**
+   * Metricas do cron legacy + disparo manual.
+   *
+   * O cron das 9h (seg-sex) e o botao "Disparar agora" da Fila usam a IA
+   * (FollowupAnalyzerService) mas NAO criam FollowupMessage — mandam direto
+   * via Evolution API e registram um Message com prefix conhecido no
+   * external_message_id:
+   *   - out_followup_ia_*       : cron legacy (FollowupCronService)
+   *   - sys_followup_ia_*       : enrollment path (FollowupProcessor.sendMessageDirect)
+   *   - out_followup_manual_*   : disparo manual pela Fila (processManualLegacy)
+   *
+   * Por isso o getStats "oficial" (FollowupMessage) mostra zero quando so o
+   * legacy ta rodando. Aqui contamos as Message direto.
+   */
+  private async getLegacyStats(tenantId?: string) {
+    const now = Date.now();
+    const h24 = new Date(now - 24 * 3600000);
+    const d7 = new Date(now - 7 * 86400000);
+    const d30 = new Date(now - 30 * 86400000);
+
+    // Filtro base: Message out com prefix de followup + (tenant opcional via Conversation.Lead)
+    const baseWhere: any = {
+      direction: 'out',
+      OR: [
+        { external_message_id: { startsWith: 'out_followup_ia_' } },
+        { external_message_id: { startsWith: 'sys_followup_ia_' } },
+        { external_message_id: { startsWith: 'out_followup_manual_' } },
+      ],
+      ...(tenantId && { conversation: { lead: { tenant_id: tenantId } } }),
+    };
+
+    const [enviados24h, enviados7d, enviados30d, enviadosTotal, ultimoEnvio, arquivados7d, arquivados30d] = await Promise.all([
+      this.prisma.message.count({ where: { ...baseWhere, created_at: { gte: h24 } } }),
+      this.prisma.message.count({ where: { ...baseWhere, created_at: { gte: d7 } } }),
+      this.prisma.message.count({ where: { ...baseWhere, created_at: { gte: d30 } } }),
+      this.prisma.message.count({ where: baseWhere }),
+      this.prisma.message.findFirst({
+        where: baseWhere,
+        orderBy: { created_at: 'desc' },
+        select: { created_at: true },
+      }),
+      // Arquivados pela IA: leads que viraram PERDIDO com last_followup_at recente
+      // (heuristica — o cron/processor setam last_followup_at ao arquivar).
+      this.prisma.lead.count({
+        where: {
+          stage: 'PERDIDO',
+          last_followup_at: { gte: d7 },
+          ...(tenantId && { tenant_id: tenantId }),
+        },
+      }),
+      this.prisma.lead.count({
+        where: {
+          stage: 'PERDIDO',
+          last_followup_at: { gte: d30 },
+          ...(tenantId && { tenant_id: tenantId }),
+        },
+      }),
+    ]);
+
+    return {
+      enviados_24h: enviados24h,
+      enviados_7d: enviados7d,
+      enviados_30d: enviados30d,
+      enviados_total: enviadosTotal,
+      arquivados_ia_7d: arquivados7d,
+      arquivados_ia_30d: arquivados30d,
+      ultimo_envio_at: ultimoEnvio?.created_at ?? null,
+      proximo_cron_at: this.nextLegacyCronTime(),
+    };
   }
 
   // ─── Disparos em Massa (Broadcasts) ─────────────────────────────────────

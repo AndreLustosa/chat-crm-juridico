@@ -85,6 +85,16 @@ interface Stats {
     email?: { enviados: number; respondidos: number };
     ligacao?: { enviados: number; respondidos: number };
   };
+  legacy?: {
+    enviados_24h: number;
+    enviados_7d: number;
+    enviados_30d: number;
+    enviados_total: number;
+    arquivados_ia_7d: number;
+    arquivados_ia_30d: number;
+    ultimo_envio_at: string | null;
+    proximo_cron_at: string;
+  };
 }
 
 interface LeadSearchResult {
@@ -1779,6 +1789,50 @@ export default function FollowupPage() {
                 <div className="bg-card/50 border border-border rounded-2xl p-6">
                   <ChannelEffectivityCards stats={stats} enrollments={enrollments} />
                 </div>
+
+                {/* Cron Legacy — atividade automatica do followup IA */}
+                {stats.legacy && (
+                  <div className="bg-card/50 border border-border rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <Clock size={16} className="text-yellow-400" />
+                        <h3 className="text-sm font-semibold text-foreground">Cron Legacy (Followup IA)</h3>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {stats.legacy.ultimo_envio_at ? (
+                          <>
+                            <span>Último disparo:</span>
+                            <span className="text-foreground font-medium">{formatDate(stats.legacy.ultimo_envio_at)}</span>
+                          </>
+                        ) : (
+                          <span className="italic">Nenhum disparo registrado ainda</span>
+                        )}
+                        <span className="text-muted-foreground/60">·</span>
+                        <span>Próxima execução:</span>
+                        <span className="text-foreground font-medium">{formatDate(stats.legacy.proximo_cron_at)}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {[
+                        { label: 'Enviados 24h', value: stats.legacy.enviados_24h, text: 'text-blue-400', bg: 'bg-blue-500/5 border-blue-500/15' },
+                        { label: 'Enviados 7d', value: stats.legacy.enviados_7d, text: 'text-blue-400', bg: 'bg-blue-500/5 border-blue-500/15' },
+                        { label: 'Enviados 30d', value: stats.legacy.enviados_30d, text: 'text-blue-400', bg: 'bg-blue-500/5 border-blue-500/15' },
+                        { label: 'Enviados total', value: stats.legacy.enviados_total, text: 'text-foreground', bg: 'bg-muted/40 border-border' },
+                        { label: 'Arquivados IA 7d', value: stats.legacy.arquivados_ia_7d, text: 'text-red-400', bg: 'bg-red-500/5 border-red-500/15' },
+                        { label: 'Arquivados IA 30d', value: stats.legacy.arquivados_ia_30d, text: 'text-red-400', bg: 'bg-red-500/5 border-red-500/15' },
+                      ].map(card => (
+                        <div key={card.label} className={`rounded-xl border ${card.bg} p-3`}>
+                          <p className={`text-2xl font-bold ${card.text}`}>{card.value}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight">{card.label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-4 leading-relaxed">
+                      Inclui: cron automático (seg-sex 9h), disparos manuais da Fila e envios feitos por
+                      enrollments. Arquivados contam leads que a IA marcou como PERDIDO por detectar desengajamento.
+                    </p>
+                  </div>
+                )}
 
                 {/* Quick actions */}
                 <div className="grid md:grid-cols-2 gap-4">
