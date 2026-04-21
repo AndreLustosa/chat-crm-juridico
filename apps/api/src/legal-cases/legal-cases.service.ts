@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef, Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { CalendarService } from '../calendar/calendar.service';
+import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import OpenAI from 'openai';
 
@@ -611,6 +613,112 @@ export class LegalCasesService {
       if (ev) await this.verifyTenantOwnership(ev.case_id, tenantId);
     }
     return this.prisma.caseEvent.delete({ where: { id: eventId } });
+  }
+
+  // ─── RE-SYNC DE MOVIMENTACOES VIA SCRAPER TJAL ─────────────────────
+  //
+  // Faz nova consulta ao TJAL e persiste as movimentacoes atuais como
+  // CaseEvent. O scraper retorna TODAS as movimentacoes do processo (le
+  // direto do HTML do show.do — sem precisar de AJAX adicional). Idempotente
+  // via movement_hash (unique em CaseEvent): movs ja persistidas sao
+  // ignoradas pelo createMany skipDuplicates.
+  //
+  // Supported: TJAL (e-SAJ). Outros tribunais retornam erro explicito.
+  async resyncMovementsFromScraper(caseId: string, tenantId?: string) {
+    const startedAt = Date.now();
+    await this.verifyTenantOwnership(caseId, tenantId);
+
+    const legalCase = await this.prisma.legalCase.findUnique({
+      where: { id: caseId },
+      select: { id: true, case_number: true, court: true },
+    });
+    if (!legalCase) throw new NotFoundException('Processo nao encontrado');
+    if (!legalCase.case_number) {
+      throw new BadRequestException('Processo sem numero cadastrado');
+    }
+
+    // Hoje suportamos apenas TJAL (8.02). Para outros tribunais, retornar erro
+    // explicito em vez de tentar e falhar silenciosamente.
+    const digits = legalCase.case_number.replace(/\D/g, '');
+    const tribunalCode = digits.slice(13, 16); // ex: "802" para TJAL
+    if (tribunalCode !== '802') {
+      throw new BadRequestException(
+        `Sincronizacao automatica disponivel apenas para TJAL (codigo 8.02). Este processo e do tribunal ${tribunalCode}.`,
+      );
+    }
+
+    const scraper = new EsajTjalScraper();
+    const data = await scraper.searchByNumber(legalCase.case_number).catch((err: any) => {
+      this.logger.warn(`[RESYNC] Erro ao buscar ${legalCase.case_number}: ${err?.message}`);
+      throw new BadRequestException(`Falha ao consultar TJAL: ${err?.message || 'erro desconhecido'}`);
+    });
+
+    if (!data) {
+      throw new NotFoundException(`Processo ${legalCase.case_number} nao encontrado no TJAL`);
+    }
+
+    const movements = data.movements || [];
+    if (movements.length === 0) {
+      // Scraper nao encontrou movimentacoes. Pode ser layout novo — deixa log
+      // pra investigacao mas nao e erro (processo pode realmente ter 0 movs).
+      this.logger.warn(
+        `[RESYNC] Processo ${legalCase.case_number}: scraper retornou 0 movimentacoes. ` +
+        `Pode indicar layout nao suportado pelas 4 estrategias de extracao.`,
+      );
+      return {
+        scraped: 0,
+        created: 0,
+        already_existed: 0,
+        total_now: 0,
+        source: 'ESAJ_TJAL',
+        duration_ms: Date.now() - startedAt,
+        warning: 'Scraper nao encontrou movimentacoes — processo pode ter layout novo',
+      };
+    }
+
+    // Persistir com dedup via movement_hash
+    const movementRows = movements.map((m) => ({
+      case_id: caseId,
+      type: 'MOVIMENTACAO',
+      source: 'ESAJ',
+      title: m.description.slice(0, 120),
+      description: m.description,
+      event_date: this.parseEsajDateSafe(m.date),
+      movement_hash: createHash('sha256')
+        .update(`${legalCase.case_number}|${m.date}|${m.description}`)
+        .digest('hex'),
+      source_raw: { raw_date: m.date, raw_description: m.description } as any,
+    }));
+
+    const createResult = await this.prisma.caseEvent.createMany({
+      data: movementRows,
+      skipDuplicates: true,
+    });
+
+    // Contar total atual de CaseEvents tipo MOVIMENTACAO para este processo
+    const totalNow = await this.prisma.caseEvent.count({
+      where: { case_id: caseId, type: 'MOVIMENTACAO' },
+    });
+
+    this.logger.log(
+      `[RESYNC] ${legalCase.case_number}: ${createResult.count} novas / ${movements.length - createResult.count} ja existiam. Total agora: ${totalNow}`,
+    );
+
+    return {
+      scraped: movements.length,
+      created: createResult.count,
+      already_existed: movements.length - createResult.count,
+      total_now: totalNow,
+      source: 'ESAJ_TJAL',
+      duration_ms: Date.now() - startedAt,
+    };
+  }
+
+  /** Converte "dd/mm/yyyy" -> Date (UTC 12h). Retorna null se nao parse. */
+  private parseEsajDateSafe(dateStr: string): Date | null {
+    const m = dateStr?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!m) return null;
+    return new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00Z`);
   }
 
   // ─── AUTO-CREATION (hook do FINALIZADO) ─────────────────────────

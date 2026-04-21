@@ -278,6 +278,20 @@ export class LegalCasesController {
     return this.service.deleteEvent(eventId, req.user?.tenant_id);
   }
 
+  /**
+   * Sincroniza TODAS as movimentacoes do processo re-scraping o TJAL
+   * (e-SAJ) e persistindo como CaseEvent (type=MOVIMENTACAO, source=ESAJ).
+   *
+   * Idempotente via movement_hash — re-sincronizar so adiciona
+   * movimentacoes novas. Ja existentes sao ignoradas silenciosamente.
+   *
+   * Retorno: { scraped, created, already_existed, total_now, source, duration_ms }
+   */
+  @Post(':id/resync-movements')
+  resyncMovements(@Param('id') id: string, @Request() req: any) {
+    return this.service.resyncMovementsFromScraper(id, req.user?.tenant_id);
+  }
+
   /** Corrige leads com processo ativo que não estão marcados como cliente */
   @Post('admin/sync-clients')
   @Roles('ADMIN')

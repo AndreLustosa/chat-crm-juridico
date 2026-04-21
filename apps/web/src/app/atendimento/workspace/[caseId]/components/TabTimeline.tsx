@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Activity, Loader2, FileText, Calendar, Gavel, MessageSquare,
-  ExternalLink, Plus, Trash2, ChevronDown, ChevronUp,
+  ExternalLink, Plus, Trash2, ChevronDown, ChevronUp, RefreshCw,
 } from 'lucide-react';
 import api from '@/lib/api';
-import { showError, showSuccess } from '@/lib/toast';
+import { showError, showSuccess, showInfo } from '@/lib/toast';
 
 const EVENT_TYPES = [
   { id: 'MOVIMENTACAO', label: 'Movimentacao' },
@@ -125,6 +125,7 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
   const [newDate, setNewDate] = useState('');
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [syncingTjal, setSyncingTjal] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -183,6 +184,30 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
       showError('Erro ao criar evento');
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Sincroniza movimentacoes do TJAL (e-SAJ) e recarrega a timeline.
+  // Funciona apenas para processos TJAL (codigo 8.02) — outros tribunais
+  // retornam BadRequest com mensagem explicita.
+  const handleResyncTjal = async () => {
+    setSyncingTjal(true);
+    try {
+      const res = await api.post(`/legal-cases/${caseId}/resync-movements`);
+      const { created, already_existed, total_now, warning } = res.data || {};
+      if (warning) {
+        showInfo(`Consulta OK mas scraper nao encontrou movimentacoes — ${warning}`);
+      } else if (created === 0) {
+        showInfo(`Nada novo — ${already_existed} movimentacoes ja estavam sincronizadas (total: ${total_now})`);
+      } else {
+        showSuccess(`${created} nova(s) movimentacao(oes) sincronizada(s). Total agora: ${total_now}`);
+      }
+      fetchData();
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Erro ao sincronizar';
+      showError(msg);
+    } finally {
+      setSyncingTjal(false);
     }
   };
 
@@ -259,13 +284,24 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
               </span>
             )}
           </h2>
-          <button
-            onClick={() => setShowNewEvent(!showNewEvent)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity shadow-lg shadow-primary/20"
-          >
-            <Plus size={12} />
-            Novo Evento
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleResyncTjal}
+              disabled={syncingTjal}
+              title="Re-consulta o TJAL e traz todas as movimentacoes atuais (somente processos TJAL)"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-accent/50 border border-border text-foreground text-[11px] font-bold hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {syncingTjal ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {syncingTjal ? 'Sincronizando…' : 'Sincronizar TJAL'}
+            </button>
+            <button
+              onClick={() => setShowNewEvent(!showNewEvent)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity shadow-lg shadow-primary/20"
+            >
+              <Plus size={12} />
+              Novo Evento
+            </button>
+          </div>
         </div>
 
         {/* Create event form */}
