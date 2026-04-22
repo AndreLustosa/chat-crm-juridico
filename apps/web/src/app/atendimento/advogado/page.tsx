@@ -2302,8 +2302,11 @@ export default function AdvogadoPage() {
             )}
 
             {/* Prazos e Petições Pendentes */}
+            {/* shrink-0: nao deve empurrar o kanban embaixo
+                max-h + overflow-y-auto: quando tem muitos prazos (>6), rola
+                internamente em vez de travar a tela inteira. */}
             {view === 'active' && deadlines.length > 0 && (
-              <div className="mx-6 mt-4">
+              <div className="mx-6 mt-4 shrink-0">
                 <button
                   onClick={() => setShowDeadlines(!showDeadlines)}
                   className="flex items-center gap-2 text-[12px] font-bold text-amber-400 uppercase tracking-wider mb-2 hover:opacity-80 transition-opacity"
@@ -2313,7 +2316,7 @@ export default function AdvogadoPage() {
                   Prazos Processuais ({deadlines.length})
                 </button>
                 {showDeadlines && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[280px] overflow-y-auto custom-scrollbar pr-1 pb-1">
                     {deadlines.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       return (
