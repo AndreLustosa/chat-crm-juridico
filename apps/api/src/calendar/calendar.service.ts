@@ -8,6 +8,46 @@ import { isAdmin } from '../common/utils/permissions.util';
 const EVENT_TYPES = ['CONSULTA', 'TAREFA', 'AUDIENCIA', 'PERICIA', 'PRAZO', 'OUTRO'] as const;
 const EVENT_STATUSES = ['AGENDADO', 'CONFIRMADO', 'CONCLUIDO', 'CANCELADO', 'ADIADO'] as const;
 
+/**
+ * Reminders default por tipo de evento — usados quando o frontend/outra via
+ * nao especifica `reminders` no payload do create(). Garante que TODO evento
+ * criado tem lembrete automatico, sem depender do usuario configurar manualmente.
+ *
+ * Atualizado em 2026-04-22: antes, eventos criados via book_appointment da IA,
+ * child events de recorrencia, etc. ficavam sem nenhum reminder e nunca
+ * disparavam notificacao.
+ */
+const DEFAULT_REMINDERS_BY_TYPE: Record<string, { minutes_before: number; channel: string }[]> = {
+  AUDIENCIA: [
+    { minutes_before: 1440, channel: 'WHATSAPP' },   // 1 dia antes — WhatsApp pro cliente e advogado
+    { minutes_before: 1440, channel: 'PUSH' },        // 1 dia antes — push visual
+    { minutes_before: 60,   channel: 'WHATSAPP' },   // 1h antes
+    { minutes_before: 60,   channel: 'PUSH' },
+  ],
+  PERICIA: [
+    { minutes_before: 1440, channel: 'WHATSAPP' },
+    { minutes_before: 1440, channel: 'PUSH' },
+    { minutes_before: 60,   channel: 'WHATSAPP' },
+    { minutes_before: 60,   channel: 'PUSH' },
+  ],
+  PRAZO: [
+    { minutes_before: 2880, channel: 'PUSH' },       // 2 dias antes
+    { minutes_before: 1440, channel: 'WHATSAPP' },   // 1 dia antes
+    { minutes_before: 1440, channel: 'PUSH' },
+    { minutes_before: 60,   channel: 'PUSH' },       // 1h antes
+  ],
+  CONSULTA: [
+    { minutes_before: 60,   channel: 'PUSH' },
+    { minutes_before: 30,   channel: 'WHATSAPP' },
+  ],
+  TAREFA: [
+    { minutes_before: 60, channel: 'PUSH' },
+  ],
+  OUTRO: [
+    { minutes_before: 30, channel: 'PUSH' },
+  ],
+};
+
 @Injectable()
 export class CalendarService {
   private readonly logger = new Logger(CalendarService.name);
@@ -170,6 +210,14 @@ export class CalendarService {
       if (legalCase?.lead_id) resolvedLeadId = legalCase.lead_id;
     }
 
+    // Reminders: se frontend/via nao especificou, usa defaults do tipo.
+    // Se passou array vazio explicito [], respeita (sem reminders).
+    // Se passou array com items, usa eles.
+    const effectiveReminders =
+      data.reminders === undefined
+        ? (DEFAULT_REMINDERS_BY_TYPE[data.type] || [{ minutes_before: 30, channel: 'PUSH' }])
+        : data.reminders;
+
     const event = await this.prisma.calendarEvent.create({
       data: {
         type: data.type,
@@ -192,9 +240,9 @@ export class CalendarService {
         recurrence_rule: data.recurrence_rule,
         recurrence_end: data.recurrence_end ? new Date(data.recurrence_end) : null,
         recurrence_days: data.recurrence_days ?? [],
-        reminders: data.reminders?.length
+        reminders: effectiveReminders.length
           ? {
-              create: data.reminders.map((r) => ({
+              create: effectiveReminders.map((r) => ({
                 minutes_before: r.minutes_before,
                 channel: r.channel ?? 'PUSH',
               })),
