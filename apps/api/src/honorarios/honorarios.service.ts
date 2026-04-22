@@ -130,6 +130,10 @@ export class HonorariosService {
       contract_date?: string;
       interest_rate?: number;
       notes?: string;
+      /** Se true, marca todas as parcelas como PAGO no ato da criacao (pagamento retroativo). */
+      already_paid?: boolean;
+      /** Metodo usado, obrigatorio se already_paid=true. */
+      payment_method?: string;
     },
     tenantId?: string,
     actorId?: string,
@@ -225,6 +229,32 @@ export class HonorariosService {
       cliente: caseData?.lead?.name, lawyer_id: caseData?.lawyer_id,
       sucumbencia_condenacao: sentenceValue, sucumbencia_pct: data.success_percentage,
     });
+
+    // ── Pagamento retroativo: marcar TODAS as parcelas como PAGAS ────────
+    // Usado quando o advogado cadastra um contrato que ja foi pago
+    // (ex: entrada recebida antes do sistema ser usado).
+    // Cada markPaid cria FinancialTransaction + log de auditoria proprio.
+    if (data.already_paid) {
+      for (const payment of honorario.payments) {
+        try {
+          await this.markPaid(
+            payment.id,
+            { payment_method: data.payment_method },
+            tenantId,
+            actorId,
+          );
+        } catch (e: any) {
+          this.logger.warn(
+            `[HONORARIO] Falha ao marcar parcela ${payment.id} como paga (retroativo): ${e.message}`,
+          );
+        }
+      }
+      // Retorna estado atualizado com pagamentos marcados
+      return this.prisma.caseHonorario.findUnique({
+        where: { id: honorario.id },
+        include: { payments: { orderBy: { due_date: 'asc' } } },
+      });
+    }
 
     // Regime de caixa: NÃO cria FinancialTransaction ao cadastrar honorário.
     // Receita só é registrada quando o pagamento é efetivamente recebido (markPaid).

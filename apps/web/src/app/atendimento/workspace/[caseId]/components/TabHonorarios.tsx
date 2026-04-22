@@ -352,6 +352,9 @@ function CreateHonorarioForm({
   const [contractDate, setContractDate] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  // Pagamento retroativo — marcar tudo como pago ao criar
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('PIX');
 
   const isSucumbencia = type === 'SUCUMBENCIA';
 
@@ -388,8 +391,18 @@ function CreateHonorarioForm({
               contract_date: contractDate || undefined,
             }),
         notes: notes.trim() || undefined,
+        // Pagamento retroativo — backend marca todas as parcelas como PAGO
+        // e cria FinancialTransaction correspondente (regime de caixa).
+        ...(alreadyPaid && !isSucumbencia ? {
+          already_paid: true,
+          payment_method: paymentMethod,
+        } : {}),
       });
-      showSuccess('Contrato criado com parcelas geradas');
+      showSuccess(
+        alreadyPaid && !isSucumbencia
+          ? 'Contrato criado e parcelas marcadas como pagas'
+          : 'Contrato criado com parcelas geradas',
+      );
       onCreated();
     } catch (e: any) {
       showError(e?.response?.data?.message || 'Erro ao criar contrato');
@@ -509,6 +522,48 @@ function CreateHonorarioForm({
             className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
           />
         </div>
+
+        {/* ── Pagamento retroativo — so pra tipos com data definida ── */}
+        {!isSucumbencia && (
+          <div className="space-y-2.5 px-4 py-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={alreadyPaid}
+                onChange={e => setAlreadyPaid(e.target.checked)}
+                className="w-4 h-4 rounded border-border accent-emerald-500 cursor-pointer"
+              />
+              <div className="flex-1">
+                <span className="text-[12px] font-bold text-emerald-400 flex items-center gap-1.5">
+                  <Check size={12} />
+                  Já recebido
+                </span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">
+                  Marca todas as parcelas como PAGAS (pagamento retroativo — registra entrada no financeiro)
+                </span>
+              </div>
+            </label>
+
+            {alreadyPaid && (
+              <div className="pl-6 pt-2 border-t border-emerald-500/15 space-y-1.5">
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Método de pagamento
+                </label>
+                <CustomSelect
+                  value={paymentMethod}
+                  onChange={setPaymentMethod}
+                  options={[
+                    { id: 'PIX', label: 'PIX' },
+                    { id: 'DINHEIRO', label: 'Dinheiro' },
+                    { id: 'TRANSFERENCIA', label: 'Transferência' },
+                    { id: 'CARTAO', label: 'Cartão' },
+                    { id: 'BOLETO', label: 'Boleto' },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 pt-1">
           <button

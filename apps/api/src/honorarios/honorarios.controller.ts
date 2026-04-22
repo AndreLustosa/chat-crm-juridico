@@ -41,9 +41,15 @@ export class HonorariosController {
     @Body() body: {
       type: string;
       total_value: number;
+      success_percentage?: number;
+      sentence_value?: number;
       installment_count?: number;
       contract_date?: string;
+      interest_rate?: number;
       notes?: string;
+      // Pagamento retroativo — marca todas as parcelas como PAGAS na criacao
+      already_paid?: boolean;
+      payment_method?: string;
     },
     @Request() req: any,
   ) {
