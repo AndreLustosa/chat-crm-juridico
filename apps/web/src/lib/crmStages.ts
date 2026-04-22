@@ -25,15 +25,20 @@ export function normalizeStage(stage: string | null | undefined): string {
   if (!stage) return 'QUALIFICANDO';
   const known = CRM_STAGES.find(s => s.id === stage);
   if (known) return known.id;
-  // Legado: mapeia valores antigos para QUALIFICANDO (ponto de entrada unico)
+  // Legado: mapeia valores antigos para stages atuais
   const legacyMap: Record<string, string> = {
+    // Ponto de entrada unificado em QUALIFICANDO
     NOVO: 'QUALIFICANDO', NEW: 'QUALIFICANDO',
-    INICIAL: 'QUALIFICANDO', // coluna antiga do funil unificada em QUALIFICANDO
+    INICIAL: 'QUALIFICANDO',
     CONTATADO: 'QUALIFICANDO', CONTACTED: 'QUALIFICANDO',
     QUALIFICADO: 'QUALIFICANDO', QUALIFIED: 'QUALIFICANDO',
     EM_ATENDIMENTO: 'QUALIFICANDO',
-    PROPOSTA: 'AGUARDANDO_FORM', PROPOSAL: 'AGUARDANDO_FORM',
+    // Stages que representam "caso ja existente" → FINALIZADO
+    PROCESSO_ATIVO: 'FINALIZADO',     // cliente com processo em andamento
+    ENCERRADO: 'FINALIZADO',           // alias antigo de FINALIZADO
     GANHO: 'FINALIZADO', WON: 'FINALIZADO',
+    // Proposta/contratação em andamento → formulario
+    PROPOSTA: 'AGUARDANDO_FORM', PROPOSAL: 'AGUARDANDO_FORM',
   };
   return legacyMap[stage.toUpperCase()] ?? 'QUALIFICANDO';
 }
