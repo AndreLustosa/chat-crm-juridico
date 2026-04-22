@@ -196,6 +196,18 @@ export function ClientPanel({
   const [casesOpen, setCasesOpen] = useState(false);
   const [creatingCase, setCreatingCase] = useState(false);
   const [newCaseArea, setNewCaseArea] = useState('');
+  const [newCaseSubject, setNewCaseSubject] = useState('');
+  const [newCaseUrgency, setNewCaseUrgency] = useState<'BAIXA' | 'NORMAL' | 'URGENTE'>('NORMAL');
+  const [submittingCase, setSubmittingCase] = useState(false);
+
+  /** Abre form de novo caso ja expandindo a secao de Casos Juridicos */
+  const openNewCaseForm = () => {
+    setCasesOpen(true);
+    setCreatingCase(true);
+    setNewCaseSubject('');
+    setNewCaseArea('');
+    setNewCaseUrgency('NORMAL');
+  };
 
   // Modal de nova tarefa
   const [taskModal, setTaskModal] = useState(false);
@@ -592,32 +604,42 @@ export function ClientPanel({
                       </>
                     )}
                   </div>
-                  {/* Badge de casos em VIABILIDADE — novo caso aberto (pela IA
-                      ou manualmente) que precisa de avaliacao do advogado. */}
-                  {(() => {
-                    const viabilidadeCases = (lead.legal_cases || []).filter(c => c.stage === 'VIABILIDADE');
-                    if (viabilidadeCases.length === 0) return null;
-                    // Detecta casos novos (< 24h) — abertos hoje pela IA
-                    const now = Date.now();
-                    const newCount = viabilidadeCases.filter(c =>
-                      c.created_at && (now - new Date(c.created_at).getTime()) < 24 * 3600 * 1000
-                    ).length;
-                    return (
-                      <button
-                        onClick={() => setCasesOpen(true)}
-                        className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold hover:bg-amber-500/15 transition-colors"
-                        title={`${viabilidadeCases.length} caso(s) aguardando avaliacao de viabilidade`}
-                      >
-                        <Scale size={11} />
-                        {viabilidadeCases.length} em triagem
-                        {newCount > 0 && (
-                          <span className="ml-1 px-1.5 py-0 rounded-full bg-amber-400/30 text-amber-200 text-[9px] font-bold leading-tight">
-                            {newCount} nov{newCount !== 1 ? 'os' : 'o'}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })()}
+                  {/* Atalhos: badge de triagem + botao novo caso */}
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    {(() => {
+                      const viabilidadeCases = (lead.legal_cases || []).filter(c => c.stage === 'VIABILIDADE');
+                      if (viabilidadeCases.length === 0) return null;
+                      // Detecta casos novos (< 24h) — abertos hoje pela IA
+                      const now = Date.now();
+                      const newCount = viabilidadeCases.filter(c =>
+                        c.created_at && (now - new Date(c.created_at).getTime()) < 24 * 3600 * 1000
+                      ).length;
+                      return (
+                        <button
+                          onClick={() => setCasesOpen(true)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-bold hover:bg-amber-500/15 transition-colors"
+                          title={`${viabilidadeCases.length} caso(s) aguardando avaliacao de viabilidade`}
+                        >
+                          <Scale size={11} />
+                          {viabilidadeCases.length} em triagem
+                          {newCount > 0 && (
+                            <span className="ml-1 px-1.5 py-0 rounded-full bg-amber-400/30 text-amber-200 text-[9px] font-bold leading-tight">
+                              {newCount} nov{newCount !== 1 ? 'os' : 'o'}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })()}
+                    {/* Botao atalho: abre form de novo caso ja expandido */}
+                    <button
+                      onClick={openNewCaseForm}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/30 text-violet-400 text-[11px] font-bold hover:bg-violet-500/15 transition-colors"
+                      title="Abrir um novo caso juridico pra este cliente"
+                    >
+                      <Plus size={11} />
+                      Novo caso
+                    </button>
+                  </div>
                   <div className="mt-3 flex flex-col gap-1.5">
                     <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
                       <Phone size={13} className="shrink-0" />
@@ -918,7 +940,7 @@ export function ClientPanel({
                   {/* Criar novo caso */}
                   {!creatingCase ? (
                     <button
-                      onClick={() => setCreatingCase(true)}
+                      onClick={openNewCaseForm}
                       className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-dashed border-violet-500/30 text-violet-400 hover:bg-violet-500/5 transition-colors text-[11px] font-medium"
                     >
                       <Plus size={12} />
@@ -926,44 +948,94 @@ export function ClientPanel({
                     </button>
                   ) : (
                     <div className="bg-foreground/[0.03] border border-violet-500/30 rounded-xl p-3.5 flex flex-col gap-2.5">
-                      <select
-                        value={newCaseArea}
-                        onChange={(e) => setNewCaseArea(e.target.value)}
-                        className="w-full bg-background border border-border rounded-lg px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
-                      >
-                        <option value="">Área jurídica (opcional)</option>
-                        <option value="TRABALHISTA">Trabalhista</option>
-                        <option value="CIVIL">Civil</option>
-                        <option value="PREVIDENCIARIO">Previdenciário</option>
-                        <option value="PENAL">Penal</option>
-                        <option value="TRIBUTARIO">Tributário</option>
-                        <option value="ADMINISTRATIVO">Administrativo</option>
-                      </select>
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Descrição do caso *
+                        </label>
+                        <textarea
+                          value={newCaseSubject}
+                          onChange={(e) => setNewCaseSubject(e.target.value)}
+                          placeholder="Ex: Disputa com vizinho sobre cerca no terreno; cliente quer entender responsabilidades e próximos passos."
+                          rows={3}
+                          className="w-full bg-background border border-border rounded-lg px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none"
+                          autoFocus
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            Área jurídica
+                          </label>
+                          <select
+                            value={newCaseArea}
+                            onChange={(e) => setNewCaseArea(e.target.value)}
+                            className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
+                          >
+                            <option value="">A definir</option>
+                            <option value="TRABALHISTA">Trabalhista</option>
+                            <option value="CIVIL">Civil</option>
+                            <option value="PREVIDENCIARIO">Previdenciário</option>
+                            <option value="CONSUMIDOR">Consumidor</option>
+                            <option value="FAMILIA">Família</option>
+                            <option value="PENAL">Penal</option>
+                            <option value="TRIBUTARIO">Tributário</option>
+                            <option value="EMPRESARIAL">Empresarial</option>
+                            <option value="ADMINISTRATIVO">Administrativo</option>
+                          </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            Urgência
+                          </label>
+                          <select
+                            value={newCaseUrgency}
+                            onChange={(e) => setNewCaseUrgency(e.target.value as 'BAIXA' | 'NORMAL' | 'URGENTE')}
+                            className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
+                          >
+                            <option value="BAIXA">🔵 Baixa</option>
+                            <option value="NORMAL">🟡 Normal</option>
+                            <option value="URGENTE">🔴 Urgente</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 mt-1">
                         <button
-                          onClick={() => { setCreatingCase(false); setNewCaseArea(''); }}
-                          className="flex-1 py-1.5 rounded-lg text-[11px] text-muted-foreground hover:bg-accent/30 transition-colors"
+                          onClick={() => { setCreatingCase(false); setNewCaseArea(''); setNewCaseSubject(''); setNewCaseUrgency('NORMAL'); }}
+                          disabled={submittingCase}
+                          className="flex-1 py-1.5 rounded-lg text-[11px] text-muted-foreground hover:bg-accent/30 transition-colors disabled:opacity-50"
                         >
                           Cancelar
                         </button>
                         <button
+                          disabled={submittingCase || !newCaseSubject.trim()}
                           onClick={async () => {
+                            if (!newCaseSubject.trim()) return;
+                            setSubmittingCase(true);
                             try {
                               const res = await api.post('/legal-cases', {
                                 lead_id: lead.id,
                                 conversation_id: resolvedConvId || undefined,
                                 legal_area: newCaseArea || undefined,
+                                subject: newCaseSubject.trim(),
+                                priority: newCaseUrgency,
                               });
                               setCreatingCase(false);
+                              setNewCaseSubject('');
                               setNewCaseArea('');
+                              setNewCaseUrgency('NORMAL');
                               router.push(`/atendimento/workspace/${res.data.id}`);
                             } catch {
                               // silently fail
+                            } finally {
+                              setSubmittingCase(false);
                             }
                           }}
-                          className="flex-1 py-1.5 rounded-lg bg-violet-600 text-white text-[11px] font-medium hover:bg-violet-500 transition-colors"
+                          className="flex-1 py-1.5 rounded-lg bg-violet-600 text-white text-[11px] font-medium hover:bg-violet-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Criar Caso
+                          {submittingCase ? 'Criando...' : 'Criar Caso'}
                         </button>
                       </div>
                     </div>

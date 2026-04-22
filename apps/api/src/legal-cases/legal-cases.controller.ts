@@ -103,13 +103,27 @@ export class LegalCasesController {
 
   @Post()
   @Roles('ADMIN', 'ADVOGADO')
-  create(@Body() body: { lead_id: string; conversation_id?: string; legal_area?: string }, @Request() req: any) {
+  create(
+    @Body() body: {
+      lead_id: string;
+      conversation_id?: string;
+      legal_area?: string;
+      // Campos opcionais adicionados pro botao "Novo caso" do ClientPanel:
+      //   subject  -> descricao do novo assunto (vai pras notes do caso)
+      //   priority -> URGENTE | NORMAL | BAIXA (default NORMAL)
+      subject?: string;
+      priority?: string;
+    },
+    @Request() req: any,
+  ) {
     return this.service.create({
       lead_id: body.lead_id,
       conversation_id: body.conversation_id,
       lawyer_id: req.user.id,
       legal_area: body.legal_area,
       tenant_id: req.user.tenant_id,
+      subject: body.subject,
+      priority: body.priority,
     });
   }
 

@@ -39,6 +39,10 @@ export class LegalCasesService {
     lawyer_id: string;
     legal_area?: string;
     tenant_id?: string;
+    /** Descricao do novo assunto — prepende nas notes do caso */
+    subject?: string;
+    /** URGENTE | NORMAL | BAIXA (default NORMAL) */
+    priority?: string;
   }) {
     // Pré-preencher com dados do LeadProfile (sistema novo).
     //
@@ -64,6 +68,23 @@ export class LegalCasesService {
       this.logger.warn(`[LEGAL] Falha ao pré-preencher caso com LeadProfile: ${e.message}`);
     }
 
+    // Se subject foi passado pelo frontend (botao "Novo caso" do ClientPanel),
+    // prepende no notes pra ficar visivel pro advogado ao abrir o workspace.
+    if (data.subject && data.subject.trim()) {
+      const header = [
+        '== Novo caso aberto pelo advogado ==',
+        `Descricao: ${data.subject.trim()}`,
+        `Aberto em: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Maceio' })}`,
+      ].join('\n');
+      notes = notes ? `${header}\n\n--- Perfil do cliente ---\n${notes}` : header;
+    }
+
+    // Normalizar prioridade (default NORMAL)
+    const validPriorities = ['URGENTE', 'NORMAL', 'BAIXA'];
+    const priority = data.priority && validPriorities.includes(data.priority.toUpperCase())
+      ? data.priority.toUpperCase()
+      : 'NORMAL';
+
     const legalCase = await this.prisma.legalCase.create({
       data: {
         lead_id: data.lead_id,
@@ -72,6 +93,7 @@ export class LegalCasesService {
         legal_area: resolvedArea,
         tenant_id: data.tenant_id,
         stage: 'VIABILIDADE',
+        priority,
         opposing_party,
         notes,
       },
