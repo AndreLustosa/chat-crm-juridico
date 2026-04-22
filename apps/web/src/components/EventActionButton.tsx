@@ -15,7 +15,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { CheckCircle2, XCircle, Clock, ChevronDown, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ChevronDown, Loader2, StickyNote, User as UserIcon } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 
@@ -36,6 +36,22 @@ interface Props {
   label?: string;
   /** Classe CSS adicional pro container */
   className?: string;
+  /** Nota salva no cumprimento — se presente, mostra icone clicavel */
+  completionNote?: string | null;
+  /** Quem cumpriu (pra mostrar no popover da nota) */
+  completedBy?: { id: string; name: string } | null;
+  /** Quando cumpriu (ISO string ou Date) */
+  completedAt?: string | Date | null;
+}
+
+function formatCompletionDate(d: string | Date | null | undefined): string {
+  if (!d) return '';
+  const dt = typeof d === 'string' ? new Date(d) : d;
+  if (isNaN(dt.getTime())) return '';
+  return dt.toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
 }
 
 const ALREADY_DONE_STATUSES = new Set([
@@ -50,6 +66,9 @@ export function EventActionButton({
   compact = false,
   label = 'Dar andamento',
   className = '',
+  completionNote,
+  completedBy,
+  completedAt,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<'complete' | 'cancel' | 'postpone' | null>(null);
@@ -58,7 +77,21 @@ export function EventActionButton({
   const [showPostpone, setShowPostpone] = useState(false);
   const [postponeDate, setPostponeDate] = useState('');
   const [postponeReason, setPostponeReason] = useState('');
+  const [notePopoverOpen, setNotePopoverOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const notePopoverRef = useRef<HTMLDivElement>(null);
+
+  // Fechar popover da nota ao clicar fora
+  useEffect(() => {
+    if (!notePopoverOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (notePopoverRef.current && !notePopoverRef.current.contains(e.target as Node)) {
+        setNotePopoverOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [notePopoverOpen]);
 
   // Fechar ao clicar fora
   useEffect(() => {
@@ -136,18 +169,60 @@ export function EventActionButton({
     }
   };
 
-  // Se ja concluido/cancelado, botao de reabrir
+  // Se ja concluido/cancelado, botao de reabrir + icone de nota (se houver)
   if (isAlreadyDone) {
+    const hasNote = !!(completionNote && completionNote.trim());
     return (
-      <button
-        onClick={doReopen}
-        disabled={loading !== null}
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50 ${className}`}
-        title="Reabrir evento"
-      >
-        {loading ? <Loader2 size={11} className="animate-spin" /> : <Clock size={11} />}
-        {!compact && 'Reabrir'}
-      </button>
+      <div className={`inline-flex items-center gap-1 ${className}`}>
+        {/* Icone de nota clicavel (popover com detalhes do cumprimento) */}
+        {hasNote && (
+          <div ref={notePopoverRef} className="relative inline-block">
+            <button
+              onClick={(e) => { e.stopPropagation(); setNotePopoverOpen(!notePopoverOpen); }}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-400 hover:bg-amber-500/20 transition-colors"
+              title={`Nota: ${completionNote}${completedBy ? ` — ${completedBy.name}` : ''}`}
+            >
+              <StickyNote size={10} />
+            </button>
+            {notePopoverOpen && (
+              <div className="absolute right-0 top-full mt-1 z-40 w-[260px] bg-card border border-border rounded-xl shadow-xl p-3 text-left">
+                <div className="flex items-center gap-2 mb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                  <StickyNote size={10} className="text-amber-400" />
+                  Nota de cumprimento
+                </div>
+                <p className="text-[12px] text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                  {completionNote}
+                </p>
+                {(completedBy || completedAt) && (
+                  <div className="mt-3 pt-2 border-t border-border/50 flex flex-col gap-1 text-[10px] text-muted-foreground">
+                    {completedBy && (
+                      <span className="flex items-center gap-1">
+                        <UserIcon size={9} />
+                        Cumprido por <span className="text-foreground font-medium">{completedBy.name}</span>
+                      </span>
+                    )}
+                    {completedAt && (
+                      <span className="flex items-center gap-1">
+                        <Clock size={9} />
+                        {formatCompletionDate(completedAt)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        <button
+          onClick={doReopen}
+          disabled={loading !== null}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+          title="Reabrir evento"
+        >
+          {loading ? <Loader2 size={11} className="animate-spin" /> : <Clock size={11} />}
+          {!compact && 'Reabrir'}
+        </button>
+      </div>
     );
   }
 

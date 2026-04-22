@@ -4,6 +4,7 @@ import { EventsService } from './events.service';
 import { CalendarModule } from '../calendar/calendar.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { CaseDeadlinesModule } from '../case-deadlines/case-deadlines.module';
+import { PrismaModule } from '../prisma/prisma.module';
 
 /**
  * Events: facade que unifica cumprimento/cancelamento/adiamento dos 3
@@ -13,7 +14,7 @@ import { CaseDeadlinesModule } from '../case-deadlines/case-deadlines.module';
  * ja exportam seus services respectivos.
  */
 @Module({
-  imports: [CalendarModule, TasksModule, CaseDeadlinesModule],
+  imports: [CalendarModule, TasksModule, CaseDeadlinesModule, PrismaModule],
   controllers: [EventsController],
   providers: [EventsService],
 })

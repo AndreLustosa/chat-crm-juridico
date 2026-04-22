@@ -166,9 +166,13 @@ export class LegalCasesService {
         select: {
           id: true,
           type: true,
+          status: true,
           start_at: true,
           title: true,
           location: true,
+          completion_note: true,
+          completed_at: true,
+          completed_by: { select: { id: true, name: true } },
         },
       },
       // Resumo financeiro para badge no kanban

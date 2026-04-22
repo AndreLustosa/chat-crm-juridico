@@ -1134,6 +1134,7 @@ export class CalendarService {
       include: {
         assigned_user: { select: { id: true, name: true } },
         created_by: { select: { id: true, name: true } },
+        completed_by: { select: { id: true, name: true } },
         _count: { select: { comments: true } },
       },
       orderBy: { created_at: 'desc' },

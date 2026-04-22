@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
 import { EventsService, EventTarget } from './events.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -14,6 +14,28 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @Controller('events')
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
+
+  /**
+   * Historico unificado de cumprimento/cancelamento pra um caso ou lead.
+   * Query params:
+   *   - legal_case_id: filtra por caso (preferido)
+   *   - lead_id: filtra por lead (abrangente — inclui eventos sem legal_case)
+   *   - limit: default 100
+   */
+  @Get('history')
+  history(
+    @Query('legal_case_id') legalCaseId: string | undefined,
+    @Query('lead_id') leadId: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Request() req: any,
+  ) {
+    return this.eventsService.history({
+      legalCaseId,
+      leadId,
+      tenantId: req.user?.tenant_id,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
 
   @Post('complete')
   @HttpCode(HttpStatus.OK)

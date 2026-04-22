@@ -27,6 +27,9 @@ interface CaseEvent {
   location: string | null;
   assigned_user: { id: string; name: string } | null;
   created_by: { id: string; name: string } | null;
+  completed_at?: string | null;
+  completion_note?: string | null;
+  completed_by?: { id: string; name: string } | null;
   _count?: { comments: number };
 }
 
@@ -192,6 +195,9 @@ export default function TabTarefas({
                     id={ev.id}
                     currentStatus={ev.status}
                     compact
+                    completionNote={ev.completion_note}
+                    completedBy={ev.completed_by}
+                    completedAt={ev.completed_at}
                     onActionComplete={fetchEvents}
                   />
                 </div>

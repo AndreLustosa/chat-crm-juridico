@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { CalendarService } from '../calendar/calendar.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CaseDeadlinesService } from '../case-deadlines/case-deadlines.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 export type EventTarget =
   | { type: 'CALENDAR'; id: string }
@@ -30,7 +31,146 @@ export class EventsService {
     private calendarService: CalendarService,
     private tasksService: TasksService,
     private caseDeadlinesService: CaseDeadlinesService,
+    private prisma: PrismaService,
   ) {}
+
+  /**
+   * Historico de cumprimento de um caso — lista unificada de todos os
+   * CalendarEvents, Tasks e CaseDeadlines que ja foram cumpridos/cancelados,
+   * ordenados por quando foram finalizados (completed_at desc).
+   *
+   * Dedup: se um CalendarEvent tem Task ou Deadline vinculados, aparece UMA
+   * vez so (prioriza Calendar porque e o agregador natural).
+   */
+  async history(params: { legalCaseId?: string; leadId?: string; tenantId?: string; limit?: number }) {
+    const limit = params.limit ?? 100;
+    const tenantFilter = params.tenantId ? { tenant_id: params.tenantId } : {};
+
+    const caseFilter: any = {};
+    if (params.legalCaseId) caseFilter.legal_case_id = params.legalCaseId;
+    if (params.leadId) caseFilter.lead_id = params.leadId;
+
+    // 1. CalendarEvents terminais
+    const calendarEvents = await this.prisma.calendarEvent.findMany({
+      where: {
+        status: { in: ['CONCLUIDO', 'CANCELADO'] },
+        ...caseFilter,
+        ...tenantFilter,
+      },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        status: true,
+        start_at: true,
+        completed_at: true,
+        completion_note: true,
+        completed_by: { select: { id: true, name: true } },
+        task: { select: { id: true } },
+        deadline: { select: { id: true } },
+      },
+      orderBy: { completed_at: 'desc' },
+      take: limit,
+    });
+
+    // IDs de Task/Deadline ja cobertos via CalendarEvent (pra nao duplicar)
+    const coveredTaskIds = new Set<string>();
+    const coveredDeadlineIds = new Set<string>();
+    for (const ce of calendarEvents) {
+      if (ce.task?.id) coveredTaskIds.add(ce.task.id);
+      if (ce.deadline?.id) coveredDeadlineIds.add(ce.deadline.id);
+    }
+
+    // 2. Tasks terminais (SEM calendar_event_id coberto acima)
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        status: { in: ['CONCLUIDA', 'CANCELADA'] },
+        ...(params.legalCaseId ? { legal_case_id: params.legalCaseId } : {}),
+        ...(params.leadId ? { lead_id: params.leadId } : {}),
+        ...tenantFilter,
+        id: { notIn: [...coveredTaskIds] },
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        due_at: true,
+        completed_at: true,
+        completion_note: true,
+        completed_by: { select: { id: true, name: true } },
+      },
+      orderBy: { completed_at: 'desc' },
+      take: limit,
+    });
+
+    // 3. CaseDeadlines completed (SEM calendar_event_id coberto)
+    const deadlines = params.legalCaseId
+      ? await this.prisma.caseDeadline.findMany({
+          where: {
+            legal_case_id: params.legalCaseId,
+            completed: true,
+            id: { notIn: [...coveredDeadlineIds] },
+            ...tenantFilter,
+          },
+          select: {
+            id: true,
+            type: true,
+            title: true,
+            due_at: true,
+            completed_at: true,
+            completion_note: true,
+            completed_by: { select: { id: true, name: true } },
+          },
+          orderBy: { completed_at: 'desc' },
+          take: limit,
+        })
+      : [];
+
+    // Normalizar pro formato unificado
+    const items = [
+      ...calendarEvents.map(e => ({
+        source: 'CALENDAR' as const,
+        id: e.id,
+        type: e.type,
+        title: e.title,
+        status: e.status,
+        scheduled_at: e.start_at,
+        completed_at: e.completed_at,
+        completion_note: e.completion_note,
+        completed_by: e.completed_by,
+      })),
+      ...tasks.map(t => ({
+        source: 'TASK' as const,
+        id: t.id,
+        type: 'TAREFA',
+        title: t.title,
+        status: t.status,
+        scheduled_at: t.due_at,
+        completed_at: t.completed_at,
+        completion_note: t.completion_note,
+        completed_by: t.completed_by,
+      })),
+      ...deadlines.map(d => ({
+        source: 'DEADLINE' as const,
+        id: d.id,
+        type: d.type,
+        title: d.title,
+        status: 'CONCLUIDO',
+        scheduled_at: d.due_at,
+        completed_at: d.completed_at,
+        completion_note: d.completion_note,
+        completed_by: d.completed_by,
+      })),
+    ];
+
+    items.sort((a, b) => {
+      const ta = a.completed_at?.getTime() ?? 0;
+      const tb = b.completed_at?.getTime() ?? 0;
+      return tb - ta;
+    });
+
+    return { total: items.length, items: items.slice(0, limit) };
+  }
 
   /**
    * Marca evento como cumprido/concluido.
