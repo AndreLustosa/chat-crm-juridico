@@ -423,14 +423,29 @@ export class CalendarService {
     return event;
   }
 
-  async updateStatus(id: string, status: string, completionNote?: string) {
+  async updateStatus(id: string, status: string, completionNote?: string, userId?: string) {
     if (!EVENT_STATUSES.includes(status as any)) {
       throw new BadRequestException(`Status invalido: ${status}`);
     }
 
+    // Audit: seta completed_at/completed_by/note quando entra em estado terminal.
+    // Se volta pra AGENDADO/CONFIRMADO (reopen), limpa pra nao ter audit falso.
+    const isTerminal = ['CONCLUIDO', 'CANCELADO', 'ADIADO'].includes(status);
+    const auditData: any = {};
+    if (isTerminal) {
+      auditData.completed_at = new Date();
+      if (userId) auditData.completed_by_id = userId;
+      if (completionNote) auditData.completion_note = completionNote;
+    } else {
+      // Reopen — limpa audit
+      auditData.completed_at = null;
+      auditData.completed_by_id = null;
+      auditData.completion_note = null;
+    }
+
     const event = await this.prisma.calendarEvent.update({
       where: { id },
-      data: { status },
+      data: { status, ...auditData },
       include: {
         assigned_user: { select: { id: true, name: true } },
         task: { select: { id: true, status: true } },
@@ -460,12 +475,20 @@ export class CalendarService {
       const taskStatus = calToTaskStatus[status];
       if (taskStatus && (event as any).task.status !== taskStatus) {
         try {
+          // Espelha audit no Task se chegou em estado terminal
+          const isTaskTerminal = ['CONCLUIDA', 'CANCELADA'].includes(taskStatus);
           await this.prisma.task.update({
             where: { id: (event as any).task.id },
             data: {
               status: taskStatus,
-              // Preserva completion_note se passado junto
-              ...(completionNote && status === 'CONCLUIDO' ? { completion_note: completionNote } : {}),
+              ...(isTaskTerminal ? {
+                completed_at: new Date(),
+                ...(userId ? { completed_by_id: userId } : {}),
+                ...(completionNote ? { completion_note: completionNote } : {}),
+              } : {
+                completed_at: null,
+                completed_by_id: null,
+              }),
             },
           });
           this.logger.log(
@@ -490,6 +513,9 @@ export class CalendarService {
             data: {
               completed: shouldBeCompleted,
               completed_at: shouldBeCompleted ? new Date() : null,
+              ...(shouldBeCompleted && userId ? { completed_by_id: userId } : {}),
+              ...(shouldBeCompleted && completionNote ? { completion_note: completionNote } : {}),
+              ...(!shouldBeCompleted ? { completed_by_id: null, completion_note: null } : {}),
             },
           });
           this.logger.log(

@@ -68,13 +68,16 @@ model User {
   task_comments            TaskComment[]
   supervisors              User[]                 @relation("InternSupervisors")
   interns                  User[]                 @relation("InternSupervisors")
-  calendar_events_assigned CalendarEvent[]        @relation("EventAssigned")
-  calendar_events_created  CalendarEvent[]        @relation("EventCreator")
-  schedules                UserSchedule[]
-  calendar_event_comments  CalendarEventComment[]
-  transfer_audios          TransferAudio[]        @relation("AudioUploader")
-  uploaded_documents       CaseDocument[]         @relation("DocumentUploader")
-  created_deadlines        CaseDeadline[]         @relation("DeadlineCreator")
+  calendar_events_assigned  CalendarEvent[]        @relation("EventAssigned")
+  calendar_events_created   CalendarEvent[]        @relation("EventCreator")
+  calendar_events_completed CalendarEvent[]        @relation("EventCompleter")
+  tasks_completed           Task[]                 @relation("TaskCompleter")
+  deadlines_completed       CaseDeadline[]         @relation("DeadlineCompleter")
+  schedules                 UserSchedule[]
+  calendar_event_comments   CalendarEventComment[]
+  transfer_audios           TransferAudio[]        @relation("AudioUploader")
+  uploaded_documents        CaseDocument[]         @relation("DocumentUploader")
+  created_deadlines         CaseDeadline[]         @relation("DeadlineCreator")
   authored_petitions       CasePetition[]         @relation("PetitionAuthor")
   reviewed_petitions       CasePetition[]         @relation("PetitionReviewer")
   saved_versions           PetitionVersion[]      @relation("VersionSaver")
@@ -260,10 +263,13 @@ model Task {
   created_at        DateTime            @default(now())
   // Conclusão
   completion_note   String?
+  completed_at      DateTime?
+  completed_by_id   String?
   // Adiamentos
   postpone_count    Int                 @default(0)
   created_by_id     String?
   assigned_user     User?               @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  completed_by      User?               @relation("TaskCompleter", fields: [completed_by_id], references: [id], onDelete: SetNull)
   conversation      Conversation?       @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
   lead              Lead?               @relation(fields: [lead_id], references: [id], onDelete: SetNull)
   message           Message?            @relation(fields: [message_id], references: [id], onDelete: SetNull)
@@ -804,6 +810,13 @@ model CalendarEvent {
   created_by_id       String
   appointment_type_id String?
 
+  // Audit de cumprimento — populado pelo EventsService quando status muda
+  // para CONCLUIDO/CANCELADO/ADIADO. Nota fica disponivel no Workspace/Agenda
+  // pra revisao posterior (ex: "audiencia ocorreu, acordo celebrado").
+  completed_at     DateTime?
+  completed_by_id  String?
+  completion_note  String?
+
   // Recurrence
   recurrence_rule String? // DAILY, WEEKLY, BIWEEKLY, MONTHLY, CUSTOM
   recurrence_end  DateTime?
@@ -817,6 +830,7 @@ model CalendarEvent {
   legal_case       LegalCase?       @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
   assigned_user    User?            @relation("EventAssigned", fields: [assigned_user_id], references: [id], onDelete: SetNull)
   created_by       User             @relation("EventCreator", fields: [created_by_id], references: [id])
+  completed_by     User?            @relation("EventCompleter", fields: [completed_by_id], references: [id], onDelete: SetNull)
   appointment_type AppointmentType? @relation(fields: [appointment_type_id], references: [id], onDelete: SetNull)
 
   reminders EventReminder[]
@@ -983,11 +997,14 @@ model CaseDeadline {
   alert_days        Int       @default(2) // Dias antes para alertar
   completed         Boolean   @default(false)
   completed_at      DateTime?
+  completed_by_id   String?
+  completion_note   String?
   calendar_event_id String?   @unique // Link para CalendarEvent gerado automaticamente
   created_at        DateTime  @default(now())
 
   legal_case     LegalCase      @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
   created_by     User           @relation("DeadlineCreator", fields: [created_by_id], references: [id])
+  completed_by   User?          @relation("DeadlineCompleter", fields: [completed_by_id], references: [id], onDelete: SetNull)
   tenant         Tenant?        @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   calendar_event CalendarEvent? @relation(fields: [calendar_event_id], references: [id], onDelete: SetNull)
 

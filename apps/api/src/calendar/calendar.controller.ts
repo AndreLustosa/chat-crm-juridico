@@ -93,7 +93,7 @@ export class CalendarController {
   ) {
     const canEdit = await this.calendarService.checkOwnership(id, req.user.id, req.user.roles, req.user?.tenant_id);
     if (!canEdit) throw new ForbiddenException('Sem permissao para alterar status deste evento');
-    return this.calendarService.updateStatus(id, body.status, body.completion_note);
+    return this.calendarService.updateStatus(id, body.status, body.completion_note, req.user?.id);
   }
 
   @Post('events/:id/notify')

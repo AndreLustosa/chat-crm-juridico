@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess, showInfo } from '@/lib/toast';
+import { EventActionButton } from '@/components/EventActionButton';
 
 const EVENT_TYPES = [
   { id: 'MOVIMENTACAO', label: 'Movimentacao' },
@@ -250,6 +251,7 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
         eventType: e.type,
         status: e.status,
         assignedUser: e.assigned_user,
+        originalId: e.id,
       },
     })),
     ...djenPublications.map(d => ({
@@ -501,7 +503,7 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
                         </div>
                       </div>
 
-                      {/* Delete button -- only for manual events */}
+                      {/* Delete button -- only for manual CaseEvents (audit log) */}
                       {item.type === 'event' && item.extra.originalId && (
                         <button
                           onClick={() => handleDeleteEvent(item.extra.originalId)}
@@ -513,6 +515,19 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
                             ? <Loader2 size={13} className="animate-spin" />
                             : <Trash2 size={13} />}
                         </button>
+                      )}
+
+                      {/* Action button — para CalendarEvents: concluir/adiar/cancelar */}
+                      {item.type === 'calendar' && (item.extra as any).originalId && (
+                        <div className="self-start mt-2">
+                          <EventActionButton
+                            type="CALENDAR"
+                            id={(item.extra as any).originalId}
+                            currentStatus={(item.extra as any).status}
+                            compact
+                            onActionComplete={fetchData}
+                          />
+                        </div>
                       )}
                     </div>
                   );

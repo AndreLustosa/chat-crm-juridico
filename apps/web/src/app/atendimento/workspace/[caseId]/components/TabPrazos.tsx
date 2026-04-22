@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { EventActionButton } from '@/components/EventActionButton';
 
 interface CaseDeadline {
   id: string;
@@ -343,19 +344,19 @@ export default function TabPrazos({ caseId }: { caseId: string }) {
                     )}
                   </div>
 
-                  {/* Actions */}
+                  {/* Actions: botao unificado + delete */}
                   {!dl.completed && (
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => handleComplete(dl.id)}
-                        title="Marcar como cumprido"
-                        className="p-2 rounded-xl text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                      >
-                        <CheckCircle2 size={16} />
-                      </button>
+                      <EventActionButton
+                        type="DEADLINE"
+                        id={dl.id}
+                        currentStatus={dl.completed ? 'CONCLUIDO' : 'AGENDADO'}
+                        compact
+                        onActionComplete={fetchDeadlines}
+                      />
                       <button
                         onClick={() => handleDelete(dl.id)}
-                        title="Remover"
+                        title="Remover prazo"
                         className="p-2 rounded-xl text-red-400 hover:bg-red-500/10 transition-colors"
                       >
                         <Trash2 size={16} />

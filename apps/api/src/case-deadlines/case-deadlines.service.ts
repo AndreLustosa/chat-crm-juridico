@@ -165,7 +165,7 @@ export class CaseDeadlinesService {
     });
   }
 
-  async complete(deadlineId: string, tenantId?: string) {
+  async complete(deadlineId: string, tenantId?: string, userId?: string, note?: string) {
     const deadline = await this.prisma.caseDeadline.findUnique({
       where: { id: deadlineId },
       include: { legal_case: { select: { tenant_id: true } } },
@@ -175,11 +175,16 @@ export class CaseDeadlinesService {
       throw new ForbiddenException('Acesso negado');
     }
 
-    // Marcar CalendarEvent como CONCLUIDO
+    // Marcar CalendarEvent como CONCLUIDO com audit completo
     if (deadline.calendar_event_id) {
       await this.prisma.calendarEvent.update({
         where: { id: deadline.calendar_event_id },
-        data: { status: 'CONCLUIDO' },
+        data: {
+          status: 'CONCLUIDO',
+          completed_at: new Date(),
+          ...(userId ? { completed_by_id: userId } : {}),
+          ...(note ? { completion_note: note } : {}),
+        },
       });
     }
 
@@ -188,6 +193,8 @@ export class CaseDeadlinesService {
       data: {
         completed: true,
         completed_at: new Date(),
+        ...(userId ? { completed_by_id: userId } : {}),
+        ...(note ? { completion_note: note } : {}),
       },
       include: {
         created_by: { select: { id: true, name: true } },

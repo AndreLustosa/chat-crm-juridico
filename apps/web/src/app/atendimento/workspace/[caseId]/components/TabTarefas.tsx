@@ -9,6 +9,7 @@ import {
 import api from '@/lib/api';
 import { showError } from '@/lib/toast';
 import { EventModal, EVENT_TYPES } from '@/components/EventModal';
+import { EventActionButton } from '@/components/EventActionButton';
 import type { UserOption } from '@/components/EventModal';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────────
@@ -100,15 +101,10 @@ export default function TabTarefas({
     }
   }, [fetchEvents, lawyerId]);
 
-  const handleToggle = async (ev: CaseEvent) => {
-    const newStatus = ev.status === 'CONCLUIDO' ? 'AGENDADO' : 'CONCLUIDO';
-    try {
-      await api.patch(`/calendar/events/${ev.id}`, { status: newStatus });
-      fetchEvents();
-    } catch {
-      showError('Erro ao atualizar evento');
-    }
-  };
+  // handleToggle removido em 2026-04-22 — substituido pelo EventActionButton
+  // que usa endpoint unificado /events/complete (sync bidirecional) + audit.
+  // O antigo usava PATCH /calendar/events/:id direto sem passar pelo /status,
+  // entao Task/CaseDeadline vinculados nunca atualizavam.
 
   const filteredEvents = events.filter(ev => {
     if (filter === 'pending') return ev.status !== 'CONCLUIDO' && ev.status !== 'CANCELADO';
@@ -189,18 +185,16 @@ export default function TabTarefas({
                     : 'border-border bg-card/50 hover:bg-card'
                 }`}
               >
-                {/* Toggle concluído */}
-                <button
-                  onClick={() => handleToggle(ev)}
-                  className="mt-0.5 shrink-0"
-                  title={isDone ? 'Reabrir' : 'Marcar como concluído'}
-                >
-                  {isDone ? (
-                    <CheckCircle2 className="h-5 w-5 text-green-400" />
-                  ) : (
-                    <Circle className="h-5 w-5 text-muted-foreground/30 hover:text-primary transition-colors" />
-                  )}
-                </button>
+                {/* Acoes: botao unificado com Concluir/Adiar/Cancelar + nota */}
+                <div className="mt-0.5 shrink-0">
+                  <EventActionButton
+                    type="CALENDAR"
+                    id={ev.id}
+                    currentStatus={ev.status}
+                    compact
+                    onActionComplete={fetchEvents}
+                  />
+                </div>
 
                 {/* Conteúdo */}
                 <div className="flex-1 min-w-0">

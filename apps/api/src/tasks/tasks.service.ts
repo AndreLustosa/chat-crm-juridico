@@ -269,7 +269,12 @@ export class TasksService {
     const ops: any[] = [
       this.prisma.task.update({
         where: { id: taskId },
-        data: { status: 'CONCLUIDA', completion_note: note?.trim() || null },
+        data: {
+          status: 'CONCLUIDA',
+          completion_note: note?.trim() || null,
+          completed_at: new Date(),
+          ...(userId && userId !== 'system' ? { completed_by_id: userId } : {}),
+        },
       }),
     ];
     if (task.conversation_id) {
@@ -288,7 +293,14 @@ export class TasksService {
     const [updatedTask] = await this.prisma.$transaction(ops);
 
     if (updatedTask.calendar_event_id) {
-      try { await this.calendarService.updateStatus(updatedTask.calendar_event_id, 'CONCLUIDO'); } catch {}
+      try {
+        await this.calendarService.updateStatus(
+          updatedTask.calendar_event_id,
+          'CONCLUIDO',
+          note?.trim() || undefined,
+          userId !== 'system' ? userId : undefined,
+        );
+      } catch {}
     }
 
     this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);

@@ -49,11 +49,11 @@ export class EventsService {
 
     switch (target.type) {
       case 'CALENDAR':
-        return this.calendarService.updateStatus(target.id, 'CONCLUIDO', note);
+        return this.calendarService.updateStatus(target.id, 'CONCLUIDO', note, userId);
       case 'TASK':
         return this.tasksService.complete(target.id, note || '', userId, tenantId);
       case 'DEADLINE':
-        return this.caseDeadlinesService.complete(target.id, tenantId);
+        return this.caseDeadlinesService.complete(target.id, tenantId, userId, note);
       default:
         throw new BadRequestException(`Tipo de evento invalido: ${(target as any).type}`);
     }
@@ -74,14 +74,18 @@ export class EventsService {
 
     switch (target.type) {
       case 'CALENDAR':
-        return this.calendarService.updateStatus(target.id, 'CANCELADO', reason);
+        return this.calendarService.updateStatus(target.id, 'CANCELADO', reason, userId);
       case 'TASK':
         return this.tasksService.updateStatus(target.id, 'CANCELADA', tenantId);
       case 'DEADLINE':
-        // Deadline cancelado = nao e devido mais. Marcamos completed=true mas
-        // com completion_note "CANCELADO: reason" pra diferenciar no audit.
-        // Frontend que consome precisa saber ler isso.
-        return this.caseDeadlinesService.complete(target.id, tenantId);
+        // Deadline cancelado = nao e devido mais. Marcamos completed=true com
+        // prefixo [CANCELADO] na note pra diferenciar cumprimento real de cancel.
+        return this.caseDeadlinesService.complete(
+          target.id,
+          tenantId,
+          userId,
+          reason ? `[CANCELADO] ${reason}` : '[CANCELADO]',
+        );
       default:
         throw new BadRequestException(`Tipo de evento invalido: ${(target as any).type}`);
     }
