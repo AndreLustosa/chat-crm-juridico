@@ -6,9 +6,11 @@ import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Gavel, Clock, Archive, ArchiveRestore, Send,
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, ArrowRight, Flame, ArrowDown, CheckSquare, Bell,
-  Save, Trash2, Sparkles, ArrowLeft, CalendarClock,
+  Save, Trash2, Sparkles, ArrowLeft, CalendarClock, UserPlus, UserCheck,
 } from 'lucide-react';
 import api from '@/lib/api';
+import { EventActionButton } from '@/components/EventActionButton';
+import { showError, showSuccess } from '@/lib/toast';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
@@ -1838,6 +1840,8 @@ export default function AdvogadoPage() {
   const [showDeadlines, setShowDeadlines] = useState(true);
   const [interns, setInterns] = useState<{ id: string; name: string }[]>([]);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [delegateOpenId, setDelegateOpenId] = useState<string | null>(null);
 
   // Toggle notificação DJEN ao cliente (admin only)
   const { isAdmin } = useRole();
@@ -1937,10 +1941,11 @@ export default function AdvogadoPage() {
       }).catch(() => {});
     }
 
-    // Fetch estagiários vinculados
+    // Fetch estagiários vinculados + guarda user_id do advogado logado
     try {
       const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       if (payload?.sub) {
+        setCurrentUserId(payload.sub);
         api.get(`/users/${payload.sub}/interns`).then(r => setInterns(r.data || [])).catch(() => {});
       }
     } catch {}
@@ -2322,48 +2327,174 @@ export default function AdvogadoPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {deadlines.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
+                      const caseId = d.legal_case_id || d.legal_case?.id;
+                      const delegateOpen = delegateOpenId === d.id;
+
+                      const doAssign = async (newId: string | null, newName: string | null) => {
+                        setAssigningId(d.id);
+                        try {
+                          // Usa /status? Nao — aqui e so atribuicao. Continua no endpoint geral.
+                          await api.patch(`/calendar/events/${d.id}`, { assigned_user_id: newId });
+                          setDeadlines(prev => prev.map(item =>
+                            item.id === d.id
+                              ? {
+                                  ...item,
+                                  assigned_user_id: newId,
+                                  assigned_user: newId ? { id: newId, name: newName } : null,
+                                }
+                              : item
+                          ));
+                          showSuccess(newId ? `Delegado para ${newName}` : 'Atribuição removida');
+                        } catch {
+                          showError('Erro ao delegar');
+                        } finally {
+                          setAssigningId(null);
+                          setDelegateOpenId(null);
+                        }
+                      };
+
                       return (
-                        <div key={d.id} className={`bg-card border rounded-xl p-3 ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${d.type === 'PRAZO' ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400'}`}>
-                                  {d.type}
-                                </span>
-                                <span className={`text-[9px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
-                                  {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                                  {isOverdue && ' (vencido)'}
-                                </span>
-                              </div>
-                              <p className="text-[11px] font-semibold text-foreground truncate">{d.title}</p>
-                              {d.lead?.name && <p className="text-[9px] text-muted-foreground mt-0.5">{d.lead.name}</p>}
-                              {d.assigned_user && (
-                                <p className="text-[9px] text-emerald-400 mt-0.5">Atribuído: {d.assigned_user.name}</p>
+                        <div
+                          key={d.id}
+                          onClick={() => {
+                            if (caseId) router.push(`/atendimento/workspace/${caseId}`);
+                          }}
+                          className={`bg-card border rounded-xl p-3 transition-all group ${
+                            caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
+                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
+                        >
+                          {/* Header: tipo + data */}
+                          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${d.type === 'PRAZO' ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400'}`}>
+                              {d.type}
+                            </span>
+                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              {isOverdue && ' (vencido)'}
+                            </span>
+                          </div>
+
+                          {/* Titulo + cliente */}
+                          <p className="text-[12px] font-semibold text-foreground leading-snug mb-1">
+                            {d.title}
+                          </p>
+
+                          <div className="flex items-center gap-3 text-[10px] mb-2 flex-wrap">
+                            {d.lead?.name && (
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <User size={9} />
+                                {d.lead.name}
+                              </span>
+                            )}
+                            {d.assigned_user ? (
+                              <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                                <UserCheck size={9} />
+                                {d.assigned_user.name}
+                              </span>
+                            ) : (
+                              <span className="text-amber-400/80 italic flex items-center gap-1">
+                                <AlertTriangle size={9} />
+                                Sem responsável
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Botoes de acao — stopPropagation pra nao disparar o onClick do card */}
+                          <div
+                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {/* Delegar — popover com opcoes */}
+                            <div className="relative">
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setDelegateOpenId(delegateOpen ? null : d.id);
+                                }}
+                                disabled={assigningId === d.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/25 text-blue-400 text-[11px] font-bold hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                                title="Delegar para alguem"
+                              >
+                                {assigningId === d.id ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  <UserPlus size={11} />
+                                )}
+                                Delegar
+                                <ChevronDown size={9} className={`transition-transform ${delegateOpen ? 'rotate-180' : ''}`} />
+                              </button>
+                              {delegateOpen && (
+                                <>
+                                  {/* Backdrop pra fechar clicando fora */}
+                                  <div
+                                    className="fixed inset-0 z-20"
+                                    onClick={e => { e.stopPropagation(); setDelegateOpenId(null); }}
+                                  />
+                                  <div className="absolute right-0 top-full mt-1 z-30 w-[220px] bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+                                    <div className="py-1 max-h-[260px] overflow-y-auto custom-scrollbar">
+                                      {currentUserId && d.assigned_user_id !== currentUserId && (
+                                        <button
+                                          onClick={() => doAssign(currentUserId, 'Você')}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-emerald-500/10 text-left transition-colors"
+                                        >
+                                          <UserCheck size={12} className="text-emerald-400" />
+                                          Eu mesmo
+                                        </button>
+                                      )}
+                                      {d.assigned_user_id && (
+                                        <button
+                                          onClick={() => doAssign(null, null)}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-muted-foreground hover:bg-red-500/10 text-left transition-colors"
+                                        >
+                                          <X size={12} />
+                                          Remover atribuição
+                                        </button>
+                                      )}
+                                      {interns.length > 0 ? (
+                                        <>
+                                          <div className="px-3 py-1.5 border-t border-border/30 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                                            Estagiários
+                                          </div>
+                                          {interns.map(i => (
+                                            <button
+                                              key={i.id}
+                                              onClick={() => doAssign(i.id, i.name)}
+                                              disabled={d.assigned_user_id === i.id}
+                                              className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-blue-500/10 text-left transition-colors disabled:opacity-40 disabled:cursor-default"
+                                            >
+                                              <UserCheck size={12} className="text-blue-400" />
+                                              {i.name}
+                                              {d.assigned_user_id === i.id && (
+                                                <span className="ml-auto text-[9px] text-emerald-400">atual</span>
+                                              )}
+                                            </button>
+                                          ))}
+                                        </>
+                                      ) : (
+                                        <div className="px-3 py-2 text-[10px] text-muted-foreground italic">
+                                          Nenhum estagiário vinculado
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
                               )}
                             </div>
-                            <div className="shrink-0">
-                              {interns.length > 0 && (
-                                <select
-                                  value={d.assigned_user_id || ''}
-                                  onChange={async (e) => {
-                                    const newId = e.target.value || null;
-                                    setAssigningId(d.id);
-                                    try {
-                                      await api.patch(`/calendar/events/${d.id}`, { assigned_user_id: newId });
-                                      setDeadlines(prev => prev.map(item =>
-                                        item.id === d.id ? { ...item, assigned_user_id: newId, assigned_user: newId ? interns.find(i => i.id === newId) : null } : item
-                                      ));
-                                    } catch {}
-                                    setAssigningId(null);
-                                  }}
-                                  disabled={assigningId === d.id}
-                                  className="text-[9px] bg-accent/50 border border-border rounded-lg px-2 py-1 text-foreground focus:outline-none max-w-[100px]"
-                                >
-                                  <option value="">Atribuir...</option>
-                                  {interns.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                                </select>
-                              )}
-                            </div>
+
+                            {/* Cumprir — EventActionButton com concluir/adiar/cancelar + nota */}
+                            <EventActionButton
+                              type="CALENDAR"
+                              id={d.id}
+                              currentStatus={d.status}
+                              label="Cumprir"
+                              completionNote={d.completion_note}
+                              completedBy={d.completed_by}
+                              completedAt={d.completed_at}
+                              onActionComplete={() => {
+                                // Card sai da lista porque filtramos so AGENDADO/CONFIRMADO
+                                setDeadlines(prev => prev.filter(item => item.id !== d.id));
+                              }}
+                            />
                           </div>
                         </div>
                       );
