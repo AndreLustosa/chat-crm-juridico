@@ -2236,8 +2236,11 @@ export default function AdvogadoPage() {
             )}
           </div>
         ) : (
-          /* ─── Active: Incoming + Kanban ─── */
-          <div className="flex-1 flex flex-col overflow-hidden">
+          /* ─── Active: Incoming + Prazos + Kanban ─── */
+          /* overflow-y-auto: a pagina inteira rola verticalmente, permitindo
+             acessar o kanban embaixo mesmo quando Entrada + Prazos ocupam muito
+             espaco. Antes era overflow-hidden, o que travava a tela. */
+          <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
             {/* Incoming Section */}
             {incoming.length > 0 && (
               <div className="px-6 py-3 border-b border-border shrink-0">
@@ -2302,9 +2305,9 @@ export default function AdvogadoPage() {
             )}
 
             {/* Prazos e Petições Pendentes */}
-            {/* shrink-0: nao deve empurrar o kanban embaixo
-                max-h + overflow-y-auto: quando tem muitos prazos (>6), rola
-                internamente em vez de travar a tela inteira. */}
+            {/* shrink-0: nao esticar; a pagina rola verticalmente, entao os
+                prazos ocupam altura natural e o kanban fica abaixo, acessivel
+                via scroll da pagina inteira. */}
             {view === 'active' && deadlines.length > 0 && (
               <div className="mx-6 mt-4 shrink-0">
                 <button
@@ -2316,7 +2319,7 @@ export default function AdvogadoPage() {
                   Prazos Processuais ({deadlines.length})
                 </button>
                 {showDeadlines && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[280px] overflow-y-auto custom-scrollbar pr-1 pb-1">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {deadlines.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       return (
@@ -2371,9 +2374,12 @@ export default function AdvogadoPage() {
             )}
 
             {/* Kanban Board */}
+            {/* shrink-0 + altura fixa (70vh): garante que o kanban aparece com
+                tamanho util quando a pagina rola ate ele. overflow-x-auto no
+                board + overflow-y-hidden (colunas proprias rolam internamente). */}
             <div
               ref={boardRef}
-              className="flex-1 overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none"
+              className="shrink-0 h-[70vh] min-h-[500px] overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none mt-2"
               onMouseDown={handleBoardMouseDown}
               onMouseMove={handleBoardMouseMove}
               onMouseUp={handleBoardMouseUp}
