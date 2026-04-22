@@ -30,6 +30,7 @@ import { FichaTrabalhistaModule } from './ficha-trabalhista/ficha-trabalhista.mo
 import { CalendarModule } from './calendar/calendar.module';
 import { CaseDocumentsModule } from './case-documents/case-documents.module';
 import { CaseDeadlinesModule } from './case-deadlines/case-deadlines.module';
+import { EventsModule } from './events/events.module';
 import { PetitionsModule } from './petitions/petitions.module';
 import { LegalTemplatesModule } from './legal-templates/legal-templates.module';
 import { HonorariosModule } from './honorarios/honorarios.module';
@@ -99,6 +100,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     CalendarModule,
     CaseDocumentsModule,
     CaseDeadlinesModule,
+    EventsModule,
     PetitionsModule,
     GoogleDriveModule,
     LegalTemplatesModule,

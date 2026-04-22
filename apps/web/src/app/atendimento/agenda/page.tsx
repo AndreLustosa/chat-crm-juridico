@@ -1406,14 +1406,15 @@ export default function AgendaPage() {
                               </span>
                             )}
 
-                            {/* Mover para outra coluna */}
+                            {/* Mover para outra coluna — usa endpoint /status
+                                que propaga sync pra Task/CaseDeadline vinculados */}
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1 flex-wrap">
                               {KANBAN_COLUMNS.filter(c => c.id !== col.id).map(target => (
                                 <button
                                   key={target.id}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    api.patch(`/calendar/events/${ev.id}`, { status: target.id })
+                                    api.patch(`/calendar/events/${ev.id}/status`, { status: target.id })
                                       .then(() => setEvents(prev =>
                                         prev.map(x => x.id === ev.id ? { ...x, status: target.id } : x)
                                       ));

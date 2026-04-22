@@ -423,7 +423,7 @@ export class CalendarService {
     return event;
   }
 
-  async updateStatus(id: string, status: string) {
+  async updateStatus(id: string, status: string, completionNote?: string) {
     if (!EVENT_STATUSES.includes(status as any)) {
       throw new BadRequestException(`Status invalido: ${status}`);
     }
@@ -431,13 +431,74 @@ export class CalendarService {
     const event = await this.prisma.calendarEvent.update({
       where: { id },
       data: { status },
-      include: { assigned_user: { select: { id: true, name: true } } },
+      include: {
+        assigned_user: { select: { id: true, name: true } },
+        task: { select: { id: true, status: true } },
+        deadline: { select: { id: true, completed: true } },
+      },
     });
 
     // Cancelar jobs de lembrete quando evento é cancelado/concluído
     if (['CANCELADO', 'CONCLUIDO'].includes(status)) {
       await this.cancelReminderJobs(id);
       this.logger.log(`Lembretes cancelados para evento ${id} (status → ${status})`);
+    }
+
+    // ── Sync bidirecional: Calendar → Task ────────────────────────────────
+    // Antes so existia o sentido Task → Calendar. Se o advogado cumpria na
+    // agenda, a Task vinculada ficava presa em A_FAZER em outras telas.
+    // Corrigido em 2026-04-22: qualquer mudanca de status no Calendar
+    // propaga pra Task linkada via calendar_event_id.
+    if ((event as any).task?.id) {
+      const calToTaskStatus: Record<string, string> = {
+        'CONCLUIDO': 'CONCLUIDA',
+        'CANCELADO': 'CANCELADA',
+        'CONFIRMADO': 'EM_PROGRESSO',
+        'AGENDADO': 'A_FAZER',
+        'ADIADO': 'A_FAZER', // Adiado vira "a fazer" de novo (evento foi remarcado)
+      };
+      const taskStatus = calToTaskStatus[status];
+      if (taskStatus && (event as any).task.status !== taskStatus) {
+        try {
+          await this.prisma.task.update({
+            where: { id: (event as any).task.id },
+            data: {
+              status: taskStatus,
+              // Preserva completion_note se passado junto
+              ...(completionNote && status === 'CONCLUIDO' ? { completion_note: completionNote } : {}),
+            },
+          });
+          this.logger.log(
+            `[Sync] Task ${(event as any).task.id} sincronizada: ${(event as any).task.status} → ${taskStatus}`,
+          );
+        } catch (e: any) {
+          this.logger.warn(`[Sync] Falha ao sincronizar Task ${(event as any).task.id}: ${e.message}`);
+        }
+      }
+    }
+
+    // ── Sync bidirecional: Calendar → CaseDeadline ─────────────────────────
+    // CaseDeadline.completed e booleano. Marcar true se Calendar virou
+    // CONCLUIDO, false se voltou a AGENDADO/CONFIRMADO. Cancelar/adiar no
+    // Calendar nao muda o deadline (prazo processual nao cancela — so adia).
+    if ((event as any).deadline?.id) {
+      const shouldBeCompleted = status === 'CONCLUIDO';
+      if ((event as any).deadline.completed !== shouldBeCompleted) {
+        try {
+          await this.prisma.caseDeadline.update({
+            where: { id: (event as any).deadline.id },
+            data: {
+              completed: shouldBeCompleted,
+              completed_at: shouldBeCompleted ? new Date() : null,
+            },
+          });
+          this.logger.log(
+            `[Sync] CaseDeadline ${(event as any).deadline.id} sincronizado: completed=${shouldBeCompleted}`,
+          );
+        } catch (e: any) {
+          this.logger.warn(`[Sync] Falha ao sincronizar CaseDeadline: ${e.message}`);
+        }
+      }
     }
 
     // Notificar advogado

@@ -18,6 +18,7 @@ import { useRole } from '@/lib/useRole';
 import { ClientPanel } from '@/components/ClientPanel';
 import { ChatPopup } from '@/components/ChatPopup';
 import { EventModal } from '@/components/EventModal';
+import { EventActionButton } from '@/components/EventActionButton';
 import TabHonorarios from '@/app/atendimento/workspace/[caseId]/components/TabHonorarios';
 import {
   ProcessosFilterDrawer,
@@ -247,6 +248,7 @@ function ProcessoCard({
   onDragEnd,
   onClick,
   onStageChange,
+  onEventAction,
 }: {
   legalCase: LegalCase;
   isDragging: boolean;
@@ -254,6 +256,7 @@ function ProcessoCard({
   onDragEnd: () => void;
   onClick: () => void;
   onStageChange: (stageId: string) => void;
+  onEventAction?: () => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -397,15 +400,25 @@ function ProcessoCard({
               const colorBg = isHoje ? 'bg-red-500/12 border-red-500/30' : isPast ? 'bg-gray-500/8 border-gray-500/20' : isProxima ? 'bg-amber-500/10 border-amber-500/25' : 'bg-blue-500/8 border-blue-500/20';
               const colorText = isHoje ? 'text-red-400' : isPast ? 'text-gray-400' : isProxima ? 'text-amber-400' : 'text-blue-400';
               return (
-                <div key={ev.id} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${colorBg}`}>
+                <div
+                  key={ev.id}
+                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${colorBg}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Calendar size={9} className={`${colorText} shrink-0`} />
-                  <span className={`text-[9px] font-semibold leading-tight ${colorText}`}>
+                  <span className={`text-[9px] font-semibold leading-tight ${colorText} flex-1`}>
                     {isHoje
                       ? `🔴 ${label} HOJE`
                       : isPast
                       ? `${label} realizada: ${dateLabel}`
                       : `${emoji} ${label}: ${dateLabel}${isProxima ? ` (em ${diffDias}d)` : ''}`}
                   </span>
+                  <EventActionButton
+                    type="CALENDAR"
+                    id={ev.id}
+                    compact
+                    onActionComplete={onEventAction}
+                  />
                 </div>
               );
             })}
@@ -4882,6 +4895,7 @@ function ProcessosPageContent() {
                               onDragEnd={() => { setDraggingId(null); setDragOverStage(null); }}
                               onClick={() => setSelectedCase(lc)}
                               onStageChange={(newStage) => moveCase(lc.id, newStage)}
+                              onEventAction={() => fetchCases(true)}
                             />
                           ))}
 
