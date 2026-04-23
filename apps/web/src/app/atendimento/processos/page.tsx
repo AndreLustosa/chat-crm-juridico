@@ -3518,6 +3518,41 @@ function TabelaView({ cases, onSelect, columns, onToggleColumn, sort, onSortChan
 
 // ─── OAB Import Modal ──────────────────────────────────────────
 
+// Cache em sessionStorage: persiste resultados da busca OAB + processos ja
+// cadastrados, pra nao forcar nova busca toda vez que o usuario cadastra
+// 1 processo dos 100+ retornados. TTL 1h — depois disso, vale re-buscar.
+const OAB_IMPORT_CACHE_KEY = 'oab-import-cache-v2';
+const OAB_IMPORT_CACHE_TTL_MS = 3600_000; // 1h
+
+function loadOabCache(): {
+  oabs: string[];
+  results: any[];
+  sentSet: string[];
+  ts: number;
+} | null {
+  try {
+    const raw = sessionStorage.getItem(OAB_IMPORT_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.ts !== 'number') return null;
+    if (Date.now() - parsed.ts > OAB_IMPORT_CACHE_TTL_MS) {
+      sessionStorage.removeItem(OAB_IMPORT_CACHE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveOabCache(data: { oabs: string[]; results: any[]; sentSet: string[] }) {
+  try {
+    sessionStorage.setItem(OAB_IMPORT_CACHE_KEY, JSON.stringify({ ...data, ts: Date.now() }));
+  } catch {
+    // quota exceeded ou SSR — ignora
+  }
+}
+
 function OabImportModal({ onClose, onStartCadastro }: {
   onClose: () => void;
   onStartCadastro: (items: Array<{ processo_codigo: string; foro: string; case_number: string }>) => void;
@@ -3534,15 +3569,59 @@ function OabImportModal({ onClose, onStartCadastro }: {
   const [sendingToCadastro, setSendingToCadastro] = useState<string | null>(null);
   const [sentSet, setSentSet] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [restoredFromCache, setRestoredFromCache] = useState(false);
 
   useEffect(() => {
     api.get('/court-scraper/lawyers').then(r => {
       const data = r.data || [];
       setLawyers(data);
-      const oabs = new Set<string>(data.filter((l: any) => l.oab_number).map((l: any) => l.oab_number as string));
-      setSelectedOabs(oabs);
+      // So setar OABs default se o cache nao restaurou
+      const cached = loadOabCache();
+      if (cached) {
+        setSelectedOabs(new Set(cached.oabs));
+        setResults(cached.results);
+        setSentSet(new Set(cached.sentSet));
+        const toSelect = new Set<string>(
+          cached.results
+            .filter((c: any) => !c.already_registered && !cached.sentSet.includes(c.processo_codigo) && c.processo_codigo)
+            .map((c: any) => c.processo_codigo as string),
+        );
+        setSelectedForImport(toSelect);
+        setRestoredFromCache(true);
+      } else {
+        const oabs = new Set<string>(data.filter((l: any) => l.oab_number).map((l: any) => l.oab_number as string));
+        setSelectedOabs(oabs);
+      }
     }).catch(() => {});
   }, []);
+
+  // Escuta evento global — quando pai cadastra um processo com sucesso,
+  // risca visualmente e persiste no cache.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const codigo = (e as CustomEvent).detail?.processo_codigo;
+      if (!codigo) return;
+      setSentSet(prev => {
+        if (prev.has(codigo)) return prev;
+        const n = new Set(prev);
+        n.add(codigo);
+        return n;
+      });
+      setSendingToCadastro(null);
+    };
+    window.addEventListener('oab-case-saved', handler);
+    return () => window.removeEventListener('oab-case-saved', handler);
+  }, []);
+
+  // Persiste mudancas de results/sentSet no sessionStorage
+  useEffect(() => {
+    if (results.length === 0) return;
+    saveOabCache({
+      oabs: Array.from(selectedOabs),
+      results,
+      sentSet: Array.from(sentSet),
+    });
+  }, [results, sentSet, selectedOabs]);
 
   const toggleOab = (oab: string) => {
     setSelectedOabs(prev => { const n = new Set(prev); n.has(oab) ? n.delete(oab) : n.add(oab); return n; });
@@ -3613,6 +3692,29 @@ function OabImportModal({ onClose, onStartCadastro }: {
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-accent"><X size={16} /></button>
         </div>
+
+        {restoredFromCache && results.length > 0 && (
+          <div className="px-4 py-2 border-b border-border bg-emerald-500/5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[11px]">
+              <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
+              <span className="text-emerald-400 font-semibold">
+                Busca anterior restaurada ({results.length} processos, {sentSet.size} já cadastrados)
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                sessionStorage.removeItem(OAB_IMPORT_CACHE_KEY);
+                setResults([]);
+                setSentSet(new Set());
+                setSelectedForImport(new Set());
+                setRestoredFromCache(false);
+              }}
+              className="text-[10px] font-semibold text-muted-foreground hover:text-foreground underline"
+            >
+              Limpar e buscar de novo
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Advogados com OAB */}
@@ -3870,6 +3972,9 @@ function ProcessosPageContent() {
   const [showOabImportModal, setShowOabImportModal] = useState(false);
   const [oabCadastroQueue, setOabCadastroQueue] = useState<Array<{ processo_codigo: string; foro: string; case_number: string }>>([]);
   const [oabCadastroProgress, setOabCadastroProgress] = useState<{ current: number; total: number } | null>(null);
+  // Ref do item atualmente em cadastro — usado pra dispatch do event 'oab-case-saved'
+  // pro OabImportModal quando o CadastrarModal finaliza com sucesso.
+  const currentOabItemRef = useRef<{ processo_codigo: string } | null>(null);
 
   const [pendingClosure, setPendingClosure] = useState<any[]>([]);
 
@@ -4124,6 +4229,9 @@ function ProcessosPageContent() {
   };
 
   const openCadastroForOabItem = useCallback(async (item: { processo_codigo: string; foro: string; case_number: string }) => {
+    // Guarda ref pra saber qual processo_codigo foi cadastrado quando o
+    // modal de cadastro fechar com sucesso (usado em handleCadastroModalSuccess).
+    currentOabItemRef.current = { processo_codigo: item.processo_codigo };
     try {
       const res = await api.get('/court-scraper/search', { params: { caseNumber: item.case_number }, timeout: 30000 });
       // Backend retorna { found, already_registered, data: CourtCaseData, tribunal }.
@@ -4176,7 +4284,9 @@ function ProcessosPageContent() {
   }, []);
 
   const handleStartOabCadastro = useCallback(async (items: Array<{ processo_codigo: string; foro: string; case_number: string }>) => {
-    setShowOabImportModal(false);
+    // NAO fechar o OabImportModal — mantem os resultados da busca visiveis
+    // pra o usuario cadastrar outros processos em sequencia sem re-buscar.
+    // Antes (bug): setShowOabImportModal(false) derrubava o state da busca.
     if (items.length === 0) return;
     setOabCadastroQueue(items.slice(1));
     setOabCadastroProgress({ current: 1, total: items.length });
@@ -4185,6 +4295,20 @@ function ProcessosPageContent() {
 
   const handleCadastroModalSuccess = useCallback(() => {
     fetchCases(true);
+
+    // Notifica o OabImportModal (se estiver aberto) que este processo_codigo
+    // foi cadastrado com sucesso — ele vai riscar visualmente + persistir no
+    // sessionStorage pra nao aparecer como pendente.
+    const saved = currentOabItemRef.current;
+    if (saved?.processo_codigo) {
+      window.dispatchEvent(
+        new CustomEvent('oab-case-saved', {
+          detail: { processo_codigo: saved.processo_codigo },
+        }),
+      );
+      currentOabItemRef.current = null;
+    }
+
     if (oabCadastroQueue.length > 0) {
       const [next, ...remaining] = oabCadastroQueue;
       setOabCadastroQueue(remaining);
