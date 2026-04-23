@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { S3Module } from './s3/s3.module';
 import { SettingsModule } from './settings/settings.module';
 import { MediaModule } from './media/media.module';
+import { TranscricaoModule } from './transcricao/transcricao.module';
 import { AiModule } from './ai/ai.module';
 // ReminderModule removido em 2026-04-20 (Divida 3) — CalendarReminderWorker na API
 // passou a ser o processor unico da fila 'calendar-reminders'. O worker continua
@@ -34,6 +35,7 @@ import { MemoryModule } from './memory/memory.module';
       },
     }),
     MediaModule,
+    TranscricaoModule,
     AiModule,
     FollowupModule,
     PaymentAlertsModule,

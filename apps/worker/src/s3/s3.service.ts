@@ -5,6 +5,9 @@ import {
   GetObjectCommand,
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import { createWriteStream, createReadStream } from 'fs';
+import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 
 @Injectable()
@@ -64,5 +67,36 @@ export class S3Service implements OnModuleInit {
       buffer: Buffer.concat(chunks),
       contentType: response.ContentType || 'application/octet-stream',
     };
+  }
+
+  /**
+   * Baixa um objeto grande direto pro disco (stream). Essencial pra vídeos de
+   * audiência — evita carregar 1GB+ em memória.
+   */
+  async downloadToFile(key: string, destPath: string): Promise<void> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    const response = await this.client.send(command);
+    const body = response.Body as Readable;
+    await pipeline(body, createWriteStream(destPath));
+    this.logger.log(`Downloaded: ${key} -> ${destPath}`);
+  }
+
+  /**
+   * Upload streaming (multipart). Body pode ser um ReadStream de arquivo.
+   */
+  async uploadFile(key: string, filePath: string, mimeType: string): Promise<void> {
+    const upload = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucket,
+        Key: key,
+        Body: createReadStream(filePath),
+        ContentType: mimeType,
+      },
+      partSize: 20 * 1024 * 1024,
+      queueSize: 4,
+    });
+    await upload.done();
+    this.logger.log(`Uploaded (file): ${key}`);
   }
 }
