@@ -955,11 +955,55 @@ export default function Dashboard() {
   // Auto-abrir conversa vinda do CRM (via sessionStorage 'crm_open_conv')
   // Roda uma vez no mount — não depende da lista de conversas estar carregada.
   // As mensagens são buscadas via API usando o ID diretamente.
+  //
+  // Quando a conversa nao aparece na lista filtrada (ex: lead com stage
+  // PERDIDO/FINALIZADO, ou em aba diferente da atual), fazemos fallback:
+  // buscamos a conversa individualmente via GET /conversations/:id (sem
+  // filtro de stage) e injetamos no estado, pra a ChatWindow renderizar.
+  // Bug reportado 2026-04-23 — "Abrir no Chat" da Dra. Gianny (stage=PERDIDO)
+  // ia pra tela em branco.
   useEffect(() => {
     const pendingConvId = sessionStorage.getItem('crm_open_conv');
     if (pendingConvId) {
       setSelectedId(pendingConvId);
       sessionStorage.removeItem('crm_open_conv');
+
+      // Fallback: se a conv nao aparecer na lista apos um tempo razoavel
+      // (indicando que foi filtrada por stage), injeta manualmente.
+      setTimeout(() => {
+        setConversations((prev) => {
+          if (prev.some((c) => c.id === pendingConvId)) return prev;
+          // Fire-and-forget: busca individual e injeta no topo quando chegar
+          api.get(`/conversations/${pendingConvId}`, { _silent401: true } as any)
+            .then((r) => {
+              const conv = r.data;
+              if (!conv?.id) return;
+              // Mapeia o shape do findOne (snake_case da API) pro shape do
+              // ConversationSummary (camelCase usado na lista do inbox).
+              const summary: ConversationSummary = {
+                id: conv.id,
+                leadId: conv.lead?.id ?? '',
+                contactName: conv.lead?.name || 'Sem nome',
+                contactPhone: conv.lead?.phone || '',
+                channel: conv.channel || 'whatsapp',
+                status: conv.status || 'ABERTO',
+                lastMessage: conv.messages?.[0]?.text || '',
+                lastMessageAt: conv.last_message_at || new Date().toISOString(),
+                assignedAgentId: conv.assigned_user_id ?? null,
+                assignedAgentName: conv.assigned_user?.name ?? null,
+                aiMode: conv.ai_mode ?? false,
+                profile_picture_url: conv.lead?.profile_picture_url ?? null,
+                inboxId: conv.inbox_id ?? null,
+                leadStage: conv.lead?.stage ?? null,
+                leadTags: [],
+                isClient: conv.lead?.is_client ?? false,
+              };
+              setConversations((cur) => cur.some((c) => c.id === conv.id) ? cur : [summary, ...cur]);
+            })
+            .catch(() => {});
+          return prev;
+        });
+      }, 1500);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
