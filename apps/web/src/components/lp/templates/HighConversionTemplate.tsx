@@ -402,6 +402,7 @@ export function HighConversionTemplate({
               src={hero.backgroundDesktop || "/landing/Design sem nome (35).png"}
               alt="Fundo Escritório Desktop"
               fill
+              sizes="(max-width: 768px) 100vw, 100vw"
               className="object-cover object-top"
               priority
             />
@@ -412,6 +413,7 @@ export function HighConversionTemplate({
               src={hero.backgroundMobile || hero.backgroundDesktop || "/landing/Design sem nome (26).png"}
               alt="Fundo Escritório Mobile"
               fill
+              sizes="(max-width: 768px) 100vw, 100vw"
               className="object-cover object-top"
               priority
             />
@@ -564,6 +566,7 @@ export function HighConversionTemplate({
                   src={hero.lawyerImage}
                   alt="Advogado"
                   fill
+                  sizes="(max-width: 768px) 100vw, 50vw"
                   className="object-contain object-bottom relative z-0"
                   priority
                 />
@@ -591,7 +594,7 @@ export function HighConversionTemplate({
             }
           `}</style>
           <div className="marquee-belt">
-            {[...Array(20)].map((_, i) => (
+            {[...Array(4)].map((_, i) => (
               <div
                 key={i}
                 className="relative h-[65px] w-[220px] mx-0.5 shrink-0"
@@ -599,8 +602,10 @@ export function HighConversionTemplate({
                 <Image
                   src="/landing/logo_andre_lustosa_transparente.png"
                   alt="André Lustosa Logo"
-                  fill
-                  className="object-contain"
+                  width={220}
+                  height={65}
+                  loading="lazy"
+                  className="h-full w-full object-contain"
                 />
               </div>
             ))}
@@ -619,8 +624,9 @@ export function HighConversionTemplate({
             src="/landing/chic_trigger_bg.png"
             alt="Law firm elegant background"
             fill
+            sizes="100vw"
+            loading="lazy"
             className="object-cover pointer-events-none"
-            priority
           />
           {/* Dark gradient to ensure cards and text pop */}
           <div className="absolute inset-0 bg-[#0A0A0A]/80 pointer-events-none" />
@@ -762,6 +768,8 @@ export function HighConversionTemplate({
                         src={area.bgImage}
                         alt={area.title}
                         fill
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                        loading="lazy"
                         className="object-cover opacity-80 group-hover:scale-110 transition-transform duration-700 ease-out"
                       />
                     )}
@@ -1020,6 +1028,8 @@ export function HighConversionTemplate({
                   src="/landing/Design-sem-nome-_34_.webp"
                   alt="Escritório André Lustosa Advogados"
                   fill
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  loading="lazy"
                   className="object-contain p-2 md:p-4 group-hover:scale-105 transition-transform duration-1000"
                 />
                 {/* Overlay for branding — adjusted positioning for contained image */}
@@ -1165,8 +1175,9 @@ export function HighConversionTemplate({
                   src="/landing/mapa-brasil-cobertura.png"
                   alt="Mapa de Cobertura Nacional André Lustosa"
                   fill
+                  sizes="(max-width: 768px) 95vw, 50vw"
+                  loading="lazy"
                   className="object-contain"
-                  priority
                 />
               </motion.div>
 
