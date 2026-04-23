@@ -6,7 +6,7 @@ import {
   ArrowLeft, FileText, CalendarDays, Clock, MessageSquare, Activity,
   Loader2, AlertTriangle, ClipboardList, FileSignature, BookOpen,
   DollarSign, Archive, ArchiveRestore, Send, Ban, Undo2, History as HistoryIcon,
-  Copy, Check,
+  Copy, Check, AudioLines,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -31,6 +31,7 @@ import TabTimeline from './components/TabTimeline';
 import TabPeticoes from './components/TabPeticoes';
 import TabBancoPecas from './components/TabBancoPecas';
 import TabHonorarios from './components/TabHonorarios';
+import TabTranscricoes from './components/TabTranscricoes';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ interface WorkspaceData {
   };
 }
 
-type TabId = 'resumo' | 'documentos' | 'peticoes' | 'banco' | 'tarefas' | 'prazos' | 'honorarios' | 'comunicacoes' | 'timeline' | 'historico';
+type TabId = 'resumo' | 'documentos' | 'peticoes' | 'banco' | 'tarefas' | 'prazos' | 'honorarios' | 'comunicacoes' | 'timeline' | 'historico' | 'transcricoes';
 
 const LEGAL_STAGES = [
   { id: 'VIABILIDADE', label: 'Viabilidade' },
@@ -119,6 +120,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'prazos', label: 'Prazos', icon: Clock },
   { id: 'honorarios', label: 'Honorários', icon: DollarSign },
   { id: 'comunicacoes', label: 'Comunicações', icon: MessageSquare },
+  { id: 'transcricoes', label: 'Transcrições', icon: AudioLines },
   { id: 'timeline', label: 'Timeline', icon: Activity },
   { id: 'historico', label: 'Histórico', icon: HistoryIcon },
 ];
@@ -470,6 +472,9 @@ export default function WorkspacePage() {
           )}
           {activeTab === 'comunicacoes' && (
             <TabComunicacoes caseId={caseId} />
+          )}
+          {activeTab === 'transcricoes' && (
+            <TabTranscricoes caseId={caseId} />
           )}
           {activeTab === 'timeline' && (
             <TabTimeline caseId={caseId} />
