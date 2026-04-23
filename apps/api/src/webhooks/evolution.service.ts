@@ -362,9 +362,12 @@ export class EvolutionService implements OnApplicationBootstrap {
 
       // Para mensagens enviadas (fromMe=true / send.message echo), verifica se existe uma
       // mensagem "pendente" na mesma conversa com o mesmo texto salva em menos de 2 minutos.
-      // Isso ocorre quando o CRM salva a mensagem com external_message_id temporário (out_xxx)
-      // porque a Evolution API retornou erro na chamada mas a mensagem foi enviada mesmo assim.
-      // Nesse caso, atualiza o external_message_id em vez de criar duplicata.
+      // Isso ocorre quando o CRM salva a mensagem com external_message_id sintético
+      // (prefixos: 'out_*', 'sys_reminder_*', 'sys_followup_ia_*', 'sys_broadcast_*',
+      // 'out_followup_ia_*', 'out_followup_manual_*') e depois o webhook chega com o
+      // ID real do WhatsApp. Antes o filtro só cobria 'out_*', deixando passar
+      // reminders/followups/broadcasts que ficavam duplicados.
+      // Atualizado em 2026-04-23 apos bug reportado (duplicata de reminder da Dra. Gianny).
       if (isFromMe && messageContent) {
         const since = new Date(Date.now() - 2 * 60 * 1000); // janela de 2 minutos
         const pendingMsg = await this.prisma.message.findFirst({
@@ -373,7 +376,10 @@ export class EvolutionService implements OnApplicationBootstrap {
             direction: 'out',
             text: messageContent,
             created_at: { gte: since },
-            external_message_id: { startsWith: 'out_' },
+            OR: [
+              { external_message_id: { startsWith: 'out_' } },
+              { external_message_id: { startsWith: 'sys_' } }, // sys_reminder_, sys_followup_ia_, sys_broadcast_
+            ],
           },
           include: { media: true, skill: { select: { id: true, name: true, area: true } } },
         });
