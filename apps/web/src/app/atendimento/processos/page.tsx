@@ -332,7 +332,37 @@ const TASK_STATUSES = [
 const LEGAL_AREAS = [
   'Trabalhista', 'Cível', 'Criminal', 'Previdenciário',
   'Tributário', 'Consumidor', 'Família', 'Administrativo',
+  'Empresarial', 'Tributário',
 ];
+
+/**
+ * Normaliza legal_area vindo do ESAJ/usuario pra valor canonico.
+ * ESAJ retorna em MAIUSCULAS sem acento ('CIVIL', 'TRABALHISTA', 'PREVIDENCIARIO').
+ * Os selects usam valores com acento ('Cível', 'Previdenciário').
+ * Sem normalizacao, o select fica 'Selecionar...' mesmo com dado no banco.
+ */
+function normalizeLegalArea(raw: string | null | undefined): string {
+  if (!raw) return '';
+  const s = raw.toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // remove acentos
+  const map: Record<string, string> = {
+    'trabalhista': 'Trabalhista',
+    'trabalho':    'Trabalhista',
+    'civel':       'Cível',
+    'civil':       'Cível',
+    'criminal':    'Criminal',
+    'penal':       'Criminal',
+    'previdenciario': 'Previdenciário',
+    'previdencia': 'Previdenciário',
+    'tributario':  'Tributário',
+    'fiscal':      'Tributário',
+    'consumidor':  'Consumidor',
+    'familia':     'Família',
+    'administrativo': 'Administrativo',
+    'empresarial': 'Empresarial',
+  };
+  return map[s] || raw; // se nao mapeia, devolve o original (nao perde dado)
+}
 
 // ─── ProcessoCard ──────────────────────────────────────────────
 
@@ -456,7 +486,7 @@ function ProcessoCard({
       <div className="flex flex-wrap gap-1 mb-2">
         {legalCase.legal_area && (
           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-400 text-[9px] font-bold border border-violet-500/20">
-            ⚖️ {legalCase.legal_area}
+            ⚖️ {normalizeLegalArea(legalCase.legal_area)}
           </span>
         )}
         {legalCase.lawyer?.name && (
@@ -1158,7 +1188,8 @@ function ProcessoDetailPanel({
   const [caseNumber, setCaseNumber] = useState(legalCase.case_number || '');
   const [court, setCourt] = useState(legalCase.court || '');
   const [notes, setNotes] = useState(legalCase.notes || '');
-  const [legalArea, setLegalArea] = useState(legalCase.legal_area || '');
+  // Normaliza pra bater com as opcoes do select ('CIVIL' -> 'Cível', etc)
+  const [legalArea, setLegalArea] = useState(normalizeLegalArea(legalCase.legal_area));
   const [priority, setPriority] = useState(legalCase.priority || 'NORMAL');
   const [opposingParty, setOpposingParty] = useState(legalCase.opposing_party || '');
   const [actionType, setActionType] = useState(legalCase.action_type || '');
@@ -1906,6 +1937,11 @@ function ProcessoDetailPanel({
                   >
                     <option value="">Selecionar...</option>
                     {LEGAL_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+                    {/* Fallback: se legal_area tem valor fora da lista (ex: 'Bancário'),
+                        preserva como opcao extra pra nao perder ao salvar. */}
+                    {legalArea && !LEGAL_AREAS.includes(legalArea) && (
+                      <option value={legalArea}>{legalArea} (atual)</option>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -2863,7 +2899,8 @@ function CadastrarProcessoModal({
 
   // ── Processo ──────────────────────────────────────────────────
   const [caseNumber, setCaseNumber] = useState(prefillData?.case_number || '');
-  const [legalArea, setLegalArea] = useState(prefillData?.legal_area || '');
+  // Normaliza ('CIVIL' -> 'Cível') pra bater com opcoes do select
+  const [legalArea, setLegalArea] = useState(normalizeLegalArea(prefillData?.legal_area));
   const [actionType, setActionType] = useState(prefillData?.action_type || '');
   // author e opposingParty representam SEMPRE os lados do processo
   // (autor no polo ativo, reu no polo passivo). Quem e o cliente do
