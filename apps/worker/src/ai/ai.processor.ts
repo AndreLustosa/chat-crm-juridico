@@ -249,17 +249,66 @@ export class AiProcessor extends WorkerHost {
           media.s3_key,
         );
         const mimeBase = contentType.split(';')[0].trim();
-        const ext = mimeBase.split('/')[1] || 'ogg';
+        // Evolution manda audio/ogg; codecs OPUS. Whisper aceita 'ogg' direto.
+        // Se vier algo muito genérico (application/octet-stream ou vazio),
+        // forçamos audio/ogg porque esse é o formato real do WhatsApp.
+        const normalizedMime = mimeBase && mimeBase.startsWith('audio/')
+          ? mimeBase
+          : 'audio/ogg';
+        const ext = normalizedMime.split('/')[1] || 'ogg';
 
-        const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
-        const result = await ai.audio.transcriptions.create({
-          file,
-          model: 'gpt-4o-transcribe',
-          language: 'pt',
-          prompt: 'Transcrição de mensagem de voz do WhatsApp em português brasileiro. O cliente está conversando com um escritório de advocacia sobre questões jurídicas.',
-        });
+        const sizeKB = (buffer.length / 1024).toFixed(1);
+        this.logger.log(
+          `[AI] Transcrevendo áudio msg=${msg.id} mime=${normalizedMime} size=${sizeKB}KB`,
+        );
 
-        const transcription = result.text?.trim() || '';
+        // Tenta com modelo preferido (gpt-4o-transcribe — mais acurado).
+        // Em caso de falha ou texto vazio, cai pra whisper-1 (fallback robusto,
+        // disponivel em qualquer conta OpenAI com credits). Bug reportado
+        // 2026-04-23: IA respondendo "nao consegui ouvir" em audios validos.
+        const transcribeWithModel = async (model: string) => {
+          const file = await toFile(buffer, `audio.${ext}`, { type: normalizedMime });
+          return ai.audio.transcriptions.create({
+            file,
+            model,
+            language: 'pt',
+            prompt: 'Transcrição de mensagem de voz do WhatsApp em português brasileiro. O cliente está conversando com um escritório de advocacia sobre questões jurídicas.',
+          });
+        };
+
+        let transcription = '';
+        let usedModel = 'gpt-4o-transcribe';
+
+        try {
+          const result = await transcribeWithModel('gpt-4o-transcribe');
+          transcription = (result.text || '').trim();
+        } catch (primaryErr: any) {
+          this.logger.warn(
+            `[AI] gpt-4o-transcribe falhou msg=${msg.id}: ${primaryErr?.message || primaryErr} (status=${primaryErr?.status})`,
+          );
+          usedModel = 'whisper-1';
+          const result = await transcribeWithModel('whisper-1');
+          transcription = (result.text || '').trim();
+        }
+
+        // Mesmo com 200 OK, Whisper pode retornar texto vazio (audio so ruido,
+        // muito curto, idioma diferente, etc). Tenta fallback se primeiro foi
+        // gpt-4o-transcribe e retornou vazio.
+        if (!transcription && usedModel === 'gpt-4o-transcribe') {
+          this.logger.warn(
+            `[AI] gpt-4o-transcribe retornou texto vazio msg=${msg.id} — tentando whisper-1`,
+          );
+          try {
+            const result = await transcribeWithModel('whisper-1');
+            transcription = (result.text || '').trim();
+            usedModel = 'whisper-1';
+          } catch (fallbackErr: any) {
+            this.logger.warn(
+              `[AI] whisper-1 fallback tambem falhou msg=${msg.id}: ${fallbackErr?.message || fallbackErr}`,
+            );
+          }
+        }
+
         if (transcription) {
           // Salva no banco para que próximos jobs não precisem retranscrever
           await this.prisma.message.update({
@@ -268,12 +317,19 @@ export class AiProcessor extends WorkerHost {
           });
           msg.text = transcription; // atualiza in-memory
           this.logger.log(
-            `[AI] Áudio transcrito (msg ${msg.id}): "${transcription.slice(0, 80)}"`,
+            `[AI] Áudio transcrito (msg ${msg.id}, modelo=${usedModel}): "${transcription.slice(0, 80)}"`,
           );
+        } else {
+          // Whisper nao lancou excecao mas retornou vazio — provavelmente
+          // audio so com ruido/silencio. Placeholder educado pra IA.
+          this.logger.warn(
+            `[AI] Transcricao vazia apos 2 tentativas msg=${msg.id} (audio pode ser so ruido/silencio)`,
+          );
+          msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
         }
       } catch (e: any) {
-        this.logger.warn(
-          `[AI] Falha ao transcrever áudio ${msg.id}: ${e.message}`,
+        this.logger.error(
+          `[AI] Falha total ao transcrever áudio ${msg.id}: ${e?.message || e} (status=${e?.status || 'n/a'}, code=${e?.code || 'n/a'})`,
         );
         msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
       }
