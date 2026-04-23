@@ -7,7 +7,7 @@ import {
   LogOut, Users, Briefcase, Settings, Palette, Check,
   MessageSquare, BarChart2, Scale, BookOpen, Calendar,
   LayoutDashboard, Gavel, Wallet, HelpCircle,
-  ChevronRight, ClipboardList, Sparkles,
+  ChevronRight, ClipboardList, Sparkles, Wrench,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
@@ -297,6 +297,13 @@ export function Sidebar() {
       match: (p) => p.startsWith('/atendimento/marketing'),
       show: perms.canViewAnalytics,
     },
+    ferramentas: {
+      label: 'Ferramentas',
+      href: '/atendimento/ferramentas',
+      icon: <Wrench size={20} strokeWidth={2} />,
+      match: (p) => p.startsWith('/atendimento/ferramentas'),
+      show: true,
+    },
     manual: {
       label: 'Manual',
       href: '/atendimento/manual',
@@ -328,6 +335,11 @@ export function Sidebar() {
       id: 'gestao',
       label: 'Gestão',
       items: [allItems.followup, allItems.financeiro, allItems.analytics].filter(i => i.show),
+    },
+    {
+      id: 'ferramentas',
+      label: 'Ferramentas',
+      items: [allItems.ferramentas].filter(i => i.show),
     },
     {
       id: 'sistema',
