@@ -995,6 +995,14 @@ model CaseDeadline {
   description       String?
   due_at            DateTime
   alert_days        Int       @default(2) // Dias antes para alertar
+  // Status normalizado (enum-like, espelha CalendarEvent):
+  //   PENDENTE | CONCLUIDO | CANCELADO | ADIADO
+  // Sincronizado com `completed` por triggers + service layer:
+  //   completed = true  quando status IN ('CONCLUIDO', 'CANCELADO')
+  //   completed = false quando status IN ('PENDENTE', 'ADIADO')
+  // O campo `completed` fica como shortcut boolean pra queries legadas
+  // (foi renomeado pra `is_closed` mentalmente, mas mantido pra compat).
+  status            String    @default("PENDENTE")
   completed         Boolean   @default(false)
   completed_at      DateTime?
   completed_by_id   String?

@@ -282,8 +282,7 @@ export class EventsService {
       case 'TASK':
         return this.tasksService.updateStatus(target.id, 'A_FAZER', tenantId);
       case 'DEADLINE':
-        // Nao tem reopen nativo — manipular direto
-        return this.caseDeadlinesService.update(target.id, {}, tenantId);
+        return this.caseDeadlinesService.reopen(target.id, tenantId);
       default:
         throw new BadRequestException(`Tipo de evento invalido: ${(target as any).type}`);
     }

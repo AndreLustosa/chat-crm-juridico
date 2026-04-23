@@ -549,29 +549,37 @@ export class CalendarService {
     }
 
     // ── Sync bidirecional: Calendar → CaseDeadline ─────────────────────────
-    // CaseDeadline.completed e booleano. Marcar true se Calendar virou
-    // CONCLUIDO, false se voltou a AGENDADO/CONFIRMADO. Cancelar/adiar no
-    // Calendar nao muda o deadline (prazo processual nao cancela — so adia).
+    // CaseDeadline agora tem enum `status` (PENDENTE/CONCLUIDO/CANCELADO/
+    // ADIADO) + campo shortcut `completed` pra compat com queries legadas.
+    // Mapeamento direto de Calendar.status -> Deadline.status.
     if ((event as any).deadline?.id) {
-      const shouldBeCompleted = status === 'CONCLUIDO';
-      if ((event as any).deadline.completed !== shouldBeCompleted) {
-        try {
-          await this.prisma.caseDeadline.update({
-            where: { id: (event as any).deadline.id },
-            data: {
-              completed: shouldBeCompleted,
-              completed_at: shouldBeCompleted ? new Date() : null,
-              ...(shouldBeCompleted && userId ? { completed_by_id: userId } : {}),
-              ...(shouldBeCompleted && completionNote ? { completion_note: completionNote } : {}),
-              ...(!shouldBeCompleted ? { completed_by_id: null, completion_note: null } : {}),
-            },
-          });
-          this.logger.log(
-            `[Sync] CaseDeadline ${(event as any).deadline.id} sincronizado: completed=${shouldBeCompleted}`,
-          );
-        } catch (e: any) {
-          this.logger.warn(`[Sync] Falha ao sincronizar CaseDeadline: ${e.message}`);
-        }
+      const calToDeadlineStatus: Record<string, string> = {
+        'CONCLUIDO': 'CONCLUIDO',
+        'CANCELADO': 'CANCELADO',
+        'ADIADO': 'ADIADO',
+        'AGENDADO': 'PENDENTE',
+        'CONFIRMADO': 'PENDENTE',
+      };
+      const deadlineStatus = calToDeadlineStatus[status] ?? 'PENDENTE';
+      const isTerminal = ['CONCLUIDO', 'CANCELADO'].includes(status);
+
+      try {
+        await this.prisma.caseDeadline.update({
+          where: { id: (event as any).deadline.id },
+          data: {
+            status: deadlineStatus,
+            completed: isTerminal,
+            completed_at: isTerminal ? new Date() : null,
+            ...(isTerminal && userId ? { completed_by_id: userId } : {}),
+            ...(isTerminal && completionNote ? { completion_note: completionNote } : {}),
+            ...(!isTerminal ? { completed_by_id: null, completion_note: null } : {}),
+          },
+        });
+        this.logger.log(
+          `[Sync] CaseDeadline ${(event as any).deadline.id} sincronizado: status=${deadlineStatus}`,
+        );
+      } catch (e: any) {
+        this.logger.warn(`[Sync] Falha ao sincronizar CaseDeadline: ${e.message}`);
       }
     }
 

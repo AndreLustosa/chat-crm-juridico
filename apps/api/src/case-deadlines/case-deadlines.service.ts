@@ -175,12 +175,16 @@ export class CaseDeadlinesService {
       throw new ForbiddenException('Acesso negado');
     }
 
-    // Marcar CalendarEvent como CONCLUIDO com audit completo
+    // Detecta se e cancelamento (note com prefix [CANCELADO]) pra status correto
+    const isCancelled = note?.startsWith('[CANCELADO]') ?? false;
+    const newStatus = isCancelled ? 'CANCELADO' : 'CONCLUIDO';
+
+    // Marcar CalendarEvent com status correspondente + audit completo
     if (deadline.calendar_event_id) {
       await this.prisma.calendarEvent.update({
         where: { id: deadline.calendar_event_id },
         data: {
-          status: 'CONCLUIDO',
+          status: newStatus,
           completed_at: new Date(),
           ...(userId ? { completed_by_id: userId } : {}),
           ...(note ? { completion_note: note } : {}),
@@ -191,10 +195,53 @@ export class CaseDeadlinesService {
     return this.prisma.caseDeadline.update({
       where: { id: deadlineId },
       data: {
-        completed: true,
+        status: newStatus,
+        completed: true, // sempre true em estado terminal (CONCLUIDO ou CANCELADO)
         completed_at: new Date(),
         ...(userId ? { completed_by_id: userId } : {}),
         ...(note ? { completion_note: note } : {}),
+      },
+      include: {
+        created_by: { select: { id: true, name: true } },
+        calendar_event: { select: { id: true, status: true } },
+      },
+    });
+  }
+
+  /**
+   * Reabre um prazo (volta pra PENDENTE). Util quando advogado marca errado.
+   * Limpa audit fields e sincroniza com CalendarEvent.
+   */
+  async reopen(deadlineId: string, tenantId?: string) {
+    const deadline = await this.prisma.caseDeadline.findUnique({
+      where: { id: deadlineId },
+      include: { legal_case: { select: { tenant_id: true } } },
+    });
+    if (!deadline) throw new NotFoundException('Prazo não encontrado');
+    if (tenantId && deadline.legal_case.tenant_id && deadline.legal_case.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado');
+    }
+
+    if (deadline.calendar_event_id) {
+      await this.prisma.calendarEvent.update({
+        where: { id: deadline.calendar_event_id },
+        data: {
+          status: 'AGENDADO',
+          completed_at: null,
+          completed_by_id: null,
+          completion_note: null,
+        },
+      });
+    }
+
+    return this.prisma.caseDeadline.update({
+      where: { id: deadlineId },
+      data: {
+        status: 'PENDENTE',
+        completed: false,
+        completed_at: null,
+        completed_by_id: null,
+        completion_note: null,
       },
       include: {
         created_by: { select: { id: true, name: true } },
