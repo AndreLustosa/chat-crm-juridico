@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import {
+  brazilRealNowToNaive,
+  brazilRealEpochToNaive,
+  minutesUntilBrazilNaive,
+} from '../common/utils/timezone.util';
 
 /**
  * Cron na API para emitir socket events de tarefas/eventos em tempo real.
@@ -20,18 +25,24 @@ export class TaskAlertCronService {
 
   /**
    * A cada 5 min: verifica tarefas/eventos vencendo nos próximos 15 min
+   *
+   * Nota timezone: colunas `due_at`/`start_at` sao gravadas como "UTC naive BRT"
+   * (ver common/utils/timezone.util.ts). Por isso usamos helpers pra comparar
+   * com `now`: senao o WHERE filtra uma janela deslocada em 3h.
    */
   @Cron('*/5 * * * *')
   async emitDueSoonAlerts() {
     try {
-      const now = new Date();
-      const fifteenMinFromNow = new Date(now.getTime() + 15 * 60 * 1000);
+      const nowMs = Date.now();
+      // "now" e "15min" em coordenadas UTC naive BRT pra comparar com o banco
+      const nowNaive = brazilRealNowToNaive(nowMs);
+      const fifteenMinFromNowNaive = brazilRealEpochToNaive(nowMs + 15 * 60 * 1000);
 
       // 1. Tasks com due_at prestes a vencer
       const tasksDueSoon = await this.prisma.task.findMany({
         where: {
           status: { in: ['A_FAZER', 'EM_PROGRESSO'] },
-          due_at: { gte: now, lte: fifteenMinFromNow },
+          due_at: { gte: nowNaive, lte: fifteenMinFromNowNaive },
           assigned_user_id: { not: null },
         },
         select: {
@@ -46,7 +57,7 @@ export class TaskAlertCronService {
         where: {
           type: { in: ['TAREFA', 'PRAZO'] },
           status: { in: ['AGENDADO', 'CONFIRMADO'] },
-          start_at: { gte: now, lte: fifteenMinFromNow },
+          start_at: { gte: nowNaive, lte: fifteenMinFromNowNaive },
           assigned_user_id: { not: null },
         },
         select: {
@@ -63,7 +74,7 @@ export class TaskAlertCronService {
 
       // Emitir para Tasks
       for (const task of tasksDueSoon) {
-        const mins = Math.round((new Date(task.due_at!).getTime() - now.getTime()) / 60000);
+        const mins = minutesUntilBrazilNaive(new Date(task.due_at!), nowMs);
         this.emitAlert(task.assigned_user_id!, {
           taskId: task.id,
           title: task.title,
@@ -76,7 +87,7 @@ export class TaskAlertCronService {
 
       // Emitir para CalendarEvents
       for (const evt of eventsDueSoon) {
-        const mins = Math.round((new Date(evt.start_at).getTime() - now.getTime()) / 60000);
+        const mins = minutesUntilBrazilNaive(new Date(evt.start_at), nowMs);
         const emoji = evt.type === 'PRAZO' ? '⏰' : '✅';
         this.emitAlert(evt.assigned_user_id!, {
           taskId: evt.id,
@@ -98,13 +109,15 @@ export class TaskAlertCronService {
   @Cron('*/30 * * * *')
   async emitOverdueAlerts() {
     try {
-      const now = new Date();
+      const nowMs = Date.now();
+      // Compara com colunas "UTC naive BRT" (ver timezone.util.ts)
+      const nowNaive = brazilRealNowToNaive(nowMs);
 
       // 1. Tasks vencidas
       const overdueTasks = await this.prisma.task.findMany({
         where: {
           status: { in: ['A_FAZER', 'EM_PROGRESSO'] },
-          due_at: { lt: now },
+          due_at: { lt: nowNaive },
           assigned_user_id: { not: null },
         },
         select: { id: true, title: true, due_at: true, assigned_user_id: true },
@@ -116,7 +129,7 @@ export class TaskAlertCronService {
         where: {
           type: { in: ['TAREFA', 'PRAZO'] },
           status: { in: ['AGENDADO', 'CONFIRMADO'] },
-          start_at: { lt: now },
+          start_at: { lt: nowNaive },
           assigned_user_id: { not: null },
         },
         select: { id: true, title: true, start_at: true, type: true, assigned_user_id: true },
@@ -147,7 +160,9 @@ export class TaskAlertCronService {
       for (const [userId, items] of byUser.entries()) {
         // Emitir um ÚNICO batch com todas as tarefas vencidas (não individual)
         const topItems = items.slice(0, 5).map(item => {
-          const hoursAgo = Math.round((now.getTime() - item.date.getTime()) / 3600000);
+          // item.date eh "UTC naive BRT" — minutesUntil compensa offset
+          const minsAgo = -minutesUntilBrazilNaive(item.date, nowMs);
+          const hoursAgo = Math.round(minsAgo / 60);
           return {
             taskId: item.id,
             title: item.title,

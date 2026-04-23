@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { isAdmin } from '../common/utils/permissions.util';
+import { brazilNaiveToRealEpoch } from '../common/utils/timezone.util';
 
 const EVENT_TYPES = ['CONSULTA', 'TAREFA', 'AUDIENCIA', 'PERICIA', 'PRAZO', 'OUTRO'] as const;
 const EVENT_STATUSES = ['AGENDADO', 'CONFIRMADO', 'CONCLUIDO', 'CANCELADO', 'ADIADO'] as const;
@@ -398,7 +399,10 @@ export class CalendarService {
   private async enqueueReminders(eventId: string, startAt: Date, reminders: { id: string; minutes_before: number; channel: string }[]) {
     for (const r of reminders) {
       if (r.channel !== 'WHATSAPP' && r.channel !== 'EMAIL') continue; // PUSH handled by cron
-      const triggerAt = startAt.getTime() - r.minutes_before * 60 * 1000;
+      // startAt eh "UTC naive" (horario BRT armazenado como UTC no banco) —
+      // brazilNaiveToRealEpoch converte pro epoch real antes de calcular delay.
+      // Sem isso o trigger sai 3h adiantado. Bug reportado 2026-04-23.
+      const triggerAt = brazilNaiveToRealEpoch(startAt) - r.minutes_before * 60 * 1000;
       const delay = Math.max(triggerAt - Date.now(), 1000); // min 1s
       const jobId = `reminder-${r.id}`;
       try {
