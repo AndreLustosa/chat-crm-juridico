@@ -193,13 +193,16 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   return (
     <SocketProvider pathname={pathname}>
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar — desktop only */}
-      <div className="hidden md:flex">
+      {/* Sidebar — aparece a partir de sm (640px). Antes era md (768px),
+          sumia em notebooks com zoom alto ou telas divididas. */}
+      <div className="hidden sm:flex">
         <Sidebar />
       </div>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-hidden">
+      {/* Main content — min-w-0 permite que flex-1 encolha corretamente
+          quando os filhos sao largos (kanban com minWidth: 2400px etc).
+          Sem isso, main empurra pra fora da viewport e corta o Sidebar. */}
+      <main className="flex-1 overflow-hidden min-w-0">
         {children}
       </main>
 
