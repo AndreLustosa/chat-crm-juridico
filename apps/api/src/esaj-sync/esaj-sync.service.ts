@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EsajTjalScraper, inferTrackingStage } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+import { normalizeBrazilianPhone } from '../common/utils/phone';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -249,8 +250,12 @@ export class EsajSyncService {
     newMovements: Array<{ date: string; description: string }>,
     stageChange: { from: string | null; to: string } | null,
   ) {
-    const lawyerPhone = legalCase.lawyer?.phone;
-    if (!lawyerPhone) return;
+    const rawLawyerPhone = legalCase.lawyer?.phone;
+    if (!rawLawyerPhone) return;
+    // Normaliza p/ DDI 55 + 12 digitos canonicos. Antes mandava raw — se
+    // User.phone estava sem DDI (ex: 10 digitos), Evolution retornava 400
+    // "exists:false" e o log mentia sucesso. Fix 2026-04-23.
+    const lawyerPhone = normalizeBrazilianPhone(rawLawyerPhone);
 
     const caseNumber = formatCNJ((legalCase.case_number || '').replace(/\D/g, ''));
     const clientName = legalCase.lead?.name || 'Cliente';
@@ -279,7 +284,16 @@ export class EsajSyncService {
     // Buscar instância WhatsApp
     const instance = process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
 
-    await this.whatsapp.sendText(lawyerPhone, message, instance);
+    // Checa retorno da Evolution antes de logar sucesso — sendText nao lanca
+    // excecao em falhas HTTP, retorna objeto de erro. Fix 2026-04-23.
+    const result: any = await this.whatsapp.sendText(lawyerPhone, message, instance);
+    if (!result || result?.statusCode >= 400 || result?.error) {
+      this.logger.warn(
+        `[NOTIFY] Falha ao notificar ${legalCase.lawyer?.name} (${lawyerPhone}): ` +
+          `Evolution API ${result?.statusCode} — ${JSON.stringify(result)}`,
+      );
+      return;
+    }
     this.logger.log(`[NOTIFY] WhatsApp enviado para ${legalCase.lawyer?.name} (${lawyerPhone})`);
   }
 

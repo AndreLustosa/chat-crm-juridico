@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+import { normalizeBrazilianPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import * as nodemailer from 'nodemailer';
@@ -344,11 +345,22 @@ export class CalendarReminderWorker extends WorkerHost {
 
     // ── 1. Mensagem para o Advogado (sempre) ─────────────────────────
     if (event.assigned_user?.phone) {
-      const advPhone = event.assigned_user.phone.replace(/\D/g, '');
+      // normalizeBrazilianPhone garante DDI 55 + 12 digitos canonicos.
+      // Antes usava replace(/\D/g, '') cru — se User.phone estava sem DDI
+      // (ex: 8296316935 cadastrado como 10 digitos), virava JID invalido
+      // "8296316935@s.whatsapp.net" e Evolution retornava 400 "exists:false".
+      // Bug reportado 2026-04-23 (reminder da Dra. Gianny nao chegou).
+      const advPhone = normalizeBrazilianPhone(event.assigned_user.phone);
       // Advogado recebe template rico — sem precisar de IA (já conhece o caso)
       const advMsg = templateAdvogado(event, minutesBefore);
       try {
-        await this.whatsapp.sendText(advPhone, advMsg);
+        const advSendResult: any = await this.whatsapp.sendText(advPhone, advMsg);
+        // sendText() retorna objeto de erro em vez de lancar excecao em falhas HTTP.
+        // Antes o log "WhatsApp enviado" saia mesmo com Evolution API 400 — engana
+        // diagnostico. Agora lanca pra cair no catch e logar WARN de verdade.
+        if (!advSendResult || advSendResult?.statusCode >= 400 || advSendResult?.error) {
+          throw new Error(`Evolution API error ${advSendResult?.statusCode}: ${JSON.stringify(advSendResult)}`);
+        }
         this.logger.log(`[REMINDER] WhatsApp enviado para advogado ${advPhone}`);
       } catch (e: any) {
         this.logger.warn(`[REMINDER] Erro ao enviar para advogado ${advPhone}: ${e.message}`);
@@ -357,7 +369,7 @@ export class CalendarReminderWorker extends WorkerHost {
 
     // ── 2. Mensagem para o Cliente via IA (apenas audiências) ─────────
     if (isAudiencia && event.lead?.phone) {
-      const clientPhone = event.lead.phone.replace(/\D/g, '');
+      const clientPhone = normalizeBrazilianPhone(event.lead.phone);
       let clientMsg: string;
 
       try {
@@ -484,7 +496,7 @@ export class CalendarReminderWorker extends WorkerHost {
     ]);
 
     const context = buildContext(event, memory, event.legal_case, ficha, djenPubs);
-    const clientPhone = event.lead.phone.replace(/\D/g, '');
+    const clientPhone = normalizeBrazilianPhone(event.lead.phone);
     const firstName = (event.lead.name || 'Cliente').split(' ')[0];
 
     let msg: string;
