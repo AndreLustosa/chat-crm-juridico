@@ -169,7 +169,7 @@ export function HomeTemplate({
               aria-label="Voltar para o topo"
             >
               <Image
-                src="/landing/logo_andre_lustosa_transparente.png"
+                src="/landing/logo_andre_lustosa_transparente.webp"
                 alt="André Lustosa Advogado"
                 width={220}
                 height={60}
@@ -317,7 +317,7 @@ export function HomeTemplate({
           {/* Desktop Background */}
           <div className="hidden md:block absolute inset-0">
             <Image
-              src="/landing/Design sem nome (35).png"
+              src="/landing/Design sem nome (35).webp"
               alt="Fundo Escritório Desktop"
               fill
               sizes="(max-width: 768px) 100vw, 100vw"
@@ -328,7 +328,7 @@ export function HomeTemplate({
           {/* Mobile Background */}
           <div className="md:hidden absolute inset-0">
             <Image
-              src="/landing/Design sem nome (26).png"
+              src="/landing/Design sem nome (26).webp"
               alt="Fundo Escritório Mobile"
               fill
               sizes="(max-width: 768px) 100vw, 100vw"
@@ -512,7 +512,7 @@ export function HomeTemplate({
                 className="relative h-[65px] w-[220px] mx-0.5 shrink-0"
               >
                 <Image
-                  src="/landing/logo_andre_lustosa_transparente.png"
+                  src="/landing/logo_andre_lustosa_transparente.webp"
                   alt="André Lustosa Logo"
                   width={220}
                   height={65}
@@ -1013,7 +1013,7 @@ export function HomeTemplate({
                 className="relative w-[95%] md:w-full max-w-2xl aspect-square drop-shadow-[0_0_50px_rgba(168,144,72,0.15)] mx-auto"
               >
                 <Image
-                  src="/landing/mapa-brasil-cobertura.png"
+                  src="/landing/mapa-brasil-cobertura.webp"
                   alt="Mapa de Cobertura Nacional André Lustosa"
                   fill
                   sizes="(max-width: 768px) 95vw, 50vw"
@@ -1562,7 +1562,7 @@ export function HomeTemplate({
           {/* BRAND & INFO (5 cols) */}
           <div className="md:col-span-5 flex flex-col items-center md:items-start text-center md:text-left">
             <Image
-              src="/landing/logo_andre_lustosa_transparente.png"
+              src="/landing/logo_andre_lustosa_transparente.webp"
               alt="André Lustosa Advogados"
               width={240}
               height={65}

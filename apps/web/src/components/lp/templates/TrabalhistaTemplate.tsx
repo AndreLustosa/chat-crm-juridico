@@ -110,7 +110,7 @@ export function TrabalhistaTemplate({
               aria-label="Voltar para o topo"
             >
               <Image
-                src="/landing/logo_andre_lustosa_transparente.png"
+                src="/landing/logo_andre_lustosa_transparente.webp"
                 alt="André Lustosa Advogado"
                 width={220}
                 height={60}
@@ -793,7 +793,7 @@ export function TrabalhistaTemplate({
             {/* Logo + Description */}
             <div className="text-center md:text-left">
               <Image
-                src="/landing/logo_andre_lustosa_transparente.png"
+                src="/landing/logo_andre_lustosa_transparente.webp"
                 alt="André Lustosa Advogados"
                 width={250}
                 height={70}

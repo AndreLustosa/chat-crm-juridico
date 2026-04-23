@@ -251,7 +251,7 @@ export function HighConversionTemplate({
               aria-label="Voltar para o topo"
             >
               <Image
-                src="/landing/logo_andre_lustosa_transparente.png"
+                src="/landing/logo_andre_lustosa_transparente.webp"
                 alt="André Lustosa Advogado"
                 width={220}
                 height={60}
@@ -399,7 +399,7 @@ export function HighConversionTemplate({
           {/* Desktop Background */}
           <div className="hidden md:block absolute inset-0">
             <Image
-              src={hero.backgroundDesktop || "/landing/Design sem nome (35).png"}
+              src={hero.backgroundDesktop || "/landing/Design sem nome (35).webp"}
               alt="Fundo Escritório Desktop"
               fill
               sizes="(max-width: 768px) 100vw, 100vw"
@@ -410,7 +410,7 @@ export function HighConversionTemplate({
           {/* Mobile Background */}
           <div className="md:hidden absolute inset-0">
             <Image
-              src={hero.backgroundMobile || hero.backgroundDesktop || "/landing/Design sem nome (26).png"}
+              src={hero.backgroundMobile || hero.backgroundDesktop || "/landing/Design sem nome (26).webp"}
               alt="Fundo Escritório Mobile"
               fill
               sizes="(max-width: 768px) 100vw, 100vw"
@@ -600,7 +600,7 @@ export function HighConversionTemplate({
                 className="relative h-[65px] w-[220px] mx-0.5 shrink-0"
               >
                 <Image
-                  src="/landing/logo_andre_lustosa_transparente.png"
+                  src="/landing/logo_andre_lustosa_transparente.webp"
                   alt="André Lustosa Logo"
                   width={220}
                   height={65}
@@ -621,7 +621,7 @@ export function HighConversionTemplate({
         {/* Section Background Image */}
         <div className="absolute inset-0 z-0 opacity-40 mix-blend-luminosity">
           <Image
-            src="/landing/chic_trigger_bg.png"
+            src="/landing/chic_trigger_bg.webp"
             alt="Law firm elegant background"
             fill
             sizes="100vw"
@@ -681,63 +681,63 @@ export function HighConversionTemplate({
                   title: pa.title,
                   description: pa.description,
                   tag: "ESPECIALIDADE",
-                  bgImage: "/landing/Design sem nome (35).png"
+                  bgImage: "/landing/Design sem nome (35).webp"
                 }))
               : [
                   {
                     title: "DIREITO TRABALHISTA",
                     description: "Relações profissionais ganham equilíbrio quando direitos são respeitados. Protegemos sua trajetória no trabalho com precisão e segurança.",
                     tag: "JUSTIÇA QUE ILUMINA",
-                    bgImage: "/landing/img_trabalhista.png",
+                    bgImage: "/landing/img_trabalhista.webp",
                     href: "https://andrelustosaadvogados.com.br/arapiraca/trabalhista"
                   },
                   {
                     title: "DIREITO DO CONSUMIDOR",
                     description: "Quando produtos e serviços falham, sua voz deve ser ouvida. Reforçamos sua proteção diante de práticas abusivas.",
                     tag: "CONFIANÇA EM CADA ESCOLHA",
-                    bgImage: "/landing/img_consumidor.png"
+                    bgImage: "/landing/img_consumidor.webp"
                   },
                   {
                     title: "DIREITO PREVIDENCIÁRIO",
                     description: "Entre contribuições, benefícios e revisões, garantimos que o seu futuro seja tão sólido quanto o seu esforço.",
                     tag: "PROTEÇÃO ATEMPORAL",
-                    bgImage: "/landing/img_previdenciario.png"
+                    bgImage: "/landing/img_previdenciario.webp"
                   },
                   {
                     title: "DIREITO DE FAMÍLIA",
                     description: "Nos momentos mais sensíveis, garantimos segurança jurídica e respeito às suas relações e ao que importa para você.",
                     tag: "VÍNCULOS PROTEGIDOS",
-                    bgImage: "/landing/img_familia.png"
+                    bgImage: "/landing/img_familia.webp"
                   },
                   {
                     title: "DIREITO CRIMINAL",
                     description: "Defesa em processos criminais, desde inquérito até julgamento. Atuamos com estratégia e compromisso na proteção dos direitos do acusado.",
                     tag: "DEFESA INTRANSIGENTE",
-                    bgImage: "/landing/img_criminal.png"
+                    bgImage: "/landing/img_criminal.webp"
                   },
                   {
                     title: "DIREITO CIVIL",
                     description: "Conflitos cotidianos encontram solução em fundamentos claros e justos. Atuamos para preservar seus direitos em cada detalhe da vida civil.",
                     tag: "ORDEM NAS RELAÇÕES",
-                    bgImage: "/landing/img_civil.png"
+                    bgImage: "/landing/img_civil.webp"
                   },
                   {
                     title: "DIREITO IMOBILIÁRIO",
                     description: "Atuação em compra e venda de imóveis, contratos de locação e regularização fundiária. Protegemos seu patrimônio.",
                     tag: "PATRIMÔNIO SEGURO",
-                    bgImage: "/landing/img_imobiliario.png"
+                    bgImage: "/landing/img_imobiliario.webp"
                   },
                   {
                     title: "DIREITO DAS SUCESSÕES",
                     description: "Regula a transferência do patrimônio após o falecimento. Atuamos com segurança jurídica e respeito.",
                     tag: "LEGADO PROTEGIDO",
-                    bgImage: "/landing/img_sucessoes.png"
+                    bgImage: "/landing/img_sucessoes.webp"
                   },
                   {
                     title: "DIREITO EMPRESARIAL",
                     description: "Empresas crescem quando estão juridicamente protegidas. Cuidamos da base legal que sustenta suas decisões e expande resultados.",
                     tag: "DIREITO ESTRATÉGICO",
-                    bgImage: "/landing/img_empresarial.png"
+                    bgImage: "/landing/img_empresarial.webp"
                   },
                 ]
             ).map((area, index) => {
@@ -1172,7 +1172,7 @@ export function HighConversionTemplate({
                 className="relative w-[95%] md:w-full max-w-2xl aspect-square drop-shadow-[0_0_50px_rgba(168,144,72,0.15)] mx-auto"
               >
                 <Image
-                  src="/landing/mapa-brasil-cobertura.png"
+                  src="/landing/mapa-brasil-cobertura.webp"
                   alt="Mapa de Cobertura Nacional André Lustosa"
                   fill
                   sizes="(max-width: 768px) 95vw, 50vw"
@@ -1540,7 +1540,7 @@ export function HighConversionTemplate({
           {/* BRAND & INFO (5 cols) */}
           <div className="md:col-span-5 flex flex-col items-center md:items-start text-center md:text-left">
             <Image
-              src="/landing/logo_andre_lustosa_transparente.png"
+              src="/landing/logo_andre_lustosa_transparente.webp"
               alt="André Lustosa Advogados"
               width={240}
               height={65}
