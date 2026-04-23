@@ -14,6 +14,9 @@ RUN cd apps/${APP} && npm run build
 FROM base AS runner
 ARG APP
 ENV NODE_ENV=production
+# ffmpeg: necessário para conversão ASF→MP4 e extração de áudio
+# (usado pelo worker no processor de transcrição de audiências)
+RUN apk add --no-cache ffmpeg
 # Copia node_modules do root e pacote shared
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules

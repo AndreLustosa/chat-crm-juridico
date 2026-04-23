@@ -4,3 +4,4 @@ export const prisma = new PrismaClient();
 export * from '@prisma/client';
 export * from './enums';
 export * from './business-hours';
+export * from './transcription';

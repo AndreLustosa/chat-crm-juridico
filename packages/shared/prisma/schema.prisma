@@ -21,6 +21,7 @@ model Tenant {
   appointment_types  AppointmentType[]
   holidays           Holiday[]
   case_documents     CaseDocument[]
+  case_transcriptions CaseTranscription[]
   case_deadlines     CaseDeadline[]
   petitions          CasePetition[]
   legal_templates    LegalTemplate[]
@@ -77,6 +78,7 @@ model User {
   calendar_event_comments   CalendarEventComment[]
   transfer_audios           TransferAudio[]        @relation("AudioUploader")
   uploaded_documents        CaseDocument[]         @relation("DocumentUploader")
+  uploaded_transcriptions   CaseTranscription[]    @relation("TranscriptionUploader")
   created_deadlines         CaseDeadline[]         @relation("DeadlineCreator")
   authored_petitions       CasePetition[]         @relation("PetitionAuthor")
   reviewed_petitions       CasePetition[]         @relation("PetitionReviewer")
@@ -537,6 +539,7 @@ model LegalCase {
   documents         CaseDocument[]
   deadlines         CaseDeadline[]
   petitions         CasePetition[]
+  transcriptions    CaseTranscription[]
   honorarios             CaseHonorario[]
   financial_transactions FinancialTransaction[]
   gateway_charges        PaymentGatewayCharge[]
@@ -979,6 +982,56 @@ model CaseDocument {
 
   @@index([legal_case_id, folder])
   @@index([parent_id])
+}
+
+// ===============================================
+// Case Transcriptions (transcrição de audiências)
+// Video ASF/MP4/etc -> WhisperX -> texto + diarização
+// ===============================================
+
+model CaseTranscription {
+  id             String    @id @default(uuid())
+  tenant_id      String?
+  legal_case_id  String
+  uploaded_by_id String
+  title          String
+  // Job lifecycle: PENDING -> CONVERTING -> TRANSCRIBING -> DONE | ERROR
+  status         String    @default("PENDING")
+  progress       Int       @default(0) // 0-100
+  error_message  String?
+  // Provider usado (whisper-local, groq, ...) — permite histórico se trocar depois
+  provider       String    @default("whisper-local")
+  model          String? // ex: "large-v3"
+  diarize        Boolean   @default(true)
+  // Storage no MinIO/S3 (bucket chat-crm-media)
+  source_s3_key  String // arquivo original enviado (ASF, MP4, MKV, etc.)
+  source_mime    String
+  source_size    Int
+  // Convertido pra MP4 web-friendly (h264+aac) — usado no player do frontend
+  video_s3_key   String?
+  // Áudio extraído (WAV 16kHz) — só guardamos se precisar reprocessar
+  audio_s3_key   String?
+  // Resultado final
+  language       String? // "pt", etc.
+  duration_sec   Float? // duração do áudio
+  text           String? @db.Text // texto corrido (todos falantes juntos)
+  segments_json  Json? // [{start,end,text,speaker}] - bloco por bloco
+  words_json     Json? // [{start,end,word,speaker,score}] - word-level
+  speakers_json  Json? // [{id:"SPEAKER_00", label:"Juiz", color:"#..."}] - labels editáveis
+  // Job tracking
+  external_job_id String? // id no crm-whisper (pra polling/retomada)
+  started_at     DateTime?
+  finished_at    DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  legal_case  LegalCase @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
+  uploaded_by User      @relation("TranscriptionUploader", fields: [uploaded_by_id], references: [id])
+  tenant      Tenant?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([legal_case_id, created_at])
+  @@index([status])
+  @@index([tenant_id])
 }
 
 // ===============================================

@@ -1,0 +1,13 @@
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+pydantic-settings==2.6.0
+python-multipart==0.0.12
+httpx==0.27.2
+boto3==1.35.54
+# WhisperX traz faster-whisper + pyannote + alinhamento word-level
+whisperx==3.1.5
+# Pinagem de torch — CPU-only por default; troque via build-arg para CUDA
+torch==2.2.2
+torchaudio==2.2.2
+numpy==1.26.4
