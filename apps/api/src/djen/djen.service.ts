@@ -1,11 +1,21 @@
 import { Injectable, Logger, BadRequestException, ConflictException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+
+/** Hash deterministico pra CaseEvent MOVIMENTACAO vindo de publicacao DJEN.
+ * Mesma chave que ESAJ usa (movement_hash eh UNIQUE no banco), entao precisamos
+ * garantir nao-colisao. Usamos prefixo "djen:" + comunicacao_id (ja e unique na DJEN). */
+function djenMovementHash(comunicacaoId: number): string {
+  return crypto.createHash('sha256')
+    .update(`djen:${comunicacaoId}`)
+    .digest('hex');
+}
 
 function toDateStr(date: Date): string {
   return date.toISOString().slice(0, 10); // yyyy-MM-dd
@@ -311,6 +321,37 @@ export class DjenService {
           },
         });
         saved++;
+
+        // ─── Criar CaseEvent tipo MOVIMENTACAO pra aparecer na timeline do ───
+        // processo. Antes de 2026-04-23, publicacoes DJEN ficavam isoladas em
+        // DjenPublication — so movimentacoes do ESAJ scraper apareciam como
+        // eventos do processo. Bug reportado: intimacao publicada hoje no DJEN
+        // nao aparece como movimento do processo.
+        // Usa hash deterministico (djen:comunicacaoId) + movement_hash UNIQUE
+        // no schema pra dedupe — seguro contra re-syncs.
+        if (legalCaseId) {
+          const movTitle = [tipoComunicacao, assunto].filter(Boolean).join(' — ') || 'Publicação DJEN';
+          const movDescription = conteudo || movTitle;
+          try {
+            await this.prisma.caseEvent.create({
+              data: {
+                case_id: legalCaseId,
+                type: 'MOVIMENTACAO',
+                title: movTitle.slice(0, 200),
+                description: movDescription,
+                source: 'DJEN',
+                event_date: dataDisp,
+                movement_hash: djenMovementHash(Number(comunicacaoId)),
+                source_raw: { djen_publication_id: pub.id, comunicacao_id: Number(comunicacaoId), tipo: tipoComunicacao, assunto } as any,
+              },
+            });
+          } catch (err: any) {
+            // P2002 = unique constraint violation (ja existe) — OK, pular
+            if (err?.code !== 'P2002') {
+              this.logger.warn(`[DJEN] Falha ao criar CaseEvent MOVIMENTACAO pra pub ${pub.id}: ${err?.message || err}`);
+            }
+          }
+        }
 
         // Auto-arquivar publicações de processos renunciados ou ignorados
         const shouldAutoArchive =

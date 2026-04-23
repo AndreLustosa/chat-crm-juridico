@@ -1564,8 +1564,13 @@ export class LegalCasesService {
         },
         djen_publications: {
           orderBy: { data_disponibilizacao: 'desc' },
-          take: 3,
-          select: { tipo_comunicacao: true, data_disponibilizacao: true, assunto: true },
+          take: 10, // 2026-04-23: era 3, subiu pra 10 pra cobrir intimacoes
+          // recentes ao gerar briefing (usuario reclamou que publicacao
+          // de hoje nao aparecia quando havia outras pubs mais antigas
+          // empurrando ela pra fora do top-3).
+          // Sem filtro de viewed_at/archived — briefing ve TUDO, mesmo
+          // publicacoes ja lidas ou arquivadas.
+          select: { tipo_comunicacao: true, data_disponibilizacao: true, assunto: true, conteudo: true, viewed_at: true, archived: true },
         },
         documents: {
           take: 5,
@@ -1610,8 +1615,15 @@ ${legalCase.deadlines?.map((d: any) => `- ${d.title} | Vence: ${fmtDate(d.due_at
 TAREFAS ABERTAS (${legalCase.tasks?.length || 0}):
 ${legalCase.tasks?.map((t: any) => `- ${t.title} | Status: ${t.status}${t.due_at ? ` | Prazo: ${fmtDate(t.due_at)}` : ''}`).join('\n') || 'Nenhuma tarefa aberta'}
 
-ÚLTIMAS PUBLICAÇÕES DJEN:
-${legalCase.djen_publications?.map((d: any) => `- ${d.tipo_comunicacao || 'Publicação'} | ${fmtDate(d.data_disponibilizacao)}${d.assunto ? ` | ${d.assunto}` : ''}`).join('\n') || 'Nenhuma publicação'}
+ÚLTIMAS PUBLICAÇÕES DJEN (${legalCase.djen_publications?.length || 0} mais recentes, incluindo lidas e arquivadas):
+${legalCase.djen_publications?.map((d: any) => {
+  const tipo = d.tipo_comunicacao || 'Publicação';
+  const data = fmtDate(d.data_disponibilizacao);
+  const assunto = d.assunto ? ` | ${d.assunto}` : '';
+  const flags = [d.viewed_at ? 'lida' : 'não lida', d.archived ? 'arquivada' : null].filter(Boolean).join(', ');
+  const snippet = (d.conteudo || '').slice(0, 300).replace(/\s+/g, ' ').trim();
+  return `- ${data} | ${tipo}${assunto} [${flags}]${snippet ? `\n    ${snippet}${d.conteudo?.length > 300 ? '…' : ''}` : ''}`;
+}).join('\n') || 'Nenhuma publicação'}
 
 DOCUMENTOS RECENTES:
 ${legalCase.documents?.map((d: any) => `- ${d.name} (${fmtDate(d.created_at)})`).join('\n') || 'Nenhum documento'}
