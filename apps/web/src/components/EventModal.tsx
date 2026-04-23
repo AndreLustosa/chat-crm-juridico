@@ -49,6 +49,35 @@ const REMINDER_OPTIONS = [
   { value: 1440, label: '1 dia antes'  },
 ];
 
+// Defaults de lembretes por tipo de evento. Audiencia/pericia recebem
+// 1440min (1 dia antes) + 30min antes por WhatsApp — antes o default era
+// apenas 30min, entao a notificacao de 24h nunca era criada (bug reportado
+// 2026-04-23: audiencia do Guilherme Porto nao notificou no dia anterior).
+const DEFAULT_REMINDERS_BY_TYPE: Record<string, { minutes_before: number; channel: string }[]> = {
+  AUDIENCIA: [
+    { minutes_before: 1440, channel: 'WHATSAPP' },
+    { minutes_before: 30,   channel: 'WHATSAPP' },
+  ],
+  PERICIA: [
+    { minutes_before: 1440, channel: 'WHATSAPP' },
+    { minutes_before: 30,   channel: 'WHATSAPP' },
+  ],
+  PRAZO: [
+    { minutes_before: 1440, channel: 'WHATSAPP' },
+    { minutes_before: 60,   channel: 'PUSH' },
+  ],
+  CONSULTA: [
+    { minutes_before: 60,   channel: 'WHATSAPP' },
+    { minutes_before: 30,   channel: 'PUSH' },
+  ],
+  TAREFA: [
+    { minutes_before: 30, channel: 'WHATSAPP' },
+  ],
+  OUTRO: [
+    { minutes_before: 30, channel: 'WHATSAPP' },
+  ],
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function typeInfo(type: string) {
@@ -112,9 +141,11 @@ export function EventModal({ caseId, leadId, conversationId, lawyerId = '', user
   const [location, setLocation]       = useState('');
   const [priority, setPriority]       = useState<string>('NORMAL');
   const [assignedUserId, setAssignedUserId] = useState(lawyerId);
-  const [reminders, setReminders]     = useState<{ minutes_before: number; channel: string }[]>([
-    { minutes_before: 30, channel: 'WHATSAPP' },
-  ]);
+  const [reminders, setReminders]     = useState<{ minutes_before: number; channel: string }[]>(
+    DEFAULT_REMINDERS_BY_TYPE['TAREFA'],
+  );
+  // Flag: usuario customizou os lembretes? Se sim, nao sobrescreve ao trocar tipo.
+  const [remindersTouched, setRemindersTouched] = useState(false);
   const [saving, setSaving]           = useState(false);
 
   // ── Delegação (só para PRAZO) ──────────────────────────────────
@@ -133,6 +164,14 @@ export function EventModal({ caseId, leadId, conversationId, lawyerId = '', user
       setPriority('ALTA');
     }
   }, [type, lawyerId]);
+
+  // Quando o tipo muda e o usuario AINDA nao mexeu nos lembretes, atualiza
+  // pros defaults do novo tipo. Evita sobrescrever customizacao manual.
+  useEffect(() => {
+    if (remindersTouched) return;
+    const next = DEFAULT_REMINDERS_BY_TYPE[type] || [{ minutes_before: 30, channel: 'WHATSAPP' }];
+    setReminders(next);
+  }, [type, remindersTouched]);
 
   // Quando desativa delegação, reseta campos de delegação
   useEffect(() => {
@@ -165,6 +204,8 @@ export function EventModal({ caseId, leadId, conversationId, lawyerId = '', user
     : (delegateDate ? formatISO(localInputToISO(`${delegateDate} ${delegateTime || '00:00'}`)) : null);
 
   const toggleReminder = (minutes: number, channel: string) => {
+    // Marca como customizado pelo usuario — inibe reset automatico ao trocar tipo
+    setRemindersTouched(true);
     const key = `${minutes}-${channel}`;
     setReminders(prev => {
       const exists = prev.some(r => `${r.minutes_before}-${r.channel}` === key);
