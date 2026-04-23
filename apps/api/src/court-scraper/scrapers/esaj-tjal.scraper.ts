@@ -63,14 +63,26 @@ export const inferTrackingStage = (movements: Array<{ description: string }>): s
   return 'DISTRIBUIDO';
 };
 
-/** Infere área jurídica */
-const inferLegalArea = (areaText: string, assunto: string): string => {
-  const combined = `${areaText} ${assunto}`.toLowerCase();
-  if (/criminal|penal|crime/.test(combined)) return 'Criminal';
+/** Infere área jurídica
+ *
+ * Antes usava apenas areaText + assunto. Mas em processos criminais no TJAL
+ * o campo #areaProcesso costuma vir vazio, e o assunto pode ser generico
+ * ("Crimes contra a pessoa" vs "Homicidio"). Como resultado, processos
+ * criminais caiam no fallback final e eram classificados como 'Cível'.
+ *
+ * Bug reportado 2026-04-23 — Alecio Diogo, Acao Penal, classificado CIVIL.
+ *
+ * Fix: incluir tambem o `actionType` (campo #classeProcesso, ex: "Ação Penal -
+ * Procedimento Ordinário") na combinacao, pra aumentar o recall da heuristica.
+ */
+const inferLegalArea = (areaText: string, assunto: string, actionType: string = ''): string => {
+  const combined = `${areaText} ${assunto} ${actionType}`.toLowerCase();
+  if (/criminal|penal|crime|homic[ií]dio|furto|roubo|estelionato|tr[aá]fico/.test(combined)) return 'Criminal';
   if (/fam[ií]lia|divor|aliment|guard|invent[aá]rio/.test(combined)) return 'Família';
   if (/trabalh|tst|clt|reclam/.test(combined)) return 'Trabalhista';
   if (/fazenda|tribut|fiscal|execu[çc][aã]o\s+fiscal/.test(combined)) return 'Tributário';
   if (/consumidor|cdc/.test(combined)) return 'Consumidor';
+  if (/previden|inss|benef[ií]cio|aposentad/.test(combined)) return 'Previdenciário';
   return areaText || 'Cível';
 };
 
@@ -366,7 +378,25 @@ export class EsajTjalScraper {
     const foro       = getById('foroProcesso');
     const vara       = getById('varaProcesso');
     const court      = [foro, vara].filter(Boolean).join(' - ') || vara || foro;
-    const judge      = getById('juizProcesso');
+    // Juiz: #juizProcesso e o padrao SAJ. Em processos recem-distribuidos,
+    // varas criminais, ou certas instancias, o campo pode nao existir ou ter
+    // label alternativo ("Magistrado(a)"). Fallback: busca qualquer linha
+    // com <span class="unj-label"> contendo "Juiz" ou "Magistrado".
+    let judge = getById('juizProcesso');
+    if (!judge) {
+      $('.unj-label, td.labelClass, span.nomeMagistrado').each((_, el) => {
+        const label = $(el).text().replace(/\s+/g, ' ').trim();
+        if (/ju[ií]z|magistrado/i.test(label)) {
+          // Pega o proximo elemento/irmao que costuma conter o nome
+          const candidate = $(el).next().text().replace(/\s+/g, ' ').trim()
+            || $(el).parent().find('span, td').last().text().replace(/\s+/g, ' ').trim();
+          if (candidate && candidate !== label && candidate.length < 120) {
+            judge = candidate;
+            return false; // break do each
+          }
+        }
+      });
+    }
     const statusText = getById('situacaoProcesso');
     const distributionDate = getById('dataHoraDistribuicaoProcesso');
 
@@ -561,7 +591,7 @@ export class EsajTjalScraper {
     }
 
     // Inferir área e tracking stage
-    const legalArea = inferLegalArea(areaText, subject);
+    const legalArea = inferLegalArea(areaText, subject, actionType);
     const trackingStage = inferTrackingStage(movements);
 
     const result: CourtCaseData = {

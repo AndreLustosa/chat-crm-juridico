@@ -6,6 +6,7 @@ import {
   ArrowLeft, FileText, CalendarDays, Clock, MessageSquare, Activity,
   Loader2, AlertTriangle, ClipboardList, FileSignature, BookOpen,
   DollarSign, Archive, ArchiveRestore, Send, Ban, Undo2, History as HistoryIcon,
+  Copy, Check,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -141,6 +142,18 @@ export default function WorkspacePage() {
   const [trackingCaseNumber, setTrackingCaseNumber] = useState('');
   const [trackingCourt, setTrackingCourt] = useState('');
   const [sendingToTracking, setSendingToTracking] = useState(false);
+  const [copiedCaseNumber, setCopiedCaseNumber] = useState(false);
+
+  const handleCopyCaseNumber = async (rawNumber: string) => {
+    try {
+      await navigator.clipboard.writeText(formatCNJ(rawNumber));
+      setCopiedCaseNumber(true);
+      showSuccess('Numero do processo copiado');
+      setTimeout(() => setCopiedCaseNumber(false), 2000);
+    } catch {
+      showError('Falha ao copiar');
+    }
+  };
 
   const fetchWorkspace = useCallback(async () => {
     try {
@@ -309,7 +322,17 @@ export default function WorkspacePage() {
           </div>
           <div className="flex items-center gap-2 text-xs text-base-content/60">
             {data.case_number && (
-              <span>Processo: {formatCNJ(data.case_number)}</span>
+              <span className="inline-flex items-center gap-1">
+                Processo: {formatCNJ(data.case_number)}
+                <button
+                  type="button"
+                  onClick={() => handleCopyCaseNumber(data.case_number!)}
+                  title="Copiar numero do processo"
+                  className="ml-0.5 p-0.5 rounded hover:bg-base-300 transition-colors text-base-content/50 hover:text-base-content"
+                >
+                  {copiedCaseNumber ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </span>
             )}
             {data.court && (
               <>
