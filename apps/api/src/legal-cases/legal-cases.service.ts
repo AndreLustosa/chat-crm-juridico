@@ -656,7 +656,12 @@ export class LegalCasesService {
 
     const legalCase = await this.prisma.legalCase.findUnique({
       where: { id: caseId },
-      select: { id: true, case_number: true, court: true, lead_id: true, tenant_id: true },
+      select: {
+        id: true, case_number: true, court: true, lead_id: true, tenant_id: true,
+        // Campos extras pra sincronizacao de metadados vazios
+        legal_area: true, action_type: true, judge: true, claim_value: true,
+        opposing_party: true, filed_at: true,
+      },
     });
     if (!legalCase) throw new NotFoundException('Processo nao encontrado');
     if (!legalCase.case_number) {
@@ -726,6 +731,57 @@ export class LegalCasesService {
       where: { case_id: caseId, type: 'MOVIMENTACAO' },
     });
 
+    // ── Sincronizar metadados vazios do LegalCase com dados do ESAJ ─────────
+    // Preenche APENAS campos null/vazios — nao sobrescreve edicoes manuais.
+    // Usecase: processo cadastrado antes dos fixes de persistencia, ou ESAJ
+    // nao retornou alguns dados na epoca.
+    const metadataPatch: any = {};
+    const metadataUpdated: string[] = [];
+    if (!legalCase.legal_area && data.legal_area) {
+      metadataPatch.legal_area = data.legal_area;
+      metadataUpdated.push('Área jurídica');
+    }
+    if (!legalCase.action_type && data.action_type) {
+      metadataPatch.action_type = data.action_type;
+      metadataUpdated.push('Tipo de ação');
+    }
+    if (!legalCase.court && data.court) {
+      metadataPatch.court = data.court;
+      metadataUpdated.push('Vara/Tribunal');
+    }
+    if (!legalCase.judge && data.judge) {
+      metadataPatch.judge = data.judge;
+      metadataUpdated.push('Juiz');
+    }
+    if (!legalCase.claim_value && data.claim_value) {
+      metadataPatch.claim_value = data.claim_value;
+      metadataUpdated.push('Valor da causa');
+    }
+    if (!legalCase.filed_at && data.filed_at) {
+      metadataPatch.filed_at = new Date(data.filed_at);
+      metadataUpdated.push('Data de ajuizamento');
+    }
+    // Parte contraria: pega reu dos parties[]
+    if (!legalCase.opposing_party && data.parties?.length) {
+      const reu = data.parties.find((p: any) =>
+        /r[eé]u|requerido|executado|reclamado|denunciado/i.test(p.role),
+      );
+      if (reu?.name) {
+        metadataPatch.opposing_party = reu.name;
+        metadataUpdated.push('Parte contrária');
+      }
+    }
+
+    if (Object.keys(metadataPatch).length > 0) {
+      await this.prisma.legalCase.update({
+        where: { id: caseId },
+        data: metadataPatch,
+      });
+      this.logger.log(
+        `[RESYNC] ${legalCase.case_number}: metadados preenchidos: ${metadataUpdated.join(', ')}`,
+      );
+    }
+
     this.logger.log(
       `[RESYNC] ${legalCase.case_number}: ${createResult.count} novas / ${movements.length - createResult.count} ja existiam. Total agora: ${totalNow}`,
     );
@@ -742,6 +798,7 @@ export class LegalCasesService {
       total_now: totalNow,
       source: 'ESAJ_TJAL',
       duration_ms: Date.now() - startedAt,
+      metadata_updated: metadataUpdated, // novo campo — lista de campos preenchidos
     };
   }
 

@@ -1025,6 +1025,34 @@ function ProcessoDetailPanel({
   const [claimValue, setClaimValue] = useState(legalCase.claim_value ? String(legalCase.claim_value) : '');
   const [judge, setJudge] = useState(legalCase.judge || '');
 
+  // Sincronizar com ESAJ — preenche campos vazios com dados do tribunal
+  const [syncingEsaj, setSyncingEsaj] = useState(false);
+  const handleSyncEsaj = async () => {
+    setSyncingEsaj(true);
+    try {
+      const res = await api.post(`/legal-cases/${legalCase.id}/resync-movements`);
+      const metaUpdated: string[] = res.data?.metadata_updated || [];
+      const newMovements = res.data?.created || 0;
+      const parts: string[] = [];
+      if (metaUpdated.length > 0) {
+        parts.push(`${metaUpdated.length} campo(s) preenchido(s): ${metaUpdated.join(', ')}`);
+      }
+      if (newMovements > 0) {
+        parts.push(`${newMovements} nova(s) movimentação(ões)`);
+      }
+      if (parts.length === 0) {
+        toast(`Tudo já estava atualizado (total: ${res.data?.total_now || 0} movimentações)`, { icon: '✓' });
+      } else {
+        toast.success(parts.join(' · '));
+      }
+      onRefresh();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Erro ao sincronizar com tribunal');
+    } finally {
+      setSyncingEsaj(false);
+    }
+  };
+
   // ── Vinculação de cliente ──────────────────────────────────────
   const isPlaceholderLead = legalCase.lead?.phone?.startsWith('PROC_') || legalCase.lead?.name?.startsWith('[Processo]');
   type LeadLinkMode = 'existing' | 'new';
@@ -1637,6 +1665,28 @@ function ProcessoDetailPanel({
                     </button>
                   </div>
                 </div>
+              )}
+
+              {/* ── Botao de sincronizar com tribunal (ESAJ) ────────── */}
+              {legalCase.case_number && (
+                <button
+                  onClick={handleSyncEsaj}
+                  disabled={syncingEsaj}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 text-[12px] font-bold hover:bg-sky-500/15 transition-colors disabled:opacity-50"
+                  title="Busca dados atualizados no ESAJ TJAL e preenche campos vazios + novas movimentações"
+                >
+                  {syncingEsaj ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      Consultando tribunal...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={13} />
+                      Atualizar do tribunal (ESAJ)
+                    </>
+                  )}
+                </button>
               )}
 
               {/* ── Bloco Advogado Responsável ───────────────────── */}
