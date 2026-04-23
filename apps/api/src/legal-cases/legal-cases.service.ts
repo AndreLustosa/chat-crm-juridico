@@ -4,9 +4,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { CalendarService } from '../calendar/calendar.service';
+import { SettingsService } from '../settings/settings.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 @Injectable()
 export class LegalCasesService {
@@ -17,6 +19,7 @@ export class LegalCasesService {
     private chatGateway: ChatGateway,
     @Inject(forwardRef(() => WhatsappService)) private whatsappService: WhatsappService,
     private calendarService: CalendarService,
+    private settings: SettingsService,
   ) {}
 
   private tenantWhere(tenantId?: string) {
@@ -1528,10 +1531,14 @@ export class LegalCasesService {
   async generateBriefing(id: string, tenantId?: string): Promise<{ briefing: string }> {
     await this.verifyTenantOwnership(id, tenantId);
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new BadRequestException('OPENAI_API_KEY não configurada. Configure a variável de ambiente para usar o Briefing IA.');
-    }
+    // Resolve API key: settings (admin panel) > env var. Alinha com o padrao
+    // do resto do sistema (calendar-reminder.worker, followup, etc) — antes
+    // esse metodo so lia env var, entao se o admin configurasse via UI a key
+    // nao era encontrada e dava erro falso-positivo.
+    // Bug reportado 2026-04-23 (Briefing IA do Alecio Diogo retornava erro).
+    const aiConfig = await this.settings.getAiConfig();
+    const model = aiConfig.defaultModel || 'gpt-4.1-mini';
+    const isAnthropic = model.startsWith('claude');
 
     const legalCase: any = await this.prisma.legalCase.findUnique({
       where: { id },
@@ -1612,24 +1619,43 @@ ${legalCase.documents?.map((d: any) => `- ${d.name} (${fmtDate(d.created_at)})`)
 FICHA TRABALHISTA: ${legalCase.lead?.ficha_trabalhista ? `${legalCase.lead.ficha_trabalhista.completion_pct}% preenchida${legalCase.lead.ficha_trabalhista.finalizado ? ' (finalizada)' : ''}` : 'Não aplicável'}
 `.trim();
 
-    const openai = new OpenAI({ apiKey });
+    const systemPrompt = `Você é um assistente jurídico especializado. Gere briefings de casos concisos e bem estruturados para advogados brasileiros. Use linguagem profissional e direta. Formate em seções claras usando markdown simples (## para títulos, - para listas). Seja objetivo — máximo 400 palavras.`;
+    const userPrompt = `Com base nas informações abaixo, gere um briefing estruturado do caso incluindo: (1) Resumo executivo, (2) Situação atual, (3) Próximos passos prioritários, (4) Pontos de atenção/riscos.\n\n${context}`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
-      temperature: 0.3,
-      messages: [
-        {
-          role: 'system',
-          content: `Você é um assistente jurídico especializado. Gere briefings de casos concisos e bem estruturados para advogados brasileiros. Use linguagem profissional e direta. Formate em seções claras usando markdown simples (## para títulos, - para listas). Seja objetivo — máximo 400 palavras.`,
-        },
-        {
-          role: 'user',
-          content: `Com base nas informações abaixo, gere um briefing estruturado do caso incluindo: (1) Resumo executivo, (2) Situação atual, (3) Próximos passos prioritários, (4) Pontos de atenção/riscos.\n\n${context}`,
-        },
-      ],
-    });
+    let briefing = '';
 
-    const briefing = completion.choices[0]?.message?.content || 'Não foi possível gerar o briefing.';
+    if (isAnthropic) {
+      const anthropicKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
+      if (!anthropicKey) {
+        throw new BadRequestException('ANTHROPIC_API_KEY nao configurada. Configure em Configurações > IA ou como variável de ambiente.');
+      }
+      const client = new Anthropic({ apiKey: anthropicKey });
+      const response = await client.messages.create({
+        model,
+        max_tokens: 800,
+        temperature: 0.3,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+      briefing = ((response.content[0] as any)?.text || '').trim();
+    } else {
+      const openaiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+      if (!openaiKey) {
+        throw new BadRequestException('OPENAI_API_KEY nao configurada. Configure em Configurações > IA ou como variável de ambiente.');
+      }
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const completion = await openai.chat.completions.create({
+        model,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      briefing = (completion.choices[0]?.message?.content || '').trim();
+    }
+
+    if (!briefing) briefing = 'Não foi possível gerar o briefing.';
     return { briefing };
   }
 }
