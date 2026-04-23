@@ -22,6 +22,7 @@ import { SectorsModule } from './sectors/sectors.module';
 import { MediaModule } from './media/media.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { TransferAudioModule } from './transfer-audio/transfer-audio.module';
+import { AudienciaTranscricaoModule } from './audiencia-transcricao/audiencia-transcricao.module';
 import { LegalCasesModule } from './legal-cases/legal-cases.module';
 import { DjenModule } from './djen/djen.module';
 import { CourtScraperModule } from './court-scraper/court-scraper.module';
@@ -92,6 +93,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     MediaModule,
     AnalyticsModule,
     TransferAudioModule,
+    AudienciaTranscricaoModule,
     LegalCasesModule,
     DjenModule,
     CourtScraperModule,

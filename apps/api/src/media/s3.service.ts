@@ -6,6 +6,7 @@ import {
   CreateBucketCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { Readable } from 'stream';
 
 @Injectable()
@@ -47,6 +48,33 @@ export class MediaS3Service implements OnModuleInit {
     });
     await this.client.send(command);
     this.logger.log(`Uploaded: ${key}`);
+  }
+
+  /**
+   * Upload streaming — usa multipart quando o arquivo é grande.
+   * Essencial pra vídeos de audiência (100MB–3GB) sem carregar em memória.
+   */
+  async uploadStream(
+    key: string,
+    body: Readable,
+    mimeType: string,
+    knownLength?: number,
+  ): Promise<void> {
+    const upload = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucket,
+        Key: key,
+        Body: body,
+        ContentType: mimeType,
+        ContentLength: knownLength,
+      },
+      // 20MB por parte, até 8 partes em paralelo → 160MB em vôo
+      partSize: 20 * 1024 * 1024,
+      queueSize: 4,
+    });
+    await upload.done();
+    this.logger.log(`Uploaded (stream): ${key}`);
   }
 
   async deleteObject(key: string): Promise<void> {
