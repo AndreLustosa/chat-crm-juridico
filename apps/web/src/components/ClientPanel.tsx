@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, KeyboardEvent } from 'react';
-import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake, CreditCard } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, KeyboardEvent } from 'react';
+import { Search, User, Phone, Loader2, X, MessageSquare, Calendar, ChevronDown, ChevronUp, Mail, Pencil, Check, UserCheck, FolderOpen, FileText, Image as ImageIcon, Mic, Video, Download, Trash2, AlertCircle, ClipboardList, StickyNote, Plus, Send, Scale, CheckSquare, ExternalLink, Clock, ArrowRight, DollarSign, Handshake, CreditCard, CalendarClock } from 'lucide-react';
+import { EventActionButton } from '@/components/EventActionButton';
 import FichaTrabalhista from '@/components/FichaTrabalhista';
 import { LeadMemoryPanel } from '@/components/LeadMemoryPanel';
 import { useRouter } from 'next/navigation';
@@ -196,6 +197,21 @@ export function ClientPanel({
   const [casesOpen, setCasesOpen] = useState(false);
   const [creatingCase, setCreatingCase] = useState(false);
   const [newCaseArea, setNewCaseArea] = useState('');
+
+  // Próximos eventos do cliente (agenda + prazos + tarefas)
+  const [events, setEvents] = useState<Array<{
+    id: string;
+    type: string;
+    title: string;
+    start_at: string;
+    status: string;
+    location?: string | null;
+    completion_note?: string | null;
+    completed_by?: { id: string; name: string } | null;
+    completed_at?: string | null;
+  }>>([]);
+  const [eventsOpen, setEventsOpen] = useState(true);
+  const [loadingEvents, setLoadingEvents] = useState(false);
   const [newCaseSubject, setNewCaseSubject] = useState('');
   const [newCaseUrgency, setNewCaseUrgency] = useState<'BAIXA' | 'NORMAL' | 'URGENTE'>('NORMAL');
   const [submittingCase, setSubmittingCase] = useState(false);
@@ -326,6 +342,31 @@ export function ClientPanel({
     if (!taskModal || agents.length > 0) return;
     api.get('/users/agents').then(r => setAgents(r.data || [])).catch(() => {});
   }, [taskModal, agents.length]);
+
+  // Buscar eventos do cliente (proximos 30 dias + atrasados de ate 7 dias)
+  const fetchClientEvents = useCallback(async () => {
+    if (!leadId) return;
+    setLoadingEvents(true);
+    try {
+      const start = new Date(Date.now() - 7 * 86400000).toISOString();  // 7d atras (vencidos recentes)
+      const end = new Date(Date.now() + 30 * 86400000).toISOString();   // 30d futuros
+      const res = await api.get('/calendar/events', {
+        params: { leadId, start, end, showAll: 'true' },
+      });
+      const items = (res.data || [])
+        .filter((e: any) => !['CANCELADO', 'CONCLUIDO'].includes(e.status))
+        .sort((a: any, b: any) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+      setEvents(items);
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingEvents(false);
+    }
+  }, [leadId]);
+
+  useEffect(() => {
+    fetchClientEvents();
+  }, [fetchClientEvents]);
 
   const submitTask = async () => {
     if (!taskTitle.trim() || !leadId) return;
@@ -1039,6 +1080,114 @@ export function ClientPanel({
                         </button>
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Próximos eventos do cliente — audiencias, pericias, prazos, tarefas */}
+            <div className="border-t border-border">
+              <button
+                className="w-full px-6 py-4 flex items-center justify-between hover:bg-accent/30 transition-colors"
+                onClick={() => setEventsOpen(!eventsOpen)}
+              >
+                <div className="flex items-center gap-2.5">
+                  <CalendarClock size={15} className="text-sky-400" />
+                  <span className="text-[13px] font-bold text-foreground">Próximos eventos</span>
+                  <span className="text-[11px] text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-full font-mono">
+                    {events.length}
+                  </span>
+                </div>
+                {eventsOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
+              </button>
+              {eventsOpen && (
+                <div className="px-6 pb-5 flex flex-col gap-2">
+                  {loadingEvents ? (
+                    <div className="text-center py-4 text-[11px] text-muted-foreground flex items-center justify-center gap-2">
+                      <Loader2 size={12} className="animate-spin" />
+                      Carregando eventos...
+                    </div>
+                  ) : events.length === 0 ? (
+                    <div className="text-center py-4 text-[11px] text-muted-foreground/70 italic">
+                      Nenhum evento agendado
+                    </div>
+                  ) : (
+                    events.map(ev => {
+                      const eventDate = new Date(ev.start_at);
+                      const isOverdue = eventDate < new Date();
+                      const diffMs = eventDate.getTime() - Date.now();
+                      const diffDays = Math.round(diffMs / 86400000);
+                      const isToday = diffDays === 0 && diffMs > 0;
+                      const isTomorrow = diffDays === 1;
+
+                      const typeIcons: Record<string, string> = {
+                        AUDIENCIA: '⚖️', PERICIA: '🔬', PRAZO: '⏰',
+                        TAREFA: '✅', CONSULTA: '📞', OUTRO: '📅',
+                      };
+                      const typeColors: Record<string, string> = {
+                        AUDIENCIA: 'text-red-400',
+                        PERICIA: 'text-violet-400',
+                        PRAZO: 'text-amber-400',
+                        TAREFA: 'text-emerald-400',
+                        CONSULTA: 'text-blue-400',
+                        OUTRO: 'text-muted-foreground',
+                      };
+
+                      let dateLabel: string;
+                      if (isOverdue) {
+                        const daysOverdue = Math.abs(diffDays);
+                        dateLabel = daysOverdue === 0 ? 'Atrasado (hoje)' : `Atrasado há ${daysOverdue}d`;
+                      } else if (isToday) {
+                        dateLabel = `Hoje às ${eventDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                      } else if (isTomorrow) {
+                        dateLabel = `Amanhã às ${eventDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                      } else {
+                        dateLabel = eventDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) +
+                          ` ${eventDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                      }
+
+                      return (
+                        <div
+                          key={ev.id}
+                          className={`bg-foreground/[0.03] border rounded-xl p-3 flex flex-col gap-2 ${
+                            isOverdue ? 'border-red-500/30 bg-red-500/5' : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`text-[10px] font-bold ${typeColors[ev.type] || 'text-muted-foreground'}`}>
+                                  {typeIcons[ev.type] || '📅'} {ev.type}
+                                </span>
+                                <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : isToday ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                                  {dateLabel}
+                                </span>
+                              </div>
+                              <p className="text-[12px] font-semibold text-foreground mt-1 leading-snug">
+                                {ev.title}
+                              </p>
+                              {ev.location && (
+                                <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                                  📍 {ev.location}
+                                </p>
+                              )}
+                            </div>
+                            <div className="shrink-0">
+                              <EventActionButton
+                                type="CALENDAR"
+                                id={ev.id}
+                                currentStatus={ev.status}
+                                compact
+                                completionNote={ev.completion_note}
+                                completedBy={ev.completed_by}
+                                completedAt={ev.completed_at}
+                                onActionComplete={fetchClientEvents}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               )}
