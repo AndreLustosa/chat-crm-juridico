@@ -992,7 +992,9 @@ model CaseDocument {
 model CaseTranscription {
   id             String    @id @default(uuid())
   tenant_id      String?
-  legal_case_id  String
+  // legal_case_id NULLABLE: transcrições avulsas (sem processo vinculado) são criadas
+  // a partir do menu Ferramentas. Quando vinculadas, aparecem também na aba do workspace.
+  legal_case_id  String?
   uploaded_by_id String
   title          String
   // Job lifecycle: PENDING -> CONVERTING -> TRANSCRIBING -> DONE | ERROR
@@ -1025,13 +1027,14 @@ model CaseTranscription {
   created_at     DateTime  @default(now())
   updated_at     DateTime  @updatedAt
 
-  legal_case  LegalCase @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
-  uploaded_by User      @relation("TranscriptionUploader", fields: [uploaded_by_id], references: [id])
-  tenant      Tenant?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  legal_case  LegalCase? @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  uploaded_by User       @relation("TranscriptionUploader", fields: [uploaded_by_id], references: [id])
+  tenant      Tenant?    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([legal_case_id, created_at])
   @@index([status])
   @@index([tenant_id])
+  @@index([uploaded_by_id, created_at])
 }
 
 // ===============================================

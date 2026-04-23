@@ -1577,6 +1577,18 @@ export class LegalCasesService {
           orderBy: { created_at: 'desc' },
           select: { name: true, created_at: true },
         },
+        transcriptions: {
+          where: { status: 'DONE' },
+          orderBy: { created_at: 'desc' },
+          take: 3,
+          select: {
+            title: true,
+            created_at: true,
+            duration_sec: true,
+            text: true,
+            speakers_json: true,
+          },
+        },
       },
     });
 
@@ -1627,6 +1639,21 @@ ${legalCase.djen_publications?.map((d: any) => {
 
 DOCUMENTOS RECENTES:
 ${legalCase.documents?.map((d: any) => `- ${d.name} (${fmtDate(d.created_at)})`).join('\n') || 'Nenhum documento'}
+
+TRANSCRIÇÕES DE AUDIÊNCIAS (${legalCase.transcriptions?.length || 0} mais recentes):
+${legalCase.transcriptions?.map((t: any) => {
+  const dur = t.duration_sec ? `${Math.round(t.duration_sec / 60)}min` : '—';
+  const speakers = Array.isArray(t.speakers_json)
+    ? t.speakers_json.map((s: any) => s.label).join(', ')
+    : 'sem diarização';
+  const text = (t.text || '').replace(/\s+/g, ' ').trim();
+  // Limita pra não explodir contexto — IA vê o suficiente pra entender o caso.
+  const MAX_CHARS = 2500;
+  const excerpt = text.length > MAX_CHARS
+    ? `${text.slice(0, MAX_CHARS)}… [transcrição truncada — ${text.length} chars no total]`
+    : text;
+  return `### ${t.title} (${fmtDate(t.created_at)}) — ${dur}, falantes: ${speakers}\n${excerpt || '[transcrição vazia]'}`;
+}).join('\n\n') || 'Nenhuma transcrição de audiência'}
 
 FICHA TRABALHISTA: ${legalCase.lead?.ficha_trabalhista ? `${legalCase.lead.ficha_trabalhista.completion_pct}% preenchida${legalCase.lead.ficha_trabalhista.finalizado ? ' (finalizada)' : ''}` : 'Não aplicável'}
 `.trim();

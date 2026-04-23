@@ -34,10 +34,12 @@ export class AudienciaTranscricaoService {
 
   /**
    * Cria registro, faz upload do arquivo pro S3 e enfileira job.
+   * `caseId` é opcional — sem ele, a transcrição é avulsa (criada pelo menu
+   * Ferramentas, não aparece em nenhum painel de cliente).
    * O `tmpPath` é o caminho onde o multer salvou o arquivo (diskStorage).
    */
   async createFromUpload(params: {
-    caseId: string;
+    caseId?: string | null;
     title: string;
     tmpPath: string;
     originalName: string;
@@ -48,11 +50,15 @@ export class AudienciaTranscricaoService {
     minSpeakers?: number;
     maxSpeakers?: number;
   }) {
-    const legalCase = await (this.prisma as any).legalCase.findUnique({
-      where: { id: params.caseId },
-      select: { id: true, tenant_id: true },
-    });
-    if (!legalCase) throw new NotFoundException('Processo não encontrado');
+    let tenantId: string | null = params.tenantId ?? null;
+    if (params.caseId) {
+      const legalCase = await (this.prisma as any).legalCase.findUnique({
+        where: { id: params.caseId },
+        select: { id: true, tenant_id: true },
+      });
+      if (!legalCase) throw new NotFoundException('Processo não encontrado');
+      tenantId = legalCase.tenant_id ?? tenantId;
+    }
 
     // Ext do arquivo (pra compor a s3_key). Fallback pra "bin" se não vier.
     const ext = (params.originalName.split('.').pop() || 'bin')
@@ -61,8 +67,8 @@ export class AudienciaTranscricaoService {
 
     const record = await (this.prisma as any).caseTranscription.create({
       data: {
-        legal_case_id: params.caseId,
-        tenant_id: legalCase.tenant_id ?? params.tenantId ?? null,
+        legal_case_id: params.caseId ?? null,
+        tenant_id: tenantId,
         uploaded_by_id: params.userId,
         title: params.title || params.originalName,
         status: 'UPLOADING' as TranscriptionStatus,
@@ -77,7 +83,11 @@ export class AudienciaTranscricaoService {
     });
 
     try {
-      const s3Key = `transcricoes/${params.caseId}/${record.id}/source.${ext}`;
+      // "avulsas" vai pro prefixo genérico; senão vai aninhado no processo
+      const keyPrefix = params.caseId
+        ? `transcricoes/${params.caseId}/${record.id}`
+        : `transcricoes/avulsas/${record.id}`;
+      const s3Key = `${keyPrefix}/source.${ext}`;
       await this.s3.uploadStream(
         s3Key,
         createReadStream(params.tmpPath),
@@ -148,6 +158,58 @@ export class AudienciaTranscricaoService {
         created_at: true,
         finished_at: true,
         uploaded_by: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  /**
+   * Lista global de transcrições — usada na página de Ferramentas.
+   * `scope`:
+   *   - 'all'    : tudo (avulsas + vinculadas a processos)
+   *   - 'avulsas': apenas as sem legal_case_id
+   *   - 'linked' : apenas as vinculadas a processos
+   * `mine=true` filtra pelas do próprio usuário.
+   */
+  async listGlobal(opts: {
+    scope?: 'all' | 'avulsas' | 'linked';
+    userId?: string;
+    mine?: boolean;
+    tenantId?: string | null;
+  }) {
+    const where: any = {};
+    if (opts.tenantId !== undefined) where.tenant_id = opts.tenantId;
+    if (opts.scope === 'avulsas') where.legal_case_id = null;
+    if (opts.scope === 'linked') where.legal_case_id = { not: null };
+    if (opts.mine && opts.userId) where.uploaded_by_id = opts.userId;
+
+    return (this.prisma as any).caseTranscription.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        progress: true,
+        error_message: true,
+        provider: true,
+        diarize: true,
+        duration_sec: true,
+        language: true,
+        source_size: true,
+        video_s3_key: true,
+        created_at: true,
+        finished_at: true,
+        legal_case_id: true,
+        uploaded_by: { select: { id: true, name: true } },
+        legal_case: {
+          select: {
+            id: true,
+            case_number: true,
+            legal_area: true,
+            lead: { select: { id: true, name: true } },
+          },
+        },
       },
     });
   }

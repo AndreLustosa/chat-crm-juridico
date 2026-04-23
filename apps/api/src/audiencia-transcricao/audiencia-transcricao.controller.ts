@@ -49,7 +49,9 @@ export class AudienciaTranscricaoController {
   constructor(private readonly service: AudienciaTranscricaoService) {}
 
   /**
-   * POST /transcriptions?caseId=xxx
+   * POST /transcriptions
+   *   - com ?caseId=xxx  → vincula ao processo (aparece na aba do workspace)
+   *   - sem caseId       → transcrição avulsa (só no menu Ferramentas)
    * Upload multipart (campo "file"). Cria registro PENDING e enfileira job.
    */
   @Post()
@@ -70,19 +72,18 @@ export class AudienciaTranscricaoController {
     }),
   )
   async upload(
-    @Query('caseId') caseId: string,
+    @Query('caseId') caseId: string | undefined,
     @Query('title') title: string | undefined,
     @Query('minSpeakers') minSpeakers: string | undefined,
     @Query('maxSpeakers') maxSpeakers: string | undefined,
     @UploadedFile() file: Express.Multer.File,
     @Request() req: any,
   ) {
-    if (!caseId) throw new BadRequestException('caseId é obrigatório');
     if (!file) throw new BadRequestException('Arquivo obrigatório no campo "file"');
 
     const tmpPath = (file as any).path || join(tmpdir(), (file as any).filename);
     const record = await this.service.createFromUpload({
-      caseId,
+      caseId: caseId || null,
       title: title || file.originalname,
       tmpPath,
       originalName: file.originalname,
@@ -97,15 +98,37 @@ export class AudienciaTranscricaoController {
       id: record.id,
       status: record.status,
       title: record.title,
+      legal_case_id: record.legal_case_id,
       created_at: record.created_at,
     };
   }
 
-  /** GET /transcriptions?caseId=xxx — lista de um processo */
+  /**
+   * GET /transcriptions
+   *   - ?caseId=xxx       → lista de um processo (como antes)
+   *   - ?scope=all        → todas (vinculadas + avulsas) — página Ferramentas
+   *   - ?scope=avulsas    → apenas sem processo
+   *   - ?scope=linked     → apenas vinculadas
+   *   - &mine=true        → filtra só as do usuário logado
+   */
   @Get()
-  list(@Query('caseId') caseId: string) {
-    if (!caseId) throw new BadRequestException('caseId é obrigatório');
-    return this.service.listByCase(caseId);
+  list(
+    @Query('caseId') caseId: string | undefined,
+    @Query('scope') scope: string | undefined,
+    @Query('mine') mine: string | undefined,
+    @Request() req: any,
+  ) {
+    if (caseId) return this.service.listByCase(caseId);
+    const validScopes = ['all', 'avulsas', 'linked'] as const;
+    const s = (scope as any) && validScopes.includes(scope as any)
+      ? (scope as (typeof validScopes)[number])
+      : 'all';
+    return this.service.listGlobal({
+      scope: s,
+      mine: mine === 'true' || mine === '1',
+      userId: req.user?.id,
+      tenantId: req.user?.tenant_id ?? null,
+    });
   }
 
   /** GET /transcriptions/meta/health — status do provider (Whisper) */
