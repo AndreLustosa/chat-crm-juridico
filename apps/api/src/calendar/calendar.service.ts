@@ -1,10 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { isAdmin } from '../common/utils/permissions.util';
-import { brazilNaiveToRealEpoch } from '../common/utils/timezone.util';
+import { brazilNaiveToRealEpoch, brazilRealNowToNaive } from '../common/utils/timezone.util';
 
 const EVENT_TYPES = ['CONSULTA', 'TAREFA', 'AUDIENCIA', 'PERICIA', 'PRAZO', 'OUTRO'] as const;
 const EVENT_STATUSES = ['AGENDADO', 'CONFIRMADO', 'CONCLUIDO', 'CANCELADO', 'ADIADO'] as const;
@@ -50,7 +50,7 @@ const DEFAULT_REMINDERS_BY_TYPE: Record<string, { minutes_before: number; channe
 };
 
 @Injectable()
-export class CalendarService {
+export class CalendarService implements OnApplicationBootstrap {
   private readonly logger = new Logger(CalendarService.name);
 
   constructor(
@@ -58,6 +58,66 @@ export class CalendarService {
     private chatGateway: ChatGateway,
     @InjectQueue('calendar-reminders') private reminderQueue: Queue,
   ) {}
+
+  /**
+   * Re-enfileira todos os reminders pendentes (sent_at=null) de eventos
+   * futuros quando a API sobe. Necessario apos 2026-04-23 porque o fix
+   * do bug de timezone mudou a formula do `triggerAt` — jobs ja na fila
+   * BullMQ estavam com delay 3h adiantado. Este sweep usa a formula nova.
+   *
+   * Idempotente: `enqueueReminders` remove job antigo antes de adicionar
+   * o novo (via jobId deterministico `reminder-${id}`). Roda 1x por boot.
+   *
+   * Depois que todos os reminders afetados ja passaram pelo sweep,
+   * este metodo pode ser removido sem efeitos colaterais.
+   */
+  async onApplicationBootstrap() {
+    try {
+      const nowNaive = brazilRealNowToNaive();
+      const pendingReminders = await this.prisma.eventReminder.findMany({
+        where: {
+          sent_at: null,
+          channel: { in: ['WHATSAPP', 'EMAIL'] },
+          event: {
+            start_at: { gt: nowNaive },
+            status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
+          },
+        },
+        select: {
+          id: true,
+          minutes_before: true,
+          channel: true,
+          event_id: true,
+          event: { select: { id: true, start_at: true } },
+        },
+      });
+
+      if (pendingReminders.length === 0) {
+        this.logger.log('[BOOT-TZ] Nenhum reminder pendente pra re-enfileirar');
+        return;
+      }
+
+      this.logger.log(`[BOOT-TZ] Re-enfileirando ${pendingReminders.length} reminder(s) pendente(s) com delay corrigido…`);
+
+      // Agrupa por event_id pra chamar enqueueReminders uma vez por evento
+      const byEvent = new Map<string, { id: string; start_at: Date; reminders: { id: string; minutes_before: number; channel: string }[] }>();
+      for (const r of pendingReminders) {
+        if (!r.event) continue;
+        if (!byEvent.has(r.event.id)) {
+          byEvent.set(r.event.id, { id: r.event.id, start_at: r.event.start_at, reminders: [] });
+        }
+        byEvent.get(r.event.id)!.reminders.push({ id: r.id, minutes_before: r.minutes_before, channel: r.channel });
+      }
+
+      for (const ev of byEvent.values()) {
+        await this.enqueueReminders(ev.id, ev.start_at, ev.reminders);
+      }
+
+      this.logger.log(`[BOOT-TZ] Re-enfileiramento concluido para ${byEvent.size} evento(s)`);
+    } catch (e: any) {
+      this.logger.warn(`[BOOT-TZ] Falha no re-enfileiramento: ${e.message}`);
+    }
+  }
 
   // ─── CRUD Events ──────────────────────────────────────
 
