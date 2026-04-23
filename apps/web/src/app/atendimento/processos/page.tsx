@@ -64,6 +64,101 @@ const formatCNJ = (num: string | null | undefined): string => {
   return num; // Não é CNJ de 20 dígitos, retorna como está
 };
 
+/**
+ * Identifica tribunal + sistema a partir do numero CNJ.
+ * CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO
+ *   J (1 digito): segmento da justica
+ *   TR (2 digitos): tribunal dentro do segmento
+ *
+ * Retorna { code: 'TJAL', system: 'ESAJ', label: 'TJAL-ESAJ', ramo: 'Estadual' }
+ * ou null se nao conseguir identificar.
+ */
+function getTribunalInfo(caseNumber: string | null | undefined): {
+  code: string;
+  system: string | null;
+  label: string;
+  ramo: string;
+  color: string;
+} | null {
+  if (!caseNumber) return null;
+  const digits = caseNumber.replace(/\D/g, '');
+  if (digits.length !== 20) return null;
+  const j = digits.slice(13, 14);   // segmento
+  const tr = digits.slice(14, 16);  // tribunal
+
+  // Ramos da justica + sistema predominante
+  // Cores: estadual=sky, trabalho=red, federal=emerald, eleitoral=amber
+  const TRIBUNAIS: Record<string, { code: string; system: string | null; ramo: string; color: string }> = {
+    // ─── Justica Estadual (J=8) ───
+    '8.01': { code: 'TJAC',  system: 'ESAJ',   ramo: 'Estadual', color: 'sky' },
+    '8.02': { code: 'TJAL',  system: 'ESAJ',   ramo: 'Estadual', color: 'sky' },
+    '8.03': { code: 'TJAP',  system: 'TUCUJURIS', ramo: 'Estadual', color: 'sky' },
+    '8.04': { code: 'TJAM',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.05': { code: 'TJBA',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.06': { code: 'TJCE',  system: 'ESAJ',   ramo: 'Estadual', color: 'sky' },
+    '8.07': { code: 'TJDFT', system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.08': { code: 'TJES',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.09': { code: 'TJGO',  system: 'PROJUDI', ramo: 'Estadual', color: 'sky' },
+    '8.10': { code: 'TJMA',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.11': { code: 'TJMT',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.12': { code: 'TJMS',  system: 'ESAJ',   ramo: 'Estadual', color: 'sky' },
+    '8.13': { code: 'TJMG',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.14': { code: 'TJPA',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.15': { code: 'TJPB',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.16': { code: 'TJPR',  system: 'PROJUDI', ramo: 'Estadual', color: 'sky' },
+    '8.17': { code: 'TJPE',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.18': { code: 'TJPI',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.19': { code: 'TJRJ',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.20': { code: 'TJRN',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.21': { code: 'TJRS',  system: 'Eproc', ramo: 'Estadual', color: 'sky' },
+    '8.22': { code: 'TJRO',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.23': { code: 'TJRR',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.24': { code: 'TJSC',  system: 'Eproc', ramo: 'Estadual', color: 'sky' },
+    '8.25': { code: 'TJSE',  system: 'PJE',    ramo: 'Estadual', color: 'sky' },
+    '8.26': { code: 'TJSP',  system: 'ESAJ',   ramo: 'Estadual', color: 'sky' },
+    '8.27': { code: 'TJTO',  system: 'Eproc', ramo: 'Estadual', color: 'sky' },
+    // ─── Justica do Trabalho (J=5) ───
+    '5.01': { code: 'TRT1',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.02': { code: 'TRT2',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.03': { code: 'TRT3',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.04': { code: 'TRT4',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.05': { code: 'TRT5',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.06': { code: 'TRT6',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.07': { code: 'TRT7',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.08': { code: 'TRT8',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.09': { code: 'TRT9',  system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.10': { code: 'TRT10', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.11': { code: 'TRT11', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.12': { code: 'TRT12', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.13': { code: 'TRT13', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.14': { code: 'TRT14', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.15': { code: 'TRT15', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.16': { code: 'TRT16', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.17': { code: 'TRT17', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.18': { code: 'TRT18', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.19': { code: 'TRT19', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.20': { code: 'TRT20', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.21': { code: 'TRT21', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.22': { code: 'TRT22', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.23': { code: 'TRT23', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    '5.24': { code: 'TRT24', system: 'PJE', ramo: 'Trabalho', color: 'red' },
+    // ─── Justica Federal (J=4) ───
+    '4.01': { code: 'TRF1', system: 'PJE', ramo: 'Federal', color: 'emerald' },
+    '4.02': { code: 'TRF2', system: 'PJE', ramo: 'Federal', color: 'emerald' },
+    '4.03': { code: 'TRF3', system: 'PJE', ramo: 'Federal', color: 'emerald' },
+    '4.04': { code: 'TRF4', system: 'Eproc', ramo: 'Federal', color: 'emerald' },
+    '4.05': { code: 'TRF5', system: 'PJE', ramo: 'Federal', color: 'emerald' },
+    '4.06': { code: 'TRF6', system: 'PJE', ramo: 'Federal', color: 'emerald' },
+  };
+  const key = `${j}.${tr}`;
+  const info = TRIBUNAIS[key];
+  if (!info) return null;
+  return {
+    ...info,
+    label: info.system ? `${info.code}-${info.system}` : info.code,
+  };
+}
+
 // ─── Types ────────────────────────────────────────────────────
 
 interface LegalCase {
@@ -357,16 +452,11 @@ function ProcessoCard({
         </p>
       </div>
 
-      {/* Badges */}
+      {/* Badges area juridica + advogado */}
       <div className="flex flex-wrap gap-1 mb-2">
         {legalCase.legal_area && (
           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-violet-500/12 text-violet-400 text-[9px] font-bold border border-violet-500/20">
             ⚖️ {legalCase.legal_area}
-          </span>
-        )}
-        {legalCase.court && (
-          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/12 text-blue-400 text-[9px] font-bold border border-blue-500/20 truncate max-w-[110px]">
-            🏛️ {legalCase.court}
           </span>
         )}
         {legalCase.lawyer?.name && (
@@ -375,6 +465,56 @@ function ProcessoCard({
           </span>
         )}
       </div>
+
+      {/* Onde o processo tramita — Tribunal/Sistema (do CNJ) + Vara + Tipo de Acao */}
+      {(() => {
+        const tribunal = getTribunalInfo(legalCase.case_number);
+        if (!tribunal && !legalCase.court && !legalCase.action_type) return null;
+        // Mapa de cores tailwind pro tribunal.color
+        const colorCls: Record<string, string> = {
+          sky:     'bg-sky-500/10 border-sky-500/25 text-sky-400',
+          red:     'bg-red-500/10 border-red-500/25 text-red-400',
+          emerald: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
+          amber:   'bg-amber-500/10 border-amber-500/25 text-amber-400',
+        };
+        return (
+          <div className="mb-2 flex flex-col gap-1">
+            {tribunal && (
+              <div
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border ${colorCls[tribunal.color] || colorCls.sky} self-start`}
+                title={`${tribunal.code} · Justiça ${tribunal.ramo}${tribunal.system ? ` · Sistema ${tribunal.system}` : ''}`}
+              >
+                <span className="text-[10px] shrink-0">⚖️</span>
+                <span className="text-[10px] font-bold leading-tight">
+                  {tribunal.label}
+                </span>
+              </div>
+            )}
+            {legalCase.court && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-500/8 border border-blue-500/20"
+                title={legalCase.court}
+              >
+                <span className="text-[10px] shrink-0">🏛️</span>
+                <span className="text-[10px] font-semibold text-blue-400 leading-tight line-clamp-2 break-words">
+                  {legalCase.court}
+                </span>
+              </div>
+            )}
+            {legalCase.action_type && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-500/8 border border-indigo-500/20"
+                title={legalCase.action_type}
+              >
+                <span className="text-[10px] shrink-0">📋</span>
+                <span className="text-[10px] font-semibold text-indigo-400 leading-tight line-clamp-2 break-words">
+                  {legalCase.action_type}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Todos os eventos (audiências, perícias, prazos, tarefas) */}
       {legalCase.calendar_events && legalCase.calendar_events.length > 0 && (() => {
