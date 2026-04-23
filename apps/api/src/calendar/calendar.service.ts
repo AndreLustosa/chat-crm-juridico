@@ -317,7 +317,82 @@ export class CalendarService {
       await this.expandRecurrence(event);
     }
 
+    // ── Auto-promocao do tracking_stage do processo ────────────────────────
+    // Ao criar CalendarEvent futuro tipo AUDIENCIA ou PERICIA vinculado a um
+    // LegalCase, avanca automaticamente o tracking_stage pra coluna
+    // correspondente no kanban. Nunca regressa (so avanca se target > atual).
+    if (data.legal_case_id && ['AUDIENCIA', 'PERICIA'].includes(data.type)) {
+      const isFuture = new Date(data.start_at) > new Date();
+      if (isFuture) {
+        await this.autoPromoteTrackingStage(
+          data.legal_case_id,
+          data.type as 'AUDIENCIA' | 'PERICIA',
+        ).catch((e) => {
+          this.logger.warn(`[AUTO-STAGE] Falha ao promover processo ${data.legal_case_id}: ${e.message}`);
+        });
+      }
+    }
+
     return event;
+  }
+
+  /**
+   * Avanca o tracking_stage do LegalCase automaticamente quando um
+   * CalendarEvent AUDIENCIA ou PERICIA e agendado.
+   *
+   * Regras:
+   *   - AUDIENCIA -> INSTRUCAO (indice 5)
+   *   - PERICIA   -> PERICIA_AGENDADA (indice 4)
+   *   - So avanca se tracking_stage atual e MENOR que o target (nao regressa)
+   *   - Nao mexe em casos arquivados, encerrados ou em etapas finais
+   *     (JULGAMENTO, RECURSO, TRANSITADO, EXECUCAO, ENCERRADO)
+   */
+  private async autoPromoteTrackingStage(
+    legalCaseId: string,
+    eventType: 'AUDIENCIA' | 'PERICIA',
+  ) {
+    // Ordem canonica dos tracking_stages (indice = posicao no kanban)
+    const ORDER = [
+      'DISTRIBUIDO',       // 0
+      'CITACAO',           // 1
+      'CONTESTACAO',       // 2
+      'REPLICA',           // 3
+      'PERICIA_AGENDADA',  // 4
+      'INSTRUCAO',         // 5 — Audiencia/Instrucao
+      'ALEGACOES_FINAIS',  // 6
+      'AGUARDANDO_SENTENCA', // 7
+      'JULGAMENTO',        // 8
+      'RECURSO',           // 9
+      'TRANSITADO',        // 10
+      'EXECUCAO',          // 11
+      'ENCERRADO',         // 12
+    ];
+    const targetStage = eventType === 'AUDIENCIA' ? 'INSTRUCAO' : 'PERICIA_AGENDADA';
+    const targetIdx = ORDER.indexOf(targetStage);
+
+    const lc = await this.prisma.legalCase.findUnique({
+      where: { id: legalCaseId },
+      select: { id: true, tracking_stage: true, archived: true, case_number: true },
+    });
+    if (!lc || lc.archived) return;
+
+    const currentIdx = ORDER.indexOf(lc.tracking_stage || 'DISTRIBUIDO');
+    // Se o stage atual nao e reconhecido (nao ta no ORDER), indice = -1.
+    // Nesse caso, tratamos como 'inicio' (0) pra permitir promocao.
+    const effectiveCurrentIdx = currentIdx < 0 ? 0 : currentIdx;
+
+    if (effectiveCurrentIdx >= targetIdx) {
+      // Ja esta no target ou mais avancado — nao mexe
+      return;
+    }
+
+    await this.prisma.legalCase.update({
+      where: { id: legalCaseId },
+      data: { tracking_stage: targetStage, stage_changed_at: new Date() },
+    });
+    this.logger.log(
+      `[AUTO-STAGE] ${lc.case_number} ${lc.tracking_stage || '-'} -> ${targetStage} (evento ${eventType} agendado)`,
+    );
   }
 
   private async enqueueReminders(eventId: string, startAt: Date, reminders: { id: string; minutes_before: number; channel: string }[]) {
