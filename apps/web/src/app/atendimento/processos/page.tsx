@@ -4553,7 +4553,7 @@ function ProcessosPageContent() {
                 title="Filtros avançados"
               >
                 <SlidersHorizontal size={13} />
-                Filtros
+                <span className="hidden lg:inline">Filtros</span>
                 {activeFiltersCount > 0 && (
                   <span className="ml-0.5 px-1.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold">
                     {activeFiltersCount}
@@ -4571,7 +4571,7 @@ function ProcessosPageContent() {
                   title="Views salvas"
                 >
                   <Bookmark size={13} />
-                  Views
+                  <span className="hidden lg:inline">Views</span>
                 </button>
                 {showSavedViewsMenu && (
                   <>
@@ -4616,8 +4616,9 @@ function ProcessosPageContent() {
               <button
                 onClick={() => setView('archived')}
                 className="text-[11px] font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg hover:bg-accent transition-colors"
+                title="Arquivados"
               >
-                <Archive size={13} /> Arquivados
+                <Archive size={13} /> <span className="hidden xl:inline">Arquivados</span>
               </button>
             ) : (
               <button
@@ -4632,11 +4633,12 @@ function ProcessosPageContent() {
             <button
               onClick={() => router.push('/atendimento/djen')}
               className="text-[11px] font-semibold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 px-3 py-1.5 border border-sky-500/30 rounded-lg hover:bg-sky-500/5 transition-colors"
+              title="DJEN — diário eletrônico"
             >
-              <Bell size={13} /> DJEN
+              <Bell size={13} /> <span className="hidden xl:inline">DJEN</span>
             </button>
 
-            {/* Search */}
+            {/* Search — mais estreito em telas menores */}
             <div className="relative">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60 pointer-events-none" />
               <input
@@ -4644,7 +4646,7 @@ function ProcessosPageContent() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Buscar processo…"
-                className="pl-8 pr-3 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 w-44"
+                className="pl-8 pr-3 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 w-32 lg:w-44"
               />
             </div>
 
@@ -4665,10 +4667,10 @@ function ProcessosPageContent() {
             {view === 'active' && currentUserIsAdmin && (
               <button
                 onClick={() => setShowOabImportModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-lg hover:opacity-90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-lg hover:opacity-90 transition-all shrink-0"
                 title="Importar processos pelo número da OAB"
               >
-                <ExternalLink size={13} /> Importar OAB
+                <ExternalLink size={13} /> <span className="hidden xl:inline">Importar OAB</span><span className="xl:hidden">OAB</span>
               </button>
             )}
 
@@ -4676,10 +4678,10 @@ function ProcessosPageContent() {
             {view === 'active' && (
               <button
                 onClick={() => { setPrefillData(null); setShowCadastrarModal(true); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all shrink-0"
                 title="Cadastrar processo em andamento"
               >
-                <FolderPlus size={13} /> Cadastrar
+                <FolderPlus size={13} /> <span className="hidden xl:inline">Cadastrar</span>
               </button>
             )}
 
