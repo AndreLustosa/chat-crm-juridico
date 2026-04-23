@@ -71,6 +71,79 @@ export class WhatsappService {
     return this.request('POST', `message/sendText/${targetInstance}`, payload);
   }
 
+  /**
+   * Verifica se um numero existe no WhatsApp via Evolution API.
+   * Retorna { exists: bool, jid: string | null, number: string }.
+   *
+   * Util pra evitar tentar enviar pra numeros invalidos (ex: sem DDI,
+   * sem nono digito em DDDs que exigem, fixo sem WhatsApp Business).
+   * Bug reportado 2026-04-23 — Paulo Henrique 551143922725 (DDD 11
+   * sem o 9 obrigatorio).
+   */
+  async checkNumberExists(number: string, instanceName?: string): Promise<{ exists: boolean; jid: string | null; number: string }> {
+    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
+    try {
+      const result: any = await this.request('POST', `chat/whatsappNumbers/${targetInstance}`, { numbers: [number] });
+      // Evolution retorna array [{ exists, jid, number }]
+      const entry = Array.isArray(result) ? result[0] : result?.[0] || result;
+      return {
+        exists: Boolean(entry?.exists),
+        jid: entry?.jid || null,
+        number: entry?.number || number,
+      };
+    } catch (e: any) {
+      this.logger.warn(`[checkNumber] Falha ao verificar ${number}: ${e?.message || e}`);
+      // Em caso de erro na API, retorna exists=true pra nao bloquear envio
+      // (melhor tentar enviar e deixar sendText reportar erro real).
+      return { exists: true, jid: null, number };
+    }
+  }
+
+  /**
+   * Tenta resolver o JID correto pra um numero BR:
+   *   1. Tenta o numero como veio (normalmente sem nono digito, 12 digitos)
+   *   2. Se nao existir, tenta adicionando o nono digito (13 digitos)
+   *   3. Retorna { number: formato_que_funciona, exists: bool }
+   *
+   * Padrao da Anatel: DDDs 11-19 (SP), 21-28 (RJ/ES/MG), 31-34 (MG), 41-49
+   * (PR/SC/RS) exigem nono digito obrigatorio. DDDs menores (norte/nordeste)
+   * frequentemente ainda funcionam sem o 9 em numeros antigos.
+   */
+  async resolveBrazilianWhatsappNumber(
+    number: string,
+    instanceName?: string,
+  ): Promise<{ number: string; exists: boolean; tried: string[] }> {
+    const tried: string[] = [];
+    const cleaned = number.replace(/\D/g, '');
+
+    // Primeira tentativa: como veio
+    tried.push(cleaned);
+    let check = await this.checkNumberExists(cleaned, instanceName);
+    if (check.exists) return { number: cleaned, exists: true, tried };
+
+    // Fallback: se tem 12 digitos (55 + DDD + 8), adiciona o 9 antes do numero
+    if (cleaned.length === 12 && cleaned.startsWith('55')) {
+      const ddd = cleaned.substring(2, 4);
+      const rest = cleaned.substring(4);
+      const with9 = `55${ddd}9${rest}`;
+      tried.push(with9);
+      check = await this.checkNumberExists(with9, instanceName);
+      if (check.exists) return { number: with9, exists: true, tried };
+    }
+
+    // Fallback inverso: se tem 13 digitos (55 + DDD + 9 + 8), tenta sem o 9
+    if (cleaned.length === 13 && cleaned.startsWith('55') && cleaned.charAt(4) === '9') {
+      const ddd = cleaned.substring(2, 4);
+      const rest = cleaned.substring(5);
+      const without9 = `55${ddd}${rest}`;
+      tried.push(without9);
+      check = await this.checkNumberExists(without9, instanceName);
+      if (check.exists) return { number: without9, exists: true, tried };
+    }
+
+    return { number: cleaned, exists: false, tried };
+  }
+
   async deleteForEveryone(instanceName: string, remoteJid: string, externalMessageId: string, fromMe: boolean) {
     const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
     return this.request('DELETE', `chat/deleteMessageForEveryone/${targetInstance}`, {

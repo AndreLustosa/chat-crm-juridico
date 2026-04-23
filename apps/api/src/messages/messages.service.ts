@@ -277,25 +277,59 @@ export class MessagesService {
     // O DB salva o texto limpo; o WhatsApp recebe com assinatura
     const textToSend = senderName ? `*${senderName}:* ${text}` : text;
 
+    // 1a. Resolve o numero via Evolution (tenta como esta, fallback com/sem
+    // nono digito). Bug reportado 2026-04-23 — Paulo Henrique 551143922725
+    // (DDD 11 sem o 9 obrigatorio) falhava silenciosamente.
+    const resolved = await this.whatsapp.resolveBrazilianWhatsappNumber(
+      convo.lead.phone,
+      convo.instance_name || undefined,
+    );
+    if (!resolved.exists) {
+      this.logger.warn(
+        `[send] Numero ${convo.lead.phone} nao existe no WhatsApp (tentado: ${resolved.tried.join(', ')})`,
+      );
+      throw new BadRequestException(
+        `O numero ${convo.lead.phone} nao existe no WhatsApp. ` +
+          `Verifique se falta o nono digito (celulares de SP/RJ/MG) ou se o numero esta correto.`,
+      );
+    }
+    const targetNumber = resolved.number;
+    // Se o numero resolvido eh diferente do phone do lead, atualiza o Lead
+    // pro formato que funciona (evita fazer check toda vez).
+    if (targetNumber !== convo.lead.phone.replace(/\D/g, '')) {
+      this.logger.log(
+        `[send] Lead ${convo.lead.id}: phone ${convo.lead.phone} -> ${targetNumber} (corrigido via Evolution)`,
+      );
+      await this.prisma.lead.update({
+        where: { id: convo.lead.id },
+        data: { phone: targetNumber },
+      }).catch((e) => this.logger.warn(`[send] Falha atualizar phone do lead: ${e.message}`));
+    }
+
     let externalMsg: any;
-    let sendStatus = 'enviado';
     try {
       externalMsg = await this.whatsapp.sendText(
-        convo.lead.phone,
+        targetNumber,
         textToSend,
         convo.instance_name || undefined,
         quotedPayload,
       );
       if (externalMsg?.statusCode >= 400 || externalMsg?.error) {
         this.logger.error(`Evolution API erro ao enviar texto: ${JSON.stringify(externalMsg)}`);
-        sendStatus = 'erro';
+        // NAO salva msg com status=erro no banco — antes o codigo salvava e
+        // cada clique do usuario criava duplicata visivel no chat (bug 2026-04-23).
+        throw new BadRequestException(
+          `Falha ao enviar mensagem via WhatsApp: ${externalMsg?.error || 'erro desconhecido'}`,
+        );
       }
-    } catch (e) {
+    } catch (e: any) {
+      // Preserva BadRequest especifico (numero nao existe) lancado acima
+      if (e instanceof BadRequestException) throw e;
       this.logger.error(`Exceção ao enviar texto: ${e.message}`);
-      sendStatus = 'erro';
+      throw new BadRequestException(`Falha ao enviar mensagem via WhatsApp: ${e.message}`);
     }
 
-    // 2. Persist in DB
+    // 2. Persist in DB (so chega aqui se Evolution confirmou o envio)
     const externalId = externalMsg?.key?.id || `out_${Date.now()}`;
     const msg = await this.prisma.message.create({
       data: {
@@ -304,17 +338,11 @@ export class MessagesService {
         type: 'text',
         text,
         external_message_id: externalId,
-        status: sendStatus,
+        status: 'enviado',
         reply_to_id: replyToId || null,
         reply_to_text: replyToText,
       }
     });
-
-    if (sendStatus === 'erro') {
-      this.chatGateway.emitNewMessage(convo.id, msg);
-      this.chatGateway.emitConversationsUpdate(null);
-      throw new BadRequestException('Falha ao enviar mensagem via WhatsApp');
-    }
 
     // 3. Update Convo
     await this.prisma.conversation.update({
