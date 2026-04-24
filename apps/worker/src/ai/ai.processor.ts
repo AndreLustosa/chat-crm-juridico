@@ -992,7 +992,15 @@ export class AiProcessor extends WorkerHost {
         if (lead?.is_client) {
           activeCases = await (this.prisma as any).legalCase.findMany({
             where: { lead_id: convo.lead_id, archived: false },
-            select: { id: true, case_number: true, legal_area: true, tracking_stage: true, in_tracking: true, stage: true, opposing_party: true },
+            select: {
+              id: true, case_number: true, legal_area: true,
+              tracking_stage: true, in_tracking: true, stage: true,
+              opposing_party: true,
+              // Polo processual — IA precisa saber pra nao inverter sujeitos
+              // em mensagens sobre o processo ("seu processo contra X" vs
+              // "processo de X contra voce").
+              client_is_author: true,
+            },
             orderBy: { stage_changed_at: 'desc' },
           });
           if (activeCases.length > 0) isActiveClient = true;
@@ -1234,11 +1242,22 @@ export class AiProcessor extends WorkerHost {
           const stageLabel = c.in_tracking
             ? (TRACKING_LABELS[c.tracking_stage] || c.tracking_stage || 'Em acompanhamento')
             : (PREP_LABELS[c.stage] || c.stage || 'Em preparação');
-          return `  - Nº ${c.case_number || 'Sem número'} | ${c.legal_area || 'Área não definida'} | Estágio: ${stageLabel}${c.opposing_party ? ` | vs ${c.opposing_party}` : ''}`;
+          // Polo do cliente: AUTOR (polo ativo — cliente processando) ou
+          // REU (polo passivo — cliente sendo processado). Campo client_is_author
+          // default true pra cobrir caso antigo sem info explicita.
+          const poloLabel = c.client_is_author === false ? 'RÉU' : 'AUTOR';
+          const relacao = c.client_is_author === false
+            ? (c.opposing_party ? ` | AUTOR (contra o cliente): ${c.opposing_party}` : '')
+            : (c.opposing_party ? ` | RÉU: ${c.opposing_party}` : '');
+          return `  - Nº ${c.case_number || 'Sem número'} | ${c.legal_area || 'Área não definida'} | Polo do cliente: ${poloLabel} | Estágio: ${stageLabel}${relacao}`;
         });
         activeCasesInfoBlock = `═══════════════════════════════════════════════════
 ⚖️ PROCESSOS ATIVOS DO CLIENTE (${activeCases.length}):
 ${caseLines.join('\n')}
+
+ATENÇÃO AO POLO PROCESSUAL (CRÍTICO PRA NÃO ERRAR):
+  - Se o cliente é AUTOR → ele PROCESSOU a parte contrária. Refira-se como "seu processo CONTRA [nome]" ou "a ação que VOCÊ moveu contra [nome]".
+  - Se o cliente é RÉU → ele ESTÁ SENDO PROCESSADO pela parte contrária. Refira-se como "a ação DE [nome] contra você" ou "o processo que [nome] moveu contra você". NUNCA diga "seu processo contra X" porque o cliente não está processando ninguém.
 
 IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investigue fatos, NÃO pergunte dados pessoais. Responda sobre o andamento do processo.
 ═══════════════════════════════════════════════════

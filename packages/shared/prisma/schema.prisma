@@ -524,6 +524,12 @@ model LegalCase {
   sentence_date    DateTime? // Data da sentença/acórdão
   sentence_type    String? // PROCEDENTE, PARCIAL, IMPROCEDENTE, ACORDO
   opposing_party   String? // Parte contrária (nome)
+  // Polo processual do cliente. true = cliente eh autor (polo ativo),
+  // false = cliente eh reu (polo passivo). Default true porque a maior parte
+  // dos processos do escritorio eh com o cliente autorando a acao.
+  // A IA usa esse campo pra se referir corretamente ao processo ("seu processo
+  // contra X" vs "processo de X contra voce"). Adicionado 2026-04-24.
+  client_is_author Boolean @default(true)
   judge            String? // Juiz/Desembargador
   priority         String    @default("NORMAL") // URGENTE | NORMAL | BAIXA
   google_drive_folder_id String? // Pasta do caso no Google Drive

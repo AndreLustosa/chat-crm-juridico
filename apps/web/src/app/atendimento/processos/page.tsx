@@ -2999,6 +2999,9 @@ function CadastrarProcessoModal({
         legal_area: legalArea || undefined,
         action_type: actionType || undefined,
         opposing_party: opposingPartyForApi || undefined,
+        // Polo processual do cliente (toggle "Escritorio representa: Autor|Reu")
+        // Usado pela IA pra se referir corretamente ao processo em mensagens.
+        client_is_author: clientIsAuthor,
         court: court || undefined,
         judge: judge || undefined,
         claim_value: claimValue ? parseFloat(claimValue) : undefined,

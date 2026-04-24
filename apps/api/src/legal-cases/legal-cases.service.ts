@@ -875,6 +875,8 @@ export class LegalCasesService {
     lead_email?: string;
     // Atendente responsável (operador)
     assigned_user_id?: string;
+    // Polo processual do cliente (default true = autor)
+    client_is_author?: boolean;
   }) {
     const VALID_TRACKING = TRACKING_STAGES.map(s => s.id) as string[];
     const trackingStage = (
@@ -1052,6 +1054,10 @@ export class LegalCasesService {
         legal_area: data.legal_area,
         action_type: data.action_type,
         opposing_party: data.opposing_party,
+        // Polo do cliente: true=autor, false=reu. Default true pro caso
+        // comum (cliente autorando a acao). Frontend envia explicitamente
+        // baseado no toggle "Escritorio representa: Autor | Reu".
+        client_is_author: data.client_is_author ?? true,
         claim_value: data.claim_value,
         court: data.court,
         judge: data.judge,
@@ -1673,6 +1679,7 @@ IDENTIFICAÇÃO
 - Área jurídica: ${legalCase.legal_area || '—'}
 - Tipo de ação: ${legalCase.action_type || '—'}
 - Vara/Tribunal: ${legalCase.court || '—'}
+- Polo do cliente: ${legalCase.client_is_author === false ? 'RÉU (polo passivo — está sendo processado)' : 'AUTOR (polo ativo — é quem move a ação)'}
 - Parte contrária: ${legalCase.opposing_party || '—'}
 - Juiz/Desembargador: ${legalCase.judge || '—'}
 - Valor da causa: ${fmtBRL(legalCase.claim_value)}

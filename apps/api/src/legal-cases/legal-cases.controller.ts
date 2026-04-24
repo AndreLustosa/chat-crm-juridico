@@ -152,6 +152,9 @@ export class LegalCasesController {
       lawyer_id?: string;
       // ADMIN pode escolher o atendente responsável
       assigned_user_id?: string;
+      // Polo processual do cliente: true = autor (padrao), false = reu.
+      // Usado pela IA pra se referir corretamente ao processo em mensagens.
+      client_is_author?: boolean;
     },
     @Request() req: any,
   ) {
