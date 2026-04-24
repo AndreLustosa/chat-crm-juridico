@@ -54,12 +54,50 @@ class WhisperPipeline:
         return self._asr
 
     def _load_align(self, language: str):
-        if self._align_model is None or self._align_lang != language:
+        """Carrega modelo de alinhamento word-level. Não é crítico: se falhar,
+        o pipeline segue com timestamps segment-level do Whisper (menos precisos
+        mas suficientes pra clicar e pular o vídeo).
+
+        Bug conhecido do whisperx 3.3.0 em pt-BR: o default aponta pra
+        jonatasgrosman/wav2vec2-large-xlsr-53-portuguese que às vezes retorna
+        404. Tentamos com HF_TOKEN primeiro, depois um modelo multilingual
+        estável como fallback.
+        """
+        if self._align_model is not None and self._align_lang == language:
+            return self._align_model, self._align_meta
+
+        kwargs = {"language_code": language, "device": settings.device}
+        # Se tiver HF_TOKEN, passa — alguns modelos gated precisam
+        if settings.hf_token:
+            import os
+            os.environ.setdefault("HF_TOKEN", settings.hf_token)
+            os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", settings.hf_token)
+
+        try:
             log.info("Carregando modelo de alinhamento word-level lang=%s", language)
-            self._align_model, self._align_meta = whisperx.load_align_model(
-                language_code=language, device=settings.device
+            self._align_model, self._align_meta = whisperx.load_align_model(**kwargs)
+        except Exception as e:
+            # Fallback: tenta modelo multilingual oficial (wav2vec2-large-xlsr-53
+            # de Facebook é base pública, não fine-tuned pra pt mas funciona)
+            log.warning(
+                "Default align model falhou (%s) — tentando fallback jonatasgrosman/wav2vec2-xls-r-1b-portuguese",
+                e,
             )
-            self._align_lang = language
+            try:
+                self._align_model, self._align_meta = whisperx.load_align_model(
+                    language_code=language,
+                    device=settings.device,
+                    model_name="jonatasgrosman/wav2vec2-xls-r-1b-portuguese",
+                )
+            except Exception as e2:
+                log.warning(
+                    "Fallback tambem falhou (%s) — seguindo sem alinhamento word-level",
+                    e2,
+                )
+                self._align_model = None
+                self._align_meta = None
+
+        self._align_lang = language
         return self._align_model, self._align_meta
 
     def _load_diarize(self):
@@ -95,17 +133,27 @@ class WhisperPipeline:
         language = result.get("language", settings.language or "pt")
 
         align_model, align_meta = self._load_align(language)
-        aligned = whisperx.align(
-            result["segments"],
-            align_model,
-            align_meta,
-            audio,
-            settings.device,
-            return_char_alignments=False,
-        )
 
-        segments = aligned.get("segments", [])
-        words = aligned.get("word_segments", [])
+        segments: list[dict[str, Any]]
+        words: list[dict[str, Any]]
+        aligned: dict[str, Any] | None = None
+
+        if align_model is not None:
+            aligned = whisperx.align(
+                result["segments"],
+                align_model,
+                align_meta,
+                audio,
+                settings.device,
+                return_char_alignments=False,
+            )
+            segments = aligned.get("segments", [])
+            words = aligned.get("word_segments", [])
+        else:
+            # Sem alinhamento — usa segmentos do Whisper direto (sem word-level)
+            log.info("Seguindo sem alinhamento word-level (segmentos do Whisper)")
+            segments = result.get("segments", [])
+            words = []
 
         if do_diarize:
             diar = self._load_diarize()
@@ -114,7 +162,10 @@ class WhisperPipeline:
                 min_speakers=min_speakers or settings.min_speakers,
                 max_speakers=max_speakers or settings.max_speakers,
             )
-            assigned = whisperx.assign_word_speakers(diar_segments, aligned)
+            # assign_word_speakers precisa do formato do align; se não tiver,
+            # ainda dá pra diarizar em nível de segmento.
+            source = aligned if aligned is not None else {"segments": segments, "word_segments": words}
+            assigned = whisperx.assign_word_speakers(diar_segments, source)
             segments = assigned.get("segments", segments)
             words = assigned.get("word_segments", words)
 
