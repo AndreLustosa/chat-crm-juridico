@@ -200,6 +200,41 @@ export class SettingsService {
     await this.set('AI_COOLDOWN_SECONDS', String(seconds));
   }
 
+  // ─── Transcrição (Whisper local + Groq) ────────────────────────
+  /**
+   * Lê config dos providers de transcrição. DB tem prioridade sobre env
+   * (deixa admin trocar via UI sem precisar redeploy).
+   */
+  async getTranscriptionConfig() {
+    const groqKey = await this.get('GROQ_API_KEY');
+    const groqModel = await this.get('GROQ_MODEL');
+    const whisperUrl = await this.get('WHISPER_SERVICE_URL');
+    const defaultProvider = await this.get('TRANSCRIPTION_PROVIDER');
+    const hfToken = await this.get('HF_TOKEN');
+
+    return {
+      groqApiKey: groqKey || process.env.GROQ_API_KEY || '',
+      groqModel: groqModel || process.env.GROQ_MODEL || 'whisper-large-v3',
+      whisperServiceUrl: whisperUrl || process.env.WHISPER_SERVICE_URL || 'http://crm-whisper:8000',
+      defaultProvider: defaultProvider || process.env.TRANSCRIPTION_PROVIDER || 'whisper-local',
+      hfToken: hfToken || process.env.HF_TOKEN || '',
+    };
+  }
+
+  async setTranscriptionConfig(data: {
+    groqApiKey?: string;
+    groqModel?: string;
+    whisperServiceUrl?: string;
+    defaultProvider?: string;
+    hfToken?: string;
+  }) {
+    if (data.groqApiKey !== undefined)        await this.set('GROQ_API_KEY', data.groqApiKey);
+    if (data.groqModel)                       await this.set('GROQ_MODEL', data.groqModel);
+    if (data.whisperServiceUrl)               await this.set('WHISPER_SERVICE_URL', data.whisperServiceUrl);
+    if (data.defaultProvider)                 await this.set('TRANSCRIPTION_PROVIDER', data.defaultProvider);
+    if (data.hfToken !== undefined)           await this.set('HF_TOKEN', data.hfToken);
+  }
+
   async setAiConfig(apiKey: string) {
     await this.set('OPENAI_API_KEY', apiKey);
   }

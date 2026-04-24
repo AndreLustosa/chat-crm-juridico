@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../s3/s3.service';
+import { SettingsService } from '../settings/settings.service';
 import { createProviderById } from '@crm/shared';
 import type { TranscriptionJobStatus, TranscriptionProvider } from '@crm/shared';
 import { convertToMp4, extractAudioWav, extractAudioMp3 } from './ffmpeg.util';
@@ -29,25 +30,29 @@ import { convertToMp4, extractAudioWav, extractAudioMp3 } from './ffmpeg.util';
 @Processor('transcription-jobs')
 export class TranscricaoProcessor extends WorkerHost {
   private readonly logger = new Logger(TranscricaoProcessor.name);
-  private readonly providers = new Map<string, TranscriptionProvider>();
 
   // Polling: a cada 15s durante job ativo. Timeout duro de 12h (audiência grande).
   private readonly POLL_INTERVAL_MS = 15_000;
   private readonly MAX_WAIT_MS = 12 * 60 * 60 * 1000;
 
-  /** Lazy: instancia o provider só na primeira vez que precisar dele. */
-  private getProvider(id: string): TranscriptionProvider {
-    let p = this.providers.get(id);
-    if (!p) {
-      p = createProviderById(id);
-      this.providers.set(id, p);
-    }
-    return p;
+  /**
+   * Cria o provider com config FRESH do SettingsService a cada job.
+   * Não cacheia mais por id porque admin pode trocar GROQ_API_KEY pela UI
+   * e queremos pegar o valor novo no próximo job sem reiniciar o worker.
+   */
+  private async buildProvider(id: string): Promise<TranscriptionProvider> {
+    const cfg = await this.settings.getTranscriptionConfig();
+    return createProviderById(id, {
+      groqApiKey: cfg.groqApiKey,
+      groqModel: cfg.groqModel,
+      whisperServiceUrl: cfg.whisperServiceUrl,
+    });
   }
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3: S3Service,
+    private readonly settings: SettingsService,
   ) {
     super();
   }
@@ -71,7 +76,7 @@ export class TranscricaoProcessor extends WorkerHost {
     };
     const { transcriptionId } = data;
     const providerId = data.providerId || process.env.TRANSCRIPTION_PROVIDER || 'whisper-local';
-    const provider = this.getProvider(providerId);
+    const provider = await this.buildProvider(providerId);
     const isGroq = providerId === 'groq';
 
     const workDir = join(tmpdir(), `transcr-${transcriptionId}-${randomUUID()}`);

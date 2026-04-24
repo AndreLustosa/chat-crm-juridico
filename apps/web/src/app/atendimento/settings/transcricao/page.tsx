@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AudioLines, Cpu, Cloud, CheckCircle2, AlertCircle, Loader2, Save,
-  Search, Zap, Snail,
+  Search, Zap, Snail, Eye, EyeOff, Key,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -29,6 +29,16 @@ interface ProvidersResponse {
   default: string;
 }
 
+interface TranscriptionConfig {
+  groqApiKey: string; // mascarado quando vem do backend (****1234)
+  groqModel: string;
+  whisperServiceUrl: string;
+  defaultProvider: string;
+  hfToken: string; // mascarado
+  isGroqConfigured: boolean;
+  isHfTokenConfigured: boolean;
+}
+
 type HealthMap = Record<string, { ok: boolean; details?: any }>;
 
 const PROVIDER_OPTIONS = [
@@ -37,28 +47,75 @@ const PROVIDER_OPTIONS = [
   { value: 'groq', label: 'Groq (nuvem)' },
 ];
 
+const GROQ_MODEL_OPTIONS = [
+  { value: 'whisper-large-v3', label: 'whisper-large-v3 (preciso)' },
+  { value: 'whisper-large-v3-turbo', label: 'whisper-large-v3-turbo (rápido)' },
+];
+
+const DEFAULT_PROVIDER_OPTIONS = [
+  { value: 'whisper-local', label: 'Whisper (servidor)' },
+  { value: 'groq', label: 'Groq (nuvem)' },
+];
+
 export default function TranscricaoSettingsPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [providersInfo, setProvidersInfo] = useState<ProvidersResponse | null>(null);
   const [health, setHealth] = useState<HealthMap>({});
+  const [config, setConfig] = useState<TranscriptionConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    Promise.all([
+  // Form state pra config (não preenchido com mascara — vazio = não muda)
+  const [groqKeyInput, setGroqKeyInput] = useState('');
+  const [showGroqKey, setShowGroqKey] = useState(false);
+  const [groqModelInput, setGroqModelInput] = useState('whisper-large-v3');
+  const [defaultProviderInput, setDefaultProviderInput] = useState('whisper-local');
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const reload = useCallback(() => {
+    return Promise.all([
       api.get('/users'),
       api.get('/transcriptions/meta/providers'),
       api.get('/transcriptions/meta/health'),
+      api.get('/settings/transcription-config'),
     ])
-      .then(([u, p, h]) => {
+      .then(([u, p, h, c]) => {
         setUsers(u.data);
         setProvidersInfo(p.data);
         setHealth(h.data);
-      })
+        setConfig(c.data);
+        setGroqModelInput(c.data.groqModel || 'whisper-large-v3');
+        setDefaultProviderInput(c.data.defaultProvider || 'whisper-local');
+      });
+  }, []);
+
+  useEffect(() => {
+    reload()
       .catch((e) => showError(e?.response?.data?.message || 'Erro ao carregar'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [reload]);
+
+  const saveConfig = async () => {
+    setSavingConfig(true);
+    try {
+      const payload: any = {
+        groqModel: groqModelInput,
+        defaultProvider: defaultProviderInput,
+      };
+      // Só envia chave se o admin DIGITOU algo (vazio mantém atual)
+      if (groqKeyInput.trim()) payload.groqApiKey = groqKeyInput.trim();
+      await api.post('/settings/transcription-config', payload);
+      setGroqKeyInput('');
+      setShowGroqKey(false);
+      await reload();
+      showSuccess('Configurações salvas');
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao salvar');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   const updateUserProvider = async (userId: string, provider: string) => {
     setSavingId(userId);
@@ -149,6 +206,105 @@ export default function TranscricaoSettingsPage() {
           Provider padrão do sistema: <strong>{providersInfo?.default}</strong>
           {' '}— usado pra usuários que não têm escolha específica.
         </p>
+      </section>
+
+      {/* Configuração das chaves */}
+      <section className="border border-border rounded-lg p-5 bg-accent/5">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-base-content/60 mb-1 flex items-center gap-2">
+          <Key className="h-4 w-4" /> Credenciais e parâmetros
+        </h2>
+        <p className="text-xs text-base-content/50 mb-4">
+          Salvas criptografadas no banco. Sobrescrevem as variáveis de ambiente do container —
+          mudanças aplicam imediatamente, sem redeploy.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Provider padrão */}
+          <div>
+            <label className="label text-sm">Provider padrão do sistema</label>
+            <select
+              value={defaultProviderInput}
+              onChange={(e) => setDefaultProviderInput(e.target.value)}
+              className="select select-bordered w-full"
+            >
+              {DEFAULT_PROVIDER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-base-content/50 mt-1">
+              Usuários sem escolha específica usam este.
+            </p>
+          </div>
+
+          {/* Modelo Groq */}
+          <div>
+            <label className="label text-sm">Modelo Groq</label>
+            <select
+              value={groqModelInput}
+              onChange={(e) => setGroqModelInput(e.target.value)}
+              className="select select-bordered w-full"
+            >
+              {GROQ_MODEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* GROQ_API_KEY */}
+          <div className="md:col-span-2">
+            <label className="label text-sm flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Cloud className="h-4 w-4 text-cyan-400" />
+                GROQ_API_KEY
+              </span>
+              {config?.isGroqConfigured ? (
+                <span className="text-xs text-emerald-400 inline-flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> configurada — atual: {config.groqApiKey}
+                </span>
+              ) : (
+                <span className="text-xs text-base-content/50">não configurada</span>
+              )}
+            </label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showGroqKey ? 'text' : 'password'}
+                  value={groqKeyInput}
+                  onChange={(e) => setGroqKeyInput(e.target.value)}
+                  placeholder={
+                    config?.isGroqConfigured
+                      ? 'Deixe em branco para manter a atual, ou cole uma nova'
+                      : 'gsk_...'
+                  }
+                  className="input input-bordered w-full pr-10"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGroqKey(!showGroqKey)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-base-content/40 hover:text-base-content"
+                >
+                  {showGroqKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-base-content/50 mt-1">
+              Pegue em <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="link link-primary">console.groq.com/keys</a>.
+              Free tier disponível, ~$0.02 por hora de áudio.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={saveConfig}
+            disabled={savingConfig}
+            className="btn btn-primary btn-sm gap-2"
+          >
+            {savingConfig ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Salvar configurações
+          </button>
+        </div>
       </section>
 
       {/* Tabela de usuários */}

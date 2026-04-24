@@ -186,6 +186,33 @@ export class SettingsController {
     return { ...config, apiKey: maskApiKey(config.apiKey) };
   }
 
+  @Get('transcription-config')
+  @Roles('ADMIN')
+  async getTranscriptionConfig() {
+    const cfg = await this.settingsService.getTranscriptionConfig();
+    return {
+      ...cfg,
+      // Mascara segredos no GET (admin reedita sem ver o valor real)
+      groqApiKey: maskApiKey(cfg.groqApiKey),
+      hfToken: maskApiKey(cfg.hfToken),
+      isGroqConfigured: !!cfg.groqApiKey,
+      isHfTokenConfigured: !!cfg.hfToken,
+    };
+  }
+
+  @Post('transcription-config')
+  @Roles('ADMIN')
+  async setTranscriptionConfig(@Body() data: {
+    groqApiKey?: string;
+    groqModel?: string;
+    whisperServiceUrl?: string;
+    defaultProvider?: string;
+    hfToken?: string;
+  }) {
+    await this.settingsService.setTranscriptionConfig(data);
+    return { message: 'Configurações de transcrição salvas' };
+  }
+
   @Post('ai-config')
   @Roles('ADMIN')
   async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; djenPrompt?: string; djenNotifyTemplate?: string; adminBotEnabled?: boolean; cooldownSeconds?: number }) {

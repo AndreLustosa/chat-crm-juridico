@@ -93,6 +93,22 @@ export class SettingsService {
     return (isNaN(seconds) ? 8 : seconds) * 1000;
   }
 
+  /**
+   * Config dos providers de transcrição. DB tem prioridade sobre env
+   * (admin troca via UI sem precisar redeploy do worker).
+   * GROQ_API_KEY no DB vem criptografado — descriptografa aqui.
+   */
+  async getTranscriptionConfig() {
+    const groqKeyRaw = await this.get('GROQ_API_KEY');
+    const groqModel = await this.get('GROQ_MODEL');
+    const whisperUrl = await this.get('WHISPER_SERVICE_URL');
+    return {
+      groqApiKey: this.decryptIfNeeded(groqKeyRaw || '') || process.env.GROQ_API_KEY || '',
+      groqModel: groqModel || process.env.GROQ_MODEL || 'whisper-large-v3',
+      whisperServiceUrl: whisperUrl || process.env.WHISPER_SERVICE_URL || 'http://crm-whisper:8000',
+    };
+  }
+
   // ─── TTS ──────────────────────────────────────────────────────────────────
 
   /** Descriptografa valores salvos pela API (formato enc:<iv>:<tag>:<data>) */

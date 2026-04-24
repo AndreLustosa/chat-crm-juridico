@@ -42,6 +42,7 @@ export function decryptValue(ciphertext: string): string {
 export const SENSITIVE_KEYS = new Set([
   'OPENAI_API_KEY',
   'OPENAI_ADMIN_KEY',
+  'ANTHROPIC_API_KEY',
   'EVOLUTION_GLOBAL_APIKEY',
   'SMTP_PASS',
   'GOOGLE_TTS_API_KEY',
@@ -52,6 +53,8 @@ export const SENSITIVE_KEYS = new Set([
   'GDRIVE_OAUTH_CLIENT_ID',
   'GDRIVE_OAUTH_CLIENT_SECRET',
   'GDRIVE_OAUTH_REFRESH_TOKEN',
+  'GROQ_API_KEY',
+  'HF_TOKEN',
 ]);
 
 export function isSensitiveKey(key: string): boolean {

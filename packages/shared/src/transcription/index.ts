@@ -17,18 +17,29 @@ export function createTranscriptionProvider(): TranscriptionProvider {
 }
 
 /**
- * Cria provider por id — usado quando o upload escolhe explicitamente.
- * Permite ter os 2 ativos simultaneamente (cada job usa o que pediu).
+ * Opções do provider — vindas do SettingsService (DB) ou env.
+ * Cada campo é opcional: se omitido, cai no env.
  */
-export function createProviderById(id: string): TranscriptionProvider {
+export interface ProviderOptions {
+  groqApiKey?: string;
+  groqModel?: string;
+  whisperServiceUrl?: string;
+}
+
+/**
+ * Cria provider por id — usado quando o upload escolhe explicitamente.
+ * Aceita opts pra que API/worker passem config do banco (admin pode trocar
+ * a chave Groq pela UI sem redeploy).
+ */
+export function createProviderById(id: string, opts: ProviderOptions = {}): TranscriptionProvider {
   const lower = id.toLowerCase();
   if (lower === 'groq') {
     return new GroqProvider(
-      process.env.GROQ_API_KEY || '',
-      process.env.GROQ_MODEL || 'whisper-large-v3',
+      opts.groqApiKey || process.env.GROQ_API_KEY || '',
+      opts.groqModel || process.env.GROQ_MODEL || 'whisper-large-v3',
     );
   }
   return new WhisperLocalProvider(
-    process.env.WHISPER_SERVICE_URL || 'http://crm-whisper:8000',
+    opts.whisperServiceUrl || process.env.WHISPER_SERVICE_URL || 'http://crm-whisper:8000',
   );
 }

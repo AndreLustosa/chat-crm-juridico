@@ -5,6 +5,7 @@ import { createReadStream, promises as fs } from 'fs';
 import { basename } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
+import { SettingsService } from '../settings/settings.service';
 import { createProviderById } from '@crm/shared';
 import { UpdateSpeakersDto, UpdateTranscriptionDto } from './dto';
 
@@ -26,6 +27,7 @@ export class AudienciaTranscricaoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3: MediaS3Service,
+    private readonly settings: SettingsService,
     @InjectQueue(TRANSCRIPTION_QUEUE) private readonly queue: Queue,
   ) {}
 
@@ -289,27 +291,26 @@ export class AudienciaTranscricaoService {
   }
 
   /** Lista os providers disponíveis (catálogo + se cada um está configurado) */
-  providersStatus() {
-    const groqConfigured = !!process.env.GROQ_API_KEY;
-    const whisperUrlConfigured = !!process.env.WHISPER_SERVICE_URL;
+  async providersStatus() {
+    const cfg = await this.settings.getTranscriptionConfig();
     return {
       providers: [
         {
           id: 'whisper-local',
           label: 'Whisper (servidor)',
-          available: whisperUrlConfigured,
+          available: !!cfg.whisperServiceUrl,
           diarize: true,
           speed: 'slow' as const,
         },
         {
           id: 'groq',
           label: 'Groq Whisper (nuvem)',
-          available: groqConfigured,
+          available: !!cfg.groqApiKey,
           diarize: false,
           speed: 'fast' as const,
         },
       ],
-      default: (process.env.TRANSCRIPTION_PROVIDER || 'whisper-local').toLowerCase(),
+      default: cfg.defaultProvider.toLowerCase(),
     };
   }
 
@@ -406,11 +407,17 @@ export class AudienciaTranscricaoService {
   }
 
   async providerHealth() {
-    // Retorna saúde de cada provider configurado
+    // Retorna saúde de cada provider — passa config do DB (admin pode ter
+    // configurado a chave Groq na UI sem mexer em env var)
+    const cfg = await this.settings.getTranscriptionConfig();
     const out: Record<string, any> = {};
     for (const id of ['whisper-local', 'groq']) {
       try {
-        out[id] = await createProviderById(id).health();
+        out[id] = await createProviderById(id, {
+          groqApiKey: cfg.groqApiKey,
+          groqModel: cfg.groqModel,
+          whisperServiceUrl: cfg.whisperServiceUrl,
+        }).health();
       } catch (e: any) {
         out[id] = { ok: false, details: { error: e?.message || String(e) } };
       }
