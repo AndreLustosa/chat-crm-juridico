@@ -279,7 +279,14 @@ export class MessagesService {
 
     // 1a. Resolve o numero via Evolution (tenta como esta, fallback com/sem
     // nono digito). Bug reportado 2026-04-23 — Paulo Henrique 551143922725
-    // (DDD 11 sem o 9 obrigatorio) falhava silenciosamente.
+    // (DDD 11 sem o 9 obrigatorio) falhava silenciosamente no envio.
+    //
+    // IMPORTANTE: NAO atualiza Lead.phone com a variante resolvida. A
+    // convencao do sistema eh Lead.phone = 12 digitos (sem 9). Se tentassemos
+    // salvar 13 digitos, o webhook de echo (messages.upsert via leadsService
+    // .upsert que chama to12Digits) nao acharia o Lead e criaria duplicata
+    // vazia. Usamos o formato com 9 APENAS pra chamar sendText — o Lead
+    // segue inalterado no banco.
     const resolved = await this.whatsapp.resolveBrazilianWhatsappNumber(
       convo.lead.phone,
       convo.instance_name || undefined,
@@ -290,20 +297,15 @@ export class MessagesService {
       );
       throw new BadRequestException(
         `O numero ${convo.lead.phone} nao existe no WhatsApp. ` +
-          `Verifique se falta o nono digito (celulares de SP/RJ/MG) ou se o numero esta correto.`,
+          `Verifique se o numero esta correto.`,
       );
     }
     const targetNumber = resolved.number;
-    // Se o numero resolvido eh diferente do phone do lead, atualiza o Lead
-    // pro formato que funciona (evita fazer check toda vez).
     if (targetNumber !== convo.lead.phone.replace(/\D/g, '')) {
       this.logger.log(
-        `[send] Lead ${convo.lead.id}: phone ${convo.lead.phone} -> ${targetNumber} (corrigido via Evolution)`,
+        `[send] Lead ${convo.lead.id}: phone canonico ${convo.lead.phone} ` +
+          `requer variante ${targetNumber} pro WhatsApp — enviando com essa variante.`,
       );
-      await this.prisma.lead.update({
-        where: { id: convo.lead.id },
-        data: { phone: targetNumber },
-      }).catch((e) => this.logger.warn(`[send] Falha atualizar phone do lead: ${e.message}`));
     }
 
     let externalMsg: any;
