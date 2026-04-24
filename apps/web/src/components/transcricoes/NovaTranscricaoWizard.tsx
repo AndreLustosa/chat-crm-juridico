@@ -192,8 +192,11 @@ export function NovaTranscricaoWizard({ open, onClose, onCreated, prefilledCaseI
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-base-100 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div
+        className="rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-border"
+        style={{ backgroundColor: 'var(--color-card, #1f2937)' }}
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-lg font-semibold">Nova transcrição</h2>
@@ -401,20 +404,41 @@ export function NovaTranscricaoWizard({ open, onClose, onCreated, prefilledCaseI
 
             <div>
               <label className="label text-sm">Arquivo de vídeo ou áudio</label>
+              {/* Input file escondido — clicado via ref. Padrão mais robusto:
+                  evita problemas de estilização do <input type="file"> nativo */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="video/*,audio/*,.asf,.wmv,.mkv,.avi,.mov,.mp4,.webm,.mp3,.wav,.m4a,.ogg"
-                className="file-input file-input-bordered w-full"
+                className="hidden"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
-              {file && (
-                <p className="text-xs text-base-content/60 mt-2">
-                  {file.name} — {(file.size / 1024 / 1024).toFixed(1)} MB
-                </p>
-              )}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full p-4 rounded-lg border-2 border-dashed border-border hover:border-primary/60 hover:bg-accent/10 transition text-left flex items-center gap-3"
+              >
+                <Upload className="h-5 w-5 text-base-content/50 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  {file ? (
+                    <>
+                      <div className="text-sm font-medium truncate">{file.name}</div>
+                      <div className="text-xs text-base-content/60">
+                        {(file.size / 1024 / 1024).toFixed(1)} MB — clique pra trocar
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm font-medium">Clique para escolher um arquivo</div>
+                      <div className="text-xs text-base-content/60">
+                        Vídeo ou áudio (ASF, WMV, MP4, MKV, MOV, WEBM, MP3, WAV, M4A, OGG)
+                      </div>
+                    </>
+                  )}
+                </div>
+              </button>
               <p className="text-xs text-base-content/50 mt-2">
-                Aceita: ASF, WMV, MP4, MKV, MOV, WEBM, MP3, WAV, M4A, OGG (até 3GB)
+                Tamanho máximo: 3GB
               </p>
             </div>
 
