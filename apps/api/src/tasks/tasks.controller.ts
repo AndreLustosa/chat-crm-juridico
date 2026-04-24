@@ -43,13 +43,20 @@ export class TasksController {
     const l = limit ? parseInt(limit, 10) : undefined;
     const roles = req?.user?.roles || [];
     const userId = req?.user?.id;
+    const isAdmin = roles.includes('ADMIN');
 
-    // ADMIN/ADVOGADO podem ver todas as tarefas (viewAll=true) ou filtrar por assignedUserId
-    // ESTAGIARIO/OPERADOR veem apenas as próprias tarefas por padrão
-    let effectiveAssignedUserId = assignedUserId;
-    if (!effectiveAssignedUserId && !roles.some((r: string) => ['ADMIN', 'ADVOGADO'].includes(r)) && viewAll !== 'true') {
-      effectiveAssignedUserId = userId;
-    }
+    // RBAC:
+    //   ADMIN → pode usar viewAll=true pra ver tudo, ou filtrar por
+    //            assignedUserId especifico (supervisao).
+    //   Nao-ADMIN (inclusive ADVOGADO) → SEMPRE filtra por req.user.id.
+    //     viewAll e assignedUserId da query SAO IGNORADOS.
+    //
+    // Bug corrigido 2026-04-24: antes, ADVOGADO com ?viewAll=true via
+    // todas as tarefas da empresa (de todos os operadores/estagiarios/
+    // advogados). Equivalente ao bug de calendar/events (commit 1184efa).
+    const effectiveAssignedUserId = isAdmin
+      ? (viewAll === 'true' ? undefined : (assignedUserId || userId))
+      : userId; // nao-admin: sempre o proprio
 
     return this.tasksService.findAll(req?.user?.tenant_id, p, l, {
       status,

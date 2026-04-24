@@ -44,6 +44,12 @@ export class FinanceiroController {
     @Query('offset') offset: string,
     @Request() req: any,
   ) {
+    // RBAC: apenas ADMIN pode consultar transacoes de outro advogado.
+    // Demais usuarios veem so as proprias — query param lawyerId eh
+    // IGNORADO pra prevenir vazamento de receitas/despesas.
+    // Bug corrigido 2026-04-24.
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
     return this.service.findAllTransactions({
       tenantId: req.user.tenant_id,
       type,
@@ -51,7 +57,7 @@ export class FinanceiroController {
       status,
       legalCaseId,
       leadId,
-      lawyerId,
+      lawyerId: effectiveLawyerId,
       startDate,
       endDate,
       limit: limit ? parseInt(limit, 10) : undefined,
@@ -106,7 +112,15 @@ export class FinanceiroController {
     @Query('offset') offset: string,
     @Request() req: any,
   ) {
-    return this.service.getAuditLog(lawyerId, startDate, endDate, parseInt(limit || '50'), parseInt(offset || '0'));
+    // RBAC: audit log eh extremamente sensivel (quem alterou o que e
+    // quando). Apenas ADMIN pode ver audit log de qualquer advogado.
+    // Demais usuarios veem so o proprio — forca lawyerId=req.user.id.
+    // Bug corrigido 2026-04-24: antes qualquer autenticado podia
+    // passar ?lawyerId=X e ler historico de alteracoes financeiras
+    // de outro advogado.
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
+    return this.service.getAuditLog(effectiveLawyerId, startDate, endDate, parseInt(limit || '50'), parseInt(offset || '0'));
   }
 
   // ─── Summary & Cash Flow ───────────────────────────────
@@ -118,7 +132,11 @@ export class FinanceiroController {
     @Query('lawyerId') lawyerId: string,
     @Request() req: any,
   ) {
-    return this.service.getSummary(req.user.tenant_id, startDate, endDate, lawyerId);
+    // RBAC: apenas ADMIN pode ver summary consolidado de outro advogado.
+    // Demais usuarios veem o proprio. Bug corrigido 2026-04-24.
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
+    return this.service.getSummary(req.user.tenant_id, startDate, endDate, effectiveLawyerId);
   }
 
   @Get('cash-flow')

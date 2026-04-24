@@ -18,13 +18,22 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class HonorariosController {
   constructor(private readonly service: HonorariosService) {}
 
-  /** Parcelas pendentes/atrasadas com dados do processo e cliente (para tab Receitas) */
+  /** Parcelas pendentes/atrasadas com dados do processo e cliente (para tab Receitas).
+   *
+   * RBAC: apenas ADMIN pode consultar honorarios de outro advogado via query
+   * param `lawyerId`. Demais usuarios sempre veem apenas os proprios — query
+   * param eh IGNORADO pra prevenir vazamento de dados financeiros.
+   * Bug corrigido 2026-04-24: antes, OPERADOR/ESTAGIARIO podiam passar
+   * ?lawyerId=X e ver parcelas em atraso de qualquer advogado.
+   */
   @Get('pending-payments')
   pendingPayments(
     @Query('lawyerId') lawyerId: string | undefined,
     @Request() req: any,
   ) {
-    return this.service.findPendingPayments(req.user.tenant_id, lawyerId);
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
+    return this.service.findPendingPayments(req.user.tenant_id, effectiveLawyerId);
   }
 
   @Get('case/:caseId')

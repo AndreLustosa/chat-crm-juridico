@@ -125,9 +125,18 @@ export class AudienciaTranscricaoController {
     const s = (scope as any) && validScopes.includes(scope as any)
       ? (scope as (typeof validScopes)[number])
       : 'all';
+    // RBAC: apenas ADMIN pode desligar o filtro `mine`. Demais usuarios
+    // (ADVOGADO, OPERADOR, etc) sempre veem apenas transcricoes que
+    // criaram ou que sao dos casos deles — query `mine` da request eh
+    // forcada a true. Antes, passar ?mine=false (ou omitir) vazava
+    // transcricoes de outros advogados.
+    // Bug corrigido 2026-04-24.
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const forceMine = !isAdmin;
+    const effectiveMine = forceMine ? true : (mine === 'true' || mine === '1');
     return this.service.listGlobal({
       scope: s,
-      mine: mine === 'true' || mine === '1',
+      mine: effectiveMine,
       userId: req.user?.id,
       tenantId: req.user?.tenant_id ?? null,
     });
