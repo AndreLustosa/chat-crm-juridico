@@ -2826,7 +2826,10 @@ function CadastrarProcessoModal({
   batchProgress,
 }: {
   onClose: () => void;
-  onSuccess: () => void;
+  // Recebe o LegalCase criado — permite o handler abrir o painel
+  // de detalhes pra ajustes imediatos (fix UX reportado 2026-04-24:
+  // usuario tinha que sair e procurar o processo cadastrado).
+  onSuccess: (createdCase: any) => void;
   prefillData?: {
     case_number?: string;
     legal_area?: string;
@@ -2991,7 +2994,7 @@ function CadastrarProcessoModal({
       // - representa reu   -> opposing_party = autor
       const opposingPartyForApi = clientIsAuthor ? opposingParty : author;
 
-      await api.post('/legal-cases/direct', {
+      const res = await api.post('/legal-cases/direct', {
         case_number: caseNumber.trim(),
         legal_area: legalArea || undefined,
         action_type: actionType || undefined,
@@ -3013,7 +3016,8 @@ function CadastrarProcessoModal({
         // Atendente: qualquer usuário pode indicar o responsável pelo atendimento no chat
         assigned_user_id: selectedOperatorId || undefined,
       });
-      onSuccess();
+      // Passa o LegalCase criado pro handler — permite abrir painel pra ajustes
+      onSuccess(res.data);
       onClose();
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Erro ao cadastrar processo.');
@@ -4522,7 +4526,7 @@ function ProcessosPageContent() {
     await openCadastroForOabItem(items[0]);
   }, [openCadastroForOabItem]);
 
-  const handleCadastroModalSuccess = useCallback(() => {
+  const handleCadastroModalSuccess = useCallback((createdCase: any) => {
     fetchCases(true);
 
     // Notifica o OabImportModal (se estiver aberto) que este processo_codigo
@@ -4539,14 +4543,23 @@ function ProcessosPageContent() {
     }
 
     if (oabCadastroQueue.length > 0) {
+      // Ainda ha mais processos na fila OAB — abre o proximo modal sem
+      // interrupcao pra nao quebrar o fluxo de import em lote.
       const [next, ...remaining] = oabCadastroQueue;
       setOabCadastroQueue(remaining);
       setOabCadastroProgress(prev => prev ? { ...prev, current: prev.current + 1 } : null);
       openCadastroForOabItem(next);
     } else {
+      // Ultimo (ou unico) processo cadastrado — fecha modal e ABRE o
+      // painel de detalhes pra ajustes imediatos (stage, prioridade,
+      // observacoes, etc). Fix UX reportado 2026-04-24: usuario tinha
+      // que sair do modal e ir procurar o processo manualmente na lista.
       setShowCadastrarModal(false);
       setPrefillData(null);
       setOabCadastroProgress(null);
+      if (createdCase?.id) {
+        setSelectedCase(createdCase);
+      }
     }
   }, [oabCadastroQueue, openCadastroForOabItem, fetchCases]);
 
