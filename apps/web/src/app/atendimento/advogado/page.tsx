@@ -2481,7 +2481,9 @@ export default function AdvogadoPage() {
                               )}
                             </div>
 
-                            {/* Cumprir — EventActionButton com concluir/adiar/cancelar + nota */}
+                            {/* Cumprir — EventActionButton com concluir/adiar/cancelar + nota.
+                                Passa legalCaseId + tracking_stage atual pra oferecer a opcao
+                                de avancar a fase do processo no mesmo click do cumprir. */}
                             <EventActionButton
                               type="CALENDAR"
                               id={d.id}
@@ -2490,6 +2492,8 @@ export default function AdvogadoPage() {
                               completionNote={d.completion_note}
                               completedBy={d.completed_by}
                               completedAt={d.completed_at}
+                              legalCaseId={d.legal_case?.id ?? d.legal_case_id ?? null}
+                              currentTrackingStage={d.legal_case?.tracking_stage ?? null}
                               onActionComplete={() => {
                                 // Card sai da lista porque filtramos so AGENDADO/CONFIRMADO
                                 setDeadlines(prev => prev.filter(item => item.id !== d.id));

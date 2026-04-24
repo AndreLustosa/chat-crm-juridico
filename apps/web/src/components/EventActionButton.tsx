@@ -15,9 +15,10 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { CheckCircle2, XCircle, Clock, ChevronDown, Loader2, StickyNote, User as UserIcon } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ChevronDown, Loader2, StickyNote, User as UserIcon, ArrowRight } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { TRACKING_STAGES } from '@/lib/legalStages';
 
 export type EventType = 'CALENDAR' | 'TASK' | 'DEADLINE';
 
@@ -42,6 +43,12 @@ interface Props {
   completedBy?: { id: string; name: string } | null;
   /** Quando cumpriu (ISO string ou Date) */
   completedAt?: string | Date | null;
+  /** LegalCase vinculado ao evento — quando presente, o popover de
+   *  "Concluir" oferece opcao de avancar o tracking_stage do processo. */
+  legalCaseId?: string | null;
+  /** Fase atual do processo (tracking_stage) — usada pra pre-selecionar
+   *  o select de nova fase. */
+  currentTrackingStage?: string | null;
 }
 
 function formatCompletionDate(d: string | Date | null | undefined): string {
@@ -69,11 +76,17 @@ export function EventActionButton({
   completionNote,
   completedBy,
   completedAt,
+  legalCaseId,
+  currentTrackingStage,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<'complete' | 'cancel' | 'postpone' | null>(null);
   const [showNoteInput, setShowNoteInput] = useState<'complete' | 'cancel' | null>(null);
   const [note, setNote] = useState('');
+  // Nova fase do processo (opcional, so quando tem legalCaseId).
+  // Vazio = nao mexe na fase. Selecionado = avanca o tracking_stage apos
+  // concluir o evento. Bug/feature 2026-04-24.
+  const [newTrackingStage, setNewTrackingStage] = useState('');
   const [showPostpone, setShowPostpone] = useState(false);
   const [postponeDate, setPostponeDate] = useState('');
   const [postponeReason, setPostponeReason] = useState('');
@@ -117,10 +130,42 @@ export function EventActionButton({
       if (action === 'complete' && noteValue) body.note = noteValue;
       if (action === 'cancel' && noteValue) body.reason = noteValue;
       await api.post(endpoint, body);
-      showSuccess(action === 'complete' ? 'Marcado como concluído' : 'Cancelado');
+
+      // Avancar fase do processo, se usuario selecionou — so roda em
+      // "complete" com legalCaseId presente e fase nova != atual.
+      // Feature 2026-04-24: ao cumprir um prazo, advogado ja pode avancar
+      // o tracking_stage sem precisar sair da tela.
+      let stageChanged = false;
+      if (
+        action === 'complete' &&
+        legalCaseId &&
+        newTrackingStage &&
+        newTrackingStage !== currentTrackingStage
+      ) {
+        try {
+          await api.patch(`/legal-cases/${legalCaseId}/tracking-stage`, {
+            trackingStage: newTrackingStage,
+          });
+          stageChanged = true;
+        } catch (stageErr: any) {
+          showError(
+            'Evento concluido, mas falhou ao avancar a fase do processo: ' +
+              (stageErr?.response?.data?.message || stageErr.message),
+          );
+        }
+      }
+
+      showSuccess(
+        action === 'complete'
+          ? stageChanged
+            ? 'Concluido e processo avancado'
+            : 'Marcado como concluído'
+          : 'Cancelado',
+      );
       setOpen(false);
       setShowNoteInput(null);
       setNote('');
+      setNewTrackingStage('');
       onActionComplete?.();
     } catch (e: any) {
       showError(e?.response?.data?.message || 'Erro ao executar ação');
@@ -290,9 +335,36 @@ export function EventActionButton({
                 className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
                 autoFocus
               />
+
+              {/* Avancar fase do processo — so aparece em "complete" e quando
+                  o evento tem legalCaseId. Permite ao advogado mover o processo
+                  pra proxima etapa no mesmo click do cumprir. */}
+              {showNoteInput === 'complete' && legalCaseId && (
+                <div className="pt-1">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <ArrowRight size={10} className="text-sky-400" />
+                    Avançar fase do processo (opcional)
+                  </label>
+                  <select
+                    value={newTrackingStage}
+                    onChange={e => setNewTrackingStage(e.target.value)}
+                    className="w-full mt-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="">Manter etapa atual{currentTrackingStage ? ` (${currentTrackingStage})` : ''}</option>
+                    {TRACKING_STAGES
+                      .filter(s => s.id !== currentTrackingStage)
+                      .map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.emoji ? `${s.emoji} ` : ''}{s.label}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setShowNoteInput(null); setNote(''); }}
+                  onClick={() => { setShowNoteInput(null); setNote(''); setNewTrackingStage(''); }}
                   className="flex-1 py-1.5 rounded-md text-[11px] text-muted-foreground hover:bg-accent transition-colors"
                 >
                   Voltar
