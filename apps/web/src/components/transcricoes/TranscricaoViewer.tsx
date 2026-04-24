@@ -1,8 +1,8 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Loader2, ArrowLeft, Pencil, Check, X, Download, FileAudio, ChevronDown,
+  Loader2, ArrowLeft, Pencil, Check, X, Download, ChevronDown,
 } from 'lucide-react';
 import api, { API_BASE_URL } from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -146,11 +146,16 @@ export function TranscricaoViewer({ id, onBack }: Props) {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 min-h-0">
         <div className="flex flex-col min-h-0">
           <div className="bg-black rounded-lg overflow-hidden aspect-video">
-            <AuthenticatedVideo
+            {/* Streaming nativo: <video src> faz Range requests automaticamente,
+                tocar enquanto baixa, sem carregar o arquivo inteiro em RAM.
+                Token vai na query (JwtStrategy aceita via fromUrlQueryParameter). */}
+            <video
               ref={videoRef}
-              src={videoUrl}
-              token={token}
+              src={`${videoUrl}?token=${encodeURIComponent(token)}`}
+              controls
+              preload="metadata"
               onTimeUpdate={(e) => setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+              className="h-full w-full"
             />
           </div>
 
@@ -238,62 +243,3 @@ export function TranscricaoViewer({ id, onBack }: Props) {
   );
 }
 
-interface AuthenticatedVideoProps {
-  src: string;
-  token: string;
-  onTimeUpdate?: (e: React.SyntheticEvent<HTMLVideoElement>) => void;
-}
-
-const AuthenticatedVideo = forwardRef<HTMLVideoElement, AuthenticatedVideoProps>(
-  function AuthenticatedVideo({ src, token, onTimeUpdate }, ref) {
-    const [blobUrl, setBlobUrl] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-      let cancelled = false;
-      let createdUrl: string | null = null;
-      (async () => {
-        try {
-          const r = await fetch(src, { headers: { Authorization: `Bearer ${token}` } });
-          if (!r.ok) throw new Error('fetch video failed');
-          const blob = await r.blob();
-          if (cancelled) return;
-          createdUrl = URL.createObjectURL(blob);
-          setBlobUrl(createdUrl);
-        } catch {
-          if (!cancelled) showError('Erro ao carregar vídeo');
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-        if (createdUrl) URL.revokeObjectURL(createdUrl);
-      };
-    }, [src, token]);
-
-    if (loading) {
-      return (
-        <div className="h-full w-full flex items-center justify-center text-base-content/60">
-          <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-      );
-    }
-    if (!blobUrl) {
-      return (
-        <div className="h-full w-full flex items-center justify-center text-base-content/60 gap-2">
-          <FileAudio className="h-5 w-5" /> Vídeo indisponível
-        </div>
-      );
-    }
-    return (
-      <video
-        ref={ref}
-        src={blobUrl}
-        controls
-        onTimeUpdate={onTimeUpdate}
-        className="h-full w-full"
-      />
-    );
-  },
-);

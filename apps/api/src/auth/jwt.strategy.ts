@@ -14,7 +14,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       new Logger('JwtStrategy').warn('⚠️  JWT_SECRET não definido! Usando fallback INSEGURO.');
     }
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Aceita JWT em 2 lugares:
+      //   1. Header Authorization: Bearer ... (padrão pra chamadas API normais)
+      //   2. ?token=... na query string (necessário pra <video src> nativo,
+      //      <img src>, downloads — onde o browser não permite custom headers)
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        ExtractJwt.fromUrlQueryParameter('token'),
+      ]),
       ignoreExpiration: false,
       secretOrKey: secret || '__INSECURE_DEV_FALLBACK_CHANGE_ME__',
     });
