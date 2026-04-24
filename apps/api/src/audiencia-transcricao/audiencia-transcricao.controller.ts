@@ -74,6 +74,7 @@ export class AudienciaTranscricaoController {
   async upload(
     @Query('caseId') caseId: string | undefined,
     @Query('title') title: string | undefined,
+    @Query('provider') provider: string | undefined,
     @Query('minSpeakers') minSpeakers: string | undefined,
     @Query('maxSpeakers') maxSpeakers: string | undefined,
     @UploadedFile() file: Express.Multer.File,
@@ -91,6 +92,7 @@ export class AudienciaTranscricaoController {
       size: file.size,
       userId: req.user?.id,
       tenantId: req.user?.tenant_id,
+      providerId: provider,
       minSpeakers: minSpeakers ? parseInt(minSpeakers, 10) : undefined,
       maxSpeakers: maxSpeakers ? parseInt(maxSpeakers, 10) : undefined,
     });
@@ -131,10 +133,16 @@ export class AudienciaTranscricaoController {
     });
   }
 
-  /** GET /transcriptions/meta/health — status do provider (Whisper) */
+  /** GET /transcriptions/meta/health — saúde de cada provider configurado */
   @Get('meta/health')
   health() {
     return this.service.providerHealth();
+  }
+
+  /** GET /transcriptions/meta/providers — catálogo + qual default + quais ativos */
+  @Get('meta/providers')
+  providers() {
+    return this.service.providersStatus();
   }
 
   /** GET /transcriptions/:id — detalhe completo (texto, segmentos, speakers) */

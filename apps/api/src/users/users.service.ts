@@ -299,4 +299,20 @@ export class UsersService {
       },
     });
   }
+
+  /**
+   * Atualiza o provider de transcrição de um usuário.
+   * Valores aceitos: 'whisper-local', 'groq', null (volta ao default global).
+   */
+  async setTranscriptionProvider(userId: string, provider: string | null) {
+    const allowed = ['whisper-local', 'groq', null];
+    if (!allowed.includes(provider as any)) {
+      throw new Error(`provider inválido. Use: whisper-local | groq | null`);
+    }
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { transcription_provider: provider } as any,
+      select: { id: true, name: true, email: true, transcription_provider: true } as any,
+    });
+  }
 }

@@ -13,6 +13,7 @@ export interface TranscricaoListItem {
   status: TranscriptionStatus;
   progress: number;
   error_message: string | null;
+  /** 'whisper-local' | 'groq' */
   provider: string;
   diarize: boolean;
   duration_sec: number | null;
@@ -69,6 +70,31 @@ export const SPEAKER_PALETTE = [
   '#3B82F6', '#EF4444', '#10B981', '#F59E0B',
   '#8B5CF6', '#EC4899', '#14B8A6', '#F97316',
 ];
+
+// ─── Providers ─────────────────────────────────────────────────────────
+
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  available: boolean;
+  diarize: boolean;
+  speed: 'slow' | 'medium' | 'fast';
+}
+
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
+  default: string;
+}
+
+export const PROVIDER_META: Record<string, { label: string; color: string }> = {
+  'whisper-local': { label: 'Whisper (servidor)', color: 'text-violet-400' },
+  'groq':          { label: 'Groq (nuvem)',       color: 'text-cyan-400'   },
+};
+
+export function providerLabel(id: string | null | undefined): string {
+  if (!id) return '—';
+  return PROVIDER_META[id]?.label || id;
+}
 
 export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;

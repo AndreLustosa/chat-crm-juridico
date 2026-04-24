@@ -5,7 +5,7 @@ import {
   UserCog, Bot, Shield, ChevronLeft, MessageSquare, Layout, Briefcase,
   Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch,
   CreditCard, FileText, Building2, Users, Wallet, Cpu, Link2, HardDrive,
-  Brain,
+  Brain, AudioLines,
 } from 'lucide-react';
 import { useRole } from '@/lib/useRole';
 import { RouteGuard } from '@/components/RouteGuard';
@@ -61,6 +61,7 @@ const settingsSections: MenuSection[] = [
         ],
       },
       { label: 'Base de Conhecimento', href: '/atendimento/settings/knowledge', icon: Brain },
+      { label: 'Transcrição', href: '/atendimento/settings/transcricao', icon: AudioLines },
     ],
   },
   {
@@ -86,6 +87,7 @@ const adminOnlyPaths = new Set([
   '/atendimento/settings/mcp',
   '/atendimento/settings/payment-gateway',
   '/atendimento/settings/nota-fiscal',
+  '/atendimento/settings/transcricao',
 ]);
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

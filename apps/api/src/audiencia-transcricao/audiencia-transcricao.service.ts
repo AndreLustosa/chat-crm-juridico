@@ -5,7 +5,7 @@ import { createReadStream, promises as fs } from 'fs';
 import { basename } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
-import { createTranscriptionProvider } from '@crm/shared';
+import { createProviderById } from '@crm/shared';
 import { UpdateSpeakersDto, UpdateTranscriptionDto } from './dto';
 
 export const TRANSCRIPTION_QUEUE = 'transcription-jobs';
@@ -22,7 +22,6 @@ type TranscriptionStatus =
 @Injectable()
 export class AudienciaTranscricaoService {
   private readonly logger = new Logger(AudienciaTranscricaoService.name);
-  private readonly provider = createTranscriptionProvider();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -36,6 +35,7 @@ export class AudienciaTranscricaoService {
    * Cria registro, faz upload do arquivo pro S3 e enfileira job.
    * `caseId` é opcional — sem ele, a transcrição é avulsa (criada pelo menu
    * Ferramentas, não aparece em nenhum painel de cliente).
+   * `providerId`: 'whisper-local' (default, server) | 'groq' (nuvem rápida)
    * O `tmpPath` é o caminho onde o multer salvou o arquivo (diskStorage).
    */
   async createFromUpload(params: {
@@ -47,6 +47,7 @@ export class AudienciaTranscricaoService {
     size: number;
     userId: string;
     tenantId?: string | null;
+    providerId?: string;
     minSpeakers?: number;
     maxSpeakers?: number;
   }) {
@@ -60,10 +61,28 @@ export class AudienciaTranscricaoService {
       tenantId = legalCase.tenant_id ?? tenantId;
     }
 
+    // Provider: usa o do usuário (config admin) > param explícito (debug) > env default
+    let providerFromUser: string | null = null;
+    if (params.userId) {
+      const u = await (this.prisma as any).user.findUnique({
+        where: { id: params.userId },
+        select: { transcription_provider: true },
+      });
+      providerFromUser = u?.transcription_provider ?? null;
+    }
+
     // Ext do arquivo (pra compor a s3_key). Fallback pra "bin" se não vier.
     const ext = (params.originalName.split('.').pop() || 'bin')
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '');
+
+    const providerId = (
+      providerFromUser ||
+      params.providerId ||
+      process.env.TRANSCRIPTION_PROVIDER ||
+      'whisper-local'
+    ).toLowerCase();
+    const isGroq = providerId === 'groq';
 
     const record = await (this.prisma as any).caseTranscription.create({
       data: {
@@ -73,9 +92,11 @@ export class AudienciaTranscricaoService {
         title: params.title || params.originalName,
         status: 'UPLOADING' as TranscriptionStatus,
         progress: 0,
-        provider: this.provider.name,
-        model: process.env.WHISPER_MODEL || 'large-v3',
-        diarize: true,
+        provider: providerId,
+        model: isGroq
+          ? (process.env.GROQ_MODEL || 'whisper-large-v3')
+          : (process.env.WHISPER_MODEL || 'large-v3'),
+        diarize: !isGroq, // Groq não diariza
         source_s3_key: '', // preenchido após upload
         source_mime: params.mime,
         source_size: params.size,
@@ -110,6 +131,7 @@ export class AudienciaTranscricaoService {
           transcriptionId: record.id,
           sourceS3Key: s3Key,
           sourceMime: params.mime,
+          providerId,
           minSpeakers: params.minSpeakers,
           maxSpeakers: params.maxSpeakers,
         },
@@ -255,10 +277,40 @@ export class AudienciaTranscricaoService {
     });
     await this.queue.add(
       'transcribe',
-      { transcriptionId: id, sourceS3Key: t.source_s3_key, sourceMime: t.source_mime },
+      {
+        transcriptionId: id,
+        sourceS3Key: t.source_s3_key,
+        sourceMime: t.source_mime,
+        providerId: t.provider, // preserva o provider original
+      },
       { attempts: 2, removeOnComplete: true },
     );
     return { ok: true };
+  }
+
+  /** Lista os providers disponíveis (catálogo + se cada um está configurado) */
+  providersStatus() {
+    const groqConfigured = !!process.env.GROQ_API_KEY;
+    const whisperUrlConfigured = !!process.env.WHISPER_SERVICE_URL;
+    return {
+      providers: [
+        {
+          id: 'whisper-local',
+          label: 'Whisper (servidor)',
+          available: whisperUrlConfigured,
+          diarize: true,
+          speed: 'slow' as const,
+        },
+        {
+          id: 'groq',
+          label: 'Groq Whisper (nuvem)',
+          available: groqConfigured,
+          diarize: false,
+          speed: 'fast' as const,
+        },
+      ],
+      default: (process.env.TRANSCRIPTION_PROVIDER || 'whisper-local').toLowerCase(),
+    };
   }
 
   async delete(id: string) {
@@ -354,7 +406,16 @@ export class AudienciaTranscricaoService {
   }
 
   async providerHealth() {
-    return this.provider.health();
+    // Retorna saúde de cada provider configurado
+    const out: Record<string, any> = {};
+    for (const id of ['whisper-local', 'groq']) {
+      try {
+        out[id] = await createProviderById(id).health();
+      } catch (e: any) {
+        out[id] = { ok: false, details: { error: e?.message || String(e) } };
+      }
+    }
+    return out;
   }
 }
 

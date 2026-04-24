@@ -50,15 +50,52 @@ export interface TranscriptionJobStatus {
 }
 
 export interface TranscribeInput {
-  /** Chave no bucket S3/MinIO. Mutuamente exclusivo com `url`. */
+  /** Chave no bucket S3/MinIO. Usado pelo whisper-local (Python baixa). */
   s3_key?: string;
   /** URL HTTP(S) pública do áudio. */
   url?: string;
+  /**
+   * Caminho local de arquivo já baixado/preparado no disco do worker.
+   * Necessário pro Groq (envia via multipart). Worker faz download/conversão
+   * antes de chamar o provider.
+   */
+  local_path?: string;
   /** Ativa/desativa diarização (se omitido, usa default do provider). */
   diarize?: boolean;
   min_speakers?: number;
   max_speakers?: number;
 }
+
+/**
+ * Capacidades de cada provider — usado pelo frontend pra mostrar os tradeoffs.
+ */
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  description: string;
+  diarize: boolean; // separa falantes nativamente?
+  speed: 'slow' | 'medium' | 'fast'; // tempo relativo de processamento
+  cost: 'free' | 'paid'; // custo por uso
+}
+
+export const PROVIDER_CATALOG: ProviderInfo[] = [
+  {
+    id: 'whisper-local',
+    label: 'Whisper (servidor)',
+    description: 'Roda na sua VPS, separa falantes (Juiz/Advogado/...). Lento em CPU.',
+    diarize: true,
+    speed: 'slow',
+    cost: 'free',
+  },
+  {
+    id: 'groq',
+    label: 'Groq Whisper (nuvem)',
+    description: 'Whisper large-v3 na nuvem Groq. ~30s por hora de áudio. Sem separação de falantes.',
+    diarize: false,
+    speed: 'fast',
+    cost: 'paid',
+  },
+];
 
 export interface TranscriptionProvider {
   readonly name: string;

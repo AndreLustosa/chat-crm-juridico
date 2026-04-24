@@ -85,6 +85,7 @@ export function NovaTranscricaoWizard({ open, onClose, onCreated, prefilledCaseI
     setLeadCases([]);
   }, [open, prefilledCaseId]);
 
+
   // Busca por CNJ (debounced)
   useEffect(() => {
     if (mode !== 'cnj') return;
@@ -155,6 +156,8 @@ export function NovaTranscricaoWizard({ open, onClose, onCreated, prefilledCaseI
     try {
       const params: any = {};
       if (selectedCaseId) params.caseId = selectedCaseId;
+      // Provider é decidido pelo backend a partir de user.transcription_provider
+      // (admin define em Configurações → Transcrição), não escolhido aqui.
       const r = await api.post(`/transcriptions`, form, {
         params,
         headers: { 'Content-Type': 'multipart/form-data' },

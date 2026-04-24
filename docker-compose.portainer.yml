@@ -119,6 +119,8 @@ services:
       - WEBHOOK_HMAC_REQUIRED=${WEBHOOK_HMAC_REQUIRED:-false}
       - TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-whisper-local}
       - WHISPER_SERVICE_URL=${WHISPER_SERVICE_URL:-http://crm-whisper:8000}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-whisper-large-v3}
     networks:
       - default
       - OrionNet
@@ -169,6 +171,8 @@ services:
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
       - TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-whisper-local}
       - WHISPER_SERVICE_URL=${WHISPER_SERVICE_URL:-http://crm-whisper:8000}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-whisper-large-v3}
     networks:
       - default
       - OrionNet

@@ -76,13 +76,19 @@ def _set(job: Job, **kwargs):
 
 
 def _s3_client():
+    # MinIO exige path-style addressing (`host/bucket/key`). Sem isso, boto3
+    # tenta virtual-hosted-style (`bucket.host/key`) e o MinIO devolve 301
+    # Moved Permanently — que o boto3 NÃO segue por padrão em downloads.
     return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint or None,
         region_name=settings.s3_region,
         aws_access_key_id=settings.s3_access_key or None,
         aws_secret_access_key=settings.s3_secret_key or None,
-        config=BotoConfig(signature_version="s3v4"),
+        config=BotoConfig(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+        ),
     )
 
 

@@ -7,9 +7,9 @@ import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../s3/s3.service';
-import { createTranscriptionProvider } from '@crm/shared';
-import type { TranscriptionJobStatus } from '@crm/shared';
-import { convertToMp4, extractAudioWav } from './ffmpeg.util';
+import { createProviderById } from '@crm/shared';
+import type { TranscriptionJobStatus, TranscriptionProvider } from '@crm/shared';
+import { convertToMp4, extractAudioWav, extractAudioMp3 } from './ffmpeg.util';
 
 /**
  * Pipeline de transcrição de audiência:
@@ -29,11 +29,21 @@ import { convertToMp4, extractAudioWav } from './ffmpeg.util';
 @Processor('transcription-jobs')
 export class TranscricaoProcessor extends WorkerHost {
   private readonly logger = new Logger(TranscricaoProcessor.name);
-  private readonly provider = createTranscriptionProvider();
+  private readonly providers = new Map<string, TranscriptionProvider>();
 
   // Polling: a cada 15s durante job ativo. Timeout duro de 12h (audiência grande).
   private readonly POLL_INTERVAL_MS = 15_000;
   private readonly MAX_WAIT_MS = 12 * 60 * 60 * 1000;
+
+  /** Lazy: instancia o provider só na primeira vez que precisar dele. */
+  private getProvider(id: string): TranscriptionProvider {
+    let p = this.providers.get(id);
+    if (!p) {
+      p = createProviderById(id);
+      this.providers.set(id, p);
+    }
+    return p;
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -55,10 +65,14 @@ export class TranscricaoProcessor extends WorkerHost {
       transcriptionId: string;
       sourceS3Key: string;
       sourceMime: string;
+      providerId?: string; // 'whisper-local' | 'groq' (default whisper-local)
       minSpeakers?: number;
       maxSpeakers?: number;
     };
     const { transcriptionId } = data;
+    const providerId = data.providerId || process.env.TRANSCRIPTION_PROVIDER || 'whisper-local';
+    const provider = this.getProvider(providerId);
+    const isGroq = providerId === 'groq';
 
     const workDir = join(tmpdir(), `transcr-${transcriptionId}-${randomUUID()}`);
     await fs.mkdir(workDir, { recursive: true });
@@ -67,23 +81,24 @@ export class TranscricaoProcessor extends WorkerHost {
       await this.updateStatus(transcriptionId, {
         status: 'CONVERTING',
         progress: 5,
+        provider: providerId,
         started_at: new Date(),
       });
 
-      // 1. Download
+      // 1. Download do source (ASF/MP4/etc.)
       const sourcePath = join(workDir, 'source.bin');
-      this.logger.log(`[${transcriptionId}] baixando source do S3`);
+      this.logger.log(`[${transcriptionId}] baixando source do S3 (provider=${providerId})`);
       await this.s3.downloadToFile(data.sourceS3Key, sourcePath);
       await this.updateStatus(transcriptionId, { progress: 15 });
 
-      // 2. Converte pra MP4 web-friendly
+      // 2. Converte pra MP4 web-friendly (pro player do frontend)
       const mp4Path = join(workDir, 'video.mp4');
       this.logger.log(`[${transcriptionId}] convertendo pra MP4`);
       await convertToMp4(sourcePath, mp4Path);
       await this.updateStatus(transcriptionId, { progress: 25 });
 
-      // 3. Upload MP4
-      const caseIdFromKey = data.sourceS3Key.split('/')[1]; // transcricoes/{caseId}/{id}/source.ext
+      // 3. Upload MP4 pro S3
+      const caseIdFromKey = data.sourceS3Key.split('/')[1];
       const videoKey = `transcricoes/${caseIdFromKey}/${transcriptionId}/video.mp4`;
       await this.s3.uploadFile(videoKey, mp4Path, 'video/mp4');
       await this.updateStatus(transcriptionId, {
@@ -91,33 +106,54 @@ export class TranscricaoProcessor extends WorkerHost {
         video_s3_key: videoKey,
       });
 
-      // 4. Extrai WAV 16kHz pro Whisper
-      const wavPath = join(workDir, 'audio.wav');
-      this.logger.log(`[${transcriptionId}] extraindo WAV pro Whisper`);
-      await extractAudioWav(sourcePath, wavPath);
+      // 4. Extrai áudio — formato depende do provider
+      //    - whisper-local: WAV 16kHz mono (sem perdas, container Python lê do S3)
+      //    - groq: MP3 32kbps mono (precisa caber em 25MB, enviado direto via multipart)
+      const audioPath = isGroq
+        ? join(workDir, 'audio.mp3')
+        : join(workDir, 'audio.wav');
+      const audioMime = isGroq ? 'audio/mpeg' : 'audio/wav';
+      const audioExt = isGroq ? 'mp3' : 'wav';
+
+      this.logger.log(`[${transcriptionId}] extraindo áudio (${isGroq ? 'MP3 32kbps pro Groq' : 'WAV 16kHz pro Whisper local'})`);
+      if (isGroq) {
+        await extractAudioMp3(sourcePath, audioPath);
+      } else {
+        await extractAudioWav(sourcePath, audioPath);
+      }
       await this.updateStatus(transcriptionId, { progress: 40 });
 
-      // 5. Upload WAV (o crm-whisper vai baixar do S3)
-      const audioKey = `transcricoes/${caseIdFromKey}/${transcriptionId}/audio.wav`;
-      await this.s3.uploadFile(audioKey, wavPath, 'audio/wav');
+      // 5. Upload do áudio pro S3 (mantém histórico em ambos os casos —
+      //    permite reprocessar com outro provider depois sem refazer ffmpeg)
+      const audioKey = `transcricoes/${caseIdFromKey}/${transcriptionId}/audio.${audioExt}`;
+      await this.s3.uploadFile(audioKey, audioPath, audioMime);
       await this.updateStatus(transcriptionId, {
         progress: 45,
         audio_s3_key: audioKey,
         status: 'TRANSCRIBING',
       });
 
-      // 6. Dispara job no whisper-server
-      const { job_id } = await this.provider.submit({
-        s3_key: audioKey,
-        diarize: true,
-        min_speakers: data.minSpeakers,
-        max_speakers: data.maxSpeakers,
-      });
+      // 6. Dispara o job no provider escolhido
+      //    - whisper-local: passa s3_key (Python baixa do MinIO)
+      //    - groq: passa local_path (provider lê o arquivo e manda multipart)
+      const submitInput = isGroq
+        ? {
+            local_path: audioPath,
+            diarize: false, // Groq não diariza
+          }
+        : {
+            s3_key: audioKey,
+            diarize: true,
+            min_speakers: data.minSpeakers,
+            max_speakers: data.maxSpeakers,
+          };
+
+      const { job_id } = await provider.submit(submitInput);
       await this.updateStatus(transcriptionId, { external_job_id: job_id });
-      this.logger.log(`[${transcriptionId}] submetido ao whisper job=${job_id}`);
+      this.logger.log(`[${transcriptionId}] submetido ao ${providerId} job=${job_id}`);
 
       // 7. Polling
-      const result = await this.pollUntilDone(transcriptionId, job_id);
+      const result = await this.pollUntilDone(transcriptionId, provider, job_id);
 
       // 8. Salva resultado
       const speakersList = this.extractSpeakers(result.segments);
@@ -158,7 +194,11 @@ export class TranscricaoProcessor extends WorkerHost {
     }
   }
 
-  private async pollUntilDone(transcriptionId: string, jobId: string) {
+  private async pollUntilDone(
+    transcriptionId: string,
+    provider: TranscriptionProvider,
+    jobId: string,
+  ) {
     const deadline = Date.now() + this.MAX_WAIT_MS;
     let lastProgress = 45;
 
@@ -166,7 +206,7 @@ export class TranscricaoProcessor extends WorkerHost {
       await sleep(this.POLL_INTERVAL_MS);
       let status: TranscriptionJobStatus;
       try {
-        status = await this.provider.status(jobId);
+        status = await provider.status(jobId);
       } catch (e: any) {
         this.logger.warn(`[${transcriptionId}] polling falhou: ${e?.message} — reintentando`);
         continue;

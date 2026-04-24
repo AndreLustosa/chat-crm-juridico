@@ -2,10 +2,10 @@
 
 import {
   Loader2, Play, Trash2, RefreshCw, AlertCircle, CheckCircle2, Clock as ClockIcon,
-  Briefcase, Unlink,
+  Briefcase, Unlink, Cpu, Cloud,
 } from 'lucide-react';
 import type { TranscricaoListItem } from './types';
-import { STATUS_META, formatSize, formatDuration, formatDate } from './types';
+import { STATUS_META, formatSize, formatDuration, formatDate, PROVIDER_META } from './types';
 
 interface Props {
   item: TranscricaoListItem;
@@ -66,6 +66,15 @@ export function TranscricaoCard({ item, onOpen, onDelete, onRetry, showLink }: P
           )}
           <span>{formatDate(item.created_at)}</span>
           {item.uploaded_by && <span>por {item.uploaded_by.name}</span>}
+          {item.provider && (
+            <span
+              className={`inline-flex items-center gap-1 ${PROVIDER_META[item.provider]?.color || 'text-base-content/40'}`}
+              title={`Provider: ${item.provider}`}
+            >
+              {item.provider === 'groq' ? <Cloud className="h-3 w-3" /> : <Cpu className="h-3 w-3" />}
+              {PROVIDER_META[item.provider]?.label || item.provider}
+            </span>
+          )}
         </div>
         {!done && !error && (
           <div className="mt-2 w-full bg-accent/30 rounded-full h-1.5 overflow-hidden">

@@ -25,7 +25,7 @@ export async function convertToMp4(input: string, output: string): Promise<void>
 }
 
 /**
- * Extrai áudio mono 16kHz em formato WAV — formato ideal pro Whisper.
+ * Extrai áudio mono 16kHz em formato WAV — formato ideal pro Whisper local.
  * Evita overhead do Whisper ter que resampling internamente.
  */
 export async function extractAudioWav(input: string, output: string): Promise<void> {
@@ -37,6 +37,24 @@ export async function extractAudioWav(input: string, output: string): Promise<vo
     '-ar', '16000',   // 16kHz
     '-acodec', 'pcm_s16le',
     '-f', 'wav',
+    output,
+  ]);
+}
+
+/**
+ * Extrai áudio mono 16kHz em MP3 com bitrate baixo — pro Groq que tem
+ * limite de 25MB. Voz humana fica clara em 32kbps mono → ~14MB pra 1h.
+ * Audiência de 2h ainda cabe.
+ */
+export async function extractAudioMp3(input: string, output: string, bitrateKbps = 32): Promise<void> {
+  await runFfmpeg([
+    '-y',
+    '-i', input,
+    '-vn',
+    '-ac', '1',
+    '-ar', '16000',
+    '-codec:a', 'libmp3lame',
+    '-b:a', `${bitrateKbps}k`,
     output,
   ]);
 }

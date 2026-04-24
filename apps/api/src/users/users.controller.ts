@@ -81,6 +81,19 @@ export class UsersController {
     return this.usersService.linkSupervisors(id, data.lawyerIds);
   }
 
+  /**
+   * Define qual motor de transcrição este usuário usa.
+   * provider: 'whisper-local' | 'groq' | null (null = volta ao default global)
+   */
+  @Patch(':id/transcription-provider')
+  @Roles('ADMIN')
+  setTranscriptionProvider(
+    @Param('id') id: string,
+    @Body() data: { provider: string | null },
+  ) {
+    return this.usersService.setTranscriptionProvider(id, data.provider);
+  }
+
   /** Resumo do que o usuário possui (para modal de transferência antes de excluir) */
   @Get(':id/transfer-summary')
   @Roles('ADMIN')
