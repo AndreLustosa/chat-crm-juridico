@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Loader2, ArrowLeft, Pencil, Check, X, Download, ChevronDown,
+  Loader2, ArrowLeft, Pencil, Check, X, Download, ChevronDown, Copy,
 } from 'lucide-react';
 import api, { API_BASE_URL } from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -89,6 +89,48 @@ export function TranscricaoViewer({ id, onBack }: Props) {
     }
   };
 
+  const copyText = async () => {
+    if (!data) return;
+    // Se tiver speakers etiquetados, prefixa cada bloco com o falante.
+    // Senão (ex: Groq), copia texto corrido.
+    const speakerMap = new Map(speakers.map((s) => [s.id, s.label]));
+    const segments = data.segments_json || [];
+    let out: string;
+    if (speakers.length > 0 && segments.some((s) => s.speaker)) {
+      const lines: string[] = [];
+      let lastSpeaker = '';
+      for (const seg of segments) {
+        const speaker = seg.speaker ? (speakerMap.get(seg.speaker) || seg.speaker) : '';
+        if (speaker && speaker !== lastSpeaker) {
+          lines.push(`\n${speaker}:`);
+          lastSpeaker = speaker;
+        }
+        lines.push(seg.text.trim());
+      }
+      out = lines.join('\n').trim();
+    } else {
+      out = (data.text || '').trim();
+    }
+    try {
+      await navigator.clipboard.writeText(out);
+      showSuccess(`Texto copiado (${out.length.toLocaleString('pt-BR')} caracteres)`);
+    } catch {
+      // Fallback pra browsers que bloqueiam clipboard sem HTTPS
+      const ta = document.createElement('textarea');
+      ta.value = out;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        showSuccess('Texto copiado');
+      } catch {
+        showError('Seu browser bloqueou a cópia — selecione o texto manualmente');
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  };
+
   const exportAs = (format: 'txt' | 'srt' | 'vtt') => {
     const url = `${API_BASE_URL}/transcriptions/${id}/export/${format}`;
     const token = localStorage.getItem('access_token') || '';
@@ -131,15 +173,24 @@ export function TranscricaoViewer({ id, onBack }: Props) {
             <span>{data.language}</span>
           </div>
         </div>
-        <div className="dropdown dropdown-end">
-          <button tabIndex={0} className="btn btn-sm gap-1">
-            <Download className="h-4 w-4" /> Exportar <ChevronDown className="h-3 w-3" />
+        <div className="flex items-center gap-1">
+          <button
+            onClick={copyText}
+            className="btn btn-sm gap-1"
+            title="Copiar texto completo pro clipboard"
+          >
+            <Copy className="h-4 w-4" /> Copiar texto
           </button>
-          <ul tabIndex={0} className="dropdown-content menu bg-base-200 rounded-box w-36 shadow z-10">
-            <li><button onClick={() => exportAs('txt')}>TXT</button></li>
-            <li><button onClick={() => exportAs('srt')}>SRT (legendas)</button></li>
-            <li><button onClick={() => exportAs('vtt')}>VTT (web)</button></li>
-          </ul>
+          <div className="dropdown dropdown-end">
+            <button tabIndex={0} className="btn btn-sm gap-1">
+              <Download className="h-4 w-4" /> Exportar <ChevronDown className="h-3 w-3" />
+            </button>
+            <ul tabIndex={0} className="dropdown-content menu bg-base-200 rounded-box w-36 shadow z-10">
+              <li><button onClick={() => exportAs('txt')}>TXT</button></li>
+              <li><button onClick={() => exportAs('srt')}>SRT (legendas)</button></li>
+              <li><button onClick={() => exportAs('vtt')}>VTT (web)</button></li>
+            </ul>
+          </div>
         </div>
       </div>
 
