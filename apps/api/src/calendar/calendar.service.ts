@@ -261,14 +261,24 @@ export class CalendarService implements OnApplicationBootstrap {
       throw new BadRequestException(`Tipo invalido: ${data.type}. Use: ${EVENT_TYPES.join(', ')}`);
     }
 
-    // Auto-preencher lead_id a partir do processo vinculado, se não informado
+    // Auto-preencher lead_id + assigned_user_id a partir do processo vinculado,
+    // se não informados. LegalCase.lawyer_id eh sempre preenchido (NOT NULL
+    // no schema). Antes assigned_user_id ficava null em eventos criados por
+    // fluxos que nao passavam explicitamente (ex: case-deadlines, DJEN auto-task),
+    // fazendo prazos aparecerem como "Sem responsavel" na Triagem.
+    // Bug reportado 2026-04-24. Fix: fallback generico aqui cobre todos os
+    // pontos de criacao de CalendarEvent com legal_case_id.
     let resolvedLeadId = data.lead_id;
-    if (!resolvedLeadId && data.legal_case_id) {
+    let resolvedAssignedUserId = data.assigned_user_id;
+    if (data.legal_case_id && (!resolvedLeadId || !resolvedAssignedUserId)) {
       const legalCase = await this.prisma.legalCase.findUnique({
         where: { id: data.legal_case_id },
-        select: { lead_id: true },
+        select: { lead_id: true, lawyer_id: true },
       });
-      if (legalCase?.lead_id) resolvedLeadId = legalCase.lead_id;
+      if (legalCase?.lead_id && !resolvedLeadId) resolvedLeadId = legalCase.lead_id;
+      if (legalCase?.lawyer_id && !resolvedAssignedUserId) {
+        resolvedAssignedUserId = legalCase.lawyer_id;
+      }
     }
 
     // Reminders: se frontend/via nao especificou, usa defaults do tipo.
@@ -294,7 +304,7 @@ export class CalendarService implements OnApplicationBootstrap {
         lead_id: resolvedLeadId,
         conversation_id: data.conversation_id,
         legal_case_id: data.legal_case_id,
-        assigned_user_id: data.assigned_user_id,
+        assigned_user_id: resolvedAssignedUserId,
         created_by_id: data.created_by_id,
         appointment_type_id: data.appointment_type_id,
         tenant_id: data.tenant_id,

@@ -31,7 +31,10 @@ export class CaseDeadlinesService {
   private async verifyCaseAccess(caseId: string, tenantId?: string) {
     const lc = await this.prisma.legalCase.findUnique({
       where: { id: caseId },
-      select: { id: true, tenant_id: true, lead_id: true, conversation_id: true },
+      // lawyer_id incluido pra herdar como assigned_user_id do CalendarEvent
+      // do prazo (antes vinha null e aparecia "Sem responsavel" na UI —
+      // bug reportado 2026-04-24).
+      select: { id: true, tenant_id: true, lead_id: true, conversation_id: true, lawyer_id: true },
     });
     if (!lc) throw new NotFoundException('Caso não encontrado');
     if (tenantId && lc.tenant_id && lc.tenant_id !== tenantId) {
@@ -77,6 +80,9 @@ export class CaseDeadlinesService {
     const legalCase = await this.verifyCaseAccess(caseId, tenantId);
 
     // Criar CalendarEvent automaticamente tipo PRAZO
+    // assigned_user_id herda lawyer_id do LegalCase por padrao — evita
+    // prazos aparecerem como "Sem responsavel" na Triagem. Usuario pode
+    // reatribuir depois via PATCH /calendar/events/:id.
     const calendarEvent = await this.calendarService.create({
       type: 'PRAZO',
       title: `Prazo: ${data.title}`,
@@ -85,6 +91,7 @@ export class CaseDeadlinesService {
       all_day: true,
       priority: 'ALTA',
       legal_case_id: caseId,
+      assigned_user_id: legalCase.lawyer_id,
       created_by_id: userId,
       tenant_id: tenantId,
       reminders: [
