@@ -201,27 +201,36 @@ export class AiProcessor extends WorkerHost {
   }
 
   // ─── Auto-transcreve mensagens de áudio sem texto (Whisper) ───
+  //
+  // Arquitetura (2026-04-23): API e worker estao em containers separados,
+  // NAO compartilham filesystem. Upload S3 foi removido (padrao Chatwoot:
+  // filesystem local apenas). Worker busca o buffer via HTTP chamando o
+  // endpoint publico GET /media/:messageId do crm-api (a rota ja faz o
+  // fallback interno: filesystem -> S3 -> original_url).
   private async autoTranscribeAudios(
     messages: any[],
     ai: OpenAI,
   ): Promise<void> {
+    const apiInternalUrl = process.env.API_INTERNAL_URL || 'http://crm-api:3001';
+
     for (const msg of messages) {
       // Só áudios recebidos do cliente sem transcrição
       if (msg.direction !== 'in' || msg.type !== 'audio' || msg.text) continue;
 
       // Retry apenas para mensagens recentes (< 2 min). Mensagens antigas sem mídia
-      // são do sync-history e nunca terão registro no S3 — pular sem esperar.
+      // são do sync-history e nunca terão registro — pular sem esperar.
       let media = msg.media ?? null;
       const msgAge = Date.now() - new Date(msg.created_at).getTime();
       const isRecent = msgAge < 2 * 60 * 1000; // < 2 minutos
 
-      if (!media?.s3_key && isRecent) {
-        // Polling com duas fases:
-        // - Fase rápida (5×500ms = 2.5s): cobre download síncrono com pequeno atraso de commit
-        // - Fase lenta (12×2000ms = 24s): cobre fallback BullMQ processando áudios longos
+      // Aguarda o Media record existir com file_path OU s3_key (download
+      // fire-and-forget do webhook pode ainda nao ter terminado).
+      const hasStorage = (m: any) => m && (m.file_path || m.s3_key);
+
+      if (!hasStorage(media) && isRecent) {
         const phases = [
-          { attempts: 5, delay: 500 },
-          { attempts: 12, delay: 2000 },
+          { attempts: 5, delay: 500 },   // 2.5s rapido
+          { attempts: 12, delay: 2000 }, // 24s pra audios longos
         ];
         outer: for (const phase of phases) {
           for (let attempt = 1; attempt <= phase.attempts; attempt++) {
@@ -229,25 +238,37 @@ export class AiProcessor extends WorkerHost {
             const found = await this.prisma.media.findFirst({
               where: { message_id: msg.id },
             });
-            if (found?.s3_key) {
+            if (hasStorage(found)) {
               media = found;
               break outer;
             }
             this.logger.log(
-              `[AI] Aguardando mídia para msg ${msg.id} (delay=${phase.delay}ms tentativa ${attempt}/${phase.attempts})...`,
+              `[AI] Aguardando mídia msg ${msg.id} (delay=${phase.delay}ms tentativa ${attempt}/${phase.attempts})...`,
             );
           }
         }
       }
-      if (!media?.s3_key) {
+      if (!hasStorage(media)) {
         msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
         continue;
       }
 
       try {
-        const { buffer, contentType } = await this.s3.getObjectBuffer(
-          media.s3_key,
+        // Busca o buffer via HTTP do crm-api (GET /media/:messageId).
+        // Esse endpoint eh @Public e faz fallback filesystem -> S3 -> CDN.
+        const mediaUrl = `${apiInternalUrl}/media/${msg.id}`;
+        const sizeKB = media?.size ? (media.size / 1024).toFixed(1) : '?';
+        this.logger.log(
+          `[AI] Transcrevendo áudio msg=${msg.id} url=${mediaUrl} size=${sizeKB}KB`,
         );
+
+        const resp = await axios.get(mediaUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30_000,
+          validateStatus: (s) => s < 400,
+        });
+        const buffer: Buffer = Buffer.from(resp.data);
+        const contentType = (resp.headers['content-type'] as string) || media.mime_type || 'audio/ogg';
         const mimeBase = contentType.split(';')[0].trim();
         // Evolution manda audio/ogg; codecs OPUS. Whisper aceita 'ogg' direto.
         // Se vier algo muito genérico (application/octet-stream ou vazio),
@@ -256,11 +277,6 @@ export class AiProcessor extends WorkerHost {
           ? mimeBase
           : 'audio/ogg';
         const ext = normalizedMime.split('/')[1] || 'ogg';
-
-        const sizeKB = (buffer.length / 1024).toFixed(1);
-        this.logger.log(
-          `[AI] Transcrevendo áudio msg=${msg.id} mime=${normalizedMime} size=${sizeKB}KB`,
-        );
 
         // Tenta com modelo preferido (gpt-4o-transcribe — mais acurado).
         // Em caso de falha ou texto vazio, cai pra whisper-1 (fallback robusto,
