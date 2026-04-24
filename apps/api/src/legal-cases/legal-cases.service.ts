@@ -226,12 +226,22 @@ export class LegalCasesService {
       where: { id },
       include: {
         lead: true,
+        // Lawyer incluido pro frontend pre-popular o select de advogado
+        // responsavel no ProcessoDetailPanel (state: lawyerSelectId usa
+        // legalCase.lawyer?.id). Sem isso, o select mostrava "Selecionar
+        // advogado..." mesmo com o campo preenchido no banco.
+        // Bug reportado 2026-04-24.
+        lawyer: { select: { id: true, name: true } },
         conversation: {
           select: {
             id: true,
             instance_name: true,
             status: true,
             legal_area: true,
+            // Atendente responsavel herdado da conversation — permite o
+            // frontend mostrar quem esta atendendo o cliente.
+            assigned_user_id: true,
+            assigned_user: { select: { id: true, name: true } },
           },
         },
         tasks: {
@@ -1071,6 +1081,10 @@ export class LegalCasesService {
       },
       include: {
         lead: { select: { id: true, name: true, phone: true, profile_picture_url: true, email: true } },
+        // Lawyer incluido pra o frontend pre-popular o select de advogado
+        // quando o painel abre automaticamente apos cadastro (fix UX
+        // commit 1f92740). Sem isso o campo aparecia vazio.
+        lawyer: { select: { id: true, name: true } },
         _count: { select: { tasks: true, events: true, djen_publications: true } },
       },
     });
