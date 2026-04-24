@@ -69,7 +69,20 @@ export function NovaTranscricaoWizard({ open, onClose, onCreated, prefilledCaseI
     if (!open) return;
     if (prefilledCaseId) {
       setSelectedCaseId(prefilledCaseId);
+      // Label provisório enquanto busca o nome real do processo
+      setSelectedCaseLabel('Processo atual');
       setMode('avulsa'); // usamos 'avulsa' como sinônimo de "avançar direto pro upload"
+      // Busca o nome real do processo pra mostrar no card de "Vinculada a:"
+      api.get(`/legal-cases/${prefilledCaseId}`)
+        .then((r) => {
+          const c = r.data;
+          const num = c?.case_number || `${c?.legal_area || 'Processo'} sem número`;
+          const nome = c?.lead?.name ? ` — ${c.lead.name}` : '';
+          setSelectedCaseLabel(`Processo ${num}${nome}`);
+        })
+        .catch(() => {
+          // mantém label provisório se a busca falhar
+        });
     } else {
       setMode('choose');
       setSelectedCaseId(null);
