@@ -1848,6 +1848,13 @@ export default function AdvogadoPage() {
   const [djenNotify, setDjenNotify] = useState(true);
   const [loadingNotify, setLoadingNotify] = useState(false);
 
+  // Filtro de advogado pra admin visualizar prazos (todos / apenas os meus /
+  // advogado especifico). Feature 2026-04-24. Nao-admin nao ve esse dropdown
+  // e o backend forca req.user.id no retorno (RBAC garantido no commit 72ef01d).
+  type LawyerFilter = 'all' | 'mine' | string; // string = userId do advogado
+  const [lawyerFilter, setLawyerFilter] = useState<LawyerFilter>('all');
+  const [lawyers, setLawyers] = useState<{ id: string; name: string }[]>([]);
+
   // Modal de confirmação de conclusão de tarefas ao mover estágio
   const [pendingMove, setPendingMove] = useState<{ caseId: string; newStage: string; pendingTasks: number } | null>(null);
 
@@ -1921,16 +1928,8 @@ export default function AdvogadoPage() {
       .then(r => setUpcomingEvents((r.data || []).filter((e: any) => e.status !== 'CANCELADO' && e.status !== 'CONCLUIDO').slice(0, 5)))
       .catch(() => {});
 
-    // Fetch prazos/tarefas pendentes (AGENDADO/CONFIRMADO, tipo TAREFA/PRAZO)
-    // Fetch TODOS os prazos/tarefas pendentes (com ou sem caso vinculado)
-    api.get('/calendar/events', { params: { start: new Date(Date.now() - 30 * 86400000).toISOString(), end: in7d, showAll: 'true' } })
-      .then(r => {
-        const items = (r.data || []).filter((e: any) =>
-          ['AGENDADO', 'CONFIRMADO'].includes(e.status) && e.type === 'PRAZO'
-        );
-        setDeadlines(items.sort((a: any, b: any) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()).slice(0, 50));
-      })
-      .catch(() => {});
+    // Fetch prazos/tarefas pendentes — chamada inicial. O refetch ao mudar
+    // o filtro de advogado vem via useEffect separado abaixo.
 
     // Fetch setting DJEN_NOTIFY_CLIENT (admin only)
     if (isAdmin) {
@@ -1939,6 +1938,18 @@ export default function AdvogadoPage() {
         const notify = settings.find((s: any) => s.key === 'DJEN_NOTIFY_CLIENT');
         setDjenNotify(notify?.value !== 'false');
       }).catch(() => {});
+
+      // Lista de advogados pra popular o dropdown de filtro (admin only).
+      // Backend /users ja filtra por tenant — nao-admin veria endpoint 403 de qualquer forma.
+      api.get('/users', { params: { role: 'ADVOGADO' } })
+        .then(r => {
+          const users = Array.isArray(r.data) ? r.data : (r.data?.data || []);
+          const mapped = users
+            .filter((u: any) => (u.roles || []).some((role: string) => ['ADMIN', 'ADVOGADO', 'Advogados'].includes(role)))
+            .map((u: any) => ({ id: u.id, name: u.name || u.email || 'Sem nome' }));
+          setLawyers(mapped);
+        })
+        .catch(() => {});
     }
 
     // Fetch estagiários vinculados + guarda user_id do advogado logado
@@ -1953,6 +1964,42 @@ export default function AdvogadoPage() {
     const interval = setInterval(() => fetchCases(true), 30_000);
     return () => clearInterval(interval);
   }, [router, fetchCases, fetchArchivedTotal, view]);
+
+  // Fetch prazos separado — roda quando lawyerFilter muda.
+  // Pra admin, mapeia lawyerFilter pros params corretos (respeita RBAC do backend):
+  //   - 'all'                → showAll=true (admin ve tudo)
+  //   - 'mine'               → sem params (backend filtra req.user.id)
+  //   - '<userId especifico>' → userId=X
+  // Pra nao-admin, qualquer valor eh ignorado (backend sempre forca req.user.id).
+  useEffect(() => {
+    const in7d = new Date(Date.now() + 7 * 86400000).toISOString();
+    const params: Record<string, string> = {
+      start: new Date(Date.now() - 30 * 86400000).toISOString(),
+      end: in7d,
+    };
+
+    if (isAdmin) {
+      if (lawyerFilter === 'all') {
+        params.showAll = 'true';
+      } else if (lawyerFilter === 'mine') {
+        // sem showAll → backend filtra req.user.id
+      } else {
+        params.userId = lawyerFilter;
+      }
+    }
+    // nao-admin: params sem showAll/userId → backend sempre forca req.user.id
+
+    api.get('/calendar/events', { params })
+      .then(r => {
+        const items = (r.data || []).filter((e: any) =>
+          ['AGENDADO', 'CONFIRMADO'].includes(e.status) && e.type === 'PRAZO'
+        );
+        setDeadlines(items.sort((a: any, b: any) =>
+          new Date(a.start_at).getTime() - new Date(b.start_at).getTime()
+        ).slice(0, 50));
+      })
+      .catch(() => {});
+  }, [isAdmin, lawyerFilter]);
 
   // WebSocket: atualização em tempo real quando petição muda de status
   useEffect(() => {
@@ -2110,6 +2157,27 @@ export default function AdvogadoPage() {
                 >
                   <option value="">Todas as áreas</option>
                   {allAreas.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              </div>
+            )}
+
+            {/* Filtro de advogado — SOMENTE admin. Controla os prazos exibidos na
+                secao "Prazos Processuais". Feature 2026-04-24. */}
+            {isAdmin && (
+              <div className="relative" title="Filtrar prazos por advogado">
+                <select
+                  value={lawyerFilter}
+                  onChange={e => setLawyerFilter(e.target.value)}
+                  className="appearance-none pl-3 pr-7 py-1.5 text-[12px] bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+                >
+                  <option value="all">Prazos: todos os advogados</option>
+                  <option value="mine">Prazos: apenas os meus</option>
+                  {lawyers.length > 0 && (
+                    <optgroup label="Filtrar por advogado">
+                      {lawyers.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </optgroup>
+                  )}
                 </select>
                 <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
