@@ -270,6 +270,26 @@ export class AiProcessor extends WorkerHost {
         const buffer: Buffer = Buffer.from(resp.data);
         const contentType = (resp.headers['content-type'] as string) || media.mime_type || 'audio/ogg';
         const mimeBase = contentType.split(';')[0].trim();
+
+        // Validacao de magic bytes — se o buffer nao for audio valido
+        // (ex: proxy serviu conteudo encriptado do WhatsApp CDN com extensao
+        // .enc), nao queima tokens do Whisper. OGG sempre comeca com "OggS",
+        // MP3 com "ID3" ou sync frame (0xFF 0xFB/0xFA/0xF3/0xF2).
+        // Bug reportado 2026-04-23: Whisper rejeitando com "400 corrupted".
+        const head = buffer.subarray(0, 4);
+        const isOgg = head.toString('ascii', 0, 4) === 'OggS';
+        const isMp3 = head.toString('ascii', 0, 3) === 'ID3' ||
+          (head[0] === 0xFF && (head[1] & 0xE0) === 0xE0);
+        const isWav = head.toString('ascii', 0, 4) === 'RIFF';
+        const isM4a = buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+        if (!isOgg && !isMp3 && !isWav && !isM4a) {
+          this.logger.warn(
+            `[AI] Buffer invalido msg=${msg.id} size=${buffer.length}B ` +
+            `head=${head.toString('hex')} — possivel conteudo encriptado. Pulando.`,
+          );
+          msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+          continue;
+        }
         // Evolution manda audio/ogg; codecs OPUS. Whisper aceita 'ogg' direto.
         // Se vier algo muito genérico (application/octet-stream ou vazio),
         // forçamos audio/ogg porque esse é o formato real do WhatsApp.

@@ -96,22 +96,55 @@ export class MediaController {
           return;
         } catch (s3Err: any) {
           this.logger.warn(`[MediaController] S3 falhou para ${messageId}: ${s3Err.message}`);
-          // Cai no fallback de original_url
+          // Cai no fluxo de re-download
         }
       }
 
-      // ─── 3. Fallback: proxy da Evolution CDN (original_url) ──────
-      if (media.original_url) {
-        this.logger.log(`[MediaController] Servindo via original_url para ${messageId}`);
+      // ─── 3. Re-download via Evolution API ────────────────────────
+      // Bug reportado 2026-04-23: quando o arquivo sumia do filesystem
+      // (container antigo pre-volume-persistente) e caia direto no proxy
+      // de original_url, servia conteudo CRIPTOGRAFADO da CDN do WhatsApp
+      // (.enc) — Whisper rejeitava com "400 Audio file might be corrupted".
+      //
+      // Fix: se filesystem nao tem mas existe external_message_id, tenta
+      // re-baixar via Evolution API (getBase64FromMediaMessage — entrega
+      // plaintext decriptado). Se sucesso, serve do filesystem recem-escrito.
+      if (messageId) {
+        this.logger.log(`[MediaController] Arquivo ausente msg=${messageId} — disparando re-download via Evolution`);
+        const retry = await this.mediaDownloadService.retryDownload(messageId);
+        if (retry.ok) {
+          // Re-busca a media atualizada (file_path agora preenchido com arquivo real)
+          const refreshed = await this.prisma.media.findUnique({ where: { message_id: messageId } });
+          if (refreshed?.file_path && await this.fileStorage.exists(refreshed.file_path)) {
+            await this.serveFromFilesystem(refreshed, dl, req, res);
+            return;
+          }
+        } else {
+          this.logger.warn(`[MediaController] Re-download falhou msg=${messageId}: ${retry.reason || 'unknown'}`);
+        }
+      }
+
+      // ─── 4. Ultimo recurso: proxy da Evolution CDN (apenas NAO-WhatsApp) ─
+      // URLs do WhatsApp CDN (mmg.whatsapp.net) retornam conteudo encriptado —
+      // so servimos se for outra origem (ex: midia ja processada, link publico).
+      const isEncryptedWhatsAppUrl = media.original_url &&
+        /(\.whatsapp\.net|mmg\.whatsapp)/.test(media.original_url);
+      if (media.original_url && !isEncryptedWhatsAppUrl) {
+        this.logger.log(`[MediaController] Servindo via original_url (nao-WhatsApp) para ${messageId}`);
         await this.proxyFromEvolutionCdn(media, res);
         return;
       }
 
-      throw new NotFoundException('Arquivo não encontrado no storage');
+      if (isEncryptedWhatsAppUrl) {
+        this.logger.warn(
+          `[MediaController] Arquivo ${messageId} nao disponivel — original_url eh encriptada do WhatsApp, re-download falhou`,
+        );
+      }
+      throw new NotFoundException('Arquivo não disponível');
     } catch (e) {
       if (e instanceof NotFoundException) throw e;
       this.logger.error(`Erro ao servir mídia ${messageId}: ${(e as Error).message}`);
-      throw new NotFoundException('Arquivo não encontrado no storage');
+      throw new NotFoundException('Arquivo não disponível');
     }
   }
 
