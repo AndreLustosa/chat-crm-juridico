@@ -1990,11 +1990,17 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         this.logger.log('[AI] Lead enviou áudio — resposta será apenas por voz (sem texto)');
       }
 
+      // Flag de sucesso do envio. Se texto+audio ambos falham, NAO salvamos
+      // Message no banco (evita mensagem fantasma no chat do CRM mostrando
+      // algo que cliente nunca recebeu no WhatsApp — bug reportado 2026-04-23).
+      // _willAudio=true pula sendText porque audio vai em passo posterior (TTS);
+      // consideramos "ok" nesse caso pra seguir o fluxo pro passo do audio.
+      let sendOk = !!_willAudio;
+      let sendErrMsg: string | null = null;
       try {
         let sendResult: any;
         const evoHeaders = { 'Content-Type': 'application/json', apikey: apiKey };
 
-        // Se vai enviar áudio, pula o texto
         if (_willAudio) {
           // Não envia texto — será enviado apenas áudio no passo 18 (TTS)
         } else {
@@ -2006,10 +2012,30 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             { number: convo.lead.phone, text: textToSend },
             { headers: evoHeaders, timeout: 30000 },
           );
+          // Valida resposta. Evolution as vezes retorna 200 OK mas sem
+          // key.id (falha silenciosa no canal interno com WhatsApp) —
+          // detectamos isso aqui e tratamos como erro.
+          const realId = sendResult?.data?.key?.id;
+          if (realId) {
+            evolutionMsgId = realId;
+            sendOk = true;
+          } else {
+            sendErrMsg = `Evolution API 200 sem key.id: ${JSON.stringify(sendResult?.data).slice(0, 200)}`;
+            sendOk = false;
+          }
         }
-        if (sendResult) evolutionMsgId = sendResult.data?.key?.id || evolutionMsgId;
       } catch (sendErr: any) {
-        this.logger.error(`[AI] Falha ao enviar via Evolution (${sendErr.response?.status || sendErr.message}): ${JSON.stringify(sendErr.response?.data || {}).slice(0, 200)}`);
+        sendErrMsg = `${sendErr.response?.status || sendErr.message}: ${JSON.stringify(sendErr.response?.data || {}).slice(0, 200)}`;
+        sendOk = false;
+      }
+
+      if (!sendOk) {
+        this.logger.error(
+          `[AI] Envio pra WhatsApp falhou (conv ${convo.id}): ${sendErrMsg} — abortando save pra evitar msg fantasma. BullMQ vai retry (defaultJobOptions.attempts=3).`,
+        );
+        // Lança pra BullMQ re-tentar com backoff exponencial (2s, 4s, 8s).
+        // Cobre rate limit transitorio, instability da Evolution, etc.
+        throw new Error(`Evolution sendText failed: ${sendErrMsg}`);
       }
 
       // 17. Salvar mensagem no banco com skill_id (texto limpo, sem assinatura)
