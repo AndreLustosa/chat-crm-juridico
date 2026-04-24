@@ -68,9 +68,11 @@ services:
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
     volumes:
       - whisper_models:/models
+    # depends_on em list simple — Docker Swarm nao suporta `condition: service_healthy`
+    # em long-form (apenas Compose standalone suporta). Stack deploy falhava
+    # silenciosamente quando havia condition: declarada aqui.
     depends_on:
-      crm-minio:
-        condition: service_started
+      - crm-minio
 
   # ------ NestJS Core API ------
   crm-api:
@@ -106,11 +108,16 @@ services:
       - WHISPER_SERVICE_URL=${WHISPER_SERVICE_URL:-http://crm-whisper:8000}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-whisper-large-v3}
+    # Volume persistente pra midia (audios/imagens do WhatsApp). Sem isso,
+    # rollouts perdiam arquivos em transito (container antigo matava filesystem
+    # antes do novo subir). Adicionado 2026-04-23.
+    volumes:
+      - crm_media:/var/lib/crm-media
+    # depends_on em list simple — Docker Swarm nao suporta long-form com
+    # condition. Usar deploy.restart_policy / healthcheck pra garantir ordem.
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
 
   # ------ NestJS Worker ------
   crm-worker:
@@ -137,11 +144,11 @@ services:
       - WHISPER_SERVICE_URL=${WHISPER_SERVICE_URL:-http://crm-whisper:8000}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-whisper-large-v3}
+    # Worker nao precisa de volume de midia — busca via HTTP do crm-api
+    # (GET /media/:id). Abordagem chatwoot-style pra evitar S3 + complexidade.
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - postgres
+      - redis
 
   # ------ Next.js Frontend ------
   crm-web:
@@ -163,3 +170,4 @@ volumes:
   redisdata:
   minio_data:
   whisper_models:
+  crm_media:  # persistente pra audios/imagens (WhatsApp) — evita perda em rollouts
