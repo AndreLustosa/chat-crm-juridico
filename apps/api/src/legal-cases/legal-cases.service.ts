@@ -7,6 +7,7 @@ import { CalendarService } from '../calendar/calendar.service';
 import { SettingsService } from '../settings/settings.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
+import { phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -955,27 +956,49 @@ export class LegalCasesService {
         normalizedPhone = normalizedPhone.slice(0, 4) + normalizedPhone.slice(5);
       }
 
-      // Verifica se já existe lead com esse telefone
-      const byPhone = await this.prisma.lead.findFirst({
-        where: { phone: { contains: normalizedPhone } },
-        select: { id: true, name: true },
-      });
+      // Busca robusta por variantes do telefone (cobre 10/11/12/13 digitos).
+      // Antes usava `contains` (preso em 1 formato) — lead em formato
+      // diferente nao era encontrado. Bug reportado 2026-04-24:
+      // telefone 8296316935 existia como Lead PERDIDO mas o sistema
+      // oferecia "Novo cliente" em vez de vincular ao existente.
+      const variants = phoneVariants(normalizedPhone);
+      const byPhone = variants.length > 0
+        ? await this.prisma.lead.findFirst({
+            where: { phone: { in: variants } },
+            select: { id: true, name: true, stage: true, loss_reason: true },
+          })
+        : null;
 
       if (byPhone) {
         leadId = byPhone.id;
-        // Atualizar nome/email se o lead existente não tem e foram informados
-        if (data.lead_name && (!byPhone.name || byPhone.name.startsWith('[Processo]'))) {
+
+        const updateData: any = {};
+        const nameIsBetter = data.lead_name &&
+          (!byPhone.name || byPhone.name.startsWith('[Processo]'));
+        if (nameIsBetter) updateData.name = data.lead_name;
+        if (data.lead_email) updateData.email = data.lead_email;
+
+        // Log de reativacao — o stage FINALIZADO + is_client=true sao
+        // aplicados na secao "Promover lead para cliente" mais abaixo,
+        // que transforma qualquer lead (ativo/PERDIDO/etc) em cliente ativo.
+        if (byPhone.stage === 'PERDIDO' || byPhone.loss_reason) {
+          this.logger.log(
+            `[createDirect] Reativando lead ${byPhone.id} (estava ${byPhone.stage}` +
+            (byPhone.loss_reason ? `, motivo: ${byPhone.loss_reason}` : '') +
+            `) via cadastro de processo`,
+          );
+        }
+
+        if (Object.keys(updateData).length > 0) {
           await this.prisma.lead.update({
             where: { id: byPhone.id },
-            data: {
-              name: data.lead_name,
-              ...(data.lead_email && { email: data.lead_email }),
-            },
+            data: updateData,
           });
-          leadDisplayName = data.lead_name;
-        } else {
-          leadDisplayName = byPhone.name || normalizedPhone;
         }
+
+        leadDisplayName = (nameIsBetter && data.lead_name)
+          ? data.lead_name
+          : (byPhone.name || normalizedPhone);
       } else {
         const newLead = await this.prisma.lead.create({
           data: {

@@ -2879,7 +2879,12 @@ function CadastrarProcessoModal({
   const [newLeadPhone, setNewLeadPhone] = useState('');
   const [newLeadName, setNewLeadName] = useState('');
   const [newLeadEmail, setNewLeadEmail] = useState('');
-  const [phoneCheckResult, setPhoneCheckResult] = useState<{ exists: boolean; lead?: { id: string; name: string | null; phone: string } } | null>(null);
+  const [phoneCheckResult, setPhoneCheckResult] = useState<{
+    exists: boolean;
+    lead?: { id: string; name: string | null; phone: string; stage?: string; is_client?: boolean };
+    inactive?: boolean;
+    inactiveReason?: string | null;
+  } | null>(null);
   const [checkingPhone, setCheckingPhone] = useState(false);
   const phoneCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 

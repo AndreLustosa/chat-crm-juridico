@@ -8,6 +8,7 @@ import { AutomationsService } from '../automations/automations.service';
 import { FollowupService } from '../followup/followup.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
+import { phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
 
 /**
@@ -291,16 +292,41 @@ export class LeadsService {
   }
 
   async findByPhone(phone: string): Promise<Lead | null> {
-    const normalized = to12Digits(phone);
+    // Busca ROBUSTA: cobre todas as 4 variantes plausíveis (10/11/12/13
+    // dígitos, com/sem DDI, com/sem nono dígito). Antes só tentava
+    // normalizado + raw, então leads cadastrados em formato intermediário
+    // (ex: 11 dígitos com nono mas sem DDI) não apareciam. Bug reportado
+    // 2026-04-24: usuário digitou 8296316935 no Cadastro Direto e o lead
+    // existente não foi encontrado (estava em outro formato no banco).
+    const variants = phoneVariants(phone);
+    if (variants.length === 0) return null;
     return this.prisma.lead.findFirst({
-      where: { OR: [{ phone: normalized }, { phone }] },
+      where: { phone: { in: variants } },
     });
   }
 
-  async checkPhone(phone: string): Promise<{ exists: boolean; lead?: Lead }> {
+  async checkPhone(phone: string): Promise<{
+    exists: boolean;
+    lead?: Lead;
+    // Flags pra UI avisar o usuário quando o lead existente está em
+    // estado "inativo" (perdido/finalizado). Se vincular o contato a um
+    // processo novo, o createDirect automaticamente reativa.
+    inactive?: boolean;
+    inactiveReason?: string | null;
+  }> {
     const found = await this.findByPhone(phone);
     if (!found) return { exists: false };
-    return { exists: true, lead: found };
+    const isInactive =
+      ['PERDIDO', 'FINALIZADO'].includes(found.stage) &&
+      !found.is_client;
+    return {
+      exists: true,
+      lead: found,
+      inactive: isInactive,
+      inactiveReason: isInactive
+        ? (found.stage === 'PERDIDO' ? 'perdido' : 'finalizado sem vínculo ativo')
+        : null,
+    };
   }
 
   async update(id: string, data: { name?: string; email?: string; cpf_cnpj?: string; tags?: string[] }, tenantId?: string): Promise<Lead> {
