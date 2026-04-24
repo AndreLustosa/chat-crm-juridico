@@ -7,7 +7,7 @@ import { CalendarService } from '../calendar/calendar.service';
 import { SettingsService } from '../settings/settings.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
-import { phoneVariants } from '../common/utils/phone';
+import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -947,13 +947,13 @@ export class LegalCasesService {
 
     } else if (data.lead_phone) {
       // Caminho B: criar novo lead real com telefone/nome fornecidos
-      let normalizedPhone = data.lead_phone.replace(/\D/g, '');
-      if (!normalizedPhone) throw new BadRequestException('Telefone inválido para o cliente.');
-      // Auto-adicionar código do país (55) se não informado
-      if (normalizedPhone.length <= 11) normalizedPhone = '55' + normalizedPhone;
-      // Remover 9 extra (13 dígitos: 55 + DDD 2dig + 9 + 8dig → 55 + DDD + 8dig)
-      if (normalizedPhone.length === 13 && normalizedPhone.startsWith('55') && normalizedPhone[4] === '9') {
-        normalizedPhone = normalizedPhone.slice(0, 4) + normalizedPhone.slice(5);
+      // Normaliza pro formato canonico via helper unificado (common/utils/phone.ts).
+      // Antes tinha lógica inline divergente das outras partes do sistema.
+      const normalizedPhone = toCanonicalBrPhone(data.lead_phone);
+      if (!normalizedPhone) {
+        throw new BadRequestException(
+          `Telefone invalido: "${data.lead_phone}". Informe um celular brasileiro com DDD valido.`,
+        );
       }
 
       // Busca robusta por variantes do telefone (cobre 10/11/12/13 digitos).
@@ -1285,16 +1285,18 @@ export class LegalCasesService {
       finalLeadId = data.lead_id;
 
     } else if (data.lead_phone) {
-      let normalizedPhone = data.lead_phone.replace(/\D/g, '');
-      if (!normalizedPhone) throw new BadRequestException('Telefone inválido.');
-      if (normalizedPhone.length <= 11) normalizedPhone = '55' + normalizedPhone;
-      if (normalizedPhone.length === 13 && normalizedPhone.startsWith('55') && normalizedPhone[4] === '9') {
-        normalizedPhone = normalizedPhone.slice(0, 4) + normalizedPhone.slice(5);
+      // Normaliza pro canonico via helper unificado
+      const normalizedPhone = toCanonicalBrPhone(data.lead_phone);
+      if (!normalizedPhone) {
+        throw new BadRequestException(
+          `Telefone invalido: "${data.lead_phone}". Informe um celular brasileiro com DDD valido.`,
+        );
       }
 
-      // Verifica se já existe lead com esse telefone
+      // Busca robusta por variantes
+      const variants = phoneVariants(normalizedPhone);
       const byPhone = await this.prisma.lead.findFirst({
-        where: { phone: { contains: normalizedPhone } },
+        where: { phone: { in: variants } },
         select: { id: true },
       });
 

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
+import { PhoneInput } from '@/components/PhoneInput';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -668,10 +669,9 @@ function CreateProcessModal({
                 </div>
                 <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-border bg-background">
                   <Search size={13} className="text-muted-foreground shrink-0" />
-                  <input
-                    type="tel"
+                  <PhoneInput
                     value={newPhone}
-                    onChange={e => setNewPhone(e.target.value)}
+                    onChange={setNewPhone}
                     placeholder="Telefone com DDD (ex: 82 99999-9999) *"
                     className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-muted-foreground outline-none"
                   />

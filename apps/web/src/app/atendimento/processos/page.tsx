@@ -18,6 +18,7 @@ import { useRole } from '@/lib/useRole';
 import { ClientPanel } from '@/components/ClientPanel';
 import { ChatPopup } from '@/components/ChatPopup';
 import { EventModal } from '@/components/EventModal';
+import { PhoneInput } from '@/components/PhoneInput';
 import { EventActionButton } from '@/components/EventActionButton';
 import TabHonorarios from '@/app/atendimento/workspace/[caseId]/components/TabHonorarios';
 import {
@@ -1777,12 +1778,10 @@ function ProcessoDetailPanel({
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Telefone <span className="text-destructive">*</span></label>
-                          <input
-                            type="tel"
+                          <PhoneInput
                             value={newLinkPhone}
-                            onChange={e => setNewLinkPhone(e.target.value)}
+                            onChange={setNewLinkPhone}
                             className="mt-0.5 w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                            placeholder="(00) 00000-0000"
                             autoFocus
                           />
                         </div>
@@ -3152,12 +3151,10 @@ function CadastrarProcessoModal({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Telefone <span className="text-destructive">*</span></label>
-                    <input
-                      type="tel"
+                    <PhoneInput
                       value={newLeadPhone}
-                      onChange={e => { setNewLeadPhone(e.target.value); checkPhoneExists(e.target.value); }}
+                      onChange={(digits) => { setNewLeadPhone(digits); checkPhoneExists(digits); }}
                       className={`${inputCls} ${phoneCheckResult?.exists ? 'border-amber-500 ring-1 ring-amber-500/30' : ''}`}
-                      placeholder="(00) 00000-0000"
                       autoFocus
                     />
                     {checkingPhone && <p className="text-[10px] text-muted-foreground mt-1">Verificando...</p>}

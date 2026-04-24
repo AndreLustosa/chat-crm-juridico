@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Pencil, Trash2, X, UserCog, Phone, Loader2 } from 'lucide-react';
 import api from '@/lib/api';
+import { PhoneInput } from '@/components/PhoneInput';
 
 const SPECIALTY_SUGGESTIONS = ['Trabalhista', 'Civil', 'Criminal', 'Tributário', 'Família', 'Empresarial', 'Previdenciário', 'Imobiliário', 'Consumidor'];
 
@@ -465,12 +466,10 @@ export default function UsersSettingsPage() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider ml-1">Telefone (WhatsApp)</label>
-                <input
-                  type="tel"
+                <PhoneInput
                   value={form.phone}
-                  onChange={e => setForm({ ...form, phone: e.target.value })}
+                  onChange={(digits) => setForm({ ...form, phone: digits })}
                   className="w-full px-4 py-2.5 border border-border rounded-xl bg-background text-foreground focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/50"
-                  placeholder="5582999999999"
                 />
                 <p className="text-[10px] text-muted-foreground opacity-70 ml-1">
                   Formato: código do país + DDD + número (ex: 5582999999999). Usado para lembretes via WhatsApp.

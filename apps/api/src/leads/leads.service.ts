@@ -8,20 +8,25 @@ import { AutomationsService } from '../automations/automations.service';
 import { FollowupService } from '../followup/followup.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
-import { phoneVariants } from '../common/utils/phone';
+import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
 
 /**
- * Remove o nono digito de celulares brasileiros.
- * 13 digitos (55+DD+9+8dig) -> 12 digitos (55+DD+8dig)
- * Ex: 5582999130127 -> 558299130127
+ * Converte telefone pro formato canonico (55+DDD+8dig). Wrapper que
+ * mantem retrocompatibilidade (nunca retorna null — se nao for BR
+ * valido, mantem raw limpo como fallback defensivo).
+ *
+ * Centralizado em common/utils/phone.ts desde 2026-04-24 — antes havia
+ * multiplas implementacoes parciais (to12Digits aqui, normalizacao
+ * inline em createDirect, etc) que divergiam em edge cases.
  */
 function to12Digits(phone: string): string {
-  const d = phone.replace(/\D/g, '');
-  if (d.length === 13 && d.startsWith('55') && d[4] === '9') {
-    return d.slice(0, 4) + d.slice(5); // remove o 5o caractere (o 9)
-  }
-  return d;
+  const canonical = toCanonicalBrPhone(phone);
+  // Fallback: se nao pudermos canonizar (ex: numero internacional
+  // nao-BR ou string vazia), preserva apenas os digitos — evita quebrar
+  // casos legados. Pontos de entrada novos devem validar explicitamente
+  // chamando toCanonicalBrPhone direto.
+  return canonical || (phone || '').replace(/\D/g, '');
 }
 
 @Injectable()

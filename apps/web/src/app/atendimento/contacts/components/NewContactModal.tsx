@@ -5,6 +5,7 @@ import { Loader2, X, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
+import { PhoneInput } from '@/components/PhoneInput';
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -148,7 +149,7 @@ export default function NewContactModal({ onClose, onCreated }: {
           <div className="flex flex-col gap-1.5">
             <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Telefone (DDD + número) *</label>
             <div className="relative">
-              <input value={phone} onChange={e => { setPhone(e.target.value); checkPhone(e.target.value); }} placeholder="(82) 99913-0127"
+              <PhoneInput value={phone} onChange={(digits) => { setPhone(digits); checkPhone(digits); }}
                 className={`w-full px-3.5 py-2.5 bg-background border rounded-xl text-[13px] text-foreground outline-none focus:ring-2 transition-all placeholder:text-muted-foreground/40 ${duplicate ? 'border-amber-500/50 focus:ring-amber-500/20' : 'border-border focus:ring-primary/20 focus:border-primary'}`} />
               {checking && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
             </div>

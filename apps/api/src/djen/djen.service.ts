@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -745,28 +746,29 @@ export class DjenService {
       lead = realLead;
     } else {
       // Opção B: cadastrar novo cliente com nome + telefone
-      let phone = leadPhone!.trim().replace(/\D/g, '');
-      // Normalizar: adicionar 55 se necessário, remover 9 extra
-      if (phone.length <= 11) phone = '55' + phone;
-      if (phone.length === 13 && phone.startsWith('55') && phone[4] === '9') {
-        phone = phone.slice(0, 4) + phone.slice(5);
+      // Normaliza pro formato canonico (55+DDD+8dig). Antes tinha logica
+      // inline com replace+if que divergia de outros pontos do sistema.
+      const phone = toCanonicalBrPhone(leadPhone);
+      if (!phone) {
+        throw new BadRequestException(
+          `Telefone invalido: "${leadPhone}". Informe um celular brasileiro com DDD valido.`,
+        );
       }
       const name = leadName!.trim();
-      // Verifica se já existe lead com esse telefone no mesmo tenant para evitar duplicatas
+      // Busca robusta por variantes (cobre formatos legados no banco)
+      const variants = phoneVariants(phone);
       const existingByPhone = await this.prisma.lead.findFirst({
         where: {
-          phone: { contains: phone.replace(/\D/g, '') },
+          phone: { in: variants },
           ...(tenantId ? { tenant_id: tenantId } : { tenant_id: null }),
         },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       if (existingByPhone) {
-        // Se lead já existe mas não tem nome, atualiza com o nome fornecido
-        const existing = await this.prisma.lead.findUnique({ where: { id: existingByPhone.id }, select: { id: true, name: true } });
-        if (existing && !existing.name?.trim()) {
-          await this.prisma.lead.update({ where: { id: existing.id }, data: { name } });
+        if (!existingByPhone.name?.trim()) {
+          await this.prisma.lead.update({ where: { id: existingByPhone.id }, data: { name } });
         }
-        lead = existingByPhone;
+        lead = { id: existingByPhone.id };
       } else {
         lead = await this.prisma.lead.create({ data: { name, phone, tenant_id: tenantId } });
       }
