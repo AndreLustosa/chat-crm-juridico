@@ -31,12 +31,25 @@ export class CalendarController {
     @Query('showAll') showAll: string | undefined,
     @Request() req: any,
   ) {
-    // Default: mostra apenas eventos do usuario logado
-    // showAll=true: ADMIN vê tudo, ADVOGADO vê eventos dos seus casos
+    // Regras de visibilidade (RBAC):
+    //
+    //   ADMIN        → pode ver TUDO (showAll=true) ou filtrar por userId
+    //                  especifico (pra auditoria/supervisao).
+    //
+    //   ADVOGADO/    → SEMPRE ve apenas eventos onde eh responsavel
+    //   OPERADOR/      (assigned_user_id = ele) ou criou (created_by_id
+    //   demais         se sem responsavel). `showAll` e `userId` da query
+    //                  sao IGNORADOS — impede vazamento lateral de prazos
+    //                  de outros advogados.
+    //
+    // Bug reportado 2026-04-24: advogado nao-admin estava vendo prazos
+    // de todos os outros advogados porque showAll=true burlava o filtro
+    // (o antigo canViewAll = isAdmin || (showAll && isAdvogado) deixava
+    // qualquer ADVOGADO com showAll=true ver tudo).
     const isAdmin = req.user?.roles?.includes('ADMIN');
-    const isAdvogado = req.user?.roles?.includes('ADVOGADO');
-    const canViewAll = isAdmin || (showAll === 'true' && isAdvogado);
-    const effectiveUserId = canViewAll ? undefined : (userId || req.user.id);
+    const effectiveUserId = isAdmin
+      ? (showAll === 'true' ? undefined : (userId || req.user.id))
+      : req.user.id; // nao-admin: SEMPRE o proprio (ignora userId/showAll)
     return this.calendarService.findAll({
       start,
       end,
