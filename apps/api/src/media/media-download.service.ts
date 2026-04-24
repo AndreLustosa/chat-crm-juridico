@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FileStorageService } from './filesystem.service';
+import { MediaS3Service } from './s3.service';
 import { SettingsService } from '../settings/settings.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { ChatGateway } from '../gateway/chat.gateway';
@@ -32,6 +33,7 @@ export class MediaDownloadService {
   constructor(
     private prisma: PrismaService,
     private fileStorage: FileStorageService,
+    private s3: MediaS3Service,
     private settings: SettingsService,
     @Inject(forwardRef(() => GoogleDriveService))
     private driveService: GoogleDriveService,
@@ -183,8 +185,25 @@ export class MediaDownloadService {
       const ext = mimeBase.split('/')[1] || 'bin';
       const filePath = this.fileStorage.generatePath(messageId, ext);
 
-      // Escreve no filesystem
+      // Escreve no filesystem (fallback local pro MediaController servir HTTP)
       await this.fileStorage.write(filePath, buffer);
+
+      // Upload pro S3/MinIO (necessario pra worker de IA ler via s3_key).
+      // Antes desse fix (2026-04-23), s3_key ficava null — autoTranscribeAudios
+      // nunca achava o arquivo e caia no placeholder "nao consegui ouvir".
+      // Key: mesmo path particionado usado no filesystem, consistente entre
+      // file_path local e s3_key (o worker usa um ou outro).
+      const s3Key = `messages/${filePath}`;
+      let s3Uploaded = false;
+      try {
+        await this.s3.uploadBuffer(s3Key, buffer, mimeBase);
+        s3Uploaded = true;
+      } catch (e: any) {
+        this.logger.warn(
+          `[MEDIA-SYNC] Falha S3 upload msg ${messageId}: ${e.message} — ` +
+          `seguindo sem s3_key (IA nao vai transcrever este audio).`,
+        );
+      }
 
       // Upsert Media record (se retry, atualiza; se primeiro, cria)
       const media = await this.prisma.media.upsert({
@@ -192,6 +211,7 @@ export class MediaDownloadService {
         create: {
           message_id: messageId,
           file_path: filePath,
+          s3_key: s3Uploaded ? s3Key : null,
           mime_type: mimeType,
           size,
           checksum,
@@ -201,6 +221,7 @@ export class MediaDownloadService {
         },
         update: {
           file_path: filePath,
+          ...(s3Uploaded ? { s3_key: s3Key } : {}),
           mime_type: mimeType,
           size,
           checksum,
@@ -208,7 +229,10 @@ export class MediaDownloadService {
         },
       });
 
-      this.logger.log(`[MEDIA-SYNC] Mídia salva: ${filePath} (${(size / 1024).toFixed(0)}KB, tentativa ${attempt})`);
+      this.logger.log(
+        `[MEDIA-SYNC] Midia salva: fs=${filePath} s3=${s3Uploaded ? s3Key : '(falhou)'} ` +
+        `(${(size / 1024).toFixed(0)}KB, tentativa ${attempt})`,
+      );
 
       // Google Drive auto-upload (fire-and-forget)
       this.uploadToDriveIfNeeded(media, messageId, conversationId).catch(e =>
