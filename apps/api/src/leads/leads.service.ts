@@ -434,6 +434,16 @@ export class LeadsService {
             conv.tenant_id ?? undefined,
           );
           this.logger.log(`Auto-created LegalCase for lead ${id} -> lawyer ${conv.assigned_lawyer_id}`);
+        } else {
+          // Lead foi finalizado SEM advogado atribuido em nenhuma conversation —
+          // processo nao eh criado automaticamente. Antes era silencioso,
+          // confundindo operador que nao entendia porque o lead finalizava
+          // mas processo nao aparecia. Agora loga WARN visivel pra diagnostico.
+          this.logger.warn(
+            `[AUTO-CASE] Lead ${id} finalizado mas SEM advogado em conversation ativa — ` +
+            `LegalCase NAO foi criado automaticamente. Atribua um advogado na conversa ` +
+            `ou crie o processo manualmente via POST /legal-cases ou /legal-cases/direct.`,
+          );
         }
       } catch (err) {
         this.logger.warn(`Failed to auto-create LegalCase for lead ${id}: ${err}`);

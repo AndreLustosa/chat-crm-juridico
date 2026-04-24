@@ -889,6 +889,48 @@ export class LegalCasesService {
         : 'NORMAL'
     ) as string;
 
+    // ─── Validacao de advogado responsavel ──────────────────────
+    // Schema tem lawyer_id NOT NULL, mas se ADMIN passar override_lawyer_id
+    // com UUID invalido/inexistente, o Prisma lanca P2003 (FK constraint)
+    // com mensagem tecnica. Validamos antes pra retornar erro claro.
+    const effectiveLawyerId = data.override_lawyer_id || data.lawyer_id;
+    if (!effectiveLawyerId) {
+      throw new BadRequestException('Advogado responsavel eh obrigatorio pra cadastrar processo.');
+    }
+    const lawyer = await this.prisma.user.findUnique({
+      where: { id: effectiveLawyerId },
+      select: { id: true, roles: true, tenant_id: true },
+    });
+    if (!lawyer) {
+      throw new BadRequestException(`Advogado ${effectiveLawyerId} nao encontrado.`);
+    }
+    const isLawyerRole = Array.isArray(lawyer.roles) &&
+      lawyer.roles.some(r => ['ADMIN', 'ADVOGADO', 'Advogados'].includes(r));
+    if (!isLawyerRole) {
+      throw new BadRequestException('O usuario selecionado nao tem permissao de advogado.');
+    }
+    if (data.tenant_id && lawyer.tenant_id && lawyer.tenant_id !== data.tenant_id) {
+      throw new BadRequestException('Advogado pertence a outra organizacao.');
+    }
+
+    // ─── Dedup de case_number ──────────────────────────────────
+    // Import ESAJ (court-scraper.service.ts:325) ja validava, mas Cadastro
+    // Direto nao — usuario podia cadastrar o mesmo processo 2x sem erro,
+    // gerando 2 LegalCases distintos com mesmo case_number. Fix: valida
+    // case_number antes de criar.
+    const caseNumberDigits = (data.case_number || '').replace(/\D/g, '');
+    if (caseNumberDigits.length >= 13) {
+      const duplicate = await this.prisma.legalCase.findFirst({
+        where: { case_number: { contains: caseNumberDigits.slice(0, 13) } },
+        select: { id: true, case_number: true, archived: true },
+      });
+      if (duplicate) {
+        throw new BadRequestException(
+          `Processo ${data.case_number} ja cadastrado no sistema${duplicate.archived ? ' (arquivado)' : ''}.`,
+        );
+      }
+    }
+
     let leadId: string;
     let leadDisplayName: string;
 
@@ -976,9 +1018,7 @@ export class LegalCasesService {
       this.logger.log(`[LEGAL] Conversa criada para lead ${leadId} (sem WhatsApp prévio)`);
     }
 
-    // Se ADMIN passou override_lawyer_id, usa ele; caso contrário usa o usuário logado
-    const effectiveLawyerId = data.override_lawyer_id || data.lawyer_id;
-
+    // effectiveLawyerId foi validado no topo do metodo (existencia + role)
     const legalCase = await this.prisma.legalCase.create({
       data: {
         lead_id: leadId,
