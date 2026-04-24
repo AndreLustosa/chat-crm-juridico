@@ -910,6 +910,16 @@ export class AiProcessor extends WorkerHost {
       // 5. Auto-transcrever áudios sem texto (Whisper) — salva no banco
       await this.autoTranscribeAudios(convo.messages as any[], ai);
 
+      // 5a. Modo transcribe-only: o cron de retry (AudioRetranscribeCronService)
+      // enfileira jobs com flag `transcribe_only: true` pra re-transcrever
+      // audios orfaos sem gerar resposta da IA — evita spammar clientes inativos.
+      if ((job.data as any)?.transcribe_only === true) {
+        this.logger.log(
+          `[AI] Job transcribe_only — pulando geracao de resposta (conv ${conversation_id})`,
+        );
+        return;
+      }
+
       // 6. Carregar LeadProfile (sistema novo de memoria) para retrocompatibilidade
       // com a variavel {{lead_memory}} do prompt wrapper.
       //
