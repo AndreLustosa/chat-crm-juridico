@@ -22,6 +22,7 @@ export class BookAppointmentHandler implements ToolHandler {
     params: {
       date: string;       // YYYY-MM-DD
       time: string;       // HH:MM
+      modality?: 'LIGACAO' | 'VIDEO' | 'PRESENCIAL';
       title?: string;
       description?: string;
       duration_minutes?: number;
@@ -55,7 +56,15 @@ export class BookAppointmentHandler implements ToolHandler {
       };
     }
 
-    const durationMinutes = params.duration_minutes ?? 60;
+    // Modalidade: define duracao + descricao + local. Sem param valido,
+    // assume LIGACAO (15min) — modalidade mais leve, evita reservar 60min.
+    const modality = params.modality || 'LIGACAO';
+    const modalityCfg = {
+      LIGACAO: { minutes: 15, label: 'Ligação telefônica', emoji: '📞' },
+      VIDEO: { minutes: 30, label: 'Videochamada', emoji: '💻' },
+      PRESENCIAL: { minutes: 30, label: 'Atendimento presencial', emoji: '📍' },
+    }[modality];
+    const durationMinutes = params.duration_minutes ?? modalityCfg.minutes;
 
     // UTC naive: datas são gravadas com os componentes locais como se fossem UTC.
     // Constrói direto via Date.UTC para não sofrer conversão pelo fuso da VPS.
@@ -89,12 +98,24 @@ export class BookAppointmentHandler implements ToolHandler {
       };
     }
 
+    // Local conforme modalidade
+    const location =
+      modality === 'LIGACAO' ? `📞 Ligação telefônica para ${context.leadPhone}` :
+      modality === 'VIDEO' ? '💻 Videochamada (link enviado pelo advogado antes da reunião)' :
+      '📍 Escritório — Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca - AL';
+
     // Cria o CalendarEvent + reminders em uma só chamada
     const event = await prisma.calendarEvent.create({
       data: {
         type: 'CONSULTA',
-        title: params.title || 'Consulta',
-        description: params.description || 'Reunião agendada automaticamente pela IA',
+        title: params.title || `${modalityCfg.emoji} ${modalityCfg.label}`,
+        description: [
+          `🤖 Agendada pela Sophia (IA) via WhatsApp.`,
+          ``,
+          `Modalidade: ${modalityCfg.label} (${durationMinutes} min)`,
+          params.description ? `\nMotivo: ${params.description}` : '',
+        ].filter(Boolean).join('\n'),
+        location,
         start_at: startAt,
         end_at: endAt,
         status: 'AGENDADO',

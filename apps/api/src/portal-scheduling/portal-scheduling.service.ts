@@ -7,31 +7,54 @@ import { normalizeBrazilianPhone } from '../common/utils/phone';
 /**
  * Agendamento de consulta pelo portal do cliente.
  *
- * Fluxo:
- *   1. GET /portal/scheduling/availability?from=&to=
- *      Retorna slots disponiveis (08h-18h util, exceto almoco 12-13h),
- *      excluindo eventos ja marcados com o advogado responsavel pelo lead.
- *   2. POST /portal/scheduling
- *      Cria CalendarEvent type=CONSULTA, status=AGENDADO. Vincula ao
- *      lead + advogado responsavel. Dispara WhatsApp ao advogado.
- *   3. GET /portal/scheduling/my-appointments
- *      Lista consultas futuras do cliente.
+ * 3 modalidades (André, 2026-04-26):
+ *   - LIGACAO: 15 min — atendimento por telefone
+ *   - VIDEO: 30 min — videochamada
+ *   - PRESENCIAL: 30 min — escritorio (Arapiraca - AL)
  *
  * Politica:
- *   - Slot = 1 hora (consulta tipica)
- *   - Antecedencia minima: 24h (advogado precisa preparar)
+ *   - Antecedencia minima: 24h
  *   - Antecedencia maxima: 6 semanas
  *   - Horario: 08h-12h e 13h-18h (almoco bloqueado)
- *   - Dias: seg-sex (consultas comerciais)
- *   - Conflito: bloqueia slot se advogado tem outro evento mesmo horario
- *     (ranges sobrepostos com calendar.service.create guardrail).
+ *   - Dias: seg-sex
+ *   - Conflito: qualquer evento ativo do advogado (audiencia, pericia,
+ *     prazo, outras consultas) bloqueia o slot. Audiencia tem prioridade
+ *     absoluta — nunca permitir consulta no horario de audiencia marcada.
  */
+
+export type ConsultationModality = 'LIGACAO' | 'VIDEO' | 'PRESENCIAL';
+
+const MODALITY_CONFIG: Record<ConsultationModality, {
+  label: string;
+  durationMinutes: number;
+  emoji: string;
+  buildLocation: (clientPhone: string) => string;
+}> = {
+  LIGACAO: {
+    label: 'Ligação telefônica',
+    durationMinutes: 15,
+    emoji: '📞',
+    buildLocation: (phone) => `📞 Ligação telefônica para ${phone}`,
+  },
+  VIDEO: {
+    label: 'Videochamada',
+    durationMinutes: 30,
+    emoji: '💻',
+    buildLocation: () => '💻 Videochamada (link enviado pelo advogado antes da reunião)',
+  },
+  PRESENCIAL: {
+    label: 'Atendimento presencial',
+    durationMinutes: 30,
+    emoji: '📍',
+    buildLocation: () => '📍 Escritório — Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca - AL',
+  },
+};
+
 @Injectable()
 export class PortalSchedulingService {
   private readonly logger = new Logger(PortalSchedulingService.name);
 
   // Janela comercial Maceio
-  private readonly SLOT_DURATION_MINUTES = 60;
   private readonly MORNING_START_HOUR = 8;
   private readonly MORNING_END_HOUR = 12;
   private readonly AFTERNOON_START_HOUR = 13;
@@ -86,13 +109,30 @@ export class PortalSchedulingService {
   }
 
   /**
-   * Lista slots livres dos proximos N dias. Front passa from/to ISO.
+   * Lista slots livres dos proximos N dias. Duracao do slot depende da
+   * modalidade: LIGACAO 15min, VIDEO/PRESENCIAL 30min.
+   *
+   * Bloqueios cobrem TODOS os eventos ativos do advogado:
+   *   - AUDIENCIA, PERICIA, PRAZO (atos processuais — prioridade absoluta)
+   *   - CONSULTA (outros agendamentos)
+   *   - TAREFA (interno do advogado)
+   * Status CANCELADO/CONCLUIDO ignorados (slot livre de novo).
    */
   async listAvailability(
     leadId: string,
+    modality: ConsultationModality,
     fromIso?: string,
     toIso?: string,
-  ): Promise<{ lawyer: { name: string | null }; slots: Array<{ start: string; end: string }> }> {
+  ): Promise<{
+    lawyer: { name: string | null };
+    modality: { value: ConsultationModality; label: string; duration_minutes: number; emoji: string };
+    slots: Array<{ start: string; end: string }>;
+  }> {
+    const cfg = MODALITY_CONFIG[modality];
+    if (!cfg) {
+      throw new BadRequestException('Modalidade invalida. Use LIGACAO, VIDEO ou PRESENCIAL.');
+    }
+
     const lawyer = await this.resolveLawyerForLead(leadId);
     if (!lawyer) {
       throw new BadRequestException(
@@ -110,30 +150,40 @@ export class PortalSchedulingService {
     if (from < minAdvance) from = minAdvance;
     if (to > maxAdvance) to = maxAdvance;
 
-    // Eventos ja marcados do advogado na janela
+    // Eventos ja marcados do advogado na janela. Inclui TODOS os tipos —
+    // audiencia tem prioridade absoluta sobre consulta (regra André 2026-04-26).
     const busy = await this.prisma.calendarEvent.findMany({
       where: {
         assigned_user_id: lawyer.id,
         status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
-        start_at: { gte: from, lte: to },
+        // Janela ampliada um pouco pra capturar eventos que comecam antes
+        // mas terminam dentro do range
+        start_at: { gte: new Date(from.getTime() - 4 * 60 * 60 * 1000), lte: to },
       },
-      select: { start_at: true, end_at: true },
+      select: { start_at: true, end_at: true, type: true },
     });
 
     // Indexa eventos por dia pra lookup rapido
-    const busyMap = new Map<string, Array<{ start: number; end: number }>>();
+    const busyMap = new Map<string, Array<{ start: number; end: number; type: string }>>();
     for (const ev of busy) {
       const dayKey = ev.start_at.toISOString().slice(0, 10);
       const arr = busyMap.get(dayKey) || [];
+      // Audiencia/pericia: bloqueia 1h se end_at vazio (atos processuais
+      // tipicamente duram 1h+); outros tipos: 30min como default.
+      const defaultDuration = (ev.type === 'AUDIENCIA' || ev.type === 'PERICIA')
+        ? 60 * 60 * 1000
+        : 30 * 60 * 1000;
       arr.push({
         start: ev.start_at.getTime(),
-        end: (ev.end_at?.getTime() || ev.start_at.getTime() + 60 * 60 * 1000),
+        end: ev.end_at?.getTime() || ev.start_at.getTime() + defaultDuration,
+        type: ev.type,
       });
       busyMap.set(dayKey, arr);
     }
 
-    // Gera slots de 1h em horario comercial pra cada dia util da janela
+    // Gera slots na duracao da modalidade
     const slots: Array<{ start: string; end: string }> = [];
+    const slotMs = cfg.durationMinutes * 60 * 1000;
     const cursor = new Date(Date.UTC(
       from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate(), 0, 0, 0, 0,
     ));
@@ -143,7 +193,6 @@ export class PortalSchedulingService {
 
     while (cursor <= endLoop) {
       const dow = cursor.getUTCDay();
-      // Pula sab/dom
       if (dow === 0 || dow === 6) {
         cursor.setUTCDate(cursor.getUTCDate() + 1);
         continue;
@@ -152,42 +201,67 @@ export class PortalSchedulingService {
       const dayKey = cursor.toISOString().slice(0, 10);
       const dayBusy = busyMap.get(dayKey) || [];
 
-      // Manha: 8h-12h
-      for (let h = this.MORNING_START_HOUR; h < this.MORNING_END_HOUR; h++) {
-        const slotStart = new Date(Date.UTC(
-          cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate(),
-          h, 0, 0, 0,
-        ));
-        const slotEnd = new Date(slotStart.getTime() + this.SLOT_DURATION_MINUTES * 60 * 1000);
-        if (slotStart < from) continue;
-        if (this.slotConflicts(slotStart, slotEnd, dayBusy)) continue;
-        slots.push({ start: slotStart.toISOString(), end: slotEnd.toISOString() });
-      }
-      // Tarde: 13h-18h
-      for (let h = this.AFTERNOON_START_HOUR; h < this.AFTERNOON_END_HOUR; h++) {
-        const slotStart = new Date(Date.UTC(
-          cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate(),
-          h, 0, 0, 0,
-        ));
-        const slotEnd = new Date(slotStart.getTime() + this.SLOT_DURATION_MINUTES * 60 * 1000);
-        if (slotStart < from) continue;
-        if (this.slotConflicts(slotStart, slotEnd, dayBusy)) continue;
-        slots.push({ start: slotStart.toISOString(), end: slotEnd.toISOString() });
-      }
+      // Gera slots de N min em cada bloco horario (manha + tarde),
+      // pulando se o slot completo nao cabe ate o fim do bloco.
+      this.generateSlotsInBlock(
+        cursor,
+        this.MORNING_START_HOUR, this.MORNING_END_HOUR,
+        slotMs, from, dayBusy, slots,
+      );
+      this.generateSlotsInBlock(
+        cursor,
+        this.AFTERNOON_START_HOUR, this.AFTERNOON_END_HOUR,
+        slotMs, from, dayBusy, slots,
+      );
 
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     return {
       lawyer: { name: lawyer.name },
+      modality: {
+        value: modality,
+        label: cfg.label,
+        duration_minutes: cfg.durationMinutes,
+        emoji: cfg.emoji,
+      },
       slots,
     };
   }
 
-  private slotConflicts(start: Date, end: Date, busy: Array<{ start: number; end: number }>): boolean {
-    const s = start.getTime();
-    const e = end.getTime();
-    return busy.some(b => s < b.end && e > b.start);
+  private generateSlotsInBlock(
+    day: Date,
+    blockStartHour: number,
+    blockEndHour: number,
+    slotMs: number,
+    minStart: Date,
+    busy: Array<{ start: number; end: number; type: string }>,
+    out: Array<{ start: string; end: string }>,
+  ) {
+    const blockStart = Date.UTC(
+      day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(),
+      blockStartHour, 0, 0, 0,
+    );
+    const blockEnd = Date.UTC(
+      day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(),
+      blockEndHour, 0, 0, 0,
+    );
+
+    let slotStart = blockStart;
+    while (slotStart + slotMs <= blockEnd) {
+      const slotEnd = slotStart + slotMs;
+      if (new Date(slotStart) >= minStart && !this.slotConflictsMs(slotStart, slotEnd, busy)) {
+        out.push({
+          start: new Date(slotStart).toISOString(),
+          end: new Date(slotEnd).toISOString(),
+        });
+      }
+      slotStart += slotMs;
+    }
+  }
+
+  private slotConflictsMs(start: number, end: number, busy: Array<{ start: number; end: number }>): boolean {
+    return busy.some(b => start < b.end && end > b.start);
   }
 
   /**
@@ -196,8 +270,13 @@ export class PortalSchedulingService {
    */
   async createAppointment(
     leadId: string,
-    data: { start_at: string; reason: string; notes?: string },
+    data: { start_at: string; modality: ConsultationModality; reason: string; notes?: string },
   ) {
+    const cfg = MODALITY_CONFIG[data.modality];
+    if (!cfg) {
+      throw new BadRequestException('Modalidade invalida. Use LIGACAO, VIDEO ou PRESENCIAL.');
+    }
+
     const reason = (data.reason || '').trim().slice(0, 500);
     if (!reason) {
       throw new BadRequestException('Informe o motivo da consulta.');
@@ -235,31 +314,52 @@ export class PortalSchedulingService {
     });
     if (!lead) throw new BadRequestException('Cliente nao encontrado');
 
-    const endAt = new Date(startAt.getTime() + this.SLOT_DURATION_MINUTES * 60 * 1000);
+    const endAt = new Date(startAt.getTime() + cfg.durationMinutes * 60 * 1000);
 
-    // Verifica conflito (alem do guardrail do CalendarService.create — esse
-    // eh especifico pra AUDIENCIA/PERICIA, nao pega CONSULTA).
+    // Verifica conflito com QUALQUER evento ativo do advogado nessa janela
+    // (audiencia, pericia, prazo, outras consultas). Audiencia tem prioridade
+    // absoluta — regra explicita do André pra evitar conflito de agenda.
     const conflict = await this.prisma.calendarEvent.findFirst({
       where: {
         assigned_user_id: lawyer.id,
         status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
-        start_at: { gte: new Date(startAt.getTime() - 30 * 60 * 1000), lt: endAt },
+        AND: [
+          { start_at: { lt: endAt } },
+          {
+            OR: [
+              // Eventos sem end_at: assume 1h pra audiencia/pericia, 30min pros outros
+              { end_at: null, start_at: { gte: new Date(startAt.getTime() - 60 * 60 * 1000) } },
+              { end_at: { gt: startAt } },
+            ],
+          },
+        ],
       },
-      select: { id: true, start_at: true, title: true },
+      select: { id: true, start_at: true, title: true, type: true },
     });
     if (conflict) {
+      this.logger.log(
+        `[PORTAL/scheduling] Conflito: lead ${leadId} tentou ${data.modality} em ` +
+        `${startAt.toISOString()} mas advogado tem ${conflict.type} (${conflict.title}) ` +
+        `em ${conflict.start_at.toISOString()}`,
+      );
       throw new ConflictException(
         `Esse horário não está mais disponível. Por favor, escolha outro.`,
       );
     }
 
-    // created_by_id deve referenciar User (FK), nao Lead — viola constraint
-    // se passar lead.id. Usa o proprio advogado como creator; a descricao
-    // ja deixa claro que foi "agendada pelo cliente via portal".
+    const description = [
+      `🔵 Agendada pelo cliente via portal.`,
+      ``,
+      `Modalidade: ${cfg.label} (${cfg.durationMinutes} min)`,
+      `Motivo: ${reason}`,
+      data.notes ? `\nObservações do cliente: ${data.notes}` : '',
+    ].filter(Boolean).join('\n');
+
     const event = await this.calendar.create({
       type: 'CONSULTA',
-      title: `Consulta: ${lead.name || 'Cliente'} — ${reason.slice(0, 80)}`,
-      description: `🔵 Agendada pelo cliente via portal.\n\nMotivo: ${reason}${data.notes ? `\n\nObservações do cliente: ${data.notes}` : ''}`,
+      title: `${cfg.emoji} ${cfg.label}: ${lead.name || 'Cliente'} — ${reason.slice(0, 60)}`,
+      description,
+      location: cfg.buildLocation(lead.phone),
       start_at: startAt.toISOString(),
       end_at: endAt.toISOString(),
       lead_id: lead.id,
@@ -282,6 +382,7 @@ export class PortalSchedulingService {
           `📅 *Nova consulta agendada pelo cliente*\n\n` +
           `Cliente: *${lead.name || 'Sem nome'}*\n` +
           `WhatsApp: ${lead.phone}\n` +
+          `Modalidade: *${cfg.emoji} ${cfg.label}* (${cfg.durationMinutes} min)\n` +
           `Data/hora: *${dateStr}*\n\n` +
           `📝 Motivo: ${reason}\n` +
           (data.notes ? `Observações: ${data.notes}\n` : '') +
@@ -293,7 +394,10 @@ export class PortalSchedulingService {
       }
     }
 
-    this.logger.log(`[PORTAL/scheduling] Cliente ${leadId} agendou consulta ${event.id} com ${lawyer.name} em ${startAt.toISOString()}`);
+    this.logger.log(
+      `[PORTAL/scheduling] Cliente ${leadId} agendou ${data.modality} (${event.id}) ` +
+      `com ${lawyer.name} em ${startAt.toISOString()}`,
+    );
 
     return {
       id: event.id,
@@ -301,6 +405,8 @@ export class PortalSchedulingService {
       end_at: endAt.toISOString(),
       lawyer_name: lawyer.name,
       reason,
+      modality: data.modality,
+      modality_label: cfg.label,
     };
   }
 

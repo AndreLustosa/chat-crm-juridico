@@ -1,10 +1,13 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../auth/decorators/public.decorator';
 import { ClientJwtAuthGuard } from '../portal-auth/client-jwt-auth.guard';
 import { CurrentClient } from '../portal-auth/current-client.decorator';
 import type { ClientUser } from '../portal-auth/current-client.decorator';
 import { PortalSchedulingService } from './portal-scheduling.service';
+import type { ConsultationModality } from './portal-scheduling.service';
+
+const VALID_MODALITIES: ConsultationModality[] = ['LIGACAO', 'VIDEO', 'PRESENCIAL'];
 
 @Controller('portal/scheduling')
 export class PortalSchedulingController {
@@ -15,10 +18,14 @@ export class PortalSchedulingController {
   @Get('availability')
   async availability(
     @CurrentClient() client: ClientUser,
+    @Query('modality') modality?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    return this.service.listAvailability(client.id, from, to);
+    if (!modality || !VALID_MODALITIES.includes(modality as ConsultationModality)) {
+      throw new BadRequestException('Parametro modality eh obrigatorio: LIGACAO, VIDEO ou PRESENCIAL');
+    }
+    return this.service.listAvailability(client.id, modality as ConsultationModality, from, to);
   }
 
   @Public()
@@ -27,7 +34,7 @@ export class PortalSchedulingController {
   @Post()
   async create(
     @CurrentClient() client: ClientUser,
-    @Body() body: { start_at: string; reason: string; notes?: string },
+    @Body() body: { start_at: string; modality: ConsultationModality; reason: string; notes?: string },
   ) {
     return this.service.createAppointment(client.id, body);
   }

@@ -289,9 +289,11 @@ export class PromptBuilder {
           'falar diretamente com o advogado humano (frases tipo "quero falar com o advogado", ' +
           '"preciso conversar pessoalmente", "marca um horario", "humano por favor"). ' +
           'NAO USE pra duvidas que voce mesmo pode responder consultando processo/movimentacao. ' +
-          'Antes de chamar, sempre pergunte qual data/hora prefere o cliente. ' +
-          'Cria CalendarEvent type=CONSULTA, notifica advogado e cliente, agenda lembretes. ' +
-          'Importante: aceitar slots em horario comercial (seg-sex 8h-18h).',
+          '\n\nFLUXO OBRIGATORIO antes de chamar:\n' +
+          '1. Pergunte a MODALIDADE: ligacao (15min), videochamada (30min) ou presencial (30min)\n' +
+          '2. Pergunte data e hora desejadas (em horario comercial seg-sex 8h-12h ou 13h-18h)\n' +
+          '3. So entao chame a tool com os 3 parametros\n\n' +
+          'Apos chamar: mensagem de confirmacao deve incluir modalidade, data/hora e advogado.',
         parameters: {
           type: 'object',
           properties: {
@@ -303,20 +305,24 @@ export class PromptBuilder {
               type: 'string',
               description: 'Hora no formato HH:MM 24h (ex: "14:00")',
             },
+            modality: {
+              type: 'string',
+              enum: ['LIGACAO', 'VIDEO', 'PRESENCIAL'],
+              description:
+                'Modalidade da consulta: LIGACAO (telefone, 15min), VIDEO (videochamada, 30min) ' +
+                'ou PRESENCIAL (escritorio em Arapiraca, 30min). Pergunte ao cliente qual prefere ' +
+                'antes de chamar.',
+            },
             title: {
               type: 'string',
-              description: 'Opcional. Titulo da consulta. Default: "Consulta — {nome do cliente}"',
+              description: 'Opcional. Titulo da consulta. Default: gerado automaticamente.',
             },
             description: {
               type: 'string',
               description: 'Opcional. Motivo/contexto resumido pra advogado se preparar.',
             },
-            duration_minutes: {
-              type: 'number',
-              description: 'Opcional. Duracao em minutos. Default: 60.',
-            },
           },
-          required: ['date', 'time'],
+          required: ['date', 'time', 'modality'],
         },
       },
     },
