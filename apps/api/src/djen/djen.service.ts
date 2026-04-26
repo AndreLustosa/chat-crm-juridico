@@ -575,21 +575,49 @@ export class DjenService {
     return { date, saved, errors, tasksCreated };
   }
 
-  /** Varre publicações não vinculadas e tenta associá-las a processos existentes pelo número */
+  /**
+   * Varre publicações não vinculadas e tenta associá-las a processos existentes pelo número.
+   *
+   * Quando o vínculo é feito aqui (e não no syncForDate), também dispara análise
+   * IA + notificação WhatsApp ao cliente — caso contrário publicações que chegam
+   * antes do processo ser cadastrado nunca seriam comunicadas ao lead.
+   *
+   * Cenario tipico: pub chega 09h com numero_processo X, processo so eh cadastrado
+   * 10h. Sync das 17h (ou 08h do dia seguinte) entra aqui, vincula e notifica.
+   *
+   * Idempotencia: notifyLeadAboutMovement ja tem guard `if (pub.client_notified_at) return`,
+   * entao re-rodar reconciliacao nao re-notifica publicacoes ja comunicadas.
+   */
   async reconcileUnlinkedPublications(): Promise<number> {
     const unlinked = await this.prisma.djenPublication.findMany({
       where: { legal_case_id: null, numero_processo: { not: '' } },
-      select: { id: true, numero_processo: true },
+      // Select expandido pra alimentar notifyLeadAboutMovement no fim do loop —
+      // antes pegava so id+numero, perdia tipo_comunicacao/data/assunto e o
+      // cliente nunca recebia WhatsApp por publicacoes reconciliadas.
+      select: {
+        id: true,
+        numero_processo: true,
+        tipo_comunicacao: true,
+        data_disponibilizacao: true,
+        assunto: true,
+        client_notified_at: true,
+      },
     });
 
     if (unlinked.length === 0) return 0;
 
     let reconciled = 0;
+    let notified = 0;
     for (const pub of unlinked) {
       if (!pub.numero_processo) continue;
       const legalCase = await this.prisma.legalCase.findFirst({
         where: { case_number: pub.numero_processo, in_tracking: true },
-        select: { id: true },
+        // Select expandido — notify precisa de lead{id,name,phone}+tenant_id.
+        select: {
+          id: true,
+          tenant_id: true,
+          lead: { select: { id: true, name: true, phone: true } },
+        },
       });
       if (!legalCase) continue;
 
@@ -598,10 +626,38 @@ export class DjenService {
         data: { legal_case_id: legalCase.id },
       });
       reconciled++;
+
+      // ─── Analisar + notificar lead (mesma sequencia do syncForDate L541-557) ─
+      // Pulamos se cliente ja foi notificado por outra rota — guarda extra
+      // alem do guard interno do notifyLeadAboutMovement, pra economizar
+      // chamada a IA em re-execucao da reconciliacao.
+      if (pub.client_notified_at) continue;
+
+      let aiAnalysis: any = null;
+      try {
+        aiAnalysis = await this.analyzePublication(pub.id);
+      } catch (e: any) {
+        this.logger.warn(`[DJEN/recon] Análise IA falhou (notificação seguirá sem resumo): ${e.message}`);
+      }
+
+      try {
+        await this.notifyLeadAboutMovement(
+          pub,
+          legalCase,
+          pub.tipo_comunicacao,
+          pub.numero_processo,
+          pub.data_disponibilizacao,
+          pub.assunto,
+          aiAnalysis,
+        );
+        notified++;
+      } catch (e: any) {
+        this.logger.warn(`[DJEN/recon] Falha ao notificar lead: ${e.message}`);
+      }
     }
 
     if (reconciled > 0) {
-      this.logger.log(`[DJEN] Reconciliação: ${reconciled} publicação(ões) vinculadas a processos existentes`);
+      this.logger.log(`[DJEN] Reconciliação: ${reconciled} publicação(ões) vinculadas a processos existentes, ${notified} notificações enviadas`);
     }
     return reconciled;
   }
