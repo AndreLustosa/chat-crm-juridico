@@ -24,6 +24,26 @@ import { normalizeBrazilianPhone } from '../common/utils/phone';
 
 export type ConsultationModality = 'LIGACAO' | 'VIDEO' | 'PRESENCIAL';
 
+/**
+ * Converte string "HH:MM" pra minutos desde meia-noite. Retorna null se invalido.
+ */
+function parseHHMMToMinutes(value: string): number | null {
+  if (!value) return null;
+  const m = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
+ * Formata Date no formato YYYY-MM-DD em UTC (consistente com a convencao do app).
+ */
+function dateKey(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 const MODALITY_CONFIG: Record<ConsultationModality, {
   label: string;
   durationMinutes: number;
@@ -54,11 +74,14 @@ const MODALITY_CONFIG: Record<ConsultationModality, {
 export class PortalSchedulingService {
   private readonly logger = new Logger(PortalSchedulingService.name);
 
-  // Janela comercial Maceio
-  private readonly MORNING_START_HOUR = 8;
-  private readonly MORNING_END_HOUR = 12;
-  private readonly AFTERNOON_START_HOUR = 13;
-  private readonly AFTERNOON_END_HOUR = 18;
+  // Janela comercial — defaults caso UserSchedule do advogado nao exista.
+  // Pode ser sobrescrito pelo UserSchedule por dia da semana com almoco.
+  private readonly DEFAULT_MORNING_START_HOUR = 8;
+  private readonly DEFAULT_MORNING_END_HOUR = 12;
+  private readonly DEFAULT_LUNCH_START_HOUR = 12;
+  private readonly DEFAULT_LUNCH_END_HOUR = 13;
+  private readonly DEFAULT_AFTERNOON_END_HOUR = 18;
+  private readonly DEFAULT_BUSINESS_DAYS = new Set([1, 2, 3, 4, 5]); // seg-sex
   private readonly MIN_ADVANCE_HOURS = 24;
   private readonly MAX_ADVANCE_DAYS = 42;
 
@@ -150,6 +173,51 @@ export class PortalSchedulingService {
     if (from < minAdvance) from = minAdvance;
     if (to > maxAdvance) to = maxAdvance;
 
+    // ─── Carrega configuracao do advogado: UserSchedule por dia da semana ───
+    //
+    // Se UserSchedule nao tiver entradas, usa defaults (seg-sex 8-12 + 13-18).
+    // Configurada na tela /atendimento/settings/office (Agenda & Horarios).
+    const schedules = await (this.prisma as any).userSchedule.findMany({
+      where: { user_id: lawyer.id },
+      select: { day_of_week: true, start_time: true, end_time: true, lunch_start: true, lunch_end: true },
+    });
+
+    // Indexa por dia da semana (0=dom, 1=seg, ..., 6=sab)
+    type DaySchedule = { startMin: number; endMin: number; lunchStartMin: number | null; lunchEndMin: number | null };
+    const schedByDow = new Map<number, DaySchedule>();
+    for (const s of schedules) {
+      const startMin = parseHHMMToMinutes(s.start_time);
+      const endMin = parseHHMMToMinutes(s.end_time);
+      if (startMin == null || endMin == null) continue;
+      schedByDow.set(s.day_of_week, {
+        startMin,
+        endMin,
+        lunchStartMin: s.lunch_start ? parseHHMMToMinutes(s.lunch_start) : null,
+        lunchEndMin: s.lunch_end ? parseHHMMToMinutes(s.lunch_end) : null,
+      });
+    }
+
+    // Se nada cadastrado: usa defaults seg-sex 8h-18h com almoco 12-13h
+    if (schedByDow.size === 0) {
+      this.logger.log(`[SCHED] Advogado ${lawyer.id} sem UserSchedule cadastrada — usando defaults`);
+      for (const dow of this.DEFAULT_BUSINESS_DAYS) {
+        schedByDow.set(dow, {
+          startMin: this.DEFAULT_MORNING_START_HOUR * 60,
+          endMin: this.DEFAULT_AFTERNOON_END_HOUR * 60,
+          lunchStartMin: this.DEFAULT_LUNCH_START_HOUR * 60,
+          lunchEndMin: this.DEFAULT_LUNCH_END_HOUR * 60,
+        });
+      }
+    }
+
+    // ─── Carrega feriados na janela (tenant do lead + globais) ───
+    const tenantId = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { tenant_id: true },
+    }).then(l => l?.tenant_id || null);
+
+    const holidayDates = await this.loadHolidayDateSet(from, to, tenantId);
+
     // Eventos ja marcados do advogado na janela. Inclui TODOS os tipos —
     // audiencia tem prioridade absoluta sobre consulta (regra André 2026-04-26).
     const busy = await this.prisma.calendarEvent.findMany({
@@ -193,26 +261,34 @@ export class PortalSchedulingService {
 
     while (cursor <= endLoop) {
       const dow = cursor.getUTCDay();
-      if (dow === 0 || dow === 6) {
+      const sched = schedByDow.get(dow);
+
+      // Pula dia se: (a) advogado nao trabalha nesse dia, (b) eh feriado
+      if (!sched || holidayDates.has(dateKey(cursor))) {
         cursor.setUTCDate(cursor.getUTCDate() + 1);
         continue;
       }
 
-      const dayKey = cursor.toISOString().slice(0, 10);
+      const dayKey = dateKey(cursor);
       const dayBusy = busyMap.get(dayKey) || [];
 
-      // Gera slots de N min em cada bloco horario (manha + tarde),
-      // pulando se o slot completo nao cabe ate o fim do bloco.
-      this.generateSlotsInBlock(
-        cursor,
-        this.MORNING_START_HOUR, this.MORNING_END_HOUR,
+      // Bloco antes do almoco (start_time → lunch_start, ou ate end_time se
+      // sem almoco)
+      const hasLunch = sched.lunchStartMin != null && sched.lunchEndMin != null;
+      const morningEnd = hasLunch ? sched.lunchStartMin! : sched.endMin;
+
+      this.generateSlotsInWindow(
+        cursor, sched.startMin, morningEnd,
         slotMs, from, dayBusy, slots,
       );
-      this.generateSlotsInBlock(
-        cursor,
-        this.AFTERNOON_START_HOUR, this.AFTERNOON_END_HOUR,
-        slotMs, from, dayBusy, slots,
-      );
+
+      // Bloco depois do almoco (lunch_end → end_time), apenas se ha almoco
+      if (hasLunch) {
+        this.generateSlotsInWindow(
+          cursor, sched.lunchEndMin!, sched.endMin,
+          slotMs, from, dayBusy, slots,
+        );
+      }
 
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
@@ -229,22 +305,33 @@ export class PortalSchedulingService {
     };
   }
 
-  private generateSlotsInBlock(
+  /**
+   * Gera slots dentro de uma janela horaria definida em minutos desde
+   * meia-noite (ex: 480 = 08:00, 720 = 12:00). Mais flexivel que horas
+   * inteiras — permite "08:30 às 11:45" cadastrado em UserSchedule.
+   */
+  private generateSlotsInWindow(
     day: Date,
-    blockStartHour: number,
-    blockEndHour: number,
+    blockStartMin: number,
+    blockEndMin: number,
     slotMs: number,
     minStart: Date,
     busy: Array<{ start: number; end: number; type: string }>,
     out: Array<{ start: string; end: string }>,
   ) {
+    if (blockStartMin >= blockEndMin) return;
+    const blockStartH = Math.floor(blockStartMin / 60);
+    const blockStartM = blockStartMin % 60;
+    const blockEndH = Math.floor(blockEndMin / 60);
+    const blockEndM = blockEndMin % 60;
+
     const blockStart = Date.UTC(
       day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(),
-      blockStartHour, 0, 0, 0,
+      blockStartH, blockStartM, 0, 0,
     );
     const blockEnd = Date.UTC(
       day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(),
-      blockEndHour, 0, 0, 0,
+      blockEndH, blockEndM, 0, 0,
     );
 
     let slotStart = blockStart;
@@ -262,6 +349,58 @@ export class PortalSchedulingService {
 
   private slotConflictsMs(start: number, end: number, busy: Array<{ start: number; end: number }>): boolean {
     return busy.some(b => start < b.end && end > b.start);
+  }
+
+  /**
+   * Carrega Set<dayKey> dos feriados na janela. Considera tanto exatos
+   * (com ano) quanto recorrentes anuais. Tenant-aware: feriados do tenant
+   * + globais (tenant_id null).
+   */
+  private async loadHolidayDateSet(
+    from: Date, to: Date, tenantId: string | null,
+  ): Promise<Set<string>> {
+    const result = new Set<string>();
+    try {
+      // Feriados exatos na janela
+      const exact = await this.prisma.holiday.findMany({
+        where: {
+          date: { gte: from, lte: to },
+          recurring_yearly: false,
+          ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+        },
+        select: { date: true },
+      });
+      for (const h of exact) {
+        result.add(h.date.toISOString().slice(0, 10));
+      }
+
+      // Feriados recorrentes anuais — calcula data deste ano (e proximo se janela cruza)
+      const recurring = await this.prisma.holiday.findMany({
+        where: {
+          recurring_yearly: true,
+          ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+        },
+        select: { date: true },
+      });
+      const yearsInWindow = new Set<number>();
+      for (let cur = new Date(from); cur <= to; cur.setUTCFullYear(cur.getUTCFullYear() + 1)) {
+        yearsInWindow.add(cur.getUTCFullYear());
+      }
+      yearsInWindow.add(to.getUTCFullYear());
+      for (const h of recurring) {
+        const month = h.date.getUTCMonth();
+        const day = h.date.getUTCDate();
+        for (const year of yearsInWindow) {
+          const cand = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+          if (cand >= from && cand <= to) {
+            result.add(dateKey(cand));
+          }
+        }
+      }
+    } catch (e: any) {
+      this.logger.warn(`[SCHED] Falha ao carregar feriados: ${e.message}`);
+    }
+    return result;
   }
 
   /**
@@ -315,6 +454,41 @@ export class PortalSchedulingService {
     if (!lead) throw new BadRequestException('Cliente nao encontrado');
 
     const endAt = new Date(startAt.getTime() + cfg.durationMinutes * 60 * 1000);
+
+    // ─── Valida contra horario de trabalho do advogado ───
+    // (Defesa em camada — UI ja filtra slots, mas cliente pode burlar via API)
+    const dow = startAt.getUTCDay();
+    const userSchedule = await (this.prisma as any).userSchedule.findFirst({
+      where: { user_id: lawyer.id, day_of_week: dow },
+      select: { start_time: true, end_time: true, lunch_start: true, lunch_end: true },
+    });
+    if (userSchedule) {
+      const slotStartMin = startAt.getUTCHours() * 60 + startAt.getUTCMinutes();
+      const slotEndMin = slotStartMin + cfg.durationMinutes;
+      const dayStartMin = parseHHMMToMinutes(userSchedule.start_time);
+      const dayEndMin = parseHHMMToMinutes(userSchedule.end_time);
+      const lunchStartMin = userSchedule.lunch_start ? parseHHMMToMinutes(userSchedule.lunch_start) : null;
+      const lunchEndMin = userSchedule.lunch_end ? parseHHMMToMinutes(userSchedule.lunch_end) : null;
+
+      const inDayRange = dayStartMin != null && dayEndMin != null &&
+        slotStartMin >= dayStartMin && slotEndMin <= dayEndMin;
+      const inLunch = lunchStartMin != null && lunchEndMin != null &&
+        slotStartMin < lunchEndMin && slotEndMin > lunchStartMin;
+
+      if (!inDayRange || inLunch) {
+        throw new BadRequestException(
+          `Horário fora do expediente do advogado (${userSchedule.start_time}-${userSchedule.end_time}` +
+          (lunchStartMin != null ? `, almoço ${userSchedule.lunch_start}-${userSchedule.lunch_end}` : '') +
+          `).`,
+        );
+      }
+    }
+
+    // ─── Valida contra feriados ───
+    const holidays = await this.loadHolidayDateSet(startAt, endAt, lead.tenant_id || null);
+    if (holidays.has(dateKey(startAt))) {
+      throw new BadRequestException('Data selecionada é feriado. Por favor, escolha outro dia.');
+    }
 
     // Verifica conflito com QUALQUER evento ativo do advogado nessa janela
     // (audiencia, pericia, prazo, outras consultas). Audiencia tem prioridade
