@@ -1,14 +1,18 @@
-import { BadRequestException, Controller, Get, Param, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { ClientJwtAuthGuard } from '../portal-auth/client-jwt-auth.guard';
 import { CurrentClient } from '../portal-auth/current-client.decorator';
 import type { ClientUser } from '../portal-auth/current-client.decorator';
 import { PortalDocumentsService } from './portal-documents.service';
+import { PortalDocumentFetcherService } from './portal-document-fetcher.service';
 
 @Controller('portal/documents')
 export class PortalDocumentsController {
-  constructor(private readonly service: PortalDocumentsService) {}
+  constructor(
+    private readonly service: PortalDocumentsService,
+    private readonly fetcher: PortalDocumentFetcherService,
+  ) {}
 
   @Public()
   @UseGuards(ClientJwtAuthGuard)
@@ -58,5 +62,38 @@ export class PortalDocumentsController {
       `inline; filename="${encodeURIComponent(result.fileName)}"`,
     );
     return new StreamableFile(result.stream);
+  }
+
+  /**
+   * Endpoint INTERNO — chamado pelo worker (Sophia) quando cliente pede
+   * documento via WhatsApp. Busca em CaseDocument primeiro, fallback
+   * pra scraping do TJAL com auto-cadastro como CaseDocument.
+   *
+   * Auth: shared secret via header X-Internal-Secret (env INTERNAL_API_SECRET).
+   * NAO eh @Public — sem o secret, JwtAuthGuard global bloqueia.
+   *
+   * Retorna metadados + URL publica assinada pra o worker mandar via Evolution.
+   */
+  @Public()
+  @Post('internal/find-or-fetch')
+  async findOrFetchInternal(
+    @Headers('x-internal-secret') secret: string,
+    @Body() body: { lead_id: string; keyword: string; case_number?: string },
+  ) {
+    const expected = process.env.INTERNAL_API_SECRET;
+    if (!expected || !secret || secret !== expected) {
+      throw new ForbiddenException('Acesso interno apenas');
+    }
+    if (!body.lead_id || !body.keyword) {
+      throw new BadRequestException('lead_id e keyword obrigatorios');
+    }
+    const result = await this.fetcher.findOrFetch(body.lead_id, body.keyword, body.case_number);
+    if (!result) throw new NotFoundException('Documento nao encontrado nem disponivel pra scraping');
+
+    const shareUrl = this.service.buildPublicShareUrl(result.id, body.lead_id);
+    return {
+      ...result,
+      share_url: shareUrl,
+    };
   }
 }

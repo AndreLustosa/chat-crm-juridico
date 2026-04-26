@@ -14,9 +14,22 @@ export interface CourtCaseData {
   filed_at: string | null;
   status: string;
   parties: Array<{ role: string; name: string; lawyers?: string[] }>;
-  movements: Array<{ date: string; description: string }>;
+  movements: Array<MovementData>;
   tracking_stage: string;
   tribunal: string;
+  processo_codigo?: string; // codigo interno SAJ — necessario pra baixar docs depois
+}
+
+export interface MovementData {
+  date: string;
+  description: string;
+  // ID interno SAJ da movimentacao (cdMovimentacao). Quando presente, indica
+  // que a movimentacao TEM documento vinculado clicavel (PDF). Usado pra
+  // baixar o PDF on-demand via downloadMovementDocument.
+  cd_movimentacao?: string;
+  // Tipo do documento se conseguimos inferir pelo HTML (ex: "Sentença",
+  // "Despacho", "Decisão"). Mais confiavel que parsear a description.
+  document_type?: string;
 }
 
 export interface CourtCaseListItem {
@@ -480,6 +493,42 @@ export class EsajTjalScraper {
       if (movTable.length) tableLabel = 'id-contains';
     }
 
+    // Helper: extrai cd_movimentacao do <a onclick="abrirDocumentoVinculadoMovimentacao(...)">
+    // dentro de uma linha. SAJ usa o padrao: onclick="consultarDocumentos('CD_PROCESSO','CD_MOV')"
+    // ou similar. Tambem aceita link direto via href.
+    const extractCdMovimentacao = (row: any): { cd?: string; type?: string } => {
+      // Procura links com onclick contendo padrao do SAJ
+      const $row = $(row);
+      let cd: string | undefined;
+      let type: string | undefined;
+      $row.find('a[onclick], a[href]').each((_, el) => {
+        const onclick = $(el).attr('onclick') || '';
+        const href = $(el).attr('href') || '';
+        const both = onclick + ' ' + href;
+        // Padrao 1: consultarDocumentos('xxx','yyyy')
+        let m = both.match(/consultarDocumentos\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/);
+        if (m) { cd = m[2]; }
+        // Padrao 2: cdMovimentacao=xxxx no href
+        if (!cd) {
+          m = both.match(/cdMovimentacao=([0-9]+)/);
+          if (m) cd = m[1];
+        }
+        // Padrao 3: link direto pra abrirDocumentoVinculadoMovimentacao
+        if (!cd) {
+          m = both.match(/abrirDocumentoVinculadoMovimentacao[^'"]*['"]?[^'"]*['"]?[^'"]*['"]([^'"]+)['"]/);
+          if (m) cd = m[1];
+        }
+        // Tenta inferir tipo via title/alt do anchor ou icone
+        const alt = $(el).find('img').attr('alt') || $(el).attr('title') || '';
+        if (/senten[çc]a/i.test(alt)) type = 'Sentença';
+        else if (/despacho/i.test(alt)) type = 'Despacho';
+        else if (/decis[ãa]o/i.test(alt)) type = 'Decisão';
+        else if (/ac[óo]rd[ãa]o/i.test(alt)) type = 'Acórdão';
+        if (cd) return false; // break
+      });
+      return { cd, type };
+    };
+
     // Aplica varios parsers na tabela escolhida e pega o de maior retorno.
     // Mais robusto contra variacoes de layout (rowspan, divs aninhadas,
     // classes diferentes) porque qualquer um que funcione sera escolhido.
@@ -493,7 +542,15 @@ export class EsajTjalScraper {
             movTable.find('tr').each((_, row) => {
               const dateText = $(row).find('td.dataMovimentacao').text().trim();
               const description = $(row).find('td.descricaoMovimentacao').text().replace(/\s+/g, ' ').trim();
-              if (dateText && description) out.push({ date: dateText, description });
+              if (dateText && description) {
+                const docInfo = extractCdMovimentacao(row);
+                out.push({
+                  date: dateText,
+                  description,
+                  ...(docInfo.cd ? { cd_movimentacao: docInfo.cd } : {}),
+                  ...(docInfo.type ? { document_type: docInfo.type } : {}),
+                });
+              }
             });
             return out;
           },
@@ -594,6 +651,20 @@ export class EsajTjalScraper {
     const legalArea = inferLegalArea(areaText, subject, actionType);
     const trackingStage = inferTrackingStage(movements);
 
+    // Tenta extrair processo_codigo (cdProcesso) do HTML — necessario pra
+    // baixar PDFs depois. Esta tipicamente em um form hidden ou link.
+    let processoCodigo: string | undefined;
+    const codeFromForm = $('input[name="processo.codigo"]').first().attr('value');
+    if (codeFromForm) processoCodigo = codeFromForm;
+    if (!processoCodigo) {
+      // Fallback: procura em qualquer href com processo.codigo=...
+      $('a[href*="processo.codigo="]').first().each((_, el) => {
+        const href = $(el).attr('href') || '';
+        const m = href.match(/processo\.codigo=([^&"]+)/);
+        if (m) processoCodigo = m[1];
+      });
+    }
+
     const result: CourtCaseData = {
       case_number: caseNumber,
       action_type: actionType,
@@ -605,14 +676,10 @@ export class EsajTjalScraper {
       filed_at: filedAt,
       status: statusText || 'Ativo',
       parties,
-      // Atualizado em 2026-04-20: retorna TODAS as movimentacoes extraidas
-      // do HTML (antes limitava a 20). O HTML do show.do do e-SAJ ja contem
-      // todas as movimentacoes no elemento #tabelaTodasMovimentacoes — so
-      // ficam ocultas via CSS ate o usuario clicar em "Ver todas". O scraper
-      // le o tbody inteiro sem precisar de AJAX adicional.
       movements,
       tracking_stage: trackingStage,
       tribunal: 'TJAL',
+      processo_codigo: processoCodigo,
     };
 
     // Diagnóstico: se algum campo crítico vier vazio, logar os IDs faltantes.
@@ -652,5 +719,132 @@ export class EsajTjalScraper {
       `[PARSE] Processo ${caseNumber}: ${actionType || '(sem classe)'} | ${court || '(sem vara)'} | ${parties.length} partes | ${movements.length} movs`,
     );
     return result;
+  }
+
+  // ─── Download de Documento Vinculado a Movimentacao ─────────
+  //
+  // Best-effort: tenta baixar o PDF de uma movimentacao especifica
+  // (sentenca, despacho, decisao publica). NAO funciona pra documentos
+  // sigilosos ou que exigem certificado digital.
+  //
+  // Estrategia: o ESAJ TJAL serve documentos via:
+  //   GET /pastadigital/abrirDocumentoVinculadoMovimentacao.do
+  //     ?cdProcesso=X&cdMovimentacao=Y
+  // que retorna HTML com <iframe src="...real-pdf-url..."> ou diretamente
+  // o blob PDF. Tentamos ambos.
+
+  async downloadMovementDocument(
+    processoCodigo: string,
+    cdMovimentacao: string,
+    cookie?: string,
+  ): Promise<{ buffer: Buffer; mimeType: string } | null> {
+    const sessionCookie = cookie || (await this.initSession());
+
+    // URL principal — endpoint padrao SAJ pra abrir documento vinculado
+    const url = `${this.BASE_URL}/abrirDocumentoVinculadoMovimentacao.do?` + new URLSearchParams({
+      cdProcesso: processoCodigo,
+      cdMovimentacao: cdMovimentacao,
+    }).toString();
+
+    this.logger.log(`[DOC] Tentando baixar doc cdProc=${processoCodigo} cdMov=${cdMovimentacao}`);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: {
+          'User-Agent': this.USER_AGENT,
+          'Cookie': sessionCookie,
+          'Accept': 'application/pdf,text/html,*/*',
+        },
+        signal: AbortSignal.timeout(30000),
+        redirect: 'follow',
+      });
+    } catch (e: any) {
+      this.logger.warn(`[DOC] Erro de rede: ${e.message}`);
+      return null;
+    }
+
+    if (!res.ok) {
+      this.logger.warn(`[DOC] HTTP ${res.status} ao baixar doc cdMov=${cdMovimentacao}`);
+      return null;
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+
+    // Caso 1: retornou PDF direto
+    if (contentType.includes('application/pdf')) {
+      const buf = Buffer.from(await res.arrayBuffer());
+      this.logger.log(`[DOC] PDF baixado direto: ${buf.length} bytes`);
+      return { buffer: buf, mimeType: 'application/pdf' };
+    }
+
+    // Caso 2: retornou HTML com iframe/embed apontando pro PDF real
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // Procura iframe ou embed com src de PDF
+    let pdfUrl: string | undefined;
+    $('iframe[src], embed[src], object[data]').each((_, el) => {
+      const src = $(el).attr('src') || $(el).attr('data') || '';
+      if (/pdf|consultaSimples|documento/i.test(src)) {
+        pdfUrl = src.startsWith('http') ? src : new URL(src, this.BASE_URL).toString();
+        return false; // break
+      }
+    });
+
+    if (!pdfUrl) {
+      // Procura link direto pra PDF no HTML
+      $('a[href]').each((_, el) => {
+        const href = $(el).attr('href') || '';
+        if (/\.pdf|pastadigital|documento/i.test(href)) {
+          pdfUrl = href.startsWith('http') ? href : new URL(href, this.BASE_URL).toString();
+          return false;
+        }
+      });
+    }
+
+    if (!pdfUrl) {
+      // Caso 3: TJAL retornou pagina de "documento sigiloso" ou erro
+      const errorMsg = $('.alert, .mensagemRetorno, .container').text().slice(0, 200).trim();
+      this.logger.warn(
+        `[DOC] HTML retornado nao tem iframe/embed/link. Mensagem: "${errorMsg || 'sem msg'}"`,
+      );
+      return null;
+    }
+
+    this.logger.log(`[DOC] Iframe apontou pra ${pdfUrl}, baixando...`);
+
+    // Baixa o PDF do URL extraido
+    let pdfRes: Response;
+    try {
+      pdfRes = await fetch(pdfUrl, {
+        headers: {
+          'User-Agent': this.USER_AGENT,
+          'Cookie': sessionCookie,
+          'Referer': url,
+        },
+        signal: AbortSignal.timeout(30000),
+      });
+    } catch (e: any) {
+      this.logger.warn(`[DOC] Erro ao baixar PDF do iframe: ${e.message}`);
+      return null;
+    }
+
+    if (!pdfRes.ok) {
+      this.logger.warn(`[DOC] HTTP ${pdfRes.status} ao baixar PDF do iframe`);
+      return null;
+    }
+
+    const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
+    const pdfContentType = pdfRes.headers.get('content-type') || 'application/pdf';
+
+    // Sanity check: PDF tem que comecar com %PDF
+    if (pdfBuf.length < 100 || !pdfBuf.subarray(0, 5).toString().startsWith('%PDF')) {
+      this.logger.warn(`[DOC] Conteudo nao parece PDF (${pdfBuf.length} bytes, start: ${pdfBuf.subarray(0, 10).toString('hex')})`);
+      return null;
+    }
+
+    this.logger.log(`[DOC] PDF extraido via iframe: ${pdfBuf.length} bytes`);
+    return { buffer: pdfBuf, mimeType: pdfContentType };
   }
 }

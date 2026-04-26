@@ -83,13 +83,45 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
     });
 
     if (docs.length === 0) {
+      // ─── Fallback: tenta scraping do TJAL ───
+      // Endpoint interno faz: CaseDocument lookup + scraper + S3 upload + auto-cria CaseDocument
+      this.logger.log(`[enviar_documento] Cache vazio, tentando scraping TJAL pra keyword="${params.keyword || 'qualquer'}"`);
+      const scraped = await this.tryFetchFromCourt(params.keyword || 'sentenca', params.case_number, leadId);
+      if (scraped) {
+        // Conseguiu — manda via Evolution
+        try {
+          const result = await whatsappService.sendMedia(
+            leadPhone,
+            'document',
+            scraped.share_url,
+            `📎 ${scraped.name}`,
+            instanceName || undefined,
+            scraped.name,
+          );
+          if (result?.error || result?.statusCode >= 400) {
+            this.logger.warn(`[enviar_documento] Sendmedia falhou pos-scrape: ${JSON.stringify(result)}`);
+            return { success: false, error: 'Documento foi baixado do tribunal mas nao consegui enviar via WhatsApp' };
+          }
+          return {
+            success: true,
+            message:
+              `Baixei o documento "${scraped.name}" diretamente do tribunal e enviei ao cliente via WhatsApp. ` +
+              `Confirme o recebimento e mencione que ele tambem fica disponivel no portal.`,
+            sent: [{ name: scraped.name, type: scraped.folder }],
+            scraped_from_court: true,
+          };
+        } catch (e: any) {
+          this.logger.error(`[enviar_documento] Erro ao enviar pos-scrape: ${e.message}`);
+        }
+      }
+
       return {
         success: false,
         message:
-          'Nao encontrei documentos publicos disponiveis no processo do cliente. ' +
-          'Os documentos podem ainda nao ter sido enviados pelo advogado. ' +
-          'Diga ao cliente que o advogado vai providenciar e disponibilizar em breve, ' +
-          'OU sugira agendar consulta usando book_appointment.',
+          'Nao encontrei documentos publicos disponiveis no processo do cliente, ' +
+          'e tambem nao consegui baixar diretamente do tribunal (pode ser sigiloso ou ' +
+          'ainda nao publicado). Diga ao cliente que o advogado vai providenciar e ' +
+          'disponibilizar em breve, OU sugira agendar consulta usando book_appointment.',
         documents_found: 0,
       };
     }
@@ -174,5 +206,54 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
       failed: failed.length > 0 ? failed : undefined,
       total_available: docs.length,
     };
+  }
+
+  /**
+   * Tenta baixar documento direto do TJAL via endpoint interno da API.
+   * Endpoint usa scraper + auto-cadastra como CaseDocument folder=DECISOES.
+   * So funciona pra TJAL e documentos publicos.
+   */
+  private async tryFetchFromCourt(
+    keyword: string,
+    caseNumber: string | undefined,
+    leadId: string,
+  ): Promise<{ id: string; name: string; folder: string; share_url: string } | null> {
+    const apiBase = process.env.API_INTERNAL_URL ||
+      process.env.API_PUBLIC_URL ||
+      process.env.NEXT_PUBLIC_API_URL;
+    const secret = process.env.INTERNAL_API_SECRET;
+
+    if (!apiBase || !secret) {
+      this.logger.warn(
+        '[enviar_documento] API_INTERNAL_URL ou INTERNAL_API_SECRET nao configurada — fallback de scraping desabilitado',
+      );
+      return null;
+    }
+
+    try {
+      const res = await fetch(`${apiBase}/portal/documents/internal/find-or-fetch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Secret': secret,
+        },
+        body: JSON.stringify({ lead_id: leadId, keyword, case_number: caseNumber }),
+        signal: AbortSignal.timeout(60000), // scraping pode demorar
+      });
+      if (res.status === 404) {
+        this.logger.log(`[enviar_documento] Tribunal: nao encontrou doc pra keyword="${keyword}"`);
+        return null;
+      }
+      if (!res.ok) {
+        this.logger.warn(`[enviar_documento] HTTP ${res.status} no fetch interno`);
+        return null;
+      }
+      const data = await res.json();
+      this.logger.log(`[enviar_documento] Doc obtido via ${data.source}: ${data.name}`);
+      return data;
+    } catch (e: any) {
+      this.logger.error(`[enviar_documento] Erro no fetch interno: ${e.message}`);
+      return null;
+    }
   }
 }
