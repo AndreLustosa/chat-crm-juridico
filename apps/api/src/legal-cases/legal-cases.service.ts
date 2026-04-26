@@ -722,7 +722,7 @@ export class LegalCasesService {
     }
 
     // Persistir com dedup via movement_hash
-    const movementRows = movements.map((m) => ({
+    const movementRows = movements.map((m: any) => ({
       case_id: caseId,
       type: 'MOVIMENTACAO',
       source: 'ESAJ',
@@ -732,7 +732,15 @@ export class LegalCasesService {
       movement_hash: createHash('sha256')
         .update(`${legalCase.case_number}|${m.date}|${m.description}`)
         .digest('hex'),
-      source_raw: { raw_date: m.date, raw_description: m.description } as any,
+      source_raw: {
+        raw_date: m.date,
+        raw_description: m.description,
+        // cd_movimentacao + processo_codigo permitem baixar PDF do TJAL
+        // direto pelo portal (botao "Baixar PDF" na movimentacao).
+        ...(m.cd_movimentacao ? { cd_movimentacao: m.cd_movimentacao } : {}),
+        ...(m.document_type ? { document_type: m.document_type } : {}),
+        ...(data.processo_codigo ? { processo_codigo: data.processo_codigo } : {}),
+      } as any,
     }));
 
     const createResult = await this.prisma.caseEvent.createMany({

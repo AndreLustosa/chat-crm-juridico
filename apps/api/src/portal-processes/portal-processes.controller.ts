@@ -1,10 +1,13 @@
-import { Controller, Get, Param, Post, Query, UseGuards, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Post, Query, Res, StreamableFile, UseGuards, Body, BadRequestException } from '@nestjs/common';
+import type { Response } from 'express';
+import { Readable } from 'stream';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../auth/decorators/public.decorator';
 import { ClientJwtAuthGuard } from '../portal-auth/client-jwt-auth.guard';
 import { CurrentClient } from '../portal-auth/current-client.decorator';
 import type { ClientUser } from '../portal-auth/current-client.decorator';
 import { PortalProcessesService } from './portal-processes.service';
+import { PortalDocumentFetcherService } from '../portal-documents/portal-document-fetcher.service';
 
 /**
  * Endpoints de processos do portal do cliente. Rotas montadas em /portal/processes.
@@ -16,7 +19,10 @@ import { PortalProcessesService } from './portal-processes.service';
  */
 @Controller('portal/processes')
 export class PortalProcessesController {
-  constructor(private readonly service: PortalProcessesService) {}
+  constructor(
+    private readonly service: PortalProcessesService,
+    private readonly fetcher: PortalDocumentFetcherService,
+  ) {}
 
   @Public()
   @UseGuards(ClientJwtAuthGuard)
@@ -80,5 +86,40 @@ export class PortalProcessesController {
       throw new BadRequestException('kind deve ser "esaj" ou "djen"');
     }
     return this.service.explainMovement(client.id, caseId, body.kind, movId);
+  }
+
+  /**
+   * Baixa PDF de uma movimentacao ESAJ direto do TJAL.
+   *
+   * Best-effort: so funciona pra movimentacoes que tem documento publico
+   * vinculado (sentenca, despacho publico). Sigilosos retornam 404.
+   *
+   * Cacheado: na primeira chamada, baixa do TJAL e salva como CaseDocument
+   * folder=DECISOES. Proximas requests da mesma movimentacao reusam o cache.
+   *
+   * Throttle 10/min/IP — limite gentil, mas evita abuso massivo.
+   */
+  @Public()
+  @UseGuards(ClientJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Get(':id/movements/:movId/pdf')
+  async movementPdf(
+    @CurrentClient() client: ClientUser,
+    @Param('id') _caseId: string,
+    @Param('movId') movId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.fetcher.fetchPdfForCaseEvent(client.id, movId);
+    if (!result) {
+      throw new NotFoundException(
+        'PDF não disponível para esta movimentação. Pode ser sigilosa ou não ter documento anexado no tribunal.',
+      );
+    }
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(result.fileName)}"`,
+    );
+    return new StreamableFile(Readable.from(result.buffer));
   }
 }

@@ -263,7 +263,15 @@ export class EsajSyncService {
                   source: 'ESAJ',
                   event_date: this.parseDate(mov.date),
                   movement_hash: hash,
-                  source_raw: { date: mov.date, description: mov.description },
+                  source_raw: {
+                    date: mov.date,
+                    description: mov.description,
+                    // cd_movimentacao + processo_codigo permitem baixar PDF
+                    // direto do TJAL depois (botao "Baixar PDF" no portal).
+                    ...(mov.cd_movimentacao ? { cd_movimentacao: mov.cd_movimentacao } : {}),
+                    ...(mov.document_type ? { document_type: mov.document_type } : {}),
+                    ...(data.processo_codigo ? { processo_codigo: data.processo_codigo } : {}),
+                  },
                 },
               });
               newMovements.push(mov);

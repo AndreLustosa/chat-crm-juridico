@@ -223,4 +223,118 @@ export class PortalDocumentFetcherService {
     if (!m) return null;
     return new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00Z`);
   }
+
+  /**
+   * Baixa PDF de uma movimentacao ESAJ especifica (botao "Baixar PDF" na
+   * timeline do portal). Diferente do findOrFetch:
+   *   - findOrFetch: busca por keyword, pega "uma" sentenca relevante
+   *   - fetchPdfForCaseEvent: pega o PDF EXATAMENTE daquela movimentacao
+   *
+   * Estrategia:
+   *   1. Valida ownership (case.lead_id === leadId)
+   *   2. Le source_raw.cd_movimentacao + processo_codigo do CaseEvent
+   *      (preenchido pelos syncs novos; antigos podem nao ter)
+   *   3. Se faltar dados, refaz scraping da pagina pra extrair
+   *   4. Baixa PDF via downloadMovementDocument
+   *   5. Cacheia em CaseDocument folder=DECISOES (proxima request eh cache hit)
+   *
+   * Retorna null se nao conseguir baixar — caller traduz pra 404.
+   */
+  async fetchPdfForCaseEvent(
+    leadId: string,
+    caseEventId: string,
+  ): Promise<{ buffer: Buffer; mimeType: string; fileName: string } | null> {
+    const ce = await this.prisma.caseEvent.findUnique({
+      where: { id: caseEventId },
+      select: {
+        id: true, title: true, description: true, source: true, type: true,
+        event_date: true, source_raw: true, client_explanation: true,
+        legal_case: {
+          select: {
+            id: true, lead_id: true, case_number: true, lawyer_id: true,
+            tenant_id: true, archived: true, renounced: true,
+          },
+        },
+      },
+    });
+    if (!ce) return null;
+    if (ce.legal_case.lead_id !== leadId) return null;
+    if (ce.legal_case.archived || ce.legal_case.renounced) return null;
+    if (ce.source !== 'ESAJ' || ce.type !== 'MOVIMENTACAO') return null;
+
+    const sourceRaw = (ce.source_raw as any) || {};
+    let cdMovimentacao: string | undefined = sourceRaw.cd_movimentacao;
+    let processoCodigo: string | undefined = sourceRaw.processo_codigo;
+    let documentType: string | undefined = sourceRaw.document_type;
+
+    // Se faltam metadados (movimentacoes antigas), refaz scraping
+    if (!cdMovimentacao || !processoCodigo) {
+      this.logger.log(`[FETCHER/event] CaseEvent ${caseEventId} sem metadados — refazendo scraping`);
+      const data = await this.scraper.searchByNumber(ce.legal_case.case_number || '').catch(() => null);
+      if (!data || !data.processo_codigo) {
+        this.logger.warn(`[FETCHER/event] Scraper nao retornou data pra ${ce.legal_case.case_number}`);
+        return null;
+      }
+      processoCodigo = data.processo_codigo;
+      // Tenta achar a movimentacao pela descricao + data
+      const targetDesc = ce.description || ce.title || '';
+      const movMatch = data.movements.find((m: any) =>
+        m.cd_movimentacao &&
+        (m.description === targetDesc || targetDesc.includes(m.description.slice(0, 50))),
+      );
+      if (movMatch?.cd_movimentacao) {
+        cdMovimentacao = movMatch.cd_movimentacao;
+        documentType = movMatch.document_type;
+      }
+    }
+
+    if (!cdMovimentacao || !processoCodigo) {
+      this.logger.warn(`[FETCHER/event] Sem cd_movimentacao pra CaseEvent ${caseEventId} — provavel movimentacao sem PDF anexado`);
+      return null;
+    }
+
+    const pdfData = await this.scraper.downloadMovementDocument(
+      processoCodigo, cdMovimentacao,
+    );
+    if (!pdfData) {
+      this.logger.warn(`[FETCHER/event] downloadMovementDocument retornou null pra cdMov=${cdMovimentacao}`);
+      return null;
+    }
+
+    // Nome do arquivo
+    const dateStr = ce.event_date
+      ? ce.event_date.toISOString().slice(0, 10)
+      : 'sem-data';
+    const fileName = `${documentType || 'Movimentação'} - ${dateStr}.pdf`;
+
+    // Cacheia como CaseDocument pra proximas requests serem cache hit
+    try {
+      const fileHash = createHash('sha256')
+        .update(`${ce.legal_case.id}-${cdMovimentacao}-${pdfData.buffer.length}`)
+        .digest('hex')
+        .slice(0, 16);
+      const s3Key = `case-documents/${ce.legal_case.id}/auto-${fileHash}.pdf`;
+      await this.s3.uploadBuffer(s3Key, pdfData.buffer, pdfData.mimeType);
+      await this.prisma.caseDocument.create({
+        data: {
+          tenant_id: ce.legal_case.tenant_id,
+          legal_case_id: ce.legal_case.id,
+          uploaded_by_id: ce.legal_case.lawyer_id,
+          folder: 'DECISOES',
+          name: fileName,
+          original_name: fileName,
+          s3_key: s3Key,
+          mime_type: pdfData.mimeType,
+          size: pdfData.buffer.length,
+          description: `Baixado automaticamente do TJAL via portal (CaseEvent ${ce.id})`,
+        },
+      });
+      this.logger.log(`[FETCHER/event] PDF cacheado em CaseDocument: ${fileName}`);
+    } catch (e: any) {
+      // Nao bloqueia o retorno — usuario ainda recebe o PDF
+      this.logger.warn(`[FETCHER/event] Falha ao cachear: ${e.message}`);
+    }
+
+    return { buffer: pdfData.buffer, mimeType: pdfData.mimeType, fileName };
+  }
 }

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Loader2, Calendar, AlertCircle, Scale, Sparkles, Clock,
   ChevronDown, ChevronUp, Microscope, Gavel,
-  FileText, AlertTriangle, MapPin, MessageCircle,
+  FileText, AlertTriangle, MapPin, MessageCircle, Download,
 } from 'lucide-react';
 import { PortalHeader } from '../../components/PortalHeader';
 import { ProcessRoadmap } from '../../components/ProcessRoadmap';
@@ -295,6 +295,43 @@ function MovementCard({
   const [showExplanation, setShowExplanation] = useState(!!m.explanation_cached); // se ja tem cache, abre
   const [loadingExplanation, setLoadingExplanation] = useState(false);
   const [explanationError, setExplanationError] = useState<string | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  async function baixarPdf() {
+    setDownloadingPdf(true);
+    setPdfError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/portal/processes/${caseId}/movements/${m.id}/pdf`,
+        { credentials: 'include' },
+      );
+      if (res.status === 404) {
+        const data = await res.json().catch(() => ({}));
+        setPdfError(data.message || 'PDF não disponível pra esta movimentação.');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // Nome vem do Content-Disposition; fallback simples
+      const cd = res.headers.get('content-disposition') || '';
+      const match = cd.match(/filename="([^"]+)"/);
+      a.download = match ? decodeURIComponent(match[1]) : `movimentacao-${m.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setPdfError(e.message || 'Falha ao baixar PDF');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
 
   async function pedirExplicacao() {
     if (m.explanation_cached) {
@@ -350,23 +387,47 @@ function MovementCard({
             {m.content || m.title}
           </div>
 
-          {/* Botao "Pedir explicacao" */}
-          {!showExplanation && (
-            <button
-              onClick={pedirExplicacao}
-              disabled={loadingExplanation}
-              className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-500/15 border border-violet-500/30 hover:bg-violet-500/25 text-violet-300 text-xs font-bold transition-colors disabled:opacity-50"
-            >
-              {loadingExplanation ? (
-                <><Loader2 className="animate-spin" size={12} /> Sophia está pensando…</>
-              ) : (
-                <><MessageCircle size={12} /> Pedir explicação à Sophia</>
-              )}
-            </button>
-          )}
+          {/* Botoes de acao — lado a lado */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {/* Pedir explicacao a Sophia */}
+            {!showExplanation && (
+              <button
+                onClick={pedirExplicacao}
+                disabled={loadingExplanation}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-500/15 border border-violet-500/30 hover:bg-violet-500/25 text-violet-300 text-xs font-bold transition-colors disabled:opacity-50"
+              >
+                {loadingExplanation ? (
+                  <><Loader2 className="animate-spin" size={12} /> Sophia está pensando…</>
+                ) : (
+                  <><MessageCircle size={12} /> Pedir explicação à Sophia</>
+                )}
+              </button>
+            )}
+
+            {/* Baixar PDF — so faz sentido pra ESAJ (DJEN nao tem PDF original) */}
+            {!isDjen && (
+              <button
+                onClick={baixarPdf}
+                disabled={downloadingPdf}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/15 border border-emerald-500/30 hover:bg-emerald-500/25 text-emerald-300 text-xs font-bold transition-colors disabled:opacity-50"
+              >
+                {downloadingPdf ? (
+                  <><Loader2 className="animate-spin" size={12} /> Baixando do tribunal…</>
+                ) : (
+                  <><Download size={12} /> Baixar PDF</>
+                )}
+              </button>
+            )}
+          </div>
 
           {explanationError && (
             <p className="mt-2 text-xs text-red-400">{explanationError}</p>
+          )}
+          {pdfError && (
+            <p className="mt-2 text-xs text-amber-400 flex items-start gap-1.5">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>{pdfError}</span>
+            </p>
           )}
 
           {/* Explicacao da Sophia */}
