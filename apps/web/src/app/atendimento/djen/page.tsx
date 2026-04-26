@@ -52,6 +52,9 @@ interface AiAnalysis {
   tarefa_descricao: string;
   orientacoes: string;
   model_used?: string;
+  // event_type — usado pra decidir se o "evento sugerido" eh AUDIENCIA,
+  // PRAZO ou TAREFA. Adicionado 2026-04-24 (fix de classificacao no UI).
+  event_type?: 'AUDIENCIA' | 'PRAZO' | 'TAREFA';
   // Dados extraídos da publicação
   parte_autora?: string | null;
   parte_rea?: string | null;
@@ -59,6 +62,7 @@ interface AiAnalysis {
   area_juridica?: string | null;
   valor_causa?: string | null;
   data_audiencia?: string | null;
+  data_prazo?: string | null;
 }
 
 interface Lead {
@@ -126,6 +130,64 @@ const TRACKING_STAGES_DJEN = [
   { id: 'ENCERRADO',        label: 'Encerrado',             color: '#6b7280', emoji: '🏁' },
 ] as const;
 
+// ─── Helper: resolve type/labels/dueDate baseado no event_type da IA ─────────
+//
+// Bug reportado 2026-04-24: o frontend criava sempre "TAREFA" hardcoded mesmo
+// quando a IA detectava AUDIENCIA ou PRAZO no event_type. Agora respeita.
+//
+// Para AUDIENCIA: usa data_audiencia da analise (ISO).
+// Para PRAZO: usa data_prazo (ISO).
+// Para TAREFA: calcula due_date a partir de prazo_dias uteis.
+function resolveEventTypeConfig(analysis: AiAnalysis): {
+  type: 'TAREFA' | 'AUDIENCIA' | 'PRAZO';
+  label: string;        // "Tarefa sugerida" / "Audiência sugerida" / "Prazo sugerido"
+  buttonLabel: string;  // "Criar tarefa" / "Agendar audiência" / "Criar prazo"
+  buttonIcon: 'task' | 'audience' | 'deadline';
+  dueDate: Date;
+} {
+  const eventType = analysis.event_type || 'TAREFA';
+
+  // Calcula data_padrao = hoje + prazo_dias uteis (fallback)
+  const fallbackDue = (() => {
+    const due = new Date();
+    let added = 0;
+    while (added < (analysis.prazo_dias || 0)) {
+      due.setDate(due.getDate() + 1);
+      const dow = due.getDay();
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    return due;
+  })();
+
+  if (eventType === 'AUDIENCIA' && analysis.data_audiencia) {
+    return {
+      type: 'AUDIENCIA',
+      label: 'Audiência sugerida',
+      buttonLabel: 'Agendar audiência',
+      buttonIcon: 'audience',
+      dueDate: new Date(analysis.data_audiencia),
+    };
+  }
+  if (eventType === 'PRAZO' && analysis.data_prazo) {
+    return {
+      type: 'PRAZO',
+      label: 'Prazo sugerido',
+      buttonLabel: 'Criar prazo',
+      buttonIcon: 'deadline',
+      dueDate: new Date(analysis.data_prazo),
+    };
+  }
+  // Fallback: TAREFA (ou AUDIENCIA/PRAZO sem data extraida — vira tarefa
+  // com prazo calculado a partir de prazo_dias).
+  return {
+    type: 'TAREFA',
+    label: 'Tarefa sugerida',
+    buttonLabel: 'Criar tarefa',
+    buttonIcon: 'task',
+    dueDate: fallbackDue,
+  };
+}
+
 // ─── TaskSuggestion (sub-componente usado dentro do modal) ────
 
 function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: string }) {
@@ -140,26 +202,23 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
     setCreating(true);
     setErr(false);
     try {
-      const today = new Date();
-      let due = new Date(today);
-      let added = 0;
-      while (added < analysis.prazo_dias) {
-        due.setDate(due.getDate() + 1);
-        const dow = due.getDay();
-        if (dow !== 0 && dow !== 6) added++;
-      }
+      const cfg = resolveEventTypeConfig(analysis);
+      // Audiencia tipicamente dura 1h; prazo eh marco no dia (30min); tarefa 30min.
+      const durationMs = cfg.type === 'AUDIENCIA' ? 60 * 60_000 : 30 * 60_000;
       await api.post('/calendar/events', {
-        type: 'TAREFA',
+        type: cfg.type,
         title: `[DJEN] ${analysis.tarefa_titulo}`,
         description: analysis.tarefa_descricao,
-        start_at: due.toISOString(),
-        end_at: new Date(due.getTime() + 30 * 60_000).toISOString(),
+        start_at: cfg.dueDate.toISOString(),
+        end_at: new Date(cfg.dueDate.getTime() + durationMs).toISOString(),
         priority: analysis.urgencia,
       });
       setDone(true);
     } catch { setErr(true); }
     finally { setCreating(false); }
   };
+
+  const cfg = resolveEventTypeConfig(analysis);
 
   return (
     <div className={`rounded-xl border p-3 space-y-2 ${
@@ -168,21 +227,26 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-            <CheckSquare size={9} /> Tarefa sugerida pela IA
+            {cfg.buttonIcon === 'audience' ? <Calendar size={9} /> : cfg.buttonIcon === 'deadline' ? <Clock size={9} /> : <CheckSquare size={9} />}
+            {cfg.label} pela IA
           </p>
           <p className="text-[12px] font-semibold text-foreground truncate">{analysis.tarefa_titulo}</p>
           {analysis.tarefa_descricao && (
             <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{analysis.tarefa_descricao}</p>
           )}
           <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-            <Clock size={9} /> Prazo: {analysis.prazo_dias} dias úteis
+            <Clock size={9} />
+            {cfg.type === 'AUDIENCIA' || cfg.type === 'PRAZO'
+              ? cfg.dueDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+              : `Prazo: ${analysis.prazo_dias} dias úteis`}
           </p>
         </div>
       </div>
 
       {done ? (
         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
-          <CheckCircle2 size={11} /> Tarefa criada com sucesso!
+          <CheckCircle2 size={11} />
+          {cfg.type === 'AUDIENCIA' ? 'Audiência agendada!' : cfg.type === 'PRAZO' ? 'Prazo criado!' : 'Tarefa criada com sucesso!'}
         </p>
       ) : (
         <div className="flex gap-2">
@@ -191,19 +255,19 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
             disabled={creating}
             className="flex-1 flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-primary hover:bg-primary/15 transition-colors disabled:opacity-50"
           >
-            {creating ? <Loader2 size={10} className="animate-spin" /> : <CheckSquare size={10} />}
-            {creating ? 'Criando…' : 'Criar esta tarefa'}
+            {creating ? <Loader2 size={10} className="animate-spin" /> : (cfg.buttonIcon === 'audience' ? <Calendar size={10} /> : cfg.buttonIcon === 'deadline' ? <Clock size={10} /> : <CheckSquare size={10} />)}
+            {creating ? 'Criando…' : cfg.buttonLabel}
           </button>
           <button
             onClick={() => setSkipped(true)}
             className="px-3 text-[11px] font-semibold text-muted-foreground hover:text-foreground py-1.5 rounded-lg border border-border hover:bg-accent transition-colors"
-            title="Pular tarefa"
+            title="Pular sugestão"
           >
             <X size={11} />
           </button>
         </div>
       )}
-      {err && <p className="text-[10px] text-red-400">Erro ao criar tarefa. Tente novamente.</p>}
+      {err && <p className="text-[10px] text-red-400">Erro ao criar. Tente novamente.</p>}
     </div>
   );
 }
@@ -1041,8 +1105,12 @@ function PublicationCard({
       {expanded && (
         <div className="border-t border-border px-3.5 py-3 bg-accent/5">
           {pub.conteudo && (
-            <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto custom-scrollbar mb-3">
-              {pub.conteudo.slice(0, 600)}{pub.conteudo.length > 600 ? '…' : ''}
+            // Sem slice — mostra conteudo COMPLETO. max-h alto + overflow-y-auto
+            // permite scroll efetivo dentro do card sem ocupar tela inteira.
+            // Bug corrigido 2026-04-24: antes cortava em 600 chars com "…"
+            // sem permitir ver o resto.
+            <p className="text-[11px] text-foreground/80 whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-y-auto custom-scrollbar mb-3 pr-1">
+              {pub.conteudo}
             </p>
           )}
           <div className="flex items-center gap-2 flex-wrap">
@@ -1149,21 +1217,16 @@ function AiPanel({
     if (!analysis) return;
     setCreatingTask(true);
     try {
-      // Calcular prazo em dias úteis a partir de hoje
-      const today = new Date();
-      let due = new Date(today);
-      let added = 0;
-      while (added < analysis.prazo_dias) {
-        due.setDate(due.getDate() + 1);
-        const dow = due.getDay();
-        if (dow !== 0 && dow !== 6) added++;
-      }
+      // Respeita o event_type da analise da IA: AUDIENCIA / PRAZO / TAREFA.
+      // Bug corrigido 2026-04-24: antes criava sempre TAREFA hardcoded.
+      const cfg = resolveEventTypeConfig(analysis);
+      const durationMs = cfg.type === 'AUDIENCIA' ? 60 * 60_000 : 30 * 60_000;
       await api.post('/calendar/events', {
-        type: 'TAREFA',
+        type: cfg.type,
         title: `[DJEN] ${analysis.tarefa_titulo}`,
         description: analysis.tarefa_descricao,
-        start_at: due.toISOString(),
-        end_at: new Date(due.getTime() + 30 * 60000).toISOString(),
+        start_at: cfg.dueDate.toISOString(),
+        end_at: new Date(cfg.dueDate.getTime() + durationMs).toISOString(),
         legal_case_id: pub.legal_case_id || undefined,
         priority: analysis.urgencia,
       });
@@ -1261,38 +1324,52 @@ function AiPanel({
               </div>
             </div>
 
-            {/* Col 2: Tarefa sugerida */}
+            {/* Col 2: Tarefa / Audiência / Prazo sugerido */}
             <div className="space-y-3">
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Tarefa Sugerida</p>
-                <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                  <p className="text-[12px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
-                  {analysis.tarefa_descricao && (
-                    <p className="text-[11px] text-muted-foreground">{analysis.tarefa_descricao}</p>
-                  )}
-                  <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <Clock size={10} />
-                    Prazo: {analysis.prazo_dias} dias úteis
+              {(() => {
+                const cfg = resolveEventTypeConfig(analysis);
+                const labelUpper = cfg.label.toUpperCase();
+                return (
+                  <div>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">{labelUpper}</p>
+                    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                      <p className="text-[12px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
+                      {analysis.tarefa_descricao && (
+                        <p className="text-[11px] text-muted-foreground">{analysis.tarefa_descricao}</p>
+                      )}
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Clock size={10} />
+                        {cfg.type === 'AUDIENCIA' || cfg.type === 'PRAZO'
+                          ? cfg.dueDate.toLocaleString('pt-BR', {
+                              day: '2-digit', month: '2-digit', year: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })
+                          : `Prazo: ${analysis.prazo_dias} dias úteis`}
+                      </div>
+                      <button
+                        onClick={handleCreateTask}
+                        disabled={creatingTask || taskCreated}
+                        className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
+                          taskCreated
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+                        }`}
+                      >
+                        {creatingTask ? (
+                          <><Loader2 size={11} className="animate-spin" /> Criando…</>
+                        ) : taskCreated ? (
+                          <><CheckCircle2 size={11} /> {cfg.type === 'AUDIENCIA' ? 'Audiência agendada!' : cfg.type === 'PRAZO' ? 'Prazo criado!' : 'Tarefa criada!'}</>
+                        ) : (
+                          <>
+                            {cfg.buttonIcon === 'audience' ? <Calendar size={11} /> : cfg.buttonIcon === 'deadline' ? <Clock size={11} /> : <CheckSquare size={11} />}
+                            {cfg.buttonLabel}
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={handleCreateTask}
-                    disabled={creatingTask || taskCreated}
-                    className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
-                      taskCreated
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
-                    }`}
-                  >
-                    {creatingTask ? (
-                      <><Loader2 size={11} className="animate-spin" /> Criando…</>
-                    ) : taskCreated ? (
-                      <><CheckCircle2 size={11} /> Tarefa criada!</>
-                    ) : (
-                      <><CheckSquare size={11} /> Criar esta tarefa</>
-                    )}
-                  </button>
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
             {/* Col 3: Processo + Orientações */}
