@@ -1198,6 +1198,19 @@ function AiPanel({
   const [movingStage, setMovingStage] = useState(false);
   const [stageMoved, setStageMoved] = useState(false);
 
+  // Eventos ja agendados no processo vinculado (audiencias, pericias,
+  // prazos, tarefas futuras). Permite o usuario decidir se aceita ou
+  // ignora a sugestao da IA antes de criar evento duplicado.
+  // Feature 2026-04-26.
+  type CaseEvent = {
+    id: string;
+    type: string;
+    status: string;
+    title: string;
+    start_at: string;
+  };
+  const [caseEvents, setCaseEvents] = useState<CaseEvent[] | null>(null);
+
   const runAnalysis = (force = false) => {
     setLoading(true);
     setError(null);
@@ -1212,6 +1225,23 @@ function AiPanel({
   };
 
   useEffect(() => { runAnalysis(); }, [pub.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Busca eventos do processo vinculado (paralelo à análise IA, em background).
+  // Aparece no painel pra usuario ver o que ja existe antes de aceitar
+  // sugestao da IA.
+  useEffect(() => {
+    if (!pub.legal_case_id) { setCaseEvents([]); return; }
+    api.get(`/calendar/events/legal-case/${pub.legal_case_id}`)
+      .then(res => {
+        const events: CaseEvent[] = (res.data || []).filter((e: any) =>
+          ['AGENDADO', 'CONFIRMADO'].includes(e.status)
+        );
+        // Ordena por data ascendente, futuros primeiro
+        events.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+        setCaseEvents(events);
+      })
+      .catch(() => setCaseEvents([]));
+  }, [pub.legal_case_id, taskCreated]);
 
   const handleCreateTask = async () => {
     if (!analysis) return;
@@ -1374,6 +1404,80 @@ function AiPanel({
 
             {/* Col 3: Processo + Orientações */}
             <div className="space-y-3">
+              {/* CONTEXTO DO PROCESSO — etapa atual + eventos ja agendados.
+                  Permite o usuario decidir se aceita sugestao da IA sem
+                  duplicar evento. Feature 2026-04-26. */}
+              {pub.legal_case && pub.legal_case_id && (
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Contexto Atual</p>
+                  <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                    {/* Etapa atual */}
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Etapa atual do processo:</p>
+                      <p className={`text-[12px] font-bold ${pub.legal_case.tracking_stage === analysis.estagio_sugerido ? 'text-emerald-400' : 'text-foreground'}`}>
+                        {pub.legal_case.tracking_stage
+                          ? (STAGE_LABELS[pub.legal_case.tracking_stage] || pub.legal_case.tracking_stage)
+                          : '—'}
+                        {pub.legal_case.tracking_stage === analysis.estagio_sugerido && (
+                          <span className="ml-1.5 text-[9px] font-semibold text-emerald-400">✓ ja na etapa sugerida</span>
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Eventos agendados — futuros */}
+                    <div className="pt-2 border-t border-border/40">
+                      <p className="text-[10px] text-muted-foreground mb-1">
+                        Eventos já agendados ({caseEvents?.filter(e => new Date(e.start_at) > new Date()).length ?? 0}):
+                      </p>
+                      {caseEvents === null ? (
+                        <p className="text-[10px] text-muted-foreground italic">Carregando…</p>
+                      ) : caseEvents.filter(e => new Date(e.start_at) > new Date()).length === 0 ? (
+                        <p className="text-[10px] text-muted-foreground italic">Nenhum evento futuro neste processo.</p>
+                      ) : (
+                        <ul className="space-y-1 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                          {caseEvents
+                            .filter(e => new Date(e.start_at) > new Date())
+                            .slice(0, 8)
+                            .map(e => {
+                              const dt = new Date(e.start_at);
+                              const dateStr = dt.toLocaleString('pt-BR', {
+                                day: '2-digit', month: '2-digit', year: 'numeric',
+                                hour: '2-digit', minute: '2-digit',
+                              });
+                              const isAud = e.type === 'AUDIENCIA';
+                              const isPer = e.type === 'PERICIA';
+                              const isPrazo = e.type === 'PRAZO';
+                              const emoji = isAud ? '⚖️' : isPer ? '🔬' : isPrazo ? '⏰' : '✅';
+                              const colorBg = isAud ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                : isPer ? 'bg-violet-500/10 border-violet-500/30 text-violet-400'
+                                : isPrazo ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                                : 'bg-blue-500/10 border-blue-500/30 text-blue-400';
+                              // Detecta se ja existe evento da mesma natureza/data sugerida pela IA
+                              const isAlreadyScheduled =
+                                analysis.event_type === e.type &&
+                                analysis.data_audiencia &&
+                                e.type === 'AUDIENCIA' &&
+                                Math.abs(dt.getTime() - new Date(analysis.data_audiencia).getTime()) < 60 * 60 * 1000;
+                              return (
+                                <li key={e.id} className={`flex items-start gap-1.5 px-2 py-1 rounded border text-[10px] ${colorBg}`}>
+                                  <span className="shrink-0">{emoji}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-semibold truncate">{e.title}</p>
+                                    <p className="opacity-80">{dateStr}</p>
+                                    {isAlreadyScheduled && (
+                                      <p className="mt-0.5 text-[9px] font-bold text-emerald-400">⚠ ja agendado conforme sugestao IA</p>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {analysis.estagio_sugerido && pub.legal_case_id && (
                 <div>
                   <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Mover Processo</p>
@@ -1387,23 +1491,29 @@ function AiPanel({
                         Processo: {pub.legal_case.lead?.name || pub.legal_case.case_number}
                       </p>
                     )}
-                    <button
-                      onClick={handleMoveStage}
-                      disabled={movingStage || stageMoved}
-                      className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
-                        stageMoved
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-card border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
-                      }`}
-                    >
-                      {movingStage ? (
-                        <><Loader2 size={11} className="animate-spin" /> Movendo…</>
-                      ) : stageMoved ? (
-                        <><CheckCircle2 size={11} /> Processo movido!</>
-                      ) : (
-                        <><ArrowRight size={11} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido]}</>
-                      )}
-                    </button>
+                    {pub.legal_case?.tracking_stage === analysis.estagio_sugerido ? (
+                      <div className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <CheckCircle2 size={11} /> Já está nesta etapa
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleMoveStage}
+                        disabled={movingStage || stageMoved}
+                        className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
+                          stageMoved
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-card border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
+                        }`}
+                      >
+                        {movingStage ? (
+                          <><Loader2 size={11} className="animate-spin" /> Movendo…</>
+                        ) : stageMoved ? (
+                          <><CheckCircle2 size={11} /> Processo movido!</>
+                        ) : (
+                          <><ArrowRight size={11} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido]}</>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
