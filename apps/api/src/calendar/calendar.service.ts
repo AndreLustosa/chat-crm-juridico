@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -259,6 +259,46 @@ export class CalendarService implements OnApplicationBootstrap {
   }) {
     if (!EVENT_TYPES.includes(data.type as any)) {
       throw new BadRequestException(`Tipo invalido: ${data.type}. Use: ${EVENT_TYPES.join(', ')}`);
+    }
+
+    // ─── Guardrail: dedup AUDIENCIA/PERICIA por processo + janela de 2h ───
+    //
+    // Bug reportado 2026-04-26 (cliente Alecio): mesma audiencia foi cadastrada
+    // 2x — uma pelo painel DJEN (08:30 BRT), outra pela tela de Processos
+    // (11:30 UTC bugado, ja corrigido). Ambas dispararam notify-hearing-scheduled
+    // e o cliente recebeu mensagens conflitantes.
+    //
+    // Janela de 2h cobre: arredondamento de minutos pela IA, fuso (start_at
+    // armazenado como UTC naive BRT — diff zero quando sao a mesma audiencia).
+    // Status CANCELADO/CONCLUIDO ignorado pra permitir re-agendamento legitimo.
+    if ((data.type === 'AUDIENCIA' || data.type === 'PERICIA') && data.legal_case_id && data.start_at) {
+      const target = new Date(data.start_at);
+      const before = new Date(target.getTime() - 2 * 60 * 60 * 1000);
+      const after = new Date(target.getTime() + 2 * 60 * 60 * 1000);
+      const existing = await this.prisma.calendarEvent.findFirst({
+        where: {
+          legal_case_id: data.legal_case_id,
+          type: data.type,
+          status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
+          start_at: { gte: before, lte: after },
+        },
+        select: { id: true, title: true, start_at: true },
+      });
+      if (existing) {
+        const tipo = data.type === 'PERICIA' ? 'perícia' : 'audiência';
+        const dataExistente = existing.start_at.toLocaleString('pt-BR', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+        });
+        this.logger.warn(
+          `[CALENDAR] Duplicata bloqueada: ${data.type} ja existe pra case ${data.legal_case_id} ` +
+          `em ${existing.start_at.toISOString()} (existing id=${existing.id}, title="${existing.title}")`,
+        );
+        throw new ConflictException(
+          `Já existe ${tipo} agendada neste processo em ${dataExistente} ("${existing.title}"). ` +
+          `Verifique antes de criar outra — se for um agendamento diferente, separe por mais de 2h ou cancele o anterior.`,
+        );
+      }
     }
 
     // Auto-preencher lead_id + assigned_user_id a partir do processo vinculado,
