@@ -14,7 +14,8 @@
  * 3 opcoes principais. Mantem visualmente enxuto em cards e tabelas.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle2, XCircle, Clock, ChevronDown, Loader2, StickyNote, User as UserIcon, ArrowRight } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -92,7 +93,50 @@ export function EventActionButton({
   const [postponeReason, setPostponeReason] = useState('');
   const [notePopoverOpen, setNotePopoverOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const notePopoverRef = useRef<HTMLDivElement>(null);
+
+  // Posicao calculada do popover (renderizado em Portal pra escapar de
+  // overflow-hidden de ancestores — bug reportado 2026-04-26: popover ficava
+  // ATRAS do proximo card do kanban porque algum ancestor tinha overflow:
+  // hidden, recortando o popover dentro do bounding box. Z-index sozinho nao
+  // resolve esse caso. Portal renderiza no body, fora do contexto do parent).
+  const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number } | null>(null);
+
+  // Atualiza posicao do popover quando abre, no scroll e no resize
+  useLayoutEffect(() => {
+    if (!open) { setPopoverStyle(null); return; }
+    const reposition = () => {
+      const btn = triggerRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const popoverWidth = 260;
+      const popoverHeightEstimate = 220;
+      // Alinha pela direita do botao + 4px de margem
+      let left = rect.right - popoverWidth;
+      // Garante que nao corta na esquerda da viewport
+      if (left < 8) left = 8;
+      // Garante que nao corta na direita da viewport
+      if (left + popoverWidth > window.innerWidth - 8) {
+        left = window.innerWidth - popoverWidth - 8;
+      }
+      // Por padrao abaixo do botao; se nao couber, abre pra cima
+      let top = rect.bottom + 4;
+      if (top + popoverHeightEstimate > window.innerHeight - 8) {
+        top = rect.top - popoverHeightEstimate - 4;
+        if (top < 8) top = 8;
+      }
+      setPopoverStyle({ top, left });
+    };
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open]);
 
   // Fechar popover da nota ao clicar fora
   useEffect(() => {
@@ -106,11 +150,15 @@ export function EventActionButton({
     return () => document.removeEventListener('mousedown', handler);
   }, [notePopoverOpen]);
 
-  // Fechar ao clicar fora
+  // Fechar ao clicar fora — checa trigger E popover (Portal eh um node
+  // separado fora do menuRef, entao precisa de checagem dupla).
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = triggerRef.current?.contains(target);
+      const insidePopover = popoverRef.current?.contains(target);
+      if (!insideTrigger && !insidePopover) {
         setOpen(false);
         setShowNoteInput(null);
         setShowPostpone(false);
@@ -272,7 +320,7 @@ export function EventActionButton({
   }
 
   return (
-    <div ref={menuRef} className={`relative inline-block ${className}`}>
+    <div ref={(el) => { menuRef.current = el; triggerRef.current = el; }} className={`relative inline-block ${className}`}>
       {compact ? (
         <button
           onClick={() => setOpen(!open)}
@@ -294,12 +342,19 @@ export function EventActionButton({
         </button>
       )}
 
-      {open && (
-        // z-[60] (acima do z-50 padrao do header e do z-40 dos cards do kanban).
-        // Bug reportado 2026-04-26: o popover ficava ATRAS do proximo card
-        // do kanban quando aberto numa coluna densa (Audiencia/Instrucao
-        // com 20 cards). z-30 nao era suficiente.
-        <div className="absolute right-0 top-full mt-1 z-[60] w-[260px] bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+      {open && popoverStyle && typeof document !== 'undefined' && createPortal(
+        // Renderizado no document.body via Portal pra escapar de
+        // overflow-hidden de ancestores (cards do kanban tem overflow
+        // contido). Position fixed + coordenadas calculadas via
+        // triggerRef.getBoundingClientRect() — ver useLayoutEffect acima.
+        // Bug reportado 2026-04-26: popover ficava cortado pelos cards
+        // seguintes do kanban mesmo com z-[60] porque era recortado pelo
+        // bounding box do parent com overflow-hidden.
+        <div
+          ref={popoverRef}
+          style={{ position: 'fixed', top: popoverStyle.top, left: popoverStyle.left, width: 260 }}
+          className="z-[100] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
+        >
           {!showNoteInput && !showPostpone && (
             <div className="py-1">
               <button
@@ -427,7 +482,8 @@ export function EventActionButton({
               </div>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
