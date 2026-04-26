@@ -295,7 +295,11 @@ export function EventActionButton({
       )}
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-30 w-[260px] bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+        // z-[60] (acima do z-50 padrao do header e do z-40 dos cards do kanban).
+        // Bug reportado 2026-04-26: o popover ficava ATRAS do proximo card
+        // do kanban quando aberto numa coluna densa (Audiencia/Instrucao
+        // com 20 cards). z-30 nao era suficiente.
+        <div className="absolute right-0 top-full mt-1 z-[60] w-[260px] bg-card border border-border rounded-xl shadow-xl overflow-hidden">
           {!showNoteInput && !showPostpone && (
             <div className="py-1">
               <button
