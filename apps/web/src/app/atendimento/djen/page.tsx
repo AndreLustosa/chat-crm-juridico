@@ -1434,24 +1434,36 @@ function AiPanel({
                       ) : caseEvents.filter(e => new Date(e.start_at) > new Date()).length === 0 ? (
                         <p className="text-[10px] text-muted-foreground italic">Nenhum evento futuro neste processo.</p>
                       ) : (
-                        <ul className="space-y-1 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                        <ul className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
                           {caseEvents
-                            .filter(e => new Date(e.start_at) > new Date())
+                            // Filtro "futuro" tambem em UTC pra bater com a convencao do banco
+                            // (start_at salvo como UTC naive BRT). Senao mostraria menos eventos.
+                            .filter(e => {
+                              const dt = new Date(e.start_at);
+                              // Compara wallclock BRT real (Date.now() em UTC + 3h offset)
+                              return dt.getTime() > Date.now() - 3 * 60 * 60 * 1000;
+                            })
                             .slice(0, 8)
                             .map(e => {
                               const dt = new Date(e.start_at);
+                              // timeZone: 'UTC' faz toLocaleString NAO converter pra fuso local.
+                              // O banco guarda start_at como UTC naive BRT — converter aqui faria
+                              // mostrar 3h a menos. Bug reportado 2026-04-26.
                               const dateStr = dt.toLocaleString('pt-BR', {
                                 day: '2-digit', month: '2-digit', year: 'numeric',
                                 hour: '2-digit', minute: '2-digit',
+                                timeZone: 'UTC',
                               });
                               const isAud = e.type === 'AUDIENCIA';
                               const isPer = e.type === 'PERICIA';
                               const isPrazo = e.type === 'PRAZO';
                               const emoji = isAud ? '⚖️' : isPer ? '🔬' : isPrazo ? '⏰' : '✅';
-                              const colorBg = isAud ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                                : isPer ? 'bg-violet-500/10 border-violet-500/30 text-violet-400'
-                                : isPrazo ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                                : 'bg-blue-500/10 border-blue-500/30 text-blue-400';
+                              // Cores com contraste maior — text-XXX-200/100 + bg mais saturado
+                              // (text-XXX-400 no fundo XXX/10 ficava ilegivel — bug 2026-04-26).
+                              const colorBg = isAud ? 'bg-amber-500/20 border-amber-500/50 text-amber-100'
+                                : isPer ? 'bg-violet-500/20 border-violet-500/50 text-violet-100'
+                                : isPrazo ? 'bg-red-500/20 border-red-500/50 text-red-100'
+                                : 'bg-blue-500/20 border-blue-500/50 text-blue-100';
                               // Detecta se ja existe evento da mesma natureza/data sugerida pela IA
                               const isAlreadyScheduled =
                                 analysis.event_type === e.type &&
@@ -1459,13 +1471,13 @@ function AiPanel({
                                 e.type === 'AUDIENCIA' &&
                                 Math.abs(dt.getTime() - new Date(analysis.data_audiencia).getTime()) < 60 * 60 * 1000;
                               return (
-                                <li key={e.id} className={`flex items-start gap-1.5 px-2 py-1 rounded border text-[10px] ${colorBg}`}>
-                                  <span className="shrink-0">{emoji}</span>
+                                <li key={e.id} className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px] ${colorBg}`}>
+                                  <span className="shrink-0 text-[13px] leading-none">{emoji}</span>
                                   <div className="flex-1 min-w-0">
-                                    <p className="font-semibold truncate">{e.title}</p>
-                                    <p className="opacity-80">{dateStr}</p>
+                                    <p className="font-semibold truncate text-foreground">{e.title}</p>
+                                    <p className="text-[10px] opacity-90">{dateStr}</p>
                                     {isAlreadyScheduled && (
-                                      <p className="mt-0.5 text-[9px] font-bold text-emerald-400">⚠ ja agendado conforme sugestao IA</p>
+                                      <p className="mt-0.5 text-[9px] font-bold text-emerald-300">⚠ ja agendado conforme sugestao IA</p>
                                     )}
                                   </div>
                                 </li>
