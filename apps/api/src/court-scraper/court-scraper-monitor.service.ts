@@ -35,7 +35,10 @@ export class CourtScraperMonitorService {
     private lock: LockService,
   ) {}
 
-  @Cron('0 7 * * 1-5', { timeZone: 'America/Maceio' })
+  // Roda TODOS os dias 07h BRT (politica unificada 2026-04-26 — antes era seg-sex).
+  // Tribunal nao distribui processos novos fim de semana mas o scraper retorna
+  // rapido; e em segunda-feira a varredura pega tudo que entrou no fim de semana.
+  @Cron('0 7 * * *', { timeZone: 'America/Maceio' })
   async checkNewCasesForAllOabs() {
     // Lock distribuido pra impedir double-run em multi-replica.
     // TTL 30min: pra cada advogado com OAB faz scraping, pode demorar.

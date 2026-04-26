@@ -6,6 +6,7 @@ import { EsajTjalScraper, inferTrackingStage } from '../court-scraper/scrapers/e
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
 import { LockService } from '../common/locks/lock.service';
+import { isBusinessHours } from '../common/utils/business-hours.util';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -22,14 +23,8 @@ function movementHash(caseNumber: string, date: string, description: string): st
     .digest('hex');
 }
 
-/** Verifica se está em horário comercial (Maceió UTC-3, seg-sex 8h-20h) */
-function isBusinessHours(): boolean {
-  const now = new Date();
-  const offset = -3;
-  const hour = (now.getUTCHours() + offset + 24) % 24;
-  const day = new Date(now.getTime() + offset * 3600000).getDay();
-  return day >= 1 && day <= 5 && hour >= 8 && hour < 20;
-}
+// isBusinessHours agora vem do helper centralizado (business-hours.util):
+// 8h-20h Maceio, qualquer dia (politica unificada 2026-04-26 — antes era seg-sex).
 
 @Injectable()
 export class EsajSyncService {
@@ -49,16 +44,105 @@ export class EsajSyncService {
 
   // ─── Cron Jobs ─────────────────────────────────────────────
 
-  @Cron('0 8 * * 1-5')
+  // Crons rodam TODOS os dias (politica 2026-04-26 — incluir sab/dom).
+  // Tribunal nao publica fim de semana mas o scraper retorna 0 movimentos
+  // rapido — custo proximo de zero. Em dia util normal fluxo continua.
+  @Cron('0 8 * * *', { timeZone: 'America/Maceio' })
   async syncMorning() {
     this.logger.log('[CRON] Sync matinal ESAJ iniciado');
     await this.syncAllTrackedCases();
   }
 
-  @Cron('0 14 * * 1-5')
+  @Cron('0 14 * * *', { timeZone: 'America/Maceio' })
   async syncAfternoon() {
     this.logger.log('[CRON] Sync vespertino ESAJ iniciado');
     await this.syncAllTrackedCases();
+  }
+
+  /**
+   * Cron de repescagem: a cada hora dentro do horario comercial, pega
+   * CaseEvents tipo MOVIMENTACAO ainda nao notificados ao advogado e
+   * envia o WhatsApp.
+   *
+   * Garante zero perda quando:
+   *  - Sync rodou fora do horario (manual a noite, fim de semana antes)
+   *  - WhatsApp falhou na hora (instancia offline temporario)
+   *  - Movimento criado por scraping ad-hoc fora da janela
+   *
+   * Janela 30 dias evita reenviar movimentos antigos que perderam
+   * relevancia. Agrupa por advogado pra mandar 1 mensagem com varios
+   * processos quando aplicavel.
+   *
+   * Adicionado 2026-04-26.
+   */
+  @Cron('30 8-19 * * *', { timeZone: 'America/Maceio' })
+  async retryPendingLawyerNotifications() {
+    const result = await this.lock.withLock('esaj-retry-notify', 5 * 60, async () => {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const pending = await this.prisma.caseEvent.findMany({
+        where: {
+          type: 'MOVIMENTACAO',
+          source: 'ESAJ',
+          notified_at: null,
+          created_at: { gte: thirtyDaysAgo },
+          legal_case: {
+            in_tracking: true,
+            archived: false,
+            renounced: false,
+          },
+        },
+        include: {
+          legal_case: {
+            select: {
+              id: true, case_number: true, tracking_stage: true,
+              tenant_id: true, lead_id: true,
+              lead: { select: { id: true, name: true, phone: true } },
+              lawyer: { select: { id: true, name: true, phone: true } },
+            },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+        take: 100,
+      });
+
+      if (pending.length === 0) return 0;
+
+      // Agrupa por case_id pra mandar 1 mensagem com todos os movimentos novos
+      // do mesmo processo (em vez de N WhatsApps).
+      const byCase = new Map<string, typeof pending>();
+      for (const ev of pending) {
+        const arr = byCase.get(ev.case_id) || [];
+        arr.push(ev);
+        byCase.set(ev.case_id, arr);
+      }
+
+      this.logger.log(`[ESAJ-RETRY] ${pending.length} movimento(s) pendente(s) em ${byCase.size} processo(s)`);
+
+      let totalNotified = 0;
+      for (const [caseId, events] of byCase.entries()) {
+        const lc = events[0].legal_case;
+        if (!lc.lawyer?.phone) continue;
+        try {
+          const movements = events.map(e => ({
+            date: (e.event_date || e.created_at).toLocaleDateString('pt-BR'),
+            description: e.description || e.title,
+          }));
+          await this.sendLawyerNotification(lc, movements, null);
+          await this.prisma.caseEvent.updateMany({
+            where: { id: { in: events.map(e => e.id) } },
+            data: { notified_at: new Date() },
+          });
+          totalNotified += events.length;
+        } catch (e: any) {
+          this.logger.warn(`[ESAJ-RETRY] Falha pra ${lc.case_number}: ${e.message}`);
+        }
+      }
+      this.logger.log(`[ESAJ-RETRY] ${totalNotified}/${pending.length} movimentos notificados`);
+      return totalNotified;
+    });
+    if (result === null) {
+      this.logger.warn('[ESAJ-RETRY] Skipado — outra replica ja esta rodando');
+    }
   }
 
   // ─── Core Sync ─────────────────────────────────────────────

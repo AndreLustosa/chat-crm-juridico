@@ -6,6 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { LockService } from '../common/locks/lock.service';
+import { isBusinessHours } from '../common/utils/business-hours.util';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -201,6 +202,82 @@ export class DjenService {
    * Idempotencia: syncForDate usa upsert por id_comunicacao, entao re-rodar
    * pra mesma data nao duplica.
    */
+  /**
+   * Cron de repescagem: a cada hora dentro do horario comercial, pega
+   * publicacoes vinculadas a processo que ainda nao foram notificadas ao
+   * cliente (client_notified_at IS NULL) e tenta enviar de novo.
+   *
+   * Coberto:
+   *  - Pubs criadas fora do horario (sync 17h ainda esta no horario, mas
+   *    se rodar tarde / sync manual a noite, ficam pendentes)
+   *  - Pubs vinculadas via reconciliacao depois do dia da publicacao
+   *  - Falhas transitorias do WhatsApp (instancia offline temporario)
+   *
+   * Janela de 7 dias evita reenviar avisos de pubs muito antigas que
+   * possivelmente ja perderam relevancia.
+   *
+   * Adicionado 2026-04-26 — politica de zero perda.
+   */
+  @Cron('15 8-19 * * *', { timeZone: 'America/Maceio' })
+  async retryPendingClientNotifications() {
+    const result = await this.lock.withLock('djen-retry-notify', 5 * 60, async () => {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const pendings = await this.prisma.djenPublication.findMany({
+        where: {
+          client_notified_at: null,
+          legal_case_id: { not: null },
+          data_disponibilizacao: { gte: sevenDaysAgo },
+          archived: false,
+        },
+        include: {
+          legal_case: {
+            select: {
+              id: true,
+              tenant_id: true,
+              lead: { select: { id: true, name: true, phone: true } },
+            },
+          },
+        },
+        orderBy: { data_disponibilizacao: 'desc' },
+        take: 50, // limite pra nao sobrecarregar IA/WhatsApp em uma execucao
+      });
+
+      if (pendings.length === 0) return 0;
+
+      this.logger.log(`[DJEN-RETRY] ${pendings.length} pub(s) pendentes de notificacao`);
+
+      let notified = 0;
+      for (const pub of pendings) {
+        if (!pub.legal_case) continue;
+        try {
+          let aiAnalysis: any = null;
+          try {
+            aiAnalysis = await this.analyzePublication(pub.id);
+          } catch (e: any) {
+            this.logger.warn(`[DJEN-RETRY] IA falhou em ${pub.id}: ${e.message}`);
+          }
+          await this.notifyLeadAboutMovement(
+            pub,
+            pub.legal_case,
+            pub.tipo_comunicacao,
+            pub.numero_processo,
+            pub.data_disponibilizacao,
+            pub.assunto,
+            aiAnalysis,
+          );
+          notified++;
+        } catch (e: any) {
+          this.logger.warn(`[DJEN-RETRY] Falha em ${pub.id}: ${e.message}`);
+        }
+      }
+      this.logger.log(`[DJEN-RETRY] ${notified}/${pendings.length} notificacoes enviadas`);
+      return notified;
+    });
+    if (result === null) {
+      this.logger.warn('[DJEN-RETRY] Skipado — outra replica ja esta rodando');
+    }
+  }
+
   @Cron('0 8,17 * * *', { timeZone: 'America/Maceio' })
   async syncDaily() {
     // Lock distribuido pra impedir double-run em ambiente multi-replica.
@@ -1529,15 +1606,17 @@ ${pub.conteudo.slice(0, 6000)}`;
     const notifyEnabled = await this.settings.get('DJEN_NOTIFY_CLIENT');
     if (notifyEnabled === 'false') return;
 
-    // Horário comercial (Maceió/AL — UTC-3): 8h–20h, seg–sex
-    const now = new Date();
-    const maceioOffset = -3;
-    const maceioHour = (now.getUTCHours() + maceioOffset + 24) % 24;
-    const maceioDay = new Date(now.getTime() + maceioOffset * 3600000).getDay();
-    const isBusinessHours = maceioDay >= 1 && maceioDay <= 5 && maceioHour >= 8 && maceioHour < 20;
-
-    if (!isBusinessHours) {
-      this.logger.log(`[DJEN] Notificação adiada (fora do horário comercial) para lead ${lead.id}`);
+    // Horario comercial: 8h-20h Maceio, TODOS os dias (politica unificada
+    // 2026-04-26 — antes era seg-sex, agora inclui sab/dom).
+    //
+    // Se fora do horario, NAO descarta — `client_notified_at` continua null
+    // e o cron de repescagem `retryPendingClientNotifications` (roda 8-19h)
+    // pega esta pub e re-tenta. Garantia: zero perda.
+    if (!isBusinessHours()) {
+      this.logger.log(
+        `[DJEN] Notificacao fora do horario comercial — pub ${pub.id} ficara pendente ` +
+        `pra cron de repescagem (lead ${lead.id})`,
+      );
       return;
     }
 
