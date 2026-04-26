@@ -962,6 +962,18 @@ export class DjenService {
     valor_causa: string | null;
     data_audiencia: string | null;
     data_prazo: string | null;
+    // Lista de eventos sugeridos (multipli prazos/audiencias por publicacao).
+    // Adicionado 2026-04-26 — antes a IA so retornava 1 evento via event_type.
+    // Mantemos os campos legados (event_type, data_audiencia, data_prazo)
+    // pra compat, mas eventos[] eh a fonte canonica.
+    eventos: Array<{
+      tipo: 'AUDIENCIA' | 'PRAZO' | 'PERICIA';
+      titulo: string;          // curto e especifico (ex: "Citacao por edital - 20 dias")
+      descricao: string;       // detalhada do que fazer (instrucoes praticas)
+      data: string | null;     // ISO naive BRT — null se prazo relativo
+      prazo_dias: number | null; // dias uteis se nao tem data fixa
+      condicao: string | null; // ex: "apos publicacao do edital" — pra prazos encadeados
+    }>;
     // Campos CLIENT (linguagem acessível) — só usados internamente p/ notificação WhatsApp
     client: {
       resumo_cliente: string | null;
@@ -988,8 +1000,24 @@ export class DjenService {
       const age = Date.now() - new Date(pubAny.analyzed_at).getTime();
       if (age < CACHE_HOURS * 3600000) {
         this.logger.log(`[DJEN] Análise em cache (${Math.round(age / 60000)}min) para publicação ${id}`);
+        const cached = pubAny.lawyer_analysis;
+        // Compat: analises antigas (antes de 2026-04-26) nao tinham eventos[].
+        // Deriva on-read pra frontend nao precisar lidar com 2 formatos.
+        let cachedEventos = Array.isArray(cached.eventos) ? cached.eventos : [];
+        if (cachedEventos.length === 0 && cached.event_type && cached.event_type !== 'TAREFA') {
+          const t = cached.event_type;
+          cachedEventos = [{
+            tipo: t,
+            titulo: cached.tarefa_titulo || 'Verificar publicação',
+            descricao: cached.tarefa_descricao || cached.tarefa_titulo || '',
+            data: (t === 'AUDIENCIA' || t === 'PERICIA') ? cached.data_audiencia : cached.data_prazo,
+            prazo_dias: cached.prazo_dias || null,
+            condicao: null,
+          }];
+        }
         return {
-          ...pubAny.lawyer_analysis,
+          ...cached,
+          eventos: cachedEventos,
           client: pubAny.client_analysis || {
             resumo_cliente: null, proximo_passo_cliente: null, fase_processo_cliente: null,
             orientacao_cliente: null, prazo_cliente: null, local_evento: null,
@@ -1033,6 +1061,22 @@ CAMPOS PARA O ADVOGADO:
 
 - event_type: "AUDIENCIA" | "PRAZO" | "PERICIA" | "TAREFA"
   REGRA CRITICA: publicacoes do DJEN sempre envolvem processo. event_type DEVE ser AUDIENCIA, PRAZO ou PERICIA. Use TAREFA APENAS em ultimo recurso (publicacao puramente informativa, sem prazo nem evento). NUNCA TAREFA quando ha despacho exigindo manifestacao, contestacao, recurso, ou cumprimento — esses sao PRAZO.
+  Este campo (event_type) representa o evento PRINCIPAL/mais urgente. Se ha multiplos prazos, detalhe TODOS no array "eventos" abaixo.
+
+- eventos: array — Lista TODOS os prazos/audiencias/pericias da publicacao, em ordem cronologica. CRITICO: se ha multiplos prazos encadeados (ex: "edital com prazo de 20 dias, depois impugnacao em 15 dias apos citacao"), liste CADA UM como item separado. NAO concatene em 1 so. Cada item tem:
+  • tipo: "AUDIENCIA" | "PRAZO" | "PERICIA"
+  • titulo: string (curto e ESPECIFICO ao ato — ex: "Citacao por edital de interessados", "Impugnacao ao pedido de alvara", "Audiencia de instrucao")
+  • descricao: string (DETALHADA — explica o que esse ato significa, o que precisa ser feito concretamente, e em que ordem. Inclua referencias praticas: "monitorar publicacao do edital", "verificar resposta do Sisbajud antes da audiencia", "preparar contraminuta", etc. Minimo 80 caracteres, sem limite maximo.)
+  • data: ISO "YYYY-MM-DDTHH:MM:00" ou null se prazo relativo (sem data explicita)
+  • prazo_dias: number ou null (dias uteis se prazo relativo)
+  • condicao: string ou null (apenas se o prazo depende de outro evento — ex: "apos publicacao do edital", "apos juntada da resposta do Sisbajud", "apos parecer do MP")
+  Exemplo pra publicacao "DECISAO defere alvara, cita por edital com prazo 20d, impugnacao em 15d apos citacao, intima MP":
+  [
+    {"tipo": "PRAZO", "titulo": "Publicacao do edital de citacao (20 dias)", "descricao": "Aguardar publicacao do edital de citacao. Prazo de 20 dias corridos para que interessados se manifestem. Monitorar Diario Oficial.", "data": null, "prazo_dias": 20, "condicao": null},
+    {"tipo": "PRAZO", "titulo": "Impugnacao ao pedido de alvara (15 dias)", "descricao": "Apos decorrido o prazo do edital sem manifestacao, abrira prazo de 15 dias para impugnacao. Acompanhar e, se necessario, peticionar pela conclusao do procedimento.", "data": null, "prazo_dias": 15, "condicao": "apos publicacao do edital"},
+    {"tipo": "PRAZO", "titulo": "Parecer do Ministerio Publico", "descricao": "MP intimado para ofertar parecer apos manifestacoes. Aguardar e analisar o parecer antes da sentenca.", "data": null, "prazo_dias": null, "condicao": "apos manifestacoes/impugnacoes"}
+  ]
+  Se a publicacao tem so 1 prazo/evento, retorne array com 1 item. Se nao tem nenhum (publicacao informativa), retorne array vazio [].
 
 CAMPOS PARA O CLIENTE (linguagem acessível — enviados via WhatsApp):
 - resumo_cliente: string (explicação completa para leigo, sem termos jurídicos. Máx 5 frases.)
@@ -1245,6 +1289,86 @@ ${pub.conteudo.slice(0, 6000)}`;
       lawyerFields.event_type = 'TAREFA';
     }
 
+    // ─── Sanitiza eventos[] da IA + retrocompat com formato legado ───────────
+    //
+    // IA pode retornar varios prazos/audiencias da mesma publicacao (ex: edital
+    // 20d + impugnacao 15d apos). Sanitiza cada item, descarta os com formato
+    // ruim. Se IA nao retornou array (modelo antigo / falha), deriva 1 item dos
+    // campos legados pra nao perder a sugestao.
+    type Evento = {
+      tipo: 'AUDIENCIA' | 'PRAZO' | 'PERICIA';
+      titulo: string;
+      descricao: string;
+      data: string | null;
+      prazo_dias: number | null;
+      condicao: string | null;
+    };
+    const sanitizeEvento = (raw: any, idx: number): Evento | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      let tipo = String(raw.tipo || '').toUpperCase();
+      // TAREFA nao eh permitido em eventos[] — regra do app: processo vinculado
+      // nunca gera tarefa. Rebaixa pra PRAZO. Sem processo, ignora o item.
+      if (tipo === 'TAREFA') {
+        if (hasLinkedCase) tipo = 'PRAZO';
+        else return null;
+      }
+      if (!['AUDIENCIA', 'PRAZO', 'PERICIA'].includes(tipo)) {
+        this.logger.warn(`[DJEN/IA] eventos[${idx}].tipo invalido: "${raw.tipo}". pubId=${id}`);
+        return null;
+      }
+      const titulo = String(raw.titulo || '').trim();
+      const descricao = String(raw.descricao || '').trim();
+      if (!titulo) {
+        this.logger.warn(`[DJEN/IA] eventos[${idx}] sem titulo. pubId=${id}`);
+        return null;
+      }
+      const data = raw.data ? sanitizeIaDate(raw.data, `eventos[${idx}].data`) : null;
+      const prazo_dias = typeof raw.prazo_dias === 'number' && raw.prazo_dias > 0 ? raw.prazo_dias : null;
+      // Coerencia: AUDIENCIA/PERICIA precisa de data fixa.
+      if ((tipo === 'AUDIENCIA' || tipo === 'PERICIA') && !data) {
+        this.logger.warn(`[DJEN/IA] eventos[${idx}].tipo=${tipo} sem data — descartando. pubId=${id}`);
+        return null;
+      }
+      // PRAZO precisa de data OU prazo_dias.
+      if (tipo === 'PRAZO' && !data && !prazo_dias) {
+        this.logger.warn(`[DJEN/IA] eventos[${idx}].tipo=PRAZO sem data nem prazo_dias — descartando. pubId=${id}`);
+        return null;
+      }
+      const condicao = raw.condicao && String(raw.condicao).trim() ? String(raw.condicao).trim() : null;
+      return {
+        tipo: tipo as Evento['tipo'],
+        titulo,
+        descricao: descricao || titulo, // fallback minimo
+        data,
+        prazo_dias,
+        condicao,
+      };
+    };
+
+    let eventos: Evento[] = [];
+    if (Array.isArray(parsed.eventos) && parsed.eventos.length) {
+      eventos = parsed.eventos
+        .map((e: any, i: number) => sanitizeEvento(e, i))
+        .filter((e: Evento | null): e is Evento => e !== null);
+    }
+    // Retrocompat: se IA nao mandou eventos[] mas mandou event_type !== TAREFA,
+    // deriva 1 item dos campos legados (event_type, data_audiencia, data_prazo,
+    // tarefa_titulo, tarefa_descricao). Sem isso, modelos antigos/instaveis
+    // perderiam a sugestao.
+    if (eventos.length === 0 && lawyerFields.event_type !== 'TAREFA') {
+      const t = lawyerFields.event_type;
+      eventos = [{
+        tipo: t,
+        titulo: lawyerFields.tarefa_titulo,
+        descricao: lawyerFields.tarefa_descricao || lawyerFields.tarefa_titulo,
+        data: (t === 'AUDIENCIA' || t === 'PERICIA') ? lawyerFields.data_audiencia : lawyerFields.data_prazo,
+        prazo_dias: lawyerFields.prazo_dias || null,
+        condicao: null,
+      }];
+      this.logger.log(`[DJEN/IA] eventos[] derivado dos campos legados (IA nao retornou array). pubId=${id}`);
+    }
+    (lawyerFields as any).eventos = eventos;
+
     const clientFields = {
       resumo_cliente: parsed.resumo_cliente || null,
       proximo_passo_cliente: parsed.proximo_passo_cliente || null,
@@ -1254,7 +1378,14 @@ ${pub.conteudo.slice(0, 6000)}`;
       local_evento: parsed.local_evento || null,
     };
 
-    const result = { ...lawyerFields, client: clientFields };
+    // Eventos foi adicionado via cast (lawyerFields as any).eventos pra contornar
+    // tipo strict do retorno. Aqui exponho explicitamente pra satisfazer o
+    // contrato do metodo (eventos: AiEvento[]).
+    const result = {
+      ...lawyerFields,
+      eventos,
+      client: clientFields,
+    };
 
     // Persistir análise em DOIS campos separados (evita vazamento para área do cliente)
     await this.prisma.djenPublication.update({

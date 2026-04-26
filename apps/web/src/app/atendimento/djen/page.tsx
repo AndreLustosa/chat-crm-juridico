@@ -42,6 +42,15 @@ interface DjenPublication {
   created_at: string;
 }
 
+interface AiEvento {
+  tipo: 'AUDIENCIA' | 'PRAZO' | 'PERICIA';
+  titulo: string;        // curto e especifico (ex: "Citacao por edital - 20 dias")
+  descricao: string;     // detalhada com instrucoes praticas
+  data: string | null;   // ISO naive BRT — null se prazo relativo
+  prazo_dias: number | null;
+  condicao: string | null; // ex: "apos publicacao do edital" — pra prazos encadeados
+}
+
 interface AiAnalysis {
   resumo: string;
   urgencia: 'URGENTE' | 'NORMAL' | 'BAIXA';
@@ -55,7 +64,13 @@ interface AiAnalysis {
   // event_type — usado pra decidir se o "evento sugerido" eh AUDIENCIA,
   // PRAZO, PERICIA ou TAREFA. Adicionado 2026-04-24 (fix de classificacao no UI).
   // PERICIA adicionada 2026-04-26 — regra: processo vinculado nunca eh TAREFA.
+  // Mantido pra retrocompat — eventos[] eh a fonte canonica desde 2026-04-26.
   event_type?: 'AUDIENCIA' | 'PRAZO' | 'PERICIA' | 'TAREFA';
+  // eventos[] — lista TODOS os prazos/audiencias da publicacao (multiplos
+  // prazos encadeados como edital + impugnacao viram itens separados).
+  // Adicionado 2026-04-26. Backend faz retrocompat: deriva 1 item dos campos
+  // legados se IA nao retornar array.
+  eventos?: AiEvento[];
   // Dados extraídos da publicação
   parte_autora?: string | null;
   parte_rea?: string | null;
@@ -173,22 +188,86 @@ function subtractOneBusinessDay(d: Date): Date {
   return result;
 }
 
-// ─── Helper: resolve type/labels/dueDate baseado no event_type da IA ─────────
+// ─── Helper: resolve config de UM evento individual da IA ────────────────────
 //
-// Bug reportado 2026-04-24: o frontend criava sempre "TAREFA" hardcoded mesmo
-// quando a IA detectava AUDIENCIA ou PRAZO no event_type. Agora respeita.
-//
-// Para AUDIENCIA: usa data_audiencia da analise (ISO).
-// Para PRAZO: usa data_prazo (ISO).
-// Para TAREFA: calcula due_date a partir de prazo_dias uteis.
-function resolveEventTypeConfig(analysis: AiAnalysis): {
+// Adicionado 2026-04-26 — IA agora retorna lista de eventos (eventos[]). Cada
+// item passa por aqui pra virar config renderizavel. Antes o resolveEventType
+// trabalhava so com o evento "principal" da publicacao.
+type EventoConfig = {
   type: 'TAREFA' | 'AUDIENCIA' | 'PRAZO' | 'PERICIA';
-  label: string;        // "Tarefa sugerida" / "Audiência sugerida" / "Prazo sugerido" / "Perícia sugerida"
-  buttonLabel: string;  // "Criar tarefa" / "Agendar audiência" / "Criar prazo" / "Agendar perícia"
+  label: string;
+  buttonLabel: string;
   buttonIcon: 'task' | 'audience' | 'deadline' | 'pericia';
   dueDate: Date;        // Data efetivamente AGENDADA (com margem de -1 dia util pra PRAZO)
   deadlineEnd?: Date;   // Final REAL do prazo (usado so pra exibir "ultimo dia" no UI)
-} {
+  titulo: string;       // titulo especifico do evento (de eventos[].titulo ou tarefa_titulo)
+  descricao: string;    // descricao detalhada do evento
+  condicao: string | null; // ex: "apos publicacao do edital" pra prazos encadeados
+};
+
+function fallbackDueFrom(prazoDias: number): Date {
+  const now = new Date();
+  const due = new Date(Date.UTC(
+    now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0,
+  ));
+  const minDays = Math.max(1, prazoDias || 1);
+  let added = 0;
+  while (added < minDays) {
+    due.setUTCDate(due.getUTCDate() + 1);
+    const dow = due.getUTCDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return due;
+}
+
+function resolveEventoConfig(ev: AiEvento): EventoConfig {
+  if (ev.tipo === 'AUDIENCIA' && ev.data) {
+    return {
+      type: 'AUDIENCIA',
+      label: 'Audiência sugerida',
+      buttonLabel: 'Agendar audiência',
+      buttonIcon: 'audience',
+      dueDate: parseNaiveBrIso(ev.data),
+      titulo: ev.titulo,
+      descricao: ev.descricao,
+      condicao: ev.condicao,
+    };
+  }
+  if (ev.tipo === 'PERICIA' && ev.data) {
+    return {
+      type: 'PERICIA',
+      label: 'Perícia sugerida',
+      buttonLabel: 'Agendar perícia',
+      buttonIcon: 'pericia',
+      dueDate: parseNaiveBrIso(ev.data),
+      titulo: ev.titulo,
+      descricao: ev.descricao,
+      condicao: ev.condicao,
+    };
+  }
+  // PRAZO (com data ou prazo_dias). Aplica margem de -1 dia util.
+  const deadlineEnd = ev.data ? parseNaiveBrIso(ev.data) : fallbackDueFrom(ev.prazo_dias || 15);
+  return {
+    type: 'PRAZO',
+    label: 'Prazo sugerido',
+    buttonLabel: 'Criar prazo',
+    buttonIcon: 'deadline',
+    dueDate: subtractOneBusinessDay(deadlineEnd),
+    deadlineEnd,
+    titulo: ev.titulo,
+    descricao: ev.descricao,
+    condicao: ev.condicao,
+  };
+}
+
+// ─── Helper legado: resolve config a partir do event_type principal ──────────
+//
+// Mantido pra retrocompat com componentes que ainda usam o formato antigo
+// (TaskSuggestion no modal, por ex). Internamente delega pro novo helper.
+//
+// Bug reportado 2026-04-24: o frontend criava sempre "TAREFA" hardcoded mesmo
+// quando a IA detectava AUDIENCIA ou PRAZO no event_type. Agora respeita.
+function resolveEventTypeConfig(analysis: AiAnalysis): EventoConfig {
   const eventType = analysis.event_type || 'TAREFA';
 
   // Calcula data_padrao = hoje + prazo_dias uteis (fallback).
@@ -217,53 +296,69 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
     return due;
   })();
 
-  if (eventType === 'AUDIENCIA' && analysis.data_audiencia) {
-    return {
-      type: 'AUDIENCIA',
-      label: 'Audiência sugerida',
-      buttonLabel: 'Agendar audiência',
-      buttonIcon: 'audience',
-      dueDate: parseNaiveBrIso(analysis.data_audiencia),
+  // Reusa o helper novo se ja temos um item canonico — apenas TAREFA/legado
+  // continuam usando os campos `tarefa_titulo`/`tarefa_descricao`.
+  if (eventType !== 'TAREFA' && (analysis.data_audiencia || analysis.data_prazo)) {
+    const fakeEv: AiEvento = {
+      tipo: eventType as 'AUDIENCIA' | 'PRAZO' | 'PERICIA',
+      titulo: analysis.tarefa_titulo,
+      descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
+      data: (eventType === 'AUDIENCIA' || eventType === 'PERICIA')
+        ? (analysis.data_audiencia || null)
+        : (analysis.data_prazo || null),
+      prazo_dias: analysis.prazo_dias,
+      condicao: null,
     };
-  }
-  if (eventType === 'PERICIA' && analysis.data_audiencia) {
-    // Pericia reutiliza data_audiencia (campo compartilhado para eventos com
-    // data/hora explicita). Distincao audiencia/pericia eh via event_type.
-    return {
-      type: 'PERICIA',
-      label: 'Perícia sugerida',
-      buttonLabel: 'Agendar perícia',
-      buttonIcon: 'pericia',
-      dueDate: parseNaiveBrIso(analysis.data_audiencia),
-    };
+    return resolveEventoConfig(fakeEv);
   }
   if (eventType === 'PRAZO') {
-    // PRAZO: se IA extraiu data_prazo, usa ela. Se nao, usa fallbackDue
-    // (prazo_dias uteis). Diferente do TAREFA: prazo nao pode rebaixar pra
-    // "criar tarefa" — regra: processo vinculado nao gera tarefa.
-    //
-    // Regra de seguranca (André, 2026-04-26): agenda com 1 dia util de
-    // antecedencia do FINAL do prazo, pra prevenir perda. Se a margem cair
-    // no passado, mantem original (subtractOneBusinessDay devolve o input).
-    const deadlineEnd = analysis.data_prazo ? parseNaiveBrIso(analysis.data_prazo) : fallbackDue;
-    return {
-      type: 'PRAZO',
-      label: 'Prazo sugerido',
-      buttonLabel: 'Criar prazo',
-      buttonIcon: 'deadline',
-      dueDate: subtractOneBusinessDay(deadlineEnd),
-      deadlineEnd,
+    // PRAZO sem data: usa fallbackDue + margem.
+    const fakeEv: AiEvento = {
+      tipo: 'PRAZO',
+      titulo: analysis.tarefa_titulo,
+      descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
+      data: null,
+      prazo_dias: analysis.prazo_dias,
+      condicao: null,
     };
+    return resolveEventoConfig(fakeEv);
   }
-  // Fallback: TAREFA (ou AUDIENCIA/PRAZO sem data extraida — vira tarefa
-  // com prazo calculado a partir de prazo_dias).
+  // Fallback: TAREFA (sem processo — captura de lead).
   return {
     type: 'TAREFA',
     label: 'Tarefa sugerida',
     buttonLabel: 'Criar tarefa',
     buttonIcon: 'task',
     dueDate: fallbackDue,
+    titulo: analysis.tarefa_titulo,
+    descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
+    condicao: null,
   };
+}
+
+// ─── Helper: deriva lista canonica de eventos da analise ────────────────────
+//
+// Frontend trabalha sempre com eventos[]. Se IA antiga (cache pre-2026-04-26)
+// nao tem o array, deriva 1 item dos campos legados. TAREFA nao gera item —
+// fica vazio (operador agenda manual).
+function getAnalysisEventos(analysis: AiAnalysis): AiEvento[] {
+  if (Array.isArray(analysis.eventos) && analysis.eventos.length) {
+    return analysis.eventos;
+  }
+  if (analysis.event_type && analysis.event_type !== 'TAREFA') {
+    const t = analysis.event_type;
+    return [{
+      tipo: t,
+      titulo: analysis.tarefa_titulo,
+      descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
+      data: (t === 'AUDIENCIA' || t === 'PERICIA')
+        ? (analysis.data_audiencia || null)
+        : (analysis.data_prazo || null),
+      prazo_dias: analysis.prazo_dias || null,
+      condicao: null,
+    }];
+  }
+  return [];
 }
 
 // ─── Labels do event_type pra exibicao no UI ─────────────────────────────────
@@ -1291,8 +1386,10 @@ function AiPanel({
   const [analysis, setAnalysis] = useState<AiAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creatingTask, setCreatingTask] = useState(false);
-  const [taskCreated, setTaskCreated] = useState(false);
+  // Status individual por evento sugerido (eventos[idx]). Permite criar varios
+  // em paralelo. Sets em vez de booleans pra suportar N items.
+  const [creatingByIdx, setCreatingByIdx] = useState<Set<number>>(new Set());
+  const [createdByIdx, setCreatedByIdx] = useState<Set<number>>(new Set());
   const [movingStage, setMovingStage] = useState(false);
   const [stageMoved, setStageMoved] = useState(false);
 
@@ -1313,7 +1410,8 @@ function AiPanel({
     setLoading(true);
     setError(null);
     setAnalysis(null);
-    setTaskCreated(false);
+    setCreatedByIdx(new Set());
+    setCreatingByIdx(new Set());
     setStageMoved(false);
 
     api.post(`/djen/${pub.id}/analyze`, { force })
@@ -1339,30 +1437,30 @@ function AiPanel({
         setCaseEvents(events);
       })
       .catch(() => setCaseEvents([]));
-  }, [pub.legal_case_id, taskCreated]);
+  }, [pub.legal_case_id, createdByIdx]);
 
-  const handleCreateTask = async () => {
+  // Cria UM evento especifico da lista de sugestoes da IA. Cada item da lista
+  // tem seu proprio botao + status, permitindo o operador agendar todos os
+  // prazos encadeados (edital + impugnacao + parecer) em sequencia.
+  const handleCreateEvent = async (idx: number, ev: AiEvento, cfg: EventoConfig) => {
     if (!analysis) return;
-    setCreatingTask(true);
+    setCreatingByIdx(prev => new Set(prev).add(idx));
     try {
-      // Respeita o event_type da analise da IA: AUDIENCIA / PRAZO / TAREFA.
-      // Bug corrigido 2026-04-24: antes criava sempre TAREFA hardcoded.
-      const cfg = resolveEventTypeConfig(analysis);
-      // Audiencia/pericia tipicamente duram 1h; prazo eh marco no dia (30min); tarefa 30min.
+      // Audiencia/pericia tipicamente duram 1h; prazo eh marco no dia (30min).
       const durationMs = (cfg.type === 'AUDIENCIA' || cfg.type === 'PERICIA') ? 60 * 60_000 : 30 * 60_000;
 
-      // Descricao enriquecida com contexto do processo — ajuda o advogado a
-      // saber rapido de qual processo eh sem precisar abrir o evento.
-      const descLines = [analysis.tarefa_descricao];
+      // Descricao DETALHADA do evento — usa a descricao especifica do item
+      // (eventos[idx].descricao) que a IA escreveu pra ESTE prazo, nao a geral
+      // da publicacao. Operador entende de cara o que aquele evento significa.
+      const descLines = [cfg.descricao];
       const ctxLines: string[] = [];
+      if (cfg.condicao) ctxLines.push(`Condição: ${cfg.condicao}`);
       if (pub.numero_processo) ctxLines.push(`Processo: ${pub.numero_processo}`);
       if (analysis.juizo) ctxLines.push(`Juízo: ${analysis.juizo}`);
       if (analysis.parte_autora || analysis.parte_rea) {
         ctxLines.push(`Partes: ${analysis.parte_autora || '—'} × ${analysis.parte_rea || '—'}`);
       }
-      // Se PRAZO com margem de seguranca aplicada, registra o final REAL do
-      // prazo na descricao. Operador precisa saber a data limite legal mesmo
-      // quando o evento foi antecipado em 1 dia util.
+      // Se PRAZO com margem aplicada, registra final real do prazo na descricao.
       if (cfg.type === 'PRAZO' && cfg.deadlineEnd && cfg.deadlineEnd.getTime() !== cfg.dueDate.getTime()) {
         const deadlineStr = cfg.deadlineEnd.toLocaleDateString('pt-BR', {
           day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
@@ -1375,7 +1473,9 @@ function AiPanel({
 
       await api.post('/calendar/events', {
         type: cfg.type,
-        title: `[DJEN] ${analysis.tarefa_titulo}`,
+        // Titulo especifico do evento (ex: "Impugnacao ao pedido de alvara"),
+        // nao o geral da publicacao. Operador identifica qual prazo eh.
+        title: `[DJEN] ${cfg.titulo}`,
         description: descLines.filter(Boolean).join('\n'),
         location: analysis.juizo || undefined,
         start_at: cfg.dueDate.toISOString(),
@@ -1383,8 +1483,14 @@ function AiPanel({
         legal_case_id: pub.legal_case_id || undefined,
         priority: analysis.urgencia,
       });
-      setTaskCreated(true);
-    } catch { /* silencioso */ } finally { setCreatingTask(false); }
+      setCreatedByIdx(prev => new Set(prev).add(idx));
+    } catch { /* silencioso */ } finally {
+      setCreatingByIdx(prev => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+    }
   };
 
   const handleMoveStage = async () => {
@@ -1447,11 +1553,29 @@ function AiPanel({
         )}
 
         {analysis && !loading && (() => {
-          // ── Calculos de veredicto (Proposta C — redesign 2026-04-26) ─
-          const cfg = resolveEventTypeConfig(analysis);
+          // ── Lista de eventos sugeridos (multiplos prazos por publicacao) ─
+          // Ate 2026-04-26 a IA so retornava 1 evento. Agora o array eventos[]
+          // suporta prazos encadeados (ex: edital 20d + impugnacao 15d).
+          const eventos = getAnalysisEventos(analysis);
+          const eventoConfigs = eventos.map(resolveEventoConfig);
+
           const futureEvents = (caseEvents || []).filter(e => {
             const dt = new Date(e.start_at);
             return dt.getTime() > Date.now() - 3 * 60 * 60 * 1000;
+          });
+
+          // Pra cada evento sugerido, verifica se ja tem correspondente agendado.
+          // Janela: 2h pra audiencia/pericia (data fixa do juiz), 24h pra prazo
+          // (data estimada — pequenas variacoes sao OK).
+          const matchByIdx = eventoConfigs.map(cfg => {
+            const windowMs = (cfg.type === 'AUDIENCIA' || cfg.type === 'PERICIA')
+              ? 2 * 60 * 60 * 1000
+              : 24 * 60 * 60 * 1000;
+            return futureEvents.some(e => {
+              if (e.type !== cfg.type) return false;
+              const diff = Math.abs(new Date(e.start_at).getTime() - cfg.dueDate.getTime());
+              return diff < windowMs;
+            });
           });
 
           // Comparacao etapa
@@ -1463,27 +1587,20 @@ function AiPanel({
             analysis.estagio_sugerido && pub.legal_case_id && !stageMatches
           );
 
-          // Sugestao de evento ja agendada?
-          //
-          // Comparacao usa parseNaiveBrIso pra alinhar convencao da IA (ISO sem Z)
-          // com a do banco (UTC naive BRT). Sem isso, o diff fica 3h e nunca casa
-          // em fusos com offset != 0. Janela ampliada pra 2h pra absorver pequenas
-          // discrepancias (ex: IA arredonda minutos).
-          const sugDate = analysis.data_audiencia || analysis.data_prazo;
-          const eventAlreadyScheduled = sugDate ? futureEvents.some(e => {
-            if (e.type !== cfg.type) return false;
-            const diff = Math.abs(new Date(e.start_at).getTime() - parseNaiveBrIso(sugDate).getTime());
-            return diff < 2 * 60 * 60 * 1000; // dentro de 2h conta como mesmo evento
-          }) : false;
+          // Veredicto agregado — leva todos os eventos da IA em conta
+          const allEventosMatch = eventoConfigs.length > 0 && matchByIdx.every(Boolean);
+          const someEventosMatch = matchByIdx.some(Boolean);
+          const noEventosMatch = !someEventosMatch;
 
-          // Veredicto geral
           let verdict: 'all-done' | 'partial' | 'all-pending';
           if (!pub.legal_case_id) {
-            // sem processo vinculado, tudo eh acao
             verdict = 'all-pending';
-          } else if (stageMatches && eventAlreadyScheduled) {
+          } else if (eventoConfigs.length === 0) {
+            // Sem eventos sugeridos: depende so da etapa.
+            verdict = stageMatches ? 'all-done' : 'partial';
+          } else if (stageMatches && allEventosMatch) {
             verdict = 'all-done';
-          } else if (stageNeedsMove && !eventAlreadyScheduled) {
+          } else if (stageNeedsMove && noEventosMatch) {
             verdict = 'all-pending';
           } else {
             verdict = 'partial';
@@ -1565,7 +1682,7 @@ function AiPanel({
                     </div>
                   </div>
 
-                  {/* Lista de status — cada item da decisao IA */}
+                  {/* Lista de status — etapa + cada evento sugerido individual */}
                   {pub.legal_case_id && (
                     <ul className="space-y-1.5 pl-7">
                       {/* Status da etapa */}
@@ -1590,32 +1707,38 @@ function AiPanel({
                           )}
                         </li>
                       )}
-                      {/* Status do evento */}
-                      <li className="flex items-start gap-2 text-[11px]">
-                        {eventAlreadyScheduled ? (
-                          <>
-                            <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />
-                            <span className="text-foreground">
-                              {EVENT_TYPE_LABELS[cfg.type].noun} já agendada para{' '}
-                              <strong>{formatBrPretty(cfg.dueDate)}</strong>
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" />
-                            <span className="text-foreground">
-                              IA sugere agendar <strong>{EVENT_TYPE_LABELS[cfg.type].nounLow}</strong> para{' '}
-                              <strong>{formatBrPretty(cfg.dueDate)}</strong>
-                            </span>
-                          </>
-                        )}
-                      </li>
+                      {/* Status de cada evento sugerido */}
+                      {eventoConfigs.map((c, idx) => {
+                        const matched = matchByIdx[idx];
+                        const created = createdByIdx.has(idx);
+                        return (
+                          <li key={idx} className="flex items-start gap-2 text-[11px]">
+                            {(matched || created) ? (
+                              <>
+                                <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />
+                                <span className="text-foreground">
+                                  <strong>{c.titulo}</strong> — {EVENT_TYPE_LABELS[c.type].nounLow} {created ? 'agendada agora' : 'já agendada'}{' '}
+                                  para <strong>{formatBrPretty(c.dueDate)}</strong>
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" />
+                                <span className="text-foreground">
+                                  IA sugere <strong>{c.titulo}</strong> ({EVENT_TYPE_LABELS[c.type].nounLow}) em{' '}
+                                  <strong>{formatBrPretty(c.dueDate)}</strong>
+                                  {c.condicao && <span className="text-muted-foreground"> · {c.condicao}</span>}
+                                </span>
+                              </>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
 
-                  {/* Botões — só aparecem ações necessárias ou disponíveis */}
+                  {/* Botões — um por evento sugerido + mover etapa */}
                   <div className="pt-2 border-t border-border/40 space-y-2">
-                    {/* Caso tudo OK: mostrar ações como "opcional" em texto neutro */}
                     {verdict === 'all-done' && (
                       <p className="text-[10px] text-muted-foreground">
                         Caso queira mesmo assim — ações disponíveis:
@@ -1623,35 +1746,46 @@ function AiPanel({
                     )}
 
                     <div className="flex flex-wrap gap-2">
-                      {/* Botão de criar evento */}
-                      {!eventAlreadyScheduled && pub.legal_case_id && (
-                        <button
-                          onClick={handleCreateTask}
-                          disabled={creatingTask || taskCreated}
-                          className={`flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
-                            taskCreated
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
-                          }`}
-                        >
-                          {creatingTask ? (
-                            <><Loader2 size={11} className="animate-spin" /> Criando…</>
-                          ) : taskCreated ? (
-                            <><CheckCircle2 size={11} /> {EVENT_TYPE_LABELS[cfg.type].done}</>
-                          ) : (
-                            <>
-                              {cfg.buttonIcon === 'audience' ? <Calendar size={12} /> : cfg.buttonIcon === 'deadline' ? <Clock size={12} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={12} /> : <CheckSquare size={12} />}
-                              {cfg.buttonLabel}
-                            </>
-                          )}
-                        </button>
-                      )}
+                      {/* Botão por evento sugerido */}
+                      {pub.legal_case_id && eventoConfigs.map((c, idx) => {
+                        const isCreating = creatingByIdx.has(idx);
+                        const isCreated = createdByIdx.has(idx);
+                        const matched = matchByIdx[idx];
+                        // Se ja tem evento equivalente, botao opcional (cinza)
+                        const isOptional = matched && !isCreated;
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => handleCreateEvent(idx, eventos[idx], c)}
+                            disabled={isCreating || isCreated}
+                            title={c.descricao}
+                            className={`flex-1 min-w-[200px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
+                              isCreated
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                : isOptional
+                                ? 'bg-card border border-border text-muted-foreground hover:bg-accent disabled:opacity-50'
+                                : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+                            }`}
+                          >
+                            {isCreating ? (
+                              <><Loader2 size={11} className="animate-spin" /> Criando…</>
+                            ) : isCreated ? (
+                              <><CheckCircle2 size={11} /> {EVENT_TYPE_LABELS[c.type].done}</>
+                            ) : (
+                              <>
+                                {c.buttonIcon === 'audience' ? <Calendar size={12} /> : c.buttonIcon === 'deadline' ? <Clock size={12} /> : c.buttonIcon === 'pericia' ? <Microscope size={12} /> : <CheckSquare size={12} />}
+                                <span className="truncate">{isOptional ? `${c.buttonLabel} mesmo assim` : c.buttonLabel}: {c.titulo}</span>
+                              </>
+                            )}
+                          </button>
+                        );
+                      })}
                       {/* Botão de mover etapa */}
                       {stageNeedsMove && (
                         <button
                           onClick={handleMoveStage}
                           disabled={movingStage || stageMoved}
-                          className={`flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
+                          className={`flex-1 min-w-[200px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
                             stageMoved
                               ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
                               : 'bg-card border-2 border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
@@ -1666,23 +1800,11 @@ function AiPanel({
                           )}
                         </button>
                       )}
-                      {/* Caso tudo OK: ações opcionais (criar mesmo assim, recriar) */}
-                      {verdict === 'all-done' && eventAlreadyScheduled && (
-                        <button
-                          onClick={handleCreateTask}
-                          disabled={creatingTask || taskCreated}
-                          className="flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-semibold py-2 px-3 rounded-lg bg-card border border-border text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
-                          title="Criar evento adicional mesmo havendo um similar"
-                        >
-                          {cfg.buttonIcon === 'audience' ? <Calendar size={11} /> : cfg.buttonIcon === 'deadline' ? <Clock size={11} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={11} /> : <CheckSquare size={11} />}
-                          {cfg.buttonLabel} ainda assim
-                        </button>
-                      )}
                       {/* Sem processo vinculado: botão de criar */}
                       {!pub.legal_case_id && analysis.estagio_sugerido && (
                         <button
                           onClick={() => onCreateProcess(pub.id, analysis)}
-                          className="flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                          className="flex-1 min-w-[200px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
                         >
                           <Plus size={12} /> Cadastrar processo na etapa <strong>{STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}</strong>
                         </button>
@@ -1724,9 +1846,14 @@ function AiPanel({
                                 : isPer ? 'bg-violet-500/20 border-violet-500/50'
                                 : isPrazo ? 'bg-red-500/20 border-red-500/50'
                                 : 'bg-blue-500/20 border-blue-500/50';
-                              const isMatch = sugDate &&
-                                e.type === cfg.type &&
-                                Math.abs(dt.getTime() - parseNaiveBrIso(sugDate).getTime()) < 2 * 60 * 60 * 1000;
+                              // Match: evento ja agendado bate com QUALQUER sugestao da IA?
+                              // Janela: 2h (audiencia/pericia) ou 24h (prazo).
+                              const isMatch = eventoConfigs.some(c => {
+                                if (e.type !== c.type) return false;
+                                const window = (c.type === 'AUDIENCIA' || c.type === 'PERICIA')
+                                  ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+                                return Math.abs(dt.getTime() - c.dueDate.getTime()) < window;
+                              });
                               return (
                                 <li key={e.id} title={e.title} className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px] ${colorBg}`}>
                                   <span className="shrink-0 text-[13px] leading-none mt-0.5">{emoji}</span>
@@ -1748,57 +1875,81 @@ function AiPanel({
                     </div>
                   </div>
 
-                  {/* Direita: Sugestão detalhada */}
+                  {/* Direita: Sugestões detalhadas (uma por evento) */}
                   <div>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">💡 Sugestão Detalhada</p>
-                    <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3 space-y-2">
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">Tipo:</p>
-                        <p className="text-[12px] font-bold text-foreground">
-                          {EVENT_TYPE_LABELS[cfg.type].emoji} {EVENT_TYPE_LABELS[cfg.type].noun}
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
+                      💡 Sugestões da IA {eventoConfigs.length > 0 && <span className="text-muted-foreground/70">({eventoConfigs.length})</span>}
+                    </p>
+                    {eventoConfigs.length === 0 ? (
+                      <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3">
+                        <p className="text-[11px] text-muted-foreground italic">
+                          Nenhum evento a agendar — publicação informativa.
                         </p>
                       </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">
-                          {cfg.type === 'PRAZO' ? 'Agendar para:' : 'Data:'}
-                        </p>
-                        <p className="text-[12px] font-bold text-foreground">
-                          {EVENT_TYPE_LABELS[cfg.type].hasExplicitDate
-                            ? formatBrPretty(cfg.dueDate)
-                            : `${analysis.prazo_dias} dias úteis`}
-                        </p>
-                        {/* PRAZO: mostra final real do prazo + nota da margem
-                            de seguranca pra operador entender que o evento foi
-                            antecipado em 1 dia util por design. */}
-                        {cfg.type === 'PRAZO' && cfg.deadlineEnd && (
-                          <p className="text-[9px] text-muted-foreground mt-1 flex items-center gap-1">
-                            <AlertTriangle size={9} className="text-amber-400 shrink-0" />
-                            <span>
-                              Último dia do prazo: <strong className="text-amber-300">{formatBrPretty(cfg.deadlineEnd)}</strong>
-                              {' · '}agendado 1 dia útil antes por segurança
-                            </span>
-                          </p>
-                        )}
+                    ) : (
+                      <div className="space-y-2 max-h-[28rem] overflow-y-auto custom-scrollbar pr-1">
+                        {eventoConfigs.map((c, idx) => {
+                          const matched = matchByIdx[idx];
+                          const created = createdByIdx.has(idx);
+                          const ev = eventos[idx];
+                          return (
+                            <div key={idx} className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3 space-y-1.5">
+                              {/* Header: tipo + numeracao se ha multiplos */}
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-[12px] font-bold text-foreground flex items-center gap-1.5">
+                                  {eventoConfigs.length > 1 && (
+                                    <span className="text-[10px] text-muted-foreground">{idx + 1}/{eventoConfigs.length}</span>
+                                  )}
+                                  <span>{EVENT_TYPE_LABELS[c.type].emoji} {c.titulo}</span>
+                                </p>
+                                {(matched || created) && (
+                                  <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1 shrink-0">
+                                    <CheckCircle2 size={9} /> {created ? 'criado' : 'já agendado'}
+                                  </span>
+                                )}
+                              </div>
+                              {/* Tipo + Data */}
+                              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]">
+                                <span className="text-muted-foreground">
+                                  Tipo: <strong className="text-foreground">{EVENT_TYPE_LABELS[c.type].noun}</strong>
+                                </span>
+                                <span className="text-muted-foreground">
+                                  {c.type === 'PRAZO' ? 'Agendar:' : 'Data:'}{' '}
+                                  <strong className="text-foreground">
+                                    {EVENT_TYPE_LABELS[c.type].hasExplicitDate || c.type === 'PRAZO'
+                                      ? formatBrPretty(c.dueDate)
+                                      : `${ev.prazo_dias || analysis.prazo_dias} dias úteis`}
+                                  </strong>
+                                </span>
+                              </div>
+                              {/* Final do prazo legal (se PRAZO com margem) */}
+                              {c.type === 'PRAZO' && c.deadlineEnd && c.deadlineEnd.getTime() !== c.dueDate.getTime() && (
+                                <p className="text-[9px] text-muted-foreground flex items-start gap-1">
+                                  <AlertTriangle size={9} className="text-amber-400 shrink-0 mt-0.5" />
+                                  <span>
+                                    Último dia: <strong className="text-amber-300">{formatBrPretty(c.deadlineEnd)}</strong>
+                                    {' · '}agendado 1 dia útil antes por segurança
+                                  </span>
+                                </p>
+                              )}
+                              {/* Condicao (pra prazos encadeados) */}
+                              {c.condicao && (
+                                <p className="text-[10px] text-amber-200 italic flex items-start gap-1">
+                                  <ArrowRight size={9} className="shrink-0 mt-0.5" />
+                                  <span>{c.condicao}</span>
+                                </p>
+                              )}
+                              {/* Descricao detalhada — instrucoes do que fazer */}
+                              {c.descricao && c.descricao !== c.titulo && (
+                                <p className="text-[10px] text-foreground/80 leading-relaxed pt-1 border-t border-border/30">
+                                  {c.descricao}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground">Ação proposta:</p>
-                        <p className="text-[11px] text-foreground">{analysis.tarefa_titulo}</p>
-                        {analysis.tarefa_descricao && (
-                          <p className="text-[10px] text-muted-foreground mt-1">{analysis.tarefa_descricao}</p>
-                        )}
-                      </div>
-                      <div className="pt-1 border-t border-border/40">
-                        {eventAlreadyScheduled ? (
-                          <p className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-                            <CheckCircle2 size={10} /> Já existe evento idêntico
-                          </p>
-                        ) : (
-                          <p className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
-                            <AlertTriangle size={10} /> Ação nova — não há evento equivalente
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </section>
               )}
