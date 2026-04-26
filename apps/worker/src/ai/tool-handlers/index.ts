@@ -11,6 +11,7 @@ import { GetCaseMovementsHandler } from './get-case-movements';
 import { GetLeadInfoHandler } from './get-lead-info';
 import { AbrirCasoViabilidadeHandler } from './abrir-caso-viabilidade';
 import { SendPortalLinkHandler } from './send-portal-link';
+import { EnviarDocumentoProcessoHandler } from './enviar-documento-processo';
 
 /**
  * Registry central de tool handlers built-in.
@@ -30,6 +31,7 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new GetLeadInfoHandler(),
   new AbrirCasoViabilidadeHandler(),
   new SendPortalLinkHandler(),
+  new EnviarDocumentoProcessoHandler(),
 ];
 
 /**
@@ -49,6 +51,7 @@ const UNIVERSAL_TOOLS: Set<string> = new Set([
   'abrir_caso_viabilidade', // so chamada quando lead.is_client=true (handler valida)
   'book_appointment', // agenda consulta direto via IA quando cliente prefere
   'send_portal_link', // oferece self-service quando cliente quer agendar sozinho
+  'enviar_documento_processo', // envia sentenca/contrato/procuracao/decisao via WhatsApp
 ]);
 
 /**

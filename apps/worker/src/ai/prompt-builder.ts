@@ -329,6 +329,42 @@ export class PromptBuilder {
     {
       type: 'function',
       function: {
+        name: 'enviar_documento_processo',
+        description:
+          'ENVIA documento(s) do processo do cliente DIRETO pelo WhatsApp como anexo PDF. ' +
+          'Use quando: cliente pede sentenca, contrato, procuracao, decisao, copia de algum documento. ' +
+          'Frases tipo "manda a sentenca", "quero copia do contrato", "preciso da procuracao", ' +
+          '"PDF da decisao", "copia da sentenca". ' +
+          '\n\nApenas documentos das pastas publicas sao acessiveis: CLIENTE (RG/CPF), ' +
+          'CONTRATOS, DECISOES (sentenca, acordao, despachos), PROCURACOES. Documentos internos ' +
+          '(provas em analise, peticoes em rascunho) NUNCA aparecem aqui — protecao automatica. ' +
+          '\n\nSe nao houver documento que case com o pedido, a tool retorna lista do que tem ' +
+          'disponivel pra voce mostrar opcoes ao cliente. Se nao tiver nada do tipo pedido, ' +
+          'oriente que o advogado vai providenciar e voce avisa quando estiver disponivel.',
+        parameters: {
+          type: 'object',
+          properties: {
+            keyword: {
+              type: 'string',
+              description:
+                'Opcional. Filtra documentos pelo nome ou tipo. Ex: "sentenca", "contrato", ' +
+                '"procuracao", "decisao". Se omitido, lista todos os documentos publicos do ' +
+                'processo (max 5 enviados).',
+            },
+            case_number: {
+              type: 'string',
+              description:
+                'Opcional. Numero CNJ do processo, caso o lead tenha multiplos. Se omitido, ' +
+                'pega de todos os processos ativos do lead.',
+            },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'send_portal_link',
         description:
           'COMPLEMENTO ao agendamento — envia link do PORTAL DO CLIENTE pra que o ' +

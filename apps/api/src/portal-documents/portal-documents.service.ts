@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, UnauthorizedException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
+import { verifyShareToken, signShareToken } from '@crm/shared';
 
 /**
  * Documentos visiveis ao cliente no portal.
@@ -107,6 +108,69 @@ export class PortalDocumentsService {
     }
 
     this.logger.log(`[PORTAL/doc] Cliente ${leadId} baixou doc ${docId} (${doc.original_name})`);
+    const result = await this.s3.getObjectStream(doc.s3_key);
+    return {
+      ...result,
+      fileName: doc.original_name,
+      mimeType: doc.mime_type,
+    };
+  }
+
+  /**
+   * Gera URL publica temporaria pra cliente baixar documento sem login.
+   * Usado pela Sophia (IA) quando manda documento via WhatsApp — Evolution
+   * API precisa de URL publica acessivel.
+   *
+   * Token assinado com JWT_SECRET, TTL 7 dias (cliente pode demorar pra abrir).
+   */
+  buildPublicShareUrl(docId: string, leadId: string): string {
+    const secret = process.env.JWT_SECRET || '__INSECURE_DEV_FALLBACK_CHANGE_ME__';
+    const apiBase = process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '';
+    const token = signShareToken(
+      { sub: docId, lead_id: leadId, aud: 'doc-share' },
+      secret,
+      7 * 24 * 60 * 60, // 7 dias
+    );
+    return `${apiBase}/portal/documents/share/${docId}?token=${encodeURIComponent(token)}`;
+  }
+
+  /**
+   * Stream publico via token compartilhavel — sem cookie, sem auth normal.
+   * Valida assinatura HMAC + ownership (lead_id no token bate com doc).
+   *
+   * Bloqueios:
+   *   - Token invalido / expirado / mal formado → 401
+   *   - Doc nao existe → 404
+   *   - Doc nao eh do lead do token → 401 (anti-token-shuffling)
+   *   - Folder interno → 403 (defesa em profundidade)
+   *   - Caso arquivado → 404
+   */
+  async downloadByShareToken(docId: string, token: string) {
+    const secret = process.env.JWT_SECRET || '__INSECURE_DEV_FALLBACK_CHANGE_ME__';
+    const payload = verifyShareToken(token, secret);
+    if (!payload || payload.aud !== 'doc-share' || payload.sub !== docId) {
+      throw new UnauthorizedException('Link expirado ou inválido');
+    }
+
+    const doc = await this.prisma.caseDocument.findUnique({
+      where: { id: docId },
+      include: {
+        legal_case: { select: { lead_id: true, archived: true, renounced: true } },
+      },
+    });
+    if (!doc) throw new NotFoundException('Documento nao encontrado');
+    if (doc.legal_case.lead_id !== payload.lead_id) {
+      // Token foi gerado pra OUTRO lead — bloqueia
+      throw new UnauthorizedException('Link expirado ou inválido');
+    }
+    if (doc.legal_case.archived || doc.legal_case.renounced) {
+      throw new NotFoundException('Documento nao disponivel');
+    }
+    if (!PUBLIC_FOLDERS.includes(doc.folder as any)) {
+      throw new ForbiddenException('Documento nao disponivel pra cliente');
+    }
+
+    this.logger.log(`[PORTAL/doc-share] Doc ${docId} baixado via token (lead ${payload.lead_id})`);
     const result = await this.s3.getObjectStream(doc.s3_key);
     return {
       ...result,
