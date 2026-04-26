@@ -1323,252 +1323,358 @@ function AiPanel({
           </div>
         )}
 
-        {analysis && !loading && (
-          <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+        {analysis && !loading && (() => {
+          // ── Calculos de veredicto (Proposta C — redesign 2026-04-26) ─
+          const cfg = resolveEventTypeConfig(analysis);
+          const futureEvents = (caseEvents || []).filter(e => {
+            const dt = new Date(e.start_at);
+            return dt.getTime() > Date.now() - 3 * 60 * 60 * 1000;
+          });
 
-            {/* Col 1: Resumo + Urgência + Ação Necessária (esquerda) */}
-            <div className="space-y-3 order-1">
-              {analysis.model_used && (
-                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <Sparkles size={9} className="text-violet-400" />
-                  <span>Analisado por <strong className="text-foreground">{analysis.model_used}</strong></span>
-                </div>
-              )}
-              {urgConf && (
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
-                  <urgConf.icon size={14} className={urgConf.text} />
-                  <span className={`text-[11px] font-bold ${urgConf.text}`}>{urgConf.label}</span>
-                  <span className="text-[10px] text-muted-foreground ml-auto">{analysis.prazo_dias} dias úteis</span>
-                </div>
-              )}
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Resumo</p>
-                <p className="text-[12px] text-foreground leading-relaxed">{analysis.resumo}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Ação Necessária</p>
-                <div className="flex items-start gap-2 p-2.5 rounded-xl bg-accent/40 border border-border">
-                  <ArrowRight size={13} className="text-primary mt-0.5 shrink-0" />
-                  <p className="text-[12px] text-foreground font-medium">{analysis.tipo_acao}</p>
-                </div>
-              </div>
-            </div>
+          // Comparacao etapa
+          const stageMatches = !!(
+            analysis.estagio_sugerido &&
+            pub.legal_case?.tracking_stage === analysis.estagio_sugerido
+          );
+          const stageNeedsMove = !!(
+            analysis.estagio_sugerido && pub.legal_case_id && !stageMatches
+          );
 
-            {/* Col 3 (visualmente a direita): Sugestao IA da audiencia/prazo/tarefa.
-                Reordem solicitada 2026-04-26 — Contexto Atual fica na col 2 (centro)
-                ANTES da sugestao da IA, pra usuario decidir com contexto. */}
-            <div className="space-y-3 order-3">
-              {(() => {
-                const cfg = resolveEventTypeConfig(analysis);
-                const labelUpper = cfg.label.toUpperCase();
-                return (
-                  <div>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">{labelUpper}</p>
-                    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                      <p className="text-[12px] font-semibold text-foreground">{analysis.tarefa_titulo}</p>
-                      {analysis.tarefa_descricao && (
-                        <p className="text-[11px] text-muted-foreground">{analysis.tarefa_descricao}</p>
-                      )}
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Clock size={10} />
-                        {cfg.type === 'AUDIENCIA' || cfg.type === 'PRAZO'
-                          ? cfg.dueDate.toLocaleString('pt-BR', {
-                              day: '2-digit', month: '2-digit', year: 'numeric',
-                              hour: '2-digit', minute: '2-digit',
-                            })
-                          : `Prazo: ${analysis.prazo_dias} dias úteis`}
-                      </div>
-                      <button
-                        onClick={handleCreateTask}
-                        disabled={creatingTask || taskCreated}
-                        className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
-                          taskCreated
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
-                        }`}
-                      >
-                        {creatingTask ? (
-                          <><Loader2 size={11} className="animate-spin" /> Criando…</>
-                        ) : taskCreated ? (
-                          <><CheckCircle2 size={11} /> {cfg.type === 'AUDIENCIA' ? 'Audiência agendada!' : cfg.type === 'PRAZO' ? 'Prazo criado!' : 'Tarefa criada!'}</>
-                        ) : (
-                          <>
-                            {cfg.buttonIcon === 'audience' ? <Calendar size={11} /> : cfg.buttonIcon === 'deadline' ? <Clock size={11} /> : <CheckSquare size={11} />}
-                            {cfg.buttonLabel}
-                          </>
-                        )}
-                      </button>
+          // Sugestao de evento ja agendada?
+          const sugDate = analysis.data_audiencia || analysis.data_prazo;
+          const eventAlreadyScheduled = sugDate ? futureEvents.some(e => {
+            if (e.type !== cfg.type) return false;
+            const diff = Math.abs(new Date(e.start_at).getTime() - new Date(sugDate).getTime());
+            return diff < 60 * 60 * 1000; // mesma hora
+          }) : false;
+
+          const eventNeedsCreation = !eventAlreadyScheduled;
+
+          // Veredicto geral
+          let verdict: 'all-done' | 'partial' | 'all-pending';
+          if (!pub.legal_case_id) {
+            // sem processo vinculado, tudo eh acao
+            verdict = 'all-pending';
+          } else if (stageMatches && eventAlreadyScheduled) {
+            verdict = 'all-done';
+          } else if (stageNeedsMove && !eventAlreadyScheduled) {
+            verdict = 'all-pending';
+          } else {
+            verdict = 'partial';
+          }
+
+          const verdictConfig = {
+            'all-done': {
+              icon: CheckCircle2,
+              label: 'Esta publicação não exige ações novas',
+              bg: 'bg-emerald-500/10',
+              border: 'border-emerald-500/40',
+              text: 'text-emerald-400',
+            },
+            'partial': {
+              icon: AlertTriangle,
+              label: 'Esta publicação exige algumas ações',
+              bg: 'bg-amber-500/10',
+              border: 'border-amber-500/40',
+              text: 'text-amber-400',
+            },
+            'all-pending': {
+              icon: AlertCircle,
+              label: pub.legal_case_id ? 'Esta publicação exige ações' : 'Publicação não vinculada — cadastre o processo',
+              bg: 'bg-red-500/10',
+              border: 'border-red-500/40',
+              text: 'text-red-400',
+            },
+          }[verdict];
+
+          const VerdictIcon = verdictConfig.icon;
+
+          // Helpers de format
+          const formatBrPretty = (d: Date) =>
+            d.toLocaleString('pt-BR', {
+              day: '2-digit', month: '2-digit', year: 'numeric',
+              hour: '2-digit', minute: '2-digit',
+              timeZone: 'UTC',
+            });
+
+          return (
+            <div className="p-4 space-y-4 max-w-3xl mx-auto">
+
+              {/* ═══ ZONA 1 — TOPO: URGENCIA + RESUMO + AÇÃO ═══ */}
+              <section className="space-y-3">
+                {analysis.model_used && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <Sparkles size={9} className="text-violet-400" />
+                    <span>Analisado por <strong className="text-foreground">{analysis.model_used}</strong></span>
+                  </div>
+                )}
+                {urgConf && (
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${urgConf.bg} ${urgConf.border}`}>
+                    <urgConf.icon size={14} className={urgConf.text} />
+                    <span className={`text-[12px] font-bold ${urgConf.text}`}>{urgConf.label}</span>
+                    <span className="text-[10px] text-muted-foreground ml-auto">{analysis.prazo_dias} dias úteis</span>
+                  </div>
+                )}
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">📋 Resumo</p>
+                  <p className="text-[12px] text-foreground leading-relaxed">{analysis.resumo}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">→ Ação Necessária</p>
+                  <div className="flex items-start gap-2 p-2.5 rounded-xl bg-accent/40 border border-border">
+                    <ArrowRight size={13} className="text-primary mt-0.5 shrink-0" />
+                    <p className="text-[12px] text-foreground font-medium">{analysis.tipo_acao}</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* ═══ ZONA 2 — VEREDICTO + AÇÕES PRINCIPAIS ═══ */}
+              <section>
+                <div className={`rounded-2xl border-2 ${verdictConfig.border} ${verdictConfig.bg} p-4 space-y-3`}>
+                  {/* Header do veredicto */}
+                  <div className="flex items-start gap-2">
+                    <VerdictIcon size={20} className={`${verdictConfig.text} shrink-0 mt-0.5`} />
+                    <div className="flex-1">
+                      <p className={`text-[13px] font-bold ${verdictConfig.text}`}>{verdictConfig.label}</p>
                     </div>
                   </div>
-                );
-              })()}
-            </div>
 
-            {/* Col 2 (centro): Contexto Atual + Mover Processo.
-                Aparece ANTES da sugestao da IA via flex order — usuario
-                pediu pra ver estado atual primeiro, depois decidir sobre
-                a sugestao. */}
-            <div className="space-y-3 order-2">
-              {/* CONTEXTO DO PROCESSO — etapa atual + eventos ja agendados.
-                  Permite o usuario decidir se aceita sugestao da IA sem
-                  duplicar evento. Feature 2026-04-26. */}
-              {pub.legal_case && pub.legal_case_id && (
-                <div>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Contexto Atual</p>
-                  <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                    {/* Etapa atual */}
-                    <div>
-                      <p className="text-[10px] text-muted-foreground">Etapa atual do processo:</p>
-                      <p className={`text-[12px] font-bold ${pub.legal_case.tracking_stage === analysis.estagio_sugerido ? 'text-emerald-400' : 'text-foreground'}`}>
-                        {pub.legal_case.tracking_stage
-                          ? (STAGE_LABELS[pub.legal_case.tracking_stage] || pub.legal_case.tracking_stage)
-                          : '—'}
-                        {pub.legal_case.tracking_stage === analysis.estagio_sugerido && (
-                          <span className="ml-1.5 text-[9px] font-semibold text-emerald-400">✓ ja na etapa sugerida</span>
+                  {/* Lista de status — cada item da decisao IA */}
+                  {pub.legal_case_id && (
+                    <ul className="space-y-1.5 pl-7">
+                      {/* Status da etapa */}
+                      {analysis.estagio_sugerido && (
+                        <li className="flex items-start gap-2 text-[11px]">
+                          {stageMatches ? (
+                            <>
+                              <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />
+                              <span className="text-foreground">
+                                Etapa correta: <strong>{STAGE_LABELS[pub.legal_case?.tracking_stage || ''] || pub.legal_case?.tracking_stage}</strong>
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" />
+                              <span className="text-foreground">
+                                Etapa atual: <strong>{STAGE_LABELS[pub.legal_case?.tracking_stage || ''] || pub.legal_case?.tracking_stage || '—'}</strong>
+                                {' → '}
+                                IA sugere mover para <strong>{STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}</strong>
+                              </span>
+                            </>
+                          )}
+                        </li>
+                      )}
+                      {/* Status do evento */}
+                      <li className="flex items-start gap-2 text-[11px]">
+                        {eventAlreadyScheduled ? (
+                          <>
+                            <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />
+                            <span className="text-foreground">
+                              {cfg.type === 'AUDIENCIA' ? 'Audiência' : cfg.type === 'PRAZO' ? 'Prazo' : 'Tarefa'} já agendada para{' '}
+                              <strong>{formatBrPretty(cfg.dueDate)}</strong>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" />
+                            <span className="text-foreground">
+                              IA sugere agendar <strong>{cfg.type === 'AUDIENCIA' ? 'audiência' : cfg.type === 'PRAZO' ? 'prazo' : 'tarefa'}</strong> para{' '}
+                              <strong>{formatBrPretty(cfg.dueDate)}</strong>
+                            </span>
+                          </>
                         )}
-                      </p>
-                    </div>
+                      </li>
+                    </ul>
+                  )}
 
-                    {/* Eventos agendados — futuros */}
-                    <div className="pt-2 border-t border-border/40">
-                      <p className="text-[10px] text-muted-foreground mb-1">
-                        Eventos já agendados ({caseEvents?.filter(e => new Date(e.start_at) > new Date()).length ?? 0}):
+                  {/* Botões — só aparecem ações necessárias ou disponíveis */}
+                  <div className="pt-2 border-t border-border/40 space-y-2">
+                    {/* Caso tudo OK: mostrar ações como "opcional" em texto neutro */}
+                    {verdict === 'all-done' && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Caso queira mesmo assim — ações disponíveis:
                       </p>
-                      {caseEvents === null ? (
-                        <p className="text-[10px] text-muted-foreground italic">Carregando…</p>
-                      ) : caseEvents.filter(e => new Date(e.start_at) > new Date()).length === 0 ? (
-                        <p className="text-[10px] text-muted-foreground italic">Nenhum evento futuro neste processo.</p>
-                      ) : (
-                        <ul className="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
-                          {caseEvents
-                            // Filtro "futuro" tambem em UTC pra bater com a convencao do banco
-                            // (start_at salvo como UTC naive BRT). Senao mostraria menos eventos.
-                            .filter(e => {
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      {/* Botão de criar evento */}
+                      {!eventAlreadyScheduled && pub.legal_case_id && (
+                        <button
+                          onClick={handleCreateTask}
+                          disabled={creatingTask || taskCreated}
+                          className={`flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
+                            taskCreated
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+                          }`}
+                        >
+                          {creatingTask ? (
+                            <><Loader2 size={11} className="animate-spin" /> Criando…</>
+                          ) : taskCreated ? (
+                            <><CheckCircle2 size={11} /> {cfg.type === 'AUDIENCIA' ? 'Audiência agendada!' : cfg.type === 'PRAZO' ? 'Prazo criado!' : 'Tarefa criada!'}</>
+                          ) : (
+                            <>
+                              {cfg.buttonIcon === 'audience' ? <Calendar size={12} /> : cfg.buttonIcon === 'deadline' ? <Clock size={12} /> : <CheckSquare size={12} />}
+                              {cfg.buttonLabel}
+                            </>
+                          )}
+                        </button>
+                      )}
+                      {/* Botão de mover etapa */}
+                      {stageNeedsMove && (
+                        <button
+                          onClick={handleMoveStage}
+                          disabled={movingStage || stageMoved}
+                          className={`flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
+                            stageMoved
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-card border-2 border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
+                          }`}
+                        >
+                          {movingStage ? (
+                            <><Loader2 size={11} className="animate-spin" /> Movendo…</>
+                          ) : stageMoved ? (
+                            <><CheckCircle2 size={11} /> Processo movido!</>
+                          ) : (
+                            <><ArrowRight size={12} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido!]}</>
+                          )}
+                        </button>
+                      )}
+                      {/* Caso tudo OK: ações opcionais (criar mesmo assim, recriar) */}
+                      {verdict === 'all-done' && eventAlreadyScheduled && (
+                        <button
+                          onClick={handleCreateTask}
+                          disabled={creatingTask || taskCreated}
+                          className="flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-semibold py-2 px-3 rounded-lg bg-card border border-border text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+                          title="Criar evento adicional mesmo havendo um similar"
+                        >
+                          {cfg.buttonIcon === 'audience' ? <Calendar size={11} /> : cfg.buttonIcon === 'deadline' ? <Clock size={11} /> : <CheckSquare size={11} />}
+                          {cfg.buttonLabel} ainda assim
+                        </button>
+                      )}
+                      {/* Sem processo vinculado: botão de criar */}
+                      {!pub.legal_case_id && analysis.estagio_sugerido && (
+                        <button
+                          onClick={() => onCreateProcess(pub.id, analysis)}
+                          className="flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                        >
+                          <Plus size={12} /> Cadastrar processo na etapa <strong>{STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}</strong>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* ═══ ZONA 3 — DETALHES (2 cols: Estado x Sugestão IA) ═══ */}
+              {pub.legal_case_id && (
+                <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Esquerda: Eventos no processo */}
+                  <div>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">⚖️ Eventos no Processo</p>
+                    <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+                      <p className="text-[10px] text-muted-foreground">
+                        Etapa: <strong className="text-foreground">{STAGE_LABELS[pub.legal_case?.tracking_stage || ''] || pub.legal_case?.tracking_stage || '—'}</strong>
+                        {stageMatches && <span className="ml-1.5 text-[9px] font-bold text-emerald-400">✓ correto</span>}
+                      </p>
+                      <div className="pt-2 border-t border-border/40">
+                        <p className="text-[10px] text-muted-foreground mb-1.5">
+                          {futureEvents.length} evento{futureEvents.length !== 1 ? 's' : ''} pendente{futureEvents.length !== 1 ? 's' : ''}
+                        </p>
+                        {caseEvents === null ? (
+                          <p className="text-[10px] text-muted-foreground italic">Carregando…</p>
+                        ) : futureEvents.length === 0 ? (
+                          <p className="text-[10px] text-muted-foreground italic">Nenhum evento futuro.</p>
+                        ) : (
+                          <ul className="space-y-1.5 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                            {futureEvents.slice(0, 8).map(e => {
                               const dt = new Date(e.start_at);
-                              // Compara wallclock BRT real (Date.now() em UTC + 3h offset)
-                              return dt.getTime() > Date.now() - 3 * 60 * 60 * 1000;
-                            })
-                            .slice(0, 8)
-                            .map(e => {
-                              const dt = new Date(e.start_at);
-                              // timeZone: 'UTC' faz toLocaleString NAO converter pra fuso local.
-                              // O banco guarda start_at como UTC naive BRT — converter aqui faria
-                              // mostrar 3h a menos. Bug reportado 2026-04-26.
-                              const dateStr = dt.toLocaleString('pt-BR', {
-                                day: '2-digit', month: '2-digit', year: 'numeric',
-                                hour: '2-digit', minute: '2-digit',
-                                timeZone: 'UTC',
-                              });
+                              const dateStr = formatBrPretty(dt);
                               const isAud = e.type === 'AUDIENCIA';
                               const isPer = e.type === 'PERICIA';
                               const isPrazo = e.type === 'PRAZO';
                               const emoji = isAud ? '⚖️' : isPer ? '🔬' : isPrazo ? '⏰' : '✅';
-                              // Cores com contraste maior — text-XXX-200/100 + bg mais saturado
-                              // (text-XXX-400 no fundo XXX/10 ficava ilegivel — bug 2026-04-26).
-                              const colorBg = isAud ? 'bg-amber-500/20 border-amber-500/50 text-amber-100'
-                                : isPer ? 'bg-violet-500/20 border-violet-500/50 text-violet-100'
-                                : isPrazo ? 'bg-red-500/20 border-red-500/50 text-red-100'
-                                : 'bg-blue-500/20 border-blue-500/50 text-blue-100';
-                              // Detecta se ja existe evento da mesma natureza/data sugerida pela IA
-                              const isAlreadyScheduled =
-                                analysis.event_type === e.type &&
-                                analysis.data_audiencia &&
-                                e.type === 'AUDIENCIA' &&
-                                Math.abs(dt.getTime() - new Date(analysis.data_audiencia).getTime()) < 60 * 60 * 1000;
+                              const colorBg = isAud ? 'bg-amber-500/20 border-amber-500/50'
+                                : isPer ? 'bg-violet-500/20 border-violet-500/50'
+                                : isPrazo ? 'bg-red-500/20 border-red-500/50'
+                                : 'bg-blue-500/20 border-blue-500/50';
+                              const isMatch = sugDate &&
+                                e.type === cfg.type &&
+                                Math.abs(dt.getTime() - new Date(sugDate).getTime()) < 60 * 60 * 1000;
                               return (
                                 <li key={e.id} title={e.title} className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px] ${colorBg}`}>
                                   <span className="shrink-0 text-[13px] leading-none mt-0.5">{emoji}</span>
                                   <div className="flex-1 min-w-0">
-                                    {/* line-clamp-2 permite ver titulos longos em 2 linhas
-                                        ao inves de truncate que cortava em "...". */}
                                     <p className="font-semibold text-foreground leading-snug line-clamp-2">{e.title}</p>
-                                    <p className="text-[10px] opacity-90 mt-0.5">{dateStr}</p>
-                                    {isAlreadyScheduled && (
-                                      <p className="mt-0.5 text-[9px] font-bold text-emerald-300">⚠ ja agendado conforme sugestao IA</p>
+                                    <p className="text-[10px] text-foreground/80 mt-0.5">{dateStr}</p>
+                                    {isMatch && (
+                                      <p className="mt-0.5 text-[9px] font-bold text-emerald-300">
+                                        ✓ corresponde à sugestão da IA
+                                      </p>
                                     )}
                                   </div>
                                 </li>
                               );
                             })}
-                        </ul>
-                      )}
+                          </ul>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
 
-              {analysis.estagio_sugerido && pub.legal_case_id && (
-                <div>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Mover Processo</p>
-                  <div className="rounded-xl border border-border bg-card p-3 space-y-2">
-                    <p className="text-[11px] text-muted-foreground">Mover para o estágio:</p>
-                    <p className="text-[13px] font-bold text-foreground">
-                      {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
-                    </p>
-                    {pub.legal_case && (
-                      <p className="text-[10px] text-muted-foreground">
-                        Processo: {pub.legal_case.lead?.name || pub.legal_case.case_number}
-                      </p>
-                    )}
-                    {pub.legal_case?.tracking_stage === analysis.estagio_sugerido ? (
-                      <div className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <CheckCircle2 size={11} /> Já está nesta etapa
+                  {/* Direita: Sugestão detalhada */}
+                  <div>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">💡 Sugestão Detalhada</p>
+                    <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3 space-y-2">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Tipo:</p>
+                        <p className="text-[12px] font-bold text-foreground">
+                          {cfg.type === 'AUDIENCIA' ? '⚖️ Audiência' : cfg.type === 'PRAZO' ? '⏰ Prazo' : '✅ Tarefa'}
+                        </p>
                       </div>
-                    ) : (
-                      <button
-                        onClick={handleMoveStage}
-                        disabled={movingStage || stageMoved}
-                        className={`w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
-                          stageMoved
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-card border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50'
-                        }`}
-                      >
-                        {movingStage ? (
-                          <><Loader2 size={11} className="animate-spin" /> Movendo…</>
-                        ) : stageMoved ? (
-                          <><CheckCircle2 size={11} /> Processo movido!</>
-                        ) : (
-                          <><ArrowRight size={11} /> Mover para {STAGE_LABELS[analysis.estagio_sugerido]}</>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Data:</p>
+                        <p className="text-[12px] font-bold text-foreground">
+                          {cfg.type === 'AUDIENCIA' || cfg.type === 'PRAZO'
+                            ? formatBrPretty(cfg.dueDate)
+                            : `${analysis.prazo_dias} dias úteis`}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Ação proposta:</p>
+                        <p className="text-[11px] text-foreground">{analysis.tarefa_titulo}</p>
+                        {analysis.tarefa_descricao && (
+                          <p className="text-[10px] text-muted-foreground mt-1">{analysis.tarefa_descricao}</p>
                         )}
-                      </button>
-                    )}
+                      </div>
+                      <div className="pt-1 border-t border-border/40">
+                        {eventAlreadyScheduled ? (
+                          <p className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Já existe evento idêntico
+                          </p>
+                        ) : (
+                          <p className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
+                            <AlertTriangle size={10} /> Ação nova — não há evento equivalente
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </section>
               )}
 
-              {analysis.estagio_sugerido && !pub.legal_case_id && (
-                <div>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Cadastrar Processo</p>
-                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
-                    <p className="text-[11px] text-muted-foreground">
-                      Publicação não vinculada. Sugerido cadastrar no estágio:
-                    </p>
-                    <p className="text-[12px] font-bold text-amber-400">
-                      {STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}
-                    </p>
-                    <button
-                      onClick={() => onCreateProcess(pub.id, analysis)}
-                      className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/15 transition-colors"
-                    >
-                      <Plus size={11} /> Criar Processo
-                    </button>
-                  </div>
-                </div>
-              )}
-
+              {/* ═══ ZONA 4 — RODAPÉ: ORIENTAÇÕES ═══ */}
               {analysis.orientacoes && (
-                <div>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">Orientações</p>
+                <section>
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">📝 Orientações para Preparação</p>
                   <div className="rounded-xl border border-border bg-accent/20 p-3">
-                    <p className="text-[11px] text-foreground/80 leading-relaxed">{analysis.orientacoes}</p>
+                    <p className="text-[11px] text-foreground/90 leading-relaxed whitespace-pre-line">{analysis.orientacoes}</p>
                   </div>
-                </div>
+                </section>
               )}
             </div>
-
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
