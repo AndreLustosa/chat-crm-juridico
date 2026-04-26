@@ -1047,12 +1047,25 @@ CAMPOS DE EXTRAÇÃO (null se não encontrado):
 - juizo: string | null
 - area_juridica: string | null
 - valor_causa: string | null (formato "R$ X.XXX,XX")
-- data_audiencia: string | null (ISO "YYYY-MM-DDTHH:MM:00". Se perícia INSS sem data, retorne null.)
-- data_prazo: string | null (ISO "YYYY-MM-DDTHH:MM:00")
+- data_audiencia: string | null (ISO "YYYY-MM-DDTHH:MM:00", horário de Brasília — sem timezone, sem "Z")
+- data_prazo: string | null (ISO "YYYY-MM-DDTHH:MM:00", horário de Brasília — sem timezone, sem "Z")
+
+REGRAS RIGOROSAS DE EXTRAÇÃO DE DATA/HORA:
+1. SEMPRE retornar no formato exato: "YYYY-MM-DDTHH:MM:00" (ex: "2026-05-21T08:30:00").
+2. NUNCA inventar hora. Se a publicação não diz a hora explicitamente, retorne null para data_audiencia/data_prazo.
+3. NUNCA aplicar offset de timezone. A hora vai exatamente como aparece na publicação, considerando que é horário de Brasília.
+   - "às 8 horas e 30 minutos" → "T08:30:00"
+   - "às 14h" → "T14:00:00"
+   - "às 9 horas" → "T09:00:00"
+4. NUNCA confundir data passada com data futura. Se a publicação diz "designada audiência em 21/05/2024" e a data atual é 2026, isso é INFORMATIVO — retorne null se não há nova data marcada.
+5. data_audiencia SÓ deve ser preenchida se houver audiência FUTURA explicitamente marcada com data E hora.
+6. data_prazo SÓ deve ser preenchida se houver data limite explicitamente mencionada (ex: "até o dia X"). Se o prazo é "X dias úteis", deixe data_prazo null e use prazo_dias.
+7. Se event_type = AUDIENCIA, data_audiencia DEVE estar preenchida.
+8. Se event_type = PRAZO, data_prazo DEVE estar preenchida (ou prazo_dias se for prazo relativo).
 
 Critérios de urgência: URGENTE = citação/intimação com prazo ≤15 dias, sentença, audiência marcada, perícia designada. NORMAL = contestação, manifestação, despacho. BAIXA = distribuição, informativo, arquivamento.
 Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, perícia→PERICIA_AGENDADA, audiência→INSTRUCAO, sentença→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento→ENCERRADO.
-Critérios de event_type: AUDIENCIA = data/hora explícita para audiência. PRAZO = data explícita de prazo. TAREFA = demais casos.`;
+Critérios de event_type: AUDIENCIA = data/hora explícita futura para audiência. PRAZO = data explícita futura de prazo. TAREFA = demais casos (incluindo prazos relativos em dias úteis).`;
 
     // Usa prompt customizado do banco (se existir) ou o prompt padrão
     const customPrompt = await this.settings.getDjenPrompt();
@@ -1112,6 +1125,45 @@ ${pub.conteudo.slice(0, 6000)}`;
     let parsed: any = {};
     try { parsed = JSON.parse(raw); } catch { parsed = {}; }
 
+    // ─── Validacao de data ISO da IA ─────────────────────────────────────────
+    //
+    // A IA recebe instrucao pra retornar "YYYY-MM-DDTHH:MM:00" mas pode falhar
+    // ou inventar formato. Sanitiza:
+    //  - aceita "YYYY-MM-DDTHH:MM:00" (formato pedido)
+    //  - aceita "YYYY-MM-DDTHH:MM:00Z" / com offset (toleravel)
+    //  - aceita "YYYY-MM-DD" (so dia, vira meia-noite — bom pra prazos sem hora)
+    //  - rejeita lixo, datas invalidas, datas no passado distante
+    //  - se rejeitar, loga warning e zera o campo (operador re-roda analise se quiser)
+    //
+    // Convencao: data eh BRT naive. Se IA retorna sem TZ, eh BRT.
+    const sanitizeIaDate = (raw: any, label: string): string | null => {
+      if (!raw || typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      // Aceita formato dia-only ou ISO completo
+      const isoPattern = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:?\d{2})?)?$/;
+      if (!isoPattern.test(trimmed)) {
+        this.logger.warn(`[DJEN/IA] ${label} formato invalido: "${trimmed}" (esperava YYYY-MM-DDTHH:MM:00)`);
+        return null;
+      }
+      // Valida que eh uma data real (rejeita 31/02 etc) — interpreta como naive UTC
+      // pra checar so a data, sem fuso. Se trimmed nao tem hora, soma midnight.
+      const withTime = trimmed.includes('T') ? trimmed : `${trimmed}T00:00:00`;
+      const withZ = /Z$|[+-]\d{2}:?\d{2}$/.test(withTime) ? withTime : `${withTime}Z`;
+      const dt = new Date(withZ);
+      if (isNaN(dt.getTime())) {
+        this.logger.warn(`[DJEN/IA] ${label} data invalida: "${trimmed}"`);
+        return null;
+      }
+      // Rejeita data > 2 anos no passado (IA confundiu data antiga com nova)
+      const twoYearsAgo = Date.now() - 2 * 365 * 24 * 60 * 60 * 1000;
+      if (dt.getTime() < twoYearsAgo) {
+        this.logger.warn(`[DJEN/IA] ${label} muito antiga: "${trimmed}" — provavel hallucinacao`);
+        return null;
+      }
+      return trimmed;
+    };
+
     // ─── Separar campos LAWYER (estratégicos/internos) e CLIENT (público) ─────
     const lawyerFields = {
       resumo: parsed.resumo || 'Não foi possível gerar o resumo.',
@@ -1129,9 +1181,20 @@ ${pub.conteudo.slice(0, 6000)}`;
       juizo: parsed.juizo || null,
       area_juridica: parsed.area_juridica || null,
       valor_causa: parsed.valor_causa || null,
-      data_audiencia: parsed.data_audiencia || null,
-      data_prazo: parsed.data_prazo || null,
+      data_audiencia: sanitizeIaDate(parsed.data_audiencia, 'data_audiencia'),
+      data_prazo: sanitizeIaDate(parsed.data_prazo, 'data_prazo'),
     };
+
+    // Coerencia entre event_type e data extraida — se IA disse AUDIENCIA mas
+    // nao extraiu data_audiencia, rebaixa pra TAREFA (seguindo regra do prompt).
+    if (lawyerFields.event_type === 'AUDIENCIA' && !lawyerFields.data_audiencia) {
+      this.logger.warn(`[DJEN/IA] event_type=AUDIENCIA sem data_audiencia — rebaixando pra TAREFA. pubId=${id}`);
+      lawyerFields.event_type = 'TAREFA';
+    }
+    if (lawyerFields.event_type === 'PRAZO' && !lawyerFields.data_prazo) {
+      this.logger.warn(`[DJEN/IA] event_type=PRAZO sem data_prazo — rebaixando pra TAREFA. pubId=${id}`);
+      lawyerFields.event_type = 'TAREFA';
+    }
 
     const clientFields = {
       resumo_cliente: parsed.resumo_cliente || null,

@@ -1269,10 +1269,25 @@ function AiPanel({
       // Bug corrigido 2026-04-24: antes criava sempre TAREFA hardcoded.
       const cfg = resolveEventTypeConfig(analysis);
       const durationMs = cfg.type === 'AUDIENCIA' ? 60 * 60_000 : 30 * 60_000;
+
+      // Descricao enriquecida com contexto do processo — ajuda o advogado a
+      // saber rapido de qual processo eh sem precisar abrir o evento.
+      const descLines = [analysis.tarefa_descricao];
+      const ctxLines: string[] = [];
+      if (pub.numero_processo) ctxLines.push(`Processo: ${pub.numero_processo}`);
+      if (analysis.juizo) ctxLines.push(`Juízo: ${analysis.juizo}`);
+      if (analysis.parte_autora || analysis.parte_rea) {
+        ctxLines.push(`Partes: ${analysis.parte_autora || '—'} × ${analysis.parte_rea || '—'}`);
+      }
+      if (ctxLines.length) {
+        descLines.push('', '— Contexto —', ...ctxLines);
+      }
+
       await api.post('/calendar/events', {
         type: cfg.type,
         title: `[DJEN] ${analysis.tarefa_titulo}`,
-        description: analysis.tarefa_descricao,
+        description: descLines.filter(Boolean).join('\n'),
+        location: analysis.juizo || undefined,
         start_at: cfg.dueDate.toISOString(),
         end_at: new Date(cfg.dueDate.getTime() + durationMs).toISOString(),
         legal_case_id: pub.legal_case_id || undefined,
@@ -1370,8 +1385,6 @@ function AiPanel({
             const diff = Math.abs(new Date(e.start_at).getTime() - parseNaiveBrIso(sugDate).getTime());
             return diff < 2 * 60 * 60 * 1000; // dentro de 2h conta como mesmo evento
           }) : false;
-
-          const eventNeedsCreation = !eventAlreadyScheduled;
 
           // Veredicto geral
           let verdict: 'all-done' | 'partial' | 'all-pending';
