@@ -52,6 +52,9 @@ import { MemoriesModule } from './memories/memories.module';
 import { LockModule } from './common/locks/lock.module';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { PortalProcessesModule } from './portal-processes/portal-processes.module';
+import { PortalDocumentsModule } from './portal-documents/portal-documents.module';
+import { PortalPaymentsModule } from './portal-payments/portal-payments.module';
+import { PortalContractsModule } from './portal-contracts/portal-contracts.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -128,6 +131,9 @@ import { RolesGuard } from './auth/guards/roles.guard';
     MemoriesModule,
     PortalAuthModule,
     PortalProcessesModule,
+    PortalDocumentsModule,
+    PortalPaymentsModule,
+    PortalContractsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

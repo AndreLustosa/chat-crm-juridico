@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageCircle, Phone, Loader2, Lock, ArrowRight, ArrowLeft, LogOut, CheckCircle2, Scale, FileText, CreditCard, Calendar } from 'lucide-react';
+import { MessageCircle, Phone, Loader2, Lock, ArrowRight, ArrowLeft, LogOut, CheckCircle2, Scale, FileText, CreditCard, Calendar, FileSignature } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 const WHATSAPP_FALLBACK = 'https://wa.me/5582996390799';
@@ -348,13 +348,19 @@ export default function PortalPage() {
                 title="Documentos"
                 description="Procurações, contratos e laudos"
                 icon={FileText}
-                soon
+                onClick={() => router.push('/portal/documentos')}
               />
               <FeatureCard
                 title="Pagamentos"
                 description="Honorários e boletos do seu caso"
                 icon={CreditCard}
-                soon
+                onClick={() => router.push('/portal/pagamentos')}
+              />
+              <FeatureCard
+                title="Contratos"
+                description="Contratos pra assinar digitalmente"
+                icon={FileSignature}
+                onClick={() => router.push('/portal/contratos')}
               />
               <FeatureCard
                 title="Agendamentos"
