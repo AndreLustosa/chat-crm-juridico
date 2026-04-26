@@ -363,10 +363,10 @@ export default function PortalPage() {
                 onClick={() => router.push('/portal/contratos')}
               />
               <FeatureCard
-                title="Agendamentos"
-                description="Marque consulta com seu advogado"
+                title="Agendar consulta"
+                description="Marque um horário com seu advogado"
                 icon={Calendar}
-                soon
+                onClick={() => router.push('/portal/agendar')}
               />
             </div>
 

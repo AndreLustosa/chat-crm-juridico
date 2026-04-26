@@ -280,6 +280,71 @@ export class PromptBuilder {
         },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'book_appointment',
+        description:
+          'AGENDAR CONSULTA com o advogado responsavel. Use quando o cliente quer ' +
+          'falar diretamente com o advogado humano (frases tipo "quero falar com o advogado", ' +
+          '"preciso conversar pessoalmente", "marca um horario", "humano por favor"). ' +
+          'NAO USE pra duvidas que voce mesmo pode responder consultando processo/movimentacao. ' +
+          'Antes de chamar, sempre pergunte qual data/hora prefere o cliente. ' +
+          'Cria CalendarEvent type=CONSULTA, notifica advogado e cliente, agenda lembretes. ' +
+          'Importante: aceitar slots em horario comercial (seg-sex 8h-18h).',
+        parameters: {
+          type: 'object',
+          properties: {
+            date: {
+              type: 'string',
+              description: 'Data no formato YYYY-MM-DD (ex: 2026-04-30)',
+            },
+            time: {
+              type: 'string',
+              description: 'Hora no formato HH:MM 24h (ex: "14:00")',
+            },
+            title: {
+              type: 'string',
+              description: 'Opcional. Titulo da consulta. Default: "Consulta — {nome do cliente}"',
+            },
+            description: {
+              type: 'string',
+              description: 'Opcional. Motivo/contexto resumido pra advogado se preparar.',
+            },
+            duration_minutes: {
+              type: 'number',
+              description: 'Opcional. Duracao em minutos. Default: 60.',
+            },
+          },
+          required: ['date', 'time'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'send_portal_link',
+        description:
+          'COMPLEMENTO ao agendamento — envia link do PORTAL DO CLIENTE pra que o ' +
+          'cliente possa acessar self-service. Use quando: ' +
+          '(a) cliente prefere escolher horario sozinho ao inves de voce agendar; ' +
+          '(b) cliente quer ver documentos/pagamentos/contratos/processo; ' +
+          '(c) cliente insiste em informacao detalhada que esta melhor no portal. ' +
+          'IMPORTANTE: ofereca SEMPRE como ALTERNATIVA quando cliente quer falar com advogado: ' +
+          '"posso agendar agora ou voce pode escolher horario pelo portal: [link]". ' +
+          'Diferente de escalate_to_human (que desliga a IA), aqui voce continua atendendo.',
+        parameters: {
+          type: 'object',
+          properties: {
+            reason: {
+              type: 'string',
+              description: 'Opcional. Razao breve do envio do link (debug).',
+            },
+          },
+          required: [],
+        },
+      },
+    },
   ];
 
   /**

@@ -10,6 +10,7 @@ import { SearchMemoryHandler } from './search-memory';
 import { GetCaseMovementsHandler } from './get-case-movements';
 import { GetLeadInfoHandler } from './get-lead-info';
 import { AbrirCasoViabilidadeHandler } from './abrir-caso-viabilidade';
+import { SendPortalLinkHandler } from './send-portal-link';
 
 /**
  * Registry central de tool handlers built-in.
@@ -28,6 +29,7 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new GetCaseMovementsHandler(),
   new GetLeadInfoHandler(),
   new AbrirCasoViabilidadeHandler(),
+  new SendPortalLinkHandler(),
 ];
 
 /**
@@ -45,6 +47,8 @@ const UNIVERSAL_TOOLS: Set<string> = new Set([
   'get_lead_info',
   'search_memory', // ja existia, elevado a universal
   'abrir_caso_viabilidade', // so chamada quando lead.is_client=true (handler valida)
+  'book_appointment', // agenda consulta direto via IA quando cliente prefere
+  'send_portal_link', // oferece self-service quando cliente quer agendar sozinho
 ]);
 
 /**
