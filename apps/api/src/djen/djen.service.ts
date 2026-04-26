@@ -183,8 +183,23 @@ export class DjenService {
     @Inject(forwardRef(() => WhatsappService)) private readonly whatsappService: WhatsappService,
   ) {}
 
-  /** Cron diário às 8h — sincroniza publicações de ontem e hoje */
-  @Cron('0 8 * * *')
+  /**
+   * Cron diário às 08h e 17h BRT — sincroniza publicações de ontem e hoje.
+   *
+   * 08h: pega tudo do dia anterior (ja completo) + publicacoes que entraram
+   *      ate o final da noite anterior do dia atual.
+   * 17h: pega publicacoes que entraram durante o dia (TJAL/TRT geralmente
+   *      publicam entre 08h e 18h). Sem isso, publicacoes de hoje so chegariam
+   *      no sync da manha seguinte — atrasando 12h+ a notificacao ao advogado.
+   *
+   * timeZone: 'America/Maceio' fixa o horario independente do TZ do container,
+   * defesa caso alguem reconfigure o docker no futuro (validado em prod 2026-04-26
+   * que TZ do container = America/Sao_Paulo, igual a Maceio em offset).
+   *
+   * Idempotencia: syncForDate usa upsert por id_comunicacao, entao re-rodar
+   * pra mesma data nao duplica.
+   */
+  @Cron('0 8,17 * * *', { timeZone: 'America/Maceio' })
   async syncDaily() {
     const today = new Date();
     const yesterday = subtractDays(today, 1);
