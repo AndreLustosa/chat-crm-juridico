@@ -7,7 +7,7 @@ import {
   Bell, RefreshCw, Archive, ArchiveRestore, CheckCheck, ExternalLink,
   ChevronRight, Loader2, Plus, Link2, CheckCircle2, Eye,
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
-  ArrowRight, CheckSquare, AlertCircle, ChevronDown,
+  ArrowRight, CheckSquare, AlertCircle, ChevronDown, Microscope,
   Search, User, UserCheck, Scale, Ban, Users, Trash2, Save,
 } from 'lucide-react';
 import api from '@/lib/api';
@@ -53,8 +53,9 @@ interface AiAnalysis {
   orientacoes: string;
   model_used?: string;
   // event_type — usado pra decidir se o "evento sugerido" eh AUDIENCIA,
-  // PRAZO ou TAREFA. Adicionado 2026-04-24 (fix de classificacao no UI).
-  event_type?: 'AUDIENCIA' | 'PRAZO' | 'TAREFA';
+  // PRAZO, PERICIA ou TAREFA. Adicionado 2026-04-24 (fix de classificacao no UI).
+  // PERICIA adicionada 2026-04-26 — regra: processo vinculado nunca eh TAREFA.
+  event_type?: 'AUDIENCIA' | 'PRAZO' | 'PERICIA' | 'TAREFA';
   // Dados extraídos da publicação
   parte_autora?: string | null;
   parte_rea?: string | null;
@@ -156,10 +157,10 @@ function parseNaiveBrIso(s: string): Date {
 // Para PRAZO: usa data_prazo (ISO).
 // Para TAREFA: calcula due_date a partir de prazo_dias uteis.
 function resolveEventTypeConfig(analysis: AiAnalysis): {
-  type: 'TAREFA' | 'AUDIENCIA' | 'PRAZO';
-  label: string;        // "Tarefa sugerida" / "Audiência sugerida" / "Prazo sugerido"
-  buttonLabel: string;  // "Criar tarefa" / "Agendar audiência" / "Criar prazo"
-  buttonIcon: 'task' | 'audience' | 'deadline';
+  type: 'TAREFA' | 'AUDIENCIA' | 'PRAZO' | 'PERICIA';
+  label: string;        // "Tarefa sugerida" / "Audiência sugerida" / "Prazo sugerido" / "Perícia sugerida"
+  buttonLabel: string;  // "Criar tarefa" / "Agendar audiência" / "Criar prazo" / "Agendar perícia"
+  buttonIcon: 'task' | 'audience' | 'deadline' | 'pericia';
   dueDate: Date;
 } {
   const eventType = analysis.event_type || 'TAREFA';
@@ -199,13 +200,27 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
       dueDate: parseNaiveBrIso(analysis.data_audiencia),
     };
   }
-  if (eventType === 'PRAZO' && analysis.data_prazo) {
+  if (eventType === 'PERICIA' && analysis.data_audiencia) {
+    // Pericia reutiliza data_audiencia (campo compartilhado para eventos com
+    // data/hora explicita). Distincao audiencia/pericia eh via event_type.
+    return {
+      type: 'PERICIA',
+      label: 'Perícia sugerida',
+      buttonLabel: 'Agendar perícia',
+      buttonIcon: 'pericia',
+      dueDate: parseNaiveBrIso(analysis.data_audiencia),
+    };
+  }
+  if (eventType === 'PRAZO') {
+    // PRAZO: se IA extraiu data_prazo, usa ela. Se nao, usa fallbackDue
+    // (prazo_dias uteis). Diferente do TAREFA: prazo nao pode rebaixar pra
+    // "criar tarefa" — regra: processo vinculado nao gera tarefa.
     return {
       type: 'PRAZO',
       label: 'Prazo sugerido',
       buttonLabel: 'Criar prazo',
       buttonIcon: 'deadline',
-      dueDate: parseNaiveBrIso(analysis.data_prazo),
+      dueDate: analysis.data_prazo ? parseNaiveBrIso(analysis.data_prazo) : fallbackDue,
     };
   }
   // Fallback: TAREFA (ou AUDIENCIA/PRAZO sem data extraida — vira tarefa
@@ -218,6 +233,24 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
     dueDate: fallbackDue,
   };
 }
+
+// ─── Labels do event_type pra exibicao no UI ─────────────────────────────────
+//
+// Cada tipo tem 4 variantes pra cobrir contextos diferentes do display.
+// Antes os ternarios ficavam espalhados em 7 lugares. Aqui centraliza pra
+// nao esquecer de cobrir PERICIA quando adicionar novo lugar.
+const EVENT_TYPE_LABELS: Record<'AUDIENCIA' | 'PRAZO' | 'PERICIA' | 'TAREFA', {
+  noun: string;       // "Audiência", "Prazo", "Perícia", "Tarefa"
+  nounLow: string;    // "audiência", "prazo", "perícia", "tarefa"
+  done: string;       // "Audiência agendada!", "Prazo criado!", "Perícia agendada!", "Tarefa criada!"
+  emoji: string;      // "⚖️", "⏰", "🔬", "✅"
+  hasExplicitDate: boolean;  // true para AUDIENCIA/PRAZO/PERICIA — mostra cfg.dueDate; false para TAREFA — mostra prazo_dias
+}> = {
+  AUDIENCIA: { noun: 'Audiência', nounLow: 'audiência', done: 'Audiência agendada!', emoji: '⚖️', hasExplicitDate: true },
+  PRAZO:     { noun: 'Prazo',     nounLow: 'prazo',     done: 'Prazo criado!',       emoji: '⏰', hasExplicitDate: true },
+  PERICIA:   { noun: 'Perícia',   nounLow: 'perícia',   done: 'Perícia agendada!',   emoji: '🔬', hasExplicitDate: true },
+  TAREFA:    { noun: 'Tarefa',    nounLow: 'tarefa',    done: 'Tarefa criada!',      emoji: '✅', hasExplicitDate: false },
+};
 
 // ─── TaskSuggestion (sub-componente usado dentro do modal) ────
 
@@ -235,7 +268,8 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
     try {
       const cfg = resolveEventTypeConfig(analysis);
       // Audiencia tipicamente dura 1h; prazo eh marco no dia (30min); tarefa 30min.
-      const durationMs = cfg.type === 'AUDIENCIA' ? 60 * 60_000 : 30 * 60_000;
+      // Audiencia/pericia tipicamente duram 1h; prazo eh marco no dia (30min); tarefa 30min.
+      const durationMs = (cfg.type === 'AUDIENCIA' || cfg.type === 'PERICIA') ? 60 * 60_000 : 30 * 60_000;
       await api.post('/calendar/events', {
         type: cfg.type,
         title: `[DJEN] ${analysis.tarefa_titulo}`,
@@ -258,7 +292,7 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-            {cfg.buttonIcon === 'audience' ? <Calendar size={9} /> : cfg.buttonIcon === 'deadline' ? <Clock size={9} /> : <CheckSquare size={9} />}
+            {cfg.buttonIcon === 'audience' ? <Calendar size={9} /> : cfg.buttonIcon === 'deadline' ? <Clock size={9} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={9} /> : <CheckSquare size={9} />}
             {cfg.label} pela IA
           </p>
           <p className="text-[12px] font-semibold text-foreground truncate">{analysis.tarefa_titulo}</p>
@@ -267,8 +301,8 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
           )}
           <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
             <Clock size={9} />
-            {cfg.type === 'AUDIENCIA' || cfg.type === 'PRAZO'
-              ? cfg.dueDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            {EVENT_TYPE_LABELS[cfg.type].hasExplicitDate
+              ? cfg.dueDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
               : `Prazo: ${analysis.prazo_dias} dias úteis`}
           </p>
         </div>
@@ -277,7 +311,7 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
       {done ? (
         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
           <CheckCircle2 size={11} />
-          {cfg.type === 'AUDIENCIA' ? 'Audiência agendada!' : cfg.type === 'PRAZO' ? 'Prazo criado!' : 'Tarefa criada com sucesso!'}
+          {EVENT_TYPE_LABELS[cfg.type].done}
         </p>
       ) : (
         <div className="flex gap-2">
@@ -286,7 +320,7 @@ function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: stri
             disabled={creating}
             className="flex-1 flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-primary hover:bg-primary/15 transition-colors disabled:opacity-50"
           >
-            {creating ? <Loader2 size={10} className="animate-spin" /> : (cfg.buttonIcon === 'audience' ? <Calendar size={10} /> : cfg.buttonIcon === 'deadline' ? <Clock size={10} /> : <CheckSquare size={10} />)}
+            {creating ? <Loader2 size={10} className="animate-spin" /> : (cfg.buttonIcon === 'audience' ? <Calendar size={10} /> : cfg.buttonIcon === 'deadline' ? <Clock size={10} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={10} /> : <CheckSquare size={10} />)}
             {creating ? 'Criando…' : cfg.buttonLabel}
           </button>
           <button
@@ -1282,7 +1316,8 @@ function AiPanel({
       // Respeita o event_type da analise da IA: AUDIENCIA / PRAZO / TAREFA.
       // Bug corrigido 2026-04-24: antes criava sempre TAREFA hardcoded.
       const cfg = resolveEventTypeConfig(analysis);
-      const durationMs = cfg.type === 'AUDIENCIA' ? 60 * 60_000 : 30 * 60_000;
+      // Audiencia/pericia tipicamente duram 1h; prazo eh marco no dia (30min); tarefa 30min.
+      const durationMs = (cfg.type === 'AUDIENCIA' || cfg.type === 'PERICIA') ? 60 * 60_000 : 30 * 60_000;
 
       // Descricao enriquecida com contexto do processo — ajuda o advogado a
       // saber rapido de qual processo eh sem precisar abrir o evento.
@@ -1520,7 +1555,7 @@ function AiPanel({
                           <>
                             <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" />
                             <span className="text-foreground">
-                              {cfg.type === 'AUDIENCIA' ? 'Audiência' : cfg.type === 'PRAZO' ? 'Prazo' : 'Tarefa'} já agendada para{' '}
+                              {EVENT_TYPE_LABELS[cfg.type].noun} já agendada para{' '}
                               <strong>{formatBrPretty(cfg.dueDate)}</strong>
                             </span>
                           </>
@@ -1528,7 +1563,7 @@ function AiPanel({
                           <>
                             <AlertTriangle size={12} className="text-amber-400 mt-0.5 shrink-0" />
                             <span className="text-foreground">
-                              IA sugere agendar <strong>{cfg.type === 'AUDIENCIA' ? 'audiência' : cfg.type === 'PRAZO' ? 'prazo' : 'tarefa'}</strong> para{' '}
+                              IA sugere agendar <strong>{EVENT_TYPE_LABELS[cfg.type].nounLow}</strong> para{' '}
                               <strong>{formatBrPretty(cfg.dueDate)}</strong>
                             </span>
                           </>
@@ -1561,10 +1596,10 @@ function AiPanel({
                           {creatingTask ? (
                             <><Loader2 size={11} className="animate-spin" /> Criando…</>
                           ) : taskCreated ? (
-                            <><CheckCircle2 size={11} /> {cfg.type === 'AUDIENCIA' ? 'Audiência agendada!' : cfg.type === 'PRAZO' ? 'Prazo criado!' : 'Tarefa criada!'}</>
+                            <><CheckCircle2 size={11} /> {EVENT_TYPE_LABELS[cfg.type].done}</>
                           ) : (
                             <>
-                              {cfg.buttonIcon === 'audience' ? <Calendar size={12} /> : cfg.buttonIcon === 'deadline' ? <Clock size={12} /> : <CheckSquare size={12} />}
+                              {cfg.buttonIcon === 'audience' ? <Calendar size={12} /> : cfg.buttonIcon === 'deadline' ? <Clock size={12} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={12} /> : <CheckSquare size={12} />}
                               {cfg.buttonLabel}
                             </>
                           )}
@@ -1598,7 +1633,7 @@ function AiPanel({
                           className="flex-1 min-w-[180px] flex items-center justify-center gap-1.5 text-[11px] font-semibold py-2 px-3 rounded-lg bg-card border border-border text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
                           title="Criar evento adicional mesmo havendo um similar"
                         >
-                          {cfg.buttonIcon === 'audience' ? <Calendar size={11} /> : cfg.buttonIcon === 'deadline' ? <Clock size={11} /> : <CheckSquare size={11} />}
+                          {cfg.buttonIcon === 'audience' ? <Calendar size={11} /> : cfg.buttonIcon === 'deadline' ? <Clock size={11} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={11} /> : <CheckSquare size={11} />}
                           {cfg.buttonLabel} ainda assim
                         </button>
                       )}
@@ -1679,13 +1714,13 @@ function AiPanel({
                       <div>
                         <p className="text-[10px] text-muted-foreground">Tipo:</p>
                         <p className="text-[12px] font-bold text-foreground">
-                          {cfg.type === 'AUDIENCIA' ? '⚖️ Audiência' : cfg.type === 'PRAZO' ? '⏰ Prazo' : '✅ Tarefa'}
+                          {EVENT_TYPE_LABELS[cfg.type].emoji} {EVENT_TYPE_LABELS[cfg.type].noun}
                         </p>
                       </div>
                       <div>
                         <p className="text-[10px] text-muted-foreground">Data:</p>
                         <p className="text-[12px] font-bold text-foreground">
-                          {cfg.type === 'AUDIENCIA' || cfg.type === 'PRAZO'
+                          {EVENT_TYPE_LABELS[cfg.type].hasExplicitDate
                             ? formatBrPretty(cfg.dueDate)
                             : `${analysis.prazo_dias} dias úteis`}
                         </p>

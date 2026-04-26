@@ -952,7 +952,7 @@ export class DjenService {
     tarefa_titulo: string;
     tarefa_descricao: string;
     orientacoes: string;
-    event_type: 'AUDIENCIA' | 'PRAZO' | 'TAREFA';
+    event_type: 'AUDIENCIA' | 'PRAZO' | 'PERICIA' | 'TAREFA';
     model_used: string;
     // Dados extraídos da publicação
     parte_autora: string | null;
@@ -1031,7 +1031,8 @@ CAMPOS PARA O ADVOGADO:
   • Se houver valores, comentar se são razoáveis
   Mínimo 3 frases. Seja direto e opinativo — o advogado quer sua análise, não uma repetição da publicação.
 
-- event_type: "AUDIENCIA" | "PRAZO" | "TAREFA"
+- event_type: "AUDIENCIA" | "PRAZO" | "PERICIA" | "TAREFA"
+  REGRA CRITICA: publicacoes do DJEN sempre envolvem processo. event_type DEVE ser AUDIENCIA, PRAZO ou PERICIA. Use TAREFA APENAS em ultimo recurso (publicacao puramente informativa, sem prazo nem evento). NUNCA TAREFA quando ha despacho exigindo manifestacao, contestacao, recurso, ou cumprimento — esses sao PRAZO.
 
 CAMPOS PARA O CLIENTE (linguagem acessível — enviados via WhatsApp):
 - resumo_cliente: string (explicação completa para leigo, sem termos jurídicos. Máx 5 frases.)
@@ -1047,7 +1048,7 @@ CAMPOS DE EXTRAÇÃO (null se não encontrado):
 - juizo: string | null
 - area_juridica: string | null
 - valor_causa: string | null (formato "R$ X.XXX,XX")
-- data_audiencia: string | null (ISO "YYYY-MM-DDTHH:MM:00", horário de Brasília — sem timezone, sem "Z")
+- data_audiencia: string | null (ISO "YYYY-MM-DDTHH:MM:00", horário de Brasília — sem timezone, sem "Z". Use TAMBEM para perícias: extraia a data/hora da audiência OU da perícia, conforme o caso)
 - data_prazo: string | null (ISO "YYYY-MM-DDTHH:MM:00", horário de Brasília — sem timezone, sem "Z")
 
 REGRAS RIGOROSAS DE EXTRAÇÃO DE DATA/HORA:
@@ -1065,7 +1066,11 @@ REGRAS RIGOROSAS DE EXTRAÇÃO DE DATA/HORA:
 
 Critérios de urgência: URGENTE = citação/intimação com prazo ≤15 dias, sentença, audiência marcada, perícia designada. NORMAL = contestação, manifestação, despacho. BAIXA = distribuição, informativo, arquivamento.
 Critérios de estágio: citação→CITACAO, contestação→CONTESTACAO, réplica→REPLICA, perícia→PERICIA_AGENDADA, audiência→INSTRUCAO, sentença→JULGAMENTO, recurso→RECURSO, trânsito→TRANSITADO, execução→EXECUCAO, distribuição→DISTRIBUIDO, encerramento→ENCERRADO.
-Critérios de event_type: AUDIENCIA = data/hora explícita futura para audiência. PRAZO = data explícita futura de prazo. TAREFA = demais casos (incluindo prazos relativos em dias úteis).`;
+Critérios de event_type:
+  - AUDIENCIA = audiência judicial com data/hora explícita futura
+  - PERICIA = perícia (médica, contábil, técnica) com data/hora explícita futura. NUNCA confundir com audiência — perícia é exame técnico, audiência é ato processual com juiz.
+  - PRAZO = qualquer prazo processual (data limite OU prazo relativo em dias úteis). Exemplos: contestação, manifestação, recurso, cumprimento de decisão, impugnação, juntada.
+  - TAREFA = APENAS publicação puramente informativa, sem nenhum prazo nem evento (ex: comunicado interno, distribuição). Em duvida, use PRAZO.`;
 
     // Usa prompt customizado do banco (se existir) ou o prompt padrão
     const customPrompt = await this.settings.getDjenPrompt();
@@ -1194,7 +1199,24 @@ ${pub.conteudo.slice(0, 6000)}`;
       tarefa_titulo: parsed.tarefa_titulo || 'Verificar publicação DJEN',
       tarefa_descricao: parsed.tarefa_descricao || '',
       orientacoes: parsed.orientacoes || '',
-      event_type: (!hasLinkedCase ? 'TAREFA' : (['AUDIENCIA', 'PRAZO', 'TAREFA'].includes(parsed.event_type) ? parsed.event_type : 'TAREFA')) as 'AUDIENCIA' | 'PRAZO' | 'TAREFA',
+      // Regra de negocio (2026-04-26): publicacoes DJEN sempre envolvem processo.
+      // Quando ha processo vinculado, event_type DEVE ser AUDIENCIA, PRAZO ou
+      // PERICIA — nunca TAREFA. TAREFA fica reservada pra fase de captura do
+      // lead, com o operador. Se IA insistir em TAREFA com processo vinculado,
+      // rebaixa pra PRAZO (default seguro — operador pode reclassificar manual).
+      event_type: (() => {
+        const ALLOWED_LINKED = ['AUDIENCIA', 'PRAZO', 'PERICIA'] as const;
+        const ALLOWED_ALL = ['AUDIENCIA', 'PRAZO', 'PERICIA', 'TAREFA'] as const;
+        if (!hasLinkedCase) {
+          return ALLOWED_ALL.includes(parsed.event_type) ? parsed.event_type : 'TAREFA';
+        }
+        if (ALLOWED_LINKED.includes(parsed.event_type)) return parsed.event_type;
+        // IA retornou TAREFA (ou lixo) com processo vinculado — rebaixa pra PRAZO
+        if (parsed.event_type && parsed.event_type !== 'PRAZO') {
+          this.logger.warn(`[DJEN/IA] event_type=${parsed.event_type} com processo vinculado — forcando PRAZO. pubId=${id}`);
+        }
+        return 'PRAZO';
+      })() as 'AUDIENCIA' | 'PRAZO' | 'PERICIA' | 'TAREFA',
       model_used: configuredModel,
       parte_autora: parsed.parte_autora || null,
       parte_rea: parsed.parte_rea || null,
@@ -1205,14 +1227,19 @@ ${pub.conteudo.slice(0, 6000)}`;
       data_prazo: sanitizeIaDate(parsed.data_prazo, 'data_prazo'),
     };
 
-    // Coerencia entre event_type e data extraida — se IA disse AUDIENCIA mas
-    // nao extraiu data_audiencia, rebaixa pra TAREFA (seguindo regra do prompt).
-    if (lawyerFields.event_type === 'AUDIENCIA' && !lawyerFields.data_audiencia) {
-      this.logger.warn(`[DJEN/IA] event_type=AUDIENCIA sem data_audiencia — rebaixando pra TAREFA. pubId=${id}`);
-      lawyerFields.event_type = 'TAREFA';
+    // Coerencia entre event_type e data extraida.
+    // AUDIENCIA/PERICIA exigem data_audiencia (campo compartilhado). Sem data,
+    // se ha processo vinculado, rebaixa pra PRAZO (regra: nunca TAREFA com
+    // processo vinculado). Sem processo, rebaixa pra TAREFA.
+    const fallbackNoData = hasLinkedCase ? 'PRAZO' : 'TAREFA';
+    if ((lawyerFields.event_type === 'AUDIENCIA' || lawyerFields.event_type === 'PERICIA') && !lawyerFields.data_audiencia) {
+      this.logger.warn(`[DJEN/IA] event_type=${lawyerFields.event_type} sem data_audiencia — rebaixando pra ${fallbackNoData}. pubId=${id}`);
+      lawyerFields.event_type = fallbackNoData;
     }
-    if (lawyerFields.event_type === 'PRAZO' && !lawyerFields.data_prazo) {
-      this.logger.warn(`[DJEN/IA] event_type=PRAZO sem data_prazo — rebaixando pra TAREFA. pubId=${id}`);
+    if (lawyerFields.event_type === 'PRAZO' && !lawyerFields.data_prazo && !hasLinkedCase) {
+      // Sem data_prazo + sem processo: rebaixa pra TAREFA. Com processo, mantem
+      // PRAZO mesmo sem data_prazo — frontend usa fallbackDue (prazo_dias uteis).
+      this.logger.warn(`[DJEN/IA] event_type=PRAZO sem data_prazo + sem processo — rebaixando pra TAREFA. pubId=${id}`);
       lawyerFields.event_type = 'TAREFA';
     }
 
