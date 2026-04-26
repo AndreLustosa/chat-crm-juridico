@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { LockService } from '../common/locks/lock.service';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -181,6 +182,7 @@ export class DjenService {
     private readonly settings: SettingsService,
     private readonly calendarService: CalendarService,
     @Inject(forwardRef(() => WhatsappService)) private readonly whatsappService: WhatsappService,
+    private readonly lock: LockService,
   ) {}
 
   /**
@@ -201,12 +203,21 @@ export class DjenService {
    */
   @Cron('0 8,17 * * *', { timeZone: 'America/Maceio' })
   async syncDaily() {
-    const today = new Date();
-    const yesterday = subtractDays(today, 1);
-    this.logger.log('[DJEN] Iniciando sync diário...');
-    await this.syncForDate(toDateStr(yesterday));
-    await this.syncForDate(toDateStr(today));
-    this.logger.log('[DJEN] Sync diário concluído.');
+    // Lock distribuido pra impedir double-run em ambiente multi-replica.
+    // TTL 20min: sync de N OABs com retry vai geralmente em <5min.
+    // Migrado 2026-04-26.
+    const result = await this.lock.withLock('djen-sync', 20 * 60, async () => {
+      const today = new Date();
+      const yesterday = subtractDays(today, 1);
+      this.logger.log('[DJEN] Iniciando sync diário...');
+      await this.syncForDate(toDateStr(yesterday));
+      await this.syncForDate(toDateStr(today));
+      this.logger.log('[DJEN] Sync diário concluído.');
+      return true;
+    });
+    if (result === null) {
+      this.logger.warn('[DJEN] Sync diário skipado — outra réplica já está rodando');
+    }
   }
 
   /** Busca items da API DJEN para uma OAB específica em uma data, com retry */

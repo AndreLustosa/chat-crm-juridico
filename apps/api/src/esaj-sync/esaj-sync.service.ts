@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EsajTjalScraper, inferTrackingStage } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
+import { LockService } from '../common/locks/lock.service';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -34,12 +35,16 @@ function isBusinessHours(): boolean {
 export class EsajSyncService {
   private readonly logger = new Logger(EsajSyncService.name);
   private readonly scraper = new EsajTjalScraper();
-  private syncing = false;
+  // Lock TTL = 30min: sync de ~100 processos com sleep(2s) entre cada da no
+  // pior caso ~3-5min. 30min eh kill switch generoso pra crashes/network slow.
+  private readonly LOCK_KEY = 'esaj-sync';
+  private readonly LOCK_TTL_SECONDS = 30 * 60;
 
   constructor(
     private prisma: PrismaService,
     private whatsapp: WhatsappService,
     private settings: SettingsService,
+    private lock: LockService,
   ) {}
 
   // ─── Cron Jobs ─────────────────────────────────────────────
@@ -65,12 +70,16 @@ export class EsajSyncService {
     notifications: number;
     errors: string[];
   }> {
-    if (this.syncing) {
-      this.logger.warn('[SYNC] Já há um sync em andamento, ignorando');
+    // Lock distribuido via Redis — antes era `private syncing` em memoria, que
+    // nao protege entre replicas (Swarm/k8s) ou durante rolling-update. Bug
+    // potencial: 2 replicas mandando o mesmo WhatsApp ao advogado.
+    // Migrado 2026-04-26.
+    const acquired = await this.lock.acquire(this.LOCK_KEY, this.LOCK_TTL_SECONDS);
+    if (!acquired) {
+      this.logger.warn('[SYNC] Já há um sync em andamento (em outra réplica), ignorando');
       return { total: 0, synced: 0, newMovements: 0, notifications: 0, errors: ['Sync já em andamento'] };
     }
 
-    this.syncing = true;
     const startTime = Date.now();
     let totalSynced = 0;
     let totalNewMovements = 0;
@@ -235,7 +244,7 @@ export class EsajSyncService {
         errors,
       };
     } finally {
-      this.syncing = false;
+      await this.lock.release(this.LOCK_KEY);
     }
   }
 

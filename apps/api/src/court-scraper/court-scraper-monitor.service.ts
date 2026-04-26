@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CourtScraperService } from './court-scraper.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { LockService } from '../common/locks/lock.service';
 
 /**
  * Monitor ESAJ por OAB — cron diario que detecta processos NOVOS no
@@ -31,10 +32,23 @@ export class CourtScraperMonitorService {
     private prisma: PrismaService,
     private scraper: CourtScraperService,
     private chatGateway: ChatGateway,
+    private lock: LockService,
   ) {}
 
   @Cron('0 7 * * 1-5', { timeZone: 'America/Maceio' })
   async checkNewCasesForAllOabs() {
+    // Lock distribuido pra impedir double-run em multi-replica.
+    // TTL 30min: pra cada advogado com OAB faz scraping, pode demorar.
+    // Migrado 2026-04-26.
+    const result = await this.lock.withLock('monitor-oab', 30 * 60, async () => {
+      return this._checkNewCasesForAllOabs();
+    });
+    if (result === null) {
+      this.logger.warn('[MONITOR-OAB] Skipado — outra réplica ja está rodando');
+    }
+  }
+
+  private async _checkNewCasesForAllOabs() {
     this.logger.log('[MONITOR-OAB] Iniciando varredura diaria de processos novos no ESAJ');
 
     // 1. Advogados com OAB preenchida

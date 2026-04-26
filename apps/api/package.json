@@ -43,6 +43,7 @@
     "docx": "^9.5.0",
     "dotenv": "^16.6.1",
     "googleapis": "^171.4.0",
+    "ioredis": "^5.4.0",
     "nodemailer": "^8.0.1",
     "openai": "^4.104.0",
     "passport": "^0.7.0",
