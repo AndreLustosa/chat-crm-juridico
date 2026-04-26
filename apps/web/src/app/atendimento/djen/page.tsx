@@ -130,6 +130,23 @@ const TRACKING_STAGES_DJEN = [
   { id: 'ENCERRADO',        label: 'Encerrado',             color: '#6b7280', emoji: '🏁' },
 ] as const;
 
+// ─── Helper: parse de ISO naive da IA como UTC-naive-BRT ─────────────────────
+//
+// Bug reportado 2026-04-26: IA retorna `data_audiencia` como "YYYY-MM-DDTHH:MM:00"
+// (sem Z, sem offset). `new Date(s)` interpreta isso como hora LOCAL do navegador,
+// converte pra UTC somando 3h em BRT, e ao formatar com `timeZone: 'UTC'` mostra
+// 11:30 quando o real eh 08:30.
+//
+// Convencao do app: `start_at` no banco eh UTC-naive-BRT (08:30 BRT armazenado
+// como "2026-05-21T08:30:00.000Z"). Adicionar `Z` na string da IA alinha as
+// duas convencoes — JS interpreta como UTC, e formatacao com `timeZone: 'UTC'`
+// preserva o wall-clock BRT em qualquer fuso de navegador.
+function parseNaiveBrIso(s: string): Date {
+  // Ja tem Z ou offset explicito? Respeita.
+  if (/Z$|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+  return new Date(s + 'Z');
+}
+
 // ─── Helper: resolve type/labels/dueDate baseado no event_type da IA ─────────
 //
 // Bug reportado 2026-04-24: o frontend criava sempre "TAREFA" hardcoded mesmo
@@ -165,7 +182,7 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
       label: 'Audiência sugerida',
       buttonLabel: 'Agendar audiência',
       buttonIcon: 'audience',
-      dueDate: new Date(analysis.data_audiencia),
+      dueDate: parseNaiveBrIso(analysis.data_audiencia),
     };
   }
   if (eventType === 'PRAZO' && analysis.data_prazo) {
@@ -174,7 +191,7 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
       label: 'Prazo sugerido',
       buttonLabel: 'Criar prazo',
       buttonIcon: 'deadline',
-      dueDate: new Date(analysis.data_prazo),
+      dueDate: parseNaiveBrIso(analysis.data_prazo),
     };
   }
   // Fallback: TAREFA (ou AUDIENCIA/PRAZO sem data extraida — vira tarefa
@@ -848,9 +865,10 @@ function CreateProcessModal({
                       <div className="flex items-start gap-2 text-[11px] mt-1 pt-1.5 border-t border-border/50">
                         <span className="text-amber-400 shrink-0 w-20 font-semibold">📅 Audiência:</span>
                         <span className="text-amber-300 font-semibold">
-                          {new Date(analysis.data_audiencia).toLocaleString('pt-BR', {
+                          {parseNaiveBrIso(analysis.data_audiencia).toLocaleString('pt-BR', {
                             day: '2-digit', month: '2-digit', year: 'numeric',
                             hour: '2-digit', minute: '2-digit',
+                            timeZone: 'UTC',
                           })}
                         </span>
                       </div>
@@ -1341,11 +1359,16 @@ function AiPanel({
           );
 
           // Sugestao de evento ja agendada?
+          //
+          // Comparacao usa parseNaiveBrIso pra alinhar convencao da IA (ISO sem Z)
+          // com a do banco (UTC naive BRT). Sem isso, o diff fica 3h e nunca casa
+          // em fusos com offset != 0. Janela ampliada pra 2h pra absorver pequenas
+          // discrepancias (ex: IA arredonda minutos).
           const sugDate = analysis.data_audiencia || analysis.data_prazo;
           const eventAlreadyScheduled = sugDate ? futureEvents.some(e => {
             if (e.type !== cfg.type) return false;
-            const diff = Math.abs(new Date(e.start_at).getTime() - new Date(sugDate).getTime());
-            return diff < 60 * 60 * 1000; // mesma hora
+            const diff = Math.abs(new Date(e.start_at).getTime() - parseNaiveBrIso(sugDate).getTime());
+            return diff < 2 * 60 * 60 * 1000; // dentro de 2h conta como mesmo evento
           }) : false;
 
           const eventNeedsCreation = !eventAlreadyScheduled;
@@ -1600,7 +1623,7 @@ function AiPanel({
                                 : 'bg-blue-500/20 border-blue-500/50';
                               const isMatch = sugDate &&
                                 e.type === cfg.type &&
-                                Math.abs(dt.getTime() - new Date(sugDate).getTime()) < 60 * 60 * 1000;
+                                Math.abs(dt.getTime() - parseNaiveBrIso(sugDate).getTime()) < 2 * 60 * 60 * 1000;
                               return (
                                 <li key={e.id} title={e.title} className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px] ${colorBg}`}>
                                   <span className="shrink-0 text-[13px] leading-none mt-0.5">{emoji}</span>
