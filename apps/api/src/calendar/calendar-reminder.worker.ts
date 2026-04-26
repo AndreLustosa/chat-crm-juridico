@@ -1,6 +1,6 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
@@ -221,22 +221,80 @@ export class CalendarReminderWorker extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly whatsapp: WhatsappService,
     private readonly settings: SettingsService,
+    // Queue injetada pra re-enfileirar jobs adiados pra horario comercial.
+    // Adicionado 2026-04-26 (fix de mensagens fora do horario).
+    @InjectQueue('calendar-reminders') private readonly reminderQueue: Queue,
   ) {
     super();
     this.logger.log('✅ CalendarReminderWorker registrado na fila calendar-reminders (API container)');
+  }
+
+  /**
+   * Calcula delay em ms ate o proximo horario comercial em Maceio (seg-sex,
+   * 08h-20h). Retorna 0 se ja estamos em horario comercial.
+   *
+   * Usado pra adiar notificacoes que cairiam de madrugada/fim de semana.
+   * Bug reportado 2026-04-26: cliente Alecio recebeu 2 mensagens de audiencia
+   * agendada as 23:40 e 00:02 — `processHearingScheduled` nao tinha filtro
+   * de horario, e notificava no instante que o operador criava o evento.
+   */
+  private msUntilNextBusinessHour(): number {
+    const now = new Date();
+    const maceioOffsetMs = -3 * 60 * 60 * 1000;
+    const maceioNow = new Date(now.getTime() + maceioOffsetMs);
+    const hour = maceioNow.getUTCHours();
+    const day = maceioNow.getUTCDay();
+    const isBusiness = day >= 1 && day <= 5 && hour >= 8 && hour < 20;
+    if (isBusiness) return 0;
+
+    // Calcula proximo "08:00 BRT util"
+    const next = new Date(maceioNow);
+    next.setUTCMinutes(0, 0, 0);
+    if (hour < 8) {
+      // Mesmo dia, 08:00 BRT — mas se eh sabado/domingo, avanca pra segunda
+      next.setUTCHours(8);
+    } else {
+      // Apos 20h ou fora — proximo dia 08h
+      next.setUTCDate(next.getUTCDate() + 1);
+      next.setUTCHours(8);
+    }
+    while (next.getUTCDay() === 0 || next.getUTCDay() === 6) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+    // Volta da timezone fake pra epoch real
+    return next.getTime() - maceioOffsetMs - now.getTime();
   }
 
   async process(job: Job<any>) {
     this.logger.log(`[WORKER-API] Processando job ${job.name} (id: ${job.id})`);
 
     // ── Notificação imediata de audiência agendada ────────────────────────────
-    if (job.name === 'notify-hearing-scheduled') {
-      return this.processHearingScheduled(job.data.eventId, false);
-    }
-
-    // ── Notificação de remarcação de audiência ────────────────────────────────
-    if (job.name === 'notify-hearing-rescheduled') {
-      return this.processHearingScheduled(job.data.eventId, true);
+    //
+    // Filtro de horario comercial: se cair fora (sab/dom ou madrugada),
+    // re-enfileira o mesmo job com delay ate proximo 08h util. Operador NUNCA
+    // quer mensagem chegando de madrugada ao cliente — bug 2026-04-26 (cliente
+    // Alecio recebeu mensagem 23:40 e 00:02).
+    if (job.name === 'notify-hearing-scheduled' || job.name === 'notify-hearing-rescheduled') {
+      const delay = this.msUntilNextBusinessHour();
+      if (delay > 0) {
+        this.logger.log(
+          `[HEARING-NOTIFY] Fora do horario comercial — adiando ${Math.round(delay / 60000)}min ` +
+          `(eventId=${job.data.eventId}, jobId=${job.id})`,
+        );
+        // Re-enfileira o mesmo job com delay. Isso preserva os attempts/backoff
+        // configurados originalmente.
+        await this.reminderQueue.add(job.name, job.data, {
+          delay,
+          jobId: `${job.id}-deferred-${Date.now()}`,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: true,
+          removeOnFail: 50,
+        });
+        return;
+      }
+      const isResched = job.name === 'notify-hearing-rescheduled';
+      return this.processHearingScheduled(job.data.eventId, isResched);
     }
 
     // ── Lembretes antes do evento (fluxo original) ────────────────────────────
