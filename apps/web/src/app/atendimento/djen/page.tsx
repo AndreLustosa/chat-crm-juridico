@@ -148,6 +148,31 @@ function parseNaiveBrIso(s: string): Date {
   return new Date(s + 'Z');
 }
 
+// ─── Helper: subtrai 1 dia util (regra de seguranca pra PRAZOS) ──────────────
+//
+// Regra de negocio (André, 2026-04-26): "quando o prazo for em dias uteis
+// preciso que a IA sempre agende com um dia util de antecedencia do final do
+// prazo para prevenir perda de prazo".
+//
+// Aplicado APENAS pra PRAZO (audiencia/pericia tem data fixa do juiz, nao da
+// pra antecipar). Pula sabado/domingo. NAO considera feriados — sistema nao
+// tem calendario de feriados; operador deve revisar prazos em vesperas.
+//
+// Se o resultado cair antes de "agora", retorna o original (sem margem) — nao
+// faz sentido agendar no passado. Operador ainda ve a sugestao da IA pra
+// decidir manual.
+function subtractOneBusinessDay(d: Date): Date {
+  const result = new Date(d.getTime());
+  // Volta 1 dia, depois pula sabado/domingo se cair em FdS.
+  result.setUTCDate(result.getUTCDate() - 1);
+  while (result.getUTCDay() === 0 || result.getUTCDay() === 6) {
+    result.setUTCDate(result.getUTCDate() - 1);
+  }
+  // Se cair no passado, retorna o original (sem margem).
+  if (result.getTime() < Date.now()) return d;
+  return result;
+}
+
 // ─── Helper: resolve type/labels/dueDate baseado no event_type da IA ─────────
 //
 // Bug reportado 2026-04-24: o frontend criava sempre "TAREFA" hardcoded mesmo
@@ -161,7 +186,8 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
   label: string;        // "Tarefa sugerida" / "Audiência sugerida" / "Prazo sugerido" / "Perícia sugerida"
   buttonLabel: string;  // "Criar tarefa" / "Agendar audiência" / "Criar prazo" / "Agendar perícia"
   buttonIcon: 'task' | 'audience' | 'deadline' | 'pericia';
-  dueDate: Date;
+  dueDate: Date;        // Data efetivamente AGENDADA (com margem de -1 dia util pra PRAZO)
+  deadlineEnd?: Date;   // Final REAL do prazo (usado so pra exibir "ultimo dia" no UI)
 } {
   const eventType = analysis.event_type || 'TAREFA';
 
@@ -215,12 +241,18 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
     // PRAZO: se IA extraiu data_prazo, usa ela. Se nao, usa fallbackDue
     // (prazo_dias uteis). Diferente do TAREFA: prazo nao pode rebaixar pra
     // "criar tarefa" — regra: processo vinculado nao gera tarefa.
+    //
+    // Regra de seguranca (André, 2026-04-26): agenda com 1 dia util de
+    // antecedencia do FINAL do prazo, pra prevenir perda. Se a margem cair
+    // no passado, mantem original (subtractOneBusinessDay devolve o input).
+    const deadlineEnd = analysis.data_prazo ? parseNaiveBrIso(analysis.data_prazo) : fallbackDue;
     return {
       type: 'PRAZO',
       label: 'Prazo sugerido',
       buttonLabel: 'Criar prazo',
       buttonIcon: 'deadline',
-      dueDate: analysis.data_prazo ? parseNaiveBrIso(analysis.data_prazo) : fallbackDue,
+      dueDate: subtractOneBusinessDay(deadlineEnd),
+      deadlineEnd,
     };
   }
   // Fallback: TAREFA (ou AUDIENCIA/PRAZO sem data extraida — vira tarefa
@@ -1328,6 +1360,15 @@ function AiPanel({
       if (analysis.parte_autora || analysis.parte_rea) {
         ctxLines.push(`Partes: ${analysis.parte_autora || '—'} × ${analysis.parte_rea || '—'}`);
       }
+      // Se PRAZO com margem de seguranca aplicada, registra o final REAL do
+      // prazo na descricao. Operador precisa saber a data limite legal mesmo
+      // quando o evento foi antecipado em 1 dia util.
+      if (cfg.type === 'PRAZO' && cfg.deadlineEnd && cfg.deadlineEnd.getTime() !== cfg.dueDate.getTime()) {
+        const deadlineStr = cfg.deadlineEnd.toLocaleDateString('pt-BR', {
+          day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
+        });
+        ctxLines.push(`⚠️ Último dia do prazo legal: ${deadlineStr} (agendado 1 dia útil antes por segurança)`);
+      }
       if (ctxLines.length) {
         descLines.push('', '— Contexto —', ...ctxLines);
       }
@@ -1718,12 +1759,26 @@ function AiPanel({
                         </p>
                       </div>
                       <div>
-                        <p className="text-[10px] text-muted-foreground">Data:</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {cfg.type === 'PRAZO' ? 'Agendar para:' : 'Data:'}
+                        </p>
                         <p className="text-[12px] font-bold text-foreground">
                           {EVENT_TYPE_LABELS[cfg.type].hasExplicitDate
                             ? formatBrPretty(cfg.dueDate)
                             : `${analysis.prazo_dias} dias úteis`}
                         </p>
+                        {/* PRAZO: mostra final real do prazo + nota da margem
+                            de seguranca pra operador entender que o evento foi
+                            antecipado em 1 dia util por design. */}
+                        {cfg.type === 'PRAZO' && cfg.deadlineEnd && (
+                          <p className="text-[9px] text-muted-foreground mt-1 flex items-center gap-1">
+                            <AlertTriangle size={9} className="text-amber-400 shrink-0" />
+                            <span>
+                              Último dia do prazo: <strong className="text-amber-300">{formatBrPretty(cfg.deadlineEnd)}</strong>
+                              {' · '}agendado 1 dia útil antes por segurança
+                            </span>
+                          </p>
+                        )}
                       </div>
                       <div>
                         <p className="text-[10px] text-muted-foreground">Ação proposta:</p>

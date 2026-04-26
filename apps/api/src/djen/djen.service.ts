@@ -1060,7 +1060,9 @@ REGRAS RIGOROSAS DE EXTRAÇÃO DE DATA/HORA:
    - "às 9 horas" → "T09:00:00"
 4. NUNCA confundir data passada com data futura. Se a publicação diz "designada audiência em 21/05/2024" e a data atual é 2026, isso é INFORMATIVO — retorne null se não há nova data marcada.
 5. data_audiencia SÓ deve ser preenchida se houver audiência FUTURA explicitamente marcada com data E hora.
-6. data_prazo SÓ deve ser preenchida se houver data limite explicitamente mencionada (ex: "até o dia X"). Se o prazo é "X dias úteis", deixe data_prazo null e use prazo_dias.
+6. data_prazo é o ÚLTIMO DIA LEGAL do prazo (data limite real). NÃO aplique margem de segurança — o sistema agenda automaticamente 1 dia útil antes.
+   - Se publicação diz "manifestar-se em 15 dias úteis" sem data específica → deixe data_prazo null e preencha prazo_dias=15.
+   - Se publicação diz "até 20/05/2026" → data_prazo = "2026-05-20T17:00:00" (ou hora limite se mencionada, senão use 17:00 como fim do expediente).
 7. Se event_type = AUDIENCIA, data_audiencia DEVE estar preenchida.
 8. Se event_type = PRAZO, data_prazo DEVE estar preenchida (ou prazo_dias se for prazo relativo).
 
