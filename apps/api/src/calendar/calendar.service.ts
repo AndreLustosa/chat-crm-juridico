@@ -261,20 +261,26 @@ export class CalendarService implements OnApplicationBootstrap {
       throw new BadRequestException(`Tipo invalido: ${data.type}. Use: ${EVENT_TYPES.join(', ')}`);
     }
 
-    // ─── Guardrail: dedup AUDIENCIA/PERICIA por processo + janela de 2h ───
+    // ─── Guardrail: dedup AUDIENCIA/PERICIA por processo + janela de 12h ───
     //
     // Bug reportado 2026-04-26 (cliente Alecio): mesma audiencia foi cadastrada
     // 2x — uma pelo painel DJEN (08:30 BRT), outra pela tela de Processos
     // (11:30 UTC bugado, ja corrigido). Ambas dispararam notify-hearing-scheduled
     // e o cliente recebeu mensagens conflitantes.
     //
-    // Janela de 2h cobre: arredondamento de minutos pela IA, fuso (start_at
-    // armazenado como UTC naive BRT — diff zero quando sao a mesma audiencia).
-    // Status CANCELADO/CONCLUIDO ignorado pra permitir re-agendamento legitimo.
+    // Janela de 12h cobre:
+    //  - Arredondamento de minutos pela IA
+    //  - Fuso (start_at armazenado como UTC naive BRT — diff zero quando sao a mesma)
+    //  - Diferenca de horas dentro do MESMO DIA que ainda eh a mesma audiencia
+    //    (ex: IA detecta 14:00, operador conclui que eh as 09:00 e cria manual —
+    //    mesma audiencia, hora corrigida — bloqueia duplicacao). A IA do
+    //    servidor sugeriu 12h em 2026-04-26 e validou em prod.
+    // Status CANCELADO/CONCLUIDO ignorado pra permitir re-agendamento legitimo
+    // (operador cancela primeira, cria nova >12h depois — nao bloqueia).
     if ((data.type === 'AUDIENCIA' || data.type === 'PERICIA') && data.legal_case_id && data.start_at) {
       const target = new Date(data.start_at);
-      const before = new Date(target.getTime() - 2 * 60 * 60 * 1000);
-      const after = new Date(target.getTime() + 2 * 60 * 60 * 1000);
+      const before = new Date(target.getTime() - 12 * 60 * 60 * 1000);
+      const after = new Date(target.getTime() + 12 * 60 * 60 * 1000);
       const existing = await this.prisma.calendarEvent.findFirst({
         where: {
           legal_case_id: data.legal_case_id,
