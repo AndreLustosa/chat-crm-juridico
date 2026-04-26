@@ -267,29 +267,102 @@ export class PortalDocumentFetcherService {
     let processoCodigo: string | undefined = sourceRaw.processo_codigo;
     let documentType: string | undefined = sourceRaw.document_type;
 
-    // Se faltam metadados (movimentacoes antigas), refaz scraping
+    this.logger.log(
+      `[FETCHER/event] Pedido PDF pra CaseEvent ${caseEventId}: ` +
+      `cd_mov=${cdMovimentacao || 'AUSENTE'}, ` +
+      `cd_proc=${processoCodigo || 'AUSENTE'}, ` +
+      `case=${ce.legal_case.case_number || 'sem-numero'}`,
+    );
+
+    // Se faltam metadados (movimentacoes antigas, pre-deploy do parser),
+    // refaz scraping completo + tenta atualizar source_raw pra proximas
+    // requests serem mais rapidas.
     if (!cdMovimentacao || !processoCodigo) {
-      this.logger.log(`[FETCHER/event] CaseEvent ${caseEventId} sem metadados — refazendo scraping`);
-      const data = await this.scraper.searchByNumber(ce.legal_case.case_number || '').catch(() => null);
+      this.logger.log(`[FETCHER/event] Sem metadados — refazendo scraping completo`);
+      const data = await this.scraper.searchByNumber(ce.legal_case.case_number || '').catch((e) => {
+        this.logger.warn(`[FETCHER/event] Scraper falhou: ${e.message}`);
+        return null;
+      });
       if (!data || !data.processo_codigo) {
-        this.logger.warn(`[FETCHER/event] Scraper nao retornou data pra ${ce.legal_case.case_number}`);
+        this.logger.warn(`[FETCHER/event] Scraper nao retornou processo_codigo`);
         return null;
       }
       processoCodigo = data.processo_codigo;
-      // Tenta achar a movimentacao pela descricao + data
-      const targetDesc = ce.description || ce.title || '';
-      const movMatch = data.movements.find((m: any) =>
-        m.cd_movimentacao &&
-        (m.description === targetDesc || targetDesc.includes(m.description.slice(0, 50))),
+
+      // Conta quantas movimentacoes tem cd_movimentacao — se zero, parser do
+      // scraper precisa ser ajustado (HTML do TJAL pode ter mudado)
+      const totalMovs = data.movements.length;
+      const movsComCd = data.movements.filter((m: any) => !!m.cd_movimentacao).length;
+      this.logger.log(
+        `[FETCHER/event] Scraping retornou ${totalMovs} movs, ` +
+        `${movsComCd} com cd_movimentacao (${Math.round(100 * movsComCd / totalMovs)}%)`,
       );
+      if (movsComCd === 0 && totalMovs > 0) {
+        this.logger.warn(
+          `[FETCHER/event] PARSER PRECISA AJUSTE: 0 de ${totalMovs} movs tem cd_movimentacao. ` +
+          `HTML do TJAL provavelmente mudou. Verificar extractCdMovimentacao() no scraper.`,
+        );
+      }
+
+      // Tenta achar a movimentacao pela descricao (heuristica fuzzy)
+      const targetDesc = (ce.description || ce.title || '').trim();
+      const targetDate = ce.event_date
+        ? `${String(ce.event_date.getUTCDate()).padStart(2, '0')}/${String(ce.event_date.getUTCMonth() + 1).padStart(2, '0')}/${ce.event_date.getUTCFullYear()}`
+        : '';
+
+      // Match em ordem de confianca:
+      // 1. Mesma data E mesma descricao (exata)
+      // 2. Mesma data E descricao contem primeiros 50 chars
+      // 3. So mesma descricao (sem data)
+      const matchExact = data.movements.find((m: any) =>
+        m.cd_movimentacao && m.date === targetDate && m.description === targetDesc,
+      );
+      const matchPartial = matchExact || data.movements.find((m: any) =>
+        m.cd_movimentacao && m.date === targetDate &&
+        targetDesc.includes(m.description.slice(0, 50)),
+      );
+      const matchDescOnly = matchPartial || data.movements.find((m: any) =>
+        m.cd_movimentacao && (m.description === targetDesc || targetDesc.includes(m.description.slice(0, 50))),
+      );
+      const movMatch = matchExact || matchPartial || matchDescOnly;
+
       if (movMatch?.cd_movimentacao) {
         cdMovimentacao = movMatch.cd_movimentacao;
         documentType = movMatch.document_type;
+        this.logger.log(
+          `[FETCHER/event] Match encontrado: cd_mov=${cdMovimentacao} ` +
+          `(strategy=${matchExact ? 'exact' : matchPartial ? 'partial' : 'desc-only'})`,
+        );
+
+        // Atualiza source_raw pra proximas requests serem cache hit
+        try {
+          await this.prisma.caseEvent.update({
+            where: { id: ce.id },
+            data: {
+              source_raw: {
+                ...(ce.source_raw as any || {}),
+                cd_movimentacao: cdMovimentacao,
+                processo_codigo: processoCodigo,
+                ...(documentType ? { document_type: documentType } : {}),
+              } as any,
+            },
+          });
+          this.logger.log(`[FETCHER/event] source_raw atualizado pra ${ce.id}`);
+        } catch {}
+      } else {
+        this.logger.warn(
+          `[FETCHER/event] Sem match. Target: "${targetDesc.slice(0, 60)}" em ${targetDate}. ` +
+          `Movs com cd no scraping: ${data.movements.filter((m: any) => m.cd_movimentacao).slice(0, 3).map((m: any) => `[${m.date}] ${m.description.slice(0, 40)}`).join(' | ') || '(nenhuma)'}`,
+        );
       }
     }
 
     if (!cdMovimentacao || !processoCodigo) {
-      this.logger.warn(`[FETCHER/event] Sem cd_movimentacao pra CaseEvent ${caseEventId} — provavel movimentacao sem PDF anexado`);
+      this.logger.warn(
+        `[FETCHER/event] Resultado: SEM PDF disponivel pra ${caseEventId}. ` +
+        `Causa provavel: movimentacao sem documento anexado no tribunal, ` +
+        `OU parser do scraper nao captura cd_movimentacao do HTML atual.`,
+      );
       return null;
     }
 
