@@ -164,13 +164,27 @@ function resolveEventTypeConfig(analysis: AiAnalysis): {
 } {
   const eventType = analysis.event_type || 'TAREFA';
 
-  // Calcula data_padrao = hoje + prazo_dias uteis (fallback)
+  // Calcula data_padrao = hoje + prazo_dias uteis (fallback).
+  //
+  // Bug confirmado em prod 2026-04-26 (TAREFA db0b23bb): se prazo_dias=0,
+  // due = new Date() = exato instante do clique → start_at fica com timestamp
+  // arbitrario tipo 02:39:04.258 UTC (created_at copiado).
+  //
+  // Fix: minimo de 1 dia util (nao faz sentido tarefa pra "agora") + hora
+  // padrao 09:00 BRT. Construido em UTC pra alinhar com convencao UTC-naive-BRT
+  // do banco — toISOString gera "T09:00:00.000Z" e display com timeZone:'UTC'
+  // mostra 09:00. setHours local nao serve: em BRT geraria 12:00 UTC.
   const fallbackDue = (() => {
-    const due = new Date();
+    const now = new Date();
+    // Comeca em "hoje 09:00 BRT" (UTC naive) — base para somar dias uteis
+    const due = new Date(Date.UTC(
+      now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0,
+    ));
+    const minDays = Math.max(1, analysis.prazo_dias || 1);
     let added = 0;
-    while (added < (analysis.prazo_dias || 0)) {
-      due.setDate(due.getDate() + 1);
-      const dow = due.getDay();
+    while (added < minDays) {
+      due.setUTCDate(due.getUTCDate() + 1);
+      const dow = due.getUTCDay();
       if (dow !== 0 && dow !== 6) added++;
     }
     return due;

@@ -1132,10 +1132,16 @@ ${pub.conteudo.slice(0, 6000)}`;
     //  - aceita "YYYY-MM-DDTHH:MM:00" (formato pedido)
     //  - aceita "YYYY-MM-DDTHH:MM:00Z" / com offset (toleravel)
     //  - aceita "YYYY-MM-DD" (so dia, vira meia-noite — bom pra prazos sem hora)
-    //  - rejeita lixo, datas invalidas, datas no passado distante
-    //  - se rejeitar, loga warning e zera o campo (operador re-roda analise se quiser)
+    //  - rejeita lixo, datas invalidas
+    //  - rejeita data anterior a data_disponibilizacao (impossivel: prazo nao
+    //    pode ser anterior a publicacao que o gerou — bug 2026-04-26 confirmado
+    //    em producao: pub 14/04 com prazo 24/03 extraido de referencia historica)
+    //  - se rejeitar, loga warning e zera o campo
     //
     // Convencao: data eh BRT naive. Se IA retorna sem TZ, eh BRT.
+    const pubDate = pub.data_disponibilizacao
+      ? new Date(pub.data_disponibilizacao)
+      : null;
     const sanitizeIaDate = (raw: any, label: string): string | null => {
       if (!raw || typeof raw !== 'string') return null;
       const trimmed = raw.trim();
@@ -1155,7 +1161,21 @@ ${pub.conteudo.slice(0, 6000)}`;
         this.logger.warn(`[DJEN/IA] ${label} data invalida: "${trimmed}"`);
         return null;
       }
-      // Rejeita data > 2 anos no passado (IA confundiu data antiga com nova)
+      // Rejeita data anterior a data_disponibilizacao da publicacao.
+      // Tolerancia de 1 dia (publicacoes podem ter sido disponibilizadas um pouco
+      // depois do despacho real). Sem isso, IA extraia datas retroativas mencionadas
+      // como referencia historica no texto e marcava como prazo.
+      if (pubDate) {
+        const tolMs = 24 * 60 * 60 * 1000;
+        if (dt.getTime() < pubDate.getTime() - tolMs) {
+          this.logger.warn(
+            `[DJEN/IA] ${label} anterior a data de publicacao: "${trimmed}" < ` +
+            `${pubDate.toISOString().slice(0, 10)} — provavel referencia historica no texto. pubId=${id}`,
+          );
+          return null;
+        }
+      }
+      // Rejeita data > 2 anos no passado (fallback se nao tem pubDate)
       const twoYearsAgo = Date.now() - 2 * 365 * 24 * 60 * 60 * 1000;
       if (dt.getTime() < twoYearsAgo) {
         this.logger.warn(`[DJEN/IA] ${label} muito antiga: "${trimmed}" — provavel hallucinacao`);
