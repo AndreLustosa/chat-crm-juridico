@@ -1,5 +1,8 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SettingsService } from '../settings/settings.service';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 /**
  * Servico de processos pra portal do cliente. Sempre filtra por
@@ -13,7 +16,10 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PortalProcessesService {
   private readonly logger = new Logger(PortalProcessesService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private settings: SettingsService,
+  ) {}
 
   /**
    * Lista processos do cliente — visao "kanban" simplificada com proximo
@@ -215,6 +221,7 @@ export class PortalProcessesService {
         select: {
           id: true, title: true, description: true,
           event_date: true, created_at: true, source: true,
+          client_explanation: true,
         },
         orderBy: [{ event_date: 'desc' }, { created_at: 'desc' }],
         take: oversampled,
@@ -234,17 +241,25 @@ export class PortalProcessesService {
       }),
     ]);
 
-    // Unifica em um array unico tipado
+    // Unifica em um array unico tipado.
+    //
+    // Politica nova (2026-04-26): mostra TEXTO TECNICO cru por padrao em
+    // todas as movimentacoes (igual ao que aparece no ESAJ). Cliente clica
+    // em "Pedir explicacao a Sophia" pra IA traduzir on-demand. Antes mostrava
+    // resumo_cliente da IA por padrao em DJEN — mas o cliente pediu pra ver
+    // o ato em si primeiro, e so pedir explicacao se quiser entender.
+    //
+    // explanation_cached: ja existe explicacao salva (DJEN tem do sync, ESAJ
+    // pode ter do botao Sophia). UI mostra como "explicacao ja disponivel".
     type TimelineItem = {
       kind: 'esaj' | 'djen';
       id: string;
-      date: string; // ISO
+      date: string;
       title: string;
-      summary_lay: string;     // texto leigo (IA ou fallback)
-      detail_technical: string; // texto cru / juridico
-      // Campos opcionais especificos do DJEN
+      content: string;              // texto cru juridico — exibido por padrao
+      explanation_cached: string | null; // explicacao leiga ja salva (se houver)
+      // Campos auxiliares do DJEN (so se ja tem analise IA persistida)
       next_step_lay?: string | null;
-      stage_lay?: string | null;
       deadline_lay?: string | null;
       orientation_lay?: string | null;
     };
@@ -257,8 +272,8 @@ export class PortalProcessesService {
         id: m.id,
         date: (m.event_date || m.created_at).toISOString(),
         title: (m.title || 'Movimentação processual').slice(0, 200),
-        summary_lay: (m.description || m.title || '').slice(0, 500),
-        detail_technical: m.description || m.title || '',
+        content: m.description || m.title || '',
+        explanation_cached: (m as any).client_explanation || null,
       });
     }
 
@@ -269,10 +284,10 @@ export class PortalProcessesService {
         id: p.id,
         date: p.data_disponibilizacao.toISOString(),
         title: p.assunto || p.tipo_comunicacao || 'Publicação',
-        summary_lay: ca.resumo_cliente || (p.conteudo || '').slice(0, 500),
-        detail_technical: p.conteudo || '',
+        content: p.conteudo || '',
+        // DJEN ja tem resumo_cliente do sync — usa como cache da explicacao
+        explanation_cached: ca.resumo_cliente || null,
         next_step_lay: ca.proximo_passo_cliente || null,
-        stage_lay: ca.fase_processo_cliente || null,
         deadline_lay: ca.prazo_cliente || null,
         orientation_lay: ca.orientacao_cliente || null,
       });
@@ -289,6 +304,152 @@ export class PortalProcessesService {
       next_cursor,
       total: items.length, // nao eh total absoluto, mas total no buffer atual — UI usa pra "carregar mais"
     };
+  }
+
+  /**
+   * Pede pra Sophia explicar uma movimentacao em linguagem leiga.
+   *
+   * Comportamento:
+   *   - Verifica ownership (lead_id = currentClient.id)
+   *   - Se kind=djen: retorna o resumo_cliente ja gerado pelo sync (sem chamar
+   *     IA novamente). Esses ja tem analise persistida no client_analysis.
+   *   - Se kind=esaj: checa cache em CaseEvent.client_explanation. Se vazio,
+   *     gera via IA + salva no cache.
+   *
+   * Modelo: usa o defaultModel do settings (gpt-4.1-mini ou claude-haiku
+   * dependendo da config). Custo baixo — ~$0.0001 por chamada.
+   */
+  async explainMovement(
+    leadId: string,
+    caseId: string,
+    kind: 'esaj' | 'djen',
+    movementId: string,
+  ): Promise<{ explanation: string; cached: boolean }> {
+    // Ownership: verifica que o caso pertence ao cliente
+    const lc = await this.prisma.legalCase.findFirst({
+      where: { id: caseId, lead_id: leadId },
+      select: {
+        id: true, case_number: true, action_type: true, legal_area: true,
+        tracking_stage: true, opposing_party: true, client_is_author: true,
+      },
+    });
+    if (!lc) throw new NotFoundException('Processo nao encontrado');
+
+    if (kind === 'djen') {
+      const pub = await this.prisma.djenPublication.findFirst({
+        where: { id: movementId, legal_case_id: caseId },
+        select: { client_analysis: true, conteudo: true, assunto: true, tipo_comunicacao: true },
+      });
+      if (!pub) throw new NotFoundException('Movimentacao nao encontrada');
+      const ca: any = pub.client_analysis || {};
+      if (ca.resumo_cliente) {
+        return { explanation: ca.resumo_cliente, cached: true };
+      }
+      // Sem analise — gera on-demand a partir do conteudo bruto
+      const explanation = await this.aiExplainText(
+        pub.conteudo || pub.assunto || pub.tipo_comunicacao || '',
+        lc,
+      );
+      return { explanation, cached: false };
+    }
+
+    // ESAJ
+    const ce = await this.prisma.caseEvent.findFirst({
+      where: { id: movementId, case_id: caseId, type: 'MOVIMENTACAO' },
+      select: { id: true, title: true, description: true, client_explanation: true },
+    });
+    if (!ce) throw new NotFoundException('Movimentacao nao encontrada');
+
+    if (ce.client_explanation) {
+      return { explanation: ce.client_explanation, cached: true };
+    }
+
+    const text = ce.description || ce.title || '';
+    if (!text.trim()) {
+      return { explanation: 'Sem conteúdo para explicar.', cached: false };
+    }
+
+    const explanation = await this.aiExplainText(text, lc);
+
+    // Persiste pra futuras chamadas nao re-pagar IA
+    await this.prisma.caseEvent.update({
+      where: { id: ce.id },
+      data: { client_explanation: explanation },
+    }).catch((e: any) => this.logger.warn(`[PORTAL/explain] Cache failed: ${e.message}`));
+
+    return { explanation, cached: false };
+  }
+
+  /**
+   * Chama IA pra explicar texto juridico em linguagem leiga.
+   * Prompt curto, modelo barato. Tom acolhedor, max 4 frases.
+   */
+  private async aiExplainText(
+    text: string,
+    legalCase: {
+      case_number: string | null;
+      action_type: string | null;
+      legal_area: string | null;
+      tracking_stage: string | null;
+      opposing_party: string | null;
+      client_is_author: boolean;
+    },
+  ): Promise<string> {
+    const aiConfig = await this.settings.getAiConfig();
+    const model = aiConfig.defaultModel || 'gpt-4.1-mini';
+    const isAnthropic = model.startsWith('claude');
+
+    const polo = legalCase.client_is_author ? 'autor' : 'reu';
+    const systemPrompt =
+      `Voce eh "Sophia", assistente do escritorio André Lustosa Advogados. Sua ` +
+      `tarefa eh explicar um andamento processual em linguagem ACESSIVEL pra o ` +
+      `cliente leigo, que NAO sabe direito. Regras:\n` +
+      `- Maximo 4 frases curtas\n` +
+      `- ZERO juridiquês: nao use termos como "polo passivo", "exordial", "decisum"\n` +
+      `- Diga o que aconteceu E (se aplicavel) o que vem a seguir / o que o cliente deve fazer/esperar\n` +
+      `- Nao invente fatos que nao estao no texto\n` +
+      `- Tom: amigavel, acolhedor, profissional. Pode usar "voce".\n` +
+      `- Pode comecar com algo como "Olha so:" ou "Esse andamento significa que..."\n` +
+      `- NUNCA diga "como Sophia" ou repita seu nome\n` +
+      `Retorne APENAS o texto da explicacao, sem cabecalhos.`;
+
+    const userPrompt =
+      `CONTEXTO DO PROCESSO:\n` +
+      `- Tipo: ${legalCase.action_type || legalCase.legal_area || 'Processo Judicial'}\n` +
+      `- Numero: ${legalCase.case_number || 'N/A'}\n` +
+      `- Cliente eh: ${polo}\n` +
+      `${legalCase.opposing_party ? `- Parte contraria: ${legalCase.opposing_party}\n` : ''}` +
+      `${legalCase.tracking_stage ? `- Fase atual: ${legalCase.tracking_stage}\n` : ''}` +
+      `\nMOVIMENTACAO:\n${text.slice(0, 4000)}\n\n` +
+      `Explique pro cliente leigo o que essa movimentacao significa.`;
+
+    if (isAnthropic) {
+      const apiKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY nao configurada');
+      const client = new Anthropic({ apiKey });
+      const msg = await client.messages.create({
+        model,
+        max_tokens: 400,
+        temperature: 0.4,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+      return ((msg.content[0] as any)?.text || '').trim();
+    } else {
+      const apiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error('OPENAI_API_KEY nao configurada');
+      const openai = new OpenAI({ apiKey });
+      const completion = await openai.chat.completions.create({
+        model,
+        temperature: 0.4,
+        max_tokens: 400,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      return (completion.choices[0]?.message?.content || '').trim();
+    }
   }
 
   /**

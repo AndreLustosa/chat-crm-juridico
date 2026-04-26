@@ -604,6 +604,7 @@ model CaseEvent {
   movement_hash       String?   @unique  // SHA256(case_number|date|description)
   notified_at         DateTime?           // quando WhatsApp foi enviado ao advogado
   client_notified_at  DateTime?           // quando WhatsApp foi enviado ao cliente
+  client_explanation  String?             // explicação leiga gerada pela IA on-demand (cache)
   source_raw          Json?               // dado bruto da movimentação
 
   legal_case LegalCase @relation(fields: [case_id], references: [id], onDelete: Cascade)

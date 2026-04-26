@@ -4,10 +4,11 @@ import { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Loader2, Calendar, AlertCircle, Scale, Sparkles, Clock,
-  ChevronDown, ChevronUp, Microscope, Gavel, ArrowRight,
-  FileText, AlertTriangle, MapPin,
+  ChevronDown, ChevronUp, Microscope, Gavel,
+  FileText, AlertTriangle, MapPin, MessageCircle,
 } from 'lucide-react';
 import { PortalHeader } from '../../components/PortalHeader';
+import { ProcessRoadmap } from '../../components/ProcessRoadmap';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
@@ -46,27 +47,11 @@ type Movement = {
   id: string;
   date: string;
   title: string;
-  summary_lay: string;
-  detail_technical: string;
+  content: string;                    // texto cru juridico
+  explanation_cached: string | null;  // explicacao leiga ja gerada (cache)
   next_step_lay?: string | null;
-  stage_lay?: string | null;
   deadline_lay?: string | null;
   orientation_lay?: string | null;
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  DISTRIBUIDO: 'Distribuído',
-  CITACAO: 'Citação',
-  CONTESTACAO: 'Contestação',
-  REPLICA: 'Réplica',
-  PERICIA_AGENDADA: 'Perícia Agendada',
-  INSTRUCAO: 'Instrução / Audiência',
-  ALEGACOES_FINAIS: 'Alegações Finais',
-  JULGAMENTO: 'Julgamento',
-  RECURSO: 'Recurso',
-  TRANSITADO: 'Transitado em Julgado',
-  EXECUCAO: 'Execução',
-  ENCERRADO: 'Encerrado',
 };
 
 const TYPE_CONFIG: Record<string, { label: string; icon: React.ComponentType<{ size?: number; className?: string }>; color: string }> = {
@@ -126,6 +111,12 @@ export default function ProcessDetailPage({ params }: { params: Promise<{ id: st
       .finally(() => setLoading(false));
   }, [caseId, router]);
 
+  function updateMovementExplanation(movKey: string, explanation: string) {
+    setMovements(prev => prev.map(m =>
+      `${m.kind}-${m.id}` === movKey ? { ...m, explanation_cached: explanation } : m,
+    ));
+  }
+
   if (loading) {
     return (
       <>
@@ -154,8 +145,6 @@ export default function ProcessDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const stageLabel = detail.tracking_stage ? (STAGE_LABELS[detail.tracking_stage] || detail.tracking_stage) : null;
-
   return (
     <>
       <PortalHeader showBack />
@@ -167,21 +156,12 @@ export default function ProcessDetailPage({ params }: { params: Promise<{ id: st
             <h1 className="text-2xl font-bold">{detail.action_type || detail.legal_area || 'Processo Judicial'}</h1>
           </div>
           {detail.case_number && (
-            <p className="text-sm font-mono text-white/50 mb-3">{detail.case_number}</p>
+            <p className="text-sm font-mono text-white/50">{detail.case_number}</p>
           )}
-          <div className="flex flex-wrap gap-2">
-            {stageLabel && (
-              <span className="text-[11px] font-bold text-[#A89048] uppercase tracking-wider px-3 py-1 rounded-full bg-[#A89048]/10 border border-[#A89048]/30">
-                {stageLabel}
-              </span>
-            )}
-            {detail.legal_area && detail.legal_area !== detail.action_type && (
-              <span className="text-[11px] font-bold text-white/60 uppercase tracking-wider px-3 py-1 rounded-full bg-white/5 border border-white/10">
-                {detail.legal_area}
-              </span>
-            )}
-          </div>
         </div>
+
+        {/* Roadmap "corrida" — visualizacao ludica do progresso */}
+        <ProcessRoadmap currentStage={detail.tracking_stage} />
 
         {/* Próximos eventos em destaque */}
         {events.length > 0 && (
@@ -240,7 +220,14 @@ export default function ProcessDetailPage({ params }: { params: Promise<{ id: st
               </div>
             ) : (
               <div className="space-y-3">
-                {movements.map(m => <MovementCard key={`${m.kind}-${m.id}`} m={m} />)}
+                {movements.map(m => (
+                  <MovementCard
+                    key={`${m.kind}-${m.id}`}
+                    m={m}
+                    caseId={caseId}
+                    onExplained={(text) => updateMovementExplanation(`${m.kind}-${m.id}`, text)}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -295,10 +282,50 @@ function EventCard({ e }: { e: EventItem }) {
   );
 }
 
-function MovementCard({ m }: { m: Movement }) {
-  const [expanded, setExpanded] = useState(false);
+function MovementCard({
+  m,
+  caseId,
+  onExplained,
+}: {
+  m: Movement;
+  caseId: string;
+  onExplained: (explanation: string) => void;
+}) {
   const isDjen = m.kind === 'djen';
-  const hasDetail = m.detail_technical && m.detail_technical !== m.summary_lay;
+  const [showExplanation, setShowExplanation] = useState(!!m.explanation_cached); // se ja tem cache, abre
+  const [loadingExplanation, setLoadingExplanation] = useState(false);
+  const [explanationError, setExplanationError] = useState<string | null>(null);
+
+  async function pedirExplicacao() {
+    if (m.explanation_cached) {
+      setShowExplanation(true);
+      return;
+    }
+    setLoadingExplanation(true);
+    setExplanationError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/portal/processes/${caseId}/movements/${m.id}/explain`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: m.kind }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      onExplained(data.explanation);
+      setShowExplanation(true);
+    } catch (e: any) {
+      setExplanationError(e.message || 'Falha ao gerar explicação');
+    } finally {
+      setLoadingExplanation(false);
+    }
+  }
 
   return (
     <div className="rounded-xl border border-white/10 bg-[#0d0d14] p-4">
@@ -309,7 +336,7 @@ function MovementCard({ m }: { m: Movement }) {
           {isDjen ? <Sparkles className="text-violet-400" size={16} /> : <Scale className="text-blue-400" size={16} />}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1.5">
             <span className={`text-[9px] font-bold uppercase tracking-wider ${isDjen ? 'text-violet-400' : 'text-blue-400'}`}>
               {isDjen ? 'Diário Oficial' : 'Tribunal'}
             </span>
@@ -317,46 +344,72 @@ function MovementCard({ m }: { m: Movement }) {
             <span className="text-[10px] text-white/50">{formatBrDate(m.date)}</span>
           </div>
           <h3 className="font-bold text-sm text-white mb-2 leading-snug">{m.title}</h3>
-          <p className="text-sm text-white/80 leading-relaxed whitespace-pre-line">{m.summary_lay}</p>
 
-          {/* Campos auxiliares do DJEN */}
-          {isDjen && (m.next_step_lay || m.deadline_lay || m.orientation_lay) && (
-            <div className="mt-3 space-y-1.5">
-              {m.deadline_lay && (
-                <p className="text-xs flex items-start gap-2">
-                  <Clock size={11} className="text-amber-400 shrink-0 mt-0.5" />
-                  <span><strong className="text-amber-300">Prazo:</strong> <span className="text-white/80">{m.deadline_lay}</span></span>
-                </p>
+          {/* Texto cru — exibido por padrao */}
+          <div className="text-[13px] text-white/80 leading-relaxed whitespace-pre-line font-mono bg-black/20 rounded-lg px-3 py-2 max-h-64 overflow-y-auto custom-scrollbar">
+            {m.content || m.title}
+          </div>
+
+          {/* Botao "Pedir explicacao" */}
+          {!showExplanation && (
+            <button
+              onClick={pedirExplicacao}
+              disabled={loadingExplanation}
+              className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-500/15 border border-violet-500/30 hover:bg-violet-500/25 text-violet-300 text-xs font-bold transition-colors disabled:opacity-50"
+            >
+              {loadingExplanation ? (
+                <><Loader2 className="animate-spin" size={12} /> Sophia está pensando…</>
+              ) : (
+                <><MessageCircle size={12} /> Pedir explicação à Sophia</>
               )}
-              {m.next_step_lay && (
-                <p className="text-xs flex items-start gap-2">
-                  <ArrowRight size={11} className="text-emerald-400 shrink-0 mt-0.5" />
-                  <span><strong className="text-emerald-300">Próximo passo:</strong> <span className="text-white/80">{m.next_step_lay}</span></span>
-                </p>
-              )}
-              {m.orientation_lay && (
-                <p className="text-xs flex items-start gap-2">
-                  <AlertTriangle size={11} className="text-blue-400 shrink-0 mt-0.5" />
-                  <span><strong className="text-blue-300">Orientação:</strong> <span className="text-white/80">{m.orientation_lay}</span></span>
-                </p>
-              )}
-            </div>
+            </button>
           )}
 
-          {hasDetail && (
-            <div className="mt-3 pt-3 border-t border-white/5">
-              <button
-                onClick={() => setExpanded(!expanded)}
-                className="text-[11px] text-white/50 hover:text-white/80 flex items-center gap-1 transition-colors"
-              >
-                {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                {expanded ? 'Ocultar texto técnico' : 'Ver texto técnico (jurídico)'}
-              </button>
-              {expanded && (
-                <div className="mt-2 text-xs text-white/60 leading-relaxed whitespace-pre-line max-h-64 overflow-y-auto custom-scrollbar font-mono">
-                  {m.detail_technical}
+          {explanationError && (
+            <p className="mt-2 text-xs text-red-400">{explanationError}</p>
+          )}
+
+          {/* Explicacao da Sophia */}
+          {showExplanation && m.explanation_cached && (
+            <div className="mt-3 rounded-xl border border-violet-500/30 bg-violet-500/5 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-full bg-violet-500/20 border border-violet-500/40 flex items-center justify-center">
+                  <Sparkles size={11} className="text-violet-400" />
+                </div>
+                <span className="text-xs font-bold text-violet-300">Sophia explica</span>
+              </div>
+              <p className="text-sm text-white/90 leading-relaxed whitespace-pre-line">{m.explanation_cached}</p>
+
+              {/* Auxiliares do DJEN (so se forem campos novos da analise) */}
+              {(m.next_step_lay || m.deadline_lay || m.orientation_lay) && (
+                <div className="mt-3 pt-3 border-t border-violet-500/20 space-y-1.5">
+                  {m.deadline_lay && (
+                    <p className="text-xs flex items-start gap-2">
+                      <Clock size={11} className="text-amber-400 shrink-0 mt-0.5" />
+                      <span><strong className="text-amber-300">Prazo:</strong> <span className="text-white/80">{m.deadline_lay}</span></span>
+                    </p>
+                  )}
+                  {m.next_step_lay && (
+                    <p className="text-xs flex items-start gap-2">
+                      <span className="text-emerald-400 shrink-0 mt-0.5">→</span>
+                      <span><strong className="text-emerald-300">Próximo passo:</strong> <span className="text-white/80">{m.next_step_lay}</span></span>
+                    </p>
+                  )}
+                  {m.orientation_lay && (
+                    <p className="text-xs flex items-start gap-2">
+                      <AlertTriangle size={11} className="text-blue-400 shrink-0 mt-0.5" />
+                      <span><strong className="text-blue-300">Orientação:</strong> <span className="text-white/80">{m.orientation_lay}</span></span>
+                    </p>
+                  )}
                 </div>
               )}
+
+              <button
+                onClick={() => setShowExplanation(false)}
+                className="mt-3 text-[11px] text-white/40 hover:text-white/70 flex items-center gap-1 transition-colors"
+              >
+                <ChevronUp size={12} /> Ocultar explicação
+              </button>
             </div>
           )}
         </div>

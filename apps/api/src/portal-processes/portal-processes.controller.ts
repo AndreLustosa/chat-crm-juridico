@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, UseGuards, Body, BadRequestException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '../auth/decorators/public.decorator';
 import { ClientJwtAuthGuard } from '../portal-auth/client-jwt-auth.guard';
 import { CurrentClient } from '../portal-auth/current-client.decorator';
@@ -55,5 +56,29 @@ export class PortalProcessesController {
     @Param('id') caseId: string,
   ) {
     return this.service.listEvents(client.id, caseId);
+  }
+
+  /**
+   * "Pedir explicacao a Sophia" — IA traduz a movimentacao em linguagem
+   * leiga. Cacheado em CaseEvent.client_explanation pra ESAJ; pra DJEN
+   * usa o resumo_cliente ja gerado pelo sync.
+   *
+   * Throttle: 20/min/IP — gasto de tokens controlado mas operacional pro
+   * cliente clicar em varias movimentacoes na sequencia.
+   */
+  @Public()
+  @UseGuards(ClientJwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post(':id/movements/:movId/explain')
+  async explain(
+    @CurrentClient() client: ClientUser,
+    @Param('id') caseId: string,
+    @Param('movId') movId: string,
+    @Body() body: { kind: 'esaj' | 'djen' },
+  ) {
+    if (body.kind !== 'esaj' && body.kind !== 'djen') {
+      throw new BadRequestException('kind deve ser "esaj" ou "djen"');
+    }
+    return this.service.explainMovement(client.id, caseId, body.kind, movId);
   }
 }
