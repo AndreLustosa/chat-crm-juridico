@@ -253,16 +253,19 @@ export class PortalSchedulingService {
       );
     }
 
+    // created_by_id deve referenciar User (FK), nao Lead — viola constraint
+    // se passar lead.id. Usa o proprio advogado como creator; a descricao
+    // ja deixa claro que foi "agendada pelo cliente via portal".
     const event = await this.calendar.create({
       type: 'CONSULTA',
       title: `Consulta: ${lead.name || 'Cliente'} — ${reason.slice(0, 80)}`,
-      description: `Agendada pelo cliente via portal.\n\nMotivo: ${reason}${data.notes ? `\n\nObservações: ${data.notes}` : ''}`,
+      description: `🔵 Agendada pelo cliente via portal.\n\nMotivo: ${reason}${data.notes ? `\n\nObservações do cliente: ${data.notes}` : ''}`,
       start_at: startAt.toISOString(),
       end_at: endAt.toISOString(),
       lead_id: lead.id,
       assigned_user_id: lawyer.id,
       tenant_id: lead.tenant_id || undefined,
-      created_by_id: lead.id, // marcador "criado pelo cliente"
+      created_by_id: lawyer.id,
       priority: 'NORMAL',
     });
 
