@@ -142,12 +142,41 @@ model Lead {
   notas_fiscais             NotaFiscal[]
   broadcast_items           BroadcastItem[]
   lead_honorarios           LeadHonorario[]
+  client_login_codes        ClientLoginCode[]
   cpf_cnpj                  String? // CPF ou CNPJ — facilita match com Asaas
 
   @@index([tenant_id, phone])
   @@index([stage])
   @@index([cpf_cnpj])
   @@index([is_client])
+}
+
+/**
+ * Codigo OTP de login do cliente no portal (passwordless via WhatsApp).
+ *
+ * Fluxo:
+ *   1. Cliente digita telefone no /portal/login
+ *   2. Backend cria ClientLoginCode com sha256(codigo) e TTL 10min
+ *   3. WhatsApp do cliente recebe "Seu codigo: 1234"
+ *   4. Cliente digita 4 digitos, backend valida e emite JWT (audience=client)
+ *
+ * code_hash: NUNCA armazenar plaintext. sha256(code) — sufientemente seguro
+ * pra OTP curto + TTL 10min + max 5 attempts.
+ */
+model ClientLoginCode {
+  id          String    @id @default(uuid())
+  lead_id     String
+  code_hash   String    // sha256 do codigo de 4 digitos
+  expires_at  DateTime  // now + 10min
+  attempts    Int       @default(0)
+  used_at     DateTime?
+  ip_address  String?
+  created_at  DateTime  @default(now())
+
+  lead Lead @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+
+  @@index([lead_id, expires_at])
+  @@index([lead_id, used_at])
 }
 
 model Conversation {

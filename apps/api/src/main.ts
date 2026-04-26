@@ -8,6 +8,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as express from 'express';
+import cookieParser = require('cookie-parser');
 
 // Carregar .env da raiz do projeto antes de qualquer coisa
 const possiblePaths = [
@@ -47,6 +48,10 @@ async function bootstrap() {
     }),
   );
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // Cookie parser — necessario pro ClientJwtAuthGuard ler portal_token
+  // (auth do portal do cliente, fluxo httpOnly cookie). Adicionado 2026-04-26.
+  app.use(cookieParser());
 
   // Validacao global de DTOs via class-validator
   app.useGlobalPipes(new ValidationPipe({
