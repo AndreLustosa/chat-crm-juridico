@@ -572,14 +572,16 @@ model CaseEvent {
   created_at    DateTime  @default(now())
 
   // Campos para sync ESAJ — dedup e notificação
-  movement_hash String?   @unique  // SHA256(case_number|date|description)
-  notified_at   DateTime?           // quando WhatsApp foi enviado ao advogado
-  source_raw    Json?               // dado bruto da movimentação
+  movement_hash       String?   @unique  // SHA256(case_number|date|description)
+  notified_at         DateTime?           // quando WhatsApp foi enviado ao advogado
+  client_notified_at  DateTime?           // quando WhatsApp foi enviado ao cliente
+  source_raw          Json?               // dado bruto da movimentação
 
   legal_case LegalCase @relation(fields: [case_id], references: [id], onDelete: Cascade)
 
   @@index([case_id, created_at])
   @@index([source, notified_at])
+  @@index([source, client_notified_at])
 }
 
 model TaskComment {

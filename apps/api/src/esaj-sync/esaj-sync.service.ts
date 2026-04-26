@@ -8,6 +8,8 @@ import { SettingsService } from '../settings/settings.service';
 import { LockService } from '../common/locks/lock.service';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -61,29 +63,31 @@ export class EsajSyncService {
 
   /**
    * Cron de repescagem: a cada hora dentro do horario comercial, pega
-   * CaseEvents tipo MOVIMENTACAO ainda nao notificados ao advogado e
-   * envia o WhatsApp.
+   * CaseEvents tipo MOVIMENTACAO ainda nao notificados (tanto advogado
+   * quanto cliente) e envia os WhatsApps pendentes.
    *
    * Garante zero perda quando:
-   *  - Sync rodou fora do horario (manual a noite, fim de semana antes)
+   *  - Sync rodou fora do horario (manual a noite)
    *  - WhatsApp falhou na hora (instancia offline temporario)
    *  - Movimento criado por scraping ad-hoc fora da janela
    *
    * Janela 30 dias evita reenviar movimentos antigos que perderam
-   * relevancia. Agrupa por advogado pra mandar 1 mensagem com varios
-   * processos quando aplicavel.
+   * relevancia. Agrupa por processo pra mandar 1 mensagem com varios
+   * movimentos.
    *
-   * Adicionado 2026-04-26.
+   * Adicionado 2026-04-26 (politica zero perda + cliente notificado).
    */
   @Cron('30 8-19 * * *', { timeZone: 'America/Maceio' })
-  async retryPendingLawyerNotifications() {
-    const result = await this.lock.withLock('esaj-retry-notify', 5 * 60, async () => {
+  async retryPendingEsajNotifications() {
+    const result = await this.lock.withLock('esaj-retry-notify', 10 * 60, async () => {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      // Pega tudo que tem PELO MENOS uma das pontas pendentes (advogado OU cliente).
+      // Em uma unica query, processamos os 2 fluxos depois.
       const pending = await this.prisma.caseEvent.findMany({
         where: {
           type: 'MOVIMENTACAO',
           source: 'ESAJ',
-          notified_at: null,
+          OR: [{ notified_at: null }, { client_notified_at: null }],
           created_at: { gte: thirtyDaysAgo },
           legal_case: {
             in_tracking: true,
@@ -94,8 +98,8 @@ export class EsajSyncService {
         include: {
           legal_case: {
             select: {
-              id: true, case_number: true, tracking_stage: true,
-              tenant_id: true, lead_id: true,
+              id: true, case_number: true, legal_area: true, action_type: true,
+              tracking_stage: true, tenant_id: true, lead_id: true,
               lead: { select: { id: true, name: true, phone: true } },
               lawyer: { select: { id: true, name: true, phone: true } },
             },
@@ -107,8 +111,7 @@ export class EsajSyncService {
 
       if (pending.length === 0) return 0;
 
-      // Agrupa por case_id pra mandar 1 mensagem com todos os movimentos novos
-      // do mesmo processo (em vez de N WhatsApps).
+      // Agrupa por case_id (1 mensagem por processo, nao por movimento).
       const byCase = new Map<string, typeof pending>();
       for (const ev of pending) {
         const arr = byCase.get(ev.case_id) || [];
@@ -118,27 +121,51 @@ export class EsajSyncService {
 
       this.logger.log(`[ESAJ-RETRY] ${pending.length} movimento(s) pendente(s) em ${byCase.size} processo(s)`);
 
-      let totalNotified = 0;
+      let lawyerNotified = 0;
+      let clientNotified = 0;
       for (const [caseId, events] of byCase.entries()) {
         const lc = events[0].legal_case;
-        if (!lc.lawyer?.phone) continue;
-        try {
-          const movements = events.map(e => ({
-            date: (e.event_date || e.created_at).toLocaleDateString('pt-BR'),
-            description: e.description || e.title,
-          }));
-          await this.sendLawyerNotification(lc, movements, null);
-          await this.prisma.caseEvent.updateMany({
-            where: { id: { in: events.map(e => e.id) } },
-            data: { notified_at: new Date() },
-          });
-          totalNotified += events.length;
-        } catch (e: any) {
-          this.logger.warn(`[ESAJ-RETRY] Falha pra ${lc.case_number}: ${e.message}`);
+        const movements = events.map(e => ({
+          date: (e.event_date || e.created_at).toLocaleDateString('pt-BR'),
+          description: e.description || e.title,
+        }));
+
+        // ── Advogado ──
+        const lawyerPending = events.filter(e => !e.notified_at);
+        if (lawyerPending.length > 0 && lc.lawyer?.phone) {
+          try {
+            await this.sendLawyerNotification(lc, movements, null);
+            await this.prisma.caseEvent.updateMany({
+              where: { id: { in: lawyerPending.map(e => e.id) } },
+              data: { notified_at: new Date() },
+            });
+            lawyerNotified += lawyerPending.length;
+          } catch (e: any) {
+            this.logger.warn(`[ESAJ-RETRY/adv] Falha pra ${lc.case_number}: ${e.message}`);
+          }
+        }
+
+        // ── Cliente ──
+        const clientPending = events.filter(e => !e.client_notified_at);
+        if (clientPending.length > 0 && lc.lead?.phone) {
+          try {
+            const sent = await this.sendClientNotification(lc, movements, null);
+            if (sent) {
+              await this.prisma.caseEvent.updateMany({
+                where: { id: { in: clientPending.map(e => e.id) } },
+                data: { client_notified_at: new Date() },
+              });
+              clientNotified += clientPending.length;
+            }
+          } catch (e: any) {
+            this.logger.warn(`[ESAJ-RETRY/cli] Falha pra ${lc.case_number}: ${e.message}`);
+          }
         }
       }
-      this.logger.log(`[ESAJ-RETRY] ${totalNotified}/${pending.length} movimentos notificados`);
-      return totalNotified;
+      this.logger.log(
+        `[ESAJ-RETRY] advogado: ${lawyerNotified}/${pending.length} | cliente: ${clientNotified}/${pending.length}`,
+      );
+      return lawyerNotified + clientNotified;
     });
     if (result === null) {
       this.logger.warn('[ESAJ-RETRY] Skipado — outra replica ja esta rodando');
@@ -182,6 +209,8 @@ export class EsajSyncService {
         select: {
           id: true,
           case_number: true,
+          legal_area: true,
+          action_type: true,
           tracking_stage: true,
           tenant_id: true,
           lead_id: true,
@@ -268,24 +297,36 @@ export class EsajSyncService {
             this.logger.log(`[SYNC] ${formatCNJ(digits)}: fase ${oldStage} → ${newStage}`);
           }
 
-          // Enviar WhatsApp ao advogado
+          const stageChangePayload = oldStage !== newStage ? { from: oldStage, to: newStage } : null;
+          const hashes = newMovements.map(m => movementHash(digits, m.date, m.description));
+
+          // ── Notifica advogado (so em horario comercial) ──
           if (isBusinessHours() && legalCase.lawyer?.phone) {
             try {
-              await this.sendLawyerNotification(
-                legalCase,
-                newMovements,
-                oldStage !== newStage ? { from: oldStage, to: newStage } : null,
-              );
+              await this.sendLawyerNotification(legalCase, newMovements, stageChangePayload);
               totalNotifications++;
-
-              // Marcar como notificado
-              const hashes = newMovements.map(m => movementHash(digits, m.date, m.description));
               await this.prisma.caseEvent.updateMany({
                 where: { movement_hash: { in: hashes } },
                 data: { notified_at: new Date() },
               });
             } catch (err: any) {
-              this.logger.warn(`[SYNC] Falha WhatsApp para ${legalCase.lawyer.name}: ${err.message}`);
+              this.logger.warn(`[SYNC] Falha WhatsApp advogado ${legalCase.lawyer.name}: ${err.message}`);
+            }
+          }
+
+          // ── Notifica cliente (mesma condicao). Se fora do horario,
+          //    o cron de repescagem retryPendingClientEsajNotifications pega.
+          if (isBusinessHours() && legalCase.lead?.phone) {
+            try {
+              const sent = await this.sendClientNotification(legalCase, newMovements, stageChangePayload);
+              if (sent) {
+                await this.prisma.caseEvent.updateMany({
+                  where: { movement_hash: { in: hashes } },
+                  data: { client_notified_at: new Date() },
+                });
+              }
+            } catch (err: any) {
+              this.logger.warn(`[SYNC] Falha WhatsApp cliente ${legalCase.lead?.name}: ${err.message}`);
             }
           }
         } catch (err: any) {
@@ -388,6 +429,181 @@ export class EsajSyncService {
       return;
     }
     this.logger.log(`[NOTIFY] WhatsApp enviado para ${legalCase.lawyer?.name} (${lawyerPhone})`);
+  }
+
+  /**
+   * Notifica o CLIENTE (lead) sobre movimentacoes ESAJ — em linguagem leiga
+   * gerada pela IA, com disclaimer de mensagem automatica.
+   *
+   * Politica unificada 2026-04-26 (André): cliente recebe TODAS as movimentacoes,
+   * com explicacao do que se trata, deixando claro que eh mensagem automatica
+   * do sistema. Nao filtra por tipo — cliente decide o que importa, mas nunca
+   * fica sem saber.
+   *
+   * Dedup contra DJEN: se o mesmo processo ja recebeu notificacao DJEN
+   * dentro de uma janela de 2 dias com data semelhante, pula. Evita o cliente
+   * receber 2 mensagens praticamente identicas (DJEN cobre publicacoes que o
+   * ESAJ tambem captura — historicamente sao a mesma fonte de informacao
+   * processual).
+   */
+  private async sendClientNotification(
+    legalCase: {
+      id: string;
+      case_number: string | null;
+      legal_area: string | null;
+      action_type: string | null;
+      tracking_stage: string | null;
+      lead: { id: string; name: string | null; phone: string | null } | null;
+    },
+    newMovements: Array<{ date: string; description: string }>,
+    stageChange: { from: string | null; to: string } | null,
+  ): Promise<boolean> {
+    const lead = legalCase.lead;
+    if (!lead?.phone) return false;
+
+    // Verifica setting (mesmo toggle do DJEN — operador desliga ambos juntos)
+    const notifyEnabled = await this.settings.get('DJEN_NOTIFY_CLIENT');
+    if (notifyEnabled === 'false') return false;
+
+    // Dedup contra DJEN: se ha publicacao DJEN do mesmo processo notificada
+    // ao cliente nas ultimas 48h, assume que ja foi comunicado e pula.
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const recentDjen = await this.prisma.djenPublication.findFirst({
+      where: {
+        legal_case_id: legalCase.id,
+        client_notified_at: { not: null, gte: twoDaysAgo },
+      },
+      select: { id: true, data_disponibilizacao: true },
+    });
+    if (recentDjen) {
+      this.logger.log(
+        `[CLIENT-NOTIFY] Pulando ESAJ pra ${legalCase.case_number} — ja avisado via DJEN ` +
+        `(pub ${recentDjen.id} em ${recentDjen.data_disponibilizacao.toISOString().slice(0, 10)})`,
+      );
+      return false;
+    }
+
+    const clientPhone = normalizeBrazilianPhone(lead.phone);
+    const firstName = (lead.name || 'Cliente').split(' ')[0];
+    const caseNumber = formatCNJ((legalCase.case_number || '').replace(/\D/g, ''));
+
+    // Gera explicacao leiga via IA — prompt curto, modelo barato.
+    let explicacao = '';
+    try {
+      explicacao = await this.generateClientFriendlyExplanation(
+        legalCase, newMovements, stageChange,
+      );
+    } catch (e: any) {
+      this.logger.warn(`[CLIENT-NOTIFY] IA falhou (${e.message}) — usando texto tecnico`);
+      // Fallback: usa lista crua
+      explicacao = newMovements
+        .slice(0, 5)
+        .map(m => `• ${m.date} — ${m.description.slice(0, 150)}`)
+        .join('\n');
+    }
+
+    // Buscar instancia WhatsApp do lead (mesma da ultima conversa)
+    const lastConvo = await this.prisma.conversation.findFirst({
+      where: { lead_id: lead.id },
+      orderBy: { last_message_at: 'desc' },
+      select: { instance_name: true },
+    });
+    const instance = lastConvo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
+
+    const message =
+      `⚖️ *Atualização do seu processo*\n\n` +
+      `Olá, ${firstName}! Houve uma nova movimentação no seu processo nº ${caseNumber}.\n\n` +
+      `📖 *O que aconteceu:*\n${explicacao}\n\n` +
+      (stageChange
+        ? `📊 *Fase atual do processo:* ${stageChange.to.replace(/_/g, ' ')}\n\n`
+        : '') +
+      `Nosso advogado já foi avisado e está acompanhando. Se tiver dúvidas, pode responder esta mensagem.\n\n` +
+      `🤖 _Esta é uma mensagem automática do sistema, gerada a partir de informações do tribunal._\n\n` +
+      `_André Lustosa Advogados_`;
+
+    try {
+      const result: any = await this.whatsapp.sendText(clientPhone, message, instance);
+      if (!result || result?.statusCode >= 400 || result?.error) {
+        this.logger.warn(
+          `[CLIENT-NOTIFY] Falha pra ${firstName} (${clientPhone}): ` +
+          `Evolution API ${result?.statusCode} — ${JSON.stringify(result)}`,
+        );
+        return false;
+      }
+      this.logger.log(`[CLIENT-NOTIFY] WhatsApp enviado pra ${firstName} (${clientPhone}) — processo ${caseNumber}`);
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`[CLIENT-NOTIFY] Falha ao enviar: ${e.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Pede pra IA explicar movimentos processuais em linguagem leiga.
+   * 1 chamada por processo (agrupando todos os movimentos novos), nao por
+   * movimento — economiza token. Modelo barato (gpt-4.1-mini ou claude haiku
+   * dependendo da config).
+   */
+  private async generateClientFriendlyExplanation(
+    legalCase: { case_number: string | null; legal_area: string | null; action_type: string | null },
+    movements: Array<{ date: string; description: string }>,
+    stageChange: { from: string | null; to: string } | null,
+  ): Promise<string> {
+    const aiConfig = await this.settings.getAiConfig();
+    const model = aiConfig.defaultModel || 'gpt-4.1-mini';
+    const isAnthropic = model.startsWith('claude');
+
+    const movsTxt = movements
+      .slice(0, 8)
+      .map(m => `${m.date}: ${m.description}`)
+      .join('\n');
+
+    const systemPrompt =
+      `Voce eh assistente de um escritorio de advocacia. Sua tarefa eh explicar ` +
+      `movimentacoes processuais em linguagem ACESSIVEL pra um cliente leigo, sem ` +
+      `juridiquês. Regras:\n` +
+      `- Maximo 4 frases curtas\n` +
+      `- Nao use termos como "polo passivo", "exordial", "decisum" — fale claro\n` +
+      `- Se houver mais de 1 movimento, agrupe a explicacao em uma narrativa fluida\n` +
+      `- Diga o que aconteceu E (se aplicavel) o que vem a seguir / o que o cliente deve esperar\n` +
+      `- Nao invente fatos que nao estao nos movimentos\n` +
+      `- Tom acolhedor mas profissional\n` +
+      `Retorne APENAS o texto da explicacao, sem cabecalhos.`;
+
+    const userPrompt =
+      `Processo: ${legalCase.case_number || 'N/A'}\n` +
+      `Area: ${legalCase.legal_area || 'N/A'} — ${legalCase.action_type || ''}\n` +
+      `${stageChange ? `Mudanca de fase: ${stageChange.from || 'N/A'} -> ${stageChange.to}\n` : ''}` +
+      `\nNovas movimentacoes:\n${movsTxt}\n\n` +
+      `Explique pro cliente leigo o que esta acontecendo no processo dele.`;
+
+    if (isAnthropic) {
+      const apiKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY nao configurada');
+      const client = new Anthropic({ apiKey });
+      const msg = await client.messages.create({
+        model,
+        max_tokens: 400,
+        temperature: 0.4,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+      return ((msg.content[0] as any)?.text || '').trim();
+    } else {
+      const apiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error('OPENAI_API_KEY nao configurada');
+      const openai = new OpenAI({ apiKey });
+      const completion = await openai.chat.completions.create({
+        model,
+        temperature: 0.4,
+        max_tokens: 400,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      return (completion.choices[0]?.message?.content || '').trim();
+    }
   }
 
   // ─── Helpers ───────────────────────────────────────────────

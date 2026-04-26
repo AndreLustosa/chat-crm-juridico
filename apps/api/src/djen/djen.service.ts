@@ -1721,7 +1721,11 @@ ${pub.conteudo.slice(0, 6000)}`;
       lines.push(``);
       lines.push(`Nosso advogado já foi notificado e está acompanhando. Se tiver dúvidas, pode nos chamar aqui!`);
       lines.push(``);
-      lines.push(`André Lustosa Advogados`);
+      // Disclaimer obrigatorio (politica unificada 2026-04-26): cliente deve
+      // saber que mensagens automaticas foram geradas pelo sistema.
+      lines.push(`🤖 _Esta é uma mensagem automática do sistema, gerada a partir de informações do tribunal._`);
+      lines.push(``);
+      lines.push(`_André Lustosa Advogados_`);
 
       message = lines.join('\n');
     }
