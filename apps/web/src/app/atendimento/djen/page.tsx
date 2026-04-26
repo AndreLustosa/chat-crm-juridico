@@ -1326,8 +1326,8 @@ function AiPanel({
         {analysis && !loading && (
           <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
 
-            {/* Col 1: Resumo + Urgência + Ação */}
-            <div className="space-y-3">
+            {/* Col 1: Resumo + Urgência + Ação Necessária (esquerda) */}
+            <div className="space-y-3 order-1">
               {analysis.model_used && (
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <Sparkles size={9} className="text-violet-400" />
@@ -1354,8 +1354,10 @@ function AiPanel({
               </div>
             </div>
 
-            {/* Col 2: Tarefa / Audiência / Prazo sugerido */}
-            <div className="space-y-3">
+            {/* Col 3 (visualmente a direita): Sugestao IA da audiencia/prazo/tarefa.
+                Reordem solicitada 2026-04-26 — Contexto Atual fica na col 2 (centro)
+                ANTES da sugestao da IA, pra usuario decidir com contexto. */}
+            <div className="space-y-3 order-3">
               {(() => {
                 const cfg = resolveEventTypeConfig(analysis);
                 const labelUpper = cfg.label.toUpperCase();
@@ -1402,8 +1404,11 @@ function AiPanel({
               })()}
             </div>
 
-            {/* Col 3: Processo + Orientações */}
-            <div className="space-y-3">
+            {/* Col 2 (centro): Contexto Atual + Mover Processo.
+                Aparece ANTES da sugestao da IA via flex order — usuario
+                pediu pra ver estado atual primeiro, depois decidir sobre
+                a sugestao. */}
+            <div className="space-y-3 order-2">
               {/* CONTEXTO DO PROCESSO — etapa atual + eventos ja agendados.
                   Permite o usuario decidir se aceita sugestao da IA sem
                   duplicar evento. Feature 2026-04-26. */}
@@ -1471,11 +1476,13 @@ function AiPanel({
                                 e.type === 'AUDIENCIA' &&
                                 Math.abs(dt.getTime() - new Date(analysis.data_audiencia).getTime()) < 60 * 60 * 1000;
                               return (
-                                <li key={e.id} className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px] ${colorBg}`}>
-                                  <span className="shrink-0 text-[13px] leading-none">{emoji}</span>
+                                <li key={e.id} title={e.title} className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[11px] ${colorBg}`}>
+                                  <span className="shrink-0 text-[13px] leading-none mt-0.5">{emoji}</span>
                                   <div className="flex-1 min-w-0">
-                                    <p className="font-semibold truncate text-foreground">{e.title}</p>
-                                    <p className="text-[10px] opacity-90">{dateStr}</p>
+                                    {/* line-clamp-2 permite ver titulos longos em 2 linhas
+                                        ao inves de truncate que cortava em "...". */}
+                                    <p className="font-semibold text-foreground leading-snug line-clamp-2">{e.title}</p>
+                                    <p className="text-[10px] opacity-90 mt-0.5">{dateStr}</p>
                                     {isAlreadyScheduled && (
                                       <p className="mt-0.5 text-[9px] font-bold text-emerald-300">⚠ ja agendado conforme sugestao IA</p>
                                     )}
