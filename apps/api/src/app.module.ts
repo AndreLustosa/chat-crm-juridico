@@ -51,6 +51,7 @@ import { NotaFiscalModule } from './nota-fiscal/nota-fiscal.module';
 import { MemoriesModule } from './memories/memories.module';
 import { LockModule } from './common/locks/lock.module';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
+import { PortalProcessesModule } from './portal-processes/portal-processes.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -126,6 +127,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     PushModule,
     MemoriesModule,
     PortalAuthModule,
+    PortalProcessesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Phone, Loader2, Lock, ArrowRight, ArrowLeft, LogOut, CheckCircle2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { MessageCircle, Phone, Loader2, Lock, ArrowRight, ArrowLeft, LogOut, CheckCircle2, Scale, FileText, CreditCard, Calendar } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 const WHATSAPP_FALLBACK = 'https://wa.me/5582996390799';
@@ -20,6 +21,7 @@ type ClientMe = { id: string; name: string | null; email: string | null; phone: 
  * Token httpOnly cookie — frontend nao toca em JWT diretamente.
  */
 export default function PortalPage() {
+  const router = useRouter();
   const [stage, setStage] = useState<Stage>('check');
   const [me, setMe] = useState<ClientMe | null>(null);
   const [phone, setPhone] = useState('');
@@ -339,21 +341,25 @@ export default function PortalPage() {
               <FeatureCard
                 title="Seus processos"
                 description="Acompanhe movimentações em tempo real"
-                soon
+                icon={Scale}
+                onClick={() => router.push('/portal/processos')}
               />
               <FeatureCard
                 title="Documentos"
                 description="Procurações, contratos e laudos"
+                icon={FileText}
                 soon
               />
               <FeatureCard
                 title="Pagamentos"
                 description="Honorários e boletos do seu caso"
+                icon={CreditCard}
                 soon
               />
               <FeatureCard
                 title="Agendamentos"
                 description="Marque consulta com seu advogado"
+                icon={Calendar}
                 soon
               />
             </div>
@@ -376,16 +382,45 @@ export default function PortalPage() {
   );
 }
 
-function FeatureCard({ title, description, soon }: { title: string; description: string; soon?: boolean }) {
+function FeatureCard({
+  title,
+  description,
+  soon,
+  icon: Icon,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  soon?: boolean;
+  icon?: React.ComponentType<{ size?: number; className?: string }>;
+  onClick?: () => void;
+}) {
+  const isClickable = !soon && !!onClick;
   return (
-    <div className="rounded-xl border border-white/10 bg-[#0d0d14] p-5 relative">
-      <h3 className="font-bold text-base mb-1">{title}</h3>
-      <p className="text-white/50 text-sm">{description}</p>
+    <button
+      onClick={onClick}
+      disabled={!isClickable}
+      className={`rounded-xl border border-white/10 bg-[#0d0d14] p-5 relative text-left transition-all ${
+        isClickable ? 'hover:border-[#A89048]/50 hover:bg-[#13131c] cursor-pointer' : 'cursor-default'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {Icon && (
+          <div className="w-10 h-10 rounded-lg bg-[#A89048]/15 border border-[#A89048]/30 flex items-center justify-center shrink-0">
+            <Icon size={18} className="text-[#A89048]" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-base mb-1">{title}</h3>
+          <p className="text-white/50 text-sm">{description}</p>
+        </div>
+        {isClickable && <ArrowRight size={16} className="text-[#A89048] shrink-0 mt-1" />}
+      </div>
       {soon && (
         <span className="absolute top-3 right-3 text-[10px] font-bold text-[#A89048] uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#A89048]/10 border border-[#A89048]/30">
           Em breve
         </span>
       )}
-    </div>
+    </button>
   );
 }
