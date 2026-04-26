@@ -5,6 +5,7 @@ import { ClientJwtAuthGuard } from './client-jwt-auth.guard';
 import { CurrentClient } from './current-client.decorator';
 import type { ClientUser } from './current-client.decorator';
 import { Throttle } from '@nestjs/throttler';
+import { Public } from '../auth/decorators/public.decorator';
 
 const COOKIE_NAME = 'portal_token';
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
@@ -20,6 +21,12 @@ const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
 export class PortalAuthController {
   constructor(private readonly authService: PortalAuthService) {}
 
+  // @Public() em todos os endpoints abaixo: o JwtAuthGuard global do app
+  // bloqueia rotas sem auth (audience='user' do advogado), mas /portal/auth/*
+  // sao publicos por design (cliente ainda nao tem token quando solicita
+  // codigo). O ClientJwtAuthGuard separa as rotas autenticadas /portal/* das
+  // de auth — nao usa JwtAuthGuard global pra evitar conflito de audience.
+  @Public()
   @Post('request-code')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
@@ -31,6 +38,7 @@ export class PortalAuthController {
     return this.authService.requestCode(body.phone, ip);
   }
 
+  @Public()
   @Post('verify-code')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -57,6 +65,7 @@ export class PortalAuthController {
     return { ok: true, lead: result.lead };
   }
 
+  @Public()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(@Res({ passthrough: true }) res: Response) {
@@ -64,6 +73,11 @@ export class PortalAuthController {
     return { ok: true };
   }
 
+  // /me NAO leva @Public — usa ClientJwtAuthGuard especificamente. Mas como
+  // o JwtAuthGuard global tambem ativa, precisa @Public pra desligar ele e
+  // deixar SO o ClientJwtAuthGuard ativo. Cuidado: sem @Public, JwtAuthGuard
+  // bloquearia com 401 antes mesmo do ClientJwtAuthGuard rodar.
+  @Public()
   @Get('me')
   @UseGuards(ClientJwtAuthGuard)
   async getMe(@CurrentClient() client: ClientUser) {
