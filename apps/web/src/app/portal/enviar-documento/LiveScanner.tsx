@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Camera, Loader2, X, AlertCircle, Zap, ZapOff } from 'lucide-react';
 
 /**
@@ -34,6 +35,20 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
+  // Mounted flag pra createPortal — evita SSR hydration mismatch (document
+  // so existe no client). Setado true no useEffect de mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // Bloqueia scroll do body enquanto a camera esta aberta — sem isso o
+  // cliente pode scrollar a pagina por tras do overlay e botoes podem
+  // ficar fora da viewport. Restaura ao desmontar.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
 
   // Pede permissao + abre stream da camera traseira
   useEffect(() => {
@@ -157,44 +172,56 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
     }
   }
 
+  // Aborta render no servidor (SSR) — createPortal precisa de document
+  if (!mounted || typeof document === 'undefined') return null;
+
   // Tela de erro (incluindo permissao negada) — oferece fallback pra <input capture>
   if (state === 'denied' || state === 'error') {
-    return (
-      <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <AlertCircle className="text-red-400 mt-0.5 shrink-0" size={20} />
-          <div>
-            <p className="text-red-400 font-bold text-sm">
-              {state === 'denied' ? 'Acesso à câmera negado' : 'Erro na câmera'}
-            </p>
-            <p className="text-red-400/70 text-xs mt-1">{errorMsg}</p>
+    return createPortal(
+      <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-6">
+        <div className="rounded-2xl border border-red-500/30 bg-[#0d0d14] p-6 max-w-md w-full">
+          <div className="flex items-start gap-3 mb-4">
+            <AlertCircle className="text-red-400 mt-0.5 shrink-0" size={20} />
+            <div>
+              <p className="text-red-400 font-bold text-sm">
+                {state === 'denied' ? 'Acesso à câmera negado' : 'Erro na câmera'}
+              </p>
+              <p className="text-red-400/70 text-xs mt-1">{errorMsg}</p>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={onFallback}
+              className="bg-[#A89048] hover:bg-[#B89A50] text-[#0a0a0f] text-sm font-bold px-4 py-2 rounded-full transition-colors"
+            >
+              Usar câmera do celular
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="border border-white/15 hover:border-white/30 text-white text-sm font-bold px-4 py-2 rounded-full transition-colors"
+            >
+              Voltar
+            </button>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={onFallback}
-            className="bg-[#A89048] hover:bg-[#B89A50] text-[#0a0a0f] text-sm font-bold px-4 py-2 rounded-full transition-colors"
-          >
-            Usar câmera do celular
-          </button>
-          <button
-            onClick={onClose}
-            className="border border-white/15 hover:border-white/30 text-white text-sm font-bold px-4 py-2 rounded-full transition-colors"
-          >
-            Voltar
-          </button>
-        </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+  // Renderiza via createPortal direto no body — evita stacking context
+  // do PortalHeader (sticky z-10) ou containers da page com transform/filter
+  // que aprisionariam o `position: fixed` deste overlay.
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-black/80 backdrop-blur-sm">
+      <div className="relative z-10 flex items-center justify-between px-4 py-3 bg-black/80 backdrop-blur-sm">
         <button
+          type="button"
           onClick={onClose}
-          className="p-2 rounded-full text-white/80 hover:bg-white/10 transition-colors"
+          className="p-3 rounded-full text-white/80 hover:bg-white/10 active:bg-white/20 transition-colors touch-manipulation"
           aria-label="Fechar câmera"
         >
           <X size={20} />
@@ -202,16 +229,17 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
         <span className="text-white text-sm font-bold">Scanner</span>
         {torchSupported ? (
           <button
+            type="button"
             onClick={toggleTorch}
-            className={`p-2 rounded-full transition-colors ${
-              torchOn ? 'bg-[#A89048] text-[#0a0a0f]' : 'text-white/80 hover:bg-white/10'
+            className={`p-3 rounded-full transition-colors touch-manipulation ${
+              torchOn ? 'bg-[#A89048] text-[#0a0a0f]' : 'text-white/80 hover:bg-white/10 active:bg-white/20'
             }`}
             aria-label="Alternar flash"
           >
             {torchOn ? <Zap size={18} /> : <ZapOff size={18} />}
           </button>
         ) : (
-          <span className="w-9" /> // placeholder pra centralizar titulo
+          <span className="w-11" /> // placeholder pra centralizar titulo
         )}
       </div>
 
@@ -240,20 +268,22 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
       </div>
 
       {/* Bottom — botao de captura grande estilo Camera nativa */}
-      <div className="px-6 py-6 bg-black/80 backdrop-blur-sm flex items-center justify-center">
+      <div className="relative z-10 px-6 py-6 bg-black/80 backdrop-blur-sm flex items-center justify-center">
         <button
+          type="button"
           onClick={capture}
           disabled={state !== 'ready'}
-          className="relative w-20 h-20 rounded-full bg-white disabled:opacity-50 active:scale-95 transition-transform flex items-center justify-center"
+          className="relative w-20 h-20 rounded-full bg-white disabled:opacity-50 active:scale-95 transition-transform flex items-center justify-center touch-manipulation"
           aria-label="Tirar foto"
         >
-          <div className="absolute inset-1.5 rounded-full border-4 border-[#0a0a0f]" />
-          <div className="absolute inset-3 rounded-full bg-white" />
+          <div className="absolute inset-1.5 rounded-full border-4 border-[#0a0a0f] pointer-events-none" />
+          <div className="absolute inset-3 rounded-full bg-white pointer-events-none" />
           {state === 'capturing' && (
-            <Loader2 className="animate-spin absolute text-[#0a0a0f]" size={28} />
+            <Loader2 className="animate-spin absolute text-[#0a0a0f] pointer-events-none" size={28} />
           )}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
