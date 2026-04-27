@@ -120,12 +120,78 @@ export class NotificationWhatsappProcessor extends WorkerHost {
           ? `${appUrl}/atendimento/crm`
           : appUrl;
 
-      const text = [
-        `🔔 *${notification.title}*`,
-        notification.body || '',
-        '',
-        `Abrir no LexCRM: ${deepLink}`,
-      ].filter(Boolean).join('\n');
+      // ─── Resumo das mensagens recentes do cliente ───────────────────
+      //
+      // Antes (Gianny, 2026-04-26): notificacao mostrava so "Nova mensagem
+      // recebida" — generica. Agora mostra preview das ultimas mensagens
+      // do cliente pra advogado decidir se eh urgente sem precisar abrir
+      // o app.
+      //
+      // Estrategia: pega ate 5 mensagens INBOUND da conversa criadas desde
+      // o ultimo whatsapp_sent_at deste user (ou ultimos 60min), trunca
+      // cada uma em ~120 chars.
+      let messagesPreview = '';
+      let messagesCount = 0;
+      if (notification.notification_type === 'incoming_message' && notification.data?.conversationId) {
+        const conversationId = notification.data.conversationId;
+
+        // Janela: desde o ultimo WhatsApp enviado a este user pra esta
+        // conversa (pra cobrir TODAS as mensagens nao avisadas), com
+        // teto de 60min pra nao incluir conteudo muito antigo.
+        const lastSentToUser = await (this.prisma as any).notification.findFirst({
+          where: {
+            user_id: userId,
+            notification_type: 'incoming_message',
+            data: { path: ['conversationId'], equals: conversationId },
+            whatsapp_sent_at: { not: null },
+            id: { not: notificationId },
+          },
+          orderBy: { whatsapp_sent_at: 'desc' },
+          select: { whatsapp_sent_at: true },
+        });
+        const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000);
+        const since = lastSentToUser?.whatsapp_sent_at && lastSentToUser.whatsapp_sent_at > sixtyMinAgo
+          ? lastSentToUser.whatsapp_sent_at
+          : sixtyMinAgo;
+
+        const messages = await this.prisma.message.findMany({
+          where: {
+            conversation_id: conversationId,
+            direction: 'in',
+            text: { not: null },
+            created_at: { gte: since },
+          },
+          orderBy: { created_at: 'asc' },
+          select: { text: true, created_at: true },
+          take: 10, // pega no max 10, mostra 5
+        });
+
+        messagesCount = messages.length;
+        if (messagesCount > 0) {
+          const previewLines = messages.slice(0, 5).map(m => {
+            const t = (m.text || '').replace(/\s+/g, ' ').trim();
+            return `▸ ${t.length > 120 ? t.slice(0, 117) + '...' : t}`;
+          });
+          if (messagesCount > 5) {
+            previewLines.push(`_+${messagesCount - 5} mensagem(ns)_`);
+          }
+          messagesPreview = previewLines.join('\n');
+        }
+      }
+
+      // Monta o texto final
+      const lines: string[] = [];
+      lines.push(`🔔 *${notification.title}*`);
+      if (messagesPreview) {
+        lines.push('');
+        lines.push(messagesPreview);
+      } else if (notification.body) {
+        // Fallback pra notif que nao seja incoming_message (transfer_request, etc)
+        lines.push(notification.body);
+      }
+      lines.push('');
+      lines.push(`Abrir no LexCRM: ${deepLink}`);
+      const text = lines.join('\n');
 
       await axios.post(
         `${apiUrl}/message/sendText/${instanceName}`,
