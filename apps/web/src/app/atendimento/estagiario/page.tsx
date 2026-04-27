@@ -38,6 +38,10 @@ interface TaskItem {
   status: string;
   start_at: string;
   priority: string;
+  // 'event' = CalendarEvent (PRAZO/TAREFA processual). 'task' = Task orfã
+  // criada via "Nova diligência" (delegacao rapida sem evento). Frontend
+  // usa pra escolher endpoint correto de complete e renderizar badges.
+  kind?: 'event' | 'task';
   lead: { id: string; name: string | null; phone: string } | null;
   legal_case: {
     id: string;
@@ -226,7 +230,7 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 function TaskCard({
   task, onAction, dimmed = false,
 }: {
-  task: TaskItem; onAction: (id: string, action: string) => void; dimmed?: boolean;
+  task: TaskItem; onAction: (id: string, action: string, kind?: 'event' | 'task') => void; dimmed?: boolean;
 }) {
   const router = useRouter();
   const due = task.start_at ? daysUntil(task.start_at) : null;
@@ -235,14 +239,20 @@ function TaskCard({
   const area = task.legal_case?.legal_area || null;
   const caseNumber = task.legal_case?.case_number || null;
   const lawyerName = task.legal_case?.lawyer?.name || task.created_by?.name || null;
-  const isConfirmado = task.status === 'CONFIRMADO';
+  // Status "em andamento" depende do tipo: CalendarEvent='CONFIRMADO',
+  // Task='EM_PROGRESSO'
+  const isConfirmado = task.status === 'CONFIRMADO' || task.status === 'EM_PROGRESSO';
   const isUrgent = task.priority === 'URGENTE' || due?.urgent;
+  // kind='task' = diligência rápida criada pelo advogado (sem evento
+  // processual). Mostramos badge "Diligência" pra estagiário diferenciar
+  // de prazo processual real.
+  const isDiligencia = task.kind === 'task';
   const [confirming, setConfirming] = useState(false);
 
   const handleComplete = () => {
     if (!confirming) { setConfirming(true); return; }
     setConfirming(false);
-    onAction(task.id, 'complete');
+    onAction(task.id, 'complete', task.kind || 'event');
   };
 
   const cardBorder = dimmed
@@ -263,6 +273,14 @@ function TaskCard({
             {task.priority === 'URGENTE' && (
               <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 flex items-center gap-0.5">
                 <Zap size={8} /> URGENTE
+              </span>
+            )}
+            {isDiligencia && (
+              <span
+                className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 flex items-center gap-0.5"
+                title="Diligência delegada pelo advogado (não é prazo processual)"
+              >
+                ✋ DILIGÊNCIA
               </span>
             )}
             {isConfirmado && !dimmed && (
@@ -306,15 +324,21 @@ function TaskCard({
 
         {!dimmed && (
           <div className="flex flex-col gap-1.5 shrink-0">
-            {task.status === 'AGENDADO' && (
+            {/* Estado "pra iniciar":
+                - CalendarEvent: status='AGENDADO'
+                - Task: status='A_FAZER' */}
+            {(task.status === 'AGENDADO' || task.status === 'A_FAZER') && (
               <button
-                onClick={() => onAction(task.id, 'start')}
+                onClick={() => onAction(task.id, 'start', task.kind || 'event')}
                 className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[10px] font-bold hover:opacity-90 transition-opacity flex items-center gap-1"
               >
                 <Play size={10} /> Iniciar
               </button>
             )}
-            {task.status === 'CONFIRMADO' && (
+            {/* Estado "em andamento":
+                - CalendarEvent: status='CONFIRMADO'
+                - Task: status='EM_PROGRESSO' */}
+            {(task.status === 'CONFIRMADO' || task.status === 'EM_PROGRESSO') && (
               <button
                 onClick={handleComplete}
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-bold hover:opacity-90 transition-all flex items-center gap-1 ${
@@ -857,14 +881,14 @@ function ListView() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const handleAction = async (eventId: string, action: string) => {
+  const handleAction = async (eventId: string, action: string, kind: 'event' | 'task' = 'event') => {
     setData(prev => {
       if (!prev) return prev;
       if (action === 'start') {
         return {
           ...prev,
           pending: prev.pending.map(t =>
-            t.id === eventId ? { ...t, status: 'CONFIRMADO' } : t
+            t.id === eventId ? { ...t, status: kind === 'task' ? 'EM_PROGRESSO' : 'CONFIRMADO' } : t
           ),
         };
       }
@@ -874,7 +898,7 @@ function ListView() {
         return {
           ...prev,
           pending: prev.pending.filter(t => t.id !== eventId),
-          completedToday: [{ ...task, status: 'CONCLUIDO' }, ...prev.completedToday],
+          completedToday: [{ ...task, status: kind === 'task' ? 'CONCLUIDA' : 'CONCLUIDO' }, ...prev.completedToday],
           stats: {
             ...prev.stats,
             pendingCount: Math.max(0, prev.stats.pendingCount - 1),
@@ -886,10 +910,22 @@ function ListView() {
     });
 
     try {
-      if (action === 'start') {
-        await api.patch(`/calendar/events/${eventId}/status`, { status: 'CONFIRMADO' });
-      } else if (action === 'complete') {
-        await api.patch(`/calendar/events/${eventId}/status`, { status: 'CONCLUIDO' });
+      // Endpoint diferente conforme o tipo:
+      //   - kind='event': /calendar/events/:id/status (CalendarEvent)
+      //   - kind='task': /events/start ou /events/complete com type='TASK'
+      //     (rota unificada do EventService aceita ambos)
+      if (kind === 'task') {
+        if (action === 'complete') {
+          await api.post('/events/complete', { type: 'TASK', id: eventId });
+        } else if (action === 'start') {
+          await api.patch(`/tasks/${eventId}/status`, { status: 'EM_PROGRESSO' });
+        }
+      } else {
+        if (action === 'start') {
+          await api.patch(`/calendar/events/${eventId}/status`, { status: 'CONFIRMADO' });
+        } else if (action === 'complete') {
+          await api.patch(`/calendar/events/${eventId}/status`, { status: 'CONCLUIDO' });
+        }
       }
       fetchData();
     } catch {

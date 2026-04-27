@@ -28,30 +28,86 @@ export class InternService {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // 2. Tarefas pendentes (CalendarEvents tipo TAREFA/PRAZO atribuídos ao estagiário)
-    const pending = await this.prisma.calendarEvent.findMany({
-      where: {
-        assigned_user_id: userId,
-        type: { in: ['TAREFA', 'PRAZO'] },
-        status: { in: ['AGENDADO', 'CONFIRMADO'] },
-        ...(tenantId ? { tenant_id: tenantId } : {}),
-      },
-      include: {
-        lead: { select: { id: true, name: true, phone: true } },
-        legal_case: {
-          select: {
-            id: true, case_number: true, legal_area: true, stage: true,
-            tracking_stage: true, opposing_party: true,
-            lead: { select: { id: true, name: true, phone: true } },
-            lawyer: { select: { id: true, name: true } },
-          },
+    // 2. Tarefas pendentes — UNIAO de:
+    //    a) CalendarEvents tipo TAREFA/PRAZO atribuídos ao estagiário (prazos
+    //       processuais e tarefas vinculadas a fase de processo, criadas via
+    //       fluxo principal)
+    //    b) Tasks orphas (sem calendar_event_id) atribuidas ao estagiario —
+    //       criadas via "Nova diligencia" pelo advogado quando ele so quer
+    //       delegar uma acao rapida sem precisar de evento processual formal
+    //       (ex: "ligar pro cliente e pedir comprovante de residencia").
+    //
+    //    Ambos shapes sao normalizados pra { kind, id, title, ... } e o
+    //    frontend renderiza o mesmo componente; a diferenca eh que TASK usa
+    //    EventActionButton com type='TASK' e CALENDAR com type='CALENDAR'.
+    const [pendingEvents, pendingTasks] = await Promise.all([
+      this.prisma.calendarEvent.findMany({
+        where: {
+          assigned_user_id: userId,
+          type: { in: ['TAREFA', 'PRAZO'] },
+          status: { in: ['AGENDADO', 'CONFIRMADO'] },
+          ...(tenantId ? { tenant_id: tenantId } : {}),
         },
-        assigned_user: { select: { id: true, name: true } },
-        created_by: { select: { id: true, name: true } },
-      },
-      orderBy: [{ start_at: 'asc' }],
-      take: 50,
-    });
+        include: {
+          lead: { select: { id: true, name: true, phone: true } },
+          legal_case: {
+            select: {
+              id: true, case_number: true, legal_area: true, stage: true,
+              tracking_stage: true, opposing_party: true,
+              lead: { select: { id: true, name: true, phone: true } },
+              lawyer: { select: { id: true, name: true } },
+            },
+          },
+          assigned_user: { select: { id: true, name: true } },
+          created_by: { select: { id: true, name: true } },
+        },
+        orderBy: [{ start_at: 'asc' }],
+        take: 50,
+      }),
+      this.prisma.task.findMany({
+        where: {
+          assigned_user_id: userId,
+          // calendar_event_id null = task orfã. Tasks com evento associado
+          // ja sao cobertas pelo query (a) acima — evita duplicacao.
+          calendar_event_id: null,
+          status: { in: ['A_FAZER', 'EM_PROGRESSO'] },
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+        },
+        include: {
+          lead: { select: { id: true, name: true, phone: true } },
+          legal_case: {
+            select: {
+              id: true, case_number: true, legal_area: true, stage: true,
+              tracking_stage: true, opposing_party: true,
+              lead: { select: { id: true, name: true, phone: true } },
+              lawyer: { select: { id: true, name: true } },
+            },
+          },
+          assigned_user: { select: { id: true, name: true } },
+        },
+        orderBy: [{ due_at: 'asc' }, { created_at: 'desc' }],
+        take: 50,
+      }),
+    ]);
+
+    // Normaliza shape — frontend usa `kind` pra decidir endpoint de complete
+    // e fallback de campos opcionais (Task nao tem start_at, usa due_at;
+    // CalendarEvent nao tem due_at, usa start_at).
+    const pending = [
+      ...pendingEvents.map((e: any) => ({ ...e, kind: 'event' as const })),
+      ...pendingTasks.map((t: any) => ({
+        ...t,
+        kind: 'task' as const,
+        // Compatibilidade: frontend usa `start_at` e `type` em alguns lugares
+        start_at: t.due_at || t.created_at,
+        type: 'TAREFA',
+        // CalendarEvent tem priority — Task nao. Default normal.
+        priority: 'NORMAL',
+        // Quem criou a Task: created_by_id -> usa relacao opcional.
+        // Por simplicidade nao incluimos created_by aqui (UI ja trata null).
+        created_by: null,
+      })),
+    ].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
 
     // 3. Petições em revisão (criadas pelo estagiário, status EM_REVISAO)
     const inReview = await (this.prisma as any).casePetition.findMany({
@@ -97,24 +153,53 @@ export class InternService {
       take: 20,
     });
 
-    // 5. Concluídas hoje
-    const completedToday = await this.prisma.calendarEvent.findMany({
-      where: {
-        assigned_user_id: userId,
-        type: { in: ['TAREFA', 'PRAZO'] },
-        status: 'CONCLUIDO',
-        start_at: { gte: today, lt: tomorrow },
-        ...(tenantId ? { tenant_id: tenantId } : {}),
-      },
-      include: {
-        lead: { select: { id: true, name: true } },
-        legal_case: {
-          select: { id: true, case_number: true, legal_area: true },
+    // 5. Concluídas hoje — mesma uniao (CalendarEvent + Task orfa)
+    const [completedEvents, completedTasks] = await Promise.all([
+      this.prisma.calendarEvent.findMany({
+        where: {
+          assigned_user_id: userId,
+          type: { in: ['TAREFA', 'PRAZO'] },
+          status: 'CONCLUIDO',
+          completed_at: { gte: today, lt: tomorrow },
+          ...(tenantId ? { tenant_id: tenantId } : {}),
         },
-      },
-      orderBy: { start_at: 'desc' },
-      take: 20,
-    });
+        include: {
+          lead: { select: { id: true, name: true } },
+          legal_case: {
+            select: { id: true, case_number: true, legal_area: true },
+          },
+        },
+        orderBy: { completed_at: 'desc' },
+        take: 20,
+      }),
+      this.prisma.task.findMany({
+        where: {
+          assigned_user_id: userId,
+          calendar_event_id: null,
+          status: 'CONCLUIDA',
+          completed_at: { gte: today, lt: tomorrow },
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+        },
+        include: {
+          lead: { select: { id: true, name: true } },
+          legal_case: {
+            select: { id: true, case_number: true, legal_area: true },
+          },
+        },
+        orderBy: { completed_at: 'desc' },
+        take: 20,
+      }),
+    ]);
+    const completedToday = [
+      ...completedEvents.map((e: any) => ({ ...e, kind: 'event' as const })),
+      ...completedTasks.map((t: any) => ({
+        ...t,
+        kind: 'task' as const,
+        start_at: t.completed_at || t.due_at || t.created_at,
+        type: 'TAREFA',
+        priority: 'NORMAL',
+      })),
+    ].sort((a, b) => new Date(b.start_at).getTime() - new Date(a.start_at).getTime());
 
     // 6. Stats
     const [totalPetitions, approvedPetitions] = await Promise.all([
