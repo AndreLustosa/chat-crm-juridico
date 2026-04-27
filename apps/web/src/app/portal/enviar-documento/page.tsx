@@ -8,7 +8,6 @@ import {
   Sparkles, RefreshCcw, Crop, Edit3,
 } from 'lucide-react';
 import { PortalHeader } from '../components/PortalHeader';
-import { prewarmOpenCV } from '@/lib/opencv-loader';
 import {
   autoExtractFromDataUrl,
   warpFromDataUrl,
@@ -76,14 +75,34 @@ function getExt(name: string): string {
   return idx === -1 ? '' : name.slice(idx + 1).toLowerCase();
 }
 
+// Lado maior em pixels pra todas as imagens processadas (re-encode + warp +
+// filtro). 1280 eh o sweet spot:
+//   - texto de RG/CPF/comprovante fica nitido
+//   - PDF final fica leve (5 paginas ≈ 1MB)
+//   - filtro pixel-a-pixel roda em ~600ms num celular medio (1280x960 = 1.2M
+//     px) em vez de 2.5s+ que demorava em 1800px
+//   - menos pressao de memoria — celular antigo nao estoura RAM
+const MAX_IMG_SIDE = 1280;
+
+// Em quantos pixels-loop fazemos um yield pro main thread. Calibrado pra
+// frame budget de ~16ms — abaixo disso UI fica fluida no celular.
+const ENHANCE_YIELD_EVERY = 200_000;
+
+/**
+ * Yield curtinho pro browser respirar — usa setTimeout 0 (nao bloqueia se
+ * tab estiver em background, diferente de requestAnimationFrame).
+ */
+function yieldToMain(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 /**
  * Calcula dimensoes de output pra perspective transform: preserva aspect
- * ratio da foto original com lado maior cap em 1400px. Output suficiente
- * pra texto legivel sem inflar o PDF final.
+ * ratio da foto original com lado maior cap em MAX_IMG_SIDE.
  */
 function pickOutputSize(srcW: number, srcH: number): { outW: number; outH: number } {
   const aspect = srcH / srcW;
-  const outW = Math.min(1400, srcW);
+  const outW = Math.min(MAX_IMG_SIDE, srcW);
   return { outW, outH: Math.round(outW * aspect) };
 }
 
@@ -132,50 +151,55 @@ async function manualCrop(
  *
  * Nao eh threshold puro pra preservar detalhes (carimbos, assinaturas a
  * caneta clara nao somem).
+ *
+ * O loop pixel-a-pixel eh quebrado em chunks com `yieldToMain()` a cada
+ * ENHANCE_YIELD_EVERY pixels — sem isso o UI thread fica congelado por
+ * 1-2s em celular medio (1.2M pixels de loop sincrono).
  */
-function enhanceImageForDoc(srcUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      // Limita lado maior a 1800px — fotos de iphone modernas chegam a 4032
-      // e o jpeg final fica enorme sem ganho real de legibilidade.
-      const MAX_SIDE = 1800;
-      let w = img.naturalWidth;
-      let h = img.naturalHeight;
-      const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        reject(new Error('Canvas indisponivel'));
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-
-      const data = ctx.getImageData(0, 0, w, h);
-      const px = data.data;
-      // Loop pixel a pixel: grayscale + contraste 1.6x + brilho +15.
-      // Numeros calibrados em fotos reais de RG/CPF tiradas de celular.
-      for (let i = 0; i < px.length; i += 4) {
-        const r = px[i], g = px[i + 1], b = px[i + 2];
-        let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-        gray = (gray - 128) * 1.6 + 128;
-        gray = gray + 15;
-        if (gray < 0) gray = 0;
-        if (gray > 255) gray = 255;
-        px[i] = px[i + 1] = px[i + 2] = gray;
-      }
-      ctx.putImageData(data, 0, 0);
-
-      resolve(canvas.toDataURL('image/jpeg', 0.85));
-    };
-    img.onerror = () => reject(new Error('Falha ao carregar imagem'));
-    img.src = srcUrl;
+async function enhanceImageForDoc(srcUrl: string): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Falha ao carregar imagem'));
+    el.src = srcUrl;
   });
+
+  let w = img.naturalWidth;
+  let h = img.naturalHeight;
+  const scale = Math.min(1, MAX_IMG_SIDE / Math.max(w, h));
+  w = Math.round(w * scale);
+  h = Math.round(h * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas indisponivel');
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const data = ctx.getImageData(0, 0, w, h);
+  const px = data.data;
+  // Loop pixel a pixel: grayscale + contraste 1.6x + brilho +15.
+  // Numeros calibrados em fotos reais de RG/CPF tiradas de celular.
+  // Yield a cada ENHANCE_YIELD_EVERY pra UI nao travar em mobile.
+  let processed = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2];
+    let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    gray = (gray - 128) * 1.6 + 128;
+    gray = gray + 15;
+    if (gray < 0) gray = 0;
+    if (gray > 255) gray = 255;
+    px[i] = px[i + 1] = px[i + 2] = gray;
+    processed++;
+    if (processed >= ENHANCE_YIELD_EVERY) {
+      processed = 0;
+      await yieldToMain();
+    }
+  }
+  ctx.putImageData(data, 0, 0);
+
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
 /**
@@ -193,31 +217,32 @@ function fileToDataUrl(file: File): Promise<string> {
 /**
  * Le imagem e devolve dataUrl re-encodado em JPEG comprimido (sem filtro).
  * Necessario porque iphone manda HEIC que nao eh universalmente suportado e
- * fotos cruas sao gigantes — re-encodar normaliza tudo.
+ * fotos cruas sao gigantes — re-encodar normaliza tudo pro lado maior em
+ * MAX_IMG_SIDE px.
  */
-function fileToJpegDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    fileToDataUrl(file).then(url => {
-      const img = new Image();
-      img.onload = () => {
-        const MAX_SIDE = 1800;
-        let w = img.naturalWidth;
-        let h = img.naturalHeight;
-        const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
-        w = Math.round(w * scale);
-        h = Math.round(h * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('Canvas indisponivel')); return; }
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.onerror = () => reject(new Error('Falha ao carregar imagem'));
-      img.src = url;
-    }).catch(reject);
+async function fileToJpegDataUrl(file: File): Promise<string> {
+  const url = await fileToDataUrl(file);
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Falha ao carregar imagem'));
+    el.src = url;
   });
+  let w = img.naturalWidth;
+  let h = img.naturalHeight;
+  const scale = Math.min(1, MAX_IMG_SIDE / Math.max(w, h));
+  w = Math.round(w * scale);
+  h = Math.round(h * scale);
+  // Yield antes do drawImage — descomprimir + redesenhar imagem grande
+  // tambem segura o thread por algumas dezenas de ms.
+  await yieldToMain();
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas indisponivel');
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
 /**
@@ -299,7 +324,12 @@ export default function EnviarDocumentoPage() {
   const [scannerBusy, setScannerBusy] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [bwAll, setBwAll] = useState(true); // por default aplica filtro doc
-  const [cropAll, setCropAll] = useState(true); // por default tenta auto-recortar
+  // Auto-crop comeca DESLIGADO: OpenCV.js sao ~8MB do CDN + processamento
+  // sincrono no main thread (Canny + warpPerspective em foto grande). Em
+  // celular fraco isso TRAVA o telefone na 1a foto. Cliente liga
+  // explicitamente se quiser — sem isso, o scanner roda super leve (so
+  // re-encode + filtro em chunks com yield).
+  const [cropAll, setCropAll] = useState(false);
   // Indicador de "preparando OpenCV" — mostrado na 1a foto pra cliente nao
   // achar que a app travou (load do CDN demora 3-8s no 4G).
   const [opencvLoading, setOpencvLoading] = useState(false);
@@ -381,9 +411,11 @@ export default function EnviarDocumentoPage() {
     try {
       const rawDataUrl = await fileToJpegDataUrl(f);
 
-      // Tenta auto-crop (OpenCV: Canny + contour + warpPerspective). Pode
-      // demorar na 1a chamada porque opencv.js precisa carregar do CDN
-      // (~8MB). Se OpenCV ainda nao carregou, mostra indicador.
+      // Tenta auto-crop SE cliente ligou o toggle. Pode demorar na 1a
+      // chamada porque opencv.js precisa carregar do CDN (~8MB). Em
+      // celular fraco ou rede ruim, podemos quebrar com timeout — o
+      // catch desliga cropAll e segue sem auto-crop pra nao travar a
+      // proxima foto.
       let croppedDataUrl: string | null = null;
       let corners: Corners | null = null;
       if (cropAll) {
@@ -394,6 +426,12 @@ export default function EnviarDocumentoPage() {
             croppedDataUrl = auto.dataUrl;
             corners = auto.corners;
           }
+        } catch (e: any) {
+          // Timeout / erro pesado do OpenCV: desliga global e segue raw
+          setCropAll(false);
+          setScannerError(
+            'Auto-recorte indisponível neste dispositivo. Você pode usar o scanner sem ele e ajustar bordas manualmente em cada página.',
+          );
         } finally {
           setOpencvLoading(false);
         }
@@ -678,14 +716,15 @@ export default function EnviarDocumentoPage() {
             <SourceCard
               icon={ScanLine}
               title="Scanner de documento"
-              description="Tire fotos das páginas — endireitamos, recortamos e geramos um PDF nítido."
+              description="Tire fotos das páginas e geramos um PDF com filtro pra texto legível."
               accent
               onClick={() => {
                 setPages([]);
                 setScannerError(null);
                 setMode('scanner');
-                // Pre-aquece OpenCV em background pra 1a foto nao demorar
-                prewarmOpenCV();
+                // NAO pre-aquece OpenCV aqui — auto-crop comeca desligado
+                // pra evitar travamento. Se cliente ligar o toggle "Recortar
+                // automaticamente", ai sim a primeira foto carrega o CDN.
               }}
             />
 
@@ -793,8 +832,8 @@ export default function EnviarDocumentoPage() {
                   </p>
                   <p className="text-[10px] text-white/50">
                     {cropAll
-                      ? 'Detecta as bordas e endireita o documento'
-                      : 'Mantém a foto inteira sem recorte'}
+                      ? 'Detecta bordas e endireita — pode ser lento na 1ª foto'
+                      : 'Use "Ajustar bordas" depois se precisar recortar'}
                   </p>
                 </div>
               </button>
@@ -852,17 +891,13 @@ export default function EnviarDocumentoPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-white">Página {idx + 1}</p>
                       <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                        {p.croppedDataUrl ? (
+                        {p.croppedDataUrl && (
                           <button
                             onClick={() => togglePageCrop(p.id)}
                             className="text-[10px] text-[#A89048] hover:underline"
                           >
                             {p.useCrop ? 'Sem recorte' : 'Recortar'}
                           </button>
-                        ) : (
-                          <span className="text-[10px] text-white/30" title="Recorte automático não detectou bordas — use ajustar manual">
-                            Auto-recorte falhou
-                          </span>
                         )}
                         <button
                           onClick={() => setEditingPageId(p.id)}

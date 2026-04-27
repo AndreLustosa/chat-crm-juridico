@@ -14,6 +14,11 @@
 
 const OPENCV_URL = 'https://docs.opencv.org/4.8.0/opencv.js';
 
+// Timeout do load — se demorar mais que isso (rede ruim, CDN fora do ar,
+// dispositivo travando), desistimos e devolvemos erro pro caller cair em
+// fallback (scanner sem auto-crop, ajuste manual, etc).
+const LOAD_TIMEOUT_MS = 20_000;
+
 // Mantemos a promise no escopo do modulo — multiplas chamadas reusam o
 // mesmo carregamento (pre-warm + chamada real consolidam em uma so request).
 let cvPromise: Promise<typeof window & { cv: any }> | null = null;
@@ -36,6 +41,22 @@ export function loadOpenCV(): Promise<any> {
   if (cvPromise) return cvPromise;
 
   cvPromise = new Promise<any>((resolve, reject) => {
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    // Timeout pra rede ruim / CDN fora do ar / WASM travando no dispositivo.
+    // Sem isso o caller fica esperando indefinidamente e a UI parece morta.
+    const timer = setTimeout(() => {
+      cvPromise = null;
+      settle(() => reject(new Error(
+        `OpenCV demorou mais que ${LOAD_TIMEOUT_MS / 1000}s pra carregar — verifique sua conexão`,
+      )));
+    }, LOAD_TIMEOUT_MS);
+
     // Hook que opencv.js executa quando o wasm termina de inicializar.
     // Tem que ser definido ANTES do script carregar.
     const existingModule = window.Module || {};
@@ -45,10 +66,12 @@ export function loadOpenCV(): Promise<any> {
         if (existingModule.onRuntimeInitialized) {
           try { existingModule.onRuntimeInitialized(); } catch {}
         }
+        clearTimeout(timer);
         if (window.cv && window.cv.Mat) {
-          resolve(window.cv);
+          settle(() => resolve(window.cv));
         } else {
-          reject(new Error('OpenCV inicializado mas cv.Mat indisponivel'));
+          cvPromise = null;
+          settle(() => reject(new Error('OpenCV inicializado mas cv.Mat indisponivel')));
         }
       },
     };
@@ -64,8 +87,9 @@ export function loadOpenCV(): Promise<any> {
     script.async = true;
     script.dataset.opencvLoader = '1';
     script.onerror = () => {
+      clearTimeout(timer);
       cvPromise = null; // permite retry
-      reject(new Error('Falha ao baixar OpenCV.js do CDN'));
+      settle(() => reject(new Error('Falha ao baixar OpenCV.js do CDN')));
     };
     document.head.appendChild(script);
   });
