@@ -43,6 +43,13 @@ const securityHeaders = [
     value: "strict-origin-when-cross-origin",
   },
   {
+    // Permite camera (scanner do portal usa getUserMedia) e geolocalizacao.
+    // Sem `camera=(self)` alguns browsers em iframe/contexto cross-origin
+    // bloqueiam mesmo com permissao do usuario.
+    key: "Permissions-Policy",
+    value: "camera=(self), microphone=(), geolocation=(self)",
+  },
+  {
     // Permite scripts do Google Tag Manager, Google Ads e OpenCV.js (scanner do portal)
     key: "Content-Security-Policy",
     value: [

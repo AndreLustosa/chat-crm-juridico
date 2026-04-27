@@ -15,6 +15,7 @@ import {
   type Corners,
 } from '@/lib/document-scanner';
 import { CornerEditor } from './CornerEditor';
+import { LiveScanner } from './LiveScanner';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
@@ -344,6 +345,14 @@ export default function EnviarDocumentoPage() {
   // fallback. Default false (PC) pra evitar flash em desktop, useEffect
   // promove pra true em celular.
   const [isMobile, setIsMobile] = useState(false);
+
+  // Camera ao vivo (estilo CamScanner) — `liveScanner` true mostra a tela
+  // fullscreen com <video> + botao de captura. Setado quando cliente
+  // entra no scanner pela 1a vez. Se permissao for negada, cai pro
+  // <input capture> nativo automaticamente (LiveScanner.onFallback).
+  const [liveScanner, setLiveScanner] = useState(false);
+  // useNativeCamera = true → cliente negou camera ao vivo, usa input capture
+  const [useNativeCamera, setUseNativeCamera] = useState(false);
   useEffect(() => {
     const coarse = typeof window !== 'undefined' && window.matchMedia
       ? window.matchMedia('(pointer: coarse)').matches
@@ -800,6 +809,27 @@ export default function EnviarDocumentoPage() {
           </div>
         )}
 
+        {/* ─── Camera ao vivo (full-screen overlay) ─────────────── */}
+        {liveScanner && (
+          <LiveScanner
+            onCapture={(file) => {
+              // Nao fecha o LiveScanner — cliente pode tirar varias fotos em
+              // sequencia. Cada captura processa em paralelo (handleScannerCapture
+              // faz seu state proprio).
+              handleScannerCapture(file);
+            }}
+            onClose={() => setLiveScanner(false)}
+            onFallback={() => {
+              // Cliente negou camera ao vivo — cai pro input capture nativo
+              // permanentemente nesta sessao.
+              setLiveScanner(false);
+              setUseNativeCamera(true);
+              // Dispara imediatamente o picker nativo pra UX nao quebrar
+              setTimeout(() => scannerInputRef.current?.click(), 100);
+            }}
+          />
+        )}
+
         {/* ─── MODO: Scanner / Editor manual de bordas ────────── */}
         {cases && cases.length > 0 && mode === 'scanner' && editingPageId && (() => {
           const editingPage = pages.find(p => p.id === editingPageId);
@@ -953,9 +983,17 @@ export default function EnviarDocumentoPage() {
               </div>
             )}
 
-            {/* Adicionar pagina */}
+            {/* Adicionar pagina — abre camera ao vivo (LiveScanner) por
+                default. Se cliente negou permissao previamente, cai no
+                input capture nativo. */}
             <button
-              onClick={() => scannerInputRef.current?.click()}
+              onClick={() => {
+                if (useNativeCamera) {
+                  scannerInputRef.current?.click();
+                } else {
+                  setLiveScanner(true);
+                }
+              }}
               disabled={scannerBusy}
               className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-white/15 hover:border-[#A89048]/40 bg-[#0d0d14] hover:bg-[#A89048]/5 disabled:opacity-50 text-white text-sm font-bold py-5 rounded-2xl transition-colors"
             >
@@ -967,7 +1005,7 @@ export default function EnviarDocumentoPage() {
               ) : (
                 <>
                   <Plus size={18} />
-                  {pages.length === 0 ? 'Tirar foto da primeira página' : 'Adicionar próxima página'}
+                  {pages.length === 0 ? 'Abrir câmera' : 'Adicionar próxima página'}
                 </>
               )}
             </button>
