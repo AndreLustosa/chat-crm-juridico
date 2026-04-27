@@ -124,6 +124,11 @@ model Lead {
   cs_user_id           String?
   cs_user              User?                @relation("CSManager", fields: [cs_user_id], references: [id], onDelete: SetNull)
 
+  // Opt-out de lembretes de cobrança via WhatsApp. Cliente pode pedir
+  // pra parar de receber mensagens de honorarios sem afetar outras
+  // notificacoes (movimentacoes, agendamento).
+  payment_reminders_disabled Boolean       @default(false)
+
   // Google Drive
   google_drive_folder_id String?
 
@@ -1547,6 +1552,14 @@ model PaymentGatewayCharge {
   idempotency_key      String?   @unique
   created_at           DateTime  @default(now())
   updated_at           DateTime  @updatedAt
+
+  // Tracking de cobranca enviada ao cliente — evita spam e permite
+  // escalonamento (1=cordial, 2=firme, 3=urgente, 4+=alerta interno).
+  // last_reminder_kind eh string descritiva tipo 'initial' | 'pre-due-3d' |
+  // 'pre-due-1d' | 'pre-due-0d' | 'overdue-1d' | 'overdue-3d' | 'overdue-7d'.
+  last_reminder_sent_at DateTime?
+  reminder_count        Int      @default(0)
+  last_reminder_kind    String?
 
   lead_honorario_payment_id String?  @unique
   honorario_payment    HonorarioPayment?      @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)

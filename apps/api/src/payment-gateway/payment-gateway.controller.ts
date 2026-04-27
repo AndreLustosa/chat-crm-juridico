@@ -11,6 +11,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PaymentGatewayService } from './payment-gateway.service';
+import { PaymentReminderService } from './payment-reminder.service';
 import { CreateChargeDto, CreateBatchChargesDto, CreateInstallmentChargeDto } from './payment-gateway.dto';
 import { AsaasClient } from './asaas/asaas-client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +22,7 @@ export class PaymentGatewayController {
 
   constructor(
     private service: PaymentGatewayService,
+    private reminder: PaymentReminderService,
     private asaasClient: AsaasClient,
     private prisma: PrismaService,
   ) {}
@@ -213,38 +215,70 @@ export class PaymentGatewayController {
   async createCharge(@Body() dto: CreateChargeDto, @Req() req: any) {
     const tenantId = req.user?.tenantId;
     // Suporta tanto HonorarioPayment (caso) quanto LeadHonorarioPayment (lead)
+    let result: any;
     if (dto.leadHonorarioPaymentId) {
       this.logger.log(`[POST /charges] billingType=${dto.billingType} leadPaymentId=${dto.leadHonorarioPaymentId}`);
-      return this.service.createChargeForLeadPayment(
+      result = await this.service.createChargeForLeadPayment(
         dto.leadHonorarioPaymentId,
         dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
         tenantId,
       );
+    } else {
+      this.logger.log(`[POST /charges] billingType=${dto.billingType} paymentId=${dto.honorarioPaymentId}`);
+      result = await this.service.createCharge(
+        dto.honorarioPaymentId!,
+        dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+        tenantId,
+      );
     }
-    this.logger.log(`[POST /charges] billingType=${dto.billingType} paymentId=${dto.honorarioPaymentId}`);
-    return this.service.createCharge(
-      dto.honorarioPaymentId!,
-      dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
-      tenantId,
-    );
+    // Aviso imediato ao cliente — fire-and-forget. ReminderService filtra:
+    //   - Pula se honorario eh SUCUMBENCIA ou ACORDO
+    //   - Pula se Lead.payment_reminders_disabled = true
+    //   - Pula se ja foi enviado 'initial' antes (existing charge)
+    if (result?.id) {
+      this.reminder.sendInitialChargeNotification(result.id).catch((e) => {
+        this.logger.warn(`[POST /charges] notif imediata falhou: ${e?.message}`);
+      });
+    }
+    return result;
   }
 
   @Post('charges/batch')
   async createBatchCharges(@Body() dto: CreateBatchChargesDto, @Req() req: any) {
     const tenantId = req.user?.tenantId;
     this.logger.log(`[POST /charges/batch] honorarioId=${dto.honorarioId} billingType=${dto.billingType}`);
-    return this.service.createBatchCharges(dto.honorarioId, dto.billingType, tenantId);
+    const result = await this.service.createBatchCharges(dto.honorarioId, dto.billingType, tenantId);
+    // Notifica cada charge criada com sucesso. result.results contem os
+    // charges criados. Throttle 1.5s entre envios pra batch nao saturar
+    // Evolution API.
+    if (Array.isArray(result?.results)) {
+      for (const c of result.results) {
+        if (c?.id) {
+          this.reminder.sendInitialChargeNotification(c.id).catch(() => {});
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      }
+    }
+    return result;
   }
 
   @Post('charges/installment')
   async createInstallmentCharge(@Body() dto: CreateInstallmentChargeDto, @Req() req: any) {
     const tenantId = req.user?.tenantId;
     this.logger.log(`[POST /charges/installment] leadHonorarioId=${dto.leadHonorarioId} billingType=${dto.billingType}`);
-    return this.service.createInstallmentCharge(
+    const result = await this.service.createInstallmentCharge(
       dto.leadHonorarioId,
       dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
       tenantId,
     );
+    // createInstallmentCharge retorna so a 1a parcela como result principal.
+    // result.id eh o id da charge criada. As outras parcelas sao criadas
+    // mas nao listadas no return — limitacao do service atual. Notifica
+    // a primeira; demais parcelas pegam aviso pelo cron pre-due.
+    if (result?.id) {
+      this.reminder.sendInitialChargeNotification(result.id).catch(() => {});
+    }
+    return result;
   }
 
   @Post('charges/sync')
