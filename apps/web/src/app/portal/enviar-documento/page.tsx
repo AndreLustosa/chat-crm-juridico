@@ -338,6 +338,22 @@ export default function EnviarDocumentoPage() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Scanner e Camera so aparecem em mobile/tablet — no PC ninguem tira foto
+  // pra subir documento (webcam de notebook nao serve, scanner de mesa usa
+  // fluxo proprio). Detectamos via pointer:coarse (touch primario) + UA
+  // fallback. Default false (PC) pra evitar flash em desktop, useEffect
+  // promove pra true em celular.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const coarse = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(pointer: coarse)').matches
+      : false;
+    const ua = typeof navigator !== 'undefined'
+      ? /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent)
+      : false;
+    setIsMobile(coarse || ua);
+  }, []);
+
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const filePickerRef = useRef<HTMLInputElement | null>(null);
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
@@ -710,35 +726,45 @@ export default function EnviarDocumentoPage() {
         {cases && cases.length > 0 && mode === 'choose' && (
           <div className="space-y-3">
             <p className="text-xs font-bold text-white/60 uppercase tracking-wider mb-2">
-              Como você quer enviar?
+              {isMobile ? 'Como você quer enviar?' : 'Selecione o arquivo'}
             </p>
 
-            <SourceCard
-              icon={ScanLine}
-              title="Scanner de documento"
-              description="Tire fotos das páginas e geramos um PDF com filtro pra texto legível."
-              accent
-              onClick={() => {
-                setPages([]);
-                setScannerError(null);
-                setMode('scanner');
-                // NAO pre-aquece OpenCV aqui — auto-crop comeca desligado
-                // pra evitar travamento. Se cliente ligar o toggle "Recortar
-                // automaticamente", ai sim a primeira foto carrega o CDN.
-              }}
-            />
+            {/* Scanner + Camera so fazem sentido em celular/tablet (touch +
+                camera traseira). No PC mostramos so "Escolher arquivo" — quem
+                tem documento digitalizado de scanner de mesa ja gera PDF e
+                sobe direto. */}
+            {isMobile && (
+              <>
+                <SourceCard
+                  icon={ScanLine}
+                  title="Scanner de documento"
+                  description="Tire fotos das páginas e geramos um PDF com filtro pra texto legível."
+                  accent
+                  onClick={() => {
+                    setPages([]);
+                    setScannerError(null);
+                    setMode('scanner');
+                    // NAO pre-aquece OpenCV aqui — auto-crop comeca desligado
+                    // pra evitar travamento. Se cliente ligar o toggle "Recortar
+                    // automaticamente", ai sim a primeira foto carrega o CDN.
+                  }}
+                />
 
-            <SourceCard
-              icon={Camera}
-              title="Tirar uma foto"
-              description="Câmera do celular — uma foto rápida do documento."
-              onClick={() => cameraInputRef.current?.click()}
-            />
+                <SourceCard
+                  icon={Camera}
+                  title="Tirar uma foto"
+                  description="Câmera do celular — uma foto rápida do documento."
+                  onClick={() => cameraInputRef.current?.click()}
+                />
+              </>
+            )}
 
             <SourceCard
               icon={FolderOpen}
-              title="Escolher arquivo"
-              description="PDF, imagem ou documento que já está salvo no celular ou computador."
+              title={isMobile ? 'Escolher arquivo' : 'Selecionar arquivo'}
+              description={isMobile
+                ? 'PDF, imagem ou documento que já está salvo no celular.'
+                : 'PDF, imagem, Word ou Excel salvo no computador.'}
               onClick={() => filePickerRef.current?.click()}
             />
 
