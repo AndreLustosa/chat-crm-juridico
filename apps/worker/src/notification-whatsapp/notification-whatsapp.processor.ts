@@ -65,23 +65,37 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         }
       }
 
-      // 4. Dedup 30min por conversa/lead — não floodar o operador
+      // 4. Dedup 60min por conversa/lead — INDEPENDENTE de read_at.
+      //
+      // Bug reportado 2026-04-26 (Gianny): cada mensagem nova do cliente
+      // gerava 1 WhatsApp se a Notification anterior tivesse read_at
+      // preenchido (advogado tinha aberto o app no meio). Spam.
+      //
+      // Fix: dedup baseado em whatsapp_sent_at — se ja mandei WhatsApp pra
+      // essa conversa nas ultimas 60min, NAO mando de novo (mesmo que
+      // tenha mensagens novas). Janela ampla porque advogado nao precisa
+      // de aviso a cada 5min — uma vez por hora cobre o caso de "voltei
+      // depois e tem mensagem".
       const dedupKey = notification.data?.conversationId || notification.data?.leadId;
+      const DEDUP_WINDOW_MS = 60 * 60 * 1000;
       if (dedupKey) {
         const path = notification.data?.conversationId ? 'conversationId' : 'leadId';
-        const recent = await (this.prisma as any).notification.findFirst({
+        const recentWhatsappSent = await (this.prisma as any).notification.findFirst({
           where: {
             user_id: userId,
             notification_type: notification.notification_type,
             data: { path: [path], equals: dedupKey },
-            created_at: { gte: new Date(Date.now() - 30 * 60 * 1000) },
+            whatsapp_sent_at: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
             id: { not: notificationId },
-            read_at: null,
           },
-          orderBy: { created_at: 'desc' },
+          orderBy: { whatsapp_sent_at: 'desc' },
+          select: { id: true, whatsapp_sent_at: true },
         });
-        if (recent && new Date(recent.created_at) < new Date(notification.created_at)) {
-          this.logger.log(`[NotifWA] Dedup: WhatsApp recente já enviado — skip`);
+        if (recentWhatsappSent) {
+          this.logger.log(
+            `[NotifWA] Dedup ativo: WhatsApp ja enviado pra ${path}=${dedupKey} ` +
+            `as ${recentWhatsappSent.whatsapp_sent_at?.toISOString()} — skip`,
+          );
           return;
         }
       }
@@ -118,6 +132,13 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         { number: user.phone, text },
         { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
       );
+
+      // Marca whatsapp_sent_at — usado pelo dedup das proximas notificacoes
+      // da mesma conversa (60min de janela).
+      await (this.prisma as any).notification.update({
+        where: { id: notificationId },
+        data: { whatsapp_sent_at: new Date() },
+      }).catch(() => {});
 
       this.logger.log(`[NotifWA] WhatsApp enviado para ${user.phone}: "${notification.title}"`);
     } catch (e: any) {

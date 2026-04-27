@@ -1643,6 +1643,9 @@ model Notification {
   body              String?
   data              Json?     /// { conversationId, taskId, caseId, etc. }
   read_at           DateTime?
+  /// Quando o WhatsApp fallback foi enviado pra essa notif. Usado pra dedup
+  /// agressivo (1 WA por conversa por hora, independente de read_at).
+  whatsapp_sent_at  DateTime?
   created_at        DateTime  @default(now())
 
   user   User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -1650,6 +1653,7 @@ model Notification {
 
   @@index([user_id, read_at])
   @@index([user_id, created_at])
+  @@index([user_id, whatsapp_sent_at])
 }
 
 /// Subscriptions de Web Push — permite notificações com a aba do navegador fechada.
