@@ -216,14 +216,89 @@ export class TasksService {
       await this.syncTaskToCalendar(task, data.created_by_id);
     }
 
+    // ─── Notificacao imediata ao responsavel (BUG fix) ─────────
+    //
+    // Antes a notif so chegava via syncTaskToCalendar quando havia due_at,
+    // e mesmo assim era um *reminder* X minutos antes do horario, nao um
+    // aviso de "voce tem nova diligencia". Resultado: estagiario nao sabia
+    // que recebeu tarefa nova ate abrir o app por outra razao.
+    //
+    // Agora dispara push + WhatsApp 5min depois (com dedup) na hora da
+    // delegacao, igual ao fluxo de upload no portal do cliente. Pula se
+    // o proprio criador eh o responsavel (auto-tarefa nao notifica) ou se
+    // a Task nao tem responsavel atribuido.
+    if (data.assigned_user_id && data.assigned_user_id !== data.created_by_id) {
+      try {
+        const [creator, lead, legalCase] = await Promise.all([
+          data.created_by_id ? this.prisma.user.findUnique({
+            where: { id: data.created_by_id },
+            select: { name: true },
+          }) : Promise.resolve(null),
+          data.lead_id ? this.prisma.lead.findUnique({
+            where: { id: data.lead_id },
+            select: { name: true },
+          }) : Promise.resolve(null),
+          data.legal_case_id ? this.prisma.legalCase.findUnique({
+            where: { id: data.legal_case_id },
+            select: { case_number: true },
+          }) : Promise.resolve(null),
+        ]);
+        const creatorName = creator?.name || 'Sistema';
+        const lines: string[] = [];
+        lines.push(`Delegado por ${creatorName}`);
+        if (legalCase?.case_number) lines.push(`Processo: ${legalCase.case_number}`);
+        else if (lead?.name) lines.push(`Cliente: ${lead.name}`);
+        if (data.due_at) {
+          const due = new Date(data.due_at);
+          lines.push(`Prazo: ${due.toLocaleString('pt-BR', {
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+          })}`);
+        }
+        if (data.description?.trim()) {
+          const desc = data.description.trim();
+          lines.push(desc.length > 200 ? desc.slice(0, 197) + '…' : desc);
+        }
+
+        this.notifications.create({
+          userId: data.assigned_user_id,
+          tenantId: data.tenant_id || null,
+          type: 'task_assigned',
+          title: `Nova diligência: ${data.title}`,
+          body: lines.join('\n') || undefined,
+          data: {
+            taskId: task.id,
+            createdBy: data.created_by_id,
+            legalCaseId: data.legal_case_id,
+            leadId: data.lead_id,
+          },
+        }).catch(() => { /* fire and forget */ });
+      } catch (e: any) {
+        this.logger.warn(`[Task create] notif imediata falhou: ${e.message}`);
+      }
+    }
+
     return task;
   }
 
   async updateStatus(id: string, status: string, tenantId?: string) {
     await this.verifyTenantOwnership(id, tenantId);
+    // Auto-set started_at na 1a transicao pra EM_PROGRESSO — advogado
+    // quer saber QUANDO o estagiario comecou a executar a diligencia.
+    // Idempotente: se ja foi setado uma vez, nao reescreve em re-clicks
+    // ou voltas (caso a task tenha sido reaberta).
+    const updateData: any = { status };
+    if (status === 'EM_PROGRESSO') {
+      const current = await this.prisma.task.findUnique({
+        where: { id },
+        select: { started_at: true },
+      });
+      if (!current?.started_at) {
+        updateData.started_at = new Date();
+      }
+    }
     const task = await this.prisma.task.update({
       where: { id },
-      data: { status },
+      data: updateData,
     });
 
     // Sync calendar event status
@@ -498,6 +573,42 @@ export class TasksService {
 
   // ─── Calendar Sync ──────────────────────────────────────────────
 
+  // ─── Tracking de visualizacao ─────────────────────────────────
+
+  /**
+   * Marca a Task como vista pelo responsavel (estagiario abriu o app
+   * e o card renderizou). Idempotente — primeiro view ganha o timestamp,
+   * subsequentes nao mexem em nada.
+   *
+   * Frontend chama isso via useEffect quando o card aparece. Nao chama
+   * se o user atual nao eh o assigned_user_id (advogado vendo painel
+   * proprio nao conta como "vista" do estagiario).
+   */
+  async markViewed(taskId: string, userId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, viewed_at: true, assigned_user_id: true },
+    });
+    if (!task) throw new NotFoundException('Tarefa não encontrada');
+
+    // So conta como "vista" se foi vista pelo PROPRIO responsavel —
+    // advogado abrindo o painel dele nao deveria marcar a Task como
+    // vista pelo estagiario. Returns silently se nao for o caso.
+    if (task.assigned_user_id !== userId) {
+      return { ok: true, skipped: true };
+    }
+    if (task.viewed_at) {
+      return { ok: true, alreadyViewed: true };
+    }
+
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { viewed_at: new Date() },
+    });
+    return { ok: true, viewedAt: new Date().toISOString() };
+  }
+
   // ─── Attachments (anexos da diligência) ───────────────────────
 
   /**
@@ -722,19 +833,54 @@ export class TasksService {
       include: { user: { select: { id: true, name: true } } },
     });
 
-    // Notificar o atribuido da tarefa (se for diferente de quem comentou)
+    // Cria canal de chat real entre advogado <-> estagiario:
+    //   - Estagiario comenta -> advogado (criador) recebe push
+    //   - Advogado comenta   -> estagiario (responsavel) recebe push
+    //   - Terceiro comenta   -> ambos recebem (raro)
+    //
+    // Push ao vivo (socket) + Push/WhatsApp persistente (NotificationsService
+    // com delay 5min e dedup 60min). Sem isso, comentarios morrem se a app
+    // estiver fechada e a outra parte nunca sabe que foi respondida.
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      select: { assigned_user_id: true },
+      select: {
+        title: true, assigned_user_id: true, created_by_id: true, tenant_id: true,
+      },
     });
-    if (task?.assigned_user_id && task.assigned_user_id !== userId) {
-      try {
-        this.chatGateway.emitTaskComment(task.assigned_user_id, {
-          taskId,
-          text,
-          fromUserName: comment.user.name,
-        });
-      } catch {}
+    if (task) {
+      const recipients = new Set<string>();
+      if (task.assigned_user_id && task.assigned_user_id !== userId) {
+        recipients.add(task.assigned_user_id);
+      }
+      if (task.created_by_id && task.created_by_id !== userId) {
+        recipients.add(task.created_by_id);
+      }
+
+      const truncated = text.length > 200 ? text.slice(0, 197) + '…' : text;
+      for (const recipientId of recipients) {
+        // Socket (live) — pra notif center atualizar imediato se o user
+        // estiver com o app aberto
+        try {
+          this.chatGateway.emitTaskComment(recipientId, {
+            taskId,
+            text,
+            fromUserName: comment.user.name,
+          });
+        } catch {}
+        // Push + WhatsApp (persistente) — chega mesmo com app fechado
+        this.notifications.create({
+          userId: recipientId,
+          tenantId: task.tenant_id || null,
+          type: 'task_comment',
+          title: `${comment.user.name} comentou em "${task.title}"`,
+          body: truncated,
+          data: {
+            taskId,
+            commentId: comment.id,
+            fromUserId: userId,
+          },
+        }).catch(() => { /* fire and forget */ });
+      }
     }
 
     return comment;

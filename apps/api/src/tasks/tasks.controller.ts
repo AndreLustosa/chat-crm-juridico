@@ -92,6 +92,18 @@ export class TasksController {
     return this.tasksService.completeAndReopen(id, req.user?.tenant_id);
   }
 
+  /**
+   * Marca Task como vista pelo responsavel atual. Idempotente (chamado
+   * pelo useEffect do card no frontend toda vez que renderiza, mas
+   * service no-ops se ja tem viewed_at). Pula se quem ve nao eh o
+   * assigned_user_id — advogado abrir painel nao conta como visualizada.
+   */
+  @Post(':id/mark-viewed')
+  @HttpCode(HttpStatus.OK)
+  markViewed(@Param('id') id: string, @Request() req: any) {
+    return this.tasksService.markViewed(id, req.user?.id, req.user?.tenant_id);
+  }
+
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
   complete(@Param('id') id: string, @Body() body: { note?: string }, @Request() req: any) {

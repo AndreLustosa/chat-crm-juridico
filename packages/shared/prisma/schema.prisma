@@ -297,6 +297,11 @@ model Task {
   status            String              @default("A_FAZER")
   assigned_user_id  String?
   created_at        DateTime            @default(now())
+  // Tracking de progresso pro advogado acompanhar sem ter que perguntar:
+  //   viewed_at  : 1a vez que o responsavel viu o card no dashboard
+  //   started_at : quando clicou "Iniciar" (virou EM_PROGRESSO)
+  viewed_at         DateTime?
+  started_at        DateTime?
   // Conclusão
   completion_note   String?
   completed_at      DateTime?
@@ -322,6 +327,9 @@ model Task {
   @@index([legal_case_id])
   @@index([tenant_id])
   @@index([lead_id])
+  // Pra queries do advogado tipo "minhas diligencias que ainda nao
+  // foram vistas pelo estagiario" — cobranca proativa
+  @@index([created_by_id, viewed_at])
 }
 
 // Anexos de Task (diligencias). Uploadados pelo estagiario na hora de

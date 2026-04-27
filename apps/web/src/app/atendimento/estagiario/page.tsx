@@ -256,6 +256,20 @@ function TaskCard({
   const isDiligencia = task.kind === 'task';
   const [confirming, setConfirming] = useState(false);
 
+  // Auto mark-viewed pra diligencias (Tasks) — quando o card renderiza
+  // pela 1a vez, dispara POST /tasks/:id/mark-viewed pro advogado saber
+  // que o estagiario ja viu. Backend eh idempotente: 2a chamada nao mexe
+  // em nada. Usamos sessionStorage pra nao spammar a API a cada render
+  // dentro da mesma sessao do browser.
+  useEffect(() => {
+    if (!isDiligencia || dimmed) return;
+    const cacheKey = `task-viewed-${task.id}`;
+    if (sessionStorage.getItem(cacheKey)) return;
+    api.post(`/tasks/${task.id}/mark-viewed`)
+      .then(() => sessionStorage.setItem(cacheKey, '1'))
+      .catch(() => { /* silent — backend eh idempotente */ });
+  }, [task.id, isDiligencia, dimmed]);
+
   const handleComplete = () => {
     // Diligencia (Task orfa): abre modal com drop zone pra anexar
     // documentos coletados (ex: comprovante de residencia). Fluxo
