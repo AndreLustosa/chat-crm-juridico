@@ -1861,6 +1861,10 @@ export default function AdvogadoPage() {
   const [delegatedStats, setDelegatedStats] = useState<any>({ pending: 0, inProgress: 0, completedRecent: 0, notViewed: 0 });
   const [showDelegated, setShowDelegated] = useState(true);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // Toggle "Ver concluidas hoje" — concluidas saem da listagem por default
+  // pra nao confundir com pendentes (badge verde grande chamava atencao
+  // demais). Reaparecem so quando advogado decide revisar.
+  const [showCompletedToday, setShowCompletedToday] = useState(false);
   const fetchDelegatedTasks = useCallback(async () => {
     try {
       const res = await api.get('/tasks/delegated-by-me');
@@ -2420,45 +2424,87 @@ export default function AdvogadoPage() {
                 que o advogado delegou pra estagiario. Antes essas diligencias
                 sumiam apos criadas — nao apareciam aqui nem no painel do
                 estagiario sem refresh. Agora cada card mostra timeline do
-                progresso (vista/iniciada) + indicadores de comments/anexos. */}
-            {view === 'active' && delegatedTasks.length > 0 && (
+                progresso (vista/iniciada) + indicadores de comments/anexos.
+
+                Comportamento: concluidas SOMEM por default — toggle
+                "Ver concluidas hoje" exibe sob demanda (com estilo
+                discreto cinza pra nao confundir com pendentes). */}
+            {view === 'active' && delegatedTasks.length > 0 && (() => {
+              const activeTasks = delegatedTasks.filter((t: any) => t.status !== 'CONCLUIDA');
+              const completedToday = delegatedTasks.filter((t: any) => t.status === 'CONCLUIDA');
+              if (activeTasks.length === 0 && completedToday.length === 0) return null;
+              return (
               <div className="mx-6 mt-4 shrink-0">
-                <button
-                  onClick={() => setShowDelegated(!showDelegated)}
-                  className="flex items-center gap-2 text-[12px] font-bold text-blue-400 uppercase tracking-wider mb-2 hover:opacity-80 transition-opacity"
-                >
-                  <ChevronRight size={14} className={`transition-transform ${showDelegated ? 'rotate-90' : ''}`} />
-                  ✋ Diligências Delegadas ({delegatedTasks.length})
-                  {delegatedStats.notViewed > 0 && (
-                    <span
-                      className="text-[10px] font-bold text-red-400 bg-red-500/15 border border-red-500/30 px-2 py-0.5 rounded-full normal-case tracking-normal"
-                      title="Diligências que ainda não foram vistas pelo responsável"
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                  <button
+                    onClick={() => setShowDelegated(!showDelegated)}
+                    className="flex items-center gap-2 text-[12px] font-bold text-blue-400 uppercase tracking-wider hover:opacity-80 transition-opacity"
+                  >
+                    <ChevronRight size={14} className={`transition-transform ${showDelegated ? 'rotate-90' : ''}`} />
+                    ✋ Diligências Delegadas ({activeTasks.length})
+                    {delegatedStats.notViewed > 0 && (
+                      <span
+                        className="text-[10px] font-bold text-red-400 bg-red-500/15 border border-red-500/30 px-2 py-0.5 rounded-full normal-case tracking-normal"
+                        title="Diligências que ainda não foram vistas pelo responsável"
+                      >
+                        {delegatedStats.notViewed} sem ler
+                      </span>
+                    )}
+                  </button>
+                  {/* Toggle "ver concluidas hoje" — visivel so se houver alguma */}
+                  {completedToday.length > 0 && (
+                    <button
+                      onClick={() => setShowCompletedToday(!showCompletedToday)}
+                      className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
                     >
-                      {delegatedStats.notViewed} sem ler
-                    </span>
+                      <CheckCircle2 size={10} className="text-emerald-500/60" />
+                      {showCompletedToday ? 'Ocultar' : 'Ver'} {completedToday.length} concluída{completedToday.length === 1 ? '' : 's'} hoje
+                    </button>
                   )}
-                </button>
+                </div>
                 {showDelegated && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {delegatedTasks.map((t: any) => {
+                    {/* Render concluidas DEPOIS das ativas, e so se toggle
+                        estiver ligado. Ordem garante que pendentes ficam
+                        sempre no topo independente da listagem. */}
+                    {[
+                      ...activeTasks,
+                      ...(showCompletedToday ? completedToday : []),
+                    ].map((t: any) => {
                       const isCompleted = t.status === 'CONCLUIDA';
                       const isInProgress = t.status === 'EM_PROGRESSO';
                       const isOverdue = t.due_at && !isCompleted && new Date(t.due_at) < new Date();
-                      const cardClass = isOverdue
+                      // Estilo discreto pra concluidas — cinza com 60% opacity
+                      // pra nao competir visualmente com pendentes
+                      const cardClass = isCompleted
+                        ? 'border-border/40 bg-muted/30 opacity-60 hover:opacity-80'
+                        : isOverdue
                         ? 'border-red-500/40 bg-red-500/5'
-                        : isCompleted
-                        ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70'
                         : isInProgress
                         ? 'border-amber-500/40 bg-amber-500/5'
                         : 'border-blue-500/30 bg-blue-500/5';
                       const formatTs = (iso: string | null) => iso
                         ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
                         : null;
+                      // Click: se a diligencia tem processo vinculado, navega
+                      // pro workspace (igual click no PRAZO) com query param
+                      // openTask=ID. Workspace ve o param e abre o drawer de
+                      // detalhes. Resultado: usuario fica no contexto do
+                      // processo, fechar o drawer ele continua lá.
+                      // Sem processo vinculado: drawer overlay no proprio painel.
+                      const caseId = t.legal_case?.id;
+                      const handleCardClick = () => {
+                        if (caseId) {
+                          router.push(`/atendimento/workspace/${caseId}?openTask=${t.id}`);
+                        } else {
+                          setOpenTaskId(t.id);
+                        }
+                      };
                       return (
                         <div
                           key={t.id}
-                          onClick={() => setOpenTaskId(t.id)}
-                          className={`p-3 rounded-xl border cursor-pointer hover:opacity-90 transition-opacity ${cardClass}`}
+                          onClick={handleCardClick}
+                          className={`p-3 rounded-xl border cursor-pointer hover:shadow-sm transition-all ${cardClass}`}
                         >
                           {/* Status badge + prazo */}
                           <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -2532,7 +2578,8 @@ export default function AdvogadoPage() {
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {/* Prazos e Petições Pendentes */}
             {/* shrink-0: nao esticar; a pagina rola verticalmente, entao os

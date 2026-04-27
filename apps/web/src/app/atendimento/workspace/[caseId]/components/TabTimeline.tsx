@@ -53,6 +53,23 @@ interface DjenPublication {
   nome_advogado: string | null;
 }
 
+// Diligencia (Task) — entrada da timeline pra cada milestone (criada,
+// concluida, etc). Usamos created_at e completed_at separados pra gerar
+// dois pontos na timeline quando aplicavel.
+interface DiligenciaTask {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+  viewed_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  completion_note: string | null;
+  assigned_user: { id: string; name: string } | null;
+  created_by: { id: string; name: string } | null;
+}
+
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', {
     day: '2-digit', month: 'short', year: 'numeric',
@@ -67,7 +84,8 @@ function formatDateTime(d: string) {
 
 type TimelineItem = {
   id: string;
-  type: 'event' | 'calendar' | 'djen';
+  // 'task_created' / 'task_completed' = milestones de diligencia
+  type: 'event' | 'calendar' | 'djen' | 'task_created' | 'task_completed';
   date: string;
   title: string;
   description: string | null;
@@ -83,6 +101,8 @@ function getEventIcon(type: string) {
     case 'PRAZO': return <Calendar className="h-3.5 w-3.5 text-amber-400" />;
     case 'TAREFA': return <FileText className="h-3.5 w-3.5 text-blue-400" />;
     case 'CONSULTA': return <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />;
+    case 'DILIGENCIA_CRIADA': return <span className="text-blue-400 text-[14px] leading-none">✋</span>;
+    case 'DILIGENCIA_CONCLUIDA': return <span className="text-emerald-500 text-[14px] leading-none">✓</span>;
     default: return <Activity className="h-3.5 w-3.5" />;
   }
 }
@@ -96,12 +116,16 @@ function getDotColor(type: string): string {
     case 'PRAZO': return 'border-amber-400 bg-amber-400/10';
     case 'TAREFA': return 'border-blue-400 bg-blue-400/10';
     case 'CONSULTA': return 'border-emerald-400 bg-emerald-400/10';
+    case 'DILIGENCIA_CRIADA': return 'border-blue-500 bg-blue-500/10';
+    case 'DILIGENCIA_CONCLUIDA': return 'border-emerald-500 bg-emerald-500/10';
     default: return 'border-border bg-accent/30';
   }
 }
 
 function getBadgeColor(itemType: string, eventType: string): string {
   if (itemType === 'djen') return 'bg-violet-500/15 text-violet-400 border-violet-500/30';
+  if (itemType === 'task_created') return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+  if (itemType === 'task_completed') return 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30';
   switch (eventType.toUpperCase()) {
     case 'AUDIENCIA': return 'bg-primary/15 text-primary border-primary/30';
     case 'DECISAO': return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
@@ -117,6 +141,9 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
   const [events, setEvents] = useState<CaseEvent[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [djenPublications, setDjenPublications] = useState<DjenPublication[]>([]);
+  // Diligencias (Tasks) do processo — geram milestones na timeline:
+  // 1 ponto pra cada criacao + 1 ponto pra cada conclusao
+  const [tasks, setTasks] = useState<DiligenciaTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDjen, setExpandedDjen] = useState<Set<string>>(new Set());
   const [showNewEvent, setShowNewEvent] = useState(false);
@@ -131,14 +158,16 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [eventsRes, calRes, djenRes] = await Promise.all([
+      const [eventsRes, calRes, djenRes, tasksRes] = await Promise.all([
         api.get(`/legal-cases/${caseId}/events`),
         api.get('/calendar/events', { params: { legalCaseId: caseId } }),
         api.get(`/djen/case/${caseId}`).catch(() => ({ data: [] })),
+        api.get(`/tasks/legal-case/${caseId}`).catch(() => ({ data: [] })),
       ]);
       setEvents(eventsRes.data || []);
       setCalendarEvents(calRes.data || []);
       setDjenPublications(djenRes.data || []);
+      setTasks(tasksRes.data || []);
     } catch {
       showError('Erro ao carregar timeline');
     } finally {
@@ -269,6 +298,46 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
         numeroProcesso: d.numero_processo,
       },
     })),
+    // Diligencias: cada Task gera 1 ou 2 entradas na timeline.
+    //   - "Delegada" no momento da criacao (sempre)
+    //   - "Concluida" se status='CONCLUIDA' (so se concluida)
+    // Permite ver no historico do processo "delegou Y pra Bruna no dia 27,
+    // ela concluiu no dia 28 com 1 anexo" sem sair da timeline.
+    ...tasks.flatMap(t => {
+      const items: TimelineItem[] = [{
+        id: `task-created-${t.id}`,
+        type: 'task_created' as const,
+        date: t.created_at,
+        title: `Diligência delegada: ${t.title}`,
+        description: t.description
+          ? `${t.description}${t.assigned_user?.name ? ` · Responsável: ${t.assigned_user.name}` : ''}`
+          : (t.assigned_user?.name ? `Responsável: ${t.assigned_user.name}` : null),
+        extra: {
+          eventType: 'DILIGENCIA_CRIADA',
+          taskId: t.id,
+          assignedTo: t.assigned_user?.name,
+          createdBy: t.created_by?.name,
+          status: t.status,
+        },
+      }];
+      if (t.status === 'CONCLUIDA' && t.completed_at) {
+        items.push({
+          id: `task-completed-${t.id}`,
+          type: 'task_completed' as const,
+          date: t.completed_at,
+          title: `Diligência concluída: ${t.title}`,
+          description: t.completion_note
+            ? `${t.completion_note}${t.assigned_user?.name ? ` · por ${t.assigned_user.name}` : ''}`
+            : (t.assigned_user?.name ? `Concluída por ${t.assigned_user.name}` : null),
+          extra: {
+            eventType: 'DILIGENCIA_CONCLUIDA',
+            taskId: t.id,
+            completedBy: t.assigned_user?.name,
+          },
+        });
+      }
+      return items;
+    }),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
@@ -427,7 +496,13 @@ export default function TabTimeline({ caseId }: { caseId: string }) {
                             {formatDateTime(item.date)}
                           </span>
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider ${badgeColor}`}>
-                            {isDjen ? (item.extra.tipoComunicacao || 'DJEN') : eventType}
+                            {isDjen
+                              ? (item.extra.tipoComunicacao || 'DJEN')
+                              : item.type === 'task_created'
+                              ? 'Diligência'
+                              : item.type === 'task_completed'
+                              ? '✓ Concluída'
+                              : eventType}
                           </span>
                           {item.extra.status && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-border bg-accent/30 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">

@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, FileText, CalendarDays, Clock, MessageSquare, Activity,
   Loader2, AlertTriangle, ClipboardList, FileSignature, BookOpen,
   DollarSign, Archive, ArchiveRestore, Send, Ban, Undo2, History as HistoryIcon,
-  Copy, Check, AudioLines,
+  Copy, Check, AudioLines, Hand,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -24,6 +24,7 @@ const formatCNJ = (num: string | null | undefined): string => {
 import TabResumo from './components/TabResumo';
 import TabDocumentos from './components/TabDocumentos';
 import TabTarefas from './components/TabTarefas';
+import TabDiligencias from './components/TabDiligencias';
 import TabPrazos from './components/TabPrazos';
 import TabHistorico from './components/TabHistorico';
 import TabComunicacoes from './components/TabComunicacoes';
@@ -88,7 +89,7 @@ interface WorkspaceData {
   };
 }
 
-type TabId = 'resumo' | 'documentos' | 'peticoes' | 'banco' | 'tarefas' | 'prazos' | 'honorarios' | 'comunicacoes' | 'timeline' | 'historico' | 'transcricoes';
+type TabId = 'resumo' | 'documentos' | 'peticoes' | 'banco' | 'tarefas' | 'diligencias' | 'prazos' | 'honorarios' | 'comunicacoes' | 'timeline' | 'historico' | 'transcricoes';
 
 const LEGAL_STAGES = [
   { id: 'VIABILIDADE', label: 'Viabilidade' },
@@ -117,6 +118,10 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'peticoes', label: 'Petições', icon: FileSignature },
   { id: 'banco', label: 'Peças', icon: BookOpen },
   { id: 'tarefas', label: 'Eventos', icon: CalendarDays },
+  // Diligencias: Tasks delegadas pra estagiarios. Separado de Eventos
+  // porque tem fluxo proprio (timeline vista/iniciada/concluida + chat
+  // + anexos coletados). Eventos cobre PRAZO/AUDIENCIA/PERICIA tradicionais.
+  { id: 'diligencias', label: 'Diligências', icon: Hand },
   { id: 'prazos', label: 'Prazos', icon: Clock },
   { id: 'honorarios', label: 'Honorários', icon: DollarSign },
   { id: 'comunicacoes', label: 'Comunicações', icon: MessageSquare },
@@ -132,10 +137,28 @@ export default function WorkspacePage() {
   const router = useRouter();
   const caseId = params.caseId as string;
 
+  const searchParams = useSearchParams();
+
   const [data, setData] = useState<WorkspaceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabId>('resumo');
+  // Quando o workspace é aberto via "?openTask=ID" (clique numa diligência
+  // delegada de outro painel), automaticamente vamos pra tab Diligências e
+  // passamos o taskId pra abrir o drawer dentro dela. Apos primeira abertura
+  // a TabDiligencias chama onClearInitialOpen pra limpar.
+  const [initialOpenTaskId, setInitialOpenTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    const openTask = searchParams.get('openTask');
+    if (openTask) {
+      setInitialOpenTaskId(openTask);
+      setActiveTab('diligencias');
+      // Limpa o query param do URL pra nao reabrir em F5/back
+      const url = new URL(window.location.href);
+      url.searchParams.delete('openTask');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [searchParams]);
   const [changingStage, setChangingStage] = useState(false);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
   const [archiveReason, setArchiveReason] = useState('');
@@ -463,6 +486,13 @@ export default function WorkspacePage() {
           )}
           {activeTab === 'tarefas' && (
             <TabTarefas caseId={caseId} lawyerId={data.lawyer_id} />
+          )}
+          {activeTab === 'diligencias' && (
+            <TabDiligencias
+              caseId={caseId}
+              initialOpenTaskId={initialOpenTaskId}
+              onClearInitialOpen={() => setInitialOpenTaskId(null)}
+            />
           )}
           {activeTab === 'prazos' && (
             <TabPrazos caseId={caseId} />

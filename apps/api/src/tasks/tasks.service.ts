@@ -896,13 +896,21 @@ export class TasksService {
         throw new ForbiddenException('Acesso negado a este recurso');
       }
     }
+    // Inclui tracking timestamps + count attachments pra TabDiligencias
+    // do workspace mostrar timeline visual e indicadores corretamente.
+    // created_by_id eh raw (sem relacao formal no schema atual) — caller
+    // mapeia user_id pro nome via /users se precisar.
     return this.prisma.task.findMany({
       where: { legal_case_id: legalCaseId },
       include: {
         assigned_user: { select: { id: true, name: true } },
-        _count: { select: { comments: true } },
+        _count: { select: { comments: true, attachments: true } },
       },
-      orderBy: { created_at: 'desc' },
+      orderBy: [
+        { status: 'asc' },         // A_FAZER vem antes de EM_PROGRESSO
+        { due_at: 'asc' },          // mais urgente primeiro
+        { created_at: 'desc' },
+      ],
     });
   }
 

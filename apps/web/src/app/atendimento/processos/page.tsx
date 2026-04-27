@@ -658,7 +658,7 @@ function ProcessoCard({
       <div className="flex items-center justify-between text-[10px] text-muted-foreground/70">
         <div className="flex items-center gap-2.5">
           {taskCount > 0 && (
-            <span className="flex items-center gap-0.5" title={`${taskCount} eventos`}>
+            <span className="flex items-center gap-0.5" title={`${taskCount} tarefa(s)/diligência(s)`}>
               <CheckCircle2 size={10} /> {taskCount}
             </span>
           )}
