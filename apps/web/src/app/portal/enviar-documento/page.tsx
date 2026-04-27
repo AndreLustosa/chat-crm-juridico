@@ -812,6 +812,7 @@ export default function EnviarDocumentoPage() {
         {/* ─── Camera ao vivo (full-screen overlay) ─────────────── */}
         {liveScanner && (
           <LiveScanner
+            pageCount={pages.length}
             onCapture={(file) => {
               // Nao fecha o LiveScanner — cliente pode tirar varias fotos em
               // sequencia. Cada captura processa em paralelo (handleScannerCapture

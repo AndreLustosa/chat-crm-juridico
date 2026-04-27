@@ -24,17 +24,27 @@ type Props = {
   onCapture: (file: File) => void;
   onClose: () => void;
   onFallback: () => void;
+  // Quantas paginas ja foram capturadas (mostra no topbar pra cliente saber)
+  pageCount?: number;
 };
 
 type State = 'requesting' | 'ready' | 'capturing' | 'denied' | 'error';
 
-export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
+export function LiveScanner({ onCapture, onClose, onFallback, pageCount = 0 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [state, setState] = useState<State>('requesting');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
+  // Flash visual em cada captura bem sucedida — feedback imediato igual
+  // ao flash branco do iPhone Camera nativo. Sem isso o cliente clica e
+  // nao tem certeza se funcionou.
+  const [flashing, setFlashing] = useState(false);
+  function triggerFlash() {
+    setFlashing(true);
+    setTimeout(() => setFlashing(false), 180);
+  }
   // Mounted flag pra createPortal — evita SSR hydration mismatch (document
   // so existe no client). Setado true no useEffect de mount.
   const [mounted, setMounted] = useState(false);
@@ -142,14 +152,42 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
   /**
    * Captura o frame atual do video pra um canvas, gera Blob JPEG e
    * devolve como File. Roda 100% client-side, nao re-acessa a camera.
+   *
+   * Defensivo: cada falha eh visivel pro cliente em vez de morrer
+   * silenciosamente. Logs em console.log pra debug via Web Inspector.
    */
   async function capture() {
+    // eslint-disable-next-line no-console
+    console.log('[LiveScanner] capture() chamado, state=', state);
     const video = videoRef.current;
-    if (!video || video.readyState < 2) return;
+    if (!video) {
+      setErrorMsg('Vídeo não disponível — tente fechar e abrir a câmera');
+      return;
+    }
+    if (video.readyState < 2) {
+      // Em vez de retornar silenciosamente, espera ate ~3s pelo video
+      // ficar pronto. iOS Safari as vezes leva 1-2s pra readyState chegar
+      // em HAVE_CURRENT_DATA mesmo apos play() ter resolvido.
+      setErrorMsg('Aguardando câmera carregar…');
+      const start = Date.now();
+      while (video.readyState < 2 && Date.now() - start < 3000) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (video.readyState < 2) {
+        setErrorMsg('Câmera não respondeu. Feche e tente abrir de novo.');
+        return;
+      }
+      setErrorMsg(null);
+    }
+
     setState('capturing');
     try {
-      const w = video.videoWidth;
-      const h = video.videoHeight;
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      // eslint-disable-next-line no-console
+      console.log('[LiveScanner] capturando', w, 'x', h, 'readyState=', video.readyState);
+      if (!w || !h) throw new Error('Vídeo sem dimensões — câmera não pronta');
+
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
@@ -160,14 +198,21 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
       const blob: Blob | null = await new Promise(resolve => {
         canvas.toBlob(b => resolve(b), 'image/jpeg', 0.92);
       });
-      if (!blob) throw new Error('Falha ao gerar imagem');
+      if (!blob) throw new Error('canvas.toBlob retornou null');
 
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const file = new File([blob], `pagina-${ts}.jpg`, { type: 'image/jpeg' });
+      // eslint-disable-next-line no-console
+      console.log('[LiveScanner] capturado ok, blob.size=', blob.size);
+      // Flash visual primeiro (feedback imediato) — depois entrega o file
+      triggerFlash();
       onCapture(file);
-      setState('ready'); // pronto pra proxima foto
+      setErrorMsg(null);
+      setState('ready');
     } catch (e: any) {
-      setErrorMsg(e?.message || 'Falha ao capturar');
+      // eslint-disable-next-line no-console
+      console.error('[LiveScanner] erro capture:', e);
+      setErrorMsg(`Falha ao capturar: ${e?.message || 'erro desconhecido'}`);
       setState('ready');
     }
   }
@@ -226,7 +271,12 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
         >
           <X size={20} />
         </button>
-        <span className="text-white text-sm font-bold">Scanner</span>
+        <span className="text-white text-sm font-bold">
+          Scanner
+          {pageCount > 0 && (
+            <span className="ml-2 text-[#A89048]">· {pageCount} {pageCount === 1 ? 'página' : 'páginas'}</span>
+          )}
+        </span>
         {torchSupported ? (
           <button
             type="button"
@@ -251,6 +301,21 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
           playsInline
           muted
           autoPlay
+          // onLoadedMetadata: quando o video carrega as dimensoes (videoWidth/Height
+          // disponiveis), garante que state vira 'ready' mesmo se o useEffect
+          // tiver setado antes do video estar pronto.
+          onLoadedMetadata={() => {
+            // eslint-disable-next-line no-console
+            console.log('[LiveScanner] video loadedmetadata, w=',
+              videoRef.current?.videoWidth, 'h=', videoRef.current?.videoHeight);
+            if (state === 'requesting') setState('ready');
+          }}
+          onCanPlay={() => {
+            // eslint-disable-next-line no-console
+            console.log('[LiveScanner] video canplay, readyState=',
+              videoRef.current?.readyState);
+            if (state === 'requesting') setState('ready');
+          }}
         />
         {state === 'requesting' && (
           <div className="absolute inset-0 flex items-center justify-center text-white/60">
@@ -259,20 +324,50 @@ export function LiveScanner({ onCapture, onClose, onFallback }: Props) {
           </div>
         )}
 
+        {/* Mensagem de erro do capture — mostra acima do botao de
+            captura como toast. Some quando cliente tira proxima foto. */}
+        {errorMsg && state !== 'requesting' && (
+          <div className="absolute bottom-4 left-4 right-4 rounded-xl bg-red-500/90 backdrop-blur-sm p-3 flex items-start gap-2">
+            <AlertCircle className="text-white shrink-0 mt-0.5" size={16} />
+            <p className="text-white text-xs flex-1">{errorMsg}</p>
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              className="text-white/80 hover:text-white p-1"
+              aria-label="Fechar aviso"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Frame guide — retangulo pontilhado mostrando "enquadre o documento aqui" */}
-        {state === 'ready' && (
+        {state === 'ready' && !errorMsg && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-8">
             <div className="w-full h-full max-w-md max-h-[80%] border-2 border-dashed border-[#A89048]/50 rounded-2xl" />
           </div>
         )}
+
+        {/* Flash branco que pisca rapidamente em cada captura — confirma
+            visualmente que a foto foi tirada, igual ao iPhone Camera. */}
+        <div
+          className={`absolute inset-0 bg-white pointer-events-none transition-opacity ${
+            flashing ? 'opacity-90 duration-75' : 'opacity-0 duration-150'
+          }`}
+        />
       </div>
 
-      {/* Bottom — botao de captura grande estilo Camera nativa */}
+      {/* Bottom — botao de captura grande estilo Camera nativa.
+          IMPORTANTE: nao usamos `state !== 'ready'` no disabled porque
+          se o useEffect/play() falhar silenciosamente em algum dispositivo,
+          state fica preso em 'requesting' e o botao nunca destrava.
+          Em vez disso, deixamos sempre clicavel e a propria capture()
+          valida video.readyState com tolerancia (espera ate 3s). */}
       <div className="relative z-10 px-6 py-6 bg-black/80 backdrop-blur-sm flex items-center justify-center">
         <button
           type="button"
           onClick={capture}
-          disabled={state !== 'ready'}
+          disabled={state === 'capturing'}
           className="relative w-20 h-20 rounded-full bg-white disabled:opacity-50 active:scale-95 transition-transform flex items-center justify-center touch-manipulation"
           aria-label="Tirar foto"
         >
