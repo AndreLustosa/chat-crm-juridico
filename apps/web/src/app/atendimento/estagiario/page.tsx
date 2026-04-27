@@ -12,6 +12,7 @@ import {
 import api from '@/lib/api';
 import { useSocket } from '@/lib/SocketProvider';
 import { CompleteTaskModal } from '@/components/CompleteTaskModal';
+import { TaskDetailDrawer } from '@/components/TaskDetailDrawer';
 
 // ─── Tipos (Lista / Dashboard) ─────────────────────────────────
 
@@ -587,6 +588,63 @@ function KanbanPetitionCard({
 
 // ─── Kanban Board View ──────────────────────────────────────────
 
+/**
+ * Card compacto de diligencia pra faixa horizontal no topo do Kanban.
+ * Versao mini do TaskCard pra caber em scroll horizontal sem ocupar
+ * o espaco vertical das colunas de peticoes.
+ */
+function DiligenciaMiniCard({
+  task, onClick, onComplete,
+}: {
+  task: TaskItem;
+  onClick: () => void;
+  onComplete: () => void;
+}) {
+  const due = task.start_at ? daysUntil(task.start_at) : null;
+  const isInProgress = task.status === 'EM_PROGRESSO' || task.status === 'CONFIRMADO';
+  const clientName = task.legal_case?.lead?.name || task.lead?.name;
+  return (
+    <div
+      onClick={onClick}
+      className={`shrink-0 w-[260px] rounded-xl border p-3 cursor-pointer transition-colors ${
+        due?.overdue
+          ? 'border-red-500/40 bg-red-500/5 hover:bg-red-500/10'
+          : isInProgress
+          ? 'border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10'
+          : 'border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/10'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <span className="text-[8px] font-bold uppercase tracking-wider text-blue-400 bg-blue-500/15 px-1.5 py-0.5 rounded-full">
+          {isInProgress ? '▶ EM ANDAMENTO' : 'A FAZER'}
+        </span>
+        {due && (
+          <span className={`text-[9px] font-semibold ${
+            due.overdue ? 'text-red-400' : due.urgent ? 'text-amber-400' : 'text-muted-foreground'
+          }`}>
+            {due.text}
+          </span>
+        )}
+      </div>
+      <p className="text-[12px] font-bold text-foreground line-clamp-2 leading-tight mb-1">
+        {task.title}
+      </p>
+      {clientName && (
+        <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+          <User size={9} /> {clientName}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onComplete(); }}
+        className="mt-2 w-full px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center gap-1 transition-colors"
+      >
+        <CheckCircle2 size={10} /> Concluir
+      </button>
+    </div>
+  );
+}
+
 function KanbanView() {
   const router = useRouter();
   const { socket } = useSocket();
@@ -594,6 +652,36 @@ function KanbanView() {
   const [loading, setLoading] = useState(true);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<KanbanColumnKey | null>(null);
+
+  // Diligencias (Tasks orfas) — sao separadas do Kanban de peticoes
+  // (Rascunho/Em Revisao/Aprovada/Protocolada). Antes nao apareciam no
+  // modo Kanban — estagiario via "0 PENDENTES" mesmo tendo diligencia.
+  // Agora exibimos faixa horizontal scrollable acima do kanban.
+  const [diligencias, setDiligencias] = useState<TaskItem[]>([]);
+  const [completingTask, setCompletingTask] = useState<TaskItem | null>(null);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  useEffect(() => {
+    api.get('/users/me').then(r => setCurrentUserId(r.data?.id || '')).catch(() => {});
+  }, []);
+
+  const fetchDiligencias = useCallback(async () => {
+    try {
+      const res = await api.get('/intern/dashboard');
+      // dashboard.pending vem com kind='event' | 'task'. Filtramos so as
+      // diligencias (Tasks orfas) pra mostrar na faixa.
+      const items: TaskItem[] = (res.data?.pending || []).filter(
+        (t: TaskItem) => t.kind === 'task',
+      );
+      setDiligencias(items);
+    } catch {}
+  }, []);
+  useEffect(() => { fetchDiligencias(); }, [fetchDiligencias]);
+  // Refresh quando algo muda
+  useEffect(() => {
+    const interval = setInterval(() => fetchDiligencias(), 60_000);
+    return () => clearInterval(interval);
+  }, [fetchDiligencias]);
 
   // Board horizontal pan
   const boardRef = useRef<HTMLDivElement>(null);
@@ -770,6 +858,31 @@ function KanbanView() {
             </div>
           </div>
         )}
+
+        {/* Diligencias delegadas — faixa horizontal scrollable. Antes nao
+            apareciam no Kanban porque o board so renderiza peticoes. */}
+        {diligencias.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-[11px] font-bold text-blue-400 uppercase tracking-wider">
+                ✋ Diligências ({diligencias.length})
+              </h2>
+              <span className="text-[10px] text-muted-foreground/60">
+                Tarefas rápidas delegadas pelo advogado
+              </span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+              {diligencias.map(d => (
+                <DiligenciaMiniCard
+                  key={d.id}
+                  task={d}
+                  onClick={() => setOpenTaskId(d.id)}
+                  onComplete={() => setCompletingTask(d)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Kanban Board */}
@@ -875,6 +988,31 @@ function KanbanView() {
           })}
         </div>
       </div>
+
+      {/* Modal "Concluir diligencia" — drop zone de anexos. Abre quando
+          estagiario clica em Concluir num mini-card de diligencia. */}
+      <CompleteTaskModal
+        open={!!completingTask}
+        taskId={completingTask?.id ?? null}
+        taskTitle={completingTask?.title}
+        hasLegalCase={!!completingTask?.legal_case?.id}
+        onClose={() => setCompletingTask(null)}
+        onCompleted={() => {
+          setCompletingTask(null);
+          fetchDiligencias();
+        }}
+      />
+
+      {/* Drawer com timeline + chat + anexos. Abre quando estagiario
+          clica num mini-card de diligencia (sem ser no botao Concluir). */}
+      <TaskDetailDrawer
+        open={!!openTaskId}
+        taskId={openTaskId}
+        perspective="intern"
+        currentUserId={currentUserId}
+        onClose={() => setOpenTaskId(null)}
+        onChanged={() => fetchDiligencias()}
+      />
     </div>
   );
 }

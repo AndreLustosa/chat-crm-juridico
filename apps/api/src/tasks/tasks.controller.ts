@@ -16,6 +16,16 @@ export class TasksController {
     return this.tasksService.getWorkload(req.user?.tenant_id);
   }
 
+  /**
+   * Diligencias que o advogado delegou pra outras pessoas. Painel pra
+   * acompanhar progresso (vista/iniciada/concluida) com agregados de
+   * status e contadores de comentarios + anexos.
+   */
+  @Get('delegated-by-me')
+  findDelegatedByMe(@Request() req: any) {
+    return this.tasksService.findDelegatedByMe(req.user?.id, req.user?.tenant_id);
+  }
+
   // Sprint 4: Sugestão de próxima ação por IA
   @Post('next-action')
   @HttpCode(HttpStatus.OK)

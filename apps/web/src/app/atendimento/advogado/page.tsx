@@ -11,6 +11,7 @@ import {
 import api from '@/lib/api';
 import { EventActionButton } from '@/components/EventActionButton';
 import { NewDelegationModal } from '@/components/NewDelegationModal';
+import { TaskDetailDrawer } from '@/components/TaskDetailDrawer';
 import { showError, showSuccess } from '@/lib/toast';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
@@ -1852,6 +1853,28 @@ export default function AdvogadoPage() {
   // precisar criar evento processual antes (PRAZO/TAREFA no calendar)
   const [showNewDelegation, setShowNewDelegation] = useState(false);
 
+  // Diligencias que o advogado delegou — seçao nova "Diligências delegadas"
+  // que mostra status (vista/iniciada/concluida) das Tasks orfas que ele
+  // criou. Antes essas diligencias nao apareciam em lugar nenhum no painel
+  // do advogado depois de criadas.
+  const [delegatedTasks, setDelegatedTasks] = useState<any[]>([]);
+  const [delegatedStats, setDelegatedStats] = useState<any>({ pending: 0, inProgress: 0, completedRecent: 0, notViewed: 0 });
+  const [showDelegated, setShowDelegated] = useState(true);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const fetchDelegatedTasks = useCallback(async () => {
+    try {
+      const res = await api.get('/tasks/delegated-by-me');
+      setDelegatedTasks(res.data?.tasks || []);
+      setDelegatedStats(res.data?.stats || { pending: 0, inProgress: 0, completedRecent: 0, notViewed: 0 });
+    } catch {}
+  }, []);
+  useEffect(() => { fetchDelegatedTasks(); }, [fetchDelegatedTasks]);
+  // Refresh a cada 30s pra ver status atualizado (estagiario viu/iniciou/concluiu)
+  useEffect(() => {
+    const i = setInterval(() => fetchDelegatedTasks(), 30_000);
+    return () => clearInterval(i);
+  }, [fetchDelegatedTasks]);
+
   // Filtro de advogado pra admin visualizar prazos (todos / apenas os meus /
   // advogado especifico). Feature 2026-04-24. Nao-admin nao ve esse dropdown
   // e o backend forca req.user.id no retorno (RBAC garantido no commit 72ef01d).
@@ -2393,6 +2416,124 @@ export default function AdvogadoPage() {
               </div>
             )}
 
+            {/* Diligências delegadas — diligencias rapidas (Tasks orfas)
+                que o advogado delegou pra estagiario. Antes essas diligencias
+                sumiam apos criadas — nao apareciam aqui nem no painel do
+                estagiario sem refresh. Agora cada card mostra timeline do
+                progresso (vista/iniciada) + indicadores de comments/anexos. */}
+            {view === 'active' && delegatedTasks.length > 0 && (
+              <div className="mx-6 mt-4 shrink-0">
+                <button
+                  onClick={() => setShowDelegated(!showDelegated)}
+                  className="flex items-center gap-2 text-[12px] font-bold text-blue-400 uppercase tracking-wider mb-2 hover:opacity-80 transition-opacity"
+                >
+                  <ChevronRight size={14} className={`transition-transform ${showDelegated ? 'rotate-90' : ''}`} />
+                  ✋ Diligências Delegadas ({delegatedTasks.length})
+                  {delegatedStats.notViewed > 0 && (
+                    <span
+                      className="text-[10px] font-bold text-red-400 bg-red-500/15 border border-red-500/30 px-2 py-0.5 rounded-full normal-case tracking-normal"
+                      title="Diligências que ainda não foram vistas pelo responsável"
+                    >
+                      {delegatedStats.notViewed} sem ler
+                    </span>
+                  )}
+                </button>
+                {showDelegated && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {delegatedTasks.map((t: any) => {
+                      const isCompleted = t.status === 'CONCLUIDA';
+                      const isInProgress = t.status === 'EM_PROGRESSO';
+                      const isOverdue = t.due_at && !isCompleted && new Date(t.due_at) < new Date();
+                      const cardClass = isOverdue
+                        ? 'border-red-500/40 bg-red-500/5'
+                        : isCompleted
+                        ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70'
+                        : isInProgress
+                        ? 'border-amber-500/40 bg-amber-500/5'
+                        : 'border-blue-500/30 bg-blue-500/5';
+                      const formatTs = (iso: string | null) => iso
+                        ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                        : null;
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => setOpenTaskId(t.id)}
+                          className={`p-3 rounded-xl border cursor-pointer hover:opacity-90 transition-opacity ${cardClass}`}
+                        >
+                          {/* Status badge + prazo */}
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <span className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
+                              isCompleted ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              : isInProgress ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                              : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                            }`}>
+                              {isCompleted ? '✓ Concluída' : isInProgress ? '▶ Em andamento' : 'A fazer'}
+                            </span>
+                            {t.due_at && !isCompleted && (
+                              <span className={`text-[9px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                                {isOverdue ? 'Atrasado' : formatTs(t.due_at)}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Titulo */}
+                          <p className="text-[12px] font-bold text-foreground line-clamp-2 leading-tight mb-1">
+                            {t.title}
+                          </p>
+
+                          {/* Cliente / processo */}
+                          {(t.legal_case?.case_number || t.legal_case?.lead?.name || t.lead?.name) && (
+                            <p className="text-[10px] text-muted-foreground truncate mb-1.5">
+                              {t.legal_case?.case_number ? (
+                                <>
+                                  <Gavel size={9} className="inline mr-1" />
+                                  {t.legal_case.case_number}
+                                </>
+                              ) : (
+                                <>
+                                  <User size={9} className="inline mr-1" />
+                                  {t.legal_case?.lead?.name || t.lead?.name}
+                                </>
+                              )}
+                            </p>
+                          )}
+
+                          {/* Responsavel + indicadores de progresso */}
+                          <div className="flex items-center justify-between text-[10px] mt-2 pt-2 border-t border-border/40">
+                            <span className="text-muted-foreground truncate flex items-center gap-1">
+                              <UserCheck size={10} className="text-blue-400" />
+                              {t.assigned_user?.name || '—'}
+                            </span>
+                            <div className="flex items-center gap-2 shrink-0 ml-2">
+                              {t.viewed_at ? (
+                                <span title={`Vista em ${formatTs(t.viewed_at)}`} className="text-violet-400 flex items-center gap-0.5">
+                                  👁 {formatTs(t.viewed_at)?.split(' ')[1]}
+                                </span>
+                              ) : (
+                                <span title="Ainda não visualizada" className="text-red-400/70">
+                                  👁 não viu
+                                </span>
+                              )}
+                              {t._count?.comments > 0 && (
+                                <span title={`${t._count.comments} comentário(s)`} className="text-muted-foreground flex items-center gap-0.5">
+                                  <MessageSquare size={9} /> {t._count.comments}
+                                </span>
+                              )}
+                              {t._count?.attachments > 0 && (
+                                <span title={`${t._count.attachments} anexo(s)`} className="text-muted-foreground flex items-center gap-0.5">
+                                  📎 {t._count.attachments}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Prazos e Petições Pendentes */}
             {/* shrink-0: nao esticar; a pagina rola verticalmente, entao os
                 prazos ocupam altura natural e o kanban fica abaixo, acessivel
@@ -2695,7 +2836,19 @@ export default function AdvogadoPage() {
       <NewDelegationModal
         open={showNewDelegation}
         onClose={() => setShowNewDelegation(false)}
-        onCreated={() => fetchCases(true)}
+        onCreated={() => { fetchCases(true); fetchDelegatedTasks(); }}
+      />
+
+      {/* Drawer de detalhes da diligencia — abre clicando num card da
+          secao "Diligências Delegadas". Mostra timeline (criada/vista/
+          iniciada/concluida), chat com estagiario, anexos. */}
+      <TaskDetailDrawer
+        open={!!openTaskId}
+        taskId={openTaskId}
+        perspective="lawyer"
+        currentUserId={currentUserId || ''}
+        onClose={() => setOpenTaskId(null)}
+        onChanged={() => fetchDelegatedTasks()}
       />
 
       {/* Case Detail Panel */}

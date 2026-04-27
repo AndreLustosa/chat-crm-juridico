@@ -573,6 +573,74 @@ export class TasksService {
 
   // ─── Calendar Sync ──────────────────────────────────────────────
 
+  // ─── Diligencias delegadas pelo advogado ──────────────────────
+
+  /**
+   * Lista Tasks que `userId` delegou (created_by_id=userId E
+   * assigned_user_id != userId — auto-tarefas nao contam aqui).
+   * Foco em diligencias orfas (sem calendar_event_id) — Tasks vinculadas
+   * a CalendarEvent processual ja aparecem em outros paineis.
+   *
+   * Inclui contagem de comentarios e anexos pra UI mostrar indicadores
+   * sem N+1. Tracking timestamps (viewed_at, started_at, completed_at)
+   * vem direto pra timeline visual.
+   */
+  async findDelegatedByMe(userId: string, tenantId?: string) {
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        created_by_id: userId,
+        calendar_event_id: null, // diligencias orfas (sem evento processual)
+        assigned_user_id: { not: userId }, // auto-tarefa nao conta
+        // Mostra A_FAZER, EM_PROGRESSO E concluidas das ultimas 24h
+        // (concluidas antigas escondem pra nao poluir)
+        OR: [
+          { status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
+          {
+            status: 'CONCLUIDA',
+            completed_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          },
+        ],
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      include: {
+        assigned_user: { select: { id: true, name: true } },
+        lead: { select: { id: true, name: true, phone: true } },
+        legal_case: {
+          select: {
+            id: true, case_number: true, legal_area: true,
+            lead: { select: { id: true, name: true } },
+          },
+        },
+        _count: {
+          select: {
+            comments: true,
+            attachments: true,
+          },
+        },
+      },
+      orderBy: [
+        { status: 'asc' }, // A_FAZER vem antes de EM_PROGRESSO
+        { due_at: 'asc' }, // mais urgente primeiro
+        { created_at: 'desc' },
+      ],
+      take: 50,
+    });
+
+    // Stats agregadas pro UI mostrar contadores
+    const stats = {
+      pending: tasks.filter(t => t.status === 'A_FAZER').length,
+      inProgress: tasks.filter(t => t.status === 'EM_PROGRESSO').length,
+      completedRecent: tasks.filter(t => t.status === 'CONCLUIDA').length,
+      // Quantas pendentes/em-progresso ainda nao foram VISTAS pelo
+      // responsavel — vermelho de alerta no UI
+      notViewed: tasks.filter(t =>
+        t.status !== 'CONCLUIDA' && !t.viewed_at,
+      ).length,
+    };
+
+    return { tasks, stats };
+  }
+
   // ─── Tracking de visualizacao ─────────────────────────────────
 
   /**
