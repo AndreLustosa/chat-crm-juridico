@@ -222,6 +222,12 @@ export class PortalProcessesService {
           id: true, title: true, description: true,
           event_date: true, created_at: true, source: true,
           client_explanation: true,
+          // source_raw guarda cd_movimentacao quando o ESAJ tem documento
+          // protocolado vinculado. Despachos inline ("cite-se", "intime-se",
+          // determinacoes simples) NAO geram cd_movimentacao porque o
+          // tribunal nao protocola PDF — juiz digita direto no sistema.
+          // Usamos isso pra decidir se mostra botao "Baixar PDF" no portal.
+          source_raw: true,
         },
         orderBy: [{ event_date: 'desc' }, { created_at: 'desc' }],
         take: oversampled,
@@ -258,6 +264,12 @@ export class PortalProcessesService {
       title: string;
       content: string;              // texto cru juridico — exibido por padrao
       explanation_cached: string | null; // explicacao leiga ja salva (se houver)
+      // true = movimentacao tem PDF protocolado no tribunal e o backend
+      // sabe baixar (cd_movimentacao guardado). false = despacho inline,
+      // publicacao DJEN, ou movimentacao antiga sem cd_movimentacao
+      // capturado pelo parser ainda. Frontend usa pra esconder o botao
+      // "Baixar PDF" — evita 404 e frustacao do cliente.
+      has_pdf: boolean;
       // Campos auxiliares do DJEN (so se ja tem analise IA persistida)
       next_step_lay?: string | null;
       deadline_lay?: string | null;
@@ -267,6 +279,8 @@ export class PortalProcessesService {
     const items: TimelineItem[] = [];
 
     for (const m of esajMovements) {
+      const sourceRaw = (m as any).source_raw || {};
+      const hasPdf = !!sourceRaw.cd_movimentacao;
       items.push({
         kind: 'esaj',
         id: m.id,
@@ -274,6 +288,7 @@ export class PortalProcessesService {
         title: (m.title || 'Movimentação processual').slice(0, 200),
         content: m.description || m.title || '',
         explanation_cached: (m as any).client_explanation || null,
+        has_pdf: hasPdf,
       });
     }
 
@@ -285,6 +300,8 @@ export class PortalProcessesService {
         date: p.data_disponibilizacao.toISOString(),
         title: p.assunto || p.tipo_comunicacao || 'Publicação',
         content: p.conteudo || '',
+        // DJEN nao tem PDF original do ato — eh a propria publicacao
+        has_pdf: false,
         // DJEN ja tem resumo_cliente do sync — usa como cache da explicacao
         explanation_cached: ca.resumo_cliente || null,
         next_step_lay: ca.proximo_passo_cliente || null,

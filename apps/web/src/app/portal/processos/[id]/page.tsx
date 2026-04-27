@@ -49,6 +49,10 @@ type Movement = {
   title: string;
   content: string;                    // texto cru juridico
   explanation_cached: string | null;  // explicacao leiga ja gerada (cache)
+  // true = movimentacao tem PDF protocolado no tribunal (cd_movimentacao
+  // capturado). Despachos inline ("cite-se", "intime-se") nao tem PDF
+  // porque o juiz digitou direto no sistema sem protocolar arquivo.
+  has_pdf: boolean;
   next_step_lay?: string | null;
   deadline_lay?: string | null;
   orientation_lay?: string | null;
@@ -404,8 +408,11 @@ function MovementCard({
               </button>
             )}
 
-            {/* Baixar PDF — so faz sentido pra ESAJ (DJEN nao tem PDF original) */}
-            {!isDjen && (
+            {/* Baixar PDF — so quando o backend confirma que existe PDF
+                protocolado (has_pdf=true). Despachos inline do TJAL e
+                publicacoes DJEN nao tem arquivo, entao escondemos o
+                botao em vez de mostrar 404. */}
+            {m.has_pdf && (
               <button
                 onClick={baixarPdf}
                 disabled={downloadingPdf}
