@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, AlertCircle, FileText, Download, Folder } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Download, Folder, UploadCloud, User } from 'lucide-react';
 import { PortalHeader } from '../components/PortalHeader';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
@@ -18,6 +18,7 @@ type Document = {
   version: number;
   created_at: string;
   uploaded_by: string | null;
+  uploaded_via_portal: boolean;
   case: { id: string; case_number: string | null; action_type: string };
 };
 
@@ -94,9 +95,18 @@ export default function DocumentosPage() {
     <>
       <PortalHeader showBack />
       <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold mb-1">Seus documentos</h1>
-          <p className="text-white/50 text-sm">Procurações, contratos, decisões e demais documentos disponíveis.</p>
+        <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Seus documentos</h1>
+            <p className="text-white/50 text-sm">Procurações, contratos, decisões e demais documentos disponíveis.</p>
+          </div>
+          <button
+            onClick={() => router.push('/portal/enviar-documento')}
+            className="flex items-center gap-2 bg-[#A89048] hover:bg-[#B89A50] text-[#0a0a0f] text-sm font-bold px-4 py-2.5 rounded-full transition-colors shrink-0"
+          >
+            <UploadCloud size={16} />
+            Enviar documento
+          </button>
         </div>
 
         {docs === null && !error && (
@@ -120,10 +130,18 @@ export default function DocumentosPage() {
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#A89048]/15 border border-[#A89048]/30 mb-4">
               <FileText className="text-[#A89048]" size={24} />
             </div>
-            <h2 className="text-lg font-bold mb-2">Nenhum documento disponível</h2>
-            <p className="text-white/50 text-sm">
+            <h2 className="text-lg font-bold mb-2">Nenhum documento ainda</h2>
+            <p className="text-white/50 text-sm mb-5 max-w-md mx-auto">
               Quando seu advogado adicionar procurações, contratos ou decisões, eles aparecem aqui.
+              Você também pode enviar documentos pra ele.
             </p>
+            <button
+              onClick={() => router.push('/portal/enviar-documento')}
+              className="inline-flex items-center gap-2 bg-[#A89048] hover:bg-[#B89A50] text-[#0a0a0f] text-sm font-bold px-5 py-2.5 rounded-full transition-colors"
+            >
+              <UploadCloud size={16} />
+              Enviar documento
+            </button>
           </div>
         )}
 
@@ -183,6 +201,12 @@ function DocumentRow({
               <span className="text-[10px] font-bold text-[#A89048] uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#A89048]/10 border border-[#A89048]/30">
                 {folderCfg.emoji} {folderCfg.label}
               </span>
+              {doc.uploaded_via_portal && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
+                  <User size={10} />
+                  Enviado por mim
+                </span>
+              )}
               {doc.version > 1 && (
                 <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/30">
                   v{doc.version}
@@ -195,7 +219,7 @@ function DocumentRow({
             )}
             <p className="text-[10px] text-white/40 mt-1">
               {formatSize(doc.size)} · {formatBrDate(doc.created_at)}
-              {doc.uploaded_by && ` · adicionado por ${doc.uploaded_by}`}
+              {doc.uploaded_by && !doc.uploaded_via_portal && ` · adicionado por ${doc.uploaded_by}`}
             </p>
           </div>
         </div>

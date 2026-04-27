@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post, Query, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
 import { ClientJwtAuthGuard } from '../portal-auth/client-jwt-auth.guard';
@@ -19,6 +20,39 @@ export class PortalDocumentsController {
   @Get()
   async list(@CurrentClient() client: ClientUser) {
     return this.service.list(client.id);
+  }
+
+  /**
+   * Lista processos do cliente onde ele pode subir documentos.
+   * Frontend usa pra popular o <select> do upload.
+   */
+  @Public()
+  @UseGuards(ClientJwtAuthGuard)
+  @Get('uploadable-cases')
+  async listUploadableCases(@CurrentClient() client: ClientUser) {
+    return this.service.listUploadableCases(client.id);
+  }
+
+  /**
+   * Upload self-service: cliente sobe doc direto pelo portal.
+   * Multipart com campo 'file' + body com case_id, name?, description?.
+   *
+   * Limites: 25MB, MIME whitelist (PDF/imgs/Office/TXT). Notifica advogado
+   * via NotificationsService (delay 5min do WhatsApp respeitando dedup).
+   */
+  @Public()
+  @UseGuards(ClientJwtAuthGuard)
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async upload(
+    @CurrentClient() client: ClientUser,
+    @UploadedFile() file: any,
+    @Body('case_id') caseId: string,
+    @Body('name') name?: string,
+    @Body('description') description?: string,
+  ) {
+    if (!caseId) throw new BadRequestException('case_id obrigatorio');
+    return this.service.upload(client.id, caseId, file, { name, description });
   }
 
   @Public()

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageCircle, Phone, Loader2, Lock, ArrowRight, ArrowLeft, LogOut, CheckCircle2, Scale, FileText, CreditCard, Calendar, FileSignature } from 'lucide-react';
+import { MessageCircle, Phone, Loader2, Lock, ArrowRight, ArrowLeft, LogOut, CheckCircle2, Scale, FileText, CreditCard, Calendar, FileSignature, UploadCloud } from 'lucide-react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 const WHATSAPP_FALLBACK = 'https://wa.me/5582996390799';
@@ -367,6 +367,12 @@ export default function PortalPage() {
                 description="Marque um horário com seu advogado"
                 icon={Calendar}
                 onClick={() => router.push('/portal/agendar')}
+              />
+              <FeatureCard
+                title="Enviar documento"
+                description="Suba RG, comprovantes ou outros arquivos"
+                icon={UploadCloud}
+                onClick={() => router.push('/portal/enviar-documento')}
               />
             </div>
 

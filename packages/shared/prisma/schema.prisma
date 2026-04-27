@@ -1013,6 +1013,10 @@ model CaseDocument {
   version        Int      @default(1)
   parent_id      String? // Para versionamento: aponta pro doc original
   description    String?
+  // true = doc subido pelo cliente via /portal/enviar-documento. uploaded_by_id
+  // aponta pro advogado responsavel (FK exige User), mas a UI deve mostrar
+  // "Enviado pelo cliente" quando esta flag for true.
+  uploaded_via_portal Boolean @default(false)
   created_at     DateTime @default(now())
 
   legal_case  LegalCase      @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
@@ -1023,6 +1027,7 @@ model CaseDocument {
 
   @@index([legal_case_id, folder])
   @@index([parent_id])
+  @@index([legal_case_id, uploaded_via_portal])
 }
 
 // ===============================================

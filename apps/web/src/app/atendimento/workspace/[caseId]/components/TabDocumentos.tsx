@@ -20,6 +20,7 @@ interface CaseDoc {
   description: string | null;
   created_at: string;
   uploaded_by: { id: string; name: string };
+  uploaded_via_portal?: boolean;
   _count: { versions: number };
 }
 
@@ -308,7 +309,13 @@ export default function TabDocumentos({ caseId }: { caseId: string }) {
                             </span>
                             <span className="text-[10px] text-muted-foreground">{formatSize(doc.size)}</span>
                             <span className="text-[10px] text-muted-foreground">{formatDate(doc.created_at)}</span>
-                            <span className="text-[10px] text-muted-foreground">por {doc.uploaded_by.name}</span>
+                            {doc.uploaded_via_portal ? (
+                              <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                Enviado pelo cliente
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground">por {doc.uploaded_by.name}</span>
+                            )}
                             {doc._count.versions > 0 && (
                               <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
                                 <History size={10} /> v{doc.version + doc._count.versions}
