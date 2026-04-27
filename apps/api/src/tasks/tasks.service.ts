@@ -586,10 +586,24 @@ export class TasksService {
    * vem direto pra timeline visual.
    */
   async findDelegatedByMe(userId: string, tenantId?: string) {
+    // Filtro: Tasks que userId DELEGOU (nao auto-tarefas).
+    //
+    // Bug fix 2026-04-27: removidos 2 filtros que excluiam diligencias reais:
+    //   1. `calendar_event_id: null` — Tasks com due_at sao auto-sincronizadas
+    //      com CalendarEvent (syncTaskToCalendar) e ganham calendar_event_id.
+    //      Antes esse filtro excluia toda diligencia COM PRAZO, que eh
+    //      justamente o uso mais comum.
+    //   2. assigned_user_id: { not: userId } sozinho — em SQL three-valued
+    //      logic, NULL != userId retorna NULL (nao TRUE), entao Tasks com
+    //      assigned_user_id NULL eram excluidas. Mas tudo bem, faz sentido:
+    //      Task sem responsavel nao eh "delegacao". Mantido.
+    //
+    // Tasks criadas ANTES do commit f15156b (que persistia created_by_id)
+    // ficam com created_by_id NULL e nao aparecem aqui — limitacao
+    // retroativa, sem backfill seguro. Novas diligencias aparecem normais.
     const tasks = await this.prisma.task.findMany({
       where: {
         created_by_id: userId,
-        calendar_event_id: null, // diligencias orfas (sem evento processual)
         assigned_user_id: { not: userId }, // auto-tarefa nao conta
         // Mostra A_FAZER, EM_PROGRESSO E concluidas das ultimas 24h
         // (concluidas antigas escondem pra nao poluir)

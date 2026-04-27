@@ -40,12 +40,27 @@ export class InternService {
     //    Ambos shapes sao normalizados pra { kind, id, title, ... } e o
     //    frontend renderiza o mesmo componente; a diferenca eh que TASK usa
     //    EventActionButton com type='TASK' e CALENDAR com type='CALENDAR'.
+    // Bug fix 2026-04-27: antes a query (a) puxava TODOS os CalendarEvents
+    // type=TAREFA/PRAZO, e a query (b) puxava so Tasks ORFAS (calendar_event_id
+    // null). Resultado: Task com due_at virava CalendarEvent (via syncTask
+    // ToCalendar) e aparecia no dashboard como kind='event' — perdendo o
+    // badge "DILIGÊNCIA" e o modal de conclusao com drop zone.
+    //
+    // Agora:
+    //   - Query (a) puxa CalendarEvents que NAO tem Task linkada (eventos
+    //     processuais "puros": prazos manuais, audiencias, pericias)
+    //   - Query (b) puxa TODAS as Tasks do estagiario (orfas + sincronizadas
+    //     com calendar) — virando kind='task' uniformemente, com badge e
+    //     fluxo correto de conclusao (anexos)
     const [pendingEvents, pendingTasks] = await Promise.all([
       this.prisma.calendarEvent.findMany({
         where: {
           assigned_user_id: userId,
           type: { in: ['TAREFA', 'PRAZO'] },
           status: { in: ['AGENDADO', 'CONFIRMADO'] },
+          // Exclui CalendarEvents que sao espelho de Task — essas vao
+          // aparecer via query (b) com kind='task' pra ter badge correto
+          task: null,
           ...(tenantId ? { tenant_id: tenantId } : {}),
         },
         include: {
@@ -67,9 +82,6 @@ export class InternService {
       this.prisma.task.findMany({
         where: {
           assigned_user_id: userId,
-          // calendar_event_id null = task orfã. Tasks com evento associado
-          // ja sao cobertas pelo query (a) acima — evita duplicacao.
-          calendar_event_id: null,
           status: { in: ['A_FAZER', 'EM_PROGRESSO'] },
           ...(tenantId ? { tenant_id: tenantId } : {}),
         },
@@ -161,6 +173,8 @@ export class InternService {
           type: { in: ['TAREFA', 'PRAZO'] },
           status: 'CONCLUIDO',
           completed_at: { gte: today, lt: tomorrow },
+          // Same dedup: exclui CalendarEvents que sao espelho de Task
+          task: null,
           ...(tenantId ? { tenant_id: tenantId } : {}),
         },
         include: {
@@ -175,7 +189,6 @@ export class InternService {
       this.prisma.task.findMany({
         where: {
           assigned_user_id: userId,
-          calendar_event_id: null,
           status: 'CONCLUIDA',
           completed_at: { gte: today, lt: tomorrow },
           ...(tenantId ? { tenant_id: tenantId } : {}),
