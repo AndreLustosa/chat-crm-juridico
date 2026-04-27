@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import {
   Search, MessageSquare, Briefcase, Users, Calendar, BookOpen,
   Settings, LayoutDashboard, Bot, FileEdit, Megaphone,
-  CheckSquare, ExternalLink, Loader2, User,
+  CheckSquare, ExternalLink, Loader2, User, UserPlus,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
@@ -19,12 +19,27 @@ interface LeadResult {
 
 interface PaletteItem {
   id: string;
-  type: 'nav' | 'lead';
+  // 'nav' = navegacao pra rota; 'lead' = abrir conversa do lead;
+  // 'action' = acao client-side (ex: abrir modal de nova diligencia)
+  type: 'nav' | 'lead' | 'action';
   label: string;
   sublabel?: string;
   icon: React.ReactNode;
   onSelect: () => void;
 }
+
+// Acoes globais — disparadas por evento window pra serem tratadas no
+// layout (modal global). Mantemos a lista aqui pra ficar perto da nav.
+const GLOBAL_ACTIONS = [
+  {
+    id: 'action-new-delegation',
+    label: 'Nova diligência',
+    sublabel: 'Delegar tarefa rápida pra estagiário sem criar evento',
+    keywords: ['delegar', 'diligencia', 'tarefa', 'estagiario', 'pedir'],
+    icon: <UserPlus size={14} className="text-blue-400" />,
+    dispatch: () => window.dispatchEvent(new CustomEvent('open-new-delegation')),
+  },
+];
 
 const NAV_ITEMS = [
   { id: 'nav-dashboard',  label: 'Dashboard',               sublabel: 'Visão geral do escritório',     href: '/atendimento/dashboard',           icon: <LayoutDashboard size={14} className="text-indigo-400" /> },
@@ -133,6 +148,26 @@ export function GlobalCommandPalette({ open, onClose }: GlobalCommandPaletteProp
   // Montar lista de itens
   const items: PaletteItem[] = [];
 
+  // Acoes globais — primeiro porque sao mais raras e merecem destaque
+  // quando matcheam (ex: digitar "delegar" abre o modal direto)
+  const filteredActions = q
+    ? GLOBAL_ACTIONS.filter(a =>
+        a.label.toLowerCase().includes(q) ||
+        a.sublabel.toLowerCase().includes(q) ||
+        a.keywords.some(k => k.includes(q))
+      )
+    : GLOBAL_ACTIONS;
+  filteredActions.forEach(a => {
+    items.push({
+      id: a.id,
+      type: 'action',
+      label: a.label,
+      sublabel: a.sublabel,
+      icon: a.icon,
+      onSelect: () => { a.dispatch(); onClose(); },
+    });
+  });
+
   // Navegação — filtrada por query ou lista completa
   const filteredNav = q
     ? NAV_ITEMS.filter(n =>
@@ -200,6 +235,7 @@ export function GlobalCommandPalette({ open, onClose }: GlobalCommandPaletteProp
 
   if (!open || !mounted) return null;
 
+  const actionItems = items.filter(i => i.type === 'action');
   const navItems = items.filter(i => i.type === 'nav');
   const leadItems = items.filter(i => i.type === 'lead');
 
@@ -270,6 +306,13 @@ export function GlobalCommandPalette({ open, onClose }: GlobalCommandPaletteProp
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               Nenhum resultado para "{query}"
             </div>
+          )}
+
+          {actionItems.length > 0 && (
+            <>
+              <SectionHeader label="Ações" />
+              {actionItems.map(renderItem)}
+            </>
           )}
 
           {navItems.length > 0 && (

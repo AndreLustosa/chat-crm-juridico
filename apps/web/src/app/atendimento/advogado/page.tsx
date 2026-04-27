@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { EventActionButton } from '@/components/EventActionButton';
+import { NewDelegationModal } from '@/components/NewDelegationModal';
 import { showError, showSuccess } from '@/lib/toast';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
@@ -1847,6 +1848,9 @@ export default function AdvogadoPage() {
   const { isAdmin } = useRole();
   const [djenNotify, setDjenNotify] = useState(true);
   const [loadingNotify, setLoadingNotify] = useState(false);
+  // Modal "Nova diligência" — delegacao rapida pra estagiario sem
+  // precisar criar evento processual antes (PRAZO/TAREFA no calendar)
+  const [showNewDelegation, setShowNewDelegation] = useState(false);
 
   // Filtro de advogado pra admin visualizar prazos (todos / apenas os meus /
   // advogado especifico). Feature 2026-04-24. Nao-admin nao ve esse dropdown
@@ -2219,6 +2223,18 @@ export default function AdvogadoPage() {
                 {djenNotify ? 'Notif. Cliente ON' : 'Notif. Cliente OFF'}
               </button>
             )}
+
+            {/* Nova diligência — delega rapidamente pra estagiário sem
+                precisar criar evento. Cria Task que aparece no dashboard
+                do estagiário em /atendimento/estagiario. */}
+            <button
+              onClick={() => setShowNewDelegation(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-all"
+              title="Delegar uma diligência rápida (ex: ligar pro cliente)"
+            >
+              <UserPlus size={11} />
+              Nova diligência
+            </button>
 
             {/* Refresh */}
             <button
@@ -2671,6 +2687,16 @@ export default function AdvogadoPage() {
           </div>
         )}
       </main>
+
+      {/* Modal "Nova diligência" — sem vinculo pre-preenchido (o usuario
+          escolhe a qual processo/lead vincular dentro do modal, ou nem
+          vincula). Refresh dos cases pra futuras Tasks vinculadas refletirem
+          contadores se necessario. */}
+      <NewDelegationModal
+        open={showNewDelegation}
+        onClose={() => setShowNewDelegation(false)}
+        onCreated={() => fetchCases(true)}
+      />
 
       {/* Case Detail Panel */}
       {selectedCase && (

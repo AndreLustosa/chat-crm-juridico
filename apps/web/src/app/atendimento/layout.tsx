@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { GlobalCommandPalette, useGlobalCommandPalette } from './components/GlobalCommandPalette';
 import { TaskAlertPopup } from './components/TaskAlertPopup';
+import { NewDelegationModal } from '@/components/NewDelegationModal';
 import {
   MessageSquare, Briefcase, Users, Check, FileEdit, BookOpen,
   Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar,
@@ -23,6 +24,21 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   const { theme, setTheme } = useTheme();
   const { open: cmdOpen, setOpen: setCmdOpen } = useGlobalCommandPalette();
   const perms = useRole();
+
+  // Modal global "Nova diligência" — qualquer componente pode abrir
+  // disparando window.dispatchEvent(new CustomEvent('open-new-delegation', { detail: {...defaults} }))
+  // Defaults opcionais: legalCaseId, leadId, conversationId, assignedUserId, bindLabel.
+  // O Cmd+K + atalhos do sidebar disparam isso pra UX consistente.
+  const [delegOpen, setDelegOpen] = useState(false);
+  const [delegDefaults, setDelegDefaults] = useState<any>({});
+  useEffect(() => {
+    const handler = (e: any) => {
+      setDelegDefaults(e.detail || {});
+      setDelegOpen(true);
+    };
+    window.addEventListener('open-new-delegation', handler);
+    return () => window.removeEventListener('open-new-delegation', handler);
+  }, []);
 
   // Mobile states
   const [isMobile, setIsMobile] = useState(false);
@@ -209,6 +225,20 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
 
       {/* ─── Global Command Palette (Ctrl+K) ────────────────── */}
       <GlobalCommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
+
+      {/* ─── Modal global "Nova diligência" ─────────────────────
+          Aberto via window event 'open-new-delegation'. Qualquer pagina
+          pode disparar com defaults pre-preenchidos. */}
+      <NewDelegationModal
+        open={delegOpen}
+        onClose={() => { setDelegOpen(false); setDelegDefaults({}); }}
+        onCreated={() => { /* paginas que escutam podem dar refresh proprio */ }}
+        defaultLegalCaseId={delegDefaults.legalCaseId}
+        defaultLeadId={delegDefaults.leadId}
+        defaultConversationId={delegDefaults.conversationId}
+        defaultAssignedUserId={delegDefaults.assignedUserId}
+        defaultBindLabel={delegDefaults.bindLabel}
+      />
 
       {/* ─── Mobile Bottom Nav (fixed) ──────────────────────── */}
       {showBottomNav && (

@@ -119,18 +119,39 @@ export default function TabTarefas({
     <div className="p-6 max-w-4xl mx-auto space-y-4">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-base font-semibold flex items-center gap-2">
           <CalendarIcon className="h-4 w-4 text-primary" />
           Eventos ({events.length})
         </h2>
-        <button
-          onClick={() => setShowModal(true)}
-          className="btn btn-primary btn-sm gap-1"
-        >
-          <Plus className="h-4 w-4" />
-          Novo evento
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Diligencia rapida — abre o modal global pre-vinculado a este
+              processo. Util quando o advogado nao quer criar EVENTO
+              processual completo, so quer pedir uma acao pra estagiario
+              (ex: "ligar pro cliente e pedir comprovante"). */}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('open-new-delegation', {
+                detail: {
+                  legalCaseId: caseId,
+                  bindLabel: 'este processo',
+                },
+              }));
+            }}
+            className="btn btn-ghost btn-sm gap-1 text-blue-400 hover:text-blue-500 hover:bg-blue-500/10"
+            title="Delegar diligência rápida a um estagiário sem criar evento"
+          >
+            <Plus className="h-4 w-4" />
+            Diligência
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className="btn btn-primary btn-sm gap-1"
+          >
+            <Plus className="h-4 w-4" />
+            Novo evento
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}
