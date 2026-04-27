@@ -43,10 +43,12 @@ const securityHeaders = [
     value: "strict-origin-when-cross-origin",
   },
   {
-    // Permite scripts do Google Tag Manager e Google Ads
+    // Permite scripts do Google Tag Manager, Google Ads e OpenCV.js (scanner do portal)
     key: "Content-Security-Policy",
     value: [
-      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${googleScriptSrc}`,
+      // docs.opencv.org serve opencv.js — usado pelo scanner de documentos
+      // do portal do cliente (jscanify + perspective transform).
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${googleScriptSrc} https://docs.opencv.org`,
       `img-src 'self' data: blob: https: http:`,
       `connect-src 'self' https: wss: ${googleConnectSrc}`,
       `frame-src 'self' ${googleFrameSrc}`,

@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import {
   Loader2, AlertCircle, CheckCircle2, UploadCloud, FileText,
   X, Folder, Camera, FolderOpen, ScanLine, Plus, Trash2,
-  Sparkles, RefreshCcw,
+  Sparkles, RefreshCcw, Crop,
 } from 'lucide-react';
 import { PortalHeader } from '../components/PortalHeader';
+import { loadOpenCV, prewarmOpenCV } from '@/lib/opencv-loader';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
@@ -35,11 +36,19 @@ type CaseOption = {
 
 // Pagina escaneada — guardada como dataUrl JPEG pra rapidez. Tamanho final
 // no PDF eh comprimido pra ~85% qualidade pra arquivos legiveis sem inflar.
+//
+// Pipeline em 3 estagios pra cada pagina:
+//   raw → (auto-crop opcional via OpenCV/jscanify) → (filtro B&W opcional)
+//
+// Mantemos os 3 dataUrls em memoria pra o cliente alternar instantaneamente
+// entre "ver original/cropado/com filtro" sem reprocessar tudo.
 type ScannedPage = {
   id: string;
-  dataUrl: string;        // imagem original (sem filtro)
-  enhancedUrl: string;    // imagem com filtro doc aplicado
-  bw: boolean;            // se o usuario habilitou o filtro
+  rawDataUrl: string;             // foto original (re-encoded em JPEG)
+  croppedDataUrl: string | null;  // resultado do auto-crop, null se falhou
+  enhancedUrl: string;             // versao final com filtro doc aplicado sobre cropped (ou raw se cropped=null)
+  useCrop: boolean;                // toggle por pagina — usar versao cropada?
+  bw: boolean;                     // toggle por pagina — aplicar filtro doc?
 };
 
 type Mode = 'choose' | 'scanner' | 'form';
@@ -53,6 +62,53 @@ function formatSize(bytes: number): string {
 function getExt(name: string): string {
   const idx = name.lastIndexOf('.');
   return idx === -1 ? '' : name.slice(idx + 1).toLowerCase();
+}
+
+/**
+ * Tenta detectar os 4 cantos do documento na foto (jscanify usa OpenCV.js
+ * pra Canny edge + contour detection) e aplicar perspective transform pra
+ * "endireitar" o documento.
+ *
+ * Devolve null se OpenCV nao conseguir achar contorno claro — caso tipico
+ * de foto sem documento bem-enquadrado, fundo bagunçado, ou iluminacao
+ * baixa. Caller decide se mostra raw ou pede pra refazer foto.
+ *
+ * Lazy-importa jscanify + carrega OpenCV do CDN. Primeira chamada eh lenta
+ * (~3-8s no 4G); calls subsequentes reusam o `cv` global ja inicializado.
+ */
+async function tryAutoCrop(srcDataUrl: string): Promise<string | null> {
+  try {
+    await loadOpenCV();
+    // jscanify/client = bundle browser que NAO depende de canvas/jsdom de Node
+    const mod: any = await import('jscanify/client');
+    const Scanner = mod.default || mod;
+    const scanner = new Scanner();
+
+    // jscanify.extractPaper precisa de HTMLImageElement (faz cv.imread em cima)
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Falha ao carregar imagem'));
+      el.src = srcDataUrl;
+    });
+
+    // Output size: preserva aspect ratio da foto. Lado maior cap em 1400px
+    // (suficiente pra texto legivel, mantem PDF leve).
+    const aspect = img.naturalHeight / img.naturalWidth;
+    const outW = Math.min(1400, img.naturalWidth);
+    const outH = Math.round(outW * aspect);
+
+    const canvas: HTMLCanvasElement | null = scanner.extractPaper(img, outW, outH);
+    if (!canvas) return null;
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch (e) {
+    // Pode acontecer com CSP bloqueando, rede ruim, ou OpenCV nao encontrar
+    // contorno bonito. Em qualquer caso: fallback gracioso pro raw.
+    if (typeof console !== 'undefined') {
+      console.warn('[scanner] auto-crop falhou:', e);
+    }
+    return null;
+  }
 }
 
 /**
@@ -150,8 +206,28 @@ function fileToJpegDataUrl(file: File): Promise<string> {
 }
 
 /**
- * Monta PDF A4 a partir das paginas escaneadas. Usa imagem com filtro se
- * `bw=true` na pagina, senao a original. Cada imagem fica centralizada e
+ * Resolve qual dataUrl usar pra renderizar/exportar uma pagina escaneada,
+ * respeitando os toggles do cliente (auto-crop e filtro doc).
+ *
+ *   useCrop && croppedDataUrl → cropped (depois enhanced se bw)
+ *   useCrop && !cropped       → raw (cropped indisponivel)
+ *   !useCrop                  → raw
+ *
+ * Note: enhancedUrl JA contem o filtro aplicado sobre cropped (ou raw, se
+ * cropped=null). entao quando bw=true a gente devolve enhancedUrl direto;
+ * se o cliente alternar useCrop COM bw ativo, precisaria reprocessar
+ * enhanced — mas isso eh resolvido reaplicando enhance no toggle (vide
+ * regenerateEnhanced no service).
+ */
+function pickRenderUrl(p: ScannedPage): string {
+  if (p.bw) return p.enhancedUrl;
+  if (p.useCrop && p.croppedDataUrl) return p.croppedDataUrl;
+  return p.rawDataUrl;
+}
+
+/**
+ * Monta PDF A4 a partir das paginas escaneadas, aplicando os toggles de
+ * cada pagina (cropped/raw + bw/colorida). Cada imagem fica centralizada
  * com aspect ratio preservado.
  */
 async function buildPdfFromPages(pages: ScannedPage[]): Promise<File> {
@@ -167,7 +243,7 @@ async function buildPdfFromPages(pages: ScannedPage[]): Promise<File> {
   for (let i = 0; i < pages.length; i++) {
     if (i > 0) pdf.addPage();
     const p = pages[i];
-    const imgUrl = p.bw ? p.enhancedUrl : p.dataUrl;
+    const imgUrl = pickRenderUrl(p);
     // Pega dimensoes reais da imagem pra calcular fit
     const dims = await new Promise<{ w: number; h: number }>(resolve => {
       const img = new Image();
@@ -208,6 +284,10 @@ export default function EnviarDocumentoPage() {
   const [scannerBusy, setScannerBusy] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [bwAll, setBwAll] = useState(true); // por default aplica filtro doc
+  const [cropAll, setCropAll] = useState(true); // por default tenta auto-recortar
+  // Indicador de "preparando OpenCV" — mostrado na 1a foto pra cliente nao
+  // achar que a app travou (load do CDN demora 3-8s no 4G).
+  const [opencvLoading, setOpencvLoading] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -284,12 +364,33 @@ export default function EnviarDocumentoPage() {
     setScannerBusy(true);
     setScannerError(null);
     try {
-      const dataUrl = await fileToJpegDataUrl(f);
-      const enhancedUrl = await enhanceImageForDoc(dataUrl);
+      const rawDataUrl = await fileToJpegDataUrl(f);
+
+      // Tenta auto-crop (jscanify + OpenCV). Pode demorar na 1a chamada
+      // porque opencv.js precisa carregar do CDN (~8MB).
+      // Se OpenCV ainda nao carregou, mostra indicador.
+      let croppedDataUrl: string | null = null;
+      if (cropAll) {
+        if (!(window as any).cv?.Mat) setOpencvLoading(true);
+        try {
+          croppedDataUrl = await tryAutoCrop(rawDataUrl);
+        } finally {
+          setOpencvLoading(false);
+        }
+      }
+
+      // Aplica filtro doc sempre sobre a melhor versao disponivel:
+      // cropped (se temos) ou raw. enhancedUrl fica pronto pra renderizar
+      // quando bw=true.
+      const sourceForEnhance = croppedDataUrl ?? rawDataUrl;
+      const enhancedUrl = await enhanceImageForDoc(sourceForEnhance);
+
       const newPage: ScannedPage = {
         id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        dataUrl,
+        rawDataUrl,
+        croppedDataUrl,
         enhancedUrl,
+        useCrop: cropAll && !!croppedDataUrl,
         bw: bwAll,
       };
       setPages(prev => [...prev, newPage]);
@@ -305,6 +406,29 @@ export default function EnviarDocumentoPage() {
     setPages(prev => prev.filter(p => p.id !== id));
   }
 
+  /**
+   * Re-aplica enhance quando o cliente alterna useCrop com bw ativo —
+   * enhanced foi gerado a partir de uma versao especifica (cropped ou raw),
+   * entao trocar a fonte exige reprocessar pra nao mostrar filtro errado
+   * na exportacao.
+   */
+  async function regenerateEnhanced(p: ScannedPage, useCrop: boolean): Promise<string> {
+    const source = useCrop && p.croppedDataUrl ? p.croppedDataUrl : p.rawDataUrl;
+    return enhanceImageForDoc(source);
+  }
+
+  async function togglePageCrop(id: string) {
+    const cur = pages.find(p => p.id === id);
+    if (!cur || !cur.croppedDataUrl) return; // nada a alternar se cropped nao existe
+    const nextUseCrop = !cur.useCrop;
+    // Atualiza imediato pro feedback visual; reprocessa enhanced em paralelo
+    setPages(prev => prev.map(p => p.id === id ? { ...p, useCrop: nextUseCrop } : p));
+    if (cur.bw) {
+      const newEnhanced = await regenerateEnhanced(cur, nextUseCrop);
+      setPages(prev => prev.map(p => p.id === id ? { ...p, enhancedUrl: newEnhanced } : p));
+    }
+  }
+
   function togglePageBw(id: string) {
     setPages(prev => prev.map(p => p.id === id ? { ...p, bw: !p.bw } : p));
   }
@@ -313,6 +437,23 @@ export default function EnviarDocumentoPage() {
     const next = !bwAll;
     setBwAll(next);
     setPages(prev => prev.map(p => ({ ...p, bw: next })));
+  }
+
+  /**
+   * Toggle global de auto-crop. Reprocessa todas as paginas que tem
+   * cropped disponivel — mantem useCrop sincronizado e regera enhanced.
+   */
+  async function toggleAllCrop() {
+    const next = !cropAll;
+    setCropAll(next);
+    // Atualiza pages: useCrop = next AND tem cropped. enhanced regerado se bw.
+    const updated = await Promise.all(pages.map(async p => {
+      if (!p.croppedDataUrl) return p; // sem cropped: nao muda nada
+      const useCrop = next;
+      const enhancedUrl = p.bw ? await regenerateEnhanced(p, useCrop) : p.enhancedUrl;
+      return { ...p, useCrop, enhancedUrl };
+    }));
+    setPages(updated);
   }
 
   async function finishScan() {
@@ -326,7 +467,7 @@ export default function EnviarDocumentoPage() {
       const pdfFile = await buildPdfFromPages(pages);
       if (pdfFile.size > MAX_BYTES) {
         setScannerError(
-          `PDF gerado ficou muito grande (${formatSize(pdfFile.size)}). Tente menos páginas ou desative o B&W.`,
+          `PDF gerado ficou muito grande (${formatSize(pdfFile.size)}). Tente menos páginas ou desligue o filtro.`,
         );
         setScannerBusy(false);
         return;
@@ -483,12 +624,14 @@ export default function EnviarDocumentoPage() {
             <SourceCard
               icon={ScanLine}
               title="Scanner de documento"
-              description="Tire fotos das páginas e geramos um PDF nítido — recomendado pra RG, CPF, comprovantes."
+              description="Tire fotos das páginas — endireitamos, recortamos e geramos um PDF nítido."
               accent
               onClick={() => {
                 setPages([]);
                 setScannerError(null);
                 setMode('scanner');
+                // Pre-aquece OpenCV em background pra 1a foto nao demorar
+                prewarmOpenCV();
               }}
             />
 
@@ -561,26 +704,62 @@ export default function EnviarDocumentoPage() {
               </button>
             </div>
 
-            <button
-              onClick={toggleAllBw}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
-                bwAll
-                  ? 'border-[#A89048]/40 bg-[#A89048]/5'
-                  : 'border-white/10 bg-[#0d0d14]'
-              }`}
-            >
-              <Sparkles className={bwAll ? 'text-[#A89048]' : 'text-white/40'} size={16} />
-              <div className="flex-1 text-left">
-                <p className="text-sm font-bold">
-                  Filtro &quot;documento legível&quot; {bwAll ? 'ativado' : 'desligado'}
-                </p>
-                <p className="text-[10px] text-white/50">
-                  {bwAll
-                    ? 'Aplica preto e branco com contraste alto — texto fica nítido'
-                    : 'Mantém as cores originais da foto'}
+            {/* Toggles globais (recortar + filtro) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                onClick={toggleAllCrop}
+                disabled={scannerBusy}
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
+                  cropAll
+                    ? 'border-[#A89048]/40 bg-[#A89048]/5'
+                    : 'border-white/10 bg-[#0d0d14]'
+                } disabled:opacity-50`}
+              >
+                <Crop className={cropAll ? 'text-[#A89048]' : 'text-white/40'} size={16} />
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-bold">
+                    Recortar automaticamente
+                  </p>
+                  <p className="text-[10px] text-white/50">
+                    {cropAll
+                      ? 'Detecta as bordas e endireita o documento'
+                      : 'Mantém a foto inteira sem recorte'}
+                  </p>
+                </div>
+              </button>
+
+              <button
+                onClick={toggleAllBw}
+                disabled={scannerBusy}
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-colors ${
+                  bwAll
+                    ? 'border-[#A89048]/40 bg-[#A89048]/5'
+                    : 'border-white/10 bg-[#0d0d14]'
+                } disabled:opacity-50`}
+              >
+                <Sparkles className={bwAll ? 'text-[#A89048]' : 'text-white/40'} size={16} />
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-bold">
+                    Filtro &quot;documento legível&quot;
+                  </p>
+                  <p className="text-[10px] text-white/50">
+                    {bwAll
+                      ? 'Preto e branco com contraste alto'
+                      : 'Mantém cores originais'}
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            {/* Aviso enquanto carrega OpenCV (so na 1a foto) */}
+            {opencvLoading && (
+              <div className="rounded-xl border border-[#A89048]/30 bg-[#A89048]/5 p-3 flex items-center gap-3">
+                <Loader2 className="animate-spin text-[#A89048] shrink-0" size={16} />
+                <p className="text-xs text-white/70">
+                  Preparando o scanner pela primeira vez… isso pode levar alguns segundos.
                 </p>
               </div>
-            </button>
+            )}
 
             {/* Lista de paginas */}
             {pages.length > 0 && (
@@ -595,18 +774,32 @@ export default function EnviarDocumentoPage() {
                     </div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={p.bw ? p.enhancedUrl : p.dataUrl}
+                      src={pickRenderUrl(p)}
                       alt={`Página ${idx + 1}`}
                       className="w-16 h-20 object-cover rounded border border-white/10"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-white">Página {idx + 1}</p>
-                      <button
-                        onClick={() => togglePageBw(p.id)}
-                        className="text-[10px] text-[#A89048] hover:underline mt-0.5"
-                      >
-                        {p.bw ? 'Ver original' : 'Aplicar filtro'}
-                      </button>
+                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                        {p.croppedDataUrl ? (
+                          <button
+                            onClick={() => togglePageCrop(p.id)}
+                            className="text-[10px] text-[#A89048] hover:underline"
+                          >
+                            {p.useCrop ? 'Sem recorte' : 'Recortar'}
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-white/30" title="Não foi possível detectar bordas nesta foto">
+                            Sem recorte
+                          </span>
+                        )}
+                        <button
+                          onClick={() => togglePageBw(p.id)}
+                          className="text-[10px] text-[#A89048] hover:underline"
+                        >
+                          {p.bw ? 'Ver original' : 'Aplicar filtro'}
+                        </button>
+                      </div>
                     </div>
                     <button
                       onClick={() => removePage(p.id)}
