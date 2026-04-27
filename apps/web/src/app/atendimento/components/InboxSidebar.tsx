@@ -533,19 +533,37 @@ export function InboxSidebar({
                           aria-label={`Selecionar ${conv.contactName || conv.contactPhone}`}
                         />
                       </div>
-                      <ContactAvatar
-                        src={conv.profile_picture_url}
-                        name={conv.contactName}
-                        sizeClass="w-11 h-11"
-                        onClick={(url) => { onLightbox(url); }}
-                      />
+                      <div className="relative">
+                        <ContactAvatar
+                          src={conv.profile_picture_url}
+                          name={conv.contactName}
+                          sizeClass="w-11 h-11"
+                          onClick={(url) => { onLightbox(url); }}
+                        />
+                        {/* Badge de NAO LIDAS — destaque maximo, sobreposto
+                            no canto superior direito do avatar (padrao
+                            WhatsApp/iMessage). Antes ficava no canto
+                            direito do nome, junto com o timestamp,
+                            confundindo com o score do lead. */}
+                        {(unreadCounts[conv.id] || 0) > 0 && (
+                          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-[20px] flex items-center justify-center px-1 leading-none shadow-md ring-2 ring-background">
+                            {unreadCounts[conv.id] > 99 ? '99+' : unreadCounts[conv.id]}
+                          </span>
+                        )}
+                      </div>
+                      {/* Score do lead — DISCRETO. Antes era badge colorido
+                          (verde/amarelo/laranja/vermelho com bg) que parecia
+                          "numero de mensagens". Virou texto pequeno cinza
+                          claro, mantemos pro advogado ainda enxergar a
+                          qualificacao mas sem competir visualmente com o
+                          unread. */}
                       {(() => {
                         const stage = normalizeStage(conv.leadStage || '');
                         if (stage === 'PERDIDO' || stage === 'FINALIZADO' || !conv.leadStage) return null;
                         const score = computeScore(conv);
                         return (
                           <span
-                            className={`text-[9px] font-bold tabular-nums px-1.5 rounded-full border leading-[14px] ${scoreStyle(score)}`}
+                            className="text-[9px] font-medium tabular-nums text-muted-foreground/50 leading-[12px]"
                             title={`Score do lead: ${score}/100`}
                           >
                             {score}
@@ -559,11 +577,8 @@ export function InboxSidebar({
                           {conv.contactName || conv.contactPhone}
                         </span>
                         <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                          {(unreadCounts[conv.id] || 0) > 0 && (
-                            <span className="bg-red-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-[20px] flex items-center justify-center px-1 leading-none shadow-md">
-                              {unreadCounts[conv.id] > 99 ? '99+' : unreadCounts[conv.id]}
-                            </span>
-                          )}
+                          {/* Badge de unread foi movido pro overlay no avatar
+                              (padrao WhatsApp). Aqui fica so o timestamp. */}
                           <span className="text-[11px] text-muted-foreground">{formatTime(conv.lastMessageAt)}</span>
                         </div>
                       </div>

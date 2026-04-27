@@ -375,6 +375,7 @@ function ProcessoCard({
   onClick,
   onStageChange,
   onEventAction,
+  onRenounce,
 }: {
   legalCase: LegalCase;
   isDragging: boolean;
@@ -383,6 +384,10 @@ function ProcessoCard({
   onClick: () => void;
   onStageChange: (stageId: string) => void;
   onEventAction?: () => void;
+  /** Marca o processo como renunciado (advogado nao atua mais).
+   *  Arquiva publicacoes DJEN existentes + adiciona em DjenIgnoredProcess
+   *  pra impedir publicacoes futuras + LegalCase.renounced=true. */
+  onRenounce?: (lc: LegalCase) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -454,6 +459,23 @@ function ProcessoCard({
                   <span>{s.label}</span>
                 </button>
               ))}
+              {/* Renuncia — separador + botao destacado em ambar pra
+                  diferenciar de movimentacao de etapa. So aparece se a
+                  parent passar onRenounce + caso tem case_number (sem
+                  numero nao da pra registrar em DjenIgnoredProcess). */}
+              {onRenounce && legalCase.case_number && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onRenounce(legalCase); setShowMenu(false); }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-amber-500/10 transition-colors flex items-center gap-2 text-amber-600 dark:text-amber-400"
+                    title="Marca como renunciado — para de receber publicações DJEN e arquiva o caso"
+                  >
+                    <UserX size={12} />
+                    <span>Não sou mais advogado</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -4474,6 +4496,37 @@ function ProcessosPageContent() {
     }
   };
 
+  /**
+   * Marca processo como renunciado (advogado nao atua mais).
+   *
+   * O endpoint /court-scraper/renounce faz tudo em uma transacao:
+   *   1. DjenIgnoredProcess.upsert — impede publicacoes futuras desse
+   *      numero virarem entrada no DJEN (mesmo se outro caso for
+   *      cadastrado com o mesmo numero)
+   *   2. LegalCase.renounced=true + renounced_at — caso vira "renunciado"
+   *      no banco
+   *   3. Arquiva publicacoes DJEN existentes do caso (badge zera)
+   *
+   * Confirmacao explicita pra evitar clique acidental.
+   */
+  const handleRenounceCase = async (lc: LegalCase) => {
+    if (!lc.case_number) return;
+    const ok = window.confirm(
+      `Renunciar ao processo ${lc.case_number}?\n\n` +
+      `• Você não receberá mais publicações DJEN dele\n` +
+      `• Publicações existentes serão arquivadas\n` +
+      `• O processo sai da lista (renunciados ocultos por padrão)\n\n` +
+      `Você pode desfazer depois marcando "Mostrar renunciados" no menu de processos.`,
+    );
+    if (!ok) return;
+    try {
+      await api.post('/court-scraper/renounce', { numero_processo: lc.case_number });
+      await fetchCases(true);
+    } catch (e: any) {
+      alert(`Erro ao marcar como renunciado: ${e?.response?.data?.message || e?.message || 'desconhecido'}`);
+    }
+  };
+
   const moveCase = async (caseId: string, newTrackingStage: string) => {
     // PERICIA_AGENDADA — abre modal para agendar perícia
     if (newTrackingStage === 'PERICIA_AGENDADA') {
@@ -5383,6 +5436,7 @@ function ProcessosPageContent() {
                               onClick={() => setSelectedCase(lc)}
                               onStageChange={(newStage) => moveCase(lc.id, newStage)}
                               onEventAction={() => fetchCases(true)}
+                              onRenounce={handleRenounceCase}
                             />
                           ))}
 

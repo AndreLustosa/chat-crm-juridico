@@ -332,7 +332,7 @@ export class CourtScraperService {
     numeroProcesso: string,
     tenantId?: string,
     reason?: string,
-  ): Promise<{ ok: boolean; ignored_id: string; legal_case_marked: boolean }> {
+  ): Promise<{ ok: boolean; ignored_id: string; legal_case_marked: boolean; publications_archived: number }> {
     const digits = (numeroProcesso || '').replace(/\D/g, '');
     if (digits.length !== 20) {
       throw new BadRequestException('Número de processo inválido (20 dígitos esperados)');
@@ -369,6 +369,7 @@ export class CourtScraperService {
     });
 
     let legalCaseMarked = false;
+    let publicationsArchived = 0;
     if (existing) {
       // Confirma match (digits-only) — contains pode dar falso positivo
       const existingDigits = (existing.case_number || '').replace(/\D/g, '');
@@ -378,12 +379,23 @@ export class CourtScraperService {
           data: { renounced: true, renounced_at: new Date() },
         });
         legalCaseMarked = true;
+
+        // Arquiva publicacoes DJEN ja existentes do caso — sem isso o badge
+        // de nao-visualizadas continua mostrando publicacoes de processo
+        // que nao atuamos mais. Marca como visualizadas tambem pro contador
+        // global zerar.
+        const archived = await this.prisma.djenPublication.updateMany({
+          where: { legal_case_id: existing.id, archived: false },
+          data: { archived: true, viewed_at: new Date() },
+        });
+        publicationsArchived = archived.count;
       }
     }
 
     this.logger.log(
       `[RENOUNCE] ${normalized} marcado como renunciado` +
       (legalCaseMarked ? ' + LegalCase atualizado' : '') +
+      (publicationsArchived > 0 ? ` + ${publicationsArchived} publicacao(oes) arquivada(s)` : '') +
       (reason ? ` (motivo: ${reason})` : ''),
     );
 
@@ -391,6 +403,7 @@ export class CourtScraperService {
       ok: true,
       ignored_id: ignored.id,
       legal_case_marked: legalCaseMarked,
+      publications_archived: publicationsArchived,
     };
   }
 
