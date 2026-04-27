@@ -21,6 +21,7 @@ model Tenant {
   appointment_types  AppointmentType[]
   holidays           Holiday[]
   case_documents     CaseDocument[]
+  task_attachments   TaskAttachment[]
   case_transcriptions CaseTranscription[]
   case_deadlines     CaseDeadline[]
   petitions          CasePetition[]
@@ -81,6 +82,7 @@ model User {
   calendar_event_comments   CalendarEventComment[]
   transfer_audios           TransferAudio[]        @relation("AudioUploader")
   uploaded_documents        CaseDocument[]         @relation("DocumentUploader")
+  uploaded_task_attachments TaskAttachment[]       @relation("TaskAttachmentUploader")
   uploaded_transcriptions   CaseTranscription[]    @relation("TranscriptionUploader")
   created_deadlines         CaseDeadline[]         @relation("DeadlineCreator")
   authored_petitions       CasePetition[]         @relation("PetitionAuthor")
@@ -313,12 +315,47 @@ model Task {
   comments          TaskComment[]
   checklist_items   TaskChecklistItem[]
   postponements     TaskPostponement[]
+  attachments       TaskAttachment[]
 
   @@index([assigned_user_id, due_at])
   @@index([status])
   @@index([legal_case_id])
   @@index([tenant_id])
   @@index([lead_id])
+}
+
+// Anexos de Task (diligencias). Uploadados pelo estagiario na hora de
+// concluir a diligencia (ex: comprovante de residencia que o cliente
+// mandou via WhatsApp). Quando a Task tem legal_case_id, esses anexos
+// aparecem TAMBEM na aba Documentos do workspace do processo via UNION
+// na query — sem duplicar registros (TaskAttachment eh fonte unica).
+//
+// Quando a Task NAO tem legal_case_id, anexo fica visivel so na propria
+// diligencia (cobertura pra casos tipo "ir ao cartorio comprar selo"
+// que nao tem processo associado mas tem comprovante).
+model TaskAttachment {
+  id              String   @id @default(uuid())
+  tenant_id       String?
+  task_id         String
+  uploaded_by_id  String
+  name            String   // Nome amigavel — pode ser editado pelo usuario
+  original_name   String   // Nome original do arquivo no upload
+  s3_key          String   // Chave no MinIO/S3 (mesmo bucket de CaseDocument)
+  mime_type       String
+  size            Int      // bytes
+  // Pasta sugerida (CLIENTE/CONTRATOS/etc) — usada quando o documento eh
+  // espelhado no workspace do processo. Sem efeito quando Task nao tem
+  // legal_case_id.
+  folder          String   @default("OUTROS")
+  description     String?
+  created_at      DateTime @default(now())
+
+  task            Task    @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  tenant          Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  uploaded_by     User    @relation("TaskAttachmentUploader", fields: [uploaded_by_id], references: [id])
+
+  @@index([task_id])
+  @@index([tenant_id])
 }
 
 model TaskPostponement {

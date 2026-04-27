@@ -87,14 +87,16 @@ export function NewDelegationModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Vinculo a processo/lead — visivel so se nao veio defaultBindLabel.
-  // bindMode='none' (sem vinculo), 'case' (busca processo), 'lead' (busca cliente)
-  const [bindMode, setBindMode] = useState<'none' | 'case' | 'lead'>('none');
-  const [caseQuery, setCaseQuery] = useState('');
+  // Vinculo a processo/cliente — busca UNIFICADA. Uma query so pesquisa
+  // em paralelo /legal-cases (por CNJ ou nome do cliente) e /leads (por
+  // nome ou telefone). Resultados aparecem juntos com icone diferenciando
+  // (👤 cliente / ⚖️ processo). Selecionar um processo auto-vincula o
+  // lead dele tambem.
+  const [bindQuery, setBindQuery] = useState('');
   const [caseResults, setCaseResults] = useState<LegalCaseOption[]>([]);
-  const [selectedCase, setSelectedCase] = useState<LegalCaseOption | null>(null);
-  const [leadQuery, setLeadQuery] = useState('');
   const [leadResults, setLeadResults] = useState<LeadOption[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedCase, setSelectedCase] = useState<LegalCaseOption | null>(null);
   const [selectedLead, setSelectedLead] = useState<LeadOption | null>(null);
 
   const titleRef = useRef<HTMLInputElement>(null);
@@ -128,11 +130,9 @@ export function NewDelegationModal({
       setAssignedUserId(defaultAssignedUserId || '');
       setDueAt(tomorrowSixPMLocal());
       setError(null);
-      setBindMode('none');
       setSelectedCase(null);
       setSelectedLead(null);
-      setCaseQuery('');
-      setLeadQuery('');
+      setBindQuery('');
       setCaseResults([]);
       setLeadResults([]);
       // Foca no campo de titulo logo que abre — UX rapida (advogado abriu
@@ -141,43 +141,48 @@ export function NewDelegationModal({
     }
   }, [open, defaultAssignedUserId]);
 
-  // Busca de processos com debounce
+  // Busca UNIFICADA com debounce — pesquisa processos + leads em paralelo.
+  // Cliente digita nome / telefone / CNJ → resultados misturados aparecem
+  // numa lista so com badge visual diferenciando.
   useEffect(() => {
-    if (bindMode !== 'case' || caseQuery.length < 2) { setCaseResults([]); return; }
+    if (bindQuery.length < 2) {
+      setCaseResults([]);
+      setLeadResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
     const t = setTimeout(async () => {
+      const q = bindQuery.toLowerCase();
       try {
-        // Endpoint nao tem ?search dedicado mas inTracking traz tudo ativo;
-        // filtramos client-side por number ou nome do cliente
-        const res = await api.get('/legal-cases?inTracking=true');
-        const all: LegalCaseOption[] = Array.isArray(res.data) ? res.data : (res.data?.items || []);
-        const q = caseQuery.toLowerCase();
+        const [casesRes, leadsRes] = await Promise.all([
+          // Endpoint nao tem ?search dedicado, mas inTracking traz ativos;
+          // filtramos client-side por CNJ ou nome do cliente
+          api.get('/legal-cases?inTracking=true').catch(() => ({ data: [] })),
+          api.get(`/leads?search=${encodeURIComponent(bindQuery)}`).catch(() => ({ data: [] })),
+        ]);
+        const allCases: LegalCaseOption[] = Array.isArray(casesRes.data)
+          ? casesRes.data
+          : (casesRes.data?.items || []);
         setCaseResults(
-          all.filter(c =>
+          allCases.filter(c =>
             (c.case_number || '').toLowerCase().includes(q) ||
             (c.lead?.name || '').toLowerCase().includes(q),
-          ).slice(0, 8),
+          ).slice(0, 5),
         );
+        const allLeads: LeadOption[] = Array.isArray(leadsRes.data)
+          ? leadsRes.data
+          : (leadsRes.data?.items || []);
+        setLeadResults(allLeads.slice(0, 5));
       } catch {
         setCaseResults([]);
-      }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [caseQuery, bindMode]);
-
-  // Busca de leads com debounce
-  useEffect(() => {
-    if (bindMode !== 'lead' || leadQuery.length < 2) { setLeadResults([]); return; }
-    const t = setTimeout(async () => {
-      try {
-        const res = await api.get(`/leads?search=${encodeURIComponent(leadQuery)}`);
-        const list: LeadOption[] = Array.isArray(res.data) ? res.data : (res.data?.items || []);
-        setLeadResults(list.slice(0, 8));
-      } catch {
         setLeadResults([]);
+      } finally {
+        setSearching(false);
       }
     }, 250);
     return () => clearTimeout(t);
-  }, [leadQuery, bindMode]);
+  }, [bindQuery]);
 
   // Submit com Cmd/Ctrl+Enter pra produtividade
   function handleKey(e: React.KeyboardEvent) {
@@ -203,11 +208,15 @@ export function NewDelegationModal({
         assigned_user_id: assignedUserId,
         due_at: dueAt ? new Date(dueAt).toISOString() : undefined,
       };
-      // Vinculos: prioridade pra defaults > selecao manual
+      // Vinculos: prioridade pra defaults > selecao manual.
+      // Quando o usuario seleciona PROCESSO, lead_id vem implicitamente do
+      // backend via legal_case.lead_id — nao mandamos lead_id explicito
+      // (selectedLead virou placeholder com id='' nesse caminho).
+      // Quando seleciona LEAD direto, manda lead_id; legal_case_id em branco.
       if (defaultLegalCaseId) payload.legal_case_id = defaultLegalCaseId;
       else if (selectedCase) payload.legal_case_id = selectedCase.id;
       if (defaultLeadId) payload.lead_id = defaultLeadId;
-      else if (selectedLead) payload.lead_id = selectedLead.id;
+      else if (selectedLead && selectedLead.id) payload.lead_id = selectedLead.id;
       if (defaultConversationId) payload.conversation_id = defaultConversationId;
 
       const res = await api.post('/tasks', payload);
@@ -353,105 +362,17 @@ export function NewDelegationModal({
             </div>
           </div>
 
-          {/* Vincular a processo/cliente — escondido se ja veio default */}
+          {/* Vincular a processo/cliente — escondido se ja veio default
+              do contexto (ex: aberto a partir do workspace de um processo) */}
           {!hasPreBind && (
             <div>
               <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
                 Vincular a <span className="text-muted-foreground/60 font-normal normal-case">(opcional)</span>
               </label>
 
-              {bindMode === 'none' && !selectedCase && !selectedLead && (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setBindMode('case')}
-                    className="flex-1 px-3 py-2 text-[12px] font-semibold rounded-lg border border-border hover:border-primary/40 hover:bg-primary/5 transition-colors flex items-center gap-2 justify-center"
-                  >
-                    <Scale size={12} /> A um processo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBindMode('lead')}
-                    className="flex-1 px-3 py-2 text-[12px] font-semibold rounded-lg border border-border hover:border-primary/40 hover:bg-primary/5 transition-colors flex items-center gap-2 justify-center"
-                  >
-                    <FileText size={12} /> A um cliente
-                  </button>
-                </div>
-              )}
-
-              {bindMode === 'case' && !selectedCase && (
-                <div className="space-y-1">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={caseQuery}
-                    onChange={e => setCaseQuery(e.target.value)}
-                    placeholder="Buscar por número CNJ ou nome do cliente…"
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  {caseResults.length > 0 && (
-                    <div className="border border-border rounded-lg bg-card overflow-hidden max-h-40 overflow-y-auto">
-                      {caseResults.map(c => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => { setSelectedCase(c); setBindMode('none'); }}
-                          className="w-full px-3 py-2 text-left hover:bg-accent transition-colors text-[12px] border-b border-border last:border-0"
-                        >
-                          <div className="font-mono text-primary">{c.case_number || '(sem número)'}</div>
-                          <div className="text-muted-foreground text-[10px]">
-                            {c.lead?.name || '—'} {c.legal_area && `· ${c.legal_area}`}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => { setBindMode('none'); setCaseQuery(''); setCaseResults([]); }}
-                    className="text-[10px] text-muted-foreground hover:text-foreground"
-                  >
-                    Cancelar busca
-                  </button>
-                </div>
-              )}
-
-              {bindMode === 'lead' && !selectedLead && (
-                <div className="space-y-1">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={leadQuery}
-                    onChange={e => setLeadQuery(e.target.value)}
-                    placeholder="Buscar por nome ou telefone…"
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  {leadResults.length > 0 && (
-                    <div className="border border-border rounded-lg bg-card overflow-hidden max-h-40 overflow-y-auto">
-                      {leadResults.map(l => (
-                        <button
-                          key={l.id}
-                          type="button"
-                          onClick={() => { setSelectedLead(l); setBindMode('none'); }}
-                          className="w-full px-3 py-2 text-left hover:bg-accent transition-colors text-[12px] border-b border-border last:border-0"
-                        >
-                          <div className="font-semibold">{l.name || '(sem nome)'}</div>
-                          <div className="text-muted-foreground font-mono text-[10px]">{l.phone}</div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => { setBindMode('none'); setLeadQuery(''); setLeadResults([]); }}
-                    className="text-[10px] text-muted-foreground hover:text-foreground"
-                  >
-                    Cancelar busca
-                  </button>
-                </div>
-              )}
-
-              {(selectedCase || selectedLead) && (
+              {/* Pill mostrando o vinculo atual quando algo selecionado.
+                  Antes do select aparece campo de busca unificada. */}
+              {(selectedCase || selectedLead) ? (
                 <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-violet-500/10 border border-violet-500/20">
                   <div className="flex items-center gap-2 min-w-0">
                     {selectedCase ? (
@@ -463,6 +384,7 @@ export function NewDelegationModal({
                           </div>
                           <div className="text-[10px] text-muted-foreground truncate">
                             {selectedCase.lead?.name || '—'}
+                            {selectedCase.legal_area && ` · ${selectedCase.legal_area}`}
                           </div>
                         </div>
                       </>
@@ -482,12 +404,118 @@ export function NewDelegationModal({
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setSelectedCase(null); setSelectedLead(null); }}
+                    onClick={() => { setSelectedCase(null); setSelectedLead(null); setBindQuery(''); }}
                     className="p-1 text-muted-foreground hover:text-foreground rounded"
                     aria-label="Remover vínculo"
                   >
                     <X size={12} />
                   </button>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={bindQuery}
+                      onChange={e => setBindQuery(e.target.value)}
+                      placeholder="Nome do cliente, telefone ou número CNJ…"
+                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    />
+                    {searching && (
+                      <Loader2
+                        size={13}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground"
+                      />
+                    )}
+                  </div>
+
+                  {/* Lista mista de resultados — processos primeiro
+                      (mais especifico) depois clientes. Cada grupo com
+                      header visual sutil. */}
+                  {(caseResults.length > 0 || leadResults.length > 0) && (
+                    <div className="border border-border rounded-lg bg-card overflow-hidden max-h-56 overflow-y-auto">
+                      {caseResults.length > 0 && (
+                        <>
+                          <div className="px-3 py-1 bg-violet-500/5 border-b border-violet-500/10">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-violet-400">
+                              ⚖️ Processos
+                            </span>
+                          </div>
+                          {caseResults.map(c => (
+                            <button
+                              key={`case-${c.id}`}
+                              type="button"
+                              onClick={() => {
+                                // Selecionar processo auto-vincula tambem
+                                // o lead dele — caller faz upload sabe que
+                                // ambos legalCaseId e leadId estao setados.
+                                setSelectedCase(c);
+                                if (c.lead) setSelectedLead({
+                                  id: '', // placeholder — quando selecionou via case, leadId vem do legal_case.lead_id no backend
+                                  name: c.lead.name,
+                                  phone: '',
+                                });
+                                setBindQuery('');
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-violet-500/10 transition-colors text-[12px] border-b border-border last:border-0"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Scale size={11} className="text-violet-400 shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-mono text-primary truncate">
+                                    {c.case_number || '(sem número)'}
+                                  </div>
+                                  <div className="text-muted-foreground text-[10px] truncate">
+                                    {c.lead?.name || '—'}
+                                    {c.legal_area && ` · ${c.legal_area}`}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {leadResults.length > 0 && (
+                        <>
+                          <div className="px-3 py-1 bg-amber-500/5 border-b border-amber-500/10">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-500">
+                              👤 Clientes
+                            </span>
+                          </div>
+                          {leadResults.map(l => (
+                            <button
+                              key={`lead-${l.id}`}
+                              type="button"
+                              onClick={() => {
+                                // Selecionar lead deixa processo em branco —
+                                // permite delegar diligencia geral sobre o
+                                // cliente sem fixar processo (ex: ligar pra
+                                // confirmar agendamento)
+                                setSelectedLead(l);
+                                setSelectedCase(null);
+                                setBindQuery('');
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-amber-500/10 transition-colors text-[12px] border-b border-border last:border-0"
+                            >
+                              <div className="flex items-center gap-2">
+                                <FileText size={11} className="text-amber-500 shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold truncate">{l.name || '(sem nome)'}</div>
+                                  <div className="text-muted-foreground font-mono text-[10px] truncate">{l.phone}</div>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {bindQuery.length >= 2 && !searching && caseResults.length === 0 && leadResults.length === 0 && (
+                    <p className="text-[10px] text-muted-foreground italic">
+                      Nada encontrado. A diligência pode ser criada sem vínculo.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

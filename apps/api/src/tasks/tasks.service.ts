@@ -1,9 +1,56 @@
-import { Injectable, Logger, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException, NotFoundException, BadRequestException, PayloadTooLargeException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import OpenAI from 'openai';
+import { extname } from 'path';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { CalendarService } from '../calendar/calendar.service';
+import { MediaS3Service } from '../media/s3.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// Whitelist de MIME types pra anexos de Task. Mesma do portal/upload —
+// PDF, imagens, Office, TXT. Bloqueia executaveis e scripts.
+const ALLOWED_ATTACHMENT_MIMES = new Set<string>([
+  'application/pdf',
+  'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
+  'image/heic', 'image/heif',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+]);
+
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25MB por arquivo
+
+// Pastas validas pra espelhamento no workspace do processo
+const VALID_FOLDERS = new Set([
+  'CLIENTE', 'PROVAS', 'CONTRATOS', 'PETICOES',
+  'DECISOES', 'PROCURACOES', 'OUTROS',
+]);
+
+/**
+ * Sugere automaticamente a pasta CaseDocument baseada no titulo da Task.
+ * Acerta ~80% dos casos comuns; estagiario pode trocar manualmente no UI.
+ *
+ * Calibrado em titulos reais do escritorio:
+ *   "Pegar comprovante de residencia" → CLIENTE
+ *   "Buscar RG/CPF do cliente" → CLIENTE
+ *   "Imprimir contrato de honorarios" → CONTRATOS
+ *   "Anexar procuracao assinada" → PROCURACOES
+ *   "Baixar decisao do TJ" → DECISOES
+ */
+function inferFolder(title: string): string {
+  const t = (title || '').toLowerCase();
+  if (/\b(rg|cpf|comprovante|endere[cç]o|cnh|carteira|identidade)\b/.test(t)) return 'CLIENTE';
+  if (/\b(contrato|honor[aá]rio|honorarios)\b/.test(t)) return 'CONTRATOS';
+  if (/\b(procura[cç][aã]o|procuracao)\b/.test(t)) return 'PROCURACOES';
+  if (/\b(decis[aã]o|senten[cç]a|ac[oó]rd[aã]o|despacho)\b/.test(t)) return 'DECISOES';
+  if (/\b(prova|laudo|per[ií]cia|testemunho)\b/.test(t)) return 'PROVAS';
+  if (/\b(peti[cç][aã]o|peticao)\b/.test(t)) return 'PETICOES';
+  return 'OUTROS';
+}
 
 @Injectable()
 export class TasksService {
@@ -13,6 +60,8 @@ export class TasksService {
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
     private calendarService: CalendarService,
+    private s3: MediaS3Service,
+    private notifications: NotificationsService,
   ) {}
 
   private tenantWhere(tenantId?: string) {
@@ -155,6 +204,10 @@ export class TasksService {
         due_at: data.due_at ? new Date(data.due_at) : null,
         tenant_id: data.tenant_id,
         status: 'A_FAZER',
+        // Sem isso, a notificacao de conclusao nao sabe pra quem voltar
+        // o aviso ("estagiario X concluiu Y" precisa do criador). Tambem
+        // usado pra exibir "criada por" nos cards.
+        created_by_id: data.created_by_id || null,
       },
     });
 
@@ -263,7 +316,13 @@ export class TasksService {
 
   async complete(taskId: string, note: string, userId: string, tenantId?: string) {
     await this.verifyTenantOwnership(taskId, tenantId);
-    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        legal_case: { select: { id: true, case_number: true } },
+        lead: { select: { id: true, name: true } },
+      },
+    });
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
     const ops: any[] = [
@@ -304,6 +363,69 @@ export class TasksService {
     }
 
     this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
+
+    // ─── Notificacao enriquecida ao criador (advogado) ──────────
+    //
+    // Quando estagiario marca diligencia como concluida, o advogado que
+    // delegou recebe push + WhatsApp (delay 5min com dedup) com:
+    //   - Quem concluiu
+    //   - Quantos anexos foram subidos
+    //   - Vinculo a processo se houver
+    //
+    // Pula se userId='system' (cron interno) ou se eh o proprio criador
+    // marcando como concluido (auto-update nao notifica).
+    if (
+      userId !== 'system' &&
+      task.created_by_id &&
+      task.created_by_id !== userId
+    ) {
+      try {
+        const [completer, attachmentCount] = await Promise.all([
+          this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { name: true },
+          }),
+          (this.prisma as any).taskAttachment.count({ where: { task_id: taskId } }),
+        ]);
+
+        const completerName = completer?.name || 'Estagiário';
+        const caseLabel = task.legal_case?.case_number || task.lead?.name || null;
+
+        const lines: string[] = [];
+        if (attachmentCount > 0) {
+          lines.push(
+            `📎 ${attachmentCount} ${attachmentCount === 1 ? 'anexo' : 'anexos'}` +
+            (caseLabel ? ` → ${caseLabel}` : ''),
+          );
+        } else if (caseLabel) {
+          lines.push(`Vinculado a: ${caseLabel}`);
+        }
+        if (note?.trim()) {
+          const trimmedNote = note.trim().length > 200
+            ? note.trim().slice(0, 197) + '…'
+            : note.trim();
+          lines.push(`"${trimmedNote}"`);
+        }
+
+        this.notifications.create({
+          userId: task.created_by_id,
+          tenantId: task.tenant_id || null,
+          type: 'task_completed',
+          title: `${completerName} concluiu: ${task.title}`,
+          body: lines.join('\n') || undefined,
+          data: {
+            taskId,
+            completedBy: userId,
+            attachmentCount,
+            legalCaseId: task.legal_case_id,
+            leadId: task.lead_id,
+          },
+        }).catch(() => { /* fire and forget */ });
+      } catch (e: any) {
+        this.logger.warn(`[Task complete] notif enriquecida falhou: ${e.message}`);
+      }
+    }
+
     return { task: updatedTask, conversationId: task.conversation_id };
   }
 
@@ -375,6 +497,166 @@ export class TasksService {
   }
 
   // ─── Calendar Sync ──────────────────────────────────────────────
+
+  // ─── Attachments (anexos da diligência) ───────────────────────
+
+  /**
+   * Sugere pasta automatica baseada no titulo da Task.
+   * Exposto no controller como GET /tasks/:id/suggest-folder pra UI.
+   */
+  async suggestFolderForTask(taskId: string, tenantId?: string): Promise<string> {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { title: true },
+    });
+    return task ? inferFolder(task.title) : 'OUTROS';
+  }
+
+  /**
+   * Lista anexos de uma Task. Inclui dados do uploader pra UI mostrar
+   * "anexado por X em Y".
+   */
+  async listAttachments(taskId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    return (this.prisma as any).taskAttachment.findMany({
+      where: { task_id: taskId },
+      include: { uploaded_by: { select: { id: true, name: true } } },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  /**
+   * Sobe arquivos como anexos da Task. Cria registros TaskAttachment em
+   * batch — cada arquivo eh validado (MIME whitelist + tamanho 25MB).
+   *
+   * Quando a Task tem legal_case_id, esses anexos aparecem TAMBEM na aba
+   * Documentos do workspace via UNION na query do TabDocumentos. Sem
+   * duplicar registros — TaskAttachment eh fonte unica.
+   *
+   * folder eh sugerida automaticamente pelo titulo da Task se o caller
+   * nao passar override (ex: "comprovante" -> CLIENTE).
+   */
+  async addAttachments(
+    taskId: string,
+    files: Array<{ buffer: Buffer; originalname: string; mimetype: string; size: number }>,
+    userId: string,
+    tenantId?: string,
+    folderOverride?: string,
+  ) {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, title: true, tenant_id: true, legal_case_id: true },
+    });
+    if (!task) throw new NotFoundException('Tarefa não encontrada');
+
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Nenhum arquivo enviado');
+    }
+
+    // Valida cada arquivo antes de subir qualquer um — falha rapido
+    // se algum estiver fora de spec, sem orfaos no S3
+    for (const f of files) {
+      if (!f?.buffer) throw new BadRequestException('Arquivo vazio');
+      if (f.size > MAX_ATTACHMENT_BYTES) {
+        throw new PayloadTooLargeException(
+          `Arquivo "${f.originalname}" muito grande (max 25MB)`,
+        );
+      }
+      if (!ALLOWED_ATTACHMENT_MIMES.has(f.mimetype)) {
+        throw new UnsupportedMediaTypeException(
+          `Tipo de arquivo não permitido: ${f.mimetype} (${f.originalname})`,
+        );
+      }
+    }
+
+    // Pasta efetiva: override do caller > sugestao automatica > OUTROS
+    const folder = folderOverride && VALID_FOLDERS.has(folderOverride)
+      ? folderOverride
+      : inferFolder(task.title);
+
+    // Sobe tudo no S3 em paralelo, depois persiste em transação
+    const uploads = await Promise.all(files.map(async (f) => {
+      const ext = extname(f.originalname) || '';
+      const s3Key = `task-attachments/${taskId}/${randomUUID()}${ext}`;
+      await this.s3.uploadBuffer(s3Key, f.buffer, f.mimetype);
+      return {
+        s3Key,
+        name: f.originalname,
+        original_name: f.originalname,
+        mime_type: f.mimetype,
+        size: f.size,
+      };
+    }));
+
+    const created = await this.prisma.$transaction(
+      uploads.map((u) =>
+        (this.prisma as any).taskAttachment.create({
+          data: {
+            task_id: taskId,
+            tenant_id: task.tenant_id || tenantId || null,
+            uploaded_by_id: userId,
+            name: u.name,
+            original_name: u.original_name,
+            s3_key: u.s3Key,
+            mime_type: u.mime_type,
+            size: u.size,
+            folder,
+          },
+        }),
+      ),
+    );
+
+    this.logger.log(
+      `[TaskAttachment] ${created.length} anexo(s) na task ${taskId} ` +
+      `(folder=${folder}, tem_caso=${!!task.legal_case_id})`,
+    );
+
+    return created;
+  }
+
+  /**
+   * Stream de download de um anexo. Verifica ownership via tenant antes.
+   */
+  async downloadAttachment(attachmentId: string, tenantId?: string) {
+    const att = await (this.prisma as any).taskAttachment.findUnique({
+      where: { id: attachmentId },
+    });
+    if (!att) throw new NotFoundException('Anexo não encontrado');
+    if (tenantId && att.tenant_id && att.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado');
+    }
+    const result = await this.s3.getObjectStream(att.s3_key);
+    return {
+      ...result,
+      fileName: att.original_name,
+      mimeType: att.mime_type,
+    };
+  }
+
+  /**
+   * Remove anexo (S3 + DB). Soft delete nao faz sentido aqui — anexo
+   * errado precisa sumir do workspace tambem.
+   */
+  async removeAttachment(attachmentId: string, tenantId?: string) {
+    const att = await (this.prisma as any).taskAttachment.findUnique({
+      where: { id: attachmentId },
+    });
+    if (!att) throw new NotFoundException('Anexo não encontrado');
+    if (tenantId && att.tenant_id && att.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado');
+    }
+    try {
+      await this.s3.deleteObject(att.s3_key);
+    } catch (e: any) {
+      this.logger.warn(`Falha ao deletar S3 ${att.s3_key}: ${e.message}`);
+    }
+    await (this.prisma as any).taskAttachment.delete({ where: { id: attachmentId } });
+    return { deleted: true };
+  }
+
+  // ─── /Attachments ─────────────────────────────────────────────
 
   private async syncTaskToCalendar(task: any, createdById: string) {
     try {

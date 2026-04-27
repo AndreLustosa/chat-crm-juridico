@@ -1,4 +1,6 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus, UseInterceptors, UploadedFiles, Res, StreamableFile } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { TasksService } from './tasks.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
@@ -151,5 +153,72 @@ export class TasksController {
   @Delete(':id/checklist/:itemId')
   deleteChecklistItem(@Param('id') id: string, @Param('itemId') itemId: string, @Request() req: any) {
     return this.tasksService.deleteChecklistItem(id, itemId, req.user?.tenant_id);
+  }
+
+  // ─── Attachments (anexos da diligência) ──────────────────────
+
+  /**
+   * Sugere pasta automatica baseada no titulo da Task. Frontend chama
+   * antes de exibir o select de pasta no modal de conclusao pra ja vir
+   * com a sugestao certa marcada.
+   */
+  @Get(':id/suggest-folder')
+  suggestFolder(@Param('id') id: string, @Request() req: any) {
+    return this.tasksService.suggestFolderForTask(id, req.user?.tenant_id)
+      .then(folder => ({ folder }));
+  }
+
+  @Get(':id/attachments')
+  listAttachments(@Param('id') id: string, @Request() req: any) {
+    return this.tasksService.listAttachments(id, req.user?.tenant_id);
+  }
+
+  /**
+   * Sobe varios arquivos pra uma Task em uma chamada multipart. Aceita
+   * `folder` opcional no body (override da sugestao automatica).
+   * Maximo 10 arquivos por request — sem isso o nginx default de 8MB
+   * poderia gargalar com 25MB cada x N arquivos.
+   */
+  @Post(':id/attachments')
+  @UseInterceptors(FilesInterceptor('files', 10))
+  uploadAttachments(
+    @Param('id') id: string,
+    @UploadedFiles() files: any[],
+    @Body('folder') folder: string | undefined,
+    @Request() req: any,
+  ) {
+    return this.tasksService.addAttachments(
+      id,
+      files || [],
+      req.user?.id,
+      req.user?.tenant_id,
+      folder,
+    );
+  }
+
+  @Get('attachments/:attachmentId/download')
+  async downloadAttachment(
+    @Param('attachmentId') attachmentId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Request() req: any,
+  ) {
+    const result = await this.tasksService.downloadAttachment(
+      attachmentId,
+      req.user?.tenant_id,
+    );
+    res.setHeader('Content-Type', result.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(result.fileName)}"`,
+    );
+    return new StreamableFile(result.stream);
+  }
+
+  @Delete('attachments/:attachmentId')
+  removeAttachment(
+    @Param('attachmentId') attachmentId: string,
+    @Request() req: any,
+  ) {
+    return this.tasksService.removeAttachment(attachmentId, req.user?.tenant_id);
   }
 }

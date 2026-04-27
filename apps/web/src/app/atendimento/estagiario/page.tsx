@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useSocket } from '@/lib/SocketProvider';
+import { CompleteTaskModal } from '@/components/CompleteTaskModal';
 
 // ─── Tipos (Lista / Dashboard) ─────────────────────────────────
 
@@ -228,9 +229,15 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 // ─── Componentes da Lista (existente) ──────────────────────────
 
 function TaskCard({
-  task, onAction, dimmed = false,
+  task, onAction, onOpenCompleteModal, dimmed = false,
 }: {
-  task: TaskItem; onAction: (id: string, action: string, kind?: 'event' | 'task') => void; dimmed?: boolean;
+  task: TaskItem;
+  onAction: (id: string, action: string, kind?: 'event' | 'task') => void;
+  /** Aberto pra Tasks orfãs (kind='task') que tem fluxo de anexos.
+   *  CalendarEvent (kind='event') usa onAction direto sem modal — eh
+   *  prazo/tarefa processual ja com fluxo proprio. */
+  onOpenCompleteModal?: (task: TaskItem) => void;
+  dimmed?: boolean;
 }) {
   const router = useRouter();
   const due = task.start_at ? daysUntil(task.start_at) : null;
@@ -250,6 +257,15 @@ function TaskCard({
   const [confirming, setConfirming] = useState(false);
 
   const handleComplete = () => {
+    // Diligencia (Task orfa): abre modal com drop zone pra anexar
+    // documentos coletados (ex: comprovante de residencia). Fluxo
+    // diferente do CalendarEvent porque diligencia tipicamente
+    // produz arquivos.
+    if (task.kind === 'task' && onOpenCompleteModal) {
+      onOpenCompleteModal(task);
+      return;
+    }
+    // CalendarEvent: confirmacao em 2 cliques (sem modal)
     if (!confirming) { setConfirming(true); return; }
     setConfirming(false);
     onAction(task.id, 'complete', task.kind || 'event');
@@ -855,6 +871,10 @@ function ListView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
+  // Modal "Concluir diligencia" — abre quando estagiario clica Concluir
+  // num card kind='task' (Task orfa). Permite anexar documentos antes
+  // de marcar como concluida.
+  const [completingTask, setCompletingTask] = useState<TaskItem | null>(null);
 
   const pendingRef = useRef<HTMLElement>(null);
   const correctionRef = useRef<HTMLElement>(null);
@@ -1071,7 +1091,12 @@ function ListView() {
           ) : (
             <div className="space-y-2">
               {sortedPending.map(t => (
-                <TaskCard key={t.id} task={t} onAction={handleAction} />
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  onAction={handleAction}
+                  onOpenCompleteModal={(task) => setCompletingTask(task)}
+                />
               ))}
             </div>
           )}
@@ -1111,6 +1136,33 @@ function ListView() {
           </section>
         )}
       </div>
+
+      {/* Modal "Concluir diligencia" — abre quando estagiario clica
+          Concluir num card kind='task' (Task orfa, criada via "Nova
+          diligencia" do advogado). Permite drop-zone de arquivos antes
+          de marcar como concluida. */}
+      <CompleteTaskModal
+        open={!!completingTask}
+        taskId={completingTask?.id ?? null}
+        taskTitle={completingTask?.title}
+        hasLegalCase={!!completingTask?.legal_case?.id}
+        onClose={() => setCompletingTask(null)}
+        onCompleted={() => {
+          // Otimismo: remove da lista pendente imediatamente
+          if (completingTask) {
+            setData(prev => prev ? {
+              ...prev,
+              pending: prev.pending.filter(t => t.id !== completingTask.id),
+              stats: {
+                ...prev.stats,
+                pendingCount: Math.max(0, prev.stats.pendingCount - 1),
+                completedTodayCount: prev.stats.completedTodayCount + 1,
+              },
+            } : prev);
+          }
+          setCompletingTask(null);
+        }}
+      />
     </div>
   );
 }

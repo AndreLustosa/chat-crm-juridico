@@ -61,14 +61,65 @@ export class CaseDocumentsService {
       where.folder = folder;
     }
 
-    return this.prisma.caseDocument.findMany({
-      where,
-      include: {
-        uploaded_by: { select: { id: true, name: true } },
-        _count: { select: { versions: true } },
-      },
-      orderBy: { created_at: 'desc' },
-    });
+    // Documentos "tradicionais" do caso (CaseDocument) + anexos de
+    // diligencias (Task) que estao vinculadas a este caso. UNION na
+    // aplicacao porque sao tabelas distintas com shapes proximos mas
+    // nao identicos.
+    //
+    // Anexo de Task pode aparecer aqui se a task tem legal_case_id=caseId.
+    // UI marca esses items com kind='task' pra mostrar badge especial
+    // (ex: "via diligencia: Pegar comprovante de residencia"), mas a
+    // experiencia de listar/baixar/deletar eh a mesma do CaseDocument.
+    const taskAttachWhere: any = { task: { legal_case_id: caseId } };
+    if (folder && VALID_FOLDERS.includes(folder as any)) {
+      taskAttachWhere.folder = folder;
+    }
+
+    const [docs, taskAttachments] = await Promise.all([
+      this.prisma.caseDocument.findMany({
+        where,
+        include: {
+          uploaded_by: { select: { id: true, name: true } },
+          _count: { select: { versions: true } },
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+      (this.prisma as any).taskAttachment.findMany({
+        where: taskAttachWhere,
+        include: {
+          uploaded_by: { select: { id: true, name: true } },
+          task: { select: { id: true, title: true } },
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+    ]);
+
+    // Normaliza shape pra UI tratar igual; campos diferentes ficam
+    // como undefined no shape oposto.
+    const normalizedDocs = docs.map((d: any) => ({ ...d, kind: 'document' as const }));
+    const normalizedAttach = taskAttachments.map((a: any) => ({
+      id: a.id,
+      kind: 'task_attachment' as const,
+      // Espelha campos comuns pro frontend usar a mesma listagem
+      legal_case_id: caseId,
+      folder: a.folder,
+      name: a.name,
+      original_name: a.original_name,
+      s3_key: a.s3_key,
+      mime_type: a.mime_type,
+      size: a.size,
+      version: 1,
+      description: a.description,
+      created_at: a.created_at,
+      uploaded_by: a.uploaded_by,
+      uploaded_via_portal: false,
+      _count: { versions: 0 },
+      // Extra: link pra Task de origem (UI mostra "anexado em X")
+      from_task: a.task ? { id: a.task.id, title: a.task.title } : null,
+    }));
+
+    return [...normalizedDocs, ...normalizedAttach]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
   async upload(

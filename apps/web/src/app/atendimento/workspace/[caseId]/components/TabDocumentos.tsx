@@ -21,6 +21,13 @@ interface CaseDoc {
   created_at: string;
   uploaded_by: { id: string; name: string };
   uploaded_via_portal?: boolean;
+  // 'document' = CaseDocument tradicional. 'task_attachment' = anexo de
+  // diligência (Task) que veio via UNION no backend. Cards mostram badge
+  // "via diligência" quando kind='task_attachment' pra advogado entender
+  // contexto de origem (estagiário coletou em uma tarefa especifica).
+  kind?: 'document' | 'task_attachment';
+  /** Preenchido quando kind='task_attachment' — link pra task de origem */
+  from_task?: { id: string; title: string } | null;
   _count: { versions: number };
 }
 
@@ -112,31 +119,36 @@ export default function TabDocumentos({ caseId }: { caseId: string }) {
     }
   };
 
-  const handleDownload = async (docId: string, fileName: string) => {
+  const handleDownload = async (doc: CaseDoc) => {
     try {
-      const token = localStorage.getItem('token');
       const link = document.createElement('a');
-      link.href = `${API_BASE_URL}/case-documents/${docId}/download`;
-      link.setAttribute('download', fileName);
-      // Fetch with auth
-      const res = await api.get(`/case-documents/${docId}/download`, {
-        responseType: 'blob',
-      });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      link.href = url;
+      link.setAttribute('download', doc.original_name);
+      // Endpoint diferente conforme origem:
+      //   - 'document' (CaseDocument): /case-documents/:id/download
+      //   - 'task_attachment' (TaskAttachment): /tasks/attachments/:id/download
+      const url = doc.kind === 'task_attachment'
+        ? `/tasks/attachments/${doc.id}/download`
+        : `/case-documents/${doc.id}/download`;
+      const res = await api.get(url, { responseType: 'blob' });
+      const blobUrl = window.URL.createObjectURL(new Blob([res.data]));
+      link.href = blobUrl;
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(blobUrl);
     } catch {
       showError('Erro ao baixar documento');
     }
   };
 
-  const handleDelete = async (docId: string) => {
+  const handleDelete = async (doc: CaseDoc) => {
     if (!confirm('Deseja deletar este documento?')) return;
     try {
-      await api.delete(`/case-documents/${docId}`);
+      // Mesmo split de endpoint do download
+      const url = doc.kind === 'task_attachment'
+        ? `/tasks/attachments/${doc.id}`
+        : `/case-documents/${doc.id}`;
+      await api.delete(url);
       showSuccess('Documento removido');
       fetchDocs();
     } catch {
@@ -309,7 +321,19 @@ export default function TabDocumentos({ caseId }: { caseId: string }) {
                             </span>
                             <span className="text-[10px] text-muted-foreground">{formatSize(doc.size)}</span>
                             <span className="text-[10px] text-muted-foreground">{formatDate(doc.created_at)}</span>
-                            {doc.uploaded_via_portal ? (
+                            {/* Origem do documento — 3 cenarios:
+                                1. Anexo de diligência (kind='task_attachment'): vem de uma Task
+                                   com legal_case_id deste caso. Badge azul "via diligência".
+                                2. Upload pelo portal do cliente (uploaded_via_portal=true).
+                                3. Upload normal pelo advogado/estagiario (CaseDocument). */}
+                            {doc.kind === 'task_attachment' ? (
+                              <span
+                                className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                                title={doc.from_task ? `Coletado na diligência: ${doc.from_task.title}` : 'Anexo de diligência'}
+                              >
+                                ✋ via diligência
+                              </span>
+                            ) : doc.uploaded_via_portal ? (
                               <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                 Enviado pelo cliente
                               </span>
@@ -328,21 +352,26 @@ export default function TabDocumentos({ caseId }: { caseId: string }) {
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
-                            onClick={() => handleDownload(doc.id, doc.original_name)}
+                            onClick={() => handleDownload(doc)}
                             className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
                             title="Baixar"
                           >
                             <Download size={14} />
                           </button>
+                          {/* Editar so faz sentido em CaseDocument tradicional —
+                              TaskAttachment nao tem edicao de metadata aqui
+                              (estagiario edita na propria diligencia) */}
+                          {doc.kind !== 'task_attachment' && (
+                            <button
+                              onClick={() => startEdit(doc)}
+                              className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
+                              title="Editar"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          )}
                           <button
-                            onClick={() => startEdit(doc)}
-                            className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-                            title="Editar"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(doc.id)}
+                            onClick={() => handleDelete(doc)}
                             className="p-2 rounded-xl text-red-400/70 hover:text-red-400 hover:bg-red-500/10 transition-all"
                             title="Excluir"
                           >
