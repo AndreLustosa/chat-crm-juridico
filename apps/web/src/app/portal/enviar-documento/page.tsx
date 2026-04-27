@@ -5,10 +5,17 @@ import { useRouter } from 'next/navigation';
 import {
   Loader2, AlertCircle, CheckCircle2, UploadCloud, FileText,
   X, Folder, Camera, FolderOpen, ScanLine, Plus, Trash2,
-  Sparkles, RefreshCcw, Crop,
+  Sparkles, RefreshCcw, Crop, Edit3,
 } from 'lucide-react';
 import { PortalHeader } from '../components/PortalHeader';
-import { loadOpenCV, prewarmOpenCV } from '@/lib/opencv-loader';
+import { prewarmOpenCV } from '@/lib/opencv-loader';
+import {
+  autoExtractFromDataUrl,
+  warpFromDataUrl,
+  loadImageEl,
+  type Corners,
+} from '@/lib/document-scanner';
+import { CornerEditor } from './CornerEditor';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
@@ -38,14 +45,19 @@ type CaseOption = {
 // no PDF eh comprimido pra ~85% qualidade pra arquivos legiveis sem inflar.
 //
 // Pipeline em 3 estagios pra cada pagina:
-//   raw → (auto-crop opcional via OpenCV/jscanify) → (filtro B&W opcional)
+//   raw → (auto-crop opcional via OpenCV) → (filtro B&W opcional)
 //
 // Mantemos os 3 dataUrls em memoria pra o cliente alternar instantaneamente
 // entre "ver original/cropado/com filtro" sem reprocessar tudo.
+//
+// `corners` guardado pra (a) renderizar o overlay no editor manual com
+// posicao inicial = ultima detectada/escolhida, (b) permitir ajustes
+// incrementais sem perder o que o cliente arrastou.
 type ScannedPage = {
   id: string;
   rawDataUrl: string;             // foto original (re-encoded em JPEG)
-  croppedDataUrl: string | null;  // resultado do auto-crop, null se falhou
+  croppedDataUrl: string | null;  // resultado do auto-crop, null se falhou e cliente nao ajustou manualmente
+  corners: Corners | null;         // 4 cantos usados pro warp (auto ou manual)
   enhancedUrl: string;             // versao final com filtro doc aplicado sobre cropped (ou raw se cropped=null)
   useCrop: boolean;                // toggle por pagina — usar versao cropada?
   bw: boolean;                     // toggle por pagina — aplicar filtro doc?
@@ -65,50 +77,53 @@ function getExt(name: string): string {
 }
 
 /**
- * Tenta detectar os 4 cantos do documento na foto (jscanify usa OpenCV.js
- * pra Canny edge + contour detection) e aplicar perspective transform pra
- * "endireitar" o documento.
- *
- * Devolve null se OpenCV nao conseguir achar contorno claro — caso tipico
- * de foto sem documento bem-enquadrado, fundo bagunçado, ou iluminacao
- * baixa. Caller decide se mostra raw ou pede pra refazer foto.
- *
- * Lazy-importa jscanify + carrega OpenCV do CDN. Primeira chamada eh lenta
- * (~3-8s no 4G); calls subsequentes reusam o `cv` global ja inicializado.
+ * Calcula dimensoes de output pra perspective transform: preserva aspect
+ * ratio da foto original com lado maior cap em 1400px. Output suficiente
+ * pra texto legivel sem inflar o PDF final.
  */
-async function tryAutoCrop(srcDataUrl: string): Promise<string | null> {
+function pickOutputSize(srcW: number, srcH: number): { outW: number; outH: number } {
+  const aspect = srcH / srcW;
+  const outW = Math.min(1400, srcW);
+  return { outW, outH: Math.round(outW * aspect) };
+}
+
+/**
+ * Detecta cantos + faz warp em uma chamada. Devolve { dataUrl, corners }
+ * ou null se a deteccao nao achar contorno valido.
+ */
+async function tryAutoCrop(
+  srcDataUrl: string,
+): Promise<{ dataUrl: string; corners: Corners } | null> {
   try {
-    await loadOpenCV();
-    // jscanify/client = bundle browser que NAO depende de canvas/jsdom de Node
-    const mod: any = await import('jscanify/client');
-    const Scanner = mod.default || mod;
-    const scanner = new Scanner();
-
-    // jscanify.extractPaper precisa de HTMLImageElement (faz cv.imread em cima)
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('Falha ao carregar imagem'));
-      el.src = srcDataUrl;
-    });
-
-    // Output size: preserva aspect ratio da foto. Lado maior cap em 1400px
-    // (suficiente pra texto legivel, mantem PDF leve).
-    const aspect = img.naturalHeight / img.naturalWidth;
-    const outW = Math.min(1400, img.naturalWidth);
-    const outH = Math.round(outW * aspect);
-
-    const canvas: HTMLCanvasElement | null = scanner.extractPaper(img, outW, outH);
-    if (!canvas) return null;
-    return canvas.toDataURL('image/jpeg', 0.85);
+    const img = await loadImageEl(srcDataUrl);
+    const { outW, outH } = pickOutputSize(img.naturalWidth, img.naturalHeight);
+    const result = await autoExtractFromDataUrl(srcDataUrl, outW, outH);
+    if (!result) return null;
+    return {
+      dataUrl: result.canvas.toDataURL('image/jpeg', 0.85),
+      corners: result.corners,
+    };
   } catch (e) {
-    // Pode acontecer com CSP bloqueando, rede ruim, ou OpenCV nao encontrar
-    // contorno bonito. Em qualquer caso: fallback gracioso pro raw.
     if (typeof console !== 'undefined') {
       console.warn('[scanner] auto-crop falhou:', e);
     }
     return null;
   }
+}
+
+/**
+ * Re-aplica warp usando cantos manuais (do CornerEditor). Output mantem
+ * aspect ratio da foto original — se cantos definirem um quadrilatero
+ * "deformado" o documento sera estirado pra A4-ish.
+ */
+async function manualCrop(
+  srcDataUrl: string,
+  corners: Corners,
+): Promise<string> {
+  const img = await loadImageEl(srcDataUrl);
+  const { outW, outH } = pickOutputSize(img.naturalWidth, img.naturalHeight);
+  const canvas = await warpFromDataUrl(srcDataUrl, corners, outW, outH);
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
 /**
@@ -366,14 +381,19 @@ export default function EnviarDocumentoPage() {
     try {
       const rawDataUrl = await fileToJpegDataUrl(f);
 
-      // Tenta auto-crop (jscanify + OpenCV). Pode demorar na 1a chamada
-      // porque opencv.js precisa carregar do CDN (~8MB).
-      // Se OpenCV ainda nao carregou, mostra indicador.
+      // Tenta auto-crop (OpenCV: Canny + contour + warpPerspective). Pode
+      // demorar na 1a chamada porque opencv.js precisa carregar do CDN
+      // (~8MB). Se OpenCV ainda nao carregou, mostra indicador.
       let croppedDataUrl: string | null = null;
+      let corners: Corners | null = null;
       if (cropAll) {
         if (!(window as any).cv?.Mat) setOpencvLoading(true);
         try {
-          croppedDataUrl = await tryAutoCrop(rawDataUrl);
+          const auto = await tryAutoCrop(rawDataUrl);
+          if (auto) {
+            croppedDataUrl = auto.dataUrl;
+            corners = auto.corners;
+          }
         } finally {
           setOpencvLoading(false);
         }
@@ -389,6 +409,7 @@ export default function EnviarDocumentoPage() {
         id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         rawDataUrl,
         croppedDataUrl,
+        corners,
         enhancedUrl,
         useCrop: cropAll && !!croppedDataUrl,
         bw: bwAll,
@@ -399,6 +420,39 @@ export default function EnviarDocumentoPage() {
     } finally {
       setScannerBusy(false);
       if (scannerInputRef.current) scannerInputRef.current.value = '';
+    }
+  }
+
+  // ─── Editor manual de cantos ──────────────────────────────────
+
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+
+  /**
+   * Aplica cantos manuais a uma pagina: re-faz warp com os 4 pontos
+   * arrastados pelo cliente, regera enhanced (se bw ligado) e marca a
+   * pagina como `useCrop=true` (cliente decidiu cropar manualmente).
+   */
+  async function applyManualCorners(pageId: string, corners: Corners) {
+    const cur = pages.find(p => p.id === pageId);
+    if (!cur) return;
+    setScannerBusy(true);
+    try {
+      const croppedDataUrl = await manualCrop(cur.rawDataUrl, corners);
+      const enhancedUrl = cur.bw
+        ? await enhanceImageForDoc(croppedDataUrl)
+        : cur.enhancedUrl; // se bw=false, enhanced nao eh usado pro render
+      setPages(prev => prev.map(p => p.id === pageId ? {
+        ...p,
+        croppedDataUrl,
+        corners,
+        useCrop: true,
+        enhancedUrl,
+      } : p));
+      setEditingPageId(null);
+    } catch (e: any) {
+      setScannerError(e.message || 'Falha ao aplicar recorte');
+    } finally {
+      setScannerBusy(false);
     }
   }
 
@@ -681,8 +735,25 @@ export default function EnviarDocumentoPage() {
           </div>
         )}
 
-        {/* ─── MODO: Scanner ─────────────────────────────────── */}
-        {cases && cases.length > 0 && mode === 'scanner' && (
+        {/* ─── MODO: Scanner / Editor manual de bordas ────────── */}
+        {cases && cases.length > 0 && mode === 'scanner' && editingPageId && (() => {
+          const editingPage = pages.find(p => p.id === editingPageId);
+          if (!editingPage) {
+            // Pagina sumiu enquanto editava — fecha
+            setEditingPageId(null);
+            return null;
+          }
+          return (
+            <CornerEditor
+              imageDataUrl={editingPage.rawDataUrl}
+              initialCorners={editingPage.corners}
+              onConfirm={(corners) => applyManualCorners(editingPage.id, corners)}
+              onCancel={() => setEditingPageId(null)}
+            />
+          );
+        })()}
+
+        {cases && cases.length > 0 && mode === 'scanner' && !editingPageId && (
           <div className="space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
@@ -789,10 +860,18 @@ export default function EnviarDocumentoPage() {
                             {p.useCrop ? 'Sem recorte' : 'Recortar'}
                           </button>
                         ) : (
-                          <span className="text-[10px] text-white/30" title="Não foi possível detectar bordas nesta foto">
-                            Sem recorte
+                          <span className="text-[10px] text-white/30" title="Recorte automático não detectou bordas — use ajustar manual">
+                            Auto-recorte falhou
                           </span>
                         )}
+                        <button
+                          onClick={() => setEditingPageId(p.id)}
+                          className="text-[10px] text-[#A89048] hover:underline inline-flex items-center gap-1"
+                          title="Arraste os 4 cantos manualmente"
+                        >
+                          <Edit3 size={10} />
+                          Ajustar bordas
+                        </button>
                         <button
                           onClick={() => togglePageBw(p.id)}
                           className="text-[10px] text-[#A89048] hover:underline"
