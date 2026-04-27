@@ -77,11 +77,30 @@ const nextConfig: NextConfig = {
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
   },
   async headers() {
+    const noindexHeader = {
+      key: "X-Robots-Tag",
+      value: "noindex, nofollow",
+    };
     return [
       {
         // Aplica os headers em todas as rotas
         source: "/(.*)",
         headers: securityHeaders,
+      },
+      {
+        // Bloqueia indexacao de rotas privadas (CRM, portal do cliente,
+        // formularios privados com leadId). Reforca o robots.txt e cobre
+        // tambem assets estaticos servidos por essas rotas.
+        source: "/atendimento/:path*",
+        headers: [noindexHeader],
+      },
+      {
+        source: "/portal/:path*",
+        headers: [noindexHeader],
+      },
+      {
+        source: "/formulario/:path*",
+        headers: [noindexHeader],
       },
     ];
   },
@@ -90,6 +109,53 @@ const nextConfig: NextConfig = {
       {
         source: "/api/:path*",
         destination: `${backendUrl}/:path*`,
+      },
+    ];
+  },
+  async redirects() {
+    // Redirects 301 de URLs do site WordPress antigo que ainda estao indexadas
+    // no Google e geram 404 no Search Console. As paginas serao recriadas como
+    // LPs no futuro; por enquanto apontam para a home para preservar a autoridade.
+    return [
+      {
+        source: "/direito-trabalhista",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/direito-trabalhista/:path*",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/direito-previdenciario",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/direito-previdenciario/:path*",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/direito-do-consumidor",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/direito-do-consumidor/:path*",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/full-service",
+        destination: "/",
+        permanent: true,
+      },
+      {
+        source: "/full-service/:path*",
+        destination: "/",
+        permanent: true,
       },
     ];
   },
