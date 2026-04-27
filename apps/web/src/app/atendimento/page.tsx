@@ -332,7 +332,7 @@ export default function Dashboard() {
   // ─── Tab title + favicon dinâmico com badge de não lidos ─────
   useEffect(() => {
     const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
-    document.title = total > 0 ? `(${total}) Atendimento | LexCRM` : 'Atendimento | LexCRM';
+    document.title = total > 0 ? `(${total}) Atendimento` : 'Atendimento';
 
     // Favicon dinâmico via Canvas API
     const link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]') ||

@@ -9,12 +9,12 @@ self.addEventListener('push', (event) => {
 
   try {
     const data = event.data.json();
-    const title = data.title || 'LexCRM';
+    const title = data.title || 'Nova notificação';
     const options = {
       body: data.body || '',
       icon: '/landing/LOGO SEM FUNDO 01.png',
       badge: '/favicon.ico',
-      tag: data.tag || 'lexcrm-notification',
+      tag: data.tag || 'crm-notification',
       data: {
         url: data.url || '/atendimento',
         ...data.data,

@@ -190,7 +190,7 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         lines.push(notification.body);
       }
       lines.push('');
-      lines.push(`Abrir no LexCRM: ${deepLink}`);
+      lines.push(`Abrir o chat: ${deepLink}`);
       const text = lines.join('\n');
 
       await axios.post(
