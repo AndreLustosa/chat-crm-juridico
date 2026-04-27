@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
+  Param,
   Query,
   Body,
   Req,
@@ -50,6 +52,33 @@ export class CourtScraperController {
   async getLawyers(@Req() req: any) {
     const tenantId = req.user?.tenant_id;
     return this.service.getLawyersWithOAB(tenantId);
+  }
+
+  /**
+   * Marca um processo como renunciado/ignorado — some do import por OAB
+   * e do DJEN. Usa a mesma tabela DjenIgnoredProcess pra single source
+   * of truth. Se o processo ja esta cadastrado, tambem marca
+   * LegalCase.renounced=true.
+   */
+  @Post('renounce')
+  async renounceCase(
+    @Body() body: { numero_processo: string; reason?: string },
+    @Req() req: any,
+  ) {
+    if (!body?.numero_processo) {
+      throw new BadRequestException('numero_processo obrigatório');
+    }
+    const tenantId = req.user?.tenant_id;
+    return this.service.renounceCase(body.numero_processo, tenantId, body.reason);
+  }
+
+  /** Desfaz a renúncia — remove da lista de ignorados. */
+  @Delete('renounce/:numero')
+  async unrenounceCase(@Param('numero') numero: string) {
+    if (!numero) {
+      throw new BadRequestException('numero obrigatório');
+    }
+    return this.service.unrenounceCase(numero);
   }
 
   /** Importa processos em lote a partir dos dados do ESAJ */

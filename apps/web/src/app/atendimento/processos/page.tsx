@@ -9,7 +9,7 @@ import {
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, Bell, RefreshCcw, BookOpen,
   LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown, FolderPlus, Pencil, Trash2,
   Sparkles, AlertCircle, SlidersHorizontal, Columns3, BookmarkPlus, Bookmark, Star,
-  Undo2,
+  Undo2, UserX, RotateCcw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -3806,6 +3806,11 @@ function OabImportModal({ onClose, onStartCadastro }: {
   const [sentSet, setSentSet] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [restoredFromCache, setRestoredFromCache] = useState(false);
+  // Renunciados: backend marca `ignored=true` em cada item (vem da tabela
+  // DjenIgnoredProcess + LegalCase.renounced). Default escondemos pra
+  // limpar a UI; toggle showIgnored revela e permite desfazer.
+  const [showIgnored, setShowIgnored] = useState(false);
+  const [renouncingNumero, setRenouncingNumero] = useState<string | null>(null);
 
   useEffect(() => {
     api.get('/court-scraper/lawyers').then(r => {
@@ -3886,7 +3891,13 @@ function OabImportModal({ onClose, onStartCadastro }: {
       });
       const cases = res.data?.cases || [];
       setResults(cases);
-      const toSelect = new Set<string>(cases.filter((c: any) => !c.already_registered && c.processo_codigo).map((c: any) => c.processo_codigo as string));
+      // Auto-select: nao pega ja-cadastrados nem renunciados — cliente
+      // explicitamente desfaz a renúncia se quiser cadastrar de novo.
+      const toSelect = new Set<string>(
+        cases
+          .filter((c: any) => !c.already_registered && !c.ignored && c.processo_codigo)
+          .map((c: any) => c.processo_codigo as string),
+      );
       setSelectedForImport(toSelect);
       setSearchProgress('');
     } catch (e: any) {
@@ -3915,7 +3926,62 @@ function OabImportModal({ onClose, onStartCadastro }: {
     setSelectedForImport(prev => { const n = new Set(prev); n.has(codigo) ? n.delete(codigo) : n.add(codigo); return n; });
   };
 
-  const notRegistered = results.filter(c => !c.already_registered && !sentSet.has(c.processo_codigo));
+  /**
+   * Marca processo como renunciado — some da listagem (default oculta) e
+   * tambem fica fora do DJEN. Confirma com o usuario antes pra evitar
+   * clique acidental.
+   */
+  const handleRenounce = async (c: any) => {
+    if (!c?.case_number) return;
+    const ok = window.confirm(
+      `Tem certeza que renunciou ao processo ${c.case_number}?\n\n` +
+      `Ele será removido da lista de importação por OAB e das publicações do DJEN.\n` +
+      `Você pode desfazer depois clicando em "Mostrar renunciados".`,
+    );
+    if (!ok) return;
+    setRenouncingNumero(c.case_number);
+    try {
+      await api.post('/court-scraper/renounce', { numero_processo: c.case_number });
+      // Atualiza estado local — marca ignored=true e tira do auto-select
+      setResults(prev => prev.map(x =>
+        x.case_number === c.case_number ? { ...x, ignored: true } : x,
+      ));
+      if (c.processo_codigo) {
+        setSelectedForImport(prev => {
+          const n = new Set(prev);
+          n.delete(c.processo_codigo);
+          return n;
+        });
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao marcar como renunciado');
+    } finally {
+      setRenouncingNumero(null);
+    }
+  };
+
+  /** Desfaz a renúncia — processo volta a aparecer normal. */
+  const handleUnrenounce = async (c: any) => {
+    if (!c?.case_number) return;
+    setRenouncingNumero(c.case_number);
+    try {
+      await api.delete(`/court-scraper/renounce/${encodeURIComponent(c.case_number)}`);
+      setResults(prev => prev.map(x =>
+        x.case_number === c.case_number ? { ...x, ignored: false } : x,
+      ));
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Erro ao desfazer renúncia');
+    } finally {
+      setRenouncingNumero(null);
+    }
+  };
+
+  // notRegistered + visibleResults aplicam o filtro de renunciados.
+  // Default: renunciados ficam escondidos. Toggle "Mostrar renunciados"
+  // expande pra cliente desfazer se errou.
+  const ignoredCount = results.filter(c => c.ignored).length;
+  const visibleResults = showIgnored ? results : results.filter(c => !c.ignored);
+  const notRegistered = visibleResults.filter(c => !c.already_registered && !c.ignored && !sentSet.has(c.processo_codigo));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -4027,7 +4093,7 @@ function OabImportModal({ onClose, onStartCadastro }: {
           {/* Lista de processos */}
           {results.length > 0 && (
             <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                 <label className="text-xs font-semibold text-foreground">
                   {results.length} processo(s) encontrado(s)
                   {results.filter(c => c.already_registered).length > 0 && (
@@ -4040,20 +4106,40 @@ function OabImportModal({ onClose, onStartCadastro }: {
                       ({sentSet.size} enviado(s) para cadastro)
                     </span>
                   )}
+                  {ignoredCount > 0 && (
+                    <span className="text-muted-foreground font-normal ml-1">
+                      ({ignoredCount} renunciado{ignoredCount > 1 ? 's' : ''})
+                    </span>
+                  )}
                 </label>
-                <span className="text-[10px] text-muted-foreground">
-                  {selectedForImport.size} selecionado(s)
-                </span>
+                <div className="flex items-center gap-3">
+                  {ignoredCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowIgnored(s => !s)}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                    >
+                      {showIgnored ? 'Ocultar renunciados' : `Mostrar ${ignoredCount} renunciado${ignoredCount > 1 ? 's' : ''}`}
+                    </button>
+                  )}
+                  <span className="text-[10px] text-muted-foreground">
+                    {selectedForImport.size} selecionado(s)
+                  </span>
+                </div>
               </div>
               <div className="space-y-1.5 max-h-[350px] overflow-y-auto">
-                {results.map((c: any, i: number) => {
+                {visibleResults.map((c: any, i: number) => {
                   const isSent = sentSet.has(c.processo_codigo);
                   const isRegistered = c.already_registered || isSent;
+                  const isIgnored = !!c.ignored;
+                  const isRenouncing = renouncingNumero === c.case_number;
                   return (
                     <div
                       key={i}
                       className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all text-[11px] ${
-                        isRegistered
+                        isIgnored
+                          ? 'bg-amber-500/5 border-amber-500/20 opacity-70'
+                          : isRegistered
                           ? 'bg-accent/20 border-border/50 opacity-60'
                           : selectedForImport.has(c.processo_codigo)
                           ? 'bg-primary/5 border-primary/30'
@@ -4064,16 +4150,19 @@ function OabImportModal({ onClose, onStartCadastro }: {
                         type="checkbox"
                         checked={selectedForImport.has(c.processo_codigo)}
                         onChange={() => toggleImport(c.processo_codigo)}
-                        disabled={isRegistered || !c.processo_codigo}
+                        disabled={isRegistered || isIgnored || !c.processo_codigo}
                         className="rounded shrink-0"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono font-semibold">{c.case_number}</span>
-                          {c.already_registered && (
+                          <span className={`font-mono font-semibold ${isIgnored ? 'line-through text-muted-foreground' : ''}`}>{c.case_number}</span>
+                          {isIgnored && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-bold">Renunciado</span>
+                          )}
+                          {c.already_registered && !isIgnored && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-500 font-bold">Já cadastrado</span>
                           )}
-                          {isSent && !c.already_registered && (
+                          {isSent && !c.already_registered && !isIgnored && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-bold flex items-center gap-0.5">
                               <CheckCircle2 size={10} /> Enviado para cadastro
                             </span>
@@ -4093,17 +4182,44 @@ function OabImportModal({ onClose, onStartCadastro }: {
                           </div>
                         )}
                       </div>
-                      {/* Botão cadastrar individual */}
-                      {!isRegistered && c.processo_codigo && (
+                      {/* Botoes de acao — variacao por estado */}
+                      {isIgnored ? (
                         <button
-                          onClick={() => handleStartOneCadastro(c)}
-                          disabled={sendingToCadastro === c.processo_codigo}
-                          className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 transition-all"
-                          title="Abrir pré-cadastro"
+                          onClick={() => handleUnrenounce(c)}
+                          disabled={isRenouncing}
+                          className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-all"
+                          title="Desfazer renúncia — processo volta a aparecer"
                         >
-                          {sendingToCadastro === c.processo_codigo ? <Loader2 size={11} className="animate-spin" /> : <FolderPlus size={11} />}
-                          Cadastrar
+                          {isRenouncing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                          Desfazer
                         </button>
+                      ) : (
+                        <>
+                          {!isRegistered && c.processo_codigo && (
+                            <button
+                              onClick={() => handleStartOneCadastro(c)}
+                              disabled={sendingToCadastro === c.processo_codigo || isRenouncing}
+                              className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 transition-all"
+                              title="Abrir pré-cadastro"
+                            >
+                              {sendingToCadastro === c.processo_codigo ? <Loader2 size={11} className="animate-spin" /> : <FolderPlus size={11} />}
+                              Cadastrar
+                            </button>
+                          )}
+                          {/* Renunciei: oferecemos pra ja-cadastrados E nao-cadastrados.
+                              Pra ja-cadastrado, marca LegalCase.renounced=true tambem. */}
+                          {c.case_number && !isSent && (
+                            <button
+                              onClick={() => handleRenounce(c)}
+                              disabled={isRenouncing}
+                              className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold rounded-lg text-muted-foreground hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-500/10 disabled:opacity-50 transition-all"
+                              title="Não sou mais advogado neste processo"
+                            >
+                              {isRenouncing ? <Loader2 size={11} className="animate-spin" /> : <UserX size={11} />}
+                              Renunciei
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   );

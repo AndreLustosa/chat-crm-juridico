@@ -40,6 +40,10 @@ export interface MultiOabResult {
     found_by_lawyers: string[];   // Nomes dos advogados
     already_registered: boolean;  // Já cadastrado no sistema
     existing_case_id?: string;    // ID se já cadastrado
+    // true = escritorio renunciou ou marcou pra ignorar. Frontend esconde
+    // por default e oferece toggle "mostrar renunciados" pra desfazer.
+    // Reusa DjenIgnoredProcess (mesma source-of-truth do DJEN).
+    ignored: boolean;
   }>;
   totalByOab: Record<string, number>;
 }
@@ -269,30 +273,163 @@ export class CourtScraperService {
     const existingCases = orConditions.length > 0
       ? await this.prisma.legalCase.findMany({
           where: { OR: orConditions },
-          select: { id: true, case_number: true },
+          select: { id: true, case_number: true, renounced: true },
         })
       : [];
 
     // Normaliza chaves dos existentes para comparacao robusta (digits-only)
-    const existingById = new Map<string, string>(
-      existingCases.map(c => [(c.case_number || '').replace(/\D/g, ''), c.id]),
+    const existingById = new Map<string, { id: string; renounced: boolean }>(
+      existingCases.map(c => [(c.case_number || '').replace(/\D/g, ''), { id: c.id, renounced: c.renounced }]),
+    );
+
+    // Carrega lista de processos ignorados (renunciados) — mesma tabela do
+    // DJEN (DjenIgnoredProcess). Se cliente marcou "renunciei" no DJEN, no
+    // import por OAB tambem some por default. Single source of truth.
+    const ignoredRows = await this.prisma.djenIgnoredProcess.findMany({
+      where: { ...(tenantId ? { tenant_id: tenantId } : {}) },
+      select: { numero_processo: true },
+    });
+    // O DJEN guarda `numero_processo` em formato variavel — normalizamos pra
+    // digits-only no Set pra match consistente com o que o ESAJ retorna.
+    const ignoredSet = new Set(
+      ignoredRows.map((r: any) => (r.numero_processo || '').replace(/\D/g, '')),
     );
 
     const cases = Array.from(allCases.values()).map(c => {
       const digits = c.case_number.replace(/\D/g, '');
-      const existingId = existingById.get(digits);
+      const existing = existingById.get(digits);
       return {
         ...c,
-        already_registered: !!existingId,
-        existing_case_id: existingId,
+        already_registered: !!existing,
+        existing_case_id: existing?.id,
+        // Renunciado se: (a) na lista global de ignorados OU (b) ja cadastrado
+        // como LegalCase com renounced=true. Frontend esconde por default.
+        ignored: ignoredSet.has(digits) || (existing?.renounced === true),
       };
     });
 
     this.logger.log(
-      `[OAB-MULTI] Total: ${cases.length} processos unicos, ${cases.filter(c => c.already_registered).length} ja cadastrados`,
+      `[OAB-MULTI] Total: ${cases.length} processos unicos, ${cases.filter(c => c.already_registered).length} ja cadastrados, ${cases.filter(c => c.ignored).length} renunciados`,
     );
 
     return { cases, totalByOab };
+  }
+
+  /**
+   * Marca processo como "renunciado" — cliente nao quer mais ver no import
+   * por OAB nem no DJEN. Usa a mesma tabela DjenIgnoredProcess que ja
+   * existia (single source of truth pra ignorados).
+   *
+   * Se o processo ja esta cadastrado como LegalCase, tambem marca
+   * renounced=true la — assim toda a logica downstream (auto-archive de
+   * publicacoes DJEN, ocultacao no portal do cliente, etc) ja funciona
+   * sem mexer em mais nada.
+   *
+   * Idempotente: se ja estiver na lista, retorna o registro existente sem
+   * erro.
+   */
+  async renounceCase(
+    numeroProcesso: string,
+    tenantId?: string,
+    reason?: string,
+  ): Promise<{ ok: boolean; ignored_id: string; legal_case_marked: boolean }> {
+    const digits = (numeroProcesso || '').replace(/\D/g, '');
+    if (digits.length !== 20) {
+      throw new BadRequestException('Número de processo inválido (20 dígitos esperados)');
+    }
+
+    // Formato CNJ pra guardar (DjenIgnoredProcess.numero_processo eh @unique
+    // global — guardamos digits-only pra evitar duplicatas com formatos
+    // diferentes)
+    const normalized = digits;
+
+    const ignored = await this.prisma.djenIgnoredProcess.upsert({
+      where: { numero_processo: normalized },
+      update: {
+        ...(reason ? { reason } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      create: {
+        numero_processo: normalized,
+        tenant_id: tenantId || null,
+        reason: reason || null,
+      },
+      select: { id: true },
+    });
+
+    // Se o caso ja existe como LegalCase, marca renounced=true.
+    const existing = await this.prisma.legalCase.findFirst({
+      where: {
+        OR: [
+          { case_number: normalized },
+          { case_number: { contains: normalized.slice(0, 13) } },
+        ],
+      },
+      select: { id: true, case_number: true, renounced: true },
+    });
+
+    let legalCaseMarked = false;
+    if (existing) {
+      // Confirma match (digits-only) — contains pode dar falso positivo
+      const existingDigits = (existing.case_number || '').replace(/\D/g, '');
+      if (existingDigits === normalized && !existing.renounced) {
+        await this.prisma.legalCase.update({
+          where: { id: existing.id },
+          data: { renounced: true, renounced_at: new Date() },
+        });
+        legalCaseMarked = true;
+      }
+    }
+
+    this.logger.log(
+      `[RENOUNCE] ${normalized} marcado como renunciado` +
+      (legalCaseMarked ? ' + LegalCase atualizado' : '') +
+      (reason ? ` (motivo: ${reason})` : ''),
+    );
+
+    return {
+      ok: true,
+      ignored_id: ignored.id,
+      legal_case_marked: legalCaseMarked,
+    };
+  }
+
+  /**
+   * Desfaz a renúncia — remove da lista de ignorados E desmarca renounced
+   * no LegalCase se existir. Usado pra cliente reverter ação acidental.
+   */
+  async unrenounceCase(numeroProcesso: string): Promise<{ ok: boolean }> {
+    const digits = (numeroProcesso || '').replace(/\D/g, '');
+    if (digits.length !== 20) {
+      throw new BadRequestException('Número de processo inválido (20 dígitos esperados)');
+    }
+
+    await this.prisma.djenIgnoredProcess.deleteMany({
+      where: { numero_processo: digits },
+    });
+
+    // Tambem desmarca renounced no LegalCase se existir
+    const existing = await this.prisma.legalCase.findFirst({
+      where: {
+        OR: [
+          { case_number: digits },
+          { case_number: { contains: digits.slice(0, 13) } },
+        ],
+      },
+      select: { id: true, case_number: true },
+    });
+    if (existing) {
+      const existingDigits = (existing.case_number || '').replace(/\D/g, '');
+      if (existingDigits === digits) {
+        await this.prisma.legalCase.update({
+          where: { id: existing.id },
+          data: { renounced: false, renounced_at: null },
+        });
+      }
+    }
+
+    this.logger.log(`[RENOUNCE] ${digits} desfeito`);
+    return { ok: true };
   }
 
   // ─── Importar processos em lote ──────────────────────────
