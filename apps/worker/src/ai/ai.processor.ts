@@ -6,6 +6,14 @@ import { SettingsService } from '../settings/settings.service';
 import { S3Service } from '../s3/s3.service';
 import OpenAI, { toFile } from 'openai';
 import axios from 'axios';
+// pdf-parse v1.x tem um side-effect ruim no index.js: tenta abrir
+// ./test/data/05-versions-space.pdf na inicializacao se NODE_ENV !== 'production'
+// (debug check buggy). Importar direto de lib/pdf-parse pula isso e da uma
+// API estavel. Workaround documentado em github.com/modesty/pdf-parse#commonjs
+// O require eh necessario porque @types/pdf-parse so cobre o entry point root.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse: (buffer: Buffer) => Promise<{ text: string; numpages: number }> = require('pdf-parse/lib/pdf-parse.js');
+import mammoth from 'mammoth';
 import { SkillRouter } from './skill-router';
 import { ToolExecutor } from './tool-executor';
 import { PromptBuilder } from './prompt-builder';
@@ -391,6 +399,79 @@ export class AiProcessor extends WorkerHost {
   // chatTurns (linha ~1594), com a vantagem de manter a imagem no turn correto
   // do contexto multi-turn em vez de empilhar tudo no fim. Tambem dependia de
   // s3.getObjectBuffer() que esta deprecated (S3 removido em b118878).
+
+  // ─── Extrai texto de documentos (PDF, DOCX, TXT) ───
+  //
+  // Permite a IA "ler" anexos enviados pelo cliente — ex: contrato em PDF,
+  // peticao em DOCX, comprovante em TXT. Antes da Fase 2 (2026-04-28), a IA
+  // so via "[documento enviado: nome.pdf]" no histórico, sem o conteudo.
+  //
+  // Limites:
+  //   - Texto truncado em MAX_DOC_TEXT_CHARS (~50KB ≈ 25 paginas densas).
+  //     Acima disso, anexa "[...documento truncado...]" no fim. Evita estourar
+  //     contexto e custo desnecessario com documentos enormes que a IA nao
+  //     precisaria ler inteiros pra triagem.
+  //   - Suporta PDF, DOCX, TXT, CSV. Outros formatos retornam null e o turn
+  //     fica com placeholder "[documento .ext, formato nao suportado]".
+  //
+  // Retorna { text, truncated } ou null se formato nao suportado / extracao falhou.
+  private async extractDocumentText(
+    buffer: Buffer,
+    mimeBase: string,
+    filename?: string | null,
+  ): Promise<{ text: string; truncated: boolean } | null> {
+    const MAX_DOC_TEXT_CHARS = 50_000;
+
+    const truncate = (raw: string): { text: string; truncated: boolean } => {
+      const trimmed = raw.trim();
+      if (trimmed.length <= MAX_DOC_TEXT_CHARS) {
+        return { text: trimmed, truncated: false };
+      }
+      return {
+        text: trimmed.slice(0, MAX_DOC_TEXT_CHARS) + '\n\n[...documento truncado por tamanho — texto continua mas foi cortado pra IA caber no contexto...]',
+        truncated: true,
+      };
+    };
+
+    try {
+      // PDF
+      if (mimeBase === 'application/pdf') {
+        const data = await pdfParse(buffer);
+        const raw = (data?.text || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+        if (!raw.trim()) return null;
+        return truncate(raw);
+      }
+
+      // DOCX (Office Open XML)
+      if (mimeBase === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        const result = await mammoth.extractRawText({ buffer });
+        if (!result?.value?.trim()) return null;
+        return truncate(result.value);
+      }
+
+      // TXT / CSV — decode UTF-8 puro (BOM-safe)
+      if (mimeBase === 'text/plain' || mimeBase === 'text/csv') {
+        let raw = buffer.toString('utf8');
+        if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // remove BOM
+        if (!raw.trim()) return null;
+        return truncate(raw);
+      }
+
+      // .doc legado (binary) — mammoth nao suporta confiavelmente, pular
+      if (mimeBase === 'application/msword') {
+        this.logger.warn(`[AI] Documento .doc legado nao suportado (msg filename=${filename || '?'})`);
+        return null;
+      }
+
+      // Outros formatos (xlsx, pptx, zip, etc) — nao extraidos
+      return null;
+    } catch (e: any) {
+      this.logger.warn(
+        `[AI] Falha ao extrair texto do documento (${mimeBase}, ${filename || '?'}): ${e?.message || e}`,
+      );
+      return null;
+    }
+  }
 
   // ─── Aplica updates do JSON da IA no banco ───
   private async applyAiUpdates(
@@ -1625,6 +1706,85 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
               }
             } catch (e: any) {
               this.logger.warn(`[AI] Falha ao carregar imagem ${(m as any).id} inline: ${e?.message || e} (status=${e?.response?.status || 'n/a'})`);
+            }
+          }
+        }
+
+        // Documento do cliente (PDF/DOCX/TXT/CSV) → extrair texto e injetar
+        // no turn. Antes (Fase 2, 2026-04-28), a IA so via "[documento
+        // enviado]" sem o conteudo. Agora ela LE contratos, peticoes,
+        // comprovantes, etc.
+        if (isClient && (m as any).type === 'document') {
+          let mediaRecord = (m as any).media ?? null;
+          const hasStorage = (med: any) => med && (med.file_path || med.s3_key);
+
+          // Polling igual ao da imagem (race com download fire-and-forget)
+          if (!hasStorage(mediaRecord)) {
+            const msgAge = Date.now() - new Date((m as any).created_at).getTime();
+            const isRecent = msgAge < 2 * 60 * 1000;
+            if (isRecent) {
+              const phases = [
+                { attempts: 5, delay: 500 },
+                { attempts: 6, delay: 2000 },
+              ];
+              outer: for (const phase of phases) {
+                for (let attempt = 1; attempt <= phase.attempts; attempt++) {
+                  await new Promise((r) => setTimeout(r, phase.delay));
+                  const found = await this.prisma.media.findFirst({
+                    where: { message_id: (m as any).id },
+                  });
+                  if (hasStorage(found)) {
+                    mediaRecord = found;
+                    break outer;
+                  }
+                  this.logger.log(
+                    `[AI] Aguardando mídia de documento msg ${(m as any).id} (delay=${phase.delay}ms tentativa ${attempt}/${phase.attempts})...`,
+                  );
+                }
+              }
+            }
+          }
+
+          if (hasStorage(mediaRecord)) {
+            try {
+              const apiInternalUrl = process.env.API_INTERNAL_URL || 'http://crm-api:3001';
+              const mediaUrl = `${apiInternalUrl}/media/${(m as any).id}`;
+              const resp = await axios.get(mediaUrl, {
+                responseType: 'arraybuffer',
+                timeout: 60_000, // PDFs grandes demoram mais
+                validateStatus: (s) => s < 400,
+              });
+              const buffer: Buffer = Buffer.from(resp.data);
+              if (buffer.length > 0) {
+                const contentType = (resp.headers['content-type'] as string) || mediaRecord.mime_type || 'application/octet-stream';
+                const mimeBase = contentType.split(';')[0].trim();
+                const filename = mediaRecord.original_name || null;
+                const extracted = await this.extractDocumentText(buffer, mimeBase, filename);
+
+                const caption = (m as any).text || '';
+                if (extracted) {
+                  // Injeta o conteudo no turn como TEXTO. Formato pra IA:
+                  //   [O cliente enviou um documento: nome.pdf]
+                  //   <conteúdo extraído>
+                  //   [...]  (se truncado)
+                  //   <legenda do cliente, se houver>
+                  const header = `[Documento enviado pelo cliente${filename ? `: ${filename}` : ''} (${mimeBase})]`;
+                  const body = `${header}\n\n${extracted.text}${caption ? `\n\n[Legenda do cliente: ${caption}]` : ''}`;
+                  chatTurns.push({ role, content: body });
+                  this.logger.log(
+                    `[AI] Documento ${(m as any).id} extraido (${(buffer.length / 1024).toFixed(0)}KB binario -> ${extracted.text.length} chars de texto${extracted.truncated ? ', truncado' : ''})`,
+                  );
+                  continue;
+                } else {
+                  // Formato nao suportado ou extracao vazia — placeholder com nome
+                  const fallback = `[Cliente enviou um documento${filename ? ` "${filename}"` : ''} (${mimeBase}) — conteudo nao extraido (formato nao suportado pela IA)${caption ? `. Legenda: ${caption}` : ''}]`;
+                  chatTurns.push({ role, content: fallback });
+                  this.logger.log(`[AI] Documento ${(m as any).id} nao extraido (mime=${mimeBase})`);
+                  continue;
+                }
+              }
+            } catch (e: any) {
+              this.logger.warn(`[AI] Falha ao carregar documento ${(m as any).id}: ${e?.message || e} (status=${e?.response?.status || 'n/a'})`);
             }
           }
         }
