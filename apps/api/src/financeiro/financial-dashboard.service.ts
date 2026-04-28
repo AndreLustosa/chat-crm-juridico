@@ -910,8 +910,72 @@ export class FinancialDashboardService {
   }
 
   /**
-   * Conta itens por filtro pra tabs com contadores (B3).
-   * Roda 6 queries em paralelo. Cada uma e um count() rapido.
+   * Espelho do buildChargeWhere para LeadHonorarioPayment.
+   *
+   * LeadHonorario nao tem legal_case nem lawyer — sao parcelas geradas na
+   * fase de NEGOCIACAO (antes do contrato/processo). Por isso o filtro
+   * lawyerId nao se aplica aqui (lead pertence ao tenant inteiro).
+   *
+   * Importante: leadHonorario.status precisa estar in (NEGOCIANDO, ACEITO)
+   * pra parcela contar — proposta recusada/cancelada nao deve aparecer.
+   */
+  private buildLeadChargeWhere(
+    filter: ChargeFilter,
+    tenantId?: string,
+    lawyerId?: string,
+  ): any {
+    const today = this.startOfDay(new Date());
+    const tomorrow = this.addDays(today, 1);
+
+    // Lead-charges nao tem advogado vinculado. Quando o filtro de advogado
+    // esta ativo, retorna where impossivel pra excluir lead-charges do
+    // resultado (mantem isolamento por advogado).
+    if (lawyerId) {
+      return { id: '__nope__' };
+    }
+
+    const leadWhere: any = {
+      lead_honorario: { status: { in: ['NEGOCIANDO', 'ACEITO'] } },
+    };
+    if (tenantId) leadWhere.lead_honorario.tenant_id = tenantId;
+
+    if (filter === 'overdue') {
+      leadWhere.status = { in: ['PENDENTE', 'ATRASADO'] };
+      leadWhere.due_date = { not: null, lt: today };
+    } else if (filter === 'pending') {
+      leadWhere.status = 'PENDENTE';
+      leadWhere.due_date = { not: null, gte: today };
+    } else if (filter === 'paid') {
+      leadWhere.status = 'PAGO';
+    } else if (filter === 'awaiting_alvara') {
+      leadWhere.status = { in: ['PENDENTE', 'ATRASADO'] };
+      leadWhere.due_date = null;
+    } else if (filter === 'no_cpf') {
+      leadWhere.status = { in: ['PENDENTE', 'ATRASADO'] };
+      leadWhere.lead_honorario = {
+        ...(leadWhere.lead_honorario || {}),
+        lead: { cpf_cnpj: null },
+      };
+    } else if (filter === 'to_send') {
+      leadWhere.status = 'PENDENTE';
+      leadWhere.gateway_charge = { is: null };
+      leadWhere.lead_honorario = {
+        ...(leadWhere.lead_honorario || {}),
+        lead: { cpf_cnpj: { not: null } },
+      };
+    } else if (filter === 'due_today') {
+      leadWhere.status = 'PENDENTE';
+      leadWhere.due_date = { gte: today, lt: tomorrow };
+    } else {
+      leadWhere.status = { in: ['PENDENTE', 'ATRASADO', 'PAGO'] };
+    }
+    return leadWhere;
+  }
+
+  /**
+   * Conta itens por filtro pra tabs com contadores.
+   * Cada filtro = 2 counts em paralelo (case + lead) somados.
+   * Total: 8 filtros × 2 tabelas = 16 counts paralelos. Rapido em prod.
    */
   async getChargesCounts(params: { tenantId?: string; lawyerId?: string; search?: string }) {
     const { tenantId, lawyerId, search } = params;
@@ -920,8 +984,8 @@ export class FinancialDashboardService {
 
     const counts = await Promise.all(
       filters.map(async (f) => {
-        let where: any = this.buildChargeWhere(f, tenantId, lawyerId);
-        // Aplica busca se fornecida
+        // Where do CASE
+        let caseWhere: any = this.buildChargeWhere(f, tenantId, lawyerId);
         if (search) {
           const cleanCpfDigits = search.replace(/\D/g, '');
           const orFilters: any[] = [
@@ -932,9 +996,29 @@ export class FinancialDashboardService {
               honorario: { legal_case: { lead: { cpf_cnpj: { contains: cleanCpfDigits } } } },
             });
           }
-          where = { AND: [where, { OR: orFilters }] };
+          caseWhere = { AND: [caseWhere, { OR: orFilters }] };
         }
-        return [f, await this.prisma.honorarioPayment.count({ where })] as const;
+
+        // Where do LEAD
+        let leadWhere: any = this.buildLeadChargeWhere(f, tenantId, lawyerId);
+        if (search) {
+          const cleanCpfDigits = search.replace(/\D/g, '');
+          const orFilters: any[] = [
+            { lead_honorario: { lead: { name: { contains: search, mode: 'insensitive' } } } },
+          ];
+          if (cleanCpfDigits.length >= 3) {
+            orFilters.push({
+              lead_honorario: { lead: { cpf_cnpj: { contains: cleanCpfDigits } } },
+            });
+          }
+          leadWhere = { AND: [leadWhere, { OR: orFilters }] };
+        }
+
+        const [caseCount, leadCount] = await Promise.all([
+          this.prisma.honorarioPayment.count({ where: caseWhere }),
+          this.prisma.leadHonorarioPayment.count({ where: leadWhere }),
+        ]);
+        return [f, caseCount + leadCount] as const;
       }),
     );
 
@@ -960,27 +1044,42 @@ export class FinancialDashboardService {
 
     const skip = Math.max(0, (page - 1) * pageSize);
 
-    // Where comum gerado pelo helper (B3) — busca aplicada como AND externo
-    // pra preservar todos os campos (gateway_charge, lead, status, due_date, etc).
-    const baseWhere = this.buildChargeWhere(filter, tenantId, lawyerId);
-    let finalWhere: any = baseWhere;
-
+    // Where do CASE
+    const caseBaseWhere = this.buildChargeWhere(filter, tenantId, lawyerId);
+    let caseFinalWhere: any = caseBaseWhere;
     if (search) {
       const cleanCpf = search.replace(/\D/g, '');
-      const orFilters: any[] = [
+      const or: any[] = [
         { honorario: { legal_case: { lead: { name: { contains: search, mode: 'insensitive' } } } } },
       ];
       if (cleanCpf.length >= 3) {
-        orFilters.push({
-          honorario: { legal_case: { lead: { cpf_cnpj: { contains: cleanCpf } } } },
-        });
+        or.push({ honorario: { legal_case: { lead: { cpf_cnpj: { contains: cleanCpf } } } } });
       }
-      finalWhere = { AND: [baseWhere, { OR: orFilters }] };
+      caseFinalWhere = { AND: [caseBaseWhere, { OR: or }] };
     }
 
-    const [items, total] = await Promise.all([
+    // Where do LEAD
+    const leadBaseWhere = this.buildLeadChargeWhere(filter, tenantId, lawyerId);
+    let leadFinalWhere: any = leadBaseWhere;
+    if (search) {
+      const cleanCpf = search.replace(/\D/g, '');
+      const or: any[] = [
+        { lead_honorario: { lead: { name: { contains: search, mode: 'insensitive' } } } },
+      ];
+      if (cleanCpf.length >= 3) {
+        or.push({ lead_honorario: { lead: { cpf_cnpj: { contains: cleanCpf } } } });
+      }
+      leadFinalWhere = { AND: [leadBaseWhere, { OR: or }] };
+    }
+
+    // Pra paginacao combinada (case + lead), trazemos ate (skip+pageSize)*2 de
+    // cada lado, mesclamos, ordenamos por due_date e cortamos. Total real vem
+    // de count separado pra mostrar "Pagina X de Y" correto.
+    const fetchCap = (skip + pageSize) * 2;
+
+    const [caseItems, leadItems, caseTotal, leadTotal] = await Promise.all([
       this.prisma.honorarioPayment.findMany({
-        where: finalWhere,
+        where: caseFinalWhere,
         include: {
           honorario: {
             include: {
@@ -989,9 +1088,7 @@ export class FinancialDashboardService {
                   id: true,
                   case_number: true,
                   legal_area: true,
-                  lead: {
-                    select: { id: true, name: true, phone: true, cpf_cnpj: true },
-                  },
+                  lead: { select: { id: true, name: true, phone: true, cpf_cnpj: true } },
                   lawyer: { select: { id: true, name: true } },
                 },
               },
@@ -999,49 +1096,117 @@ export class FinancialDashboardService {
           },
           gateway_charge: {
             select: {
-              id: true,
-              external_id: true,
-              status: true,
-              billing_type: true,
-              invoice_url: true,
-              boleto_url: true,
-              pix_qr_code: true,
-              pix_copy_paste: true,
-              // A6 — usado pra derivar o status Asaas "Enviada" (reminder enviado)
-              reminder_count: true,
-              last_reminder_sent_at: true,
+              id: true, external_id: true, status: true, billing_type: true,
+              invoice_url: true, boleto_url: true, pix_qr_code: true, pix_copy_paste: true,
+              reminder_count: true, last_reminder_sent_at: true,
             },
           },
         },
-        orderBy: [
-          { due_date: { sort: 'asc', nulls: 'last' } },
-          { created_at: 'desc' },
-        ],
-        skip,
-        take: pageSize,
+        orderBy: [{ due_date: { sort: 'asc', nulls: 'last' } }, { created_at: 'desc' }],
+        take: fetchCap,
       }),
-      this.prisma.honorarioPayment.count({ where: finalWhere }),
+      this.prisma.leadHonorarioPayment.findMany({
+        where: leadFinalWhere,
+        include: {
+          lead_honorario: {
+            select: {
+              id: true,
+              type: true,
+              tenant_id: true,
+              lead: { select: { id: true, name: true, phone: true, cpf_cnpj: true } },
+            },
+          },
+          gateway_charge: {
+            select: {
+              id: true, external_id: true, status: true, billing_type: true,
+              invoice_url: true, boleto_url: true, pix_qr_code: true, pix_copy_paste: true,
+              reminder_count: true, last_reminder_sent_at: true,
+            },
+          },
+        },
+        orderBy: [{ due_date: { sort: 'asc', nulls: 'last' } }, { created_at: 'desc' }],
+        take: fetchCap,
+      }),
+      this.prisma.honorarioPayment.count({ where: caseFinalWhere }),
+      this.prisma.leadHonorarioPayment.count({ where: leadFinalWhere }),
     ]);
 
+    // Normaliza ambos pro mesmo formato (kind discrimina origem)
+    type Unified = {
+      id: string;
+      kind: 'case' | 'lead';
+      amount: number;
+      dueDate: string | null;
+      status: string;
+      paidAt: string | null;
+      leadId: string | null;
+      leadName: string | null;
+      leadCpf: string | null;
+      leadPhone: string | null;
+      legalCaseId: string | null;
+      caseNumber: string | null;
+      legalArea: string | null;
+      lawyerId: string | null;
+      lawyerName: string | null;
+      leadHonorarioType: string | null;
+      gatewayCharge: any;
+      _sortKey: number; // timestamp pra ordenacao em memoria
+    };
+
+    const caseNormalized: Unified[] = caseItems.map((p) => ({
+      id: p.id,
+      kind: 'case' as const,
+      amount: Number(p.amount),
+      dueDate: p.due_date?.toISOString() || null,
+      status: p.status,
+      paidAt: p.paid_at?.toISOString() || null,
+      leadId: p.honorario?.legal_case?.lead?.id || null,
+      leadName: p.honorario?.legal_case?.lead?.name || null,
+      leadCpf: p.honorario?.legal_case?.lead?.cpf_cnpj || null,
+      leadPhone: p.honorario?.legal_case?.lead?.phone || null,
+      legalCaseId: p.honorario?.legal_case?.id || null,
+      caseNumber: p.honorario?.legal_case?.case_number || null,
+      legalArea: p.honorario?.legal_case?.legal_area || null,
+      lawyerId: p.honorario?.legal_case?.lawyer?.id || null,
+      lawyerName: p.honorario?.legal_case?.lawyer?.name || null,
+      leadHonorarioType: null,
+      gatewayCharge: p.gateway_charge || null,
+      _sortKey: p.due_date ? p.due_date.getTime() : Number.MAX_SAFE_INTEGER,
+    }));
+
+    const leadNormalized: Unified[] = leadItems.map((p) => ({
+      id: p.id,
+      kind: 'lead' as const,
+      amount: Number(p.amount),
+      dueDate: p.due_date?.toISOString() || null,
+      status: p.status,
+      paidAt: p.paid_at?.toISOString() || null,
+      leadId: p.lead_honorario?.lead?.id || null,
+      leadName: p.lead_honorario?.lead?.name || null,
+      leadCpf: p.lead_honorario?.lead?.cpf_cnpj || null,
+      leadPhone: p.lead_honorario?.lead?.phone || null,
+      legalCaseId: null,
+      caseNumber: null,
+      legalArea: null,
+      lawyerId: null,
+      lawyerName: null,
+      leadHonorarioType: p.lead_honorario?.type || null,
+      gatewayCharge: p.gateway_charge || null,
+      _sortKey: p.due_date ? p.due_date.getTime() : Number.MAX_SAFE_INTEGER,
+    }));
+
+    // Mescla, ordena por due_date asc (nulls no fim), aplica skip+take em memoria
+    const merged = [...caseNormalized, ...leadNormalized].sort(
+      (a, b) => a._sortKey - b._sortKey,
+    );
+    const total = caseTotal + leadTotal;
+    const pageItems = merged.slice(skip, skip + pageSize);
+
+    // Remove o _sortKey do payload externo
+    const items = pageItems.map(({ _sortKey, ...rest }) => rest);
+
     return {
-      items: items.map((p) => ({
-        id: p.id,
-        kind: 'case' as const,
-        amount: Number(p.amount),
-        dueDate: p.due_date?.toISOString() || null,
-        status: p.status,
-        paidAt: p.paid_at?.toISOString() || null,
-        leadId: p.honorario?.legal_case?.lead?.id || null,
-        leadName: p.honorario?.legal_case?.lead?.name || null,
-        leadCpf: p.honorario?.legal_case?.lead?.cpf_cnpj || null,
-        leadPhone: p.honorario?.legal_case?.lead?.phone || null,
-        legalCaseId: p.honorario?.legal_case?.id || null,
-        caseNumber: p.honorario?.legal_case?.case_number || null,
-        legalArea: p.honorario?.legal_case?.legal_area || null,
-        lawyerId: p.honorario?.legal_case?.lawyer?.id || null,
-        lawyerName: p.honorario?.legal_case?.lawyer?.name || null,
-        gatewayCharge: p.gateway_charge || null,
-      })),
+      items,
       total,
       page,
       pageSize,

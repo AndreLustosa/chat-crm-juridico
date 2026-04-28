@@ -89,7 +89,7 @@ interface AgingBucket {
 
 interface ChargeRow {
   id: string;
-  kind: 'case';
+  kind: 'case' | 'lead';
   amount: number;
   dueDate: string | null;
   status: string;
@@ -103,6 +103,8 @@ interface ChargeRow {
   legalArea: string | null;
   lawyerId: string | null;
   lawyerName: string | null;
+  /** Quando kind='lead', tipo da negociacao (CONTRATUAL/ENTRADA/ACORDO) */
+  leadHonorarioType?: string | null;
   gatewayCharge: {
     id: string;
     external_id: string;
@@ -1163,12 +1165,13 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
           <NewChargeModal
             row={{
               id: row.id,
+              kind: row.kind,
               amount: row.amount,
               dueDate: row.dueDate,
               leadId: row.leadId,
               leadName: row.leadName,
               leadCpf: row.leadCpf,
-              caseNumber: row.caseNumber,
+              caseNumber: row.kind === 'lead' ? `Negociação ${row.leadHonorarioType || ''}`.trim() : row.caseNumber,
               legalArea: row.legalArea,
             }}
             onClose={() => setShowChargeModal(false)}

@@ -26,7 +26,13 @@ import { showError, showSuccess } from '@/lib/toast';
 ────────────────────────────────────────────────────────────── */
 
 export interface ChargeRowMinimal {
-  id: string;                         // honorarioPaymentId
+  id: string;                         // honorarioPaymentId OU leadHonorarioPaymentId
+  /**
+   * Discriminador: 'case' = parcela de processo formal (HonorarioPayment),
+   * 'lead' = parcela de negociacao (LeadHonorarioPayment). Define o campo
+   * que vai pro backend (honorarioPaymentId vs leadHonorarioPaymentId).
+   */
+  kind: 'case' | 'lead';
   amount: number;
   dueDate: string | null;
   leadId: string | null;
@@ -207,11 +213,18 @@ export default function NewChargeModal({ row, onClose, onSuccess }: NewChargeMod
       else if (acceptCard && !acceptBoletoPix) billingType = 'CREDIT_CARD';
       else billingType = 'BOLETO'; // pix+boleto via gateway
 
+      // Routing por tipo de parcela: case -> honorarioPaymentId,
+      // lead -> leadHonorarioPaymentId. Backend ja distingue os 2 fluxos
+      // (createCharge vs createChargeForLeadPayment).
       const payload: any = {
-        honorarioPaymentId: row.id,
         billingType,
         dueDate,
       };
+      if (row.kind === 'lead') {
+        payload.leadHonorarioPaymentId = row.id;
+      } else {
+        payload.honorarioPaymentId = row.id;
+      }
 
       // Parcelamento (so envia se >=2)
       if (installments >= 2) payload.installmentCount = installments;
