@@ -441,6 +441,13 @@ export function ExportButton({
 }) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showPdfOptions, setShowPdfOptions] = useState(false);
+
+  // Opcoes do PDF (mini-modal)
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [includeCharts, setIncludeCharts] = useState(true);
+  const [includeDetailTable, setIncludeDetailTable] = useState(true);
+  const [observations, setObservations] = useState('');
 
   const fetchAllData = useCallback(async () => {
     const [kpisRes, byLawyerRes, agingRes, byAreaRes] = await Promise.all([
@@ -457,7 +464,44 @@ export function ExportButton({
     };
   }, [from, to, lawyerId]);
 
-  const handleExportPdf = async () => {
+  /**
+   * Geracao server-side via /reports/dashboard-snapshot.
+   * PDF abre em nova aba (window.open com blob URL).
+   */
+  const handleExportPdfServerSide = async () => {
+    setShowPdfOptions(false);
+    setExporting(true);
+    showSuccess('Gerando PDF...');
+    try {
+      const res = await api.post(
+        '/reports/dashboard-snapshot',
+        {
+          from,
+          to,
+          lawyerId: lawyerId || undefined,
+          compare: 'previous-month',
+          orientation,
+          includeCharts,
+          includeDetailTable,
+          observations: observations || undefined,
+        },
+        { responseType: 'blob' },
+      );
+      const blob = new Blob([res.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // Revoke depois de um delay pra garantir que abriu
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      showSuccess('PDF pronto.');
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao gerar PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  /** PDF antigo via jspdf (fallback caso server-side falhe) — mantido por compat */
+  const handleExportPdfClientSide = async () => {
     setExporting(true);
     try {
       const { kpis, byLawyer, aging, byArea } = await fetchAllData();
@@ -611,7 +655,7 @@ export function ExportButton({
       {open && (
         <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-lg z-10 min-w-[140px]">
           <button
-            onClick={handleExportPdf}
+            onClick={() => { setOpen(false); setShowPdfOptions(true); }}
             disabled={exporting}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent/30 text-foreground"
           >
@@ -624,6 +668,107 @@ export function ExportButton({
           >
             <Sheet size={12} className="text-emerald-400" /> CSV (Excel)
           </button>
+        </div>
+      )}
+
+      {/* Mini-modal de opcoes do PDF (Fase 1 do plano de relatorios) */}
+      {showPdfOptions && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowPdfOptions(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-bold text-foreground">Opções do PDF</h3>
+              <button
+                onClick={() => setShowPdfOptions(false)}
+                className="p-1 rounded hover:bg-accent/30 text-muted-foreground"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">Orientação</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['portrait', 'landscape'] as const).map((o) => (
+                    <button
+                      key={o}
+                      onClick={() => setOrientation(o)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold border ${
+                        orientation === o
+                          ? 'bg-primary/10 border-primary text-foreground'
+                          : 'bg-card border-border text-muted-foreground hover:bg-accent/20'
+                      }`}
+                    >
+                      {o === 'portrait' ? 'Retrato' : 'Paisagem'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeCharts}
+                  onChange={(e) => setIncludeCharts(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Incluir gráficos</div>
+                  <div className="text-[11px] text-muted-foreground">Receita por advogado e visualização do aging.</div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeDetailTable}
+                  onChange={(e) => setIncludeDetailTable(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Incluir tabela detalhada</div>
+                  <div className="text-[11px] text-muted-foreground">Anexo final com cobranças pendentes (até 50 linhas).</div>
+                </div>
+              </label>
+
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                  Observações (opcional)
+                </label>
+                <textarea
+                  value={observations}
+                  onChange={(e) => setObservations(e.target.value)}
+                  rows={3}
+                  placeholder="Ex: Reunião de fechamento mensal — comparativo MoM."
+                  className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
+                />
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Aparece em uma página dedicada no fim do PDF.
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+              <button
+                onClick={() => setShowPdfOptions(false)}
+                className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-accent/20"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleExportPdfServerSide}
+                disabled={exporting}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-50"
+              >
+                {exporting ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                Gerar PDF
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -46,6 +46,7 @@ import { GoogleDriveModule } from './google-drive/google-drive.module';
 import { InternModule } from './intern/intern.module';
 import { AdminBotModule } from './admin-bot/admin-bot.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
+import { ReportsModule } from './reports/reports.module';
 import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
 import { NotaFiscalModule } from './nota-fiscal/nota-fiscal.module';
 import { MemoriesModule } from './memories/memories.module';
@@ -124,6 +125,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     InternModule,
     AdminBotModule,
     FinanceiroModule,
+    ReportsModule,
     PaymentGatewayModule,
     NotaFiscalModule,
     NotificationSettingsModule,
