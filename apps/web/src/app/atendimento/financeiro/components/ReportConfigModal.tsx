@@ -69,11 +69,14 @@ export default function ReportConfigModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose, submitting]);
 
-  const showPeriodFields = !['charges-list', 'cobrancas-list'].includes(card.kind);
+  // Inadimplencia + charges-list nao usam periodo (snapshot atual)
+  const showPeriodFields = !['charges-list', 'cobrancas-list', 'inadimplencia'].includes(card.kind);
   const showFilterField = ['charges-list', 'cobrancas-list'].includes(card.kind);
   const showOrientation = ['dashboard-snapshot', 'snapshot-reuniao', 'extrato-receitas', 'extrato-despesas'].includes(card.kind);
   const showCharts = ['dashboard-snapshot', 'snapshot-reuniao'].includes(card.kind);
   const showSummaryOnly = ['extrato-receitas', 'extrato-despesas'].includes(card.kind);
+  // Performance advogado e sempre todos os advogados (relatorio comparativo)
+  const showLawyerScope = card.kind !== 'performance-advogado';
 
   const handleShortcut = (kind: 'this_month' | 'last_month' | 'this_year') => {
     if (kind === 'this_month') {
@@ -180,7 +183,7 @@ export default function ReportConfigModal({
           )}
 
           {/* Escopo */}
-          {canAll && (
+          {canAll && showLawyerScope && (
             <div>
               <label className="text-[11px] font-semibold text-muted-foreground block mb-1">Escopo</label>
               <select

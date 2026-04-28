@@ -232,6 +232,144 @@ export class ReportsController {
     });
     res.send(buf);
   }
+
+  /**
+   * POST /reports/delinquency
+   * Inadimplencia detalhada (aging + top 10 + recuperacao).
+   */
+  @Post('delinquency')
+  async delinquency(
+    @Body() body: { lawyerId?: string; observations?: string },
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
+    const roles: string[] = req.user?.roles || [];
+    const isAdmin = roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+    const canExport = isAdmin || roles.includes('ADVOGADO');
+    if (!canExport) throw new ForbiddenException('Sem permissao');
+
+    const effectiveLawyerId = isAdmin ? body.lawyerId : req.user.id;
+    let lawyerName: string | undefined;
+    if (effectiveLawyerId) {
+      const u = await this.service['prisma'].user.findUnique({
+        where: { id: effectiveLawyerId }, select: { name: true },
+      });
+      lawyerName = u?.name;
+    }
+
+    const buf = await this.service.generateDelinquency({
+      tenantId: req.user.tenant_id,
+      actorName: req.user.email || 'Usuário',
+      lawyerId: effectiveLawyerId,
+      lawyerName,
+      observations: body.observations,
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `inadimplencia-${today}.pdf`;
+    this.service.recordHistory({
+      tenantId: req.user.tenant_id,
+      userId: req.user.id,
+      kind: 'inadimplencia',
+      displayName: `Inadimplência detalhada — ${today}`,
+      payload: body,
+    });
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': buf.length.toString(),
+    });
+    res.send(buf);
+  }
+
+  /**
+   * POST /reports/billing-by-period
+   * Faturamento por dia/semana/mes/trimestre.
+   */
+  @Post('billing-by-period')
+  async billingByPeriod(
+    @Body() body: { from: string; to: string; lawyerId?: string; observations?: string },
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
+    const roles: string[] = req.user?.roles || [];
+    const isAdmin = roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+    const canExport = isAdmin || roles.includes('ADVOGADO');
+    if (!canExport) throw new ForbiddenException('Sem permissao');
+
+    const effectiveLawyerId = isAdmin ? body.lawyerId : req.user.id;
+    let lawyerName: string | undefined;
+    if (effectiveLawyerId) {
+      const u = await this.service['prisma'].user.findUnique({
+        where: { id: effectiveLawyerId }, select: { name: true },
+      });
+      lawyerName = u?.name;
+    }
+
+    const buf = await this.service.generateBillingByPeriod({
+      tenantId: req.user.tenant_id,
+      actorName: req.user.email || 'Usuário',
+      from: body.from,
+      to: body.to,
+      lawyerId: effectiveLawyerId,
+      lawyerName,
+      observations: body.observations,
+    });
+
+    const filename = buildFilename('faturamento', body.from, body.to);
+    this.service.recordHistory({
+      tenantId: req.user.tenant_id,
+      userId: req.user.id,
+      kind: 'faturamento',
+      displayName: `Faturamento — ${formatPeriodLabel(body.from, body.to)}`,
+      payload: body,
+    });
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': buf.length.toString(),
+    });
+    res.send(buf);
+  }
+
+  /**
+   * POST /reports/lawyer-performance
+   * Performance por advogado (ranking).
+   * Apenas ADMIN/FINANCEIRO — relatorio comparativo.
+   */
+  @Post('lawyer-performance')
+  async lawyerPerformance(
+    @Body() body: { from: string; to: string; observations?: string },
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
+    const roles: string[] = req.user?.roles || [];
+    const isAdmin = roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+    if (!isAdmin) throw new ForbiddenException('Apenas ADMIN ou FINANCEIRO podem gerar este relatorio');
+
+    const buf = await this.service.generateLawyerPerformance({
+      tenantId: req.user.tenant_id,
+      actorName: req.user.email || 'Usuário',
+      from: body.from,
+      to: body.to,
+      observations: body.observations,
+    });
+
+    const filename = buildFilename('performance-advogado', body.from, body.to);
+    this.service.recordHistory({
+      tenantId: req.user.tenant_id,
+      userId: req.user.id,
+      kind: 'performance-advogado',
+      displayName: `Performance por advogado — ${formatPeriodLabel(body.from, body.to)}`,
+      payload: body,
+    });
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': buf.length.toString(),
+    });
+    res.send(buf);
+  }
 }
 
 function formatPeriodLabel(from: string, to: string): string {

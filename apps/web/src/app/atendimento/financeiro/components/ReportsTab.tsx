@@ -95,10 +95,10 @@ const CATALOG: CatalogCard[] = [
     status: 'coming_soon' },
   { kind: 'inadimplencia', category: 'gerenciais', icon: FileText, title: 'Inadimplência detalhada',
     description: 'Aging + top 10 inadimplentes + taxa de recuperação.',
-    status: 'coming_soon' },
+    status: 'available', endpoint: '/reports/delinquency' },
   { kind: 'faturamento', category: 'gerenciais', icon: FileText, title: 'Faturamento por período',
     description: 'Receita por dia, semana, mês e trimestre.',
-    status: 'coming_soon' },
+    status: 'available', endpoint: '/reports/billing-by-period' },
   { kind: 'performance-comparada', category: 'gerenciais', icon: FileText, title: 'Performance comparada',
     description: 'Compara dois períodos arbitrários (MoM, YoY, Q vs Q).',
     status: 'coming_soon' },
@@ -131,8 +131,8 @@ const CATALOG: CatalogCard[] = [
     endpoint: '/reports/dashboard-snapshot',
   },
   { kind: 'performance-advogado', category: 'reuniao', icon: Users, title: 'Performance por advogado',
-    description: 'Receita, casos, ticket médio, taxa de êxito, evolução 6m.',
-    status: 'coming_soon' },
+    description: 'Ranking: receita, casos, ticket médio, tempo de cobrança, inadimplência.',
+    status: 'available', endpoint: '/reports/lawyer-performance' },
   { kind: 'pipeline-cobranca', category: 'reuniao', icon: FileText, title: 'Pipeline de cobrança',
     description: 'Funil: contratado → cobrança → enviada → paga.',
     status: 'coming_soon' },
@@ -373,6 +373,12 @@ function endpointForKind(kind: string): string | null {
     case 'charges-list':
     case 'cobrancas-list':
       return '/reports/charges-list';
+    case 'inadimplencia':
+      return '/reports/delinquency';
+    case 'faturamento':
+      return '/reports/billing-by-period';
+    case 'performance-advogado':
+      return '/reports/lawyer-performance';
     default:
       return null;
   }
