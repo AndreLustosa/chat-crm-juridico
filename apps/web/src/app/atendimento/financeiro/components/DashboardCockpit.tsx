@@ -1009,6 +1009,42 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
   const [cpfInput, setCpfInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Botao "Gerar cobranca" — menu inline com PIX/Boleto/Cartao
+  const [showChargeMenu, setShowChargeMenu] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [chargeResult, setChargeResult] = useState<{
+    type: string;
+    pixCopyPaste?: string | null;
+    pixQrCode?: string | null;
+    boletoUrl?: string | null;
+    invoiceUrl?: string | null;
+  } | null>(null);
+
+  const handleGenerateCharge = async (billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD') => {
+    setShowChargeMenu(false);
+    setGenerating(true);
+    try {
+      const res = await api.post('/payment-gateway/charges', {
+        honorarioPaymentId: row.id,
+        billingType,
+      });
+      const charge = res.data;
+      setChargeResult({
+        type: billingType,
+        pixCopyPaste: charge.pix_copy_paste || charge.pix?.copyPaste,
+        pixQrCode: charge.pix_qr_code || charge.pix?.qrCode,
+        boletoUrl: charge.boleto_url || charge.boleto?.url,
+        invoiceUrl: charge.invoice_url,
+      });
+      showSuccess(`Cobrança ${billingType} gerada — cliente recebe no WhatsApp em segundos.`);
+      onUpdate();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao gerar cobrança');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   // A6 — Status do pagamento (4 estados): A vencer, Vence hoje, Atrasado, Pago
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const dueDt = row.dueDate ? new Date(row.dueDate) : null;
@@ -1124,27 +1160,119 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
         </span>
       </td>
       <td className="px-3 py-2.5">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 relative">
+          {/* Cobranca ja existe: link pra abrir no Asaas */}
           {row.gatewayCharge?.invoice_url && (
             <a
               href={row.gatewayCharge.invoice_url}
               target="_blank"
               rel="noopener noreferrer"
               className="p-1.5 rounded bg-muted hover:bg-muted/70 text-muted-foreground hover:text-foreground"
-              title="Abrir cobrança no gateway"
+              title="Abrir cobrança no Asaas"
             >
               <ExternalLink size={12} />
             </a>
           )}
+
+          {/* Sem charge + tem CPF + nao pago: botao gerar cobranca com menu */}
           {!row.gatewayCharge && row.leadCpf && row.status !== 'PAGO' && (
-            <span
-              className="p-1.5 rounded bg-muted text-muted-foreground"
-              title="Sem cobrança gerada"
-            >
-              <CreditCard size={12} />
-            </span>
+            <>
+              <button
+                type="button"
+                disabled={generating}
+                onClick={() => setShowChargeMenu((v) => !v)}
+                className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-[10px] font-semibold disabled:opacity-50"
+                title="Gerar cobrança no Asaas"
+              >
+                {generating ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />}
+                Gerar
+              </button>
+              {showChargeMenu && (
+                <div className="absolute right-0 top-full mt-1 z-20 bg-card border border-border rounded-lg shadow-lg min-w-[140px]">
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateCharge('PIX')}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-accent/30 text-foreground border-b border-border"
+                  >
+                    <span className="text-emerald-400 font-bold">PIX</span>
+                    <span className="text-muted-foreground text-[10px]">recebe em segundos</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateCharge('BOLETO')}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-accent/30 text-foreground border-b border-border"
+                  >
+                    <span className="text-blue-400 font-bold">Boleto</span>
+                    <span className="text-muted-foreground text-[10px]">vence em D+3</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateCharge('CREDIT_CARD')}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-accent/30 text-foreground"
+                  >
+                    <span className="text-purple-400 font-bold">Cartão</span>
+                    <span className="text-muted-foreground text-[10px]">link de pagamento</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowChargeMenu(false)}
+                    className="w-full px-3 py-1.5 text-[10px] text-muted-foreground hover:bg-accent/20 border-t border-border"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
+
+        {/* Resultado da cobranca recem-gerada — mostra inline na linha */}
+        {chargeResult && (
+          <div className="mt-1.5 p-2 rounded-md bg-emerald-500/5 border border-emerald-500/20 space-y-1">
+            <div className="text-[10px] font-bold text-emerald-400">
+              ✓ Cobrança {chargeResult.type} gerada
+            </div>
+            {chargeResult.pixCopyPaste && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(chargeResult.pixCopyPaste!);
+                  showSuccess('PIX copiado');
+                }}
+                className="text-[10px] text-emerald-400 hover:underline"
+              >
+                Copiar PIX copia-e-cola
+              </button>
+            )}
+            {chargeResult.boletoUrl && (
+              <a
+                href={chargeResult.boletoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-[10px] text-blue-400 hover:underline"
+              >
+                Abrir boleto →
+              </a>
+            )}
+            {chargeResult.invoiceUrl && (
+              <a
+                href={chargeResult.invoiceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                Abrir fatura no Asaas →
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => setChargeResult(null)}
+              className="text-[10px] text-muted-foreground/60 hover:text-foreground"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
       </td>
     </tr>
   );
