@@ -293,7 +293,7 @@ export class FinancialDashboardService {
     const sparkline = await this.buildRevenueSparkline(tenantId, lawyerId, 7);
 
     // Meta do mês — só considera quando from/to é mês corrente fechado
-    const monthlyGoal = await this.getCurrentMonthGoal(tenantId, fromDate);
+    const monthlyGoal = await this.getCurrentMonthGoal(tenantId, fromDate, lawyerId);
 
     return {
       period: {
@@ -528,18 +528,25 @@ export class FinancialDashboardService {
     return ((current - previous) / previous) * 100;
   }
 
-  // ─── Meta do mês ──────────────────────────────────────────
+  // ─── Meta do mês (KPI Card — usa schema novo extendido) ───
+  // Mantido aqui apenas pra alimentar o KPI grid do dashboard. O CRUD
+  // completo migrou pra MonthlyGoalsService (3 dimensoes: escopo, tipo, modo).
 
-  private async getCurrentMonthGoal(tenantId?: string, refDate?: Date) {
+  private async getCurrentMonthGoal(tenantId?: string, refDate?: Date, lawyerId?: string) {
     const ref = refDate || new Date();
     const year = ref.getUTCFullYear();
     const month = ref.getUTCMonth() + 1;
 
+    // KPI card mostra meta REALIZED (caixa). Escopo: usuario filtrou advogado
+    // -> meta dele; senao meta do escritorio (lawyer_id null).
     const goal = await this.prisma.monthlyGoal.findFirst({
       where: {
         ...(tenantId ? { tenant_id: tenantId } : { tenant_id: null }),
+        lawyer_id: lawyerId || null,
         year,
         month,
+        kind: 'REALIZED',
+        deleted_at: null,
       },
     });
 
@@ -548,7 +555,7 @@ export class FinancialDashboardService {
     // Receita realizada do mês inteiro
     const monthStart = this.firstOfMonth(year, month - 1);
     const monthEnd = this.lastOfMonth(year, month - 1);
-    const realized = await this.aggregateRealizedRevenue(tenantId, monthStart, monthEnd);
+    const realized = await this.aggregateRealizedRevenue(tenantId, monthStart, monthEnd, lawyerId);
     const target = Number(goal.value);
     const progressPct = target > 0 ? (realized / target) * 100 : 0;
 
@@ -559,55 +566,6 @@ export class FinancialDashboardService {
       realized,
       progressPct,
     };
-  }
-
-  async listGoals(tenantId?: string, year?: number) {
-    const y = year || new Date().getUTCFullYear();
-    return this.prisma.monthlyGoal.findMany({
-      where: { ...(tenantId ? { tenant_id: tenantId } : {}), year: y },
-      orderBy: [{ year: 'asc' }, { month: 'asc' }],
-    });
-  }
-
-  /**
-   * Upsert meta. Aceita single (`{ year, month, value }`) ou bulk
-   * (`{ year, value, propagate: true }` — propaga pros 12 meses).
-   */
-  async upsertGoal(
-    tenantId: string | undefined,
-    body: { year: number; month?: number; value: number; propagate?: boolean },
-  ) {
-    if (!body.year || body.value == null || body.value < 0) {
-      throw new BadRequestException('year e value são obrigatórios; value deve ser ≥ 0');
-    }
-
-    if (body.propagate) {
-      // Propaga pros 12 meses do ano
-      const months = Array.from({ length: 12 }, (_, i) => i + 1);
-      const ops = months.map((m) =>
-        this.prisma.monthlyGoal.upsert({
-          where: { tenant_id_year_month: { tenant_id: tenantId || null, year: body.year, month: m } as any },
-          create: { tenant_id: tenantId || null, year: body.year, month: m, value: body.value },
-          update: { value: body.value },
-        }),
-      );
-      return this.prisma.$transaction(ops);
-    }
-
-    if (!body.month || body.month < 1 || body.month > 12) {
-      throw new BadRequestException('month obrigatório (1-12) quando propagate=false');
-    }
-
-    return this.prisma.monthlyGoal.upsert({
-      where: { tenant_id_year_month: { tenant_id: tenantId || null, year: body.year, month: body.month } as any },
-      create: {
-        tenant_id: tenantId || null,
-        year: body.year,
-        month: body.month,
-        value: body.value,
-      },
-      update: { value: body.value },
-    });
   }
 
   // ─── Layer 3: Análises ────────────────────────────────────

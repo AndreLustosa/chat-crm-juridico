@@ -116,10 +116,16 @@ export function GoalEditor({
 
   const loadCurrent = useCallback(async () => {
     try {
-      const r = await api.get('/financeiro/dashboard/goals', { params: { year } });
-      const found = (r.data as MonthlyGoal[]).find((g) => g.month === month) || null;
-      setExisting(found);
-      if (found) setValue(String(Number(found.value)));
+      // Endpoint novo: /financeiro/goals com 3 dimensoes (escopo/tipo/modo).
+      // GoalEditor antigo cobre apenas escopo OFFICE + kind REALIZED.
+      // Modal multi-step novo (no commit B) suporta as outras dimensoes.
+      const r = await api.get('/financeiro/goals', {
+        params: { year, scope: 'OFFICE', kind: 'REALIZED' },
+      });
+      const goals = Array.isArray(r.data) ? r.data : [];
+      const found = goals.find((g: any) => g.month === month) || null;
+      setExisting(found ? { ...found, value: found.target } : null);
+      if (found) setValue(String(found.target));
     } catch {
       // silencioso — sem meta ainda
     }
@@ -139,12 +145,13 @@ export function GoalEditor({
     }
     setSaving(true);
     try {
-      await api.post('/financeiro/dashboard/goals', {
-        year,
-        month: propagate ? undefined : month,
-        value: num,
-        propagate,
-      });
+      // Endpoint novo /financeiro/goals com 3 dimensoes — GoalEditor antigo
+      // cobre escopo OFFICE + kind REALIZED + 2 modos (single ou yearly).
+      // Modal multi-step (commit B) sera o caminho completo.
+      const payload = propagate
+        ? { scope: 'OFFICE', kind: 'REALIZED', mode: 'yearly', year, value: num * 12, overwriteConfirmed: true }
+        : { scope: 'OFFICE', kind: 'REALIZED', mode: 'single', year, month, value: num, overwriteConfirmed: true };
+      await api.post('/financeiro/goals', payload);
       showSuccess(propagate ? `Meta de ${fmt(num)} salva pros 12 meses de ${year}` : `Meta de ${MONTH_NAMES[month - 1]} salva: ${fmt(num)}`);
       setEditing(false);
       onSaved();

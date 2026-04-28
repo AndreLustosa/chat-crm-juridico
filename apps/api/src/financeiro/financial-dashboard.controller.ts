@@ -166,18 +166,7 @@ export class FinancialDashboardController {
   }
 
   // ─── Meta do mês (CRUD) ───────────────────────────────────
-
-  @Get('goals')
-  listGoals(@Query('year') year: string, @Request() req: any) {
-    const y = year ? parseInt(year, 10) : undefined;
-    return this.service.listGoals(req.user.tenant_id, y);
-  }
-
-  @Post('goals')
-  upsertGoal(
-    @Body() body: { year: number; month?: number; value: number; propagate?: boolean },
-    @Request() req: any,
-  ) {
-    return this.service.upsertGoal(req.user.tenant_id, body);
-  }
+  // Endpoints de metas migraram pra MonthlyGoalsController em
+  // /financeiro/goals/* (3 dimensoes: escopo, tipo, modo). O KPI Card
+  // do dashboard ainda usa getCurrentMonthGoal interno via /kpis.
 }

@@ -93,6 +93,8 @@ model User {
   ai_chats                 AiChat[]               @relation("AiChatOwner")
   cs_leads                 Lead[]                 @relation("CSManager")
   financial_transactions   FinancialTransaction[] @relation("FinancialLawyer")
+  monthly_goals_as_lawyer  MonthlyGoal[]          @relation("MonthlyGoalLawyer")
+  monthly_goals_created    MonthlyGoal[]          @relation("MonthlyGoalCreator")
   tax_records              TaxRecord[]            @relation("TaxRecordLawyer")
   conversation_notes       ConversationNote[]     @relation("ConversationNoteAuthor")
   broadcast_jobs           BroadcastJob[]
@@ -1496,21 +1498,36 @@ model FinancialCategory {
   @@index([tenant_id, type])
 }
 
-// Meta de receita mensal — usada pelo card "Meta do Mês" do dashboard
-// financeiro novo. UI permite cadastrar single ou propagar pra 12 meses.
-// Multi-tenant: tenant_id pode ser null em single-tenant.
+/// Meta mensal — 3 dimensoes:
+///   - escopo: escritorio (lawyer_id=null) ou advogado especifico
+///   - tipo: REALIZED (caixa, paid_at no mes) ou CONTRACTED (vendido no mes)
+///   - mes/ano + tenant_id (multi-tenant)
+///
+/// Soft delete via deleted_at preserva historico (nunca apaga fisicamente).
+/// Unique parcial (tenant_id, lawyer_id, year, month, kind) onde deleted_at
+/// is null — gerenciado via SQL manual em manual-sql/ pq Prisma nao expressa
+/// indices parciais com COALESCE.
 model MonthlyGoal {
-  id         String   @id @default(uuid())
-  tenant_id  String?
-  year       Int
-  month      Int // 1-12 (validado no app)
-  value      Decimal  @db.Decimal(14, 2)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  id            String   @id @default(uuid())
+  tenant_id     String?
+  /// NULL = escopo escritorio. UUID = advogado especifico.
+  lawyer_id     String?
+  year          Int
+  month         Int // 1-12 (validado no app)
+  /// 'REALIZED' | 'CONTRACTED'
+  kind          String   @default("REALIZED")
+  value         Decimal  @db.Decimal(14, 2)
+  created_by_id String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  deleted_at    DateTime?
 
-  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tenant     Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lawyer     User?   @relation("MonthlyGoalLawyer", fields: [lawyer_id], references: [id], onDelete: Cascade)
+  created_by User?   @relation("MonthlyGoalCreator", fields: [created_by_id], references: [id], onDelete: SetNull)
 
-  @@unique([tenant_id, year, month])
+  @@index([tenant_id, year, month])
+  @@index([lawyer_id, year])
   @@index([year, month])
 }
 
