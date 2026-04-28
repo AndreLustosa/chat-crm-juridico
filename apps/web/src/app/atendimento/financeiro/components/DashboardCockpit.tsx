@@ -508,6 +508,128 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
   );
 }
 
+/* ──────────────────────────────────────────────────────────────
+   A7 — MonthOverMonthStrip (faixa entre Camada 2 e 3)
+────────────────────────────────────────────────────────────── */
+
+function MonthOverMonthStrip({ data }: { data: Kpis | null }) {
+  if (!data) return null;
+
+  const comparedLabel = formatComparedLabel(data.period.comparedTo.from, data.period.comparedTo.kind);
+  const currentLabel = formatComparedLabel(data.period.from, 'previous-month'); // mes atual no mesmo formato
+
+  // 3 comparativos: Receita, Despesa, Saldo
+  const blocks = [
+    {
+      key: 'revenue',
+      label: 'Receita',
+      current: data.revenue.value,
+      previous: data.revenue.previous,
+      semantic: 'positive-good' as const,
+      color: 'text-emerald-400',
+      barColor: 'bg-emerald-400/70',
+    },
+    {
+      key: 'expenses',
+      label: 'Despesa',
+      current: data.expenses.value,
+      previous: data.expenses.previous,
+      semantic: 'positive-bad' as const,
+      color: 'text-red-400',
+      barColor: 'bg-red-400/70',
+    },
+    {
+      key: 'balance',
+      label: 'Saldo',
+      current: data.balance.value,
+      previous: data.balance.previous,
+      semantic: 'positive-good' as const,
+      color: data.balance.value >= 0 ? 'text-emerald-400' : 'text-red-400',
+      barColor: data.balance.value >= 0 ? 'bg-emerald-400/70' : 'bg-red-400/70',
+    },
+  ];
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-foreground">Mês a mês</h3>
+        <span className="text-[10px] text-muted-foreground">
+          {currentLabel} <span className="opacity-60">vs</span> {comparedLabel}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {blocks.map((b) => {
+          // Delta % com tratamento de base zero
+          let delta: number | null;
+          if (b.previous === 0) delta = b.current === 0 ? 0 : null;
+          else delta = ((b.current - b.previous) / Math.abs(b.previous)) * 100;
+
+          const isNeutral = delta !== null && Math.abs(delta) < 2;
+          const positive = delta !== null && delta > 0 && !isNeutral;
+          const negative = delta !== null && delta < 0 && !isNeutral;
+
+          // Cor semantica
+          const isGood = b.semantic === 'positive-good' ? positive : negative;
+          const isBad = b.semantic === 'positive-good' ? negative : positive;
+          const deltaColor = isNeutral
+            ? 'text-muted-foreground'
+            : isGood
+            ? 'text-emerald-400'
+            : isBad
+            ? 'text-red-400'
+            : 'text-muted-foreground';
+
+          // Mini-barrinha comparativa: escala em relacao ao maior dos 2
+          const maxVal = Math.max(Math.abs(b.current), Math.abs(b.previous), 1);
+          const currentPct = (Math.abs(b.current) / maxVal) * 100;
+          const previousPct = (Math.abs(b.previous) / maxVal) * 100;
+
+          return (
+            <div key={b.key} className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                  {b.label}
+                </span>
+                <span className={`flex items-center gap-1 text-[11px] font-bold ${deltaColor}`}>
+                  {positive && <ArrowUp size={11} />}
+                  {negative && <ArrowDown size={11} />}
+                  {isNeutral && <span className="text-[10px]">—</span>}
+                  {fmtPct(delta)}
+                </span>
+              </div>
+              <div className={`text-base font-bold tabular-nums ${b.color}`}>
+                {fmt(b.current)}
+              </div>
+              <div className="text-[11px] text-muted-foreground tabular-nums">
+                {fmt(b.previous)} <span className="opacity-60">em {comparedLabel}</span>
+              </div>
+              {/* Mini-barrinha comparativa: 2 barras horizontais */}
+              <div className="space-y-1 pt-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-muted-foreground w-10 shrink-0">
+                    {currentLabel}
+                  </span>
+                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${b.barColor}`} style={{ width: `${currentPct}%` }} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-muted-foreground/60 w-10 shrink-0">
+                    {comparedLabel}
+                  </span>
+                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-muted-foreground/30" style={{ width: `${previousPct}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** A2 — Formata "Mar/2026" a partir da data inicial do periodo comparado. */
 function formatComparedLabel(fromIso: string, kind: string): string {
   const dt = new Date(fromIso);
@@ -1057,6 +1179,9 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
 
       {/* Layer 2: KPIs */}
       <KpiGrid data={kpis} loading={loadingFirstFold} />
+
+      {/* A7 — Faixa "Mês a mês" entre KPIs e Análises */}
+      <MonthOverMonthStrip data={kpis} />
 
       {/* Layer 3: Análises (lado a lado em desktop) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
