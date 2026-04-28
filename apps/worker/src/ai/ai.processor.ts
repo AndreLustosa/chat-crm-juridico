@@ -46,6 +46,11 @@ export class AiProcessor extends WorkerHost {
     private settings: SettingsService,
     private s3: S3Service,
     @InjectQueue('calendar-reminders') private reminderQueue: Queue,
+    // Self-injecao da propria queue pra re-enfileirar quando audio fresco
+    // ainda nao foi transcrito — evita IA responder com placeholder em vez
+    // de esperar a transcricao completar. BullMQ aceita injetar a queue que
+    // o proprio processor processa (deferral pattern).
+    @InjectQueue('ai-jobs') private aiQueue: Queue,
     private memoryRetrieval: MemoryRetrievalService,
   ) {
     super();
@@ -215,11 +220,25 @@ export class AiProcessor extends WorkerHost {
   // filesystem local apenas). Worker busca o buffer via HTTP chamando o
   // endpoint publico GET /media/:messageId do crm-api (a rota ja faz o
   // fallback interno: filesystem -> S3 -> original_url).
+  //
+  // Retorna { needsDefer } — true quando algum AUDIO RECENTE (< 5 min)
+  // ainda nao foi transcrito (race com download/Whisper). Caller deve
+  // re-enfileirar o job em vez de deixar a IA responder com placeholder
+  // ("nao consegui ouvir") — bug reportado 2026-04-28 na conversa do
+  // Andre Freire (transcricao apareceu certa, mas IA ja tinha respondido
+  // como se tivesse falhado).
+  //
+  // Para audios ANTIGOS (> 5 min, ex: sync history), placeholder eh OK
+  // porque ja perdemos a janela de tempo do cliente esperando resposta.
   private async autoTranscribeAudios(
     messages: any[],
     ai: OpenAI,
-  ): Promise<void> {
+  ): Promise<{ needsDefer: boolean }> {
     const apiInternalUrl = process.env.API_INTERNAL_URL || 'http://crm-api:3001';
+    const FRESH_WINDOW_MS = 5 * 60 * 1000; // 5 min — janela em que defer faz sentido
+    const STALE_PLACEHOLDER = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+    const FRESH_PLACEHOLDER = '[áudio do cliente — transcrição em andamento, aguarde]';
+    let needsDefer = false;
 
     for (const msg of messages) {
       // Só áudios recebidos do cliente sem transcrição
@@ -230,6 +249,20 @@ export class AiProcessor extends WorkerHost {
       let media = msg.media ?? null;
       const msgAge = Date.now() - new Date(msg.created_at).getTime();
       const isRecent = msgAge < 2 * 60 * 1000; // < 2 minutos
+      const isFresh = msgAge < FRESH_WINDOW_MS;
+
+      // Helper que escolhe placeholder + sinaliza defer pra audios frescos.
+      // Tudo que faz msg.text = placeholder passa por aqui.
+      const markFailed = (reason: string) => {
+        if (isFresh) {
+          needsDefer = true;
+          msg.text = FRESH_PLACEHOLDER;
+          this.logger.warn(`[AI] Audio msg=${msg.id} fresco sem transcricao (${reason}) — defer requested`);
+        } else {
+          msg.text = STALE_PLACEHOLDER;
+          this.logger.warn(`[AI] Audio msg=${msg.id} antigo sem transcricao (${reason}) — placeholder educado`);
+        }
+      };
 
       // Aguarda o Media record existir com file_path OU s3_key (download
       // fire-and-forget do webhook pode ainda nao ter terminado).
@@ -257,7 +290,7 @@ export class AiProcessor extends WorkerHost {
         }
       }
       if (!hasStorage(media)) {
-        msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+        markFailed('media record nao apareceu');
         continue;
       }
 
@@ -283,10 +316,7 @@ export class AiProcessor extends WorkerHost {
         // condition rara (file_path no DB mas write nao terminou). Pula sem
         // queimar token do Whisper.
         if (!resp.data || resp.data.byteLength === 0) {
-          this.logger.warn(
-            `[AI] Body vazio do GET /media/${msg.id} (race condition?). Pulando transcricao.`,
-          );
-          msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+          markFailed('body vazio (race write?)');
           continue;
         }
         const buffer: Buffer = Buffer.from(resp.data);
@@ -307,9 +337,9 @@ export class AiProcessor extends WorkerHost {
         if (!isOgg && !isMp3 && !isWav && !isM4a) {
           this.logger.warn(
             `[AI] Buffer invalido msg=${msg.id} size=${buffer.length}B ` +
-            `head=${head.toString('hex')} — possivel conteudo encriptado. Pulando.`,
+            `head=${head.toString('hex')} — possivel conteudo encriptado.`,
           );
-          msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+          markFailed(`magic bytes invalidos (${head.toString('hex')})`);
           continue;
         }
         // Evolution manda audio/ogg; codecs OPUS. Whisper aceita 'ogg' direto.
@@ -345,8 +375,16 @@ export class AiProcessor extends WorkerHost {
             `[AI] gpt-4o-transcribe falhou msg=${msg.id}: ${primaryErr?.message || primaryErr} (status=${primaryErr?.status})`,
           );
           usedModel = 'whisper-1';
-          const result = await transcribeWithModel('whisper-1');
-          transcription = (result.text || '').trim();
+          try {
+            const result = await transcribeWithModel('whisper-1');
+            transcription = (result.text || '').trim();
+          } catch (fallbackErr: any) {
+            this.logger.error(
+              `[AI] whisper-1 fallback tambem falhou msg=${msg.id}: ${fallbackErr?.message || fallbackErr}`,
+            );
+            markFailed(`ambos modelos falharam (${primaryErr?.status || '?'} -> ${fallbackErr?.status || '?'})`);
+            continue;
+          }
         }
 
         // Mesmo com 200 OK, Whisper pode retornar texto vazio (audio so ruido,
@@ -379,19 +417,22 @@ export class AiProcessor extends WorkerHost {
           );
         } else {
           // Whisper nao lancou excecao mas retornou vazio — provavelmente
-          // audio so com ruido/silencio. Placeholder educado pra IA.
+          // audio so com ruido/silencio. Placeholder educado pra IA, NAO
+          // marca defer (re-tentar nao adiantaria).
           this.logger.warn(
             `[AI] Transcricao vazia apos 2 tentativas msg=${msg.id} (audio pode ser so ruido/silencio)`,
           );
-          msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+          msg.text = STALE_PLACEHOLDER;
         }
       } catch (e: any) {
         this.logger.error(
           `[AI] Falha total ao transcrever áudio ${msg.id}: ${e?.message || e} (status=${e?.status || 'n/a'}, code=${e?.code || 'n/a'})`,
         );
-        msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+        markFailed(`exception ${e?.code || e?.status || 'unknown'}`);
       }
     }
+
+    return { needsDefer };
   }
 
   // collectVisionImages REMOVIDO em 2026-04-28: era codigo morto (nao chamado
@@ -994,7 +1035,7 @@ export class AiProcessor extends WorkerHost {
       const ai = new OpenAI({ apiKey: openAiKey });
 
       // 5. Auto-transcrever áudios sem texto (Whisper) — salva no banco
-      await this.autoTranscribeAudios(convo.messages as any[], ai);
+      const { needsDefer } = await this.autoTranscribeAudios(convo.messages as any[], ai);
 
       // 5a. Modo transcribe-only: o cron de retry (AudioRetranscribeCronService)
       // enfileira jobs com flag `transcribe_only: true` pra re-transcrever
@@ -1004,6 +1045,45 @@ export class AiProcessor extends WorkerHost {
           `[AI] Job transcribe_only — pulando geracao de resposta (conv ${conversation_id})`,
         );
         return;
+      }
+
+      // 5b. Defer: se algum audio fresco nao foi transcrito (race com download
+      // ou falha transitoria do Whisper), re-enfileira o job com delay em vez
+      // de deixar a IA responder com placeholder "nao consegui ouvir". Bug
+      // reportado 2026-04-28 (Andre Freire): transcricao apareceu certa, mas
+      // IA ja tinha respondido como se tivesse falhado.
+      //
+      // Cap em 4 retries (4 x 10s = 40s totais alem dos ~26s ja gastos no
+      // polling de media). Apos isso, segue com placeholder pra nao deixar o
+      // cliente sem resposta indefinidamente.
+      if (needsDefer) {
+        const audioRetryCount = ((job.data as any)?.audioRetryCount as number) || 0;
+        const MAX_AUDIO_RETRIES = 4;
+        if (audioRetryCount < MAX_AUDIO_RETRIES) {
+          this.logger.warn(
+            `[AI] Audio fresco sem transcricao — deferindo IA response. Retry ${audioRetryCount + 1}/${MAX_AUDIO_RETRIES} em 10s (conv ${conversation_id})`,
+          );
+          await this.aiQueue.add(
+            'process_ai_response',
+            { ...(job.data as any), audioRetryCount: audioRetryCount + 1 },
+            {
+              delay: 10_000,
+              removeOnComplete: true,
+              removeOnFail: 20,
+              // jobId deterministico evita acumular duplicatas (BullMQ deduplica)
+              jobId: `ai-defer-${conversation_id}-${audioRetryCount + 1}`,
+            },
+          ).catch((e: any) => {
+            // Se duplicado (ja existe outro defer pra mesma conv), so loga
+            if (!e?.message?.includes('already exists')) {
+              this.logger.warn(`[AI] Falha ao deferir job: ${e?.message || e}`);
+            }
+          });
+          return;
+        }
+        this.logger.warn(
+          `[AI] Audio fresco sem transcricao apos ${MAX_AUDIO_RETRIES} retries — IA vai responder com placeholder (conv ${conversation_id})`,
+        );
       }
 
       // 6. Carregar LeadProfile (sistema novo de memoria) para retrocompatibilidade
