@@ -230,8 +230,8 @@ function Sparkline({ data, color = '#10b981' }: { data: Array<{ date: string; va
     .join(' ');
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-8" preserveAspectRatio="none">
-      <polyline fill="none" stroke={color} strokeWidth="1.5" points={points} />
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-5" preserveAspectRatio="none">
+      <polyline fill="none" stroke={color} strokeWidth="1.25" points={points} />
     </svg>
   );
 }
@@ -270,30 +270,35 @@ function UrgentBanner({
   if (data.withoutCpf.count > 0)
     items.push({ key: 'no_cpf', icon: UserPlus, label: 'sem CPF cadastrado', count: data.withoutCpf.count, color: 'text-purple-400' });
 
+  // B2 — banner mais compacto: sem titulo redundante, sem icone isolado.
+  // Cada bloco em UMA linha (rotulo em uppercase + count + valor + acao).
+  // O fundo gradiente claro ja comunica urgencia visual.
   return (
-    <div className="bg-gradient-to-r from-red-500/10 via-amber-500/5 to-blue-500/5 border border-red-500/20 rounded-xl p-3 md:p-4 space-y-2">
-      <div className="flex items-center gap-2 mb-2">
-        <AlertTriangle size={14} className="text-red-400" />
-        <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Ações urgentes</h3>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+    <div className="bg-gradient-to-r from-red-500/10 via-amber-500/5 to-blue-500/5 border border-red-500/15 rounded-xl px-3 py-2 md:px-4 md:py-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1.5">
         {items.map((it, idx) => {
           const Icon = it.icon;
           return (
             <button
               key={`${it.key}-${idx}`}
               onClick={() => onJumpTo(it.key)}
-              className="flex items-center gap-2 px-3 py-2 bg-card hover:bg-accent/30 border border-border rounded-lg transition-colors text-left"
+              className="flex items-center gap-2 group min-w-0 hover:bg-card/30 -mx-1 px-1 rounded transition-colors"
             >
-              <Icon size={14} className={`${it.color} shrink-0`} />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-foreground">
-                  {it.count} {it.label}
-                </div>
-                {it.total !== undefined && (
-                  <div className="text-[10px] text-muted-foreground">{fmt(it.total)}</div>
-                )}
-              </div>
+              <Icon size={12} className={`${it.color} shrink-0`} />
+              <span className={`text-[10.5px] font-semibold uppercase tracking-wide ${it.color}`}>
+                {it.label}
+              </span>
+              <span className="text-xs font-bold text-foreground tabular-nums">
+                {it.count}
+              </span>
+              {it.total !== undefined && (
+                <span className="text-[10.5px] text-muted-foreground tabular-nums">
+                  · {fmt(it.total)}
+                </span>
+              )}
+              <span className="ml-auto text-[10px] text-muted-foreground/60 group-hover:text-foreground transition-colors">
+                ver →
+              </span>
             </button>
           );
         })}
@@ -356,36 +361,38 @@ function KpiCard({
     ? 'text-red-400'
     : 'text-muted-foreground';
 
+  // B1 — densidade: padding menor (p-3 em vez de p-4), gaps reduzidos.
+  // Icone superior removido — nao agregava informacao funcional.
+  // Rotulo em peso medium (era bold). Sparkline mais discreto (h-6).
   return (
-    <div className="bg-card border border-border rounded-xl p-4 hover:border-foreground/20 transition-colors">
-      <div className="flex items-start justify-between mb-2">
-        <div className={`w-8 h-8 rounded-lg ${bgColor} flex items-center justify-center`}>
-          <Icon size={16} className={color} />
-        </div>
+    <div className="bg-card border border-border rounded-xl p-3 hover:border-foreground/20 transition-colors">
+      <div className="text-[10.5px] font-medium text-muted-foreground uppercase tracking-wide">
+        {label}
       </div>
-      <div className="text-lg md:text-xl font-bold text-foreground mb-0.5">{value}</div>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-base md:text-lg font-semibold text-foreground tabular-nums mt-0.5">
+        {value}
+      </div>
 
       {/* A2 — linha de comparacao com seta + delta % + valor periodo anterior */}
       {delta !== undefined && delta !== null && (
-        <div className={`flex items-center gap-1 mt-1 text-[11px] font-medium ${deltaColorClass}`}>
-          {deltaPositive && <ArrowUp size={11} />}
-          {deltaNegative && <ArrowDown size={11} />}
-          {isNeutral && <span className="text-[10px]">—</span>}
+        <div className={`flex items-center gap-1 mt-0.5 text-[10.5px] font-medium ${deltaColorClass}`}>
+          {deltaPositive && <ArrowUp size={10} />}
+          {deltaNegative && <ArrowDown size={10} />}
+          {isNeutral && <span className="text-[9px]">—</span>}
           <span>{fmtPct(delta)}</span>
           {comparedLabel && comparedValue !== undefined && (
-            <span className="text-muted-foreground">
+            <span className="text-muted-foreground/80 truncate">
               vs {comparedLabel} ({fmt(comparedValue)})
             </span>
           )}
           {comparedLabel && comparedValue === undefined && (
-            <span className="text-muted-foreground">vs {comparedLabel}</span>
+            <span className="text-muted-foreground/80">vs {comparedLabel}</span>
           )}
         </div>
       )}
       {/* Quando nao ha base de comparacao, mostrar "—" */}
       {(delta === null || delta === undefined) && comparedLabel && (
-        <div className="flex items-center gap-1 mt-1 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-1 mt-0.5 text-[10.5px] text-muted-foreground">
           <span>—</span>
           <span>vs {comparedLabel}</span>
         </div>
@@ -395,11 +402,11 @@ function KpiCard({
 
       {/* A1 — breakdown abaixo (ex: "X a vencer · Y vencido") */}
       {breakdown && breakdown.length > 0 && (
-        <div className="mt-2 space-y-0.5 text-[11px]">
+        <div className="mt-1.5 space-y-0.5 text-[10.5px]">
           {breakdown.map((b, i) => (
             <div key={i} className="flex items-center justify-between">
               <span className="text-muted-foreground">{b.label}</span>
-              <span className={b.tone === 'danger' ? 'text-red-400 font-bold tabular-nums' : 'text-foreground/80 tabular-nums'}>
+              <span className={b.tone === 'danger' ? 'text-red-400 font-semibold tabular-nums' : 'text-foreground/80 tabular-nums'}>
                 {fmt(b.value)}
               </span>
             </div>
@@ -407,8 +414,9 @@ function KpiCard({
         </div>
       )}
 
+      {/* B1 — sparkline mais discreto (sem caixa em volta, altura menor) */}
       {sparkline && sparkline.length > 1 && (
-        <div className="mt-2 -mx-1">
+        <div className="mt-1.5 opacity-70">
           <Sparkline data={sparkline} color={color.includes('emerald') ? '#10b981' : color.includes('red') ? '#ef4444' : '#3b82f6'} />
         </div>
       )}
@@ -697,32 +705,40 @@ function MonthlyGoalCard({ goal }: { goal: Kpis['monthlyGoal'] }) {
    Layer 3: Analyses (by-lawyer + aging)
 ────────────────────────────────────────────────────────────── */
 
-function ByLawyerChart({ data, loading }: { data: RevenueByLawyer[] | null; loading: boolean }) {
+function ByLawyerChart({ data, loading, periodLabel }: { data: RevenueByLawyer[] | null; loading: boolean; periodLabel?: string }) {
   if (loading) {
     return (
-      <div className="bg-card border border-border rounded-xl p-4 animate-pulse h-64" />
+      <div className="bg-card border border-border rounded-xl p-3 animate-pulse h-56" />
     );
   }
   if (!data || data.length === 0) {
     return (
-      <div className="bg-card border border-border rounded-xl p-4">
-        <h3 className="text-sm font-bold text-foreground mb-2">Receita por advogado</h3>
+      <div className="bg-card border border-border rounded-xl p-3">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-xs font-semibold text-foreground">Receita por advogado</h3>
+          {periodLabel && <span className="text-[10px] text-muted-foreground">{periodLabel}</span>}
+        </div>
         <div className="text-xs text-muted-foreground">Sem receitas no período</div>
       </div>
     );
   }
   const max = Math.max(...data.map((d) => d.revenue), 1);
+  // B4 — padding menor (p-3), titulo em peso medio, metainfo na mesma
+  // linha do titulo. Barras mais finas (h-1) com label/valor sob a barra.
   return (
-    <div className="bg-card border border-border rounded-xl p-4">
-      <h3 className="text-sm font-bold text-foreground mb-3">Receita por advogado</h3>
-      <div className="space-y-2">
+    <div className="bg-card border border-border rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-foreground">Receita por advogado</h3>
+        {periodLabel && <span className="text-[10px] text-muted-foreground">{periodLabel}</span>}
+      </div>
+      <div className="space-y-1.5">
         {data.slice(0, 8).map((d) => (
-          <div key={d.lawyerId} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
+          <div key={d.lawyerId} className="group">
+            <div className="flex items-center justify-between text-[11px]">
               <span className="text-foreground truncate">{d.lawyerName}</span>
-              <span className="text-emerald-400 font-bold tabular-nums">{fmt(d.revenue)}</span>
+              <span className="text-emerald-400 font-semibold tabular-nums">{fmt(d.revenue)}</span>
             </div>
-            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-1 bg-muted rounded-full overflow-hidden mt-0.5">
               <div className="h-full bg-emerald-400/70 rounded-full" style={{ width: `${(d.revenue / max) * 100}%` }} />
             </div>
           </div>
@@ -734,7 +750,7 @@ function ByLawyerChart({ data, loading }: { data: RevenueByLawyer[] | null; load
 
 function AgingChart({ data, loading, onSelectBucket }: { data: AgingBucket[] | null; loading: boolean; onSelectBucket: (key: string) => void }) {
   if (loading) {
-    return <div className="bg-card border border-border rounded-xl p-4 animate-pulse h-64" />;
+    return <div className="bg-card border border-border rounded-xl p-3 animate-pulse h-56" />;
   }
   if (!data) return null;
   const max = Math.max(...data.map((d) => d.total), 1);
@@ -747,24 +763,33 @@ function AgingChart({ data, loading, onSelectBucket }: { data: AgingBucket[] | n
     overdue60plus: 'bg-red-500/80',
   };
 
+  // Total geral pra subtitulo
+  const totalGeral = data.reduce((acc, b) => acc + b.total, 0);
+  const totalCount = data.reduce((acc, b) => acc + b.count, 0);
+
   return (
-    <div className="bg-card border border-border rounded-xl p-4">
-      <h3 className="text-sm font-bold text-foreground mb-3">Aging — parcelas em aberto</h3>
-      <div className="space-y-2">
+    <div className="bg-card border border-border rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-semibold text-foreground">Aging — parcelas em aberto</h3>
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          {fmt(totalGeral)} <span className="opacity-60">· {totalCount}</span>
+        </span>
+      </div>
+      <div className="space-y-1.5">
         {data.map((b) => (
           <button
             key={b.key}
             onClick={() => onSelectBucket(b.key)}
-            className="w-full text-left space-y-1 group"
+            className="w-full text-left group"
           >
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-[11px]">
               <span className="text-foreground group-hover:underline">{b.label}</span>
               <span className="tabular-nums">
-                <span className="text-foreground font-bold">{fmt(b.total)}</span>
+                <span className="text-foreground font-semibold">{fmt(b.total)}</span>
                 <span className="text-muted-foreground ml-1">({b.count})</span>
               </span>
             </div>
-            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-1 bg-muted rounded-full overflow-hidden mt-0.5">
               <div className={`h-full rounded-full ${colors[b.key] || 'bg-muted-foreground/40'}`} style={{ width: `${(b.total / max) * 100}%` }} />
             </div>
           </button>
@@ -1185,7 +1210,11 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
 
       {/* Layer 3: Análises (lado a lado em desktop) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <ByLawyerChart data={byLawyer} loading={loadingAnalyses} />
+        <ByLawyerChart
+          data={byLawyer}
+          loading={loadingAnalyses}
+          periodLabel={kpis ? formatComparedLabel(kpis.period.from, 'previous-month').toLowerCase() : undefined}
+        />
         <AgingChart data={aging} loading={loadingAnalyses} onSelectBucket={handleAgingBucket} />
       </div>
 
