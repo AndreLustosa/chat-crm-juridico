@@ -13,7 +13,7 @@
  * (<1s first fold), charges fetcha sob demanda quando aba scroll/interaction.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Clock,
@@ -31,9 +31,13 @@ import {
   Calendar,
   UserPlus,
   Target,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { useRole } from '@/lib/useRole';
+import { DonutByArea, ForecastChart, ExportButton, GoalEditor } from './DashboardCockpitExtras';
 
 /* ──────────────────────────────────────────────────────────────
    Types
@@ -332,14 +336,31 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
         />
       </div>
 
-      {data.monthlyGoal && (
-        <MonthlyGoalCard goal={data.monthlyGoal} />
-      )}
+      <MonthlyGoalCard goal={data.monthlyGoal} />
     </div>
   );
 }
 
-function MonthlyGoalCard({ goal }: { goal: NonNullable<Kpis['monthlyGoal']> }) {
+function MonthlyGoalCard({ goal }: { goal: Kpis['monthlyGoal'] }) {
+  const { isAdmin } = useRole();
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Sem meta cadastrada — mostra CTA pra criar (admin only)
+  if (!goal) {
+    if (!isAdmin) return null;
+    return (
+      <div className="bg-card border border-dashed border-border rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Target size={14} className="text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Sem meta cadastrada para o mês</span>
+          </div>
+          <GoalEditor isAdmin={isAdmin} onSaved={() => setRefreshKey((k) => k + 1)} />
+        </div>
+      </div>
+    );
+  }
+
   const pct = Math.min(100, goal.progressPct);
   const onTrack = pct >= 90;
   const close = pct >= 60 && pct < 90;
@@ -350,8 +371,11 @@ function MonthlyGoalCard({ goal }: { goal: NonNullable<Kpis['monthlyGoal']> }) {
           <Target size={14} className="text-purple-400" />
           <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Meta do mês</h3>
         </div>
-        <div className="text-xs text-muted-foreground">
-          {fmt(goal.realized)} / {fmt(goal.target)}
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-muted-foreground">
+            {fmt(goal.realized)} / {fmt(goal.target)}
+          </div>
+          <GoalEditor isAdmin={isAdmin} onSaved={() => setRefreshKey((k) => k + 1)} />
         </div>
       </div>
       <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -756,6 +780,7 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
   const [loadingAnalyses, setLoadingAnalyses] = useState(true);
 
   const [tableFilter, setTableFilter] = useState<'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'all'>('all');
+  const [showExtras, setShowExtras] = useState(false);
 
   // First fold: urgent + kpis (banner + cards top-of-page)
   useEffect(() => {
@@ -841,6 +866,41 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
           setFilter={setTableFilter}
           lawyerId={lawyerId}
         />
+      </div>
+
+      {/* Análise detalhada (lazy-load — Fase 3) */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowExtras((v) => !v)}
+          className="w-full flex items-center justify-between p-3 hover:bg-accent/20 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-foreground">Análise detalhada</span>
+            <span className="text-[10px] text-muted-foreground">
+              Receita por área · Projeção · Exportação
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {showExtras && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <ExportButton from={from} to={to} lawyerId={lawyerId} />
+              </div>
+            )}
+            {showExtras ? (
+              <ChevronUp size={16} className="text-muted-foreground" />
+            ) : (
+              <ChevronDown size={16} className="text-muted-foreground" />
+            )}
+          </div>
+        </button>
+        {showExtras && (
+          <div className="p-3 border-t border-border space-y-3">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <DonutByArea from={from} to={to} type="realized" />
+              <ForecastChart lawyerId={lawyerId} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
