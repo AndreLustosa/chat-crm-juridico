@@ -7,10 +7,18 @@ import { SettingsService } from '../settings/settings.service';
 
 /**
  * Tipos de template suportados — string union centralizada pra UI e
- * helpers terem a mesma fonte da verdade. UI mostra esses 7 + 2 do
- * gateway (payment-confirmed, charge-cancelled).
+ * helpers terem a mesma fonte da verdade.
+ *
+ * Singles (1 parcela): usado quando o cliente so tem UMA parcela elegivel
+ * naquele kind/janela. Mensagem direta com dados da parcela.
+ *
+ * Bulks (N parcelas): usado quando o mesmo cliente tem 2+ parcelas
+ * elegiveis no mesmo kind/janela — agrega tudo em UMA mensagem com
+ * `{parcelas_lista}` formatada multi-line. Evita o spam de 5 mensagens
+ * iguais pra Maria que ta com 5 parcelas atrasadas.
  */
 export const TEMPLATE_KINDS = [
+  // Singles
   'initial',      // Cobrança inicial gerada
   'pre-due-3d',   // Lembrete: vence em 3 dias
   'pre-due-1d',   // Lembrete: vence amanhã
@@ -18,6 +26,9 @@ export const TEMPLATE_KINDS = [
   'overdue-1d',   // Atraso 1 dia (cordial)
   'overdue-3d',   // Atraso 3 dias (firme)
   'overdue-7d',   // Atraso 7 dias (urgente)
+  // Bulks (2+ parcelas no mesmo cliente)
+  'bulk-pre-due', // Multiplas parcelas vencendo em breve
+  'bulk-overdue', // Multiplas parcelas em atraso
 ] as const;
 export type TemplateKind = typeof TEMPLATE_KINDS[number];
 
@@ -151,6 +162,50 @@ const DEFAULT_TEMPLATES: Record<TemplateKind, string> = {
     '',
     '{assinatura}',
   ].join('\n'),
+
+  // Templates BULK — usados quando o mesmo cliente tem 2+ parcelas
+  // elegiveis. {parcelas_lista} eh formatada multi-line tipo:
+  //   "▸ R$ 500,00 — vence 15/05 (Processo 0701234)"
+  //   "▸ R$ 750,00 — vence 22/05"
+  // {valor} no bulk eh o TOTAL de todas as parcelas somadas.
+  // {qtd_parcelas} adiciona o numero pra mensagem ficar natural.
+
+  'bulk-pre-due': [
+    '🔔 *Lembrete: parcelas a vencer*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Você tem *{qtd_parcelas} parcelas* de honorários com vencimento próximo:',
+    '',
+    '{parcelas_lista}',
+    '',
+    'Total: *{valor}*',
+    '',
+    'Para pagar, acesse: {portal_url}',
+    '',
+    'Sem custo extra se pagar até o vencimento.',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'bulk-overdue': [
+    '⚠️ *Parcelas em atraso*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Identificamos que você tem *{qtd_parcelas} parcelas* de honorários em atraso:',
+    '',
+    '{parcelas_lista}',
+    '',
+    'Total em aberto: *{valor}*',
+    '',
+    'Pedimos a gentileza de regularizar pra evitar incidência de juros e multa.',
+    'Caso esteja com dificuldade de pagamento, entre em contato pra a gente conversar sobre uma alternativa.',
+    '',
+    'Pague pelo portal: {portal_url}',
+    '',
+    '{assinatura}',
+  ].join('\n'),
 };
 
 /**
@@ -170,6 +225,13 @@ const PREVIEW_VARS: Record<string, string> = {
   boleto_url: 'https://www.asaas.com/b/pdf/abc123',
   dias_atraso: '3',
   assinatura: '_André Lustosa Advogados_',
+  // Bulk-only — preview com 3 parcelas de exemplo
+  qtd_parcelas: '3',
+  parcelas_lista: [
+    '▸ R$ 500,00 — venc. 15/05 (Processo 0701234)',
+    '▸ R$ 750,00 — venc. 22/05',
+    '▸ R$ 1.000,00 — venc. 29/05 (Processo 0801555)',
+  ].join('\n'),
 };
 
 /**
@@ -292,19 +354,22 @@ export class PaymentReminderService {
    * Lista as variaveis disponiveis com descricao — usada pela UI pra
    * mostrar lista clicavel de placeholders.
    */
-  listAvailableVariables(): Array<{ key: string; label: string; example: string }> {
+  listAvailableVariables(): Array<{ key: string; label: string; example: string; bulkOnly?: boolean }> {
     return [
-      { key: 'cliente',          label: 'Primeiro nome',       example: PREVIEW_VARS.cliente },
-      { key: 'cliente_completo', label: 'Nome completo',       example: PREVIEW_VARS.cliente_completo },
-      { key: 'valor',            label: 'Valor formatado',     example: PREVIEW_VARS.valor },
-      { key: 'vencimento',       label: 'Data de vencimento',  example: PREVIEW_VARS.vencimento },
-      { key: 'processo',         label: 'Número do processo',  example: PREVIEW_VARS.processo },
-      { key: 'forma',            label: 'Forma de pagamento',  example: PREVIEW_VARS.forma },
-      { key: 'portal_url',       label: 'Link do portal',      example: PREVIEW_VARS.portal_url },
-      { key: 'pix_copy_paste',   label: 'PIX copia-e-cola',    example: 'código PIX...' },
-      { key: 'boleto_url',       label: 'Link do boleto',      example: 'URL do boleto' },
-      { key: 'dias_atraso',      label: 'Dias de atraso',      example: PREVIEW_VARS.dias_atraso },
-      { key: 'assinatura',       label: 'Assinatura',          example: PREVIEW_VARS.assinatura },
+      { key: 'cliente',          label: 'Primeiro nome',                example: PREVIEW_VARS.cliente },
+      { key: 'cliente_completo', label: 'Nome completo',                example: PREVIEW_VARS.cliente_completo },
+      { key: 'valor',            label: 'Valor formatado (ou total no bulk)', example: PREVIEW_VARS.valor },
+      { key: 'vencimento',       label: 'Data de vencimento',           example: PREVIEW_VARS.vencimento },
+      { key: 'processo',         label: 'Número do processo',           example: PREVIEW_VARS.processo },
+      { key: 'forma',            label: 'Forma de pagamento',           example: PREVIEW_VARS.forma },
+      { key: 'portal_url',       label: 'Link do portal',               example: PREVIEW_VARS.portal_url },
+      { key: 'pix_copy_paste',   label: 'PIX copia-e-cola',             example: 'código PIX...' },
+      { key: 'boleto_url',       label: 'Link do boleto',               example: 'URL do boleto' },
+      { key: 'dias_atraso',      label: 'Dias de atraso',               example: PREVIEW_VARS.dias_atraso },
+      { key: 'assinatura',       label: 'Assinatura',                   example: PREVIEW_VARS.assinatura },
+      // Bulk-only
+      { key: 'qtd_parcelas',     label: 'Quantidade de parcelas (bulk)', example: PREVIEW_VARS.qtd_parcelas, bulkOnly: true },
+      { key: 'parcelas_lista',   label: 'Lista de parcelas formatada (bulk)', example: '▸ R$ X — venc. DD/MM ...', bulkOnly: true },
     ];
   }
 
@@ -625,6 +690,138 @@ export class PaymentReminderService {
     return text;
   }
 
+  /**
+   * Constroi vars pra mensagem BULK (multiplas parcelas do mesmo cliente).
+   * Diferenca pro single:
+   *   - {valor} eh o TOTAL somado de todas as parcelas (nao a 1a)
+   *   - {parcelas_lista} eh a lista formatada multi-line
+   *   - {qtd_parcelas} eh o count
+   *   - {vencimento}, {dias_atraso}, {processo} ficam vazios (cada
+   *     parcela tem o seu — listamos no parcelas_lista, nao no header)
+   */
+  private buildVarsForBulk(
+    leadName: string | null,
+    portalUrl: string,
+    contexts: Array<NonNullable<Awaited<ReturnType<typeof this.loadChargeContext>>>>,
+  ): Record<string, string> {
+    const fullName = leadName || 'Cliente';
+    const firstName = fullName.split(' ')[0];
+    const total = contexts.reduce((s, c) => s + c.amount, 0);
+
+    // Cada linha: "▸ R$ 500,00 — venc. 15/05 (Processo 0701234)"
+    const linhas = contexts.map(c => {
+      const vTxt = this.formatCurrency(c.amount);
+      const dTxt = c.dueDate
+        ? c.dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+        : '—';
+      const procSuffix = c.legalCase?.case_number
+        ? ` (Processo ${c.legalCase.case_number})`
+        : '';
+      return `▸ ${vTxt} — venc. ${dTxt}${procSuffix}`;
+    });
+
+    return {
+      cliente: firstName,
+      cliente_completo: fullName,
+      valor: this.formatCurrency(total),
+      vencimento: '',
+      processo: '',
+      forma: '',
+      portal_url: portalUrl,
+      pix_copy_paste: '',
+      boleto_url: '',
+      dias_atraso: '',
+      assinatura: '_André Lustosa Advogados_',
+      qtd_parcelas: String(contexts.length),
+      parcelas_lista: linhas.join('\n'),
+    };
+  }
+
+  /**
+   * Renderiza template bulk usando dados de N charges.
+   * Reusa cleanup do renderForCharge — linhas com placeholder vazio caem.
+   */
+  private async renderForBulk(
+    kind: 'bulk-pre-due' | 'bulk-overdue',
+    leadName: string | null,
+    portalUrl: string,
+    contexts: Array<NonNullable<Awaited<ReturnType<typeof this.loadChargeContext>>>>,
+  ): Promise<string> {
+    const all = await this.loadAllTemplates();
+    const template = all[kind] || DEFAULT_TEMPLATES[kind];
+    const vars = this.buildVarsForBulk(leadName, portalUrl, contexts);
+    let text = this.interpolate(template, vars);
+    text = text
+      .split('\n')
+      .filter(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return true;
+        if (/^[^:]+:\s*$/.test(trimmed)) return false;
+        return true;
+      })
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return text;
+  }
+
+  /**
+   * Envia mensagem bulk + atualiza tracking em TODAS as charges do grupo
+   * (cada uma ganha last_reminder_kind/sent_at, nao so a primeira).
+   * Sem isso, no proximo cron o sistema tentaria reenviar pras outras.
+   */
+  private async sendBulkAndTrack(
+    leadName: string | null,
+    leadPhone: string,
+    instanceName: string | null,
+    conversationId: string | null,
+    contexts: Array<NonNullable<Awaited<ReturnType<typeof this.loadChargeContext>>>>,
+    text: string,
+    kind: string,
+  ): Promise<boolean> {
+    const phone = this.normalizePhone(leadPhone);
+    try {
+      const sendResult = await this.whatsapp.sendText(phone, text, instanceName ?? undefined);
+      this.logger.log(
+        `[PaymentReminder] BULK ${kind} pra ${phone} — ${contexts.length} parcela(s) ` +
+        `(charges: ${contexts.map(c => c.chargeId).join(', ')})`,
+      );
+
+      if (conversationId) {
+        const evolutionMsgId = sendResult?.data?.key?.id || `sys_payment_${Date.now()}`;
+        await this.prisma.message.create({
+          data: {
+            conversation_id: conversationId,
+            direction: 'out',
+            type: 'text',
+            text,
+            external_message_id: evolutionMsgId,
+            status: 'enviado',
+          },
+        }).catch(() => {});
+        await this.prisma.conversation.update({
+          where: { id: conversationId },
+          data: { last_message_at: new Date() },
+        }).catch(() => {});
+      }
+
+      // Atualiza tracking em TODAS as charges do grupo
+      const now = new Date();
+      await this.prisma.paymentGatewayCharge.updateMany({
+        where: { id: { in: contexts.map(c => c.chargeId) } },
+        data: {
+          last_reminder_sent_at: now,
+          last_reminder_kind: kind,
+          reminder_count: { increment: 1 },
+        },
+      });
+      return true;
+    } catch (e: any) {
+      this.logger.warn(`[PaymentReminder] Falha bulk ${kind} pra ${phone}: ${e.message}`);
+      return false;
+    }
+  }
+
   // ─── Fase 2: lembrete pre-vencimento ─────────────────────────
 
   /**
@@ -667,14 +864,81 @@ export class PaymentReminderService {
       if (charges.length === 0) continue;
       this.logger.log(`[Cron pre-due] ${kind}: ${charges.length} charge(s) na janela`);
 
-      for (const c of charges) {
-        const ok = await this.sendPreDueReminder(c.id, kind);
-        if (ok) totalSent++;
-        // Throttle pra nao engasgar Evolution API
-        await new Promise(r => setTimeout(r, 2000));
-      }
+      // Agrupa por lead pra detectar bulk (cliente com multiplas
+      // parcelas no mesmo kind). 1 charge -> single template;
+      // 2+ charges -> bulk template
+      const sent = await this.sendForChargesGrouped(
+        charges.map(c => c.id),
+        kind as TemplateKind,
+        'bulk-pre-due',
+      );
+      totalSent += sent;
     }
     if (totalSent > 0) this.logger.log(`[Cron pre-due] ${totalSent} lembrete(s) enviado(s)`);
+  }
+
+  /**
+   * Carrega contextos das charges, agrupa por leadId, e envia:
+   *   - 1 charge no grupo: usa template single (kind)
+   *   - 2+ charges: usa template bulk (bulkKind)
+   *
+   * Filtros (skip silencioso) feitos pelo loadChargeContext:
+   *   - Tipo nao eh CONTRATUAL/ENTRADA
+   *   - Lead.payment_reminders_disabled = true
+   *   - Sem telefone
+   *
+   * Returns: total de mensagens enviadas (cada bulk conta 1 mesmo
+   * agregando N parcelas).
+   */
+  private async sendForChargesGrouped(
+    chargeIds: string[],
+    singleKind: TemplateKind,
+    bulkKind: 'bulk-pre-due' | 'bulk-overdue',
+  ): Promise<number> {
+    // Carrega contexts em paralelo (so charges elegiveis vem com ctx)
+    const ctxs = await Promise.all(chargeIds.map(id => this.loadChargeContext(id)));
+    const valid = ctxs.filter((c): c is NonNullable<typeof c> => !!c);
+    if (valid.length === 0) return 0;
+
+    // Agrupa por lead
+    const byLead = new Map<string, typeof valid>();
+    for (const c of valid) {
+      const arr = byLead.get(c.leadId) || [];
+      arr.push(c);
+      byLead.set(c.leadId, arr);
+    }
+
+    let sent = 0;
+    for (const [, group] of byLead) {
+      try {
+        if (group.length === 1) {
+          // Single — usa template kind original
+          const ctx = group[0];
+          const text = await this.renderForCharge(singleKind, ctx);
+          const ok = await this.sendAndTrack(ctx, text, singleKind);
+          if (ok) sent++;
+        } else {
+          // Bulk — agrega
+          const head = group[0];
+          const text = await this.renderForBulk(bulkKind, head.leadName, head.portalUrl, group);
+          const ok = await this.sendBulkAndTrack(
+            head.leadName,
+            head.leadPhone,
+            head.instanceName,
+            head.conversationId,
+            group,
+            text,
+            bulkKind,
+          );
+          if (ok) sent++;
+        }
+      } catch (e: any) {
+        this.logger.warn(`[Grouped send] erro: ${e.message}`);
+      }
+      // Throttle entre clientes (nao entre parcelas — bulk eh 1 msg)
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    return sent;
   }
 
   private async sendPreDueReminder(chargeId: string, kind: string): Promise<boolean> {
@@ -734,15 +998,22 @@ export class PaymentReminderService {
       if (charges.length === 0) continue;
       this.logger.log(`[Cron overdue] ${kind}: ${charges.length} charge(s) na janela`);
 
-      for (const c of charges) {
-        if (alertLawyer) {
+      if (alertLawyer) {
+        // 15+ dias: alerta interno por charge mesmo (advogado quer
+        // ver cada caso separado pra decidir acao). Sem agregacao.
+        for (const c of charges) {
           const ok = await this.alertLawyerOverdue15Days(c.id);
           if (ok) totalAlerts++;
-        } else {
-          const ok = await this.sendOverdueReminder(c.id, kind);
-          if (ok) totalSent++;
+          await new Promise(r => setTimeout(r, 500)); // throttle leve so
         }
-        await new Promise(r => setTimeout(r, 2000));
+      } else {
+        // 1d/3d/7d: agrupa por lead pra evitar spam
+        const sent = await this.sendForChargesGrouped(
+          charges.map(c => c.id),
+          kind as TemplateKind,
+          'bulk-overdue',
+        );
+        totalSent += sent;
       }
     }
     if (totalSent > 0) this.logger.log(`[Cron overdue] ${totalSent} cobranca(s) enviada(s)`);
