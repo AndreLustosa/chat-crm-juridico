@@ -299,6 +299,46 @@ export class PaymentGatewayController {
     return this.service.getOverdueDashboard(req.user?.tenant_id);
   }
 
+  // ─── Templates de cobranca ───────────────────────────────────
+
+  /**
+   * Lista todos os templates (com customizacoes mescladas com defaults)
+   * + variaveis disponiveis pra UI mostrar lista clicavel de placeholders.
+   */
+  @Get('templates')
+  async getTemplates() {
+    const [templates, variables] = await Promise.all([
+      this.reminder.loadAllTemplates(),
+      Promise.resolve(this.reminder.listAvailableVariables()),
+    ]);
+    return { templates, variables };
+  }
+
+  /**
+   * Salva customizacoes de templates. Body eh parcial — kinds nao
+   * informados ficam como estao. String vazia remove customizacao
+   * (volta pro default).
+   */
+  @Post('templates')
+  async saveTemplates(@Body() body: Record<string, string>) {
+    const updated = await this.reminder.saveTemplates(body as any);
+    return { templates: updated };
+  }
+
+  /**
+   * Preview de template — admin edita e ve como vai ficar antes de
+   * salvar. Aceita customText opcional pra preview de texto nao
+   * salvo ainda.
+   */
+  @Post('templates/:kind/preview')
+  async previewTemplate(
+    @Param('kind') kind: string,
+    @Body() body: { customText?: string },
+  ) {
+    const text = await this.reminder.previewTemplate(kind as any, body.customText);
+    return { text };
+  }
+
   // ─── Customers ─────────────────────────────────────────
 
   /** Lista clientes vinculados (CRM ↔ Asaas) */

@@ -46,6 +46,7 @@ const settingsSections: MenuSection[] = [
     title: 'Financeiro',
     items: [
       { label: 'Gateway de Pagamento', href: '/atendimento/settings/payment-gateway', icon: CreditCard },
+      { label: 'Templates de Cobrança', href: '/atendimento/settings/payment-templates', icon: MessageSquare },
       { label: 'Nota Fiscal (NFS-e)', href: '/atendimento/settings/nota-fiscal', icon: FileText },
     ],
   },
@@ -86,6 +87,7 @@ const adminOnlyPaths = new Set([
   '/atendimento/settings/google-drive',
   '/atendimento/settings/mcp',
   '/atendimento/settings/payment-gateway',
+  '/atendimento/settings/payment-templates',
   '/atendimento/settings/nota-fiscal',
   '/atendimento/settings/transcricao',
 ]);

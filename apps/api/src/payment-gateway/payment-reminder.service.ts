@@ -3,6 +3,174 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { PaymentGatewayService } from './payment-gateway.service';
+import { SettingsService } from '../settings/settings.service';
+
+/**
+ * Tipos de template suportados — string union centralizada pra UI e
+ * helpers terem a mesma fonte da verdade. UI mostra esses 7 + 2 do
+ * gateway (payment-confirmed, charge-cancelled).
+ */
+export const TEMPLATE_KINDS = [
+  'initial',      // Cobrança inicial gerada
+  'pre-due-3d',   // Lembrete: vence em 3 dias
+  'pre-due-1d',   // Lembrete: vence amanhã
+  'pre-due-0d',   // Lembrete: vence hoje
+  'overdue-1d',   // Atraso 1 dia (cordial)
+  'overdue-3d',   // Atraso 3 dias (firme)
+  'overdue-7d',   // Atraso 7 dias (urgente)
+] as const;
+export type TemplateKind = typeof TEMPLATE_KINDS[number];
+
+/**
+ * Defaults dos templates — usados quando admin nao customizou. Mantem
+ * comportamento original do sistema pré-templates pra ninguém perder
+ * mensagem em deploy. Placeholders entre {chaves} sao substituidos no
+ * render.
+ *
+ * Variaveis disponiveis em todos:
+ *   {cliente}          - primeiro nome (ou "Cliente" fallback)
+ *   {cliente_completo} - nome completo (ou "Cliente")
+ *   {valor}            - valor formatado em R$
+ *   {vencimento}       - data DD/MM/YYYY (ou "—")
+ *   {processo}         - número CNJ (ou vazio)
+ *   {forma}            - PIX | Boleto bancário | Cartão de crédito
+ *   {portal_url}       - link do portal/pagamentos
+ *   {pix_copy_paste}   - código PIX copia-e-cola (ou vazio)
+ *   {boleto_url}       - URL do boleto (ou vazio)
+ *   {dias_atraso}      - número de dias atrasado (so faz sentido em overdue-*)
+ *   {assinatura}       - "_André Lustosa Advogados_" (sempre)
+ */
+const DEFAULT_TEMPLATES: Record<TemplateKind, string> = {
+  'initial': [
+    '💰 *Cobrança de Honorários*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    '📁 Processo: {processo}',
+    '💵 Valor: *{valor}*',
+    '📅 Vencimento: {vencimento}',
+    '💳 Forma: {forma}',
+    '',
+    'Para pagar, acesse seu portal:',
+    '{portal_url}',
+    '',
+    'PIX copia-e-cola: {pix_copy_paste}',
+    'Boleto: {boleto_url}',
+    '',
+    'Qualquer dúvida, é só responder por aqui.',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'pre-due-3d': [
+    '🔔 *Lembrete de pagamento*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Sua parcela de honorários vence em *3 dias* ({vencimento}).',
+    '💵 Valor: *{valor}*',
+    '',
+    'Para pagar, acesse: {portal_url}',
+    '',
+    'Sem custo extra se pagar até o vencimento.',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'pre-due-1d': [
+    '🔔 *Lembrete: vence amanhã*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Sua parcela de honorários vence *amanhã* ({vencimento}).',
+    '💵 Valor: *{valor}*',
+    '',
+    'Para pagar, acesse: {portal_url}',
+    '',
+    'Sem custo extra se pagar até o vencimento.',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'pre-due-0d': [
+    '🔔 *Lembrete: vence hoje*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Sua parcela de honorários vence *hoje*.',
+    '💵 Valor: *{valor}*',
+    '',
+    'Para pagar, acesse: {portal_url}',
+    '',
+    'Sem custo extra se pagar até o vencimento.',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'overdue-1d': [
+    '⏰ *Pagamento em atraso*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Identificamos que sua parcela de honorários (vencida em {vencimento}) ainda não foi paga.',
+    'Fica o lembrete pra regularizar quanto antes — só {dias_atraso} dia(s) de atraso.',
+    '',
+    '💵 Valor: *{valor}*',
+    '',
+    'Pague pelo portal: {portal_url}',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'overdue-3d': [
+    '⚠️ *Pagamento atrasado há 3 dias*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Sua parcela de honorários (vencida em {vencimento}) está atrasada há *{dias_atraso} dias*.',
+    'Pedimos a gentileza de regularizar pra evitar incidência de juros e multa.',
+    '',
+    '💵 Valor: *{valor}*',
+    '',
+    'Pague pelo portal: {portal_url}',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+
+  'overdue-7d': [
+    '🚨 *Pagamento atrasado — atenção*',
+    '',
+    'Olá, {cliente}!',
+    '',
+    'Sua parcela de honorários está atrasada há *{dias_atraso} dias* (vencimento em {vencimento}).',
+    'Caso esteja com dificuldade de pagamento, entre em contato pra a gente conversar sobre uma alternativa.',
+    '',
+    '💵 Valor: *{valor}*',
+    '',
+    'Pague pelo portal: {portal_url}',
+    '',
+    '{assinatura}',
+  ].join('\n'),
+};
+
+/**
+ * Variaveis de exemplo pra preview na UI quando admin esta editando.
+ * Renderiza com dados ficticios pra advogado conseguir ver como vai
+ * ficar a mensagem antes de salvar.
+ */
+const PREVIEW_VARS: Record<string, string> = {
+  cliente: 'Maria',
+  cliente_completo: 'Maria Silva Souza',
+  valor: 'R$ 1.250,00',
+  vencimento: '15/05/2026',
+  processo: '0701234-56.2024.8.02.0058',
+  forma: 'PIX',
+  portal_url: 'https://crm.andrelustosaadvogados.com.br/portal/pagamentos',
+  pix_copy_paste: '00020126360014BR.GOV.BCB.PIX0114+5582999999...',
+  boleto_url: 'https://www.asaas.com/b/pdf/abc123',
+  dias_atraso: '3',
+  assinatura: '_André Lustosa Advogados_',
+};
 
 /**
  * Envia avisos de cobrança de honorarios ao cliente via WhatsApp:
@@ -33,7 +201,112 @@ export class PaymentReminderService {
     private prisma: PrismaService,
     private whatsapp: WhatsappService,
     private paymentGateway: PaymentGatewayService,
+    private settings: SettingsService,
   ) {}
+
+  // ─── Templates customizaveis pelo admin ───────────────────────
+
+  /**
+   * Carrega todos os templates do banco. Mescla com defaults — se admin
+   * customizou apenas alguns kinds, os outros vem dos hardcoded.
+   *
+   * Settings key: PAYMENT_TEMPLATES contem JSON { kind: text }.
+   */
+  async loadAllTemplates(): Promise<Record<TemplateKind, string>> {
+    const raw = await this.settings.get('PAYMENT_TEMPLATES').catch(() => null);
+    let custom: Partial<Record<TemplateKind, string>> = {};
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') custom = parsed;
+      } catch {
+        this.logger.warn('[PaymentTemplate] PAYMENT_TEMPLATES malformado — usando defaults');
+      }
+    }
+    const result = { ...DEFAULT_TEMPLATES };
+    for (const k of TEMPLATE_KINDS) {
+      if (typeof custom[k] === 'string' && (custom[k] as string).trim()) {
+        result[k] = custom[k] as string;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Salva templates customizados. Recebe parcial — kinds nao informados
+   * permanecem como estao (ou seja, admin pode editar so um sem afetar
+   * os outros). Strings vazias removem a customizacao (volta pro default).
+   */
+  async saveTemplates(updates: Partial<Record<TemplateKind, string>>): Promise<Record<TemplateKind, string>> {
+    const existing = await this.loadCustomTemplatesRaw();
+    for (const [k, v] of Object.entries(updates)) {
+      if (!TEMPLATE_KINDS.includes(k as TemplateKind)) continue;
+      if (typeof v !== 'string' || !v.trim()) {
+        delete (existing as any)[k];
+      } else {
+        (existing as any)[k] = v;
+      }
+    }
+    await this.settings.set('PAYMENT_TEMPLATES', JSON.stringify(existing));
+    return this.loadAllTemplates();
+  }
+
+  /**
+   * Retorna so as customizacoes (sem mesclar com defaults) — usado
+   * internamente pra o save preservar overrides existentes.
+   */
+  private async loadCustomTemplatesRaw(): Promise<Partial<Record<TemplateKind, string>>> {
+    const raw = await this.settings.get('PAYMENT_TEMPLATES').catch(() => null);
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Substitui placeholders {variavel} no texto pelo valor correspondente.
+   * Variavel ausente vira string vazia. Sem regex maluco — split
+   * simples pra evitar pegar falsos positivos.
+   */
+  private interpolate(text: string, vars: Record<string, string>): string {
+    return text.replace(/\{(\w+)\}/g, (match, key) => {
+      return vars[key] !== undefined ? vars[key] : '';
+    });
+  }
+
+  /**
+   * Renderiza preview com dados ficticios pra UI mostrar ao admin
+   * como vai ficar a mensagem.
+   */
+  async previewTemplate(kind: TemplateKind, customText?: string): Promise<string> {
+    const all = await this.loadAllTemplates();
+    const tpl = customText ?? all[kind];
+    if (!tpl) return '';
+    return this.interpolate(tpl, PREVIEW_VARS);
+  }
+
+  /**
+   * Lista as variaveis disponiveis com descricao — usada pela UI pra
+   * mostrar lista clicavel de placeholders.
+   */
+  listAvailableVariables(): Array<{ key: string; label: string; example: string }> {
+    return [
+      { key: 'cliente',          label: 'Primeiro nome',       example: PREVIEW_VARS.cliente },
+      { key: 'cliente_completo', label: 'Nome completo',       example: PREVIEW_VARS.cliente_completo },
+      { key: 'valor',            label: 'Valor formatado',     example: PREVIEW_VARS.valor },
+      { key: 'vencimento',       label: 'Data de vencimento',  example: PREVIEW_VARS.vencimento },
+      { key: 'processo',         label: 'Número do processo',  example: PREVIEW_VARS.processo },
+      { key: 'forma',            label: 'Forma de pagamento',  example: PREVIEW_VARS.forma },
+      { key: 'portal_url',       label: 'Link do portal',      example: PREVIEW_VARS.portal_url },
+      { key: 'pix_copy_paste',   label: 'PIX copia-e-cola',    example: 'código PIX...' },
+      { key: 'boleto_url',       label: 'Link do boleto',      example: 'URL do boleto' },
+      { key: 'dias_atraso',      label: 'Dias de atraso',      example: PREVIEW_VARS.dias_atraso },
+      { key: 'assinatura',       label: 'Assinatura',          example: PREVIEW_VARS.assinatura },
+    ];
+  }
 
   // ─── Helpers ──────────────────────────────────────────────────
 
@@ -279,39 +552,77 @@ export class PaymentReminderService {
   async sendInitialChargeNotification(chargeId: string): Promise<boolean> {
     const ctx = await this.loadChargeContext(chargeId);
     if (!ctx) return false;
+    const text = await this.renderForCharge('initial', ctx);
+    return this.sendAndTrack(ctx, text, 'initial');
+  }
 
-    const firstName = (ctx.leadName || 'Cliente').split(' ')[0];
+  /**
+   * Constroi o map de variaveis pra interpolacao a partir do context da
+   * charge. Calcula dias_atraso, normaliza forma de pagamento, preenche
+   * vazios pra placeholders ausentes nao quebrarem o template.
+   */
+  private buildVarsForCharge(ctx: NonNullable<Awaited<ReturnType<typeof this.loadChargeContext>>>): Record<string, string> {
+    const fullName = ctx.leadName || 'Cliente';
+    const firstName = fullName.split(' ')[0];
     const valor = this.formatCurrency(ctx.amount);
-    const venc = ctx.dueDate ? this.formatDate(ctx.dueDate) : null;
-    const proc = ctx.legalCase?.case_number;
-
-    const lines: string[] = [];
-    lines.push(`💰 *Cobrança de Honorários*`);
-    lines.push('');
-    lines.push(`Olá, ${firstName}!`);
-    lines.push('');
-    if (proc) lines.push(`📁 Processo: ${proc}`);
-    lines.push(`💵 Valor: *${valor}*`);
-    if (venc) lines.push(`📅 Vencimento: ${venc}`);
-    lines.push(`💳 Forma: ${ctx.billingType === 'PIX' ? 'PIX' : ctx.billingType === 'BOLETO' ? 'Boleto bancário' : 'Cartão de crédito'}`);
-    lines.push('');
-    lines.push(`Para pagar, acesse seu portal:`);
-    lines.push(ctx.portalUrl);
-    if (ctx.billingType === 'PIX' && ctx.pixCopyPaste) {
-      lines.push('');
-      lines.push(`Ou use o PIX copia-e-cola abaixo:`);
-      lines.push('');
-      lines.push(ctx.pixCopyPaste);
-    } else if (ctx.billingType === 'BOLETO' && ctx.boletoUrl) {
-      lines.push('');
-      lines.push(`Boleto: ${ctx.boletoUrl}`);
+    const venc = ctx.dueDate ? this.formatDate(ctx.dueDate) : '—';
+    const proc = ctx.legalCase?.case_number || '';
+    const forma = ctx.billingType === 'PIX' ? 'PIX'
+      : ctx.billingType === 'BOLETO' ? 'Boleto bancário'
+      : ctx.billingType === 'CREDIT_CARD' ? 'Cartão de crédito'
+      : ctx.billingType;
+    let diasAtraso = '0';
+    if (ctx.dueDate) {
+      const diff = Math.floor((Date.now() - ctx.dueDate.getTime()) / (1000 * 60 * 60 * 24));
+      diasAtraso = String(Math.max(0, diff));
     }
-    lines.push('');
-    lines.push(`Qualquer dúvida, é só responder por aqui.`);
-    lines.push('');
-    lines.push(`_André Lustosa Advogados_`);
+    return {
+      cliente: firstName,
+      cliente_completo: fullName,
+      valor,
+      vencimento: venc,
+      processo: proc,
+      forma,
+      portal_url: ctx.portalUrl,
+      pix_copy_paste: ctx.pixCopyPaste || '',
+      boleto_url: ctx.boletoUrl || '',
+      dias_atraso: diasAtraso,
+      assinatura: '_André Lustosa Advogados_',
+    };
+  }
 
-    return this.sendAndTrack(ctx, lines.join('\n'), 'initial');
+  /**
+   * Renderiza um template usando os dados de uma charge real.
+   * Centraliza a logica pros fluxos initial/pre-due/overdue todos
+   * passarem pela mesma pipeline.
+   */
+  private async renderForCharge(
+    kind: TemplateKind,
+    ctx: NonNullable<Awaited<ReturnType<typeof this.loadChargeContext>>>,
+  ): Promise<string> {
+    const all = await this.loadAllTemplates();
+    const template = all[kind] || DEFAULT_TEMPLATES[kind];
+    const vars = this.buildVarsForCharge(ctx);
+    let text = this.interpolate(template, vars);
+
+    // Limpa linhas que ficaram com so o "label:" (placeholder vazio).
+    // Ex: se nao tem PIX copy-paste, "PIX copia-e-cola: " sozinho fica feio.
+    // Heuristica: linha que termina em ": " ou eh so " " apos limpar
+    // espacos eh removida.
+    text = text
+      .split('\n')
+      .filter(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return true; // mantem linha vazia (espaco de paragrafo)
+        // Remove "Label:" sem valor depois
+        if (/^[^:]+:\s*$/.test(trimmed)) return false;
+        return true;
+      })
+      .join('\n')
+      // Colapsa multiplas linhas vazias seguidas em maximo 2
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return text;
   }
 
   // ─── Fase 2: lembrete pre-vencimento ─────────────────────────
@@ -369,39 +680,12 @@ export class PaymentReminderService {
   private async sendPreDueReminder(chargeId: string, kind: string): Promise<boolean> {
     const ctx = await this.loadChargeContext(chargeId);
     if (!ctx) return false;
-
-    const firstName = (ctx.leadName || 'Cliente').split(' ')[0];
-    const valor = this.formatCurrency(ctx.amount);
-    const venc = ctx.dueDate ? this.formatDate(ctx.dueDate) : null;
-
-    let header = '';
-    let urgency = '';
-    if (kind === 'pre-due-3d') {
-      header = '🔔 *Lembrete de pagamento*';
-      urgency = `Sua parcela de honorários vence em *3 dias* (${venc}).`;
-    } else if (kind === 'pre-due-1d') {
-      header = '🔔 *Lembrete: vence amanhã*';
-      urgency = `Sua parcela de honorários vence *amanhã* (${venc}).`;
-    } else { // pre-due-0d
-      header = '🔔 *Lembrete: vence hoje*';
-      urgency = `Sua parcela de honorários vence *hoje*.`;
+    if (!TEMPLATE_KINDS.includes(kind as TemplateKind)) {
+      this.logger.warn(`[PreDue] kind invalido: ${kind}`);
+      return false;
     }
-
-    const lines: string[] = [];
-    lines.push(header);
-    lines.push('');
-    lines.push(`Olá, ${firstName}!`);
-    lines.push('');
-    lines.push(urgency);
-    lines.push(`💵 Valor: *${valor}*`);
-    lines.push('');
-    lines.push(`Para pagar, acesse: ${ctx.portalUrl}`);
-    lines.push('');
-    lines.push(`Sem custo extra se pagar até o vencimento.`);
-    lines.push('');
-    lines.push(`_André Lustosa Advogados_`);
-
-    return this.sendAndTrack(ctx, lines.join('\n'), kind);
+    const text = await this.renderForCharge(kind as TemplateKind, ctx);
+    return this.sendAndTrack(ctx, text, kind);
   }
 
   // ─── Fase 3: cobranca de atraso ──────────────────────────────
@@ -468,39 +752,12 @@ export class PaymentReminderService {
   private async sendOverdueReminder(chargeId: string, kind: string): Promise<boolean> {
     const ctx = await this.loadChargeContext(chargeId);
     if (!ctx) return false;
-
-    const firstName = (ctx.leadName || 'Cliente').split(' ')[0];
-    const valor = this.formatCurrency(ctx.amount);
-    const venc = ctx.dueDate ? this.formatDate(ctx.dueDate) : '—';
-    const dias = kind === 'overdue-1d' ? 1 : kind === 'overdue-3d' ? 3 : 7;
-
-    let header = '';
-    let body = '';
-    if (kind === 'overdue-1d') {
-      header = '⏰ *Pagamento em atraso*';
-      body = `Identificamos que sua parcela de honorários (vencida em ${venc}) ainda não foi paga.\nFica o lembrete pra regularizar quanto antes — só ${dias} dia(s) de atraso.`;
-    } else if (kind === 'overdue-3d') {
-      header = '⚠️ *Pagamento atrasado há 3 dias*';
-      body = `Sua parcela de honorários (vencida em ${venc}) está atrasada há *${dias} dias*.\nPedimos a gentileza de regularizar pra evitar incidência de juros e multa.`;
-    } else { // overdue-7d
-      header = '🚨 *Pagamento atrasado — atenção*';
-      body = `Sua parcela de honorários está atrasada há *${dias} dias* (vencimento em ${venc}).\nCaso esteja com dificuldade de pagamento, entre em contato pra a gente conversar sobre uma alternativa.`;
+    if (!TEMPLATE_KINDS.includes(kind as TemplateKind)) {
+      this.logger.warn(`[Overdue] kind invalido: ${kind}`);
+      return false;
     }
-
-    const lines: string[] = [];
-    lines.push(header);
-    lines.push('');
-    lines.push(`Olá, ${firstName}!`);
-    lines.push('');
-    lines.push(body);
-    lines.push('');
-    lines.push(`💵 Valor: *${valor}*`);
-    lines.push('');
-    lines.push(`Pague pelo portal: ${ctx.portalUrl}`);
-    lines.push('');
-    lines.push(`_André Lustosa Advogados_`);
-
-    return this.sendAndTrack(ctx, lines.join('\n'), kind);
+    const text = await this.renderForCharge(kind as TemplateKind, ctx);
+    return this.sendAndTrack(ctx, text, kind);
   }
 
   /**
