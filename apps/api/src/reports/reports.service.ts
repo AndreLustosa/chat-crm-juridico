@@ -276,23 +276,22 @@ export class ReportsService {
   }): Promise<Buffer> {
     const { tenantId, filter, lawyerId, lawyerName } = params;
 
-    // Pega ate 200 cobrancas pra o relatorio
+    // Sequencial pra nao saturar o pool de conexoes
     const chargesPage = await this.dashboardService.getOperationalCharges({
-      tenantId, lawyerId, filter, page: 1, pageSize: 200,
+      tenantId, lawyerId, filter, page: 1, pageSize: 100,
     });
 
-    // Counts agregados (mesma chamada do dashboard)
     const counts = await this.dashboardService.getChargesCounts({ tenantId, lawyerId });
 
-    // Soma totais por status (sub-amostragem dos primeiros 500 - pra tela executiva)
+    // Sub-amostragem reduzida pra totalizadores executivos
     const allOverdue = await this.dashboardService.getOperationalCharges({
-      tenantId, lawyerId, filter: 'overdue', page: 1, pageSize: 500,
+      tenantId, lawyerId, filter: 'overdue', page: 1, pageSize: 200,
     });
     const allPending = await this.dashboardService.getOperationalCharges({
-      tenantId, lawyerId, filter: 'pending', page: 1, pageSize: 500,
+      tenantId, lawyerId, filter: 'pending', page: 1, pageSize: 200,
     });
     const allPaid = await this.dashboardService.getOperationalCharges({
-      tenantId, lawyerId, filter: 'paid', page: 1, pageSize: 500,
+      tenantId, lawyerId, filter: 'paid', page: 1, pageSize: 200,
     });
 
     const totalsByStatus = {
@@ -378,7 +377,7 @@ export class ReportsService {
           select: { last_reminder_sent_at: true, last_reminder_kind: true },
         },
       },
-      take: 1000,
+      take: 300, // limite conservador — top 10 sai dessas 300
     });
 
     const byLead = new Map<string, {
@@ -454,7 +453,7 @@ export class ReportsService {
         ...(lawyerId ? { honorario: { legal_case: { lawyer_id: lawyerId } } } : {}),
       },
       select: { status: true, due_date: true, paid_at: true },
-      take: 5000,
+      take: 1000, // amostra reduzida — suficiente pra calcular taxa estatistica
     });
 
     let payed30 = 0, payed60 = 0, payed90 = 0;
@@ -525,7 +524,7 @@ export class ReportsService {
     const txs = await this.prisma.financialTransaction.findMany({
       where,
       select: { amount: true, date: true, paid_at: true, status: true },
-      take: 10000,
+      take: 2000, // limite conservador
     });
 
     const weekdayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -627,86 +626,88 @@ export class ReportsService {
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
-    const rows = await Promise.all(
-      lawyers.map(async (l) => {
-        // Receita do periodo (regime de caixa, paid_at)
-        const revenueAgg = await this.prisma.financialTransaction.aggregate({
-          where: {
-            ...(tenantId ? { tenant_id: tenantId } : {}),
-            lawyer_id: l.id,
-            type: 'RECEITA',
-            status: 'PAGO',
-            OR: [
-              { paid_at: { gte: fromDate, lte: toDate } },
-              { AND: [{ paid_at: null }, { date: { gte: fromDate, lte: toDate } }] },
-            ],
-          },
-          _sum: { amount: true },
-        });
+    // CRITICAL: SEQUENCIAL — Promise.all com N advogados × 4 queries
+    // esgotava o pool de conexoes do Postgres (~10) e derrubava outras
+    // requests (auth, conversas). Bug 2026-04-28: sistema desconectou.
+    // Trade-off: mais lento (1-2s por advogado em vez de paralelo), mas
+    // estavel. Pra 10 advogados, ~10s aceitavel pra um relatorio.
+    const rows = [];
+    for (const l of lawyers) {
+      // Receita do periodo (regime de caixa, paid_at)
+      const revenueAgg = await this.prisma.financialTransaction.aggregate({
+        where: {
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+          lawyer_id: l.id,
+          type: 'RECEITA',
+          status: 'PAGO',
+          OR: [
+            { paid_at: { gte: fromDate, lte: toDate } },
+            { AND: [{ paid_at: null }, { date: { gte: fromDate, lte: toDate } }] },
+          ],
+        },
+        _sum: { amount: true },
+      });
 
-        // Casos
-        const [activeCases, archivedCases] = await Promise.all([
-          this.prisma.legalCase.count({
-            where: { lawyer_id: l.id, archived: false, ...(tenantId ? { tenant_id: tenantId } : {}) },
-          }),
-          this.prisma.legalCase.count({
-            where: { lawyer_id: l.id, archived: true, ...(tenantId ? { tenant_id: tenantId } : {}) },
-          }),
-        ]);
+      // Casos (sequencial pra nao multiplicar por 2)
+      const activeCases = await this.prisma.legalCase.count({
+        where: { lawyer_id: l.id, archived: false, ...(tenantId ? { tenant_id: tenantId } : {}) },
+      });
+      const archivedCases = await this.prisma.legalCase.count({
+        where: { lawyer_id: l.id, archived: true, ...(tenantId ? { tenant_id: tenantId } : {}) },
+      });
 
-        // Tempo medio de cobranca (dias entre charge.created_at e paid_at)
-        const paidCharges = await this.prisma.paymentGatewayCharge.findMany({
-          where: {
-            legal_case: { lawyer_id: l.id },
-            status: { in: ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'] },
-            paid_at: { not: null },
-          },
-          select: { created_at: true, paid_at: true },
-          take: 200,
-        });
-        const avgPaymentDays = paidCharges.length > 0
-          ? paidCharges.reduce((s, c) => {
-              const days = Math.max(0, Math.floor(((c.paid_at as Date).getTime() - c.created_at.getTime()) / 86400000));
-              return s + days;
-            }, 0) / paidCharges.length
-          : null;
+      // Tempo medio de cobranca — amostra reduzida (50 em vez de 200)
+      const paidCharges = await this.prisma.paymentGatewayCharge.findMany({
+        where: {
+          legal_case: { lawyer_id: l.id },
+          status: { in: ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'] },
+          paid_at: { not: null },
+        },
+        select: { created_at: true, paid_at: true },
+        take: 50,
+      });
+      const avgPaymentDays = paidCharges.length > 0
+        ? paidCharges.reduce((s, c) => {
+            const days = Math.max(0, Math.floor(((c.paid_at as Date).getTime() - c.created_at.getTime()) / 86400000));
+            return s + days;
+          }, 0) / paidCharges.length
+        : null;
 
-        // Inadimplencia da carteira
-        const overduePayments = await this.prisma.honorarioPayment.aggregate({
-          where: {
-            honorario: { legal_case: { lawyer_id: l.id }, ...(tenantId ? { tenant_id: tenantId } : {}) },
-            status: { in: ['PENDENTE', 'ATRASADO'] },
-            due_date: { not: null, lt: today },
-          },
-          _sum: { amount: true },
-          _count: { _all: true },
-        });
-        const totalCarteira = await this.prisma.honorarioPayment.aggregate({
-          where: {
-            honorario: { legal_case: { lawyer_id: l.id }, ...(tenantId ? { tenant_id: tenantId } : {}) },
-            status: { in: ['PENDENTE', 'ATRASADO', 'PAGO'] },
-          },
-          _sum: { amount: true },
-        });
-        const totalCarteiraValue = Number(totalCarteira._sum.amount || 0);
-        const overdueValue = Number(overduePayments._sum.amount || 0);
-        const delinquencyPct = totalCarteiraValue > 0 ? (overdueValue / totalCarteiraValue) * 100 : 0;
+      // Inadimplencia (sequencial)
+      const overduePayments = await this.prisma.honorarioPayment.aggregate({
+        where: {
+          honorario: { legal_case: { lawyer_id: l.id }, ...(tenantId ? { tenant_id: tenantId } : {}) },
+          status: { in: ['PENDENTE', 'ATRASADO'] },
+          due_date: { not: null, lt: today },
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
+      });
+      const totalCarteira = await this.prisma.honorarioPayment.aggregate({
+        where: {
+          honorario: { legal_case: { lawyer_id: l.id }, ...(tenantId ? { tenant_id: tenantId } : {}) },
+          status: { in: ['PENDENTE', 'ATRASADO', 'PAGO'] },
+        },
+        _sum: { amount: true },
+      });
+      const totalCarteiraValue = Number(totalCarteira._sum.amount || 0);
+      const overdueValue = Number(overduePayments._sum.amount || 0);
+      const delinquencyPct = totalCarteiraValue > 0 ? (overdueValue / totalCarteiraValue) * 100 : 0;
 
-        const revenue = Number(revenueAgg._sum.amount || 0);
+      const revenue = Number(revenueAgg._sum.amount || 0);
 
-        return {
-          lawyerId: l.id,
-          lawyerName: l.name,
-          revenue,
-          caseCount: activeCases,
-          archivedCount: archivedCases,
-          avgTicket: activeCases > 0 ? revenue / activeCases : 0,
-          avgPaymentDays,
-          delinquencyPct,
-          delinquencyAmount: overdueValue,
-        };
-      }),
-    );
+      rows.push({
+        lawyerId: l.id,
+        lawyerName: l.name,
+        revenue,
+        caseCount: activeCases,
+        archivedCount: archivedCases,
+        avgTicket: activeCases > 0 ? revenue / activeCases : 0,
+        avgPaymentDays,
+        delinquencyPct,
+        delinquencyAmount: overdueValue,
+      });
+    }
 
     const sortedRows = rows
       .filter((r) => r.revenue > 0 || r.caseCount > 0) // pula advogados sem atividade

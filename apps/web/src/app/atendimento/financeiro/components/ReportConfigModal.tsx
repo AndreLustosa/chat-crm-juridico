@@ -116,7 +116,11 @@ export default function ReportConfigModal({
       if (card.kind === 'extrato-receitas') body.type = 'RECEITA';
       if (card.kind === 'extrato-despesas') body.type = 'DESPESA';
 
-      const res = await api.post(card.endpoint, body, { responseType: 'blob' });
+      // Timeout de 60s pra request — se backend trava, frontend cancela
+      const res = await api.post(card.endpoint, body, {
+        responseType: 'blob',
+        timeout: 60_000,
+      });
       const blob = new Blob([res.data], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
@@ -124,7 +128,25 @@ export default function ReportConfigModal({
       showSuccess('PDF pronto.');
       onGenerated();
     } catch (e: any) {
-      showError(e?.response?.data?.message || 'Erro ao gerar PDF');
+      // Diferencia timeout de erro de aplicacao
+      if (e?.code === 'ECONNABORTED') {
+        showError('Geracao demorou mais de 60s. Tente reduzir periodo ou filtros.');
+      } else if (e?.response?.status === 503) {
+        showError('Sistema sobrecarregado. Tente novamente em 1 minuto.');
+      } else {
+        // Quando responseType=blob, body do erro vem como Blob — converte pra texto
+        let msg = 'Erro ao gerar PDF';
+        if (e?.response?.data instanceof Blob) {
+          try {
+            const text = await e.response.data.text();
+            const parsed = JSON.parse(text);
+            msg = parsed.message || msg;
+          } catch { /* fallback */ }
+        } else if (e?.response?.data?.message) {
+          msg = e.response.data.message;
+        }
+        showError(msg);
+      }
     } finally {
       setSubmitting(false);
     }
