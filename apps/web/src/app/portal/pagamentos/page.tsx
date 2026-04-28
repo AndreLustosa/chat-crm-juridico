@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, AlertCircle, CreditCard, Copy, ExternalLink, CheckCircle2, Clock, AlertTriangle, FileText } from 'lucide-react';
+import { Loader2, AlertCircle, CreditCard, Copy, ExternalLink, CheckCircle2, Clock, AlertTriangle, FileText, Bell, BellOff } from 'lucide-react';
 import { PortalHeader } from '../components/PortalHeader';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
@@ -61,6 +61,11 @@ export default function PagamentosPage() {
   const router = useRouter();
   const [data, setData] = useState<PaymentsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Toggle de opt-out de avisos via WhatsApp. null = ainda carregando,
+  // bool = preferencia atual. Disabled=true significa que cliente NAO
+  // recebe lembretes/cobrancas via WhatsApp.
+  const [remindersDisabled, setRemindersDisabled] = useState<boolean | null>(null);
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   useEffect(() => {
     fetch(`${API_BASE}/portal/payments`, { credentials: 'include' })
@@ -73,13 +78,79 @@ export default function PagamentosPage() {
       .catch(e => setError(e.message || 'Falha ao carregar'));
   }, [router]);
 
+  // Carrega preferencias separadamente (endpoint separado pra UI poder
+  // mostrar a lista mesmo se prefs falharem)
+  useEffect(() => {
+    fetch(`${API_BASE}/portal/payments/preferences`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setRemindersDisabled(!!d.remindersDisabled); })
+      .catch(() => setRemindersDisabled(false));
+  }, []);
+
+  async function toggleReminders() {
+    if (remindersDisabled === null || savingPrefs) return;
+    const next = !remindersDisabled;
+    setSavingPrefs(true);
+    // Otimismo: ja muda na UI. Reverte se PATCH falhar.
+    setRemindersDisabled(next);
+    try {
+      const res = await fetch(`${API_BASE}/portal/payments/preferences`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remindersDisabled: next }),
+      });
+      if (!res.ok) throw new Error('falha');
+    } catch {
+      setRemindersDisabled(!next); // revert
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
+
   return (
     <>
       <PortalHeader showBack />
       <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold mb-1">Seus pagamentos</h1>
-          <p className="text-white/50 text-sm">Honorários, entradas e parcelas relacionados aos seus casos.</p>
+        <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Seus pagamentos</h1>
+            <p className="text-white/50 text-sm">Honorários, entradas e parcelas relacionados aos seus casos.</p>
+          </div>
+          {/* Toggle WhatsApp — opt-out de lembretes/cobranca pelo cliente.
+              Esconde enquanto carrega (null) pra evitar piscar no estado
+              errado. Visivel mesmo sem pagamento, pra cliente poder
+              configurar antes de receber a 1a cobranca. */}
+          {remindersDisabled !== null && (
+            <button
+              onClick={toggleReminders}
+              disabled={savingPrefs}
+              className={`flex items-start gap-3 px-4 py-3 rounded-xl border transition-colors disabled:opacity-50 ${
+                remindersDisabled
+                  ? 'border-white/15 bg-white/5 hover:bg-white/10'
+                  : 'border-[#A89048]/40 bg-[#A89048]/5 hover:bg-[#A89048]/10'
+              }`}
+              title={remindersDisabled
+                ? 'Você não recebe lembretes de pagamento via WhatsApp'
+                : 'Você recebe lembretes de pagamento via WhatsApp'}
+            >
+              <div className="shrink-0 mt-0.5">
+                {remindersDisabled
+                  ? <BellOff size={16} className="text-white/40" />
+                  : <Bell size={16} className="text-[#A89048]" />}
+              </div>
+              <div className="text-left">
+                <p className={`text-xs font-bold uppercase tracking-wider ${
+                  remindersDisabled ? 'text-white/40' : 'text-[#A89048]'
+                }`}>
+                  Avisos no WhatsApp
+                </p>
+                <p className="text-[10px] text-white/50 mt-0.5">
+                  {remindersDisabled ? 'Desligado · clique pra ativar' : 'Ativado · clique pra desligar'}
+                </p>
+              </div>
+            </button>
+          )}
         </div>
 
         {data === null && !error && (
