@@ -43,6 +43,7 @@ model Tenant {
   lead_profiles             LeadProfile[]
   organization_profile      OrganizationProfile?
   monthly_goals             MonthlyGoal[]
+  financial_attachments     FinancialTransactionAttachment[]
 }
 
 model User {
@@ -95,6 +96,7 @@ model User {
   financial_transactions   FinancialTransaction[] @relation("FinancialLawyer")
   monthly_goals_as_lawyer  MonthlyGoal[]          @relation("MonthlyGoalLawyer")
   monthly_goals_created    MonthlyGoal[]          @relation("MonthlyGoalCreator")
+  financial_attachments_uploaded FinancialTransactionAttachment[] @relation("FinancialAttachmentUploader")
   tax_records              TaxRecord[]            @relation("TaxRecordLawyer")
   conversation_notes       ConversationNote[]     @relation("ConversationNoteAuthor")
   broadcast_jobs           BroadcastJob[]
@@ -1472,6 +1474,7 @@ model FinancialTransaction {
   lead_honorario_payment LeadHonorarioPayment?  @relation(fields: [lead_honorario_payment_id], references: [id], onDelete: SetNull)
   gateway_charge         PaymentGatewayCharge?
   nota_fiscal       NotaFiscal?
+  attachments       FinancialTransactionAttachment[]
 
   @@index([tenant_id, date])
   @@index([type, status])
@@ -1480,6 +1483,31 @@ model FinancialTransaction {
   @@index([lawyer_id])
   @@index([category])
   @@index([due_date, status])
+}
+
+/// Anexos vinculados a uma FinancialTransaction (receitas/despesas).
+/// Pre-requisito do "Pacote de comprovantes" pra contadora.
+/// Suporta arquivos PDF e imagens (JPG, PNG). Limite de 10MB por arquivo
+/// validado no controller.
+model FinancialTransactionAttachment {
+  id             String   @id @default(uuid())
+  tenant_id      String?
+  transaction_id String
+  filename       String   /// Nome original do arquivo (ex: "nota-fiscal-001.pdf")
+  mime_type      String   /// "application/pdf", "image/jpeg", etc
+  size_bytes     Int
+  /// S3 key (ou path local) onde o arquivo esta armazenado.
+  /// Padrao: "financial-attachments/<tenant_id>/<transaction_id>/<id>-<filename>"
+  storage_key    String
+  uploaded_by_id String?
+  created_at     DateTime @default(now())
+
+  tenant       Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  transaction  FinancialTransaction @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
+  uploaded_by  User?                @relation("FinancialAttachmentUploader", fields: [uploaded_by_id], references: [id], onDelete: SetNull)
+
+  @@index([transaction_id])
+  @@index([tenant_id, created_at])
 }
 
 model FinancialCategory {
