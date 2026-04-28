@@ -277,30 +277,43 @@ export class MonthlyGoalsService {
     const year = now.getUTCFullYear();
     const month = now.getUTCMonth() + 1;
 
-    const goal = await this.prisma.monthlyGoal.findFirst({
-      where: {
-        ...(tenantId ? { tenant_id: tenantId } : {}),
-        lawyer_id: lawyerId,
-        year,
-        month,
-        kind,
-        deleted_at: null,
-      },
-    });
+    // Busca meta + nome do advogado em paralelo (nome usado no subtitulo do card)
+    const [goal, lawyer, realized, officeFallback] = await Promise.all([
+      this.prisma.monthlyGoal.findFirst({
+        where: {
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+          lawyer_id: lawyerId,
+          year, month, kind,
+          deleted_at: null,
+        },
+      }),
+      lawyerId
+        ? this.prisma.user.findUnique({ where: { id: lawyerId }, select: { id: true, name: true } })
+        : Promise.resolve(null),
+      this.computeRealizedValue({ tenantId, year, month, lawyerId, kind }),
+      // Fallback OFFICE: quando filtro=advogado e ele nao tem meta individual,
+      // a UI pode mostrar a meta do escritorio. Pra escopo OFFICE, isso e null.
+      lawyerId
+        ? this.prisma.monthlyGoal.findFirst({
+            where: {
+              ...(tenantId ? { tenant_id: tenantId } : {}),
+              lawyer_id: null,
+              year, month, kind,
+              deleted_at: null,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
 
-    const realized = await this.computeRealizedValue({
-      tenantId,
-      year,
-      month,
-      lawyerId,
-      kind,
-    });
+    const dayOfMonth = now.getUTCDate();
+    const daysInMo = this.daysInMonth(year, month);
 
     if (!goal) {
       return {
         hasGoal: false,
         scope: lawyerId ? 'LAWYER' : 'OFFICE',
         lawyerId,
+        lawyerName: lawyer?.name || null,
         kind,
         year,
         month,
@@ -309,13 +322,15 @@ export class MonthlyGoalsService {
         progressPct: null,
         projection: null,
         status: null,
+        // Fallback meta do escritorio quando lawyer nao tem propria
+        officeFallback: officeFallback
+          ? { goalId: officeFallback.id, target: Number(officeFallback.value) }
+          : null,
       };
     }
 
     const target = Number(goal.value);
     const progressPct = target > 0 ? (realized / target) * 100 : 0;
-    const dayOfMonth = now.getUTCDate();
-    const daysInMo = this.daysInMonth(year, month);
     const projection = dayOfMonth >= 1 ? (realized / dayOfMonth) * daysInMo : null;
     const status = this.computeStatus(progressPct, year, month);
 
@@ -324,6 +339,7 @@ export class MonthlyGoalsService {
       goalId: goal.id,
       scope: lawyerId ? 'LAWYER' : 'OFFICE',
       lawyerId,
+      lawyerName: lawyer?.name || null,
       kind,
       year,
       month,
@@ -332,6 +348,7 @@ export class MonthlyGoalsService {
       progressPct,
       projection,
       status,
+      officeFallback: null,
     };
   }
 

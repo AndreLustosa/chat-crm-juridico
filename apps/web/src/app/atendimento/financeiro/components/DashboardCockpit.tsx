@@ -37,9 +37,10 @@ import {
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
-import { DonutByArea, ForecastChart, ExportButton, GoalEditor } from './DashboardCockpitExtras';
+import { DonutByArea, ForecastChart, ExportButton } from './DashboardCockpitExtras';
 import NewChargeModal from './NewChargeModal';
 import type { ChargeResult as ChargeResultPayload } from './NewChargeModal';
+import GoalCard from './GoalCard';
 
 /* ──────────────────────────────────────────────────────────────
    Types
@@ -428,7 +429,12 @@ function KpiCard({
   );
 }
 
-function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
+function KpiGrid({ data, loading, lawyerId, lawyers }: {
+  data: Kpis | null;
+  loading: boolean;
+  lawyerId: string;
+  lawyers?: Array<{ id: string; name: string }>;
+}) {
   if (loading) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -515,7 +521,7 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
         />
       </div>
 
-      <MonthlyGoalCard goal={data.monthlyGoal} />
+      <GoalCard lawyerId={lawyerId} lawyers={lawyers} />
     </div>
   );
 }
@@ -650,59 +656,6 @@ function formatComparedLabel(fromIso: string, kind: string): string {
     return `${dt.getUTCFullYear()}`;
   }
   return `${months[dt.getUTCMonth()]}/${dt.getUTCFullYear()}`;
-}
-
-function MonthlyGoalCard({ goal }: { goal: Kpis['monthlyGoal'] }) {
-  const { isAdmin } = useRole();
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  // Sem meta cadastrada — mostra CTA pra criar (admin only)
-  if (!goal) {
-    if (!isAdmin) return null;
-    return (
-      <div className="bg-card border border-dashed border-border rounded-xl p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Target size={14} className="text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Sem meta cadastrada para o mês</span>
-          </div>
-          <GoalEditor isAdmin={isAdmin} onSaved={() => setRefreshKey((k) => k + 1)} />
-        </div>
-      </div>
-    );
-  }
-
-  const pct = Math.min(100, goal.progressPct);
-  const onTrack = pct >= 90;
-  const close = pct >= 60 && pct < 90;
-  return (
-    <div className="bg-card border border-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Target size={14} className="text-purple-400" />
-          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">Meta do mês</h3>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-xs text-muted-foreground">
-            {fmt(goal.realized)} / {fmt(goal.target)}
-          </div>
-          <GoalEditor isAdmin={isAdmin} onSaved={() => setRefreshKey((k) => k + 1)} />
-        </div>
-      </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${onTrack ? 'bg-emerald-400' : close ? 'bg-amber-400' : 'bg-red-400'}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="flex items-center justify-between mt-1 text-[10px] text-muted-foreground">
-        <span>{goal.progressPct.toFixed(1)}% atingido</span>
-        <span>
-          {onTrack ? '🎯 No alvo' : close ? '⚠️ Atenção' : '🔴 Distante'}
-        </span>
-      </div>
-    </div>
-  );
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -1247,9 +1200,11 @@ interface DashboardCockpitProps {
   lawyerId: string;
   /** Compare mode: previous-month (default) ou previous-year. */
   compare?: 'previous-month' | 'previous-year';
+  /** Lista de advogados pra modais (Definir meta, etc). Vazio quando nao-admin. */
+  lawyers?: Array<{ id: string; name: string }>;
 }
 
-export default function DashboardCockpit({ from, to, lawyerId, compare = 'previous-month' }: DashboardCockpitProps) {
+export default function DashboardCockpit({ from, to, lawyerId, compare = 'previous-month', lawyers }: DashboardCockpitProps) {
   const [urgent, setUrgent] = useState<UrgentActions | null>(null);
   const [kpis, setKpis] = useState<Kpis | null>(null);
   const [byLawyer, setByLawyer] = useState<RevenueByLawyer[] | null>(null);
@@ -1331,7 +1286,7 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
       <UrgentBanner data={urgent} onJumpTo={handleJumpTo} />
 
       {/* Layer 2: KPIs */}
-      <KpiGrid data={kpis} loading={loadingFirstFold} />
+      <KpiGrid data={kpis} loading={loadingFirstFold} lawyerId={lawyerId} lawyers={lawyers} />
 
       {/* A7 — Faixa "Mês a mês" entre KPIs e Análises */}
       <MonthOverMonthStrip data={kpis} />

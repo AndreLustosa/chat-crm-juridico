@@ -990,6 +990,7 @@ export default function FinanceiroPage() {
               from={startDate}
               to={endDate}
               lawyerId={effectiveLawyerId}
+              lawyers={lawyers}
             />
           );
         })()}
