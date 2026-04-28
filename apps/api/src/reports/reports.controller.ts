@@ -1,5 +1,5 @@
 import {
-  Body, Controller, ForbiddenException, Post, Request, Res, UseGuards,
+  Body, Controller, ForbiddenException, Get, Post, Query, Request, Res, UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -9,6 +9,24 @@ import { ReportsService } from './reports.service';
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly service: ReportsService) {}
+
+  /**
+   * GET /reports/history
+   * Lista histórico do tenant. ASSOCIADO/ADVOGADO veem apenas próprios.
+   */
+  @Get('history')
+  async history(
+    @Query('limit') limit: string,
+    @Request() req: any,
+  ) {
+    const roles: string[] = req.user?.roles || [];
+    const isAdmin = roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+    return this.service.listHistory({
+      tenantId: req.user.tenant_id,
+      userId: isAdmin ? undefined : req.user.id,
+      limit: limit ? Math.min(200, parseInt(limit, 10)) : 50,
+    });
+  }
 
   /**
    * POST /reports/dashboard-snapshot
@@ -81,6 +99,14 @@ export class ReportsController {
     });
 
     const filename = buildFilename('dashboard-snapshot', body.from, body.to);
+    // Registra no historico (fire-and-forget)
+    this.service.recordHistory({
+      tenantId: req.user.tenant_id,
+      userId: req.user.id,
+      kind: 'dashboard-snapshot',
+      displayName: `Dashboard — ${formatPeriodLabel(body.from, body.to)}`,
+      payload: body,
+    });
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
@@ -137,6 +163,13 @@ export class ReportsController {
 
     const prefix = body.type === 'RECEITA' ? 'extrato-receitas' : 'extrato-despesas';
     const filename = buildFilename(prefix, body.from, body.to);
+    this.service.recordHistory({
+      tenantId: req.user.tenant_id,
+      userId: req.user.id,
+      kind: body.type === 'RECEITA' ? 'extrato-receitas' : 'extrato-despesas',
+      displayName: `${body.type === 'RECEITA' ? 'Extrato de receitas' : 'Extrato de despesas'} — ${formatPeriodLabel(body.from, body.to)}`,
+      payload: body,
+    });
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
@@ -185,6 +218,13 @@ export class ReportsController {
 
     const today = new Date().toISOString().slice(0, 10);
     const filename = `cobrancas-${body.filter}-${today}.pdf`;
+    this.service.recordHistory({
+      tenantId: req.user.tenant_id,
+      userId: req.user.id,
+      kind: 'charges-list',
+      displayName: `Cobranças (${body.filter}) — ${today}`,
+      payload: body,
+    });
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${filename}"`,
@@ -192,6 +232,16 @@ export class ReportsController {
     });
     res.send(buf);
   }
+}
+
+function formatPeriodLabel(from: string, to: string): string {
+  const f = new Date(from);
+  const t = new Date(to);
+  const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  if (f.getUTCMonth() === t.getUTCMonth() && f.getUTCFullYear() === t.getUTCFullYear()) {
+    return `${months[f.getUTCMonth()]}/${f.getUTCFullYear()}`;
+  }
+  return `${from.slice(0, 10)} a ${to.slice(0, 10)}`;
 }
 
 function buildFilename(prefix: string, from: string, to: string): string {

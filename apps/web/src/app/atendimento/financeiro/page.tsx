@@ -14,6 +14,7 @@ import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
 import DashboardCockpit from './components/DashboardCockpit';
 import GoalsManagementTab from './components/GoalsManagementTab';
+import ReportsTab from './components/ReportsTab';
 
 /** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
 const formatCNJ = (num: string | null | undefined): string => {
@@ -68,7 +69,7 @@ interface Transaction {
 /* ──────────────────────────────────────────────────────────────
    Constants
 ────────────────────────────────────────────────────────────── */
-const TABS = ['Resumo', 'Metas', 'Receitas', 'Despesas', 'Cobrancas', 'Processos', 'Clientes', 'Inadimplencia', 'Log'] as const;
+const TABS = ['Resumo', 'Metas', 'Relatorios', 'Receitas', 'Despesas', 'Cobrancas', 'Processos', 'Clientes', 'Inadimplencia', 'Log'] as const;
 type Tab = typeof TABS[number];
 
 const PERIODS = [
@@ -844,6 +845,7 @@ export default function FinanceiroPage() {
   const tabIcons: Record<Tab, any> = {
     Resumo: BarChart3,
     Metas: Target,
+    Relatorios: FileText,
     Receitas: TrendingUp,
     Despesas: TrendingDown,
     Cobrancas: CreditCard,
@@ -1000,6 +1002,9 @@ export default function FinanceiroPage() {
 
         {/* ─── TAB: Metas (gestao completa) ─── */}
         {tab === 'Metas' && <GoalsManagementTab lawyers={lawyers} />}
+
+        {/* ─── TAB: Relatorios (catalogo + historico) ─── */}
+        {tab === 'Relatorios' && <ReportsTab lawyers={lawyers} />}
 
         {/* ─── TAB: Receitas ─── */}
         {tab === 'Receitas' && <ReceitasTab receitas={receitas} onRefresh={fetchData} lawyerId={effectiveLawyerId} />}

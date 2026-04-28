@@ -30,6 +30,50 @@ export class ReportsService {
     private goalsService: MonthlyGoalsService,
   ) {}
 
+  // ─── Histórico de geração ─────────────────────────────
+
+  /**
+   * Registra um relatório gerado no histórico.
+   * Não bloqueia o response — fire-and-forget é aceitável aqui.
+   */
+  async recordHistory(params: {
+    tenantId?: string;
+    userId: string;
+    kind: string;
+    displayName: string;
+    payload: any;
+  }) {
+    try {
+      await this.prisma.report.create({
+        data: {
+          tenant_id: params.tenantId || null,
+          user_id: params.userId,
+          kind: params.kind,
+          display_name: params.displayName,
+          params: params.payload,
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`[REPORTS] historico falhou (silencioso): ${(e as Error).message}`);
+    }
+  }
+
+  /** Lista histórico do tenant com paginação. */
+  async listHistory(params: { tenantId?: string; userId?: string; limit?: number }) {
+    const { tenantId, userId, limit = 50 } = params;
+    return this.prisma.report.findMany({
+      where: {
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+        ...(userId ? { user_id: userId } : {}),
+      },
+      include: {
+        user: { select: { id: true, name: true } },
+      },
+      orderBy: { generated_at: 'desc' },
+      take: limit,
+    });
+  }
+
   // ─── Dashboard Snapshot ───────────────────────────────
 
   async generateDashboardSnapshot(params: {

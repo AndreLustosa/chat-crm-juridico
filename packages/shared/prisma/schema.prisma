@@ -44,6 +44,7 @@ model Tenant {
   organization_profile      OrganizationProfile?
   monthly_goals             MonthlyGoal[]
   financial_attachments     FinancialTransactionAttachment[]
+  reports                   Report[]
 }
 
 model User {
@@ -97,6 +98,7 @@ model User {
   monthly_goals_as_lawyer  MonthlyGoal[]          @relation("MonthlyGoalLawyer")
   monthly_goals_created    MonthlyGoal[]          @relation("MonthlyGoalCreator")
   financial_attachments_uploaded FinancialTransactionAttachment[] @relation("FinancialAttachmentUploader")
+  reports_generated        Report[]               @relation("ReportGeneratedBy")
   tax_records              TaxRecord[]            @relation("TaxRecordLawyer")
   conversation_notes       ConversationNote[]     @relation("ConversationNoteAuthor")
   broadcast_jobs           BroadcastJob[]
@@ -1483,6 +1485,32 @@ model FinancialTransaction {
   @@index([lawyer_id])
   @@index([category])
   @@index([due_date, status])
+}
+
+/// Histórico de relatórios gerados — auditoria + re-download.
+/// PDFs são regenerados sob demanda a partir dos params salvos (mais simples
+/// que armazenar blobs no S3 e expira sozinho). Registros antigos podem ser
+/// purgados via cron (default: 90 dias).
+model Report {
+  id          String   @id @default(uuid())
+  tenant_id   String?
+  user_id     String?  /// quem gerou (auditoria)
+  /// Tipo do relatório: 'dashboard-snapshot', 'transactions-statement',
+  /// 'charges-list', 'dre', 'cash-flow', etc.
+  kind        String
+  /// Parâmetros originais (period, lawyerId, filters, etc) — usados pra
+  /// regenerar o PDF idêntico ao primeiro download.
+  params      Json
+  /// Display name pra UI (ex.: "Snapshot dashboard — Abril/2026")
+  display_name String
+  generated_at DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user   User?   @relation("ReportGeneratedBy", fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([tenant_id, generated_at])
+  @@index([user_id, generated_at])
+  @@index([kind])
 }
 
 /// Anexos vinculados a uma FinancialTransaction (receitas/despesas).
