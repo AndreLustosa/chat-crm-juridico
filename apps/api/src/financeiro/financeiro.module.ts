@@ -6,6 +6,7 @@ import { FinancialDashboardService } from './financial-dashboard.service';
 import { FinancialDashboardController } from './financial-dashboard.controller';
 import { MonthlyGoalsService } from './monthly-goals.service';
 import { MonthlyGoalsController } from './monthly-goals.controller';
+import { MonthlyGoalsAlertCronService } from './monthly-goals-alert-cron.service';
 import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
@@ -20,6 +21,9 @@ import { GatewayModule } from '../gateway/gateway.module';
     TaxService,
     FinancialDashboardService,
     MonthlyGoalsService,
+    // Cron diario que alerta metas REALIZED em risco a partir do dia 25.
+    // Nao exportado — auto-discoverable pelo @nestjs/schedule.
+    MonthlyGoalsAlertCronService,
   ],
   exports: [
     FinanceiroService,
