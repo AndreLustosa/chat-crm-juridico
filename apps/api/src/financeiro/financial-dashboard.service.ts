@@ -2,6 +2,24 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
+ * Tipos de filtro suportados pela tabela operacional (Layer 4).
+ *
+ * Adicionados em B3 (refinamento visual com tabs+contadores):
+ *  - no_cpf: leads sem cpf_cnpj com cobranca pendente
+ *  - to_send: PENDENTE com lead com CPF mas sem gateway_charge ainda
+ *  - due_today: due_date == hoje (acionavel)
+ */
+export type ChargeFilter =
+  | 'all'
+  | 'overdue'
+  | 'pending'
+  | 'paid'
+  | 'awaiting_alvara'
+  | 'no_cpf'
+  | 'to_send'
+  | 'due_today';
+
+/**
  * Service novo do dashboard financeiro (cockpit).
  *
  * Coexiste com FinanceiroService (legado) — endpoints antigos continuam
@@ -837,27 +855,22 @@ export class FinancialDashboardService {
    * Filtros: status (overdue, pending, paid, awaiting_alvara), search (nome/CPF),
    * lawyer, paginação.
    */
-  async getOperationalCharges(params: {
-    tenantId?: string;
-    lawyerId?: string;
-    filter?: 'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'all';
-    search?: string;
-    page?: number;
-    pageSize?: number;
-  }) {
-    const {
-      tenantId,
-      lawyerId,
-      filter = 'all',
-      search,
-      page = 1,
-      pageSize = 20,
-    } = params;
-
+  /**
+   * Tipo dos filtros suportados na tabela operacional.
+   *
+   * Adicionados em B3 (refinamento visual):
+   *  - no_cpf: leads sem cpf_cnpj E status nao pago
+   *  - to_send: pendente sem gateway charge (ainda precisa gerar)
+   *  - due_today: due_date = hoje (acionavel hoje)
+   */
+  private buildChargeWhere(
+    filter: ChargeFilter,
+    tenantId?: string,
+    lawyerId?: string,
+  ): any {
     const today = this.startOfDay(new Date());
-    const skip = Math.max(0, (page - 1) * pageSize);
+    const tomorrow = this.addDays(today, 1);
 
-    // Where para HonorarioPayment (case)
     const caseWhere: any = { honorario: {} };
     if (tenantId) caseWhere.honorario.tenant_id = tenantId;
     if (lawyerId) caseWhere.honorario.legal_case = { lawyer_id: lawyerId };
@@ -873,9 +886,84 @@ export class FinancialDashboardService {
     } else if (filter === 'awaiting_alvara') {
       caseWhere.status = { in: ['PENDENTE', 'ATRASADO'] };
       caseWhere.due_date = null;
+    } else if (filter === 'no_cpf') {
+      caseWhere.status = { in: ['PENDENTE', 'ATRASADO'] };
+      caseWhere.honorario.legal_case = {
+        ...(caseWhere.honorario.legal_case || {}),
+        lead: { cpf_cnpj: null },
+      };
+    } else if (filter === 'to_send') {
+      caseWhere.status = 'PENDENTE';
+      caseWhere.gateway_charge = { is: null };
+      // tem que ter lead com cpf (senao seria 'no_cpf')
+      caseWhere.honorario.legal_case = {
+        ...(caseWhere.honorario.legal_case || {}),
+        lead: { cpf_cnpj: { not: null } },
+      };
+    } else if (filter === 'due_today') {
+      caseWhere.status = 'PENDENTE';
+      caseWhere.due_date = { gte: today, lt: tomorrow };
     } else {
       caseWhere.status = { in: ['PENDENTE', 'ATRASADO', 'PAGO'] };
     }
+    return caseWhere;
+  }
+
+  /**
+   * Conta itens por filtro pra tabs com contadores (B3).
+   * Roda 6 queries em paralelo. Cada uma e um count() rapido.
+   */
+  async getChargesCounts(params: { tenantId?: string; lawyerId?: string; search?: string }) {
+    const { tenantId, lawyerId, search } = params;
+
+    const filters: ChargeFilter[] = ['all', 'overdue', 'pending', 'paid', 'awaiting_alvara', 'no_cpf', 'to_send', 'due_today'];
+
+    const counts = await Promise.all(
+      filters.map(async (f) => {
+        let where: any = this.buildChargeWhere(f, tenantId, lawyerId);
+        // Aplica busca se fornecida
+        if (search) {
+          const cleanCpfDigits = search.replace(/\D/g, '');
+          const orFilters: any[] = [
+            { honorario: { legal_case: { lead: { name: { contains: search, mode: 'insensitive' } } } } },
+          ];
+          if (cleanCpfDigits.length >= 3) {
+            orFilters.push({
+              honorario: { legal_case: { lead: { cpf_cnpj: { contains: cleanCpfDigits } } } },
+            });
+          }
+          where = { AND: [where, { OR: orFilters }] };
+        }
+        return [f, await this.prisma.honorarioPayment.count({ where })] as const;
+      }),
+    );
+
+    return Object.fromEntries(counts) as Record<ChargeFilter, number>;
+  }
+
+  async getOperationalCharges(params: {
+    tenantId?: string;
+    lawyerId?: string;
+    filter?: ChargeFilter;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const {
+      tenantId,
+      lawyerId,
+      filter = 'all',
+      search,
+      page = 1,
+      pageSize = 20,
+    } = params;
+
+    const skip = Math.max(0, (page - 1) * pageSize);
+
+    // Where comum gerado pelo helper (B3) — busca aplicada como AND externo
+    // pra preservar todos os campos (gateway_charge, lead, status, due_date, etc).
+    const baseWhere = this.buildChargeWhere(filter, tenantId, lawyerId);
+    let finalWhere: any = baseWhere;
 
     if (search) {
       const cleanCpf = search.replace(/\D/g, '');
@@ -887,17 +975,12 @@ export class FinancialDashboardService {
           honorario: { legal_case: { lead: { cpf_cnpj: { contains: cleanCpf } } } },
         });
       }
-      // Mescla com where existente
-      caseWhere.AND = [{ ...caseWhere }, { OR: orFilters }];
-      // Limpa campos top-level (já dentro de AND)
-      delete caseWhere.status;
-      delete caseWhere.due_date;
-      delete caseWhere.honorario;
+      finalWhere = { AND: [baseWhere, { OR: orFilters }] };
     }
 
     const [items, total] = await Promise.all([
       this.prisma.honorarioPayment.findMany({
-        where: caseWhere,
+        where: finalWhere,
         include: {
           honorario: {
             include: {
@@ -937,7 +1020,7 @@ export class FinancialDashboardService {
         skip,
         take: pageSize,
       }),
-      this.prisma.honorarioPayment.count({ where: caseWhere }),
+      this.prisma.honorarioPayment.count({ where: finalWhere }),
     ]);
 
     return {

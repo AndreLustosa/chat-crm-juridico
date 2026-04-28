@@ -117,7 +117,7 @@ export class FinancialDashboardController {
 
   @Get('charges')
   getCharges(
-    @Query('filter') filter: 'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'all',
+    @Query('filter') filter: any,
     @Query('search') search: string,
     @Query('page') page: string,
     @Query('pageSize') pageSize: string,
@@ -132,6 +132,21 @@ export class FinancialDashboardController {
       search: search || undefined,
       page: page ? parseInt(page, 10) : 1,
       pageSize: pageSize ? Math.min(100, parseInt(pageSize, 10)) : 20,
+    });
+  }
+
+  /** B3 — counts por filtro pra tabs com contadores. */
+  @Get('charges/counts')
+  getChargesCounts(
+    @Query('search') search: string,
+    @Query('lawyerId') lawyerId: string,
+    @Request() req: any,
+  ) {
+    const effectiveLawyerId = this.resolveLawyerId(req, lawyerId);
+    return this.service.getChargesCounts({
+      tenantId: req.user.tenant_id,
+      lawyerId: effectiveLawyerId,
+      search: search || undefined,
     });
   }
 

@@ -878,66 +878,69 @@ export default function FinanceiroPage() {
     <div className="h-full overflow-y-auto bg-background">
       <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5 pb-28 md:pb-6">
 
-        {/* ─── Header ─── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-              <DollarSign size={20} className="text-emerald-400" />
+        {/* ─── Header (B6 — compacto com subtitulo + pills) ─── */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center">
+              <DollarSign size={18} className="text-emerald-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-foreground">Financeiro</h1>
-              <p className="text-xs text-muted-foreground">Gestao de receitas, despesas e inadimplencia</p>
+              <h1 className="text-lg font-semibold text-foreground leading-tight">Financeiro</h1>
+              {/* B6 — subtitulo dinamico com periodo + comparacao */}
+              <p className="text-[11px] text-muted-foreground">
+                {(() => {
+                  const label = period.startsWith('mes-')
+                    ? MONTH_NAMES[parseInt(period.split('-')[1])]
+                    : (PERIODS.find(p => p.value === period)?.label || 'Mês');
+                  // Compara com periodo anterior do mesmo tipo
+                  const compareWith = period.startsWith('mes-')
+                    ? MONTH_NAMES[Math.max(0, parseInt(period.split('-')[1]) - 1)]
+                    : period === 'mes' ? MONTH_NAMES[Math.max(0, new Date().getUTCMonth() - 1)] : 'período anterior';
+                  return `${label}/${new Date().getUTCFullYear()} · comparando com ${compareWith}`;
+                })()}
+              </p>
             </div>
           </div>
 
-          {/* Filtro por advogado (admin/financeiro) */}
-          {(isAdmin || isFinanceiro) && lawyers.length > 0 && (
-            <select
-              value={filterLawyerId}
-              onChange={e => setFilterLawyerId(e.target.value)}
-              className="px-3 py-2 text-xs bg-card border border-border rounded-xl focus:outline-none"
-            >
-              <option value="">Todos os advogados</option>
-              {lawyers.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Filtro por advogado (admin/financeiro) — pill compacta */}
+            {(isAdmin || isFinanceiro) && lawyers.length > 0 && (
+              <select
+                value={filterLawyerId}
+                onChange={e => setFilterLawyerId(e.target.value)}
+                className="px-2.5 py-1.5 text-[11px] bg-card border border-border rounded-lg focus:outline-none"
+              >
+                <option value="">Todos advogados</option>
+                {lawyers.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            )}
 
-          {/* Saldo Asaas */}
-          {asaasBalance !== null && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-xl">
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Saldo Asaas</span>
-              <span className={`text-base font-bold ${asaasBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(asaasBalance)}
-              </span>
-            </div>
-          )}
+            {/* Saldo Asaas — chip compacto */}
+            {asaasBalance !== null && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-card border border-border rounded-lg">
+                <span className="text-[9px] text-muted-foreground uppercase tracking-wide font-medium">Asaas</span>
+                <span className={`text-xs font-semibold tabular-nums ${asaasBalance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(asaasBalance)}
+                </span>
+              </div>
+            )}
 
-          {/* Period Selector */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-card border border-border rounded-xl p-1">
-              {PERIODS.map((p) => (
-                <button
-                  key={p.value}
-                  onClick={() => setPeriod(p.value)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    period === p.value
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-accent/30'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
+            {/* Period Selector — pill compacta unica (B6) */}
             <select
-              value={period.startsWith('mes-') ? period : ''}
-              onChange={e => { if (e.target.value) setPeriod(e.target.value); }}
-              className="px-3 py-2 text-xs bg-card border border-border rounded-xl text-foreground focus:outline-none"
+              value={period}
+              onChange={e => setPeriod(e.target.value)}
+              className="px-2.5 py-1.5 text-[11px] bg-card border border-border rounded-lg text-foreground focus:outline-none"
             >
-              <option value="">Mês...</option>
-              {MONTH_NAMES.map((name, idx) => (
-                <option key={idx} value={`mes-${idx}`}>{name}</option>
-              ))}
+              <optgroup label="Período">
+                {PERIODS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Mês específico">
+                {MONTH_NAMES.map((name, idx) => (
+                  <option key={idx} value={`mes-${idx}`}>{name}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
         </div>

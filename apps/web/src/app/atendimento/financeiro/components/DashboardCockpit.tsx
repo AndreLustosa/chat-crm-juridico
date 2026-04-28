@@ -803,19 +803,24 @@ function AgingChart({ data, loading, onSelectBucket }: { data: AgingBucket[] | n
    Layer 4: OperationalTable (com inline-CPF)
 ────────────────────────────────────────────────────────────── */
 
+// B3 — filtros expandidos da tabela
+type ChargeFilter = 'all' | 'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'no_cpf' | 'to_send' | 'due_today';
+type ChargeCounts = Record<ChargeFilter, number>;
+
 function OperationalTable({
   filter,
   setFilter,
   searchInit,
   lawyerId,
 }: {
-  filter: 'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'all';
-  setFilter: (f: 'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'all') => void;
+  filter: ChargeFilter;
+  setFilter: (f: ChargeFilter) => void;
   searchInit?: string;
   lawyerId?: string;
 }) {
   const [data, setData] = useState<ChargesPage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [counts, setCounts] = useState<ChargeCounts | null>(null);
   const [search, setSearch] = useState(searchInit || '');
   const [searchInput, setSearchInput] = useState(searchInit || '');
   const [page, setPage] = useState(1);
@@ -840,9 +845,28 @@ function OperationalTable({
     }
   }, [filter, search, page, lawyerId]);
 
+  // B3 — fetch dos contadores (refresh quando search muda ou apos inline-cpf)
+  const fetchCounts = useCallback(async () => {
+    try {
+      const r = await api.get('/financeiro/dashboard/charges/counts', {
+        params: {
+          search: search || undefined,
+          lawyerId: lawyerId || undefined,
+        },
+      });
+      setCounts(r.data);
+    } catch {
+      // sem contadores nao quebra a tabela
+    }
+  }, [search, lawyerId]);
+
   useEffect(() => {
     fetchPage();
   }, [fetchPage]);
+
+  useEffect(() => {
+    fetchCounts();
+  }, [fetchCounts]);
 
   // Debounce do search
   useEffect(() => {
@@ -853,45 +877,63 @@ function OperationalTable({
     return () => clearTimeout(id);
   }, [searchInput]);
 
-  const filterOptions: Array<{ key: typeof filter; label: string; count?: number }> = [
-    { key: 'all', label: 'Todas' },
-    { key: 'overdue', label: 'Atrasadas' },
+  // B3 — abas com contadores. Ordem mais acionavel primeiro.
+  const tabs: Array<{ key: ChargeFilter; label: string }> = [
+    { key: 'no_cpf', label: 'Sem CPF' },
+    { key: 'to_send', label: 'A enviar' },
+    { key: 'overdue', label: 'Vencidas' },
+    { key: 'due_today', label: 'Vence hoje' },
     { key: 'pending', label: 'A vencer' },
-    { key: 'awaiting_alvara', label: 'Aguardando alvará' },
+    { key: 'awaiting_alvara', label: 'Aguard. alvará' },
     { key: 'paid', label: 'Pagas' },
+    { key: 'all', label: 'Todas' },
   ];
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
-      {/* Header com filtros + search */}
-      <div className="p-3 border-b border-border space-y-3">
+      {/* B3 — header com titulo + busca unica + abas com contadores */}
+      <div className="p-3 border-b border-border/60 space-y-2.5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <h3 className="text-sm font-bold text-foreground">Cobranças</h3>
+          <h3 className="text-xs font-semibold text-foreground">Cobranças</h3>
           <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Nome do cliente ou CPF..."
-              className="pl-8 pr-3 py-1.5 text-xs bg-background border border-border rounded-lg w-full sm:w-64 focus:outline-none focus:border-primary"
+              className="pl-7 pr-3 py-1.5 text-[11px] bg-background border border-border rounded-lg w-full sm:w-60 focus:outline-none focus:border-primary"
             />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {filterOptions.map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => {
-                setFilter(opt.key);
-                setPage(1);
-              }}
-              className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                filter === opt.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/30'
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+        {/* B3 — abas com contador embutido. Ativa em primary. Demais cinza. */}
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+          {tabs.map((t) => {
+            const active = filter === t.key;
+            const c = counts?.[t.key];
+            return (
+              <button
+                key={t.key}
+                onClick={() => {
+                  setFilter(t.key);
+                  setPage(1);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/40'
+                }`}
+              >
+                <span>{t.label}</span>
+                {c !== undefined && (
+                  <span
+                    className={`text-[10px] tabular-nums ${
+                      active ? 'opacity-80' : 'text-muted-foreground/70'
+                    }`}
+                  >
+                    ({c})
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1131,7 +1173,7 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
   const [loadingFirstFold, setLoadingFirstFold] = useState(true);
   const [loadingAnalyses, setLoadingAnalyses] = useState(true);
 
-  const [tableFilter, setTableFilter] = useState<'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'all'>('all');
+  const [tableFilter, setTableFilter] = useState<ChargeFilter>('all');
   const [showExtras, setShowExtras] = useState(false);
 
   // First fold: urgent + kpis (banner + cards top-of-page)
@@ -1186,7 +1228,8 @@ export default function DashboardCockpit({ from, to, lawyerId, compare = 'previo
   const handleJumpTo = useCallback((target: 'overdue' | 'awaiting_alvara' | 'no_cpf') => {
     if (target === 'overdue') setTableFilter('overdue');
     else if (target === 'awaiting_alvara') setTableFilter('awaiting_alvara');
-    else setTableFilter('all'); // no_cpf: filtra na busca depois
+    else if (target === 'no_cpf') setTableFilter('no_cpf');
+    else setTableFilter('all');
     // scroll suave pra tabela
     document.getElementById('operational-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
