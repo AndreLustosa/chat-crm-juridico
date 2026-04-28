@@ -99,20 +99,21 @@ export class ReportsService {
       includeCharts, includeDetailTable, observations, orientation,
     } = params;
 
-    // Coleta paralela: KPIs (que ja tem MoM), aging, by-lawyer, charges, goal
-    const [kpis, aging, byLawyer, chargesPage, goalSummary] = await Promise.all([
-      this.dashboardService.getKpis(tenantId, from, to, compare, lawyerId),
-      this.dashboardService.getAging(tenantId, lawyerId),
-      this.dashboardService.getRevenueByLawyer(tenantId, from, to),
-      this.dashboardService.getOperationalCharges({
-        tenantId, lawyerId, filter: 'overdue', pageSize: 100, page: 1,
-      }),
-      this.goalsService.getCurrentMonthSummary({
-        tenantId,
-        scope: lawyerId || 'OFFICE',
-        kind: 'REALIZED',
-      }),
-    ]);
+    // CRITICAL: SEQUENCIAL — getKpis sozinho dispara ate 10 queries internas
+    // (receita+despesa+receivable+overdue+sparkline+meta) e getAging dispara
+    // 10 (5 buckets x 2). Em Promise.all com mais 3 metodos = 25+ queries
+    // paralelas, esgotando pool. Bug 2026-04-28.
+    const kpis = await this.dashboardService.getKpis(tenantId, from, to, compare, lawyerId);
+    const aging = await this.dashboardService.getAging(tenantId, lawyerId);
+    const byLawyer = await this.dashboardService.getRevenueByLawyer(tenantId, from, to);
+    const chargesPage = await this.dashboardService.getOperationalCharges({
+      tenantId, lawyerId, filter: 'overdue', pageSize: 100, page: 1,
+    });
+    const goalSummary = await this.goalsService.getCurrentMonthSummary({
+      tenantId,
+      scope: lawyerId || 'OFFICE',
+      kind: 'REALIZED',
+    });
 
     // Período label
     const fromDate = new Date(from);

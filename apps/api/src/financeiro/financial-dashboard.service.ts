@@ -628,41 +628,41 @@ export class FinancialDashboardService {
     const caseWhere = this.buildCaseHonorarioWhere(tenantId, lawyerId);
     const leadWhere = this.buildLeadHonorarioWhere(tenantId);
 
-    const results = await Promise.all(
-      buckets.map(async (b) => {
-        const dateFilter: any = {};
-        if (b.from && b.to) {
-          dateFilter.gte = b.from;
-          dateFilter.lt = b.to;
-        } else if (b.from && !b.to) {
-          dateFilter.gte = b.from;
-        } else if (!b.from && b.to) {
-          dateFilter.lte = b.to;
-        }
-        // Se key=current, "a vencer" significa due_date >= today
-        const dueDate = b.key === 'current' ? { gte: today } : { not: null, ...dateFilter };
+    // SEQUENCIAL — Promise.all de 5 buckets x 2 queries = 10 paralelas
+    // saturava pool quando combinado com outros metodos do dashboard.
+    // Sequencial gasta ~500ms a mais mas nao derruba a API.
+    const results: Array<{ key: string; label: string; total: number; count: number }> = [];
+    for (const b of buckets) {
+      const dateFilter: any = {};
+      if (b.from && b.to) {
+        dateFilter.gte = b.from;
+        dateFilter.lt = b.to;
+      } else if (b.from && !b.to) {
+        dateFilter.gte = b.from;
+      } else if (!b.from && b.to) {
+        dateFilter.lte = b.to;
+      }
+      // Se key=current, "a vencer" significa due_date >= today
+      const dueDate = b.key === 'current' ? { gte: today } : { not: null, ...dateFilter };
 
-        const [c, l] = await Promise.all([
-          this.prisma.honorarioPayment.aggregate({
-            where: { ...caseWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: dueDate },
-            _sum: { amount: true },
-            _count: { _all: true },
-          }),
-          this.prisma.leadHonorarioPayment.aggregate({
-            where: { ...leadWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: dueDate },
-            _sum: { amount: true },
-            _count: { _all: true },
-          }),
-        ]);
+      const c = await this.prisma.honorarioPayment.aggregate({
+        where: { ...caseWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: dueDate },
+        _sum: { amount: true },
+        _count: { _all: true },
+      });
+      const l = await this.prisma.leadHonorarioPayment.aggregate({
+        where: { ...leadWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: dueDate },
+        _sum: { amount: true },
+        _count: { _all: true },
+      });
 
-        return {
-          key: b.key,
-          label: b.label,
-          total: Number(c._sum.amount || 0) + Number(l._sum.amount || 0),
-          count: (c._count?._all || 0) + (l._count?._all || 0),
-        };
-      }),
-    );
+      results.push({
+        key: b.key,
+        label: b.label,
+        total: Number(c._sum.amount || 0) + Number(l._sum.amount || 0),
+        count: (c._count?._all || 0) + (l._count?._all || 0),
+      });
+    }
 
     return results;
   }

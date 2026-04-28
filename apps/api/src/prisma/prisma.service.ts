@@ -6,11 +6,19 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
+    // Pool de conexoes — default do Prisma eh num_cpus*2+1 (~5-10 em VPS).
+    // Bug 2026-04-28: dashboard + relatorios disparam ate 25 queries paralelas
+    // entre todos os metodos, esgotando pool e derrubando todas as outras
+    // requests (auth, conversas). Forcamos connection_limit=25 e
+    // pool_timeout=20s pra dar folga e tempo de espera quando pool cheio.
+    const baseUrl = process.env.DATABASE_URL || '';
+    const url = baseUrl.includes('connection_limit=')
+      ? baseUrl
+      : baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'connection_limit=25&pool_timeout=20';
+
     super({
       datasources: {
-        db: {
-          url: process.env.DATABASE_URL,
-        },
+        db: { url },
       },
     });
   }
