@@ -683,6 +683,153 @@ export class PaymentGatewayService {
 
   // ─── Reconciliation ────────────────────────────────────
 
+  /**
+   * Dashboard de inadimplência — lista cobrancas PENDING/OVERDUE com
+   * vencimento no passado. Inclui tracking de avisos enviados pelo
+   * PaymentReminderService pra advogado ver de relance:
+   *   - Quantas vezes ja cobrou automaticamente
+   *   - Qual foi o ultimo aviso (por kind: overdue-1d, 3d, 7d, 15d)
+   *   - Quanto tempo passou desde o ultimo aviso
+   *
+   * Agrupa em buckets pra UI mostrar "stages":
+   *   recente   = 1-2 dias atrasado
+   *   atencao   = 3-6 dias
+   *   urgente   = 7-14 dias
+   *   alerta    = 15+ dias (ja saiu da cobranca automatica, advogado decide)
+   */
+  async getOverdueDashboard(tenantId?: string) {
+    const now = new Date();
+    const today0 = new Date(now); today0.setHours(0, 0, 0, 0);
+
+    const charges = await this.prisma.paymentGatewayCharge.findMany({
+      where: {
+        status: { in: ['PENDING', 'OVERDUE'] },
+        due_date: { lt: today0 },
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      include: {
+        honorario_payment: {
+          include: {
+            honorario: {
+              include: {
+                legal_case: {
+                  select: {
+                    id: true,
+                    case_number: true,
+                    legal_area: true,
+                    lead: {
+                      select: {
+                        id: true,
+                        name: true,
+                        phone: true,
+                        payment_reminders_disabled: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        lead_honorario_payment: {
+          include: {
+            lead_honorario: {
+              include: {
+                lead: {
+                  select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    payment_reminders_disabled: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { due_date: 'asc' }, // atraso maior primeiro
+    });
+
+    // Normaliza shape
+    const items = charges.map((c: any) => {
+      const dueDate = c.due_date as Date;
+      const daysOverdue = Math.floor(
+        (today0.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      let bucket: 'recente' | 'atencao' | 'urgente' | 'alerta';
+      if (daysOverdue <= 2) bucket = 'recente';
+      else if (daysOverdue <= 6) bucket = 'atencao';
+      else if (daysOverdue <= 14) bucket = 'urgente';
+      else bucket = 'alerta';
+
+      // Resolve honorario_type + lead via uma das duas FKs (case ou lead-fase)
+      let honorarioType = '';
+      let lead: any = null;
+      let legalCase: any = null;
+      if (c.honorario_payment) {
+        honorarioType = c.honorario_payment.honorario?.type || '';
+        const lc = c.honorario_payment.honorario?.legal_case;
+        if (lc) {
+          legalCase = {
+            id: lc.id,
+            case_number: lc.case_number,
+            legal_area: lc.legal_area,
+          };
+          lead = lc.lead;
+        }
+      } else if (c.lead_honorario_payment) {
+        honorarioType = c.lead_honorario_payment.lead_honorario?.type || '';
+        lead = c.lead_honorario_payment.lead_honorario?.lead;
+      }
+
+      // Notif eligible: so CONTRATUAL/ENTRADA + cliente nao desligou
+      const eligibleForReminder =
+        (honorarioType === 'CONTRATUAL' || honorarioType === 'ENTRADA') &&
+        !lead?.payment_reminders_disabled;
+
+      return {
+        id: c.id,
+        amount: Number(c.amount),
+        due_date: dueDate.toISOString(),
+        days_overdue: daysOverdue,
+        bucket,
+        billing_type: c.billing_type,
+        status: c.status,
+        invoice_url: c.invoice_url,
+        // Tracking
+        reminder_count: c.reminder_count || 0,
+        last_reminder_kind: c.last_reminder_kind,
+        last_reminder_sent_at: c.last_reminder_sent_at?.toISOString() || null,
+        eligible_for_reminder: eligibleForReminder,
+        honorario_type: honorarioType,
+        // Cliente
+        lead: lead ? {
+          id: lead.id,
+          name: lead.name,
+          phone: lead.phone,
+          reminders_disabled: !!lead.payment_reminders_disabled,
+        } : null,
+        legal_case: legalCase,
+      };
+    });
+
+    // Agrega stats
+    const stats = {
+      total: items.length,
+      total_amount: items.reduce((s, i) => s + i.amount, 0),
+      recente: items.filter(i => i.bucket === 'recente').length,
+      atencao: items.filter(i => i.bucket === 'atencao').length,
+      urgente: items.filter(i => i.bucket === 'urgente').length,
+      alerta: items.filter(i => i.bucket === 'alerta').length,
+      // Quantos clientes distintos sao inadimplentes — mais util que charge count
+      // pra entender impacto real
+      unique_clients: new Set(items.map(i => i.lead?.id).filter(Boolean)).size,
+    };
+
+    return { items, stats };
+  }
+
   async reconcile(tenantId?: string) {
     const where: any = { status: 'PENDING', gateway: 'ASAAS' };
     if (tenantId) where.tenant_id = tenantId;

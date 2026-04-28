@@ -288,6 +288,17 @@ export class PaymentGatewayController {
     return this.service.reconcile(tenantId);
   }
 
+  /**
+   * Dashboard de inadimplencia — cobrancas atrasadas com tracking de
+   * avisos automaticos enviados (reminder_count, last_reminder_kind).
+   * Agrupa em buckets (recente/atencao/urgente/alerta) pra advogado
+   * priorizar acoes.
+   */
+  @Get('overdue-dashboard')
+  async getOverdueDashboard(@Req() req: any) {
+    return this.service.getOverdueDashboard(req.user?.tenant_id);
+  }
+
   // ─── Customers ─────────────────────────────────────────
 
   /** Lista clientes vinculados (CRM ↔ Asaas) */

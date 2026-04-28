@@ -210,28 +210,4 @@ export class PortalPaymentsService {
     };
     return map[type] || type;
   }
-
-  // ─── Preferencias de notificacao ─────────────────────────────
-
-  async getPreferences(leadId: string) {
-    const lead = await this.prisma.lead.findUnique({
-      where: { id: leadId },
-      select: { payment_reminders_disabled: true },
-    });
-    return {
-      remindersDisabled: !!lead?.payment_reminders_disabled,
-    };
-  }
-
-  async updatePreferences(leadId: string, remindersDisabled: boolean) {
-    await this.prisma.lead.update({
-      where: { id: leadId },
-      data: { payment_reminders_disabled: remindersDisabled },
-    });
-    this.logger.log(
-      `[PORTAL/prefs] Lead ${leadId} ${remindersDisabled ? 'desligou' : 'ligou'} ` +
-      `lembretes de cobranca`,
-    );
-    return { remindersDisabled };
-  }
 }

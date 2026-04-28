@@ -1235,71 +1235,7 @@ export default function FinanceiroPage() {
         {tab === 'Clientes' && <ClientesSyncTab />}
 
         {/* ─── TAB: Inadimplencia ─── */}
-        {tab === 'Inadimplencia' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
-                <AlertTriangle size={15} className="text-red-400" />
-                Pagamentos em Atraso ({overdue.length})
-              </h2>
-            </div>
-
-            {overdue.length === 0 ? (
-              <div className="bg-card border border-border rounded-xl p-8 text-center">
-                <Check size={32} className="mx-auto text-emerald-400 mb-2" />
-                <p className="text-sm text-muted-foreground">Nenhum pagamento em atraso</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {overdue.map((t) => {
-                  const days = t.due_date ? daysOverdue(t.due_date) : 0;
-                  const clientName = t.lead?.name || 'Cliente desconhecido';
-                  const clientPhone = t.lead?.phone || '';
-                  const caseNumber = formatCNJ(t.legal_case?.case_number);
-                  const reminderMsg = `Ola ${clientName}, verificamos que existe um pagamento pendente no valor de ${fmt(t.amount)} referente ao processo ${caseNumber}. Por gentileza, entre em contato para regularizacao.`;
-
-                  return (
-                    <div key={t.id} className="bg-card border border-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-bold text-foreground truncate">{clientName}</span>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            days > 30 ? 'bg-red-500/15 text-red-400' : days > 7 ? 'bg-amber-500/15 text-amber-400' : 'bg-yellow-500/15 text-yellow-400'
-                          }`}>
-                            {days} dias
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                          <span>Processo: {caseNumber}</span>
-                          <span className="text-red-400 font-bold">{fmt(t.amount)}</span>
-                          {t.due_date && <span>Venc.: {fmtDate(t.due_date)}</span>}
-                        </div>
-                        {clientPhone && (
-                          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                            <Phone size={10} /> {clientPhone}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {clientPhone && (
-                          <a
-                            href={whatsappLink(clientPhone, reminderMsg)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors"
-                          >
-                            <MessageSquare size={13} />
-                            WhatsApp
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+        {tab === 'Inadimplencia' && <InadimplenciaTab />}
 
         {/* ─── TAB: Log de Movimentações ─── */}
         {tab === 'Log' && <AuditLogTab lawyerId={effectiveLawyerId} />}
@@ -3676,6 +3612,303 @@ function ProcessosFinanceiroTab({ lawyerId }: { lawyerId: string }) {
           </div>
         </details>
       )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Componente: Aba Inadimplência (rica, com tracking de avisos)
+══════════════════════════════════════════════════════════════ */
+
+type OverdueItem = {
+  id: string;
+  amount: number;
+  due_date: string;
+  days_overdue: number;
+  bucket: 'recente' | 'atencao' | 'urgente' | 'alerta';
+  billing_type: string;
+  status: string;
+  invoice_url: string | null;
+  reminder_count: number;
+  last_reminder_kind: string | null;
+  last_reminder_sent_at: string | null;
+  eligible_for_reminder: boolean;
+  honorario_type: string;
+  lead: { id: string; name: string | null; phone: string; reminders_disabled: boolean } | null;
+  legal_case: { id: string; case_number: string | null; legal_area: string | null } | null;
+};
+
+type OverdueDashboard = {
+  items: OverdueItem[];
+  stats: {
+    total: number;
+    total_amount: number;
+    recente: number;
+    atencao: number;
+    urgente: number;
+    alerta: number;
+    unique_clients: number;
+  };
+};
+
+const BUCKET_CFG: Record<OverdueItem['bucket'], { label: string; class: string; description: string }> = {
+  recente:  { label: 'Recente (1-2d)',     class: 'bg-yellow-500/15 text-yellow-500 border-yellow-500/30', description: 'Cobrança automática enviada' },
+  atencao:  { label: 'Atenção (3-6d)',     class: 'bg-amber-500/15 text-amber-500 border-amber-500/30',  description: '2ª cobrança enviada' },
+  urgente:  { label: 'Urgente (7-14d)',    class: 'bg-orange-500/15 text-orange-500 border-orange-500/30', description: 'Última cobrança automática enviada' },
+  alerta:   { label: 'Crítico (15d+)',     class: 'bg-red-500/15 text-red-500 border-red-500/30',          description: 'Sem mais cobrança automática — ação manual' },
+};
+
+const REMINDER_KIND_LABEL: Record<string, string> = {
+  'initial':     '✉️ Cobrança inicial',
+  'pre-due-3d':  '🔔 Lembrete -3d',
+  'pre-due-1d':  '🔔 Lembrete -1d',
+  'pre-due-0d':  '🔔 Vence hoje',
+  'overdue-1d':  '⏰ Atraso 1d',
+  'overdue-3d':  '⚠️ Atraso 3d',
+  'overdue-7d':  '🚨 Atraso 7d',
+  'overdue-15d': '🛑 Crítico 15d+',
+};
+
+function fmtBRL(n: number): string {
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function fmtDateBr(iso: string): string {
+  return new Date(iso).toLocaleDateString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
+  });
+}
+
+function whatsappUrl(phone: string, msg: string): string {
+  const digits = phone.replace(/\D/g, '');
+  return `https://wa.me/${digits}?text=${encodeURIComponent(msg)}`;
+}
+
+function InadimplenciaTab() {
+  const [data, setData] = useState<OverdueDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [bucketFilter, setBucketFilter] = useState<OverdueItem['bucket'] | 'all'>('all');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/payment-gateway/overdue-dashboard');
+      setData(res.data);
+    } catch {
+      showError('Erro ao carregar dashboard de inadimplência');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 size={20} className="animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { items, stats } = data;
+  const visible = bucketFilter === 'all' ? items : items.filter(i => i.bucket === bucketFilter);
+
+  return (
+    <div className="space-y-4">
+      {/* Header — total + sumario */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+            <AlertTriangle size={15} className="text-red-400" />
+            Inadimplência ({stats.total})
+          </h2>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {stats.unique_clients} {stats.unique_clients === 1 ? 'cliente' : 'clientes'} ·
+            Total em aberto: <span className="font-bold text-red-400">{fmtBRL(stats.total_amount)}</span>
+          </p>
+        </div>
+      </div>
+
+      {/* Buckets — filtro visual */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {(['recente', 'atencao', 'urgente', 'alerta'] as const).map(b => {
+          const cfg = BUCKET_CFG[b];
+          const count = stats[b];
+          const active = bucketFilter === b;
+          return (
+            <button
+              key={b}
+              onClick={() => setBucketFilter(active ? 'all' : b)}
+              className={`p-3 rounded-xl border text-left transition-all ${
+                active
+                  ? `${cfg.class} ring-2 ring-current ring-offset-2 ring-offset-background`
+                  : `${cfg.class} hover:opacity-90`
+              } ${count === 0 ? 'opacity-50' : ''}`}
+              title={cfg.description}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">{cfg.label}</span>
+                <span className="text-2xl font-bold tabular-nums">{count}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Reset filter button */}
+      {bucketFilter !== 'all' && (
+        <button
+          onClick={() => setBucketFilter('all')}
+          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+        >
+          <X size={11} /> Limpar filtro
+        </button>
+      )}
+
+      {/* Lista vazia */}
+      {visible.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl p-8 text-center">
+          <Check size={32} className="mx-auto text-emerald-400 mb-2" />
+          <p className="text-sm text-muted-foreground">
+            {bucketFilter === 'all'
+              ? 'Nenhum pagamento em atraso'
+              : `Nenhum pagamento no estágio "${BUCKET_CFG[bucketFilter as OverdueItem['bucket']].label}"`}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visible.map(item => <OverdueRow key={item.id} item={item} onRefresh={load} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverdueRow({ item, onRefresh }: { item: OverdueItem; onRefresh: () => void }) {
+  const cfg = BUCKET_CFG[item.bucket];
+  const clientName = item.lead?.name || 'Cliente desconhecido';
+  const clientPhone = item.lead?.phone || '';
+  const caseNumber = item.legal_case?.case_number ? formatCNJ(item.legal_case.case_number) : null;
+  const lastReminder = item.last_reminder_kind ? REMINDER_KIND_LABEL[item.last_reminder_kind] || item.last_reminder_kind : null;
+
+  // Mensagem manual padrao — copia do reminder automatico, mas advogado
+  // pode editar ao abrir no WhatsApp Web
+  const reminderMsg =
+    `Olá, ${clientName?.split(' ')[0] || 'tudo bem'}!\n\n` +
+    `Verificamos que você tem uma cobrança em aberto:\n` +
+    `💵 Valor: ${fmtBRL(item.amount)}\n` +
+    `📅 Vencimento: ${fmtDateBr(item.due_date)} (${item.days_overdue} dia${item.days_overdue === 1 ? '' : 's'} atrás)\n` +
+    `${caseNumber ? `📁 Processo: ${caseNumber}\n` : ''}` +
+    `\nEntre em contato pra regularizarmos.\n\n` +
+    `_André Lustosa Advogados_`;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 hover:border-primary/30 transition-colors">
+      <div className="flex flex-col gap-3">
+        {/* Top: cliente + dias atraso */}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className="text-sm font-bold text-foreground truncate">{clientName}</span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${cfg.class}`}>
+                {item.days_overdue}d atrás
+              </span>
+              {/* Honorario type badge — destaca SUCUMBENCIA/ACORDO que NAO
+                  recebem cobranca automatica (so manual) */}
+              {item.honorario_type && !item.eligible_for_reminder && (
+                <span
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-violet-500/15 text-violet-400 border border-violet-500/30"
+                  title="Tipo de honorário não recebe cobrança automática"
+                >
+                  {item.honorario_type === 'SUCUMBENCIA' ? '⚖️ Sucumbência' :
+                   item.honorario_type === 'ACORDO' ? '🤝 Acordo' :
+                   item.honorario_type}
+                </span>
+              )}
+              {item.lead?.reminders_disabled && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-gray-500/15 text-gray-400 border border-gray-500/30" title="Cliente desligou avisos por WhatsApp">
+                  🔕 Sem aviso
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+              {caseNumber && <span className="font-mono">{caseNumber}</span>}
+              <span className="text-red-400 font-bold">{fmtBRL(item.amount)}</span>
+              <span>Venc. {fmtDateBr(item.due_date)}</span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/40">
+                {item.billing_type}
+              </span>
+            </div>
+            {clientPhone && (
+              <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1 font-mono">
+                <Phone size={10} /> {clientPhone}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Tracking — historico de avisos automatico */}
+        <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/40 flex-wrap">
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            {item.reminder_count > 0 ? (
+              <>
+                <span className="flex items-center gap-1">
+                  <MessageSquare size={11} className="text-blue-400" />
+                  <strong className="text-foreground">{item.reminder_count}</strong> aviso{item.reminder_count === 1 ? '' : 's'} automático{item.reminder_count === 1 ? '' : 's'}
+                </span>
+                {lastReminder && item.last_reminder_sent_at && (
+                  <span className="text-[10px]">
+                    · Último: <span className="text-foreground">{lastReminder}</span>
+                    <span className="text-muted-foreground/70"> ({fmtDateTime(item.last_reminder_sent_at)})</span>
+                  </span>
+                )}
+              </>
+            ) : item.eligible_for_reminder ? (
+              <span className="italic">Aguardando próximo cron de cobrança</span>
+            ) : (
+              <span className="italic text-violet-400/70">
+                Tipo {item.honorario_type} não dispara cobrança automática
+              </span>
+            )}
+          </div>
+
+          {/* Acoes */}
+          <div className="flex items-center gap-2 shrink-0">
+            {item.invoice_url && (
+              <a
+                href={item.invoice_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-border hover:bg-accent transition-colors"
+                title="Ver fatura no Asaas"
+              >
+                <ExternalLink size={11} /> Fatura
+              </a>
+            )}
+            {clientPhone && (
+              <a
+                href={whatsappUrl(clientPhone, reminderMsg)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors"
+                title="Cobrar manualmente via WhatsApp"
+              >
+                <MessageSquare size={13} />
+                Cobrar manual
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
