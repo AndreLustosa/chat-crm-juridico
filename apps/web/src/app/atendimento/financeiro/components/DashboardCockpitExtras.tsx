@@ -8,7 +8,8 @@
  * o usuário expande a seção, mantendo o first-fold leve.
  *
  * Inclui:
- *  - GoalEditor: edita ou cadastra meta do mês inline (admin only)
+ *  - GoalEditor: REMOVIDO. Substituido pelo GoalsManagerModal multi-step
+ *    (3 abas: mes/ano/replicar) + GoalCard que orquestra a UX completa.
  *  - DonutByArea: receita por área jurídica (donut SVG)
  *  - ForecastChart: 90 dias agrupado por semana com cenários
  *  - ExportButton: exporta dashboard em PDF (jspdf) ou CSV
@@ -16,16 +17,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Pencil,
   PieChart,
   TrendingUp,
   Download,
   FileText,
   Sheet,
   Loader2,
-  Check,
-  X,
-  Target,
   AlertCircle,
   Info,
 } from 'lucide-react';
@@ -55,14 +52,6 @@ interface ForecastResult {
   summary: { raw: number; expected: number; factor: number };
 }
 
-interface MonthlyGoal {
-  id: string;
-  tenant_id: string | null;
-  year: number;
-  month: number;
-  value: string | number;
-}
-
 /* ──────────────────────────────────────────────────────────────
    Helpers
 ────────────────────────────────────────────────────────────── */
@@ -89,166 +78,6 @@ const UNCLASSIFIED_LABEL = 'Não classificada';
 const isUnclassified = (label: string) => label === UNCLASSIFIED_LABEL;
 const colorForArea = (label: string, idx: number) =>
   isUnclassified(label) ? UNCLASSIFIED_COLOR : AREA_COLORS[idx % AREA_COLORS.length];
-
-const MONTH_NAMES = [
-  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
-];
-
-/* ──────────────────────────────────────────────────────────────
-   GoalEditor — admin edita meta do mês
-────────────────────────────────────────────────────────────── */
-
-export function GoalEditor({
-  isAdmin,
-  onSaved,
-}: {
-  isAdmin: boolean;
-  onSaved: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [year, setYear] = useState(new Date().getUTCFullYear());
-  const [month, setMonth] = useState(new Date().getUTCMonth() + 1);
-  const [value, setValue] = useState('');
-  const [propagate, setPropagate] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [existing, setExisting] = useState<MonthlyGoal | null>(null);
-
-  const loadCurrent = useCallback(async () => {
-    try {
-      // Endpoint novo: /financeiro/goals com 3 dimensoes (escopo/tipo/modo).
-      // GoalEditor antigo cobre apenas escopo OFFICE + kind REALIZED.
-      // Modal multi-step novo (no commit B) suporta as outras dimensoes.
-      const r = await api.get('/financeiro/goals', {
-        params: { year, scope: 'OFFICE', kind: 'REALIZED' },
-      });
-      const goals = Array.isArray(r.data) ? r.data : [];
-      const found = goals.find((g: any) => g.month === month) || null;
-      setExisting(found ? { ...found, value: found.target } : null);
-      if (found) setValue(String(found.target));
-    } catch {
-      // silencioso — sem meta ainda
-    }
-  }, [year, month]);
-
-  useEffect(() => {
-    if (editing) loadCurrent();
-  }, [editing, loadCurrent]);
-
-  if (!isAdmin) return null;
-
-  const handleSave = async () => {
-    const num = parseFloat(value.replace(/[^\d,.-]/g, '').replace(',', '.'));
-    if (isNaN(num) || num < 0) {
-      showError('Valor inválido');
-      return;
-    }
-    setSaving(true);
-    try {
-      // Endpoint novo /financeiro/goals com 3 dimensoes — GoalEditor antigo
-      // cobre escopo OFFICE + kind REALIZED + 2 modos (single ou yearly).
-      // Modal multi-step (commit B) sera o caminho completo.
-      const payload = propagate
-        ? { scope: 'OFFICE', kind: 'REALIZED', mode: 'yearly', year, value: num * 12, overwriteConfirmed: true }
-        : { scope: 'OFFICE', kind: 'REALIZED', mode: 'single', year, month, value: num, overwriteConfirmed: true };
-      await api.post('/financeiro/goals', payload);
-      showSuccess(propagate ? `Meta de ${fmt(num)} salva pros 12 meses de ${year}` : `Meta de ${MONTH_NAMES[month - 1]} salva: ${fmt(num)}`);
-      setEditing(false);
-      onSaved();
-    } catch (e: any) {
-      showError(e?.response?.data?.message || 'Erro ao salvar meta');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!editing) {
-    return (
-      <button
-        onClick={() => setEditing(true)}
-        className="flex items-center gap-1.5 text-[10px] font-bold text-purple-400 hover:text-purple-300 hover:underline"
-      >
-        <Pencil size={10} /> Editar meta
-      </button>
-    );
-  }
-
-  return (
-    <div className="bg-card border border-purple-500/30 rounded-xl p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <Target size={14} className="text-purple-400" />
-        <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
-          {existing ? 'Editar' : 'Cadastrar'} meta
-        </h3>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="text-[10px] text-muted-foreground block mb-1">Ano</label>
-          <input
-            type="number"
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value) || year)}
-            className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded focus:outline-none focus:border-primary"
-          />
-        </div>
-        <div>
-          <label className="text-[10px] text-muted-foreground block mb-1">Mês</label>
-          <select
-            value={month}
-            disabled={propagate}
-            onChange={(e) => setMonth(parseInt(e.target.value))}
-            className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded focus:outline-none focus:border-primary disabled:opacity-50"
-          >
-            {MONTH_NAMES.map((n, i) => (
-              <option key={i} value={i + 1}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <label className="text-[10px] text-muted-foreground block mb-1">Valor (R$)</label>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="50000.00"
-          className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded focus:outline-none focus:border-primary tabular-nums"
-        />
-      </div>
-
-      <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
-        <input
-          type="checkbox"
-          checked={propagate}
-          onChange={(e) => setPropagate(e.target.checked)}
-          className="rounded border-border"
-        />
-        <span>Aplicar pros 12 meses do ano</span>
-      </label>
-
-      <div className="flex items-center gap-2">
-        <button
-          disabled={saving}
-          onClick={handleSave}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-xs font-bold disabled:opacity-50"
-        >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-          Salvar
-        </button>
-        <button
-          onClick={() => setEditing(false)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/70 text-muted-foreground text-xs"
-        >
-          <X size={12} /> Cancelar
-        </button>
-      </div>
-    </div>
-  );
-}
 
 /* ──────────────────────────────────────────────────────────────
    DonutByArea
