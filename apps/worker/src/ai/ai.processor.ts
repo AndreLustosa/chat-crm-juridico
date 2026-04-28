@@ -1,19 +1,59 @@
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { S3Service } from '../s3/s3.service';
 import OpenAI, { toFile } from 'openai';
 import axios from 'axios';
-// pdf-parse v1.x tem um side-effect ruim no index.js: tenta abrir
-// ./test/data/05-versions-space.pdf na inicializacao se NODE_ENV !== 'production'
-// (debug check buggy). Importar direto de lib/pdf-parse pula isso e da uma
-// API estavel. Workaround documentado em github.com/modesty/pdf-parse#commonjs
-// O require eh necessario porque @types/pdf-parse so cobre o entry point root.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse: (buffer: Buffer) => Promise<{ text: string; numpages: number }> = require('pdf-parse/lib/pdf-parse.js');
-import mammoth from 'mammoth';
+// pdf-parse v1.x: import LAZY com try/catch defensivo.
+//
+// CONTEXTO (2026-04-28): a primeira tentativa fez require top-level direto:
+//   const pdfParse = require('pdf-parse/lib/pdf-parse.js');
+// Isso quebrou o crm-worker em produção porque a imagem Docker do deploy
+// nao tinha pdf-parse no node_modules (cache de layer Docker antigo nao
+// reinstalou apesar do package.json/lock terem o pacote). O require
+// top-level lancou ENOENT no boot, worker entrou em crash loop, IA parou
+// de responder.
+//
+// Solucao: tenta carregar uma vez e cacheia a referencia (ou null se
+// faltar). extractDocumentText() checa antes de usar e degrada
+// graciosamente — PDF vira "[formato nao suportado]" em vez de crashar
+// o worker inteiro. Mesma estrategia pra mammoth (defesa em profundidade
+// caso o proximo deploy tambem perca dependencia).
+//
+// O require direto de lib/pdf-parse.js eh proposital — o index.js de
+// pdf-parse v1 tem side-effect ruim (tenta abrir um PDF de teste se
+// NODE_ENV !== 'production'). Workaround documentado.
+
+let _pdfParse: ((buffer: Buffer) => Promise<{ text: string; numpages: number }>) | null = null;
+let _mammoth: typeof import('mammoth') | null = null;
+let _depsLoaded = false;
+
+function loadDocDeps(logger: Logger): void {
+  if (_depsLoaded) return;
+  _depsLoaded = true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _pdfParse = require('pdf-parse/lib/pdf-parse.js');
+    logger.log('[AI] pdf-parse carregado (suporte a PDF habilitado)');
+  } catch (e: any) {
+    logger.error(
+      `[AI] pdf-parse INDISPONIVEL — PDFs do cliente nao serao extraidos. ` +
+      `Verifique se o pacote esta no node_modules da imagem. Erro: ${e?.message || e}`,
+    );
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _mammoth = require('mammoth');
+    logger.log('[AI] mammoth carregado (suporte a DOCX habilitado)');
+  } catch (e: any) {
+    logger.error(
+      `[AI] mammoth INDISPONIVEL — DOCX do cliente nao serao extraidos. ` +
+      `Erro: ${e?.message || e}`,
+    );
+  }
+}
 import { SkillRouter } from './skill-router';
 import { ToolExecutor } from './tool-executor';
 import { PromptBuilder } from './prompt-builder';
@@ -36,10 +76,17 @@ const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5', 'claude-'];
 // de novo, a extracao noturna cria Memory entries e LeadProfile automaticamente.
 
 @Processor('ai-jobs')
-export class AiProcessor extends WorkerHost {
+export class AiProcessor extends WorkerHost implements OnModuleInit {
   private readonly logger = new Logger(AiProcessor.name);
   private skillRouter = new SkillRouter();
   private promptBuilder = new PromptBuilder();
+
+  // Tenta carregar pdf-parse e mammoth no boot. Se falhar, loga erro mas
+  // o worker continua subindo — features de PDF/DOCX degradam graciosamente
+  // ate o proximo deploy corrigir o node_modules.
+  onModuleInit() {
+    loadDocDeps(this.logger);
+  }
 
   constructor(
     private prisma: PrismaService,
@@ -475,17 +522,27 @@ export class AiProcessor extends WorkerHost {
     };
 
     try {
-      // PDF
+      // PDF — degrade gracioso se pdf-parse nao foi carregado (deploy
+      // perdeu a dependencia). Worker continua funcionando, IA so nao
+      // ve PDF ate proximo deploy corrigir o node_modules.
       if (mimeBase === 'application/pdf') {
-        const data = await pdfParse(buffer);
+        if (!_pdfParse) {
+          this.logger.warn(`[AI] PDF recebido (msg filename=${filename || '?'}) mas pdf-parse indisponivel — pulando extracao`);
+          return null;
+        }
+        const data = await _pdfParse(buffer);
         const raw = (data?.text || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
         if (!raw.trim()) return null;
         return truncate(raw);
       }
 
-      // DOCX (Office Open XML)
+      // DOCX (Office Open XML) — mesmo padrao defensivo
       if (mimeBase === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        const result = await mammoth.extractRawText({ buffer });
+        if (!_mammoth) {
+          this.logger.warn(`[AI] DOCX recebido (msg filename=${filename || '?'}) mas mammoth indisponivel — pulando extracao`);
+          return null;
+        }
+        const result = await _mammoth.extractRawText({ buffer });
         if (!result?.value?.trim()) return null;
         return truncate(result.value);
       }
