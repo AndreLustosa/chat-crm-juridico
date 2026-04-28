@@ -924,6 +924,9 @@ export class FinancialDashboardService {
               boleto_url: true,
               pix_qr_code: true,
               pix_copy_paste: true,
+              // A6 — usado pra derivar o status Asaas "Enviada" (reminder enviado)
+              reminder_count: true,
+              last_reminder_sent_at: true,
             },
           },
         },

@@ -110,7 +110,70 @@ interface ChargeRow {
     boleto_url: string | null;
     pix_qr_code: string | null;
     pix_copy_paste: string | null;
+    /** A6 — usado pra derivar status "Enviada" (reminder enviado) */
+    reminder_count?: number;
+    last_reminder_sent_at?: string | null;
   } | null;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   A6 — Mapeamento de status Asaas (8 estados)
+────────────────────────────────────────────────────────────── */
+
+type AsaasState =
+  | 'NAO_GERADA'
+  | 'GERADA'
+  | 'ENVIADA'
+  | 'VISUALIZADA'
+  | 'PAGA'
+  | 'VENCIDA'
+  | 'CANCELADA'
+  | 'ESTORNADA';
+
+interface AsaasStatusInfo {
+  state: AsaasState;
+  label: string;
+  color: string;
+}
+
+/**
+ * Deriva o status Asaas a partir do gatewayCharge.
+ *
+ * Mapeamento:
+ *  - sem charge        -> Não gerada
+ *  - PENDING + sem reminder -> Gerada
+ *  - PENDING + reminder enviado -> Enviada
+ *  - RECEIVED/CONFIRMED -> Paga
+ *  - OVERDUE -> Vencida
+ *  - CANCELLED/DELETED -> Cancelada
+ *  - REFUNDED -> Estornada
+ *
+ * "Visualizada" — Asaas nao expoe webhook de visualizacao por default;
+ * tratamos como "Enviada" enquanto nao houver evento.
+ */
+function getAsaasStatus(charge: ChargeRow['gatewayCharge']): AsaasStatusInfo {
+  if (!charge) {
+    return { state: 'NAO_GERADA', label: 'Não gerada', color: 'text-muted-foreground bg-muted/30' };
+  }
+  const s = (charge.status || '').toUpperCase();
+  if (s === 'RECEIVED' || s === 'CONFIRMED' || s === 'RECEIVED_IN_CASH') {
+    return { state: 'PAGA', label: 'Paga', color: 'text-emerald-400 bg-emerald-500/10' };
+  }
+  if (s === 'OVERDUE') {
+    return { state: 'VENCIDA', label: 'Vencida', color: 'text-red-400 bg-red-500/10' };
+  }
+  if (s === 'CANCELLED' || s === 'DELETED') {
+    return { state: 'CANCELADA', label: 'Cancelada', color: 'text-muted-foreground bg-muted/30' };
+  }
+  if (s === 'REFUNDED' || s === 'REFUND_REQUESTED' || s === 'REFUND_IN_PROGRESS') {
+    return { state: 'ESTORNADA', label: 'Estornada', color: 'text-amber-400 bg-amber-500/10' };
+  }
+  // PENDING — diferencia "Gerada" de "Enviada" via tracking de reminder
+  const reminderCount = charge.reminder_count || 0;
+  if (reminderCount > 0) {
+    return { state: 'ENVIADA', label: 'Enviada', color: 'text-blue-400 bg-blue-500/10' };
+  }
+  return { state: 'GERADA', label: 'Gerada', color: 'text-cyan-400 bg-cyan-500/10' };
 }
 
 interface ChargesPage {
@@ -694,21 +757,23 @@ function OperationalTable({
               <th className="px-3 py-2 font-medium">Processo</th>
               <th className="px-3 py-2 font-medium">Vencimento</th>
               <th className="px-3 py-2 font-medium text-right">Valor</th>
-              <th className="px-3 py-2 font-medium">Status</th>
+              {/* A6 — split Status em 2 colunas: pagamento + Asaas */}
+              <th className="px-3 py-2 font-medium">Pagamento</th>
+              <th className="px-3 py-2 font-medium">Asaas</th>
               <th className="px-3 py-2 font-medium">Ações</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center">
+                <td colSpan={7} className="px-3 py-8 text-center">
                   <Loader2 size={16} className="inline animate-spin text-muted-foreground" />
                 </td>
               </tr>
             )}
             {!loading && data && data.items.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
+                <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
                   Nenhuma cobrança encontrada
                 </td>
               </tr>
@@ -755,15 +820,25 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
   const [cpfInput, setCpfInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const isOverdue = row.dueDate && new Date(row.dueDate) < new Date() && row.status !== 'PAGO';
-  const statusLabel: Record<string, { label: string; color: string }> = {
-    PAGO: { label: 'Pago', color: 'text-emerald-400 bg-emerald-500/10' },
-    PENDENTE: isOverdue
-      ? { label: 'Atrasado', color: 'text-red-400 bg-red-500/10' }
-      : { label: 'A vencer', color: 'text-blue-400 bg-blue-500/10' },
-    ATRASADO: { label: 'Atrasado', color: 'text-red-400 bg-red-500/10' },
-  };
-  const st = statusLabel[row.status] || { label: row.status, color: 'text-muted-foreground bg-muted/20' };
+  // A6 — Status do pagamento (4 estados): A vencer, Vence hoje, Atrasado, Pago
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dueDt = row.dueDate ? new Date(row.dueDate) : null;
+  const isToday = dueDt && dueDt.toDateString() === today.toDateString();
+  const isOverdue = dueDt && dueDt < today && row.status !== 'PAGO' && !isToday;
+
+  let st: { label: string; color: string };
+  if (row.status === 'PAGO') {
+    st = { label: 'Pago', color: 'text-emerald-400 bg-emerald-500/10' };
+  } else if (isOverdue) {
+    st = { label: 'Atrasado', color: 'text-red-400 bg-red-500/10' };
+  } else if (isToday) {
+    st = { label: 'Vence hoje', color: 'text-amber-400 bg-amber-500/10' };
+  } else {
+    st = { label: 'A vencer', color: 'text-blue-400 bg-blue-500/10' };
+  }
+
+  // A6 — Status Asaas (8 estados) derivado do gatewayCharge.status
+  const asaasStatus = getAsaasStatus(row.gatewayCharge);
 
   const handleInlineCpf = async () => {
     if (!row.leadId) return;
@@ -844,9 +919,19 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
       </td>
       <td className="px-3 py-2.5 tabular-nums">{fmtDate(row.dueDate)}</td>
       <td className="px-3 py-2.5 text-right tabular-nums font-bold">{fmt(row.amount)}</td>
+      {/* A6 — Status do pagamento */}
       <td className="px-3 py-2.5">
         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${st.color}`}>
           {st.label}
+        </span>
+      </td>
+      {/* A6 — Status Asaas (8 estados) */}
+      <td className="px-3 py-2.5">
+        <span
+          className={`px-2 py-0.5 rounded text-[10px] font-medium ${asaasStatus.color}`}
+          title={`Status no Asaas: ${asaasStatus.label}`}
+        >
+          {asaasStatus.label}
         </span>
       </td>
       <td className="px-3 py-2.5">
