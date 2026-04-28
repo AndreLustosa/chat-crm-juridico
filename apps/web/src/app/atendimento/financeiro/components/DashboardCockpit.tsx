@@ -788,20 +788,26 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
     }
   };
 
+  // A5 — "Cadastrar CPF" so aparece quando o lead nao tem CPF cadastrado
+  // E o pagamento nao esta PAGO (nao adianta cadastrar CPF pra cobranca
+  // que ja foi paga). Bate com o contador `withoutCpf.count` do banner
+  // (que filtra apenas charges em PENDING/OVERDUE).
+  const needsCpf = !row.leadCpf && row.status !== 'PAGO';
+
   return (
     <tr className="border-b border-border/50 hover:bg-accent/20 transition-colors">
       <td className="px-3 py-2.5">
         <div className="font-medium text-foreground">{row.leadName || '—'}</div>
         {row.leadCpf ? (
           <div className="text-[10px] text-muted-foreground tabular-nums">{row.leadCpf}</div>
-        ) : (
+        ) : needsCpf ? (
           <button
             onClick={() => setShowCpfInput((v) => !v)}
             className="text-[10px] text-amber-400 hover:underline flex items-center gap-1"
           >
             <UserPlus size={10} /> Cadastrar CPF
           </button>
-        )}
+        ) : null}
         {showCpfInput && (
           <div className="mt-1 flex items-center gap-1">
             <input
