@@ -11,6 +11,7 @@ import {
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
+import DashboardCockpit from './components/DashboardCockpit';
 
 /** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
 const formatCNJ = (num: string | null | undefined): string => {
@@ -873,16 +874,6 @@ export default function FinanceiroPage() {
     );
   }
 
-  /* ─── Quick stats ─── */
-  const totalTransacoes = receitas.length + despesas.length;
-  const categoryCounts: Record<string, number> = {};
-  [...receitas, ...despesas].forEach((t) => {
-    categoryCounts[t.category] = (categoryCounts[t.category] || 0) + 1;
-  });
-  const topCategories = Object.entries(categoryCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
-
   return (
     <div className="h-full overflow-y-auto bg-background">
       <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5 pb-28 md:pb-6">
@@ -989,193 +980,16 @@ export default function FinanceiroPage() {
           </div>
         )}
 
-        {tab === 'Resumo' && summary && (
-          <div className="space-y-5">
-            {/* KPI Grid — Receitas */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KpiCard
-                icon={DollarSign}
-                label="Total Contratado"
-                value={fmt(summary.totalRevenue + summary.totalReceivable)}
-                color="text-blue-400"
-                bgColor="bg-blue-500/15"
-              />
-              <KpiCard
-                icon={TrendingUp}
-                label="Recebido"
-                value={fmt(summary.totalRevenue)}
-                color="text-emerald-400"
-                bgColor="bg-emerald-500/15"
-              />
-              <KpiCard
-                icon={Clock}
-                label="A Receber"
-                value={fmt(summary.totalReceivable)}
-                color="text-amber-400"
-                bgColor="bg-amber-500/15"
-              />
-              <KpiCard
-                icon={AlertTriangle}
-                label="Atrasado"
-                value={fmt(summary.totalOverdue)}
-                color="text-red-400"
-                bgColor="bg-red-500/15"
-              />
-            </div>
-
-            {/* KPI Grid — Despesas e Saldo */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KpiCard
-                icon={TrendingDown}
-                label="Despesas Pagas"
-                value={fmt(summary.totalExpenses)}
-                color="text-orange-400"
-                bgColor="bg-orange-500/15"
-              />
-              <KpiCard
-                icon={Clock}
-                label="Contas a Pagar"
-                value={fmt(summary.totalPayable)}
-                color="text-rose-400"
-                bgColor="bg-rose-500/15"
-              />
-              <KpiCard
-                icon={Receipt}
-                label="Saldo"
-                value={fmt(summary.totalRevenue - summary.totalExpenses)}
-                color={summary.totalRevenue - summary.totalExpenses >= 0 ? 'text-emerald-400' : 'text-red-400'}
-                bgColor={summary.totalRevenue - summary.totalExpenses >= 0 ? 'bg-emerald-500/15' : 'bg-red-500/15'}
-              />
-              {(() => {
-                const projected = summary.totalRevenue + summary.totalReceivable - summary.totalExpenses - summary.totalPayable;
-                return (
-                  <KpiCard
-                    icon={Target}
-                    label="Total Projetado Mês"
-                    value={fmt(projected)}
-                    color={projected >= 0 ? 'text-violet-400' : 'text-red-400'}
-                    bgColor={projected >= 0 ? 'bg-violet-500/15' : 'bg-red-500/15'}
-                  />
-                );
-              })()}
-            </div>
-
-            {/* Info do advogado filtrado */}
-            {effectiveLawyerId && (
-              <div className="bg-card border border-primary/20 rounded-xl p-4 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center text-primary text-lg font-bold">
-                  {lawyers.find(l => l.id === effectiveLawyerId)?.name?.[0] || userId?.[0]?.toUpperCase() || '?'}
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-foreground">
-                    {lawyers.find(l => l.id === effectiveLawyerId)?.name || 'Meus dados'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {receitas.length} receitas | {despesas.length} despesas | Saldo: {fmt(summary.balance)}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Proximos vencimentos (receitas pendentes) */}
-            {(() => {
-              const now = new Date();
-              const in30d = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-              const upcoming = receitas
-                .filter(r => r.status === 'PENDENTE' && r.due_date && new Date(r.due_date) >= now && new Date(r.due_date) <= in30d)
-                .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
-                .slice(0, 5);
-              if (upcoming.length === 0) return null;
-              return (
-                <div className="bg-card border border-border rounded-xl p-4">
-                  <h3 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
-                    <Clock size={14} className="text-amber-400" /> Proximos Vencimentos (30 dias)
-                  </h3>
-                  <div className="space-y-2">
-                    {upcoming.map(r => {
-                      const dt = new Date(r.due_date!);
-                      const days = Math.ceil((dt.getTime() - now.getTime()) / 86400000);
-                      return (
-                        <div key={r.id} className="flex items-center justify-between text-sm">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className={`text-xs font-bold ${days <= 3 ? 'text-red-400' : days <= 7 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                              {days}d
-                            </span>
-                            <span className="text-foreground truncate max-w-[200px]">{r.description}</span>
-                            {r.lead?.name && <span className="text-xs text-muted-foreground">({r.lead.name})</span>}
-                          </div>
-                          <span className="font-bold text-amber-400 tabular-nums shrink-0">{fmt(r.amount)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Chart */}
-            <MonthlyChart receitas={receitas} despesas={despesas} />
-
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="bg-card border border-border rounded-xl p-4">
-                <h3 className="text-sm font-bold text-foreground mb-3">Resumo do Periodo</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total de Transacoes</span>
-                    <span className="text-foreground font-bold tabular-nums">{totalTransacoes}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Receitas</span>
-                    <span className="text-emerald-400 font-bold tabular-nums">{receitas.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Despesas</span>
-                    <span className="text-red-400 font-bold tabular-nums">{despesas.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Em Atraso</span>
-                    <span className="text-red-400 font-bold tabular-nums">{overdue.length}</span>
-                  </div>
-                  <div className="h-px bg-border my-1" />
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Saldo</span>
-                    <span className={`font-bold tabular-nums ${summary.balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {fmt(summary.balance)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-card border border-border rounded-xl p-4">
-                <h3 className="text-sm font-bold text-foreground mb-3">Categorias Mais Comuns</h3>
-                {topCategories.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Sem dados no periodo</p>
-                ) : (
-                  <div className="space-y-2">
-                    {topCategories.map(([cat, count], i) => {
-                      const pct = Math.max(5, (count / totalTransacoes) * 100);
-                      return (
-                        <div key={cat} className="space-y-1">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-foreground font-semibold">{cat}</span>
-                            <span className="text-muted-foreground tabular-nums">{count}</span>
-                          </div>
-                          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-primary/60 transition-all duration-500"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {tab === 'Resumo' && (() => {
+          const { startDate, endDate } = getPeriodRange(period);
+          return (
+            <DashboardCockpit
+              from={startDate}
+              to={endDate}
+              lawyerId={effectiveLawyerId}
+            />
+          );
+        })()}
 
         {/* ─── TAB: Receitas ─── */}
         {tab === 'Receitas' && <ReceitasTab receitas={receitas} onRefresh={fetchData} lawyerId={effectiveLawyerId} />}
