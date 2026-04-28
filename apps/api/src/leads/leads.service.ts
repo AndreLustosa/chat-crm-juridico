@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
@@ -345,6 +345,77 @@ export class LeadsService {
       where: { id },
       data,
     });
+  }
+
+  // PATCH /leads/:id/phone (ADMIN-only) — troca o telefone do lead/cliente.
+  // Bloqueia se o numero novo ja existir em outro lead (ConflictException com
+  // o lead conflitante no payload pra UI mostrar). Registra audit trail como
+  // LeadNote prefixada [SISTEMA] pra aparecer no timeline.
+  async updatePhone(
+    id: string,
+    rawNewPhone: string,
+    tenantId: string | undefined,
+    actorId: string | undefined,
+  ): Promise<Lead> {
+    const newPhone = toCanonicalBrPhone(rawNewPhone);
+    if (!newPhone) {
+      throw new BadRequestException('Telefone invalido. Use formato BR (DDD + numero).');
+    }
+
+    const current = await this.prisma.lead.findUnique({
+      where: { id },
+      select: { id: true, tenant_id: true, phone: true, name: true },
+    });
+    if (!current) throw new NotFoundException('Lead nao encontrado');
+    if (tenantId && current.tenant_id && current.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado a este recurso');
+    }
+
+    // No-op: telefone ja esta no formato canonico desejado.
+    if (current.phone === newPhone) {
+      return this.prisma.lead.findUniqueOrThrow({ where: { id } });
+    }
+
+    // Detecta conflito cobrindo TODAS as variantes (10/11/12/13 digitos)
+    // pra pegar leads cadastrados em formato legado.
+    const conflict = await this.prisma.lead.findFirst({
+      where: {
+        phone: { in: phoneVariants(newPhone) },
+        id: { not: id },
+      },
+      select: { id: true, name: true, phone: true, is_client: true },
+    });
+    if (conflict) {
+      throw new ConflictException({
+        message: 'Ja existe outro contato com este telefone.',
+        conflict: {
+          id: conflict.id,
+          name: conflict.name,
+          phone: conflict.phone,
+          is_client: (conflict as any).is_client ?? false,
+        },
+      });
+    }
+
+    const updated = await this.prisma.lead.update({
+      where: { id },
+      data: { phone: newPhone },
+    });
+
+    // Audit trail no timeline. Note vai exigir actorId — se nao houver,
+    // pula silenciosamente (acontece so em chamadas internas/seed).
+    if (actorId) {
+      await this.prisma.leadNote.create({
+        data: {
+          lead_id: id,
+          user_id: actorId,
+          text: `[SISTEMA] Telefone alterado de ${current.phone} para ${newPhone}.`,
+        },
+      }).catch(err => this.logger.warn(`[updatePhone] falha ao registrar audit note: ${err}`));
+    }
+
+    this.logger.log(`[updatePhone] lead ${id}: ${current.phone} -> ${newPhone} por ${actorId ?? 'sistema'}`);
+    return updated;
   }
 
   async updateStatus(id: string, stage: string, tenantId?: string, lossReason?: string, actorId?: string): Promise<Lead> {

@@ -193,6 +193,13 @@ export function ClientPanel({
   const [deleting, setDeleting] = useState(false);
   const [docViewer, setDocViewer] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
 
+  // Modal troca de telefone (ADMIN-only). conflict guarda o lead duplicado
+  // quando o backend devolve 409 — UI mostra o nome+id pro admin decidir.
+  const [phoneModal, setPhoneModal] = useState(false);
+  const [newPhone, setNewPhone] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [phoneConflict, setPhoneConflict] = useState<{ id: string; name?: string; phone: string } | null>(null);
+
   // Casos jurídicos
   const [casesOpen, setCasesOpen] = useState(false);
   const [creatingCase, setCreatingCase] = useState(false);
@@ -573,6 +580,47 @@ export function ClientPanel({
     } catch (e) { console.error(e); } finally { setSaving(false); setEditing(null); }
   };
 
+  const openPhoneModal = () => {
+    setNewPhone('');
+    setPhoneConflict(null);
+    setPhoneModal(true);
+  };
+
+  const closePhoneModal = () => {
+    if (savingPhone) return;
+    setPhoneModal(false);
+    setNewPhone('');
+    setPhoneConflict(null);
+  };
+
+  const submitPhoneChange = async () => {
+    if (!lead || !newPhone.trim()) return;
+    const cleaned = newPhone.replace(/\D/g, '');
+    if (cleaned.length < 10 || cleaned.length > 13) {
+      showError('Telefone inválido. Use DDD + número (ex: 82 99913-0127).');
+      return;
+    }
+    setSavingPhone(true);
+    setPhoneConflict(null);
+    try {
+      const { data } = await api.patch(`/leads/${leadId}/phone`, { phone: cleaned });
+      setLead(prev => prev ? { ...prev, phone: data.phone } : prev);
+      showSuccess('Telefone atualizado. As próximas mensagens cairão neste cliente.');
+      setPhoneModal(false);
+      setNewPhone('');
+    } catch (e: any) {
+      const status = e?.response?.status;
+      const payload = e?.response?.data;
+      if (status === 409 && payload?.conflict) {
+        setPhoneConflict(payload.conflict);
+      } else {
+        showError(payload?.message || 'Não foi possível alterar o telefone.');
+      }
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
   const currentAgent = resolvedAgent ?? lead?.conversations?.[0]?.assigned_user ?? null;
   // factsJson/handleResetMemory removidos em 2026-04-20 — reset da memória agora
   // é feito via LeadMemoryPanel (atua em LeadProfile + Memory entries).
@@ -682,9 +730,18 @@ export function ClientPanel({
                     </button>
                   </div>
                   <div className="mt-3 flex flex-col gap-1.5">
-                    <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                    <div className="group flex items-center gap-2 text-[13px] text-muted-foreground min-w-0">
                       <Phone size={13} className="shrink-0" />
                       <span className="font-mono">{formatPhone(lead.phone)}</span>
+                      {isAdmin && (
+                        <button
+                          onClick={openPhoneModal}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0"
+                          title="Alterar telefone (ADMIN)"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      )}
                     </div>
                     <div className="group flex items-center gap-2 text-[13px] text-muted-foreground min-w-0">
                       <Mail size={13} className="shrink-0" />
@@ -1881,6 +1938,88 @@ export function ClientPanel({
               >
                 {savingTask ? <Loader2 size={13} className="animate-spin" /> : <CheckSquare size={13} />}
                 Criar Tarefa
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Modal alterar telefone (ADMIN-only) */}
+      {phoneModal && lead && (
+        <>
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" style={{ zIndex: zBase + 10 }} onClick={closePhoneModal} />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[460px] max-w-[95vw] bg-card border border-border rounded-2xl shadow-2xl p-6 flex flex-col gap-4" style={{ zIndex: zBase + 20 }}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-[15px] font-bold text-foreground flex items-center gap-2">
+                <Phone size={16} className="text-amber-400" />
+                Alterar Telefone
+              </h3>
+              <button onClick={closePhoneModal} disabled={savingPhone} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-accent text-muted-foreground transition-colors disabled:opacity-50">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl text-[12px] text-muted-foreground leading-relaxed flex gap-2">
+              <AlertCircle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="text-amber-300">Atenção:</strong> O número antigo será substituído.
+                As próximas mensagens do WhatsApp do número novo cairão automaticamente neste cliente.
+                O histórico de conversas é preservado.
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Telefone Atual</label>
+                <div className="px-3 py-2 rounded-xl bg-foreground/[0.04] border border-border text-[13px] font-mono text-muted-foreground">
+                  {formatPhone(lead.phone)}
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Telefone Novo *</label>
+                <input
+                  type="tel"
+                  value={newPhone}
+                  onChange={e => { setNewPhone(e.target.value); setPhoneConflict(null); }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !savingPhone) submitPhoneChange(); }}
+                  placeholder="(82) 99913-0127"
+                  autoFocus
+                  className="w-full bg-foreground/[0.04] border border-border rounded-xl px-3 py-2 text-[13px] font-mono text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-amber-400/40"
+                />
+              </div>
+
+              {phoneConflict && (
+                <div className="p-3 bg-destructive/5 border border-destructive/30 rounded-xl flex flex-col gap-1.5">
+                  <p className="text-[11px] font-bold text-destructive flex items-center gap-1.5">
+                    <AlertCircle size={12} /> Conflito: número já cadastrado
+                  </p>
+                  <p className="text-[12px] text-muted-foreground leading-snug">
+                    Já existe outro contato com este número:{' '}
+                    <strong className="text-foreground">{phoneConflict.name || 'Sem nome'}</strong>{' '}
+                    <span className="font-mono text-[11px]">({formatPhone(phoneConflict.phone)})</span>.
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/80">
+                    Use outro número, ou exclua/mescle o contato duplicado primeiro.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-1">
+              <button
+                onClick={closePhoneModal}
+                disabled={savingPhone}
+                className="px-4 py-2 text-[12px] rounded-lg border border-border text-muted-foreground hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={submitPhoneChange}
+                disabled={!newPhone.trim() || savingPhone}
+                className="px-4 py-2 text-[12px] rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {savingPhone ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Confirmar Troca
               </button>
             </div>
           </div>

@@ -3,7 +3,7 @@ import { LeadsService } from './leads.service';
 import { LeadsCleanupService } from './leads-cleanup.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CreateLeadDto, UpdateLeadDto, UpdateLeadStageDto } from './dto/create-lead.dto';
+import { CreateLeadDto, UpdateLeadDto, UpdateLeadStageDto, UpdateLeadPhoneDto } from './dto/create-lead.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('leads')
@@ -88,6 +88,15 @@ export class LeadsController {
   @Patch(':id/stage')
   updateStage(@Param('id') id: string, @Body() body: UpdateLeadStageDto, @Request() req: any) {
     return this.leadsService.updateStatus(id, body.stage, req.user?.tenant_id, body.loss_reason, req.user?.id);
+  }
+
+  // Troca de telefone — separado do PATCH /:id por ser destrutiva (telefone
+  // e a chave do WhatsApp/webhook). ADMIN-only. Conflito retorna 409 com
+  // o lead conflitante no payload pra UI mostrar.
+  @Patch(':id/phone')
+  @Roles('ADMIN')
+  updatePhone(@Param('id') id: string, @Body() body: UpdateLeadPhoneDto, @Request() req: any) {
+    return this.leadsService.updatePhone(id, body.phone, req.user?.tenant_id, req.user?.id);
   }
 
   @Get(':id/timeline')

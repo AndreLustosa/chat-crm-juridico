@@ -63,3 +63,8 @@ export class UpdateLeadStageDto {
   @IsString()
   loss_reason?: string;
 }
+
+export class UpdateLeadPhoneDto {
+  @IsString({ message: 'Telefone e obrigatorio' })
+  phone: string;
+}
