@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { cashRegimeWhere } from '../common/utils/cash-regime.util';
 
 /**
  * Service de Metas Mensais — 3 dimensoes:
@@ -217,21 +218,13 @@ export class MonthlyGoalsService {
     const monthEnd = this.endOfMonth(year, month);
 
     if (kind === 'REALIZED') {
-      // ALINHAMENTO 2026-04-28: usar 'date' em vez de 'paid_at'.
-      //
-      // O resto do sistema (financial-dashboard.service.aggregateRealizedRevenue
-      // que alimenta o KPI "Receita realizada", financeiro.service.getSummary,
-      // getCashFlow) filtra por 'date'. Se aqui filtrarmos por 'paid_at',
-      // o card "Meta do mes" mostra valor diferente do "Receita realizada"
-      // do mesmo mes — acontece quando transacoes tem status=PAGO mas
-      // paid_at null (legado) ou paid_at em outro mes que o date.
-      //
-      // Spec original pedia 'paidAt dentro do mes de referencia', mas
-      // consistencia visual com o KPI grid > literalidade do spec.
+      // Regime de caixa: paid_at quando preenchido (fluxo correto do Asaas),
+      // fallback pra date (dados legados). Helper compartilhado com KPI,
+      // summary, cash-flow, sparkline — todos usam mesma definicao agora.
       const where: any = {
         type: 'RECEITA',
         status: 'PAGO',
-        date: { gte: monthStart, lte: monthEnd },
+        ...cashRegimeWhere(monthStart, monthEnd),
       };
       if (tenantId) where.tenant_id = tenantId;
       if (lawyerId) where.lawyer_id = lawyerId;

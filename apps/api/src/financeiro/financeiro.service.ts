@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto, UpdateTransactionDto, CreateCategoryDto, UpdateCategoryDto } from './financeiro.dto';
+import { cashRegimeWhere, effectiveTransactionDate } from '../common/utils/cash-regime.util';
 
 const DEFAULT_CATEGORIES = [
   { type: 'RECEITA', name: 'Honorarios', icon: 'scale' },
@@ -581,6 +582,37 @@ export class FinanceiroService {
       leadHonWhere.lead_honorario.tenant_id = tenantId;
     }
 
+    // Pra PAGO em regime de caixa, usa paid_at quando preenchido (helper).
+    // Pra PENDENTE, mantemos date (nao houve pagamento ainda).
+    const startD = startDate ? new Date(startDate) : null;
+    const endD = endDate ? new Date(endDate) : null;
+
+    // Where base sem o filtro de date (cashRegimeWhere substitui)
+    const { date: _ignoredDate, ...whereWithoutDate } = where;
+
+    // Receita PAGO: tenant + status not cancelado + (cashRegime com OR) + lawyer
+    const receitaPagoWhere: any = { ...whereWithoutDate };
+    if (lawyerId) receitaPagoWhere.lawyer_id = lawyerId;
+    if (startD && endD) Object.assign(receitaPagoWhere, cashRegimeWhere(startD, endD));
+
+    // Despesa PAGO: combina 2 ORs (lawyer + cashRegime) via AND
+    const despesaPagoWhere: any = { ...whereWithoutDate };
+    const despesaAnds: any[] = [];
+    if (lawyerId) {
+      despesaAnds.push({
+        OR: [{ lawyer_id: lawyerId }, { lawyer_id: null, visible_to_lawyer: true }],
+      });
+    }
+    if (startD && endD) {
+      despesaAnds.push(cashRegimeWhere(startD, endD));
+    }
+    if (despesaAnds.length === 1) {
+      // So 1 condicao — espalha direto (mais simples pro Prisma)
+      Object.assign(despesaPagoWhere, despesaAnds[0]);
+    } else if (despesaAnds.length > 1) {
+      despesaPagoWhere.AND = despesaAnds;
+    }
+
     const [
       totalRevenue,
       totalExpenses,
@@ -592,14 +624,14 @@ export class FinanceiroService {
       awaitingAlvaraAgg,
       awaitingAlvaraLeadAgg,
     ] = await Promise.all([
-      // Receita efetiva (regime de caixa: só PAGO) — advogado só dele
+      // Receita efetiva (regime de caixa: paid_at quando preenchido, fallback date)
       this.prisma.financialTransaction.aggregate({
-        where: { ...receitaWhere, type: 'RECEITA', status: 'PAGO' },
+        where: { ...receitaPagoWhere, type: 'RECEITA', status: 'PAGO' },
         _sum: { amount: true },
       }),
-      // Despesas pagas — advogado vê dele + gerais visíveis
+      // Despesas pagas (regime de caixa) — advogado vê dele + gerais visíveis
       this.prisma.financialTransaction.aggregate({
-        where: { ...despesaWhere, type: 'DESPESA', status: 'PAGO' },
+        where: { ...despesaPagoWhere, type: 'DESPESA', status: 'PAGO' },
         _sum: { amount: true },
       }),
       // Contas a pagar (despesas PENDENTE)
@@ -673,13 +705,22 @@ export class FinanceiroService {
     endDate?: string,
     groupBy: 'day' | 'week' | 'month' = 'month',
   ) {
+    // Cash flow = regime de caixa: agrupa pela data efetiva (paid_at quando
+    // preenchido, fallback date). Inclui transacoes PAGAS dentro do range
+    // pelo paid_at, e PENDENTES pelo date (forecast).
+    const startD = startDate ? new Date(startDate) : null;
+    const endD = endDate ? new Date(endDate) : null;
+
     const where: any = { status: { not: 'CANCELADO' } };
     if (tenantId) where.tenant_id = tenantId;
 
-    if (startDate || endDate) {
-      where.date = {};
-      if (startDate) where.date.gte = new Date(startDate);
-      if (endDate) where.date.lte = new Date(endDate);
+    if (startD && endD) {
+      // Filtra: PAGAS no range (paid_at) OU PENDENTES no range (date)
+      where.OR = [
+        { status: 'PAGO', paid_at: { gte: startD, lte: endD } },
+        { status: 'PAGO', paid_at: null, date: { gte: startD, lte: endD } },
+        { status: 'PENDENTE', date: { gte: startD, lte: endD } },
+      ];
     }
 
     const transactions = await this.prisma.financialTransaction.findMany({
@@ -688,6 +729,7 @@ export class FinanceiroService {
         type: true,
         amount: true,
         date: true,
+        paid_at: true,
         status: true,
       },
       orderBy: { date: 'asc' },
@@ -697,7 +739,9 @@ export class FinanceiroService {
     const groupedMap = new Map<string, { entries: number; exits: number; balance: number }>();
 
     for (const tx of transactions) {
-      const date = new Date(tx.date);
+      // Data efetiva pra agrupamento: paid_at se preenchido + status=PAGO,
+      // senao date (cobre PENDENTES e PAGOS legados)
+      const date = effectiveTransactionDate(tx as any);
       let key: string;
 
       if (groupBy === 'day') {

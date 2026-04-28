@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { cashRegimeWhere, effectiveTransactionDate } from '../common/utils/cash-regime.util';
 
 /**
  * Tipos de filtro suportados pela tabela operacional (Layer 4).
@@ -336,17 +337,14 @@ export class FinancialDashboardService {
     to?: Date,
     lawyerId?: string,
   ): Promise<number> {
+    // Regime de caixa: usa paid_at quando preenchido, fallback pra date.
     const where: any = {
       type: 'RECEITA',
       status: 'PAGO',
+      ...(from && to ? cashRegimeWhere(from, to) : {}),
     };
     if (tenantId) where.tenant_id = tenantId;
     if (lawyerId) where.lawyer_id = lawyerId;
-    if (from || to) {
-      where.date = {};
-      if (from) where.date.gte = from;
-      if (to) where.date.lte = to;
-    }
 
     const agg = await this.prisma.financialTransaction.aggregate({
       where,
@@ -361,19 +359,24 @@ export class FinancialDashboardService {
     to?: Date,
     lawyerId?: string,
   ): Promise<number> {
+    // Despesas: regime de caixa (paid_at preenchido = data de saida real,
+    // senao fallback pra date). Combina com filtro de lawyer via AND.
     const where: any = {
       type: 'DESPESA',
       status: 'PAGO',
     };
     if (tenantId) where.tenant_id = tenantId;
+
+    const ands: any[] = [];
     if (lawyerId) {
-      where.OR = [{ lawyer_id: lawyerId }, { lawyer_id: null, visible_to_lawyer: true }];
+      ands.push({
+        OR: [{ lawyer_id: lawyerId }, { lawyer_id: null, visible_to_lawyer: true }],
+      });
     }
-    if (from || to) {
-      where.date = {};
-      if (from) where.date.gte = from;
-      if (to) where.date.lte = to;
+    if (from && to) {
+      ands.push(cashRegimeWhere(from, to));
     }
+    if (ands.length > 0) where.AND = ands;
 
     const agg = await this.prisma.financialTransaction.aggregate({
       where,
@@ -496,18 +499,20 @@ export class FinancialDashboardService {
   ): Promise<Array<{ date: string; value: number }>> {
     const today = this.startOfDay(new Date());
     const start = this.addDays(today, -(days - 1));
+    const end = this.addDays(today, 1);
 
+    // Regime de caixa: filtra por paid_at quando preenchido, fallback date.
     const where: any = {
       type: 'RECEITA',
       status: 'PAGO',
-      date: { gte: start, lte: this.addDays(today, 1) },
+      ...cashRegimeWhere(start, end),
     };
     if (tenantId) where.tenant_id = tenantId;
     if (lawyerId) where.lawyer_id = lawyerId;
 
     const txs = await this.prisma.financialTransaction.findMany({
       where,
-      select: { date: true, amount: true },
+      select: { date: true, amount: true, paid_at: true, status: true },
     });
 
     const map = new Map<string, number>();
@@ -515,9 +520,11 @@ export class FinancialDashboardService {
       const d = this.addDays(start, i);
       map.set(d.toISOString().slice(0, 10), 0);
     }
+    // Agrupa pela data efetiva (paid_at se preenchido, senao date)
     for (const tx of txs) {
-      const key = new Date(tx.date).toISOString().slice(0, 10);
-      map.set(key, (map.get(key) || 0) + Number(tx.amount));
+      const refDate = effectiveTransactionDate(tx);
+      const key = refDate.toISOString().slice(0, 10);
+      if (map.has(key)) map.set(key, (map.get(key) || 0) + Number(tx.amount));
     }
 
     return Array.from(map.entries()).map(([date, value]) => ({ date, value }));
@@ -703,6 +710,7 @@ export class FinancialDashboardService {
     }
 
     // realized — agrupa FinancialTransaction RECEITA paga por área via legal_case
+    // Regime de caixa: paid_at quando preenchido, fallback pra date.
     const fromDate = from ? new Date(from) : this.firstOfMonth(new Date().getUTCFullYear(), new Date().getUTCMonth());
     const toDate = to ? new Date(to) : new Date();
 
@@ -711,7 +719,7 @@ export class FinancialDashboardService {
         ...(tenantId ? { tenant_id: tenantId } : {}),
         type: 'RECEITA',
         status: 'PAGO',
-        date: { gte: fromDate, lte: toDate },
+        ...cashRegimeWhere(fromDate, toDate),
       },
       select: {
         amount: true,
