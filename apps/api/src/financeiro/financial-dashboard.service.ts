@@ -78,29 +78,30 @@ export class FinancialDashboardService {
    */
   async getUrgentActions(tenantId?: string, lawyerId?: string) {
     const today = this.startOfDay(new Date());
-    const sevenDaysAgo = this.addDays(today, -7);
 
     const caseWhere = this.buildCaseHonorarioWhere(tenantId, lawyerId);
     const leadWhere = this.buildLeadHonorarioWhere(tenantId);
 
-    const [overdue7dCase, overdue7dLead, overdueTodayCase, overdueTodayLead, awaitingCase, awaitingLead] =
+    // A1 — Conciliação: "atrasado" agora = TUDO com due_date < hoje e nao pago.
+    // Antes era so "7+ dias" o que fazia banner divergir do aging. Agora bate.
+    const [overdueAllCase, overdueAllLead, overdueTodayCase, overdueTodayLead, awaitingCase, awaitingLead] =
       await Promise.all([
-        // Atrasadas há 7+ dias (case)
+        // Atrasadas TOTAIS (case) — todas as faixas vencidas
         this.prisma.honorarioPayment.aggregate({
           where: {
             ...caseWhere,
             status: { in: ['PENDENTE', 'ATRASADO'] },
-            due_date: { not: null, lt: sevenDaysAgo },
+            due_date: { not: null, lt: today },
           },
           _count: { _all: true },
           _sum: { amount: true },
         }),
-        // Atrasadas há 7+ dias (lead)
+        // Atrasadas TOTAIS (lead)
         this.prisma.leadHonorarioPayment.aggregate({
           where: {
             ...leadWhere,
             status: { in: ['PENDENTE', 'ATRASADO'] },
-            due_date: { not: null, lt: sevenDaysAgo },
+            due_date: { not: null, lt: today },
           },
           _count: { _all: true },
           _sum: { amount: true },
@@ -178,10 +179,10 @@ export class FinancialDashboardService {
       },
     });
 
-    const overdue7d = {
-      count: (overdue7dCase._count?._all || 0) + (overdue7dLead._count?._all || 0),
+    const overdue = {
+      count: (overdueAllCase._count?._all || 0) + (overdueAllLead._count?._all || 0),
       total:
-        Number(overdue7dCase._sum.amount || 0) + Number(overdue7dLead._sum.amount || 0),
+        Number(overdueAllCase._sum.amount || 0) + Number(overdueAllLead._sum.amount || 0),
     };
     const overdueToday = {
       count: (overdueTodayCase._count?._all || 0) + (overdueTodayLead._count?._all || 0),
@@ -194,13 +195,17 @@ export class FinancialDashboardService {
     };
 
     return {
-      overdue7d,
+      // overdue7d removido — usar apenas overdue (todas faixas) pra bater
+      // com aging e KPI breakdown. Mantido legacy `overdue7d` apontando pro
+      // mesmo objeto pra UI antiga em transicao nao quebrar.
+      overdue,
+      overdue7d: overdue,
       overdueToday,
       awaitingAlvara,
       withoutCpf: { count: leadsWithoutCpf },
       // Quantidade total de itens acionáveis — útil pra mostrar/esconder banner.
       totalActionable:
-        overdue7d.count + overdueToday.count + awaitingAlvara.count + leadsWithoutCpf,
+        overdue.count + overdueToday.count + awaitingAlvara.count + leadsWithoutCpf,
     };
   }
 
@@ -248,9 +253,13 @@ export class FinancialDashboardService {
     ]);
 
     // A receber (com due_date) — snapshot do momento atual, sem janela
-    const [receivable, receivablePrev] = await Promise.all([
+    const [receivable, receivablePrev, receivableDue, receivableOverdue] = await Promise.all([
       this.aggregateReceivable(tenantId, lawyerId, false),
       this.aggregateReceivable(tenantId, lawyerId, true), // "previous" mas só pra MoM diff aproximado
+      // A1 — breakdown: a vencer (due_date >= today)
+      this.aggregateReceivableByDueStatus(tenantId, lawyerId, 'due'),
+      // A1 — breakdown: vencido (due_date < today)
+      this.aggregateReceivableByDueStatus(tenantId, lawyerId, 'overdue'),
     ]);
 
     // Atrasado snapshot
@@ -292,6 +301,10 @@ export class FinancialDashboardService {
         value: receivable,
         previous: receivablePrev,
         deltaPct: this.deltaPct(receivable, receivablePrev),
+        // A1 — breakdown: separa "a vencer" do "vencido" pra UI mostrar
+        // ambos abaixo do valor total. Soma dueValue+overdueValue == value.
+        dueValue: receivableDue,
+        overdueValue: receivableOverdue,
       },
       overdue: { value: overdue },
       sparkline,
@@ -383,6 +396,46 @@ export class FinancialDashboardService {
       }),
       this.prisma.leadHonorarioPayment.aggregate({
         where: { ...leadWhere, ...baseFilter },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    return Number(c._sum.amount || 0) + Number(l._sum.amount || 0);
+  }
+
+  /**
+   * A1 — breakdown do "A receber" por status de vencimento.
+   *  - 'due': due_date >= today (a vencer)
+   *  - 'overdue': due_date < today (vencido)
+   *
+   * Soma 'due' + 'overdue' deve bater com aggregateReceivable().
+   */
+  private async aggregateReceivableByDueStatus(
+    tenantId: string | undefined,
+    lawyerId: string | undefined,
+    kind: 'due' | 'overdue',
+  ): Promise<number> {
+    const today = this.startOfDay(new Date());
+    const caseWhere = this.buildCaseHonorarioWhere(tenantId, lawyerId);
+    const leadWhere = this.buildLeadHonorarioWhere(tenantId);
+
+    const dueDate = kind === 'overdue' ? { not: null, lt: today } : { not: null, gte: today };
+
+    const [c, l] = await Promise.all([
+      this.prisma.honorarioPayment.aggregate({
+        where: {
+          ...caseWhere,
+          status: { in: ['PENDENTE', 'ATRASADO'] },
+          due_date: dueDate,
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.leadHonorarioPayment.aggregate({
+        where: {
+          ...leadWhere,
+          status: { in: ['PENDENTE', 'ATRASADO'] },
+          due_date: dueDate,
+        },
         _sum: { amount: true },
       }),
     ]);

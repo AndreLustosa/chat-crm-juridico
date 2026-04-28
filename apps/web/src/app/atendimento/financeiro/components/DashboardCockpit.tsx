@@ -44,7 +44,9 @@ import { DonutByArea, ForecastChart, ExportButton, GoalEditor } from './Dashboar
 ────────────────────────────────────────────────────────────── */
 
 interface UrgentActions {
-  overdue7d: { count: number; total: number };
+  overdue: { count: number; total: number };
+  /** @deprecated mantido por compat — agora == overdue */
+  overdue7d?: { count: number; total: number };
   overdueToday: { count: number; total: number };
   awaitingAlvara: { count: number; total: number };
   withoutCpf: { count: number };
@@ -56,7 +58,15 @@ interface Kpis {
   revenue: { value: number; previous: number; deltaPct: number | null };
   expenses: { value: number; previous: number; deltaPct: number | null };
   balance: { value: number; previous: number };
-  receivable: { value: number; previous: number; deltaPct: number | null };
+  receivable: {
+    value: number;
+    previous: number;
+    deltaPct: number | null;
+    /** A1 — breakdown: a vencer (due_date >= today) */
+    dueValue?: number;
+    /** A1 — breakdown: vencido (due_date < today) */
+    overdueValue?: number;
+  };
   overdue: { value: number };
   sparkline: Array<{ date: string; value: number }>;
   monthlyGoal: { year: number; month: number; target: number; realized: number; progressPct: number } | null;
@@ -184,8 +194,12 @@ function UrgentBanner({
     total?: number;
     color: string;
   }> = [];
-  if (data.overdue7d.count > 0)
-    items.push({ key: 'overdue', icon: AlertTriangle, label: 'atrasados 7+ dias', count: data.overdue7d.count, total: data.overdue7d.total, color: 'text-red-400' });
+  // A1 — banner agora usa "atrasados" (TODAS as faixas vencidas) pra
+  // bater com aging e KPI breakdown. Subdivisao 1-7d/8-30d/etc fica so
+  // no aging.
+  const overdueData = data.overdue || data.overdue7d;
+  if (overdueData && overdueData.count > 0)
+    items.push({ key: 'overdue', icon: AlertTriangle, label: 'atrasados', count: overdueData.count, total: overdueData.total, color: 'text-red-400' });
   if (data.overdueToday.count > 0)
     items.push({ key: 'overdue', icon: Clock, label: 'vencendo hoje', count: data.overdueToday.count, total: data.overdueToday.total, color: 'text-amber-400' });
   if (data.awaitingAlvara.count > 0)
@@ -238,6 +252,10 @@ function KpiCard({
   bgColor,
   sparkline,
   hint,
+  breakdown,
+  comparedValue,
+  comparedLabel,
+  semantic = 'positive-good',
 }: {
   icon: any;
   label: string;
@@ -247,9 +265,33 @@ function KpiCard({
   bgColor: string;
   sparkline?: Array<{ date: string; value: number }>;
   hint?: string;
+  /** A1 — sub-linhas abaixo do valor (ex: "X a vencer · Y vencido") */
+  breakdown?: Array<{ label: string; value: number; tone?: 'normal' | 'danger' }>;
+  /** A2 — valor numerico do periodo comparado (mostrado entre parenteses) */
+  comparedValue?: number;
+  /** A2 — rotulo curto do periodo comparado (ex: "Mar/2026") */
+  comparedLabel?: string;
+  /** A2 — semantica de cor: subir e bom (Receita/Saldo) ou ruim (Despesas) */
+  semantic?: 'positive-good' | 'positive-bad';
 }) {
-  const deltaPositive = delta !== null && delta !== undefined && delta > 0;
-  const deltaNegative = delta !== null && delta !== undefined && delta < 0;
+  // A2 — variacao entre -2% e +2% e neutra pra evitar flutter visual
+  const isNeutral = delta !== null && delta !== undefined && Math.abs(delta) < 2;
+  const deltaPositive = delta !== null && delta !== undefined && delta > 0 && !isNeutral;
+  const deltaNegative = delta !== null && delta !== undefined && delta < 0 && !isNeutral;
+
+  // Cor semantica: pra Despesas/A receber subir e ruim
+  const isGoodChange =
+    semantic === 'positive-good' ? deltaPositive : deltaNegative;
+  const isBadChange =
+    semantic === 'positive-good' ? deltaNegative : deltaPositive;
+
+  const deltaColorClass = isNeutral
+    ? 'text-muted-foreground'
+    : isGoodChange
+    ? 'text-emerald-400'
+    : isBadChange
+    ? 'text-red-400'
+    : 'text-muted-foreground';
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 hover:border-foreground/20 transition-colors">
@@ -257,21 +299,51 @@ function KpiCard({
         <div className={`w-8 h-8 rounded-lg ${bgColor} flex items-center justify-center`}>
           <Icon size={16} className={color} />
         </div>
-        {delta !== undefined && delta !== null && (
-          <div
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
-              deltaPositive ? 'text-emerald-400 bg-emerald-500/10' : deltaNegative ? 'text-red-400 bg-red-500/10' : 'text-muted-foreground bg-muted/20'
-            }`}
-          >
-            {deltaPositive && <ArrowUp size={10} />}
-            {deltaNegative && <ArrowDown size={10} />}
-            {fmtPct(delta)}
-          </div>
-        )}
       </div>
       <div className="text-lg md:text-xl font-bold text-foreground mb-0.5">{value}</div>
       <div className="text-[11px] text-muted-foreground">{label}</div>
+
+      {/* A2 — linha de comparacao com seta + delta % + valor periodo anterior */}
+      {delta !== undefined && delta !== null && (
+        <div className={`flex items-center gap-1 mt-1 text-[11px] font-medium ${deltaColorClass}`}>
+          {deltaPositive && <ArrowUp size={11} />}
+          {deltaNegative && <ArrowDown size={11} />}
+          {isNeutral && <span className="text-[10px]">—</span>}
+          <span>{fmtPct(delta)}</span>
+          {comparedLabel && comparedValue !== undefined && (
+            <span className="text-muted-foreground">
+              vs {comparedLabel} ({fmt(comparedValue)})
+            </span>
+          )}
+          {comparedLabel && comparedValue === undefined && (
+            <span className="text-muted-foreground">vs {comparedLabel}</span>
+          )}
+        </div>
+      )}
+      {/* Quando nao ha base de comparacao, mostrar "—" */}
+      {(delta === null || delta === undefined) && comparedLabel && (
+        <div className="flex items-center gap-1 mt-1 text-[11px] text-muted-foreground">
+          <span>—</span>
+          <span>vs {comparedLabel}</span>
+        </div>
+      )}
+
       {hint && <div className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</div>}
+
+      {/* A1 — breakdown abaixo (ex: "X a vencer · Y vencido") */}
+      {breakdown && breakdown.length > 0 && (
+        <div className="mt-2 space-y-0.5 text-[11px]">
+          {breakdown.map((b, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <span className="text-muted-foreground">{b.label}</span>
+              <span className={b.tone === 'danger' ? 'text-red-400 font-bold tabular-nums' : 'text-foreground/80 tabular-nums'}>
+                {fmt(b.value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {sparkline && sparkline.length > 1 && (
         <div className="mt-2 -mx-1">
           <Sparkline data={sparkline} color={color.includes('emerald') ? '#10b981' : color.includes('red') ? '#ef4444' : '#3b82f6'} />
@@ -297,6 +369,26 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
   }
   if (!data) return null;
 
+  // A2 — rotulo curto do periodo comparado (ex: "Mar/2026")
+  const comparedLabel = formatComparedLabel(data.period.comparedTo.from, data.period.comparedTo.kind);
+
+  // A2 — Saldo: deltaPct manual (kpis nao retorna por default)
+  const balanceDelta =
+    data.balance.previous !== 0
+      ? ((data.balance.value - data.balance.previous) / Math.abs(data.balance.previous)) * 100
+      : data.balance.value === 0
+      ? 0
+      : null;
+
+  // A1 — breakdown do "A receber"
+  const receivableBreakdown: Array<{ label: string; value: number; tone?: 'normal' | 'danger' }> = [];
+  if (data.receivable.dueValue !== undefined) {
+    receivableBreakdown.push({ label: 'A vencer', value: data.receivable.dueValue });
+  }
+  if (data.receivable.overdueValue !== undefined && data.receivable.overdueValue > 0) {
+    receivableBreakdown.push({ label: 'Vencido', value: data.receivable.overdueValue, tone: 'danger' });
+  }
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -305,16 +397,21 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
           label="Receita realizada"
           value={fmt(data.revenue.value)}
           delta={data.revenue.deltaPct}
+          comparedValue={data.revenue.previous}
+          comparedLabel={comparedLabel}
+          semantic="positive-good"
           color="text-emerald-400"
           bgColor="bg-emerald-500/15"
           sparkline={data.sparkline}
-          hint="vs período anterior"
         />
         <KpiCard
           icon={TrendingDown}
           label="Despesas"
           value={fmt(data.expenses.value)}
           delta={data.expenses.deltaPct}
+          comparedValue={data.expenses.previous}
+          comparedLabel={comparedLabel}
+          semantic="positive-bad"
           color="text-red-400"
           bgColor="bg-red-500/15"
         />
@@ -322,6 +419,10 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
           icon={DollarSign}
           label="Saldo"
           value={fmt(data.balance.value)}
+          delta={balanceDelta}
+          comparedValue={data.balance.previous}
+          comparedLabel={comparedLabel}
+          semantic="positive-good"
           color={data.balance.value >= 0 ? 'text-emerald-400' : 'text-red-400'}
           bgColor={data.balance.value >= 0 ? 'bg-emerald-500/15' : 'bg-red-500/15'}
         />
@@ -330,15 +431,28 @@ function KpiGrid({ data, loading }: { data: Kpis | null; loading: boolean }) {
           label="A receber"
           value={fmt(data.receivable.value)}
           delta={data.receivable.deltaPct}
+          comparedValue={data.receivable.previous}
+          comparedLabel="snapshot anterior"
+          semantic="positive-bad"
           color="text-blue-400"
           bgColor="bg-blue-500/15"
-          hint="só com data de vencimento"
+          breakdown={receivableBreakdown}
         />
       </div>
 
       <MonthlyGoalCard goal={data.monthlyGoal} />
     </div>
   );
+}
+
+/** A2 — Formata "Mar/2026" a partir da data inicial do periodo comparado. */
+function formatComparedLabel(fromIso: string, kind: string): string {
+  const dt = new Date(fromIso);
+  const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  if (kind === 'previous-year') {
+    return `${dt.getUTCFullYear()}`;
+  }
+  return `${months[dt.getUTCMonth()]}/${dt.getUTCFullYear()}`;
 }
 
 function MonthlyGoalCard({ goal }: { goal: Kpis['monthlyGoal'] }) {
