@@ -88,6 +88,15 @@ export default function GoalsManagerModal({
   const [submitting, setSubmitting] = useState(false);
   const [conflicts, setConflicts] = useState<ConflictPreview[] | null>(null);
 
+  // Distribuicao do modo yearly:
+  //   'uniform': divide igual em 12 (default)
+  //   'q4_heavy': 60% no Q4 (Out-Dez), 40% distribuido nos outros 9 meses
+  //   'dec_peak': dezembro 2x mais que outros meses
+  //   'custom':   usuario edita 12 valores manualmente
+  type YearlyDist = 'uniform' | 'q4_heavy' | 'dec_peak' | 'custom';
+  const [yearlyDistribution, setYearlyDistribution] = useState<YearlyDist>('uniform');
+  const [customMonthly, setCustomMonthly] = useState<number[]>(Array(12).fill(0));
+
   const valueNum = parseFloat(valueStr.replace(/[^\d,.-]/g, '').replace(',', '.')) || 0;
 
   // ESC fecha
@@ -110,18 +119,61 @@ export default function GoalsManagerModal({
     if (monthsToReplicate < 1 || monthsToReplicate > 24) errors.push('Quantidade de meses entre 1 e 24');
   }
 
+  /**
+   * Calcula array de 12 valores baseado no preset escolhido (modo yearly).
+   * Soma sempre = valueNum (total anual).
+   */
+  const computeMonthlyValues = (): number[] => {
+    if (yearlyDistribution === 'uniform') {
+      const per = valueNum / 12;
+      return Array(12).fill(+per.toFixed(2));
+    }
+    if (yearlyDistribution === 'q4_heavy') {
+      const q4Total = valueNum * 0.6;       // 60% Q4
+      const other = valueNum * 0.4 / 9;     // 40% / 9 meses
+      const perQ4 = q4Total / 3;
+      return [other, other, other, other, other, other, other, other, other, perQ4, perQ4, perQ4]
+        .map((v) => +v.toFixed(2));
+    }
+    if (yearlyDistribution === 'dec_peak') {
+      // Dezembro = 2x outros meses → 11 + 2 = 13 partes
+      const part = valueNum / 13;
+      const arr = Array(11).fill(part);
+      arr.push(part * 2);
+      return arr.map((v) => +v.toFixed(2));
+    }
+    // custom: usa os valores editados pelo usuario
+    return customMonthly.map((v) => +(v || 0).toFixed(2));
+  };
+
   // ─── Submit ──────────────────────────────────────────
 
-  const buildPayload = (overwriteConfirmed = false) => ({
-    scope,
-    kind,
-    value: valueNum,
-    mode,
-    year,
-    ...(mode !== 'yearly' ? { month } : {}),
-    ...(mode === 'replicate' ? { monthsToReplicate } : {}),
-    overwriteConfirmed,
-  });
+  const buildPayload = (overwriteConfirmed = false) => {
+    // Modo yearly com distribuicao nao-uniforme: usa mode='custom' no backend
+    // com os 12 valores arrays gerados pelo preset escolhido.
+    if (mode === 'yearly' && yearlyDistribution !== 'uniform') {
+      const monthlyValues = computeMonthlyValues().map((v, i) => ({
+        year, month: i + 1, value: v,
+      }));
+      return {
+        scope, kind,
+        value: valueNum, // ignorado em mode=custom mas mantido pra compat
+        mode: 'custom' as const,
+        year,
+        monthlyValues,
+        overwriteConfirmed,
+      };
+    }
+    return {
+      scope, kind,
+      value: valueNum,
+      mode,
+      year,
+      ...(mode !== 'yearly' ? { month } : {}),
+      ...(mode === 'replicate' ? { monthsToReplicate } : {}),
+      overwriteConfirmed,
+    };
+  };
 
   const handleSave = async () => {
     if (errors.length > 0) {
@@ -302,7 +354,16 @@ export default function GoalsManagerModal({
             <SingleMonthFields year={year} setYear={setYear} month={month} setMonth={setMonth} />
           )}
           {mode === 'yearly' && (
-            <YearlyFields year={year} setYear={setYear} valueNum={valueNum} />
+            <YearlyFields
+              year={year}
+              setYear={setYear}
+              valueNum={valueNum}
+              yearlyDistribution={yearlyDistribution}
+              setYearlyDistribution={setYearlyDistribution}
+              customMonthly={customMonthly}
+              setCustomMonthly={setCustomMonthly}
+              computeMonthlyValues={computeMonthlyValues}
+            />
           )}
           {mode === 'replicate' && (
             <ReplicateFields
@@ -389,21 +450,123 @@ function SingleMonthFields({ year, setYear, month, setMonth }: any) {
   );
 }
 
-function YearlyFields({ year, setYear, valueNum }: any) {
+function YearlyFields({
+  year, setYear, valueNum, yearlyDistribution, setYearlyDistribution,
+  customMonthly, setCustomMonthly, computeMonthlyValues,
+}: any) {
+  const presets = [
+    { key: 'uniform', label: 'Uniforme', hint: 'igual em 12 meses' },
+    { key: 'q4_heavy', label: 'Q4 forte', hint: '60% no Q4' },
+    { key: 'dec_peak', label: 'Pico em Dez', hint: 'Dez 2x outros' },
+    { key: 'custom', label: 'Personalizada', hint: 'edite cada mês' },
+  ];
+
+  const monthsValues: number[] = computeMonthlyValues();
+
   return (
-    <div>
-      <label className="text-[11px] font-semibold text-muted-foreground block mb-1">Ano</label>
-      <input
-        type="number"
-        value={year}
-        onChange={(e) => setYear(parseInt(e.target.value) || year)}
-        className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary tabular-nums"
-      />
-      <div className="text-[11px] text-muted-foreground mt-2 flex items-start gap-2">
+    <div className="space-y-3">
+      <div>
+        <label className="text-[11px] font-semibold text-muted-foreground block mb-1">Ano</label>
+        <input
+          type="number"
+          value={year}
+          onChange={(e) => setYear(parseInt(e.target.value) || year)}
+          className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary tabular-nums"
+        />
+      </div>
+
+      {/* Preset de distribuicao */}
+      <div>
+        <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+          Distribuição nos 12 meses
+        </label>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          {presets.map((p) => (
+            <label
+              key={p.key}
+              className={`block p-2 border rounded-lg cursor-pointer transition-colors text-center ${
+                yearlyDistribution === p.key
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:bg-accent/20'
+              }`}
+            >
+              <input
+                type="radio"
+                name="dist"
+                value={p.key}
+                checked={yearlyDistribution === p.key}
+                onChange={() => setYearlyDistribution(p.key)}
+                className="sr-only"
+              />
+              <div className="text-[11px] font-bold text-foreground">{p.label}</div>
+              <div className="text-[10px] text-muted-foreground">{p.hint}</div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Preview dos 12 valores resultantes */}
+      {valueNum > 0 && yearlyDistribution !== 'custom' && (
+        <div className="bg-muted/30 rounded-lg p-2.5">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+            Preview da distribuição
+          </div>
+          <div className="grid grid-cols-6 gap-1 text-[10px]">
+            {MONTH_NAMES.map((n, i) => (
+              <div key={i} className="text-center">
+                <div className="text-muted-foreground">{n.slice(0, 3)}</div>
+                <div className="text-foreground tabular-nums font-semibold">
+                  {fmt(monthsValues[i] || 0)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-1.5 text-right tabular-nums">
+            Total: {fmt(monthsValues.reduce((a: number, b: number) => a + b, 0))}
+          </div>
+        </div>
+      )}
+
+      {/* Edicao customizada por mes */}
+      {yearlyDistribution === 'custom' && (
+        <div className="bg-muted/30 rounded-lg p-2.5 space-y-1.5">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+            Editar valor de cada mês
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+            {MONTH_NAMES.map((n, i) => (
+              <div key={i}>
+                <label className="text-[10px] text-muted-foreground block">{n.slice(0, 3)}</label>
+                <input
+                  type="number"
+                  step="100"
+                  min="0"
+                  value={customMonthly[i] || 0}
+                  onChange={(e) => {
+                    const arr = [...customMonthly];
+                    arr[i] = parseFloat(e.target.value) || 0;
+                    setCustomMonthly(arr);
+                  }}
+                  className="w-full px-2 py-1 text-xs bg-background border border-border rounded tabular-nums focus:outline-none focus:border-primary"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-muted-foreground tabular-nums text-right">
+            Total: {fmt(customMonthly.reduce((a: number, b: number) => a + (b || 0), 0))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-[11px] text-muted-foreground flex items-start gap-2">
         <Calendar size={11} className="mt-0.5 shrink-0" />
         <span>
-          Vamos dividir esse valor igualmente nos 12 meses
-          {valueNum > 0 && ` (${fmt(valueNum / 12)}/mês)`}.
+          {yearlyDistribution === 'uniform' && (
+            <>Vamos dividir o valor igualmente nos 12 meses{valueNum > 0 && ` (${fmt(valueNum / 12)}/mês)`}.</>
+          )}
+          {yearlyDistribution === 'q4_heavy' && 'Concentra 60% do total no Q4 (Out/Nov/Dez), restante distribuído nos outros 9 meses.'}
+          {yearlyDistribution === 'dec_peak' && 'Dezembro recebe 2× o valor dos outros meses.'}
+          {yearlyDistribution === 'custom' && 'Você define o valor de cada mês manualmente. Não precisa somar exatamente o valor total — cada mês é independente.'}
         </span>
       </div>
     </div>

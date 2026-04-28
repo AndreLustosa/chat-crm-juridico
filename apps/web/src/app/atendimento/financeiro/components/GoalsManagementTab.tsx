@@ -20,11 +20,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Target, Pencil, Trash2, Plus, Check, X, Loader2, ArrowUpRight,
+  History, GitCompare, Sigma,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
 import GoalsManagerModal from './GoalsManagerModal';
+import GoalHistoryDrawer from './GoalHistoryDrawer';
 
 type GoalKind = 'REALIZED' | 'CONTRACTED';
 type GoalStatus = 'on_track' | 'warning' | 'behind' | 'achieved' | null;
@@ -75,9 +77,18 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'OFFICE' | string>('ALL');
   const [kindFilter, setKindFilter] = useState<'ALL' | GoalKind>('ALL');
 
+  // Toggles novos
+  const [showYoy, setShowYoy] = useState(false);            // compara com ano anterior
+  const [showCumulative, setShowCumulative] = useState(false); // mostra acumulado Q1-Q4 + ano
+
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+
+  // Drawer de historico
+  const [historyContext, setHistoryContext] = useState<{
+    scope: string; kind: GoalKind; year: number; month: number; label: string;
+  } | null>(null);
 
   const fetchGoals = useCallback(async () => {
     setLoading(true);
@@ -164,6 +175,30 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
             <option value="REALIZED">Realizada</option>
             <option value="CONTRACTED">Contratada</option>
           </select>
+          {/* Toggle YoY (compara com ano anterior) */}
+          <button
+            onClick={() => setShowYoy((v) => !v)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border ${
+              showYoy
+                ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
+                : 'bg-card border-border text-muted-foreground hover:text-foreground'
+            }`}
+            title="Compara com o ano anterior mes a mes"
+          >
+            <GitCompare size={11} /> YoY
+          </button>
+          {/* Toggle acumulado (Q1-Q4 + ano) */}
+          <button
+            onClick={() => setShowCumulative((v) => !v)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border ${
+              showCumulative
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                : 'bg-card border-border text-muted-foreground hover:text-foreground'
+            }`}
+            title="Mostra totais por trimestre e ano"
+          >
+            <Sigma size={11} /> Acumulado
+          </button>
           {/* CTA Definir meta (admin only) */}
           {canEdit && (
             <button
@@ -202,11 +237,15 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
           <ScopeSection
             key={group.label}
             label={group.label}
+            scopeKey={group.rows[0]?.scope === 'OFFICE' ? 'OFFICE' : (group.rows[0]?.lawyerId || 'OFFICE')}
             rows={group.rows}
             year={year}
             kindFilter={kindFilter}
             canEdit={canEdit}
+            showYoy={showYoy}
+            showCumulative={showCumulative}
             onChanged={fetchGoals}
+            onOpenHistory={(scope, kind, m, label) => setHistoryContext({ scope, kind, year, month: m, label })}
           />
         ))}
 
@@ -221,6 +260,18 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
           }}
         />
       )}
+
+      {/* Drawer historico de versoes */}
+      {historyContext && (
+        <GoalHistoryDrawer
+          scope={historyContext.scope}
+          kind={historyContext.kind}
+          year={historyContext.year}
+          month={historyContext.month}
+          contextLabel={historyContext.label}
+          onClose={() => setHistoryContext(null)}
+        />
+      )}
     </div>
   );
 }
@@ -230,15 +281,62 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
 ────────────────────────────────────────────────────────────── */
 
 function ScopeSection({
-  label, rows, year, kindFilter, canEdit, onChanged,
+  label, scopeKey, rows, year, kindFilter, canEdit, showYoy, showCumulative, onChanged, onOpenHistory,
 }: {
   label: string;
+  /** 'OFFICE' ou lawyerId */
+  scopeKey: string;
   rows: GoalRow[];
   year: number;
   kindFilter: 'ALL' | GoalKind;
   canEdit: boolean;
+  showYoy: boolean;
+  showCumulative: boolean;
   onChanged: () => void;
+  onOpenHistory: (scope: string, kind: GoalKind, month: number, label: string) => void;
 }) {
+  // YoY data — fetched on demand quando toggle habilitado
+  const [yoyData, setYoyData] = useState<Array<{
+    month: number;
+    targetThis: number | null;
+    targetPrev: number | null;
+    realizedThis: number;
+    realizedPrev: number;
+    realizedDeltaPct: number | null;
+  }> | null>(null);
+
+  useEffect(() => {
+    if (!showYoy) {
+      setYoyData(null);
+      return;
+    }
+    // Fetch pra cada kind ativo. Quando kindFilter='ALL', pegamos REALIZED como
+    // padrao (mais relevante). Pra ver YoY de CONTRACTED, usuario filtra.
+    const kindForYoy = kindFilter === 'ALL' ? 'REALIZED' : kindFilter;
+    api
+      .get('/financeiro/goals/yoy', { params: { year, scope: scopeKey, kind: kindForYoy } })
+      .then((r) => setYoyData(r.data))
+      .catch(() => { /* silencioso */ });
+  }, [showYoy, year, scopeKey, kindFilter]);
+
+  // Cumulative data
+  const [cumulative, setCumulative] = useState<{
+    quarters: Array<{ key: string; target: number; realized: number; progressPct: number | null }>;
+    annual: { target: number; realized: number; progressPct: number | null };
+  } | null>(null);
+
+  useEffect(() => {
+    if (!showCumulative) {
+      setCumulative(null);
+      return;
+    }
+    const kindForCum = kindFilter === 'ALL' ? 'REALIZED' : kindFilter;
+    api
+      .get('/financeiro/goals/cumulative', { params: { year, scope: scopeKey, kind: kindForCum } })
+      .then((r) => setCumulative(r.data))
+      .catch(() => { /* silencioso */ });
+  }, [showCumulative, year, scopeKey, kindFilter]);
+
   // Agrupa rows por mês — pode ter 2 entries por mês quando kindFilter='ALL'
   // (uma de REALIZED + uma de CONTRACTED).
   const byMonth = useMemo(() => {
@@ -308,12 +406,49 @@ function ScopeSection({
                   showKindCol={kindFilter === 'ALL'}
                   canEdit={canEdit}
                   onChanged={onChanged}
+                  yoy={showYoy && yoyData ? yoyData.find((y) => y.month === m) : undefined}
+                  scopeKey={scopeKey}
+                  scopeLabel={label}
+                  onOpenHistory={onOpenHistory}
                 />
               ));
             })}
           </tbody>
         </table>
       </div>
+
+      {/* Acumulado: rodape com Q1-Q4 + ano (commit H) */}
+      {showCumulative && cumulative && (
+        <div className="border-t border-border bg-muted/10 p-3">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+            Acumulado {year}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            {cumulative.quarters.map((q) => (
+              <div key={q.key} className="bg-card rounded-lg p-2 text-center">
+                <div className="text-[10px] text-muted-foreground">{q.key}</div>
+                <div className="text-xs font-bold text-foreground tabular-nums">{fmt(q.realized)}</div>
+                <div className="text-[10px] text-muted-foreground tabular-nums">/ {fmt(q.target)}</div>
+                {q.progressPct !== null && (
+                  <div className={`text-[10px] tabular-nums ${q.progressPct >= 100 ? 'text-emerald-400' : q.progressPct >= 80 ? 'text-emerald-400' : q.progressPct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {q.progressPct.toFixed(0)}%
+                  </div>
+                )}
+              </div>
+            ))}
+            <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2 text-center">
+              <div className="text-[10px] text-emerald-400 font-bold">Ano</div>
+              <div className="text-xs font-bold text-foreground tabular-nums">{fmt(cumulative.annual.realized)}</div>
+              <div className="text-[10px] text-muted-foreground tabular-nums">/ {fmt(cumulative.annual.target)}</div>
+              {cumulative.annual.progressPct !== null && (
+                <div className={`text-[10px] tabular-nums ${cumulative.annual.progressPct >= 80 ? 'text-emerald-400' : cumulative.annual.progressPct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                  {cumulative.annual.progressPct.toFixed(0)}%
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -323,13 +458,24 @@ function ScopeSection({
 ────────────────────────────────────────────────────────────── */
 
 function GoalTableRow({
-  row, showMonth, showKindCol, canEdit, onChanged,
+  row, showMonth, showKindCol, canEdit, onChanged, yoy, scopeKey, scopeLabel, onOpenHistory,
 }: {
   row: GoalRow;
   showMonth: boolean;
   showKindCol: boolean;
   canEdit: boolean;
   onChanged: () => void;
+  yoy?: {
+    month: number;
+    targetThis: number | null;
+    targetPrev: number | null;
+    realizedThis: number;
+    realizedPrev: number;
+    realizedDeltaPct: number | null;
+  };
+  scopeKey: string;
+  scopeLabel: string;
+  onOpenHistory: (scope: string, kind: GoalKind, month: number, label: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [valueStr, setValueStr] = useState(String(row.target));
@@ -393,7 +539,25 @@ function GoalTableRow({
           <span className="text-foreground font-semibold tabular-nums">{fmt(row.target)}</span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-right text-foreground tabular-nums">{fmt(row.realized)}</td>
+      <td className="px-3 py-2.5 text-right text-foreground tabular-nums">
+        {fmt(row.realized)}
+        {/* YoY: mostra delta abaixo do realizado quando habilitado */}
+        {yoy && yoy.realizedDeltaPct !== null && (
+          <div
+            className={`text-[10px] ${
+              yoy.realizedDeltaPct > 2 ? 'text-emerald-400' : yoy.realizedDeltaPct < -2 ? 'text-red-400' : 'text-muted-foreground'
+            }`}
+            title={`Ano anterior: ${fmt(yoy.realizedPrev)}`}
+          >
+            {yoy.realizedDeltaPct > 0 ? '▲' : yoy.realizedDeltaPct < 0 ? '▼' : '—'}{' '}
+            {yoy.realizedDeltaPct > 0 ? '+' : ''}
+            {yoy.realizedDeltaPct.toFixed(1)}% YoY
+          </div>
+        )}
+        {yoy && yoy.realizedDeltaPct === null && yoy.realizedPrev === 0 && (
+          <div className="text-[10px] text-muted-foreground">— sem base anterior</div>
+        )}
+      </td>
       <td className="px-3 py-2.5 text-right tabular-nums">
         <span className={statusBadge.textColor}>{row.progressPct.toFixed(1)}%</span>
       </td>
@@ -443,6 +607,20 @@ function GoalTableRow({
                 title="Editar valor"
               >
                 <Pencil size={11} />
+              </button>
+              <button
+                onClick={() =>
+                  onOpenHistory(
+                    scopeKey,
+                    row.kind,
+                    row.month,
+                    `${MONTH_NAMES[row.month - 1]}/${row.year} — ${scopeLabel}, ${kindLabel(row.kind)}`,
+                  )
+                }
+                className="p-1 rounded hover:bg-accent/30 text-muted-foreground hover:text-purple-400"
+                title="Ver histórico de versões desta meta"
+              >
+                <History size={11} />
               </button>
               <button
                 onClick={handleDelete}
