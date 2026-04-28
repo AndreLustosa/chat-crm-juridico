@@ -473,22 +473,28 @@ export function ForecastChart({ lawyerId }: { lawyerId: string }) {
 
   const max = data ? Math.max(...data.buckets.map((b) => Math.max(b.expected, b.raw)), 1) : 1;
 
+  // A4 — fator do cenario em texto pra tooltip
+  const scenarioPctText =
+    scenario === 'optimistic' ? '100%' : scenario === 'realistic' ? '85%' : '60%';
+
   return (
     <div className="bg-card border border-border rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <TrendingUp size={14} className="text-cyan-400" />
           <h3 className="text-sm font-bold text-foreground">Projeção {days} dias</h3>
         </div>
         <div className="flex items-center gap-2">
+          {/* A4 — dropdown de cenarios sem o "(85%)" no nome (vai pro tooltip) */}
           <select
             value={scenario}
             onChange={(e) => setScenario(e.target.value as any)}
             className="px-2 py-1 text-[11px] bg-background border border-border rounded focus:outline-none"
+            title="Cenário usado para estimar o quanto será efetivamente recebido."
           >
-            <option value="optimistic">Otimista (100%)</option>
-            <option value="realistic">Realista (85%)</option>
-            <option value="pessimistic">Pessimista (60%)</option>
+            <option value="optimistic">Cenário otimista</option>
+            <option value="realistic">Cenário realista</option>
+            <option value="pessimistic">Cenário pessimista</option>
           </select>
           <select
             value={days}
@@ -503,6 +509,12 @@ export function ForecastChart({ lawyerId }: { lawyerId: string }) {
         </div>
       </div>
 
+      {/* A4 — frase introdutoria explicando o que e a projecao */}
+      <p className="text-[11px] text-muted-foreground mb-3 leading-relaxed">
+        Estimativa de quanto deve ser recebido nos próximos {days} dias, considerando o
+        histórico de pagamento.
+      </p>
+
       {loading && (
         <div className="h-48 flex items-center justify-center">
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
@@ -512,16 +524,34 @@ export function ForecastChart({ lawyerId }: { lawyerId: string }) {
       {!loading && data && (
         <>
           <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-            <div className="bg-muted/30 rounded-lg p-2">
-              <div className="text-[10px] text-muted-foreground">Bruto</div>
+            {/* A4 — Total previsto (era "Bruto") */}
+            <div
+              className="bg-muted/30 rounded-lg p-2"
+              title="Soma de todas as parcelas com vencimento no período, sem desconto."
+            >
+              <div className="text-[10px] text-muted-foreground flex items-center justify-center gap-1">
+                Total previsto <Info size={9} className="opacity-60" />
+              </div>
               <div className="text-sm font-bold text-foreground tabular-nums">{fmt(data.summary.raw)}</div>
             </div>
-            <div className="bg-cyan-500/10 rounded-lg p-2">
-              <div className="text-[10px] text-cyan-400">Esperado</div>
+            {/* A4 — Estimativa realista (era "Esperado") */}
+            <div
+              className="bg-cyan-500/10 rounded-lg p-2"
+              title="Quanto provavelmente entra de fato, considerando a taxa histórica de recebimento."
+            >
+              <div className="text-[10px] text-cyan-400 flex items-center justify-center gap-1">
+                Estimativa realista <Info size={9} className="opacity-60" />
+              </div>
               <div className="text-sm font-bold text-cyan-400 tabular-nums">{fmt(data.summary.expected)}</div>
             </div>
-            <div className="bg-muted/30 rounded-lg p-2">
-              <div className="text-[10px] text-muted-foreground">Fator</div>
+            {/* A4 — Taxa de recebimento (era "Fator") */}
+            <div
+              className="bg-muted/30 rounded-lg p-2"
+              title={`Percentual médio do que costuma ser efetivamente recebido. Cenário ${scenario === 'optimistic' ? 'otimista' : scenario === 'realistic' ? 'realista' : 'pessimista'} = ${scenarioPctText}.`}
+            >
+              <div className="text-[10px] text-muted-foreground flex items-center justify-center gap-1">
+                Taxa de recebimento <Info size={9} className="opacity-60" />
+              </div>
               <div className="text-sm font-bold text-foreground tabular-nums">{(data.summary.factor * 100).toFixed(0)}%</div>
             </div>
           </div>
@@ -552,7 +582,7 @@ export function ForecastChart({ lawyerId }: { lawyerId: string }) {
           </div>
 
           <p className="text-[10px] text-muted-foreground mt-3 italic">
-            Barra clara = valor bruto a vencer · barra colorida = esperado pelo cenário
+            Barra clara = total previsto · barra colorida = estimativa realista
           </p>
         </>
       )}
