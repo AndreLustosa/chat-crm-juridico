@@ -11,6 +11,13 @@ COPY apps/web/package.json ./apps/web/
 COPY packages/shared/package.json ./packages/shared/
 RUN npm install --legacy-peer-deps
 
+# lightningcss usa optionalDependencies por plataforma. Em alguns runs
+# do GitHub Actions Buildx, o npm pula a variante musl e o build do Next
+# (com Turbopack) quebra: "Cannot find module ../lightningcss.linux-x64-musl.node".
+# Força instalação explícita garante que o binário esteja sempre presente.
+# Bug 2026-04-28: build do web caiu apos commit que nao tocou em CSS.
+RUN npm install lightningcss-linux-x64-musl@~1 --no-save --legacy-peer-deps
+
 # Agora copia fontes
 COPY . .
 
