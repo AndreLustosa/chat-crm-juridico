@@ -108,6 +108,33 @@ export class PaymentGatewayService {
   // ─── Charge creation ───────────────────────────────────
 
   /**
+   * Defesa contra erro 400 invalid_dueDate do Asaas.
+   *
+   * Asaas rejeita dueDate < hoje com codigo invalid_dueDate. Isso quebrava
+   * a geracao de cobranca pra qualquer parcela ja vencida (caso comum em
+   * inadimplencia: parcela vence dia 27, advogado vai gerar cobranca dia 28).
+   *
+   * Estrategia: se a data solicitada estiver no passado, ajusta pra HOJE+1
+   * (proxima oportunidade valida) e loga warn pra rastreabilidade. Mantem a
+   * cobranca cobravel sem fazer o usuario re-selecionar manualmente.
+   */
+  private normalizeDueDateForAsaas(requested: Date, paymentRef: string): Date {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const req = new Date(requested);
+    req.setHours(0, 0, 0, 0);
+    if (req < today) {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      this.logger.warn(
+        `[CHARGE] dueDate ${req.toISOString().slice(0, 10)} no passado pra payment ${paymentRef} — ajustado pra ${tomorrow.toISOString().slice(0, 10)} (Asaas rejeita data passada)`,
+      );
+      return tomorrow;
+    }
+    return requested;
+  }
+
+  /**
    * Opcoes adicionais aceitas pelo modal Asaas-style multi-step.
    * Mantidas opcionais pra preservar compat com chamadas antigas (workspace,
    * batch, installment, etc) que so passam billingType.
@@ -211,11 +238,14 @@ export class PaymentGatewayService {
     // Criar cobranca no Asaas
     // Override do due_date: prioriza options.dueDate (usuario escolheu no modal)
     // sobre payment.due_date (campo padrao da parcela). Se ambos null, usa hoje.
-    const dueDate = options?.dueDate
+    const requestedDueDate = options?.dueDate
       ? new Date(options.dueDate)
       : payment.due_date
       ? new Date(payment.due_date)
       : new Date();
+    // Defesa: Asaas rejeita dueDate < hoje com 400 invalid_dueDate. Se a parcela
+    // estiver atrasada, ajusta pra hoje+1 (mantem cobranca cobravel) e loga.
+    const dueDate = this.normalizeDueDateForAsaas(requestedDueDate, honorarioPaymentId);
     const dueDateStr = dueDate.toISOString().slice(0, 10); // YYYY-MM-DD
 
     const baseValue = Number(payment.amount);
@@ -331,11 +361,12 @@ export class PaymentGatewayService {
     const honTenant = (payment as any).lead_honorario?.tenant_id;
     const customer = await this.ensureCustomer(lead.id, tenantId || honTenant);
 
-    const dueDate = options?.dueDate
+    const requestedDueDate = options?.dueDate
       ? new Date(options.dueDate)
       : payment.due_date
       ? new Date(payment.due_date)
       : new Date();
+    const dueDate = this.normalizeDueDateForAsaas(requestedDueDate, leadHonorarioPaymentId);
     const dueDateStr = dueDate.toISOString().slice(0, 10);
     const honType = (payment as any).lead_honorario?.type || '';
     const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', ENTRADA: 'Entrada', ACORDO: 'Acordo' };

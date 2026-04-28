@@ -128,9 +128,34 @@ export default function NewChargeModal({ row, onClose, onSuccess }: NewChargeMod
 
   // Step 1: Dados da cobrança
   const [installments, setInstallments] = useState(1);
-  const [dueDate, setDueDate] = useState(
-    row.dueDate ? row.dueDate.slice(0, 10) : todayPlusDaysIso(3),
-  );
+
+  // Default da data de vencimento:
+  //  - Se a parcela tem due_date no FUTURO, usa ela (manter coerencia com o cadastro)
+  //  - Se a parcela tem due_date no PASSADO ou null, usa hoje+3 (Asaas exige >= hoje)
+  const defaultDueDate = (() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (row.dueDate) {
+      const parcDue = new Date(row.dueDate);
+      parcDue.setHours(0, 0, 0, 0);
+      if (parcDue >= today) return row.dueDate.slice(0, 10);
+    }
+    return todayPlusDaysIso(3);
+  })();
+  const [dueDate, setDueDate] = useState(defaultDueDate);
+
+  // Min permitido no input date: hoje (Asaas rejeita data passada)
+  const todayMinIso = todayPlusDaysIso(0);
+
+  // Aviso: parcela ja vencida — informa o usuario que a data foi ajustada
+  const parcelaVencida = (() => {
+    if (!row.dueDate) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const parcDue = new Date(row.dueDate);
+    parcDue.setHours(0, 0, 0, 0);
+    return parcDue < today;
+  })();
   const [acceptBoletoPix, setAcceptBoletoPix] = useState(true);
   const [acceptCard, setAcceptCard] = useState(true);
   const [splitFees, setSplitFees] = useState(false);
@@ -149,6 +174,10 @@ export default function NewChargeModal({ row, onClose, onSuccess }: NewChargeMod
 
   const step1Errors: string[] = [];
   if (!dueDate) step1Errors.push('Data de vencimento é obrigatória');
+  // Asaas rejeita data no passado
+  if (dueDate && dueDate < todayMinIso) {
+    step1Errors.push('Data de vencimento deve ser hoje ou no futuro (Asaas não aceita data passada).');
+  }
   if (!acceptBoletoPix && !acceptCard) step1Errors.push('Selecione pelo menos uma forma de pagamento');
   if (installments < 1 || installments > 24) step1Errors.push('Parcelamento entre 1 e 24');
   if (acceptBoletoPix && !acceptCard && installments > 1) {
@@ -272,6 +301,8 @@ export default function NewChargeModal({ row, onClose, onSuccess }: NewChargeMod
               setInstallments={setInstallments}
               dueDate={dueDate}
               setDueDate={setDueDate}
+              dueDateMin={todayMinIso}
+              parcelaVencida={parcelaVencida}
               acceptBoletoPix={acceptBoletoPix}
               setAcceptBoletoPix={setAcceptBoletoPix}
               acceptCard={acceptCard}
@@ -370,6 +401,8 @@ function Step1({
   setInstallments,
   dueDate,
   setDueDate,
+  dueDateMin,
+  parcelaVencida,
   acceptBoletoPix,
   setAcceptBoletoPix,
   acceptCard,
@@ -387,6 +420,17 @@ function Step1({
         <FileText size={12} />
         <span>O valor será cobrado uma vez ou conforme parcelamento escolhido.</span>
       </div>
+
+      {/* Aviso quando a parcela esta vencida — informa o usuario que a data foi reajustada */}
+      {parcelaVencida && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">
+          <div className="text-[11px] font-bold text-amber-400">⚠️ Parcela atrasada</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            O Asaas não aceita cobranças com vencimento no passado. A nova data foi pré-preenchida
+            com hoje + 3 dias. Você pode ajustar abaixo se necessário.
+          </div>
+        </div>
+      )}
 
       {/* Cliente + valor (resumo no topo) */}
       <div className="bg-muted/30 rounded-lg p-3 grid grid-cols-2 gap-3">
@@ -431,9 +475,13 @@ function Step1({
           <input
             type="date"
             value={dueDate}
+            min={dueDateMin}
             onChange={(e) => setDueDate(e.target.value)}
             className="w-full px-3 py-2 text-xs bg-background border border-border rounded-lg focus:outline-none focus:border-primary"
           />
+          <div className="text-[10px] text-muted-foreground mt-1">
+            Asaas exige data de hoje em diante.
+          </div>
         </div>
       </div>
 
