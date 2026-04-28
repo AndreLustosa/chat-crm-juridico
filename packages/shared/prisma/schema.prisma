@@ -42,6 +42,7 @@ model Tenant {
   memories                  Memory[]
   lead_profiles             LeadProfile[]
   organization_profile      OrganizationProfile?
+  monthly_goals             MonthlyGoal[]
 }
 
 model User {
@@ -1493,6 +1494,24 @@ model FinancialCategory {
 
   @@unique([tenant_id, name, type])
   @@index([tenant_id, type])
+}
+
+// Meta de receita mensal — usada pelo card "Meta do Mês" do dashboard
+// financeiro novo. UI permite cadastrar single ou propagar pra 12 meses.
+// Multi-tenant: tenant_id pode ser null em single-tenant.
+model MonthlyGoal {
+  id         String   @id @default(uuid())
+  tenant_id  String?
+  year       Int
+  month      Int // 1-12 (validado no app)
+  value      Decimal  @db.Decimal(14, 2)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, year, month])
+  @@index([year, month])
 }
 
 // ===============================================

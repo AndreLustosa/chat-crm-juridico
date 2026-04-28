@@ -581,7 +581,17 @@ export class FinanceiroService {
       leadHonWhere.lead_honorario.tenant_id = tenantId;
     }
 
-    const [totalRevenue, totalExpenses, totalPayable, totalReceivable, totalOverdue, leadReceivable, leadOverdue] = await Promise.all([
+    const [
+      totalRevenue,
+      totalExpenses,
+      totalPayable,
+      totalReceivable,
+      totalOverdue,
+      leadReceivable,
+      leadOverdue,
+      awaitingAlvaraAgg,
+      awaitingAlvaraLeadAgg,
+    ] = await Promise.all([
       // Receita efetiva (regime de caixa: só PAGO) — advogado só dele
       this.prisma.financialTransaction.aggregate({
         where: { ...receitaWhere, type: 'RECEITA', status: 'PAGO' },
@@ -597,25 +607,38 @@ export class FinanceiroService {
         where: { ...despesaWhere, type: 'DESPESA', status: 'PENDENTE' },
         _sum: { amount: true },
       }),
-      // A receber: parcelas de honorários de casos pendentes
+      // A receber: parcelas de honorários de casos pendentes COM data de vencimento
+      // Sem due_date = aguardando alvará/sucumbência → NÃO é "a receber" previsível.
       this.prisma.honorarioPayment.aggregate({
-        where: { ...honorarioWhere, status: { in: ['PENDENTE', 'ATRASADO'] } },
+        where: { ...honorarioWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: { not: null } },
         _sum: { amount: true },
       }),
       // Atrasado: parcelas de casos com due_date vencida
       this.prisma.honorarioPayment.aggregate({
-        where: { ...honorarioWhere, status: 'ATRASADO' },
+        where: { ...honorarioWhere, status: 'ATRASADO', due_date: { not: null } },
         _sum: { amount: true },
       }),
-      // A receber: parcelas de honorários negociados (leads)
+      // A receber: parcelas de honorários negociados (leads) COM data
       this.prisma.leadHonorarioPayment.aggregate({
-        where: { ...leadHonWhere, status: { in: ['PENDENTE', 'ATRASADO'] } },
+        where: { ...leadHonWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: { not: null } },
         _sum: { amount: true },
       }),
       // Atrasado: parcelas de leads vencidas
       this.prisma.leadHonorarioPayment.aggregate({
-        where: { ...leadHonWhere, status: 'ATRASADO' },
+        where: { ...leadHonWhere, status: 'ATRASADO', due_date: { not: null } },
         _sum: { amount: true },
+      }),
+      // Aguardando alvará/sucumbência: parcelas SEM due_date (case)
+      this.prisma.honorarioPayment.aggregate({
+        where: { ...honorarioWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: null },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      // Aguardando alvará: leads sem due_date
+      this.prisma.leadHonorarioPayment.aggregate({
+        where: { ...leadHonWhere, status: { in: ['PENDENTE', 'ATRASADO'] }, due_date: null },
+        _sum: { amount: true },
+        _count: { _all: true },
       }),
     ]);
 
@@ -624,6 +647,10 @@ export class FinanceiroService {
     const payable = Number(totalPayable._sum.amount || 0);
     const receivable = Number(totalReceivable._sum.amount || 0) + Number(leadReceivable._sum.amount || 0);
     const overdue = Number(totalOverdue._sum.amount || 0) + Number(leadOverdue._sum.amount || 0);
+    const awaitingAlvaraTotal =
+      Number(awaitingAlvaraAgg._sum.amount || 0) + Number(awaitingAlvaraLeadAgg._sum.amount || 0);
+    const awaitingAlvaraCount =
+      (awaitingAlvaraAgg._count?._all || 0) + (awaitingAlvaraLeadAgg._count?._all || 0);
 
     return {
       totalRevenue: revenue,
@@ -632,6 +659,11 @@ export class FinanceiroService {
       totalReceivable: receivable,
       totalOverdue: overdue,
       balance: revenue - expenses,
+      // Novos campos: parcelas sem previsão (alvará/sucumbência) — não entram em "a receber"
+      awaitingAlvara: {
+        total: awaitingAlvaraTotal,
+        count: awaitingAlvaraCount,
+      },
     };
   }
 
