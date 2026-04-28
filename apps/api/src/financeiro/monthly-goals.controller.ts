@@ -237,6 +237,35 @@ export class MonthlyGoalsController {
     });
   }
 
+  // ─── Import CSV (commit F) ──────────────────────────────
+
+  /**
+   * Importa metas via CSV. Body:
+   *   { csvContent: string, dryRun?: bool, overwriteConfirmed?: bool }
+   *
+   * Header do CSV: year,month,kind,scope,value
+   *
+   * dryRun=true retorna preview de quantas linhas seriam criadas/sobrescritas
+   * sem gravar. dryRun=false grava (precisa overwriteConfirmed=true se ha
+   * conflitos).
+   */
+  @Post('import-csv')
+  async importCsv(
+    @Body() body: { csvContent: string; dryRun?: boolean; overwriteConfirmed?: boolean },
+    @Request() req: any,
+  ) {
+    if (!this.isAdminOrFinanceiro(req)) {
+      throw new ForbiddenException('Apenas ADMIN ou FINANCEIRO podem importar metas via CSV');
+    }
+    return this.service.importFromCsv({
+      tenantId: req.user.tenant_id,
+      actorId: req.user.id,
+      csvContent: body.csvContent,
+      dryRun: body.dryRun,
+      overwriteConfirmed: body.overwriteConfirmed,
+    });
+  }
+
   /** Acumulado por trimestre + ano. */
   @Get('cumulative')
   async cumulative(

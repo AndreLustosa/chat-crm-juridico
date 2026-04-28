@@ -355,14 +355,19 @@ export class MonthlyGoalsService {
   // ─── Cadastro / Edicao ────────────────────────────────
 
   /**
-   * Calcula meses afetados em qualquer dos 3 modos (single, yearly, replicate)
-   * pra confirmar overwrite antes de gravar.
+   * Calcula meses afetados em qualquer dos 4 modos (single, yearly, replicate,
+   * custom). Pra confirmar overwrite antes de gravar.
+   *
+   * Modo 'custom' aceita um array `monthlyValues` com {year, month, value}
+   * arbitrarios — cobre yearly-weighted (12 meses com valores diferentes),
+   * meses esparsos (ex: so trimestre Q4), ou import CSV.
    */
   computeMonthsAffected(input: {
-    mode: 'single' | 'yearly' | 'replicate';
+    mode: 'single' | 'yearly' | 'replicate' | 'custom';
     year: number;
     month?: number;
     monthsToReplicate?: number;
+    monthlyValues?: Array<{ year: number; month: number; value: number }>;
   }): Array<{ year: number; month: number }> {
     if (input.mode === 'single') {
       if (!input.month) throw new BadRequestException('month obrigatorio em mode=single');
@@ -370,6 +375,21 @@ export class MonthlyGoalsService {
     }
     if (input.mode === 'yearly') {
       return Array.from({ length: 12 }, (_, i) => ({ year: input.year, month: i + 1 }));
+    }
+    if (input.mode === 'custom') {
+      if (!input.monthlyValues || input.monthlyValues.length === 0) {
+        throw new BadRequestException('monthlyValues obrigatorio em mode=custom');
+      }
+      // Valida cada item
+      for (const mv of input.monthlyValues) {
+        if (!mv.year || !mv.month || mv.month < 1 || mv.month > 12) {
+          throw new BadRequestException(`Mes/ano invalido em custom: ${JSON.stringify(mv)}`);
+        }
+        if (mv.value == null || mv.value < 0) {
+          throw new BadRequestException(`Valor invalido em custom: ${JSON.stringify(mv)}`);
+        }
+      }
+      return input.monthlyValues.map((mv) => ({ year: mv.year, month: mv.month }));
     }
     // replicate
     if (!input.month || !input.monthsToReplicate || input.monthsToReplicate < 1) {
@@ -435,27 +455,35 @@ export class MonthlyGoalsService {
     scope: GoalScope;
     kind: 'REALIZED' | 'CONTRACTED' | 'BOTH';
     value: number;
-    mode: 'single' | 'yearly' | 'replicate';
+    mode: 'single' | 'yearly' | 'replicate' | 'custom';
     year: number;
     month?: number;
     monthsToReplicate?: number;
+    /** Custom mode: 12 (ou N) valores por mes — yearly-weighted, presets,
+     *  importacao CSV, etc. */
+    monthlyValues?: Array<{ year: number; month: number; value: number }>;
     /** Confirmacao explicita pra sobrescrever metas existentes */
     overwriteConfirmed?: boolean;
   }) {
     const {
       tenantId, actorId, scope, kind, value, mode, year, month, monthsToReplicate,
-      overwriteConfirmed,
+      monthlyValues, overwriteConfirmed,
     } = params;
 
-    if (value < 0) throw new BadRequestException('value deve ser >= 0');
+    if (mode !== 'custom' && value < 0) {
+      throw new BadRequestException('value deve ser >= 0');
+    }
 
     const lawyerId = this.resolveLawyerId(scope);
-    const months = this.computeMonthsAffected({ mode, year, month, monthsToReplicate });
+    const months = this.computeMonthsAffected({ mode, year, month, monthsToReplicate, monthlyValues });
     const kinds: GoalKind[] = kind === 'BOTH' ? ['REALIZED', 'CONTRACTED'] : [kind];
 
-    // Mode 'yearly' divide o valor total por 12 — exceto em 'single'/'replicate' onde
-    // o valor e por mes.
+    // Mode 'yearly' divide o valor total por 12; outros modos (exceto custom)
+    // usam o mesmo valor por mes. Custom usa o valor especifico de cada mes.
     const valuePerMonth = mode === 'yearly' ? +(value / 12).toFixed(2) : value;
+    const valueByMonthKey = mode === 'custom' && monthlyValues
+      ? new Map(monthlyValues.map((mv) => [`${mv.year}-${mv.month}`, mv.value]))
+      : null;
 
     // Detecta conflitos
     const conflicts = await this.findConflicts({ tenantId, scope, kinds, months });
@@ -477,6 +505,10 @@ export class MonthlyGoalsService {
         });
       }
       for (const m of months) {
+        // Em mode=custom, cada mes pode ter valor diferente
+        const monthValue = valueByMonthKey
+          ? valueByMonthKey.get(`${m.year}-${m.month}`) ?? valuePerMonth
+          : valuePerMonth;
         for (const k of kinds) {
           await tx.monthlyGoal.create({
             data: {
@@ -485,7 +517,7 @@ export class MonthlyGoalsService {
               year: m.year,
               month: m.month,
               kind: k,
-              value: valuePerMonth,
+              value: monthValue,
               created_by_id: actorId,
             },
           });
@@ -494,7 +526,7 @@ export class MonthlyGoalsService {
     });
 
     this.logger.log(
-      `[GOALS] ${actorId} criou ${months.length}x${kinds.length} metas | scope=${scope} | mode=${mode} | valor=${valuePerMonth}/mes`,
+      `[GOALS] ${actorId} criou ${months.length}x${kinds.length} metas | scope=${scope} | mode=${mode}`,
     );
 
     return {
@@ -502,6 +534,186 @@ export class MonthlyGoalsService {
       created: months.length * kinds.length,
       replaced: conflicts.length,
     };
+  }
+
+  // ─── Import CSV (commit F) ───────────────────────────────
+
+  /**
+   * Importa metas a partir de CSV. Formato esperado (header obrigatorio):
+   *   year,month,kind,scope,value
+   *   2026,1,REALIZED,OFFICE,60000
+   *   2026,1,REALIZED,<lawyerId>,15000
+   *   2026,2,CONTRACTED,OFFICE,80000
+   *
+   * - 'kind' aceita REALIZED ou CONTRACTED (BOTH nao — separe em 2 linhas)
+   * - 'scope' aceita 'OFFICE' (case-insensitive) ou UUID de advogado valido
+   * - Linhas em branco e com '#' ignoradas
+   *
+   * @param dryRun se true, NAO grava — so retorna preview de conflitos.
+   */
+  async importFromCsv(params: {
+    tenantId?: string;
+    actorId: string;
+    csvContent: string;
+    dryRun?: boolean;
+    overwriteConfirmed?: boolean;
+  }) {
+    const { tenantId, actorId, csvContent, dryRun = false, overwriteConfirmed = false } = params;
+
+    const parsed = this.parseGoalsCsv(csvContent);
+    if (parsed.errors.length > 0) {
+      return {
+        success: false,
+        errors: parsed.errors,
+        rowsProcessed: 0,
+      };
+    }
+    if (parsed.rows.length === 0) {
+      throw new BadRequestException('CSV sem linhas validas');
+    }
+
+    // Valida advogados informados (UUIDs precisam existir no tenant)
+    const lawyerIds = new Set<string>();
+    for (const row of parsed.rows) {
+      if (row.scope !== 'OFFICE') lawyerIds.add(row.scope);
+    }
+    if (lawyerIds.size > 0) {
+      const valid = await this.prisma.user.findMany({
+        where: {
+          id: { in: Array.from(lawyerIds) },
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+        },
+        select: { id: true },
+      });
+      const validIds = new Set(valid.map((u) => u.id));
+      const invalid = Array.from(lawyerIds).filter((id) => !validIds.has(id));
+      if (invalid.length > 0) {
+        return {
+          success: false,
+          errors: [`Advogados nao encontrados: ${invalid.join(', ')}`],
+          rowsProcessed: 0,
+        };
+      }
+    }
+
+    // Agrupa por (scope, kind) e processa via upsert mode=custom
+    const grouped = new Map<string, Array<typeof parsed.rows[0]>>();
+    for (const row of parsed.rows) {
+      const key = `${row.scope}|${row.kind}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(row);
+    }
+
+    let totalCreated = 0;
+    let totalReplaced = 0;
+    const groupConflicts: any[] = [];
+
+    for (const [key, rows] of grouped.entries()) {
+      const [scope, kind] = key.split('|');
+      const monthlyValues = rows.map((r) => ({ year: r.year, month: r.month, value: r.value }));
+
+      if (dryRun) {
+        // Conta conflitos sem gravar
+        const conflicts = await this.findConflicts({
+          tenantId,
+          scope: scope as GoalScope,
+          kinds: [kind as GoalKind],
+          months: monthlyValues.map((mv) => ({ year: mv.year, month: mv.month })),
+        });
+        groupConflicts.push({ scope, kind, conflicts: conflicts.length, rows: rows.length });
+        totalCreated += rows.length;
+        totalReplaced += conflicts.length;
+        continue;
+      }
+
+      const result = await this.upsert({
+        tenantId,
+        actorId,
+        scope: scope as GoalScope,
+        kind: kind as GoalKind,
+        value: 0, // ignored em mode=custom
+        mode: 'custom',
+        year: monthlyValues[0].year,
+        monthlyValues,
+        overwriteConfirmed,
+      });
+      if (result.requiresConfirmation) {
+        return {
+          success: false,
+          requiresConfirmation: true,
+          conflicts: result.conflicts,
+          message: `${result.conflicts!.length} meta(s) seriam sobrescritas em ${scope}/${kind}. Confirme via overwriteConfirmed=true.`,
+        };
+      }
+      totalCreated += result.created!;
+      totalReplaced += result.replaced!;
+    }
+
+    this.logger.log(
+      `[GOALS/CSV] ${actorId} importou ${totalCreated} meta(s)${dryRun ? ' (dry run)' : ''}`,
+    );
+
+    return {
+      success: true,
+      dryRun,
+      rowsProcessed: parsed.rows.length,
+      created: totalCreated,
+      replaced: totalReplaced,
+      groups: groupConflicts.length > 0 ? groupConflicts : undefined,
+    };
+  }
+
+  /**
+   * Parser de CSV simples (separador virgula, header na primeira linha).
+   * Pula linhas em branco/comentadas. Coleta erros sem abortar.
+   */
+  private parseGoalsCsv(content: string) {
+    const errors: string[] = [];
+    const rows: Array<{ year: number; month: number; kind: GoalKind; scope: string; value: number }> = [];
+    const lines = content.split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith('#'));
+
+    if (lines.length < 2) {
+      errors.push('CSV vazio ou sem linhas de dados');
+      return { rows, errors };
+    }
+
+    const header = lines[0].split(',').map((h) => h.trim().toLowerCase());
+    const idxYear = header.indexOf('year');
+    const idxMonth = header.indexOf('month');
+    const idxKind = header.indexOf('kind');
+    const idxScope = header.indexOf('scope');
+    const idxValue = header.indexOf('value');
+
+    if ([idxYear, idxMonth, idxKind, idxScope, idxValue].some((i) => i === -1)) {
+      errors.push('Header CSV deve ter colunas: year,month,kind,scope,value');
+      return { rows, errors };
+    }
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map((c) => c.trim());
+      const year = parseInt(cols[idxYear], 10);
+      const month = parseInt(cols[idxMonth], 10);
+      const kind = cols[idxKind].toUpperCase();
+      const scope = cols[idxScope].toUpperCase() === 'OFFICE' ? 'OFFICE' : cols[idxScope];
+      const value = parseFloat(cols[idxValue]);
+
+      if (!Number.isInteger(year) || year < 2024 || year > 2099) {
+        errors.push(`Linha ${i + 1}: ano invalido (${cols[idxYear]})`); continue;
+      }
+      if (!Number.isInteger(month) || month < 1 || month > 12) {
+        errors.push(`Linha ${i + 1}: mes invalido (${cols[idxMonth]})`); continue;
+      }
+      if (kind !== 'REALIZED' && kind !== 'CONTRACTED') {
+        errors.push(`Linha ${i + 1}: kind deve ser REALIZED ou CONTRACTED (foi: ${cols[idxKind]})`); continue;
+      }
+      if (isNaN(value) || value < 0) {
+        errors.push(`Linha ${i + 1}: valor invalido (${cols[idxValue]})`); continue;
+      }
+
+      rows.push({ year, month, kind: kind as GoalKind, scope, value });
+    }
+
+    return { rows, errors };
   }
 
   /**
