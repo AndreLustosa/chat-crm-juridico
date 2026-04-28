@@ -386,40 +386,11 @@ export class AiProcessor extends WorkerHost {
     }
   }
 
-  // ─── Coleta imagens para visão (base64 inline) ───
-  private async collectVisionImages(messages: any[]): Promise<
-    { type: 'image_url'; image_url: { url: string } }[]
-  > {
-    const attachments: { type: 'image_url'; image_url: { url: string } }[] =
-      [];
-
-    for (const msg of messages) {
-      if (msg.direction !== 'in' || msg.type !== 'image') continue;
-      const media = msg.media ?? null;
-      if (!media?.s3_key) continue;
-
-      try {
-        const { buffer, contentType } = await this.s3.getObjectBuffer(
-          media.s3_key,
-        );
-        const mimeBase = contentType.split(';')[0].trim();
-        const base64 = buffer.toString('base64');
-        attachments.push({
-          type: 'image_url',
-          image_url: { url: `data:${mimeBase};base64,${base64}` },
-        });
-        this.logger.log(
-          `[AI] Imagem carregada para visão (msg ${msg.id}, ${(buffer.length / 1024).toFixed(0)}KB)`,
-        );
-      } catch (e: any) {
-        this.logger.warn(
-          `[AI] Falha ao carregar imagem ${msg.id}: ${e.message}`,
-        );
-      }
-    }
-
-    return attachments;
-  }
+  // collectVisionImages REMOVIDO em 2026-04-28: era codigo morto (nao chamado
+  // em lugar nenhum). O carregamento de imagem pra visao acontece inline em
+  // chatTurns (linha ~1594), com a vantagem de manter a imagem no turn correto
+  // do contexto multi-turn em vez de empilhar tudo no fim. Tambem dependia de
+  // s3.getObjectBuffer() que esta deprecated (S3 removido em b118878).
 
   // ─── Aplica updates do JSON da IA no banco ───
   private async applyAiUpdates(
@@ -1589,12 +1560,19 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         const isClient = (m as any).direction === 'in';
         const role: 'user' | 'assistant' = isClient ? 'user' : 'assistant';
 
-        // Imagem do cliente + modelo suporta visão → incluir inline no turn
+        // Imagem do cliente + modelo suporta visão → incluir inline no turn.
         // Se media ainda não chegou (race condition com media job), aguarda com polling.
+        //
+        // 2026-04-28: migrado de s3_key (deprecated) pra HTTP via crm-api,
+        // espelhando o pattern de autoTranscribeAudios. Bug: commit b118878
+        // removeu o upload S3 mas esqueceu de atualizar este path — desde
+        // 24/04 todas as imagens NOVAS (so com file_path, sem s3_key) eram
+        // silenciosamente puladas. IA so via "[imagem enviada]" sem ver.
         if (isClient && (m as any).type === 'image' && supportsVision) {
           let mediaRecord = (m as any).media ?? null;
+          const hasStorage = (med: any) => med && (med.file_path || med.s3_key);
 
-          if (!mediaRecord?.s3_key) {
+          if (!hasStorage(mediaRecord)) {
             const msgAge = Date.now() - new Date((m as any).created_at).getTime();
             const isRecent = msgAge < 2 * 60 * 1000;
             if (isRecent) {
@@ -1609,7 +1587,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
                   const found = await this.prisma.media.findFirst({
                     where: { message_id: (m as any).id },
                   });
-                  if (found?.s3_key) {
+                  if (hasStorage(found)) {
                     mediaRecord = found;
                     break outer;
                   }
@@ -1621,18 +1599,32 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
             }
           }
 
-          if (mediaRecord?.s3_key) {
+          if (hasStorage(mediaRecord)) {
             try {
-              const { buffer, contentType } = await this.s3.getObjectBuffer(mediaRecord.s3_key);
-              const mimeBase = contentType.split(';')[0].trim();
-              const base64 = buffer.toString('base64');
-              const imageBlock = { type: 'image_url', image_url: { url: `data:${mimeBase};base64,${base64}` } };
-              const textBlock = { type: 'text', text: (m as any).text || '[imagem enviada pelo cliente]' };
-              chatTurns.push({ role, content: [imageBlock, textBlock] });
-              this.logger.log(`[AI] Imagem ${(m as any).id} incluída inline no chatTurn (${(buffer.length / 1024).toFixed(0)}KB)`);
-              continue;
+              // Busca via HTTP do crm-api — endpoint @Public que ja faz fallback
+              // interno (filesystem -> S3 -> CDN -> retryDownload via Evolution).
+              const apiInternalUrl = process.env.API_INTERNAL_URL || 'http://crm-api:3001';
+              const mediaUrl = `${apiInternalUrl}/media/${(m as any).id}`;
+              const resp = await axios.get(mediaUrl, {
+                responseType: 'arraybuffer',
+                timeout: 30_000,
+                validateStatus: (s) => s < 400,
+              });
+              const buffer: Buffer = Buffer.from(resp.data);
+              if (!buffer.length) {
+                this.logger.warn(`[AI] Imagem msg=${(m as any).id} body vazio — pulando inline`);
+              } else {
+                const contentType = (resp.headers['content-type'] as string) || mediaRecord.mime_type || 'image/jpeg';
+                const mimeBase = contentType.split(';')[0].trim();
+                const base64 = buffer.toString('base64');
+                const imageBlock = { type: 'image_url', image_url: { url: `data:${mimeBase};base64,${base64}` } };
+                const textBlock = { type: 'text', text: (m as any).text || '[imagem enviada pelo cliente]' };
+                chatTurns.push({ role, content: [imageBlock, textBlock] });
+                this.logger.log(`[AI] Imagem ${(m as any).id} incluída inline no chatTurn (${(buffer.length / 1024).toFixed(0)}KB)`);
+                continue;
+              }
             } catch (e: any) {
-              this.logger.warn(`[AI] Falha ao carregar imagem ${(m as any).id} inline: ${e.message}`);
+              this.logger.warn(`[AI] Falha ao carregar imagem ${(m as any).id} inline: ${e?.message || e} (status=${e?.response?.status || 'n/a'})`);
             }
           }
         }
