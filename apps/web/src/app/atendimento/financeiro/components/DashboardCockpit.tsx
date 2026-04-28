@@ -38,6 +38,8 @@ import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
 import { DonutByArea, ForecastChart, ExportButton, GoalEditor } from './DashboardCockpitExtras';
+import NewChargeModal from './NewChargeModal';
+import type { ChargeResult as ChargeResultPayload } from './NewChargeModal';
 
 /* ──────────────────────────────────────────────────────────────
    Types
@@ -1009,41 +1011,9 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
   const [cpfInput, setCpfInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Botao "Gerar cobranca" — menu inline com PIX/Boleto/Cartao
-  const [showChargeMenu, setShowChargeMenu] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [chargeResult, setChargeResult] = useState<{
-    type: string;
-    pixCopyPaste?: string | null;
-    pixQrCode?: string | null;
-    boletoUrl?: string | null;
-    invoiceUrl?: string | null;
-  } | null>(null);
-
-  const handleGenerateCharge = async (billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD') => {
-    setShowChargeMenu(false);
-    setGenerating(true);
-    try {
-      const res = await api.post('/payment-gateway/charges', {
-        honorarioPaymentId: row.id,
-        billingType,
-      });
-      const charge = res.data;
-      setChargeResult({
-        type: billingType,
-        pixCopyPaste: charge.pix_copy_paste || charge.pix?.copyPaste,
-        pixQrCode: charge.pix_qr_code || charge.pix?.qrCode,
-        boletoUrl: charge.boleto_url || charge.boleto?.url,
-        invoiceUrl: charge.invoice_url,
-      });
-      showSuccess(`Cobrança ${billingType} gerada — cliente recebe no WhatsApp em segundos.`);
-      onUpdate();
-    } catch (e: any) {
-      showError(e?.response?.data?.message || 'Erro ao gerar cobrança');
-    } finally {
-      setGenerating(false);
-    }
-  };
+  // Modal multi-step Asaas-style
+  const [showChargeModal, setShowChargeModal] = useState(false);
+  const [chargeResult, setChargeResult] = useState<ChargeResultPayload | null>(null);
 
   // A6 — Status do pagamento (4 estados): A vencer, Vence hoje, Atrasado, Pago
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1174,57 +1144,41 @@ function ChargeRowCell({ row, onUpdate }: { row: ChargeRow; onUpdate: () => void
             </a>
           )}
 
-          {/* Sem charge + tem CPF + nao pago: botao gerar cobranca com menu */}
+          {/* Sem charge + tem CPF + nao pago: botao gerar cobranca abre modal multi-step */}
           {!row.gatewayCharge && row.leadCpf && row.status !== 'PAGO' && (
-            <>
-              <button
-                type="button"
-                disabled={generating}
-                onClick={() => setShowChargeMenu((v) => !v)}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-[10px] font-semibold disabled:opacity-50"
-                title="Gerar cobrança no Asaas"
-              >
-                {generating ? <Loader2 size={10} className="animate-spin" /> : <CreditCard size={10} />}
-                Gerar
-              </button>
-              {showChargeMenu && (
-                <div className="absolute right-0 top-full mt-1 z-20 bg-card border border-border rounded-lg shadow-lg min-w-[140px]">
-                  <button
-                    type="button"
-                    onClick={() => handleGenerateCharge('PIX')}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-accent/30 text-foreground border-b border-border"
-                  >
-                    <span className="text-emerald-400 font-bold">PIX</span>
-                    <span className="text-muted-foreground text-[10px]">recebe em segundos</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleGenerateCharge('BOLETO')}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-accent/30 text-foreground border-b border-border"
-                  >
-                    <span className="text-blue-400 font-bold">Boleto</span>
-                    <span className="text-muted-foreground text-[10px]">vence em D+3</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleGenerateCharge('CREDIT_CARD')}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-accent/30 text-foreground"
-                  >
-                    <span className="text-purple-400 font-bold">Cartão</span>
-                    <span className="text-muted-foreground text-[10px]">link de pagamento</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowChargeMenu(false)}
-                    className="w-full px-3 py-1.5 text-[10px] text-muted-foreground hover:bg-accent/20 border-t border-border"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              )}
-            </>
+            <button
+              type="button"
+              onClick={() => setShowChargeModal(true)}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-[10px] font-semibold"
+              title="Criar cobrança no Asaas"
+            >
+              <CreditCard size={10} />
+              Gerar
+            </button>
           )}
         </div>
+
+        {/* Modal multi-step (Asaas-style) — renderiza fora da tabela via fixed */}
+        {showChargeModal && (
+          <NewChargeModal
+            row={{
+              id: row.id,
+              amount: row.amount,
+              dueDate: row.dueDate,
+              leadId: row.leadId,
+              leadName: row.leadName,
+              leadCpf: row.leadCpf,
+              caseNumber: row.caseNumber,
+              legalArea: row.legalArea,
+            }}
+            onClose={() => setShowChargeModal(false)}
+            onSuccess={(result) => {
+              setShowChargeModal(false);
+              setChargeResult(result);
+              onUpdate();
+            }}
+          />
+        )}
 
         {/* Resultado da cobranca recem-gerada — mostra inline na linha */}
         {chargeResult && (

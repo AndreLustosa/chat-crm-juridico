@@ -107,10 +107,61 @@ export class PaymentGatewayService {
 
   // ─── Charge creation ───────────────────────────────────
 
+  /**
+   * Opcoes adicionais aceitas pelo modal Asaas-style multi-step.
+   * Mantidas opcionais pra preservar compat com chamadas antigas (workspace,
+   * batch, installment, etc) que so passam billingType.
+   */
+  private buildAsaasOptionalFields(options?: {
+    dueDate?: string;
+    installmentCount?: number;
+    interest?: { value: number };
+    fine?: { value: number; type?: 'PERCENTAGE' | 'FIXED' };
+    discount?: { value: number; dueDateLimitDays: number; type?: 'PERCENTAGE' | 'FIXED' };
+    splitFees?: boolean;
+    value?: number; // valor base, usado pra calcular installmentValue
+  }) {
+    if (!options) return {};
+    const out: any = {};
+    // Asaas exige installmentCount >= 2; 1 = nao parcelado.
+    if (options.installmentCount && options.installmentCount >= 2 && options.value) {
+      out.installmentCount = options.installmentCount;
+      out.installmentValue = +(options.value / options.installmentCount).toFixed(2);
+    }
+    if (options.interest && options.interest.value > 0) {
+      out.interest = { value: options.interest.value };
+    }
+    if (options.fine && options.fine.value > 0) {
+      out.fine = {
+        value: options.fine.value,
+        type: options.fine.type || 'PERCENTAGE',
+      };
+    }
+    if (options.discount && options.discount.value > 0) {
+      out.discount = {
+        value: options.discount.value,
+        dueDateLimitDays: options.discount.dueDateLimitDays ?? 0,
+        type: options.discount.type || 'PERCENTAGE',
+      };
+    }
+    if (typeof options.splitFees === 'boolean') {
+      out.splitFees = options.splitFees;
+    }
+    return out;
+  }
+
   async createCharge(
     honorarioPaymentId: string,
-    billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+    billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD' | 'UNDEFINED',
     tenantId?: string,
+    options?: {
+      dueDate?: string;
+      installmentCount?: number;
+      interest?: { value: number };
+      fine?: { value: number; type?: 'PERCENTAGE' | 'FIXED' };
+      discount?: { value: number; dueDateLimitDays: number; type?: 'PERCENTAGE' | 'FIXED' };
+      splitFees?: boolean;
+    },
   ) {
     // Verificar se ja existe cobranca para este pagamento
     const existingCharge = await this.prisma.paymentGatewayCharge.findUnique({
@@ -158,25 +209,36 @@ export class PaymentGatewayService {
     );
 
     // Criar cobranca no Asaas
-    const dueDate = payment.due_date ? new Date(payment.due_date) : new Date();
+    // Override do due_date: prioriza options.dueDate (usuario escolheu no modal)
+    // sobre payment.due_date (campo padrao da parcela). Se ambos null, usa hoje.
+    const dueDate = options?.dueDate
+      ? new Date(options.dueDate)
+      : payment.due_date
+      ? new Date(payment.due_date)
+      : new Date();
     const dueDateStr = dueDate.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const baseValue = Number(payment.amount);
+    const optionalFields = this.buildAsaasOptionalFields({ ...options, value: baseValue });
 
     const asaasCharge = await this.asaas.createCharge({
       customer: customer.external_id,
       billingType,
-      value: Number(payment.amount),
+      value: baseValue,
       dueDate: dueDateStr,
       description: `Honorario - ${legalCase.case_number || 'Processo'} ${legalCase.legal_area ? `(${legalCase.legal_area})` : ''}`.trim(),
       externalReference: honorarioPaymentId,
+      ...optionalFields,
     });
 
     this.logger.log(
-      `[CHARGE] Criada no Asaas: ${asaasCharge.id} | ${billingType} | R$ ${Number(payment.amount)} | Venc: ${dueDateStr}`,
+      `[CHARGE] Criada no Asaas: ${asaasCharge.id} | ${billingType} | R$ ${baseValue} | Venc: ${dueDateStr}` +
+      (optionalFields.installmentCount ? ` | ${optionalFields.installmentCount}x` : ''),
     );
 
-    // Buscar dados de PIX se aplicavel
+    // Buscar dados de PIX se aplicavel (PIX direto ou UNDEFINED com PIX habilitado)
     let pixData: any = null;
-    if (billingType === 'PIX' && asaasCharge.id) {
+    if ((billingType === 'PIX' || billingType === 'UNDEFINED') && asaasCharge.id) {
       try {
         pixData = await this.asaas.getPixQrCode(asaasCharge.id);
       } catch (e: any) {
@@ -231,8 +293,16 @@ export class PaymentGatewayService {
 
   async createChargeForLeadPayment(
     leadHonorarioPaymentId: string,
-    billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+    billingType: 'PIX' | 'BOLETO' | 'CREDIT_CARD' | 'UNDEFINED',
     tenantId?: string,
+    options?: {
+      dueDate?: string;
+      installmentCount?: number;
+      interest?: { value: number };
+      fine?: { value: number; type?: 'PERCENTAGE' | 'FIXED' };
+      discount?: { value: number; dueDateLimitDays: number; type?: 'PERCENTAGE' | 'FIXED' };
+      splitFees?: boolean;
+    },
   ) {
     const existingCharge = await this.prisma.paymentGatewayCharge.findUnique({
       where: { lead_honorario_payment_id: leadHonorarioPaymentId },
@@ -261,24 +331,32 @@ export class PaymentGatewayService {
     const honTenant = (payment as any).lead_honorario?.tenant_id;
     const customer = await this.ensureCustomer(lead.id, tenantId || honTenant);
 
-    const dueDate = payment.due_date ? new Date(payment.due_date) : new Date();
+    const dueDate = options?.dueDate
+      ? new Date(options.dueDate)
+      : payment.due_date
+      ? new Date(payment.due_date)
+      : new Date();
     const dueDateStr = dueDate.toISOString().slice(0, 10);
     const honType = (payment as any).lead_honorario?.type || '';
     const typeLabels: Record<string, string> = { CONTRATUAL: 'Contratuais', ENTRADA: 'Entrada', ACORDO: 'Acordo' };
 
+    const baseValue = Number(payment.amount);
+    const optionalFields = this.buildAsaasOptionalFields({ ...options, value: baseValue });
+
     const asaasCharge = await this.asaas.createCharge({
       customer: customer.external_id,
       billingType,
-      value: Number(payment.amount),
+      value: baseValue,
       dueDate: dueDateStr,
       description: `Honorário ${typeLabels[honType] || honType} - Lead ${lead.name || 'Sem nome'}`.trim(),
       externalReference: leadHonorarioPaymentId,
+      ...optionalFields,
     });
 
-    this.logger.log(`[CHARGE] Criada para lead: ${asaasCharge.id} | ${billingType} | R$ ${Number(payment.amount)} | Venc: ${dueDateStr}`);
+    this.logger.log(`[CHARGE] Criada para lead: ${asaasCharge.id} | ${billingType} | R$ ${baseValue} | Venc: ${dueDateStr}`);
 
     let pixData: any = null;
-    if (billingType === 'PIX' && asaasCharge.id) {
+    if ((billingType === 'PIX' || billingType === 'UNDEFINED') && asaasCharge.id) {
       try { pixData = await this.asaas.getPixQrCode(asaasCharge.id); }
       catch (e: any) { this.logger.warn(`[CHARGE] Falha QR Code PIX: ${e.message}`); }
     }

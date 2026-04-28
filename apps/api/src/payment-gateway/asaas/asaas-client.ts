@@ -18,6 +18,10 @@ interface CreateCustomerData {
 
 interface CreateChargeData {
   customer: string;
+  /**
+   * BOLETO | PIX | CREDIT_CARD | UNDEFINED
+   * UNDEFINED permite o cliente escolher entre boleto/pix/cartao na tela do Asaas.
+   */
   billingType: string;
   value: number;
   dueDate: string;
@@ -26,6 +30,21 @@ interface CreateChargeData {
   postalService?: boolean;
   installmentCount?: number;  // Parcelamento: número de parcelas
   installmentValue?: number;  // Parcelamento: valor de cada parcela
+
+  // ─── Juros, multa, desconto (Asaas docs: Customizing Payment) ─────
+  interest?: { value: number };          // % juros ao mês
+  fine?: { value: number; type?: 'PERCENTAGE' | 'FIXED' }; // multa
+  discount?: {
+    value: number;
+    dueDateLimitDays: number;            // 0 = ate o vencimento
+    type?: 'PERCENTAGE' | 'FIXED';
+  };
+
+  // ─── Repasse de taxas ao cliente ──────────────────────────────────
+  // Se true, taxa Asaas (cartao 2.99% + R$ 0.49) aparece somada no checkout
+  // do cliente em vez de descontar do recebido. So aplica quando billingType
+  // permite cartao (CREDIT_CARD ou UNDEFINED).
+  splitFees?: boolean;
 }
 
 interface ListChargesParams {

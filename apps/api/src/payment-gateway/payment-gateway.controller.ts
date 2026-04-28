@@ -213,22 +213,39 @@ export class PaymentGatewayController {
 
   @Post('charges')
   async createCharge(@Body() dto: CreateChargeDto, @Req() req: any) {
-    const tenantId = req.user?.tenantId;
+    // Bug pre-existente: req.user?.tenantId (camelCase) sempre undefined
+    // pq JwtStrategy retorna tenant_id (snake_case). Em single-tenant nao
+    // afeta. Em multi-tenant, fix esta na lista de defesas pra fazer.
+    const tenantId = req.user?.tenant_id ?? req.user?.tenantId;
+
+    // Opcoes extras vindas do modal multi-step (juros, multa, desconto,
+    // parcelamento, override de vencimento, repasse de taxas).
+    const options = {
+      dueDate: dto.dueDate,
+      installmentCount: dto.installmentCount,
+      interest: dto.interest,
+      fine: dto.fine,
+      discount: dto.discount,
+      splitFees: dto.splitFees,
+    };
+
     // Suporta tanto HonorarioPayment (caso) quanto LeadHonorarioPayment (lead)
     let result: any;
     if (dto.leadHonorarioPaymentId) {
       this.logger.log(`[POST /charges] billingType=${dto.billingType} leadPaymentId=${dto.leadHonorarioPaymentId}`);
       result = await this.service.createChargeForLeadPayment(
         dto.leadHonorarioPaymentId,
-        dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+        dto.billingType as any,
         tenantId,
+        options,
       );
     } else {
       this.logger.log(`[POST /charges] billingType=${dto.billingType} paymentId=${dto.honorarioPaymentId}`);
       result = await this.service.createCharge(
         dto.honorarioPaymentId!,
-        dto.billingType as 'PIX' | 'BOLETO' | 'CREDIT_CARD',
+        dto.billingType as any,
         tenantId,
+        options,
       );
     }
     // Aviso imediato ao cliente — fire-and-forget. ReminderService filtra:
