@@ -88,6 +88,110 @@ export class ReportsController {
     });
     res.send(buf);
   }
+
+  /**
+   * POST /reports/transactions-statement
+   * Extrato de receitas OU despesas (definido por body.type).
+   */
+  @Post('transactions-statement')
+  async transactionsStatement(
+    @Body() body: {
+      type: 'RECEITA' | 'DESPESA';
+      from: string;
+      to: string;
+      lawyerId?: string;
+      observations?: string;
+      summaryOnly?: boolean;
+      orientation?: 'portrait' | 'landscape';
+    },
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
+    const roles: string[] = req.user?.roles || [];
+    const isAdmin = roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+    const canExport = isAdmin || roles.includes('ADVOGADO');
+    if (!canExport) throw new ForbiddenException('Sem permissao para gerar este relatorio');
+
+    const effectiveLawyerId = isAdmin ? body.lawyerId : req.user.id;
+    let lawyerName: string | undefined;
+    if (effectiveLawyerId) {
+      const u = await this.service['prisma'].user.findUnique({
+        where: { id: effectiveLawyerId },
+        select: { name: true },
+      });
+      lawyerName = u?.name;
+    }
+
+    const buf = await this.service.generateTransactionsStatement({
+      tenantId: req.user.tenant_id,
+      actorName: req.user.email || 'Usuário',
+      type: body.type,
+      from: body.from,
+      to: body.to,
+      lawyerId: effectiveLawyerId,
+      lawyerName,
+      observations: body.observations,
+      summaryOnly: body.summaryOnly,
+      orientation: body.orientation,
+    });
+
+    const prefix = body.type === 'RECEITA' ? 'extrato-receitas' : 'extrato-despesas';
+    const filename = buildFilename(prefix, body.from, body.to);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': buf.length.toString(),
+    });
+    res.send(buf);
+  }
+
+  /**
+   * POST /reports/charges-list
+   * Lista de cobranças com status Asaas.
+   */
+  @Post('charges-list')
+  async chargesList(
+    @Body() body: {
+      filter: 'all' | 'overdue' | 'pending' | 'paid' | 'awaiting_alvara' | 'no_cpf' | 'to_send' | 'due_today';
+      lawyerId?: string;
+      observations?: string;
+    },
+    @Request() req: any,
+    @Res() res: Response,
+  ) {
+    const roles: string[] = req.user?.roles || [];
+    const isAdmin = roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+    const canExport = isAdmin || roles.includes('ADVOGADO');
+    if (!canExport) throw new ForbiddenException('Sem permissao para gerar este relatorio');
+
+    const effectiveLawyerId = isAdmin ? body.lawyerId : req.user.id;
+    let lawyerName: string | undefined;
+    if (effectiveLawyerId) {
+      const u = await this.service['prisma'].user.findUnique({
+        where: { id: effectiveLawyerId },
+        select: { name: true },
+      });
+      lawyerName = u?.name;
+    }
+
+    const buf = await this.service.generateChargesList({
+      tenantId: req.user.tenant_id,
+      actorName: req.user.email || 'Usuário',
+      filter: body.filter || 'all',
+      lawyerId: effectiveLawyerId,
+      lawyerName,
+      observations: body.observations,
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `cobrancas-${body.filter}-${today}.pdf`;
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Length': buf.length.toString(),
+    });
+    res.send(buf);
+  }
 }
 
 function buildFilename(prefix: string, from: string, to: string): string {

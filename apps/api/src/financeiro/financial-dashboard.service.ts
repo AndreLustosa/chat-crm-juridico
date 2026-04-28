@@ -821,6 +821,11 @@ export class FinancialDashboardService {
    * Filtros: status (overdue, pending, paid, awaiting_alvara), search (nome/CPF),
    * lawyer, paginação.
    */
+  /** Expoe o helper de buildChargeWhere pra outros services (Reports) */
+  public buildChargeWhereExternal(filter: ChargeFilter, tenantId?: string, lawyerId?: string) {
+    return this.buildChargeWhere(filter, tenantId, lawyerId);
+  }
+
   /**
    * Tipo dos filtros suportados na tabela operacional.
    *
