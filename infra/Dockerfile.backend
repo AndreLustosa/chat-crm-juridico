@@ -10,6 +10,12 @@ ARG APP
 RUN npm run db:generate -w @crm/shared
 RUN cd packages/shared && npm run build
 RUN cd apps/${APP} && npm run build
+# Garante que o diretorio existe mesmo sem deps locais — o COPY no
+# stage runner nao falha quando o app nao tem node_modules proprio.
+# Bug 2026-04-28: pdf-parse foi instalado em apps/worker/node_modules/
+# (NPM nao hoisted por conflito de subdep) e o Dockerfile so copiava
+# /app/node_modules root — pacote sumia da imagem, worker em crash loop.
+RUN mkdir -p /app/apps/${APP}/node_modules
 
 FROM base AS runner
 ARG APP
@@ -21,9 +27,14 @@ RUN apk add --no-cache ffmpeg
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/shared ./packages/shared
-# Copia app buildado (node_modules ficam hoisted na raiz em npm workspaces)
+# Copia app buildado.
+# Em npm workspaces, deps QUE PUDERAM ser hoisted ficam em /app/node_modules
+# (root, copiado acima). Deps que tiveram conflito ou peer dep nao satisfeita
+# ficam em /app/apps/${APP}/node_modules — precisam ser copiadas tambem.
+# Sem isso, o worker subia sem pdf-parse (bug 2026-04-28, IA caiu em prod).
 COPY --from=builder /app/apps/${APP}/package*.json ./apps/${APP}/
 COPY --from=builder /app/apps/${APP}/dist ./apps/${APP}/dist
+COPY --from=builder /app/apps/${APP}/node_modules ./apps/${APP}/node_modules
 # Seta dir de inicio
 WORKDIR /app/apps/${APP}
 # Gera Cliente Prisma em PROD
