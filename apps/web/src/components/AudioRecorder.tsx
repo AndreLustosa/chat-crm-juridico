@@ -19,6 +19,18 @@ export function AudioRecorder({ conversationId, onSent, disabled, onRecordingSta
   const streamRef = useRef<MediaStream | null>(null);
 
   const startRecording = useCallback(async () => {
+    // Pre-check: contexto seguro (HTTPS ou localhost) — getUserMedia exige.
+    // Em prod o site ja eh HTTPS, mas se rodar em http://IP por acidente
+    // o navegador retorna mediaDevices=undefined sem erro claro.
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      alert('Microfone só funciona em HTTPS. Acesse o site pelo endereço seguro (cadeado verde na URL).');
+      return;
+    }
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      alert('Seu navegador não suporta gravação de áudio. Tente Chrome ou Edge atualizado.');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -41,10 +53,38 @@ export function AudioRecorder({ conversationId, onSent, disabled, onRecordingSta
       recorder.start();
       setRecording(true);
       onRecordingStart?.();
-    } catch {
-      alert('Permissão de microfone negada ou não disponível.');
+    } catch (e: any) {
+      // Logging detalhado pra debug — cliente reporta 2026-04-28 que erro
+      // generico nao ajuda a diagnosticar (Chrome global ok, mas alguma outra
+      // camada bloqueando: Windows, antivirus, OS-level, drivers).
+      console.error('[AudioRecorder] getUserMedia falhou:', {
+        name: e?.name,
+        message: e?.message,
+        constraint: e?.constraint,
+        stack: e?.stack,
+      });
+
+      // Mensagem especifica por tipo de erro do DOMException
+      const errName = e?.name || '';
+      let userMessage: string;
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        userMessage = 'Permissão de microfone negada. Clique no cadeado/ajustes ao lado da URL → Microfone → Permitir → e recarregue a página.';
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        userMessage = 'Nenhum microfone encontrado. Verifique se há um microfone conectado e habilitado em Configurações do Windows → Privacidade → Microfone.';
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        userMessage = 'O microfone está sendo usado por outro programa (Zoom, Meet, OBS, Discord, etc). Feche os outros apps e tente de novo.';
+      } else if (errName === 'OverconstrainedError' || errName === 'ConstraintNotSatisfiedError') {
+        userMessage = 'Configuração de microfone incompatível com o navegador.';
+      } else if (errName === 'AbortError') {
+        userMessage = 'Acesso ao microfone foi interrompido. Tente de novo.';
+      } else if (errName === 'SecurityError') {
+        userMessage = 'Bloqueio de segurança do navegador. Tente em janela não-anônima ou desabilite extensões de privacidade.';
+      } else {
+        userMessage = `Erro de microfone (${errName || 'desconhecido'}): ${e?.message || 'sem detalhes'}. Veja o console (F12) pra mais info.`;
+      }
+      alert(userMessage);
     }
-  }, []);
+  }, [onRecordingStart]);
 
   const stopAndSend = useCallback(async () => {
     const recorder = mediaRecorderRef.current;
