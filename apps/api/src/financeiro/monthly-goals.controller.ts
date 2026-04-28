@@ -191,4 +191,70 @@ export class MonthlyGoalsController {
       goalId: id,
     });
   }
+
+  // ─── Extensoes (commit E) ──────────────────────────────
+
+  /** Historico de overwrites — versoes ativas e soft-deletadas. */
+  @Get('history/:scope/:kind/:year/:month')
+  async history(
+    @Param('scope') scope: string,
+    @Param('kind') kind: string,
+    @Param('year') year: string,
+    @Param('month') month: string,
+    @Request() req: any,
+  ) {
+    if (!this.isReadAllowed(req)) {
+      throw new ForbiddenException('Sem permissao para visualizar metas');
+    }
+    return this.service.getHistory({
+      tenantId: req.user.tenant_id,
+      scope: scope as GoalScope,
+      kind: kind as GoalKind,
+      year: parseInt(year, 10),
+      month: parseInt(month, 10),
+      visibleScopes: this.computeVisibleScopes(req),
+    });
+  }
+
+  /** Comparacao Year-over-Year mes a mes. */
+  @Get('yoy')
+  async yoy(
+    @Query('year') year: string,
+    @Query('scope') scope: string,
+    @Query('kind') kind: string,
+    @Request() req: any,
+  ) {
+    if (!this.isReadAllowed(req)) {
+      throw new ForbiddenException('Sem permissao para visualizar metas');
+    }
+    const y = year ? parseInt(year, 10) : new Date().getUTCFullYear();
+    return this.service.getYearOverYear({
+      tenantId: req.user.tenant_id,
+      scope: (scope as GoalScope) || 'OFFICE',
+      kind: (kind as GoalKind) || 'REALIZED',
+      year: y,
+      visibleScopes: this.computeVisibleScopes(req),
+    });
+  }
+
+  /** Acumulado por trimestre + ano. */
+  @Get('cumulative')
+  async cumulative(
+    @Query('year') year: string,
+    @Query('scope') scope: string,
+    @Query('kind') kind: string,
+    @Request() req: any,
+  ) {
+    if (!this.isReadAllowed(req)) {
+      throw new ForbiddenException('Sem permissao para visualizar metas');
+    }
+    const y = year ? parseInt(year, 10) : new Date().getUTCFullYear();
+    return this.service.getCumulative({
+      tenantId: req.user.tenant_id,
+      scope: (scope as GoalScope) || 'OFFICE',
+      kind: (kind as GoalKind) || 'REALIZED',
+      year: y,
+      visibleScopes: this.computeVisibleScopes(req),
+    });
+  }
 }

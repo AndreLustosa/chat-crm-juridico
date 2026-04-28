@@ -557,4 +557,208 @@ export class MonthlyGoalsService {
     this.logger.log(`[GOALS] ${actorId} deletou meta ${goalId} (soft delete)`);
     return { deleted: true };
   }
+
+  // ─── Historico de overwrites (versoes soft-deleted) ──────
+
+  /**
+   * Lista todas as versoes (incluindo soft-deleted) de uma meta especifica.
+   * Util pra auditoria: ver quais valores foram cadastrados antes pra
+   * mesma combinacao (tenant, lawyer, year, month, kind).
+   */
+  async getHistory(params: {
+    tenantId?: string;
+    scope: GoalScope;
+    kind: GoalKind;
+    year: number;
+    month: number;
+    visibleScopes?: Array<string | null>;
+  }) {
+    const { tenantId, scope, kind, year, month, visibleScopes } = params;
+    const lawyerId = this.resolveLawyerId(scope);
+
+    // ASSOCIADO: bloqueia leitura de scope fora dos visiveis
+    if (visibleScopes !== undefined) {
+      const allowed: Array<string | null> = [];
+      if (visibleScopes.includes(null)) allowed.push(null);
+      visibleScopes.forEach((s) => { if (s) allowed.push(s); });
+      if (!allowed.includes(lawyerId)) {
+        throw new ForbiddenException('Sem permissao para ver historico desta meta');
+      }
+    }
+
+    const versions = await this.prisma.monthlyGoal.findMany({
+      where: {
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+        lawyer_id: lawyerId,
+        year, month, kind,
+      },
+      include: {
+        created_by: { select: { id: true, name: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return versions.map((v) => ({
+      id: v.id,
+      value: Number(v.value),
+      isActive: v.deleted_at === null,
+      createdAt: v.created_at.toISOString(),
+      updatedAt: v.updated_at.toISOString(),
+      deletedAt: v.deleted_at?.toISOString() || null,
+      createdBy: v.created_by ? { id: v.created_by.id, name: v.created_by.name } : null,
+    }));
+  }
+
+  // ─── Comparacao Year-over-Year (YoY) ─────────────────────
+
+  /**
+   * Compara metas + atingimento do ano alvo com o ano anterior, mes a mes.
+   * Retorna 12 linhas com targetThis/targetPrev/realizedThis/realizedPrev
+   * + delta YoY %. Util pra tela de gestao mostrar evolucao anual.
+   */
+  async getYearOverYear(params: {
+    tenantId?: string;
+    scope: GoalScope;
+    kind: GoalKind;
+    year: number;
+    visibleScopes?: Array<string | null>;
+  }) {
+    const { tenantId, scope, kind, year, visibleScopes } = params;
+    const lawyerId = this.resolveLawyerId(scope);
+
+    if (visibleScopes !== undefined) {
+      const allowed: Array<string | null> = [];
+      if (visibleScopes.includes(null)) allowed.push(null);
+      visibleScopes.forEach((s) => { if (s) allowed.push(s); });
+      if (!allowed.includes(lawyerId)) {
+        throw new ForbiddenException('Sem permissao para comparacao YoY desta meta');
+      }
+    }
+
+    const previousYear = year - 1;
+
+    // Busca metas dos 2 anos em paralelo
+    const [thisYearGoals, prevYearGoals] = await Promise.all([
+      this.prisma.monthlyGoal.findMany({
+        where: {
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+          lawyer_id: lawyerId,
+          year, kind,
+          deleted_at: null,
+        },
+        select: { month: true, value: true },
+      }),
+      this.prisma.monthlyGoal.findMany({
+        where: {
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+          lawyer_id: lawyerId,
+          year: previousYear, kind,
+          deleted_at: null,
+        },
+        select: { month: true, value: true },
+      }),
+    ]);
+
+    // Indexa por mes
+    const thisByMonth = new Map(thisYearGoals.map((g) => [g.month, Number(g.value)]));
+    const prevByMonth = new Map(prevYearGoals.map((g) => [g.month, Number(g.value)]));
+
+    // Calcula realized de cada mes em paralelo (24 chamadas: 12 meses × 2 anos)
+    const realizedThisPromises = Array.from({ length: 12 }, (_, i) =>
+      this.computeRealizedValue({ tenantId, year, month: i + 1, lawyerId, kind }),
+    );
+    const realizedPrevPromises = Array.from({ length: 12 }, (_, i) =>
+      this.computeRealizedValue({ tenantId, year: previousYear, month: i + 1, lawyerId, kind }),
+    );
+    const [realizedThis, realizedPrev] = await Promise.all([
+      Promise.all(realizedThisPromises),
+      Promise.all(realizedPrevPromises),
+    ]);
+
+    return Array.from({ length: 12 }, (_, i) => {
+      const month = i + 1;
+      const targetThis = thisByMonth.get(month) || null;
+      const targetPrev = prevByMonth.get(month) || null;
+      const rThis = realizedThis[i];
+      const rPrev = realizedPrev[i];
+      // Delta YoY do realizado (mais util que do target)
+      let realizedDeltaPct: number | null = null;
+      if (rPrev > 0) realizedDeltaPct = ((rThis - rPrev) / rPrev) * 100;
+      else if (rThis > 0) realizedDeltaPct = null; // sem base
+
+      return {
+        month,
+        targetThis,
+        targetPrev,
+        realizedThis: rThis,
+        realizedPrev: rPrev,
+        realizedDeltaPct,
+      };
+    });
+  }
+
+  // ─── Acumulado (trimestre + ano) ─────────────────────────
+
+  /**
+   * Soma metas + realizado por trimestre (Q1-Q4) e ano inteiro.
+   * Permite ver progresso em horizontes maiores que o mes.
+   */
+  async getCumulative(params: {
+    tenantId?: string;
+    scope: GoalScope;
+    kind: GoalKind;
+    year: number;
+    visibleScopes?: Array<string | null>;
+  }) {
+    const { tenantId, scope, kind, year, visibleScopes } = params;
+    const lawyerId = this.resolveLawyerId(scope);
+
+    if (visibleScopes !== undefined) {
+      const allowed: Array<string | null> = [];
+      if (visibleScopes.includes(null)) allowed.push(null);
+      visibleScopes.forEach((s) => { if (s) allowed.push(s); });
+      if (!allowed.includes(lawyerId)) {
+        throw new ForbiddenException('Sem permissao para acumulado desta meta');
+      }
+    }
+
+    const goals = await this.prisma.monthlyGoal.findMany({
+      where: {
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+        lawyer_id: lawyerId,
+        year, kind,
+        deleted_at: null,
+      },
+      select: { month: true, value: true },
+    });
+
+    const targetByMonth = new Map(goals.map((g) => [g.month, Number(g.value)]));
+
+    const realizedAll = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        this.computeRealizedValue({ tenantId, year, month: i + 1, lawyerId, kind }),
+      ),
+    );
+
+    const sumRange = (months: number[]) => {
+      let target = 0, realized = 0;
+      for (const m of months) {
+        const t = targetByMonth.get(m);
+        if (t) target += t;
+        realized += realizedAll[m - 1];
+      }
+      return { target, realized, progressPct: target > 0 ? (realized / target) * 100 : null };
+    };
+
+    return {
+      year,
+      quarters: [
+        { key: 'Q1', months: [1, 2, 3], ...sumRange([1, 2, 3]) },
+        { key: 'Q2', months: [4, 5, 6], ...sumRange([4, 5, 6]) },
+        { key: 'Q3', months: [7, 8, 9], ...sumRange([7, 8, 9]) },
+        { key: 'Q4', months: [10, 11, 12], ...sumRange([10, 11, 12]) },
+      ],
+      annual: sumRange([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+    };
+  }
 }
