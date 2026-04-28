@@ -20,13 +20,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Target, Pencil, Trash2, Plus, Check, X, Loader2, ArrowUpRight,
-  History, GitCompare, Sigma,
+  History, GitCompare, Sigma, Upload,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { useRole } from '@/lib/useRole';
 import GoalsManagerModal from './GoalsManagerModal';
 import GoalHistoryDrawer from './GoalHistoryDrawer';
+import GoalsImportCsvModal from './GoalsImportCsvModal';
 
 type GoalKind = 'REALIZED' | 'CONTRACTED';
 type GoalStatus = 'on_track' | 'warning' | 'behind' | 'achieved' | null;
@@ -84,6 +85,7 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
   const [goals, setGoals] = useState<GoalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showImportCsv, setShowImportCsv] = useState(false);
 
   // Drawer de historico
   const [historyContext, setHistoryContext] = useState<{
@@ -199,6 +201,16 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
           >
             <Sigma size={11} /> Acumulado
           </button>
+          {/* CTA Importar CSV (admin only) */}
+          {canEdit && (
+            <button
+              onClick={() => setShowImportCsv(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-card border border-border hover:border-cyan-500/40 hover:bg-cyan-500/5 text-cyan-400 text-[11px] font-semibold"
+              title="Cadastrar metas em massa via arquivo CSV"
+            >
+              <Upload size={11} /> Importar CSV
+            </button>
+          )}
           {/* CTA Definir meta (admin only) */}
           {canEdit && (
             <button
@@ -270,6 +282,18 @@ export default function GoalsManagementTab({ lawyers }: GoalsManagementTabProps)
           month={historyContext.month}
           contextLabel={historyContext.label}
           onClose={() => setHistoryContext(null)}
+        />
+      )}
+
+      {/* Modal de importacao CSV */}
+      {showImportCsv && (
+        <GoalsImportCsvModal
+          lawyers={lawyers}
+          onClose={() => setShowImportCsv(false)}
+          onImported={() => {
+            setShowImportCsv(false);
+            fetchGoals();
+          }}
         />
       )}
     </div>
