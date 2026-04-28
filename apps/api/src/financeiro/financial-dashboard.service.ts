@@ -718,7 +718,7 @@ export class FinancialDashboardService {
 
       const map = new Map<string, number>();
       for (const h of honorarios) {
-        const area = h.legal_case?.legal_area || 'Sem área';
+        const area = h.legal_case?.legal_area || 'Não classificada';
         map.set(area, (map.get(area) || 0) + Number(h.total_value));
       }
       return Array.from(map.entries())
@@ -745,7 +745,7 @@ export class FinancialDashboardService {
 
     const map = new Map<string, number>();
     for (const tx of txs) {
-      const area = tx.legal_case?.legal_area || 'Sem área';
+      const area = tx.legal_case?.legal_area || 'Não classificada';
       map.set(area, (map.get(area) || 0) + Number(tx.amount));
     }
     return Array.from(map.entries())

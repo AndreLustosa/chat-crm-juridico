@@ -26,6 +26,8 @@ import {
   Check,
   X,
   Target,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -79,6 +81,14 @@ const AREA_COLORS = [
   '#ef4444', '#06b6d4', '#ec4899', '#84cc16',
   '#f97316', '#8b5cf6',
 ];
+
+// A3 — cor cinza neutro pra fatia "Não classificada", FORA da paleta
+// colorida das áreas reais. Sinaliza visualmente "isso é pendente".
+const UNCLASSIFIED_COLOR = '#6b7280'; // gray-500
+const UNCLASSIFIED_LABEL = 'Não classificada';
+const isUnclassified = (label: string) => label === UNCLASSIFIED_LABEL;
+const colorForArea = (label: string, idx: number) =>
+  isUnclassified(label) ? UNCLASSIFIED_COLOR : AREA_COLORS[idx % AREA_COLORS.length];
 
 const MONTH_NAMES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -271,12 +281,24 @@ export function DonutByArea({
 
   const total = data?.reduce((acc, s) => acc + s.total, 0) || 0;
 
+  // A3 — detecta % da fatia "Não classificada" pra emitir alerta inline
+  const unclassifiedSlice = data?.find((s) => isUnclassified(s.area));
+  const unclassifiedPct = unclassifiedSlice && total > 0 ? (unclassifiedSlice.total / total) * 100 : 0;
+  const showUnclassifiedAlert = unclassifiedPct > 5;
+
   return (
     <div className="bg-card border border-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <PieChart size={14} className="text-violet-400" />
           <h3 className="text-sm font-bold text-foreground">Receita por área</h3>
+          {/* A3 — tooltip explicando origem das áreas */}
+          <span
+            className="group relative cursor-help"
+            title="Áreas vêm do campo 'área do direito' nos cadastros de processo e receita. Receitas sem esse campo aparecem como Não classificada."
+          >
+            <Info size={11} className="text-muted-foreground hover:text-foreground transition-colors" />
+          </span>
         </div>
         <div className="flex items-center gap-1 bg-muted/30 rounded-md p-0.5">
           <button
@@ -311,29 +333,55 @@ export function DonutByArea({
       )}
 
       {!loading && data && data.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-          <DonutSvg data={data} />
-          <div className="space-y-1.5">
-            {data.slice(0, 8).map((slice, i) => {
-              const pct = total > 0 ? (slice.total / total) * 100 : 0;
-              return (
-                <div key={slice.area} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2.5 h-2.5 rounded-sm shrink-0"
-                      style={{ backgroundColor: AREA_COLORS[i % AREA_COLORS.length] }}
-                    />
-                    <span className="text-foreground truncate">{slice.area}</span>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+            <DonutSvg data={data} />
+            <div className="space-y-1.5">
+              {data.slice(0, 8).map((slice, i) => {
+                const pct = total > 0 ? (slice.total / total) * 100 : 0;
+                const unclassified = isUnclassified(slice.area);
+                return (
+                  <div key={slice.area} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-sm shrink-0"
+                        style={{ backgroundColor: colorForArea(slice.area, i) }}
+                      />
+                      <span className={`truncate ${unclassified ? 'text-muted-foreground italic' : 'text-foreground'}`}>
+                        {slice.area}
+                      </span>
+                    </div>
+                    <div className="text-right tabular-nums shrink-0 ml-2">
+                      <div className={`font-bold ${unclassified ? 'text-muted-foreground' : 'text-foreground'}`}>
+                        {fmt(slice.total)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">{pct.toFixed(1)}%</div>
+                    </div>
                   </div>
-                  <div className="text-right tabular-nums shrink-0 ml-2">
-                    <div className="text-foreground font-bold">{fmt(slice.total)}</div>
-                    <div className="text-[10px] text-muted-foreground">{pct.toFixed(1)}%</div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
+
+          {/* A3 — alerta inline quando "Não classificada" > 5% */}
+          {showUnclassifiedAlert && (
+            <div className="mt-3 flex items-start gap-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+              <AlertCircle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-amber-400">
+                  {unclassifiedPct.toFixed(1)}% das receitas sem área cadastrada
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  Cadastre a área do direito nos processos para ver a distribuição completa.
+                  {/* A3 (item 3) — link "Classificar agora →" deferido pra proxima
+                      iteracao. Tela de massa exige design dedicado (lista filtravel
+                      + dropdown por linha + bulk save). Pra agora, mensagem
+                      orienta o usuario a corrigir nos cadastros. */}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -366,7 +414,7 @@ function DonutSvg({ data }: { data: AreaSlice[] }) {
         key={slice.area}
         d={path}
         fill="none"
-        stroke={AREA_COLORS[i % AREA_COLORS.length]}
+        stroke={colorForArea(slice.area, i)}
         strokeWidth={strokeWidth}
         strokeLinecap="butt"
       />
