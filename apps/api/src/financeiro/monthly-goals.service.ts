@@ -217,10 +217,21 @@ export class MonthlyGoalsService {
     const monthEnd = this.endOfMonth(year, month);
 
     if (kind === 'REALIZED') {
+      // ALINHAMENTO 2026-04-28: usar 'date' em vez de 'paid_at'.
+      //
+      // O resto do sistema (financial-dashboard.service.aggregateRealizedRevenue
+      // que alimenta o KPI "Receita realizada", financeiro.service.getSummary,
+      // getCashFlow) filtra por 'date'. Se aqui filtrarmos por 'paid_at',
+      // o card "Meta do mes" mostra valor diferente do "Receita realizada"
+      // do mesmo mes — acontece quando transacoes tem status=PAGO mas
+      // paid_at null (legado) ou paid_at em outro mes que o date.
+      //
+      // Spec original pedia 'paidAt dentro do mes de referencia', mas
+      // consistencia visual com o KPI grid > literalidade do spec.
       const where: any = {
         type: 'RECEITA',
         status: 'PAGO',
-        paid_at: { gte: monthStart, lte: monthEnd },
+        date: { gte: monthStart, lte: monthEnd },
       };
       if (tenantId) where.tenant_id = tenantId;
       if (lawyerId) where.lawyer_id = lawyerId;
