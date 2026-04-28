@@ -6,6 +6,7 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { MediaS3Service } from '../media/s3.service';
 import { FileStorageService } from '../media/filesystem.service';
+import { MediaDownloadService } from '../media/media-download.service';
 import { SettingsService } from '../settings/settings.service';
 import { Readable } from 'stream';
 import OpenAI, { toFile } from 'openai';
@@ -59,6 +60,7 @@ export class MessagesService {
     private chatGateway: ChatGateway,
     private s3: MediaS3Service,
     private fileStorage: FileStorageService,
+    private mediaDownloadService: MediaDownloadService,
     private settings: SettingsService,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
   ) {}
@@ -667,39 +669,139 @@ export class MessagesService {
 
     if (!message) throw new NotFoundException('Mensagem não encontrada');
     if (message.type !== 'audio') throw new BadRequestException('Mensagem não é um áudio');
-    if (!message.media) throw new BadRequestException('Mídia ainda não processada');
+    if (!message.media) {
+      throw new BadRequestException({
+        code: 'media_not_ready',
+        message: 'Mídia ainda não processada — aguarde alguns segundos e tente de novo',
+      });
+    }
 
     const { apiKey: openAiKey } = await this.settings.getAiConfig();
-    if (!openAiKey) throw new BadRequestException('OPENAI_API_KEY não configurada');
+    if (!openAiKey) {
+      throw new BadRequestException({
+        code: 'openai_not_configured',
+        message: 'OpenAI não configurada — peça pro admin cadastrar a chave em Configurações > IA',
+      });
+    }
 
-    // Dual-read: prefere filesystem (novo), cai no S3/MinIO (legado)
+    // Dual-read: prefere filesystem (novo), cai no S3/MinIO (legado).
+    // Validacao explicita de existencia antes de qualquer leitura — bug
+    // reportado 2026-04-27: file_path estava no banco mas o arquivo fisico
+    // havia sumido (volume crm_media nao montado, FS efemero apagou no
+    // restart). Sem essa checagem, a chamada caia no fileStorage.read()
+    // com ENOENT generico que era apresentado como "Falha ao transcrever".
     let buffer: Buffer;
     let contentType: string | undefined;
     if (message.media.file_path) {
-      buffer = await this.fileStorage.read(message.media.file_path);
-      contentType = message.media.mime_type;
+      const exists = await this.fileStorage.exists(message.media.file_path);
+      if (!exists) {
+        // Tenta re-baixar via Evolution antes de desistir (so funciona se
+        // external_message_id existir e a Evolution ainda tiver o arquivo
+        // em cache, < 48h apos o envio).
+        this.logger.warn(
+          `[Whisper] Arquivo fisico ausente para msg ${messageId} (file_path=${message.media.file_path}) — tentando re-download`,
+        );
+        const retry = await this.mediaDownloadService.retryDownload(messageId);
+        if (!retry.ok) {
+          throw new BadRequestException({
+            code: retry.reason === 'expired' ? 'media_expired' : 'media_lost',
+            message: retry.reason === 'expired'
+              ? 'Áudio expirou no servidor do WhatsApp (>48h) — peça pro cliente reenviar'
+              : 'Arquivo de áudio perdido no servidor — peça pro cliente reenviar',
+          });
+        }
+        // Releitura do file_path apos re-download bem-sucedido.
+        const refreshed = await this.prisma.message.findUnique({
+          where: { id: messageId },
+          include: { media: true },
+        });
+        if (!refreshed?.media?.file_path) {
+          throw new BadRequestException({
+            code: 'media_lost',
+            message: 'Re-download da mídia falhou inesperadamente',
+          });
+        }
+        buffer = await this.fileStorage.read(refreshed.media.file_path);
+        contentType = refreshed.media.mime_type;
+      } else {
+        buffer = await this.fileStorage.read(message.media.file_path);
+        contentType = message.media.mime_type;
+      }
     } else if (message.media.s3_key) {
       const s3Result = await this.s3.getObjectStream(message.media.s3_key);
       buffer = await this.streamToBuffer(s3Result.stream);
       contentType = s3Result.contentType;
     } else {
-      throw new BadRequestException('Mídia sem file_path nem s3_key — inconsistente');
+      throw new BadRequestException({
+        code: 'media_inconsistent',
+        message: 'Mídia sem file_path nem s3_key — registro corrompido',
+      });
     }
 
     const mimeBase = (contentType || message.media.mime_type).split(';')[0].trim();
     const ext = mimeBase.split('/')[1] || 'ogg';
 
-    // Transcrição via Whisper
+    // Transcricao via OpenAI. Tenta com gpt-4o-transcribe (mais acurado, mas
+    // ainda em preview) e cai pra whisper-1 (estavel, disponivel em qualquer
+    // conta com creditos) se falhar. Espelha o pattern do worker
+    // (ai.processor.ts:autoTranscribeAudios) — antes deste fix, o botao
+    // manual so usava gpt-4o-transcribe e morria silenciosamente quando o
+    // modelo dava 503/timeout.
     const openai = new OpenAI({ apiKey: openAiKey });
-    const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
-    const result = await openai.audio.transcriptions.create({
-      file,
-      model: 'gpt-4o-transcribe',
-      language: 'pt',
-      prompt: 'Transcrição de mensagem de voz do WhatsApp em português brasileiro. O cliente está conversando com um escritório de advocacia sobre questões jurídicas.',
-    });
+    const transcribeWithModel = async (model: string) => {
+      const file = await toFile(buffer, `audio.${ext}`, { type: mimeBase });
+      return openai.audio.transcriptions.create({
+        file,
+        model,
+        language: 'pt',
+        prompt: 'Transcrição de mensagem de voz do WhatsApp em português brasileiro. O cliente está conversando com um escritório de advocacia sobre questões jurídicas.',
+      });
+    };
 
-    const transcription = result.text?.trim() || '';
+    let transcription = '';
+    let usedModel = 'gpt-4o-transcribe';
+
+    try {
+      const result = await transcribeWithModel('gpt-4o-transcribe');
+      transcription = (result.text || '').trim();
+    } catch (primaryErr: any) {
+      this.logger.warn(
+        `[Whisper] gpt-4o-transcribe falhou msg=${messageId}: ${primaryErr?.message || primaryErr} (status=${primaryErr?.status}) — tentando whisper-1`,
+      );
+      try {
+        usedModel = 'whisper-1';
+        const result = await transcribeWithModel('whisper-1');
+        transcription = (result.text || '').trim();
+      } catch (fallbackErr: any) {
+        this.logger.error(
+          `[Whisper] whisper-1 fallback tambem falhou msg=${messageId}: ${fallbackErr?.message || fallbackErr}`,
+        );
+        throw new BadRequestException({
+          code: 'openai_error',
+          message: 'OpenAI temporariamente indisponível — tente em alguns minutos',
+        });
+      }
+    }
+
+    // Mesmo com 200 OK, gpt-4o-transcribe pode retornar texto vazio (ruido,
+    // audio muito curto, idioma diferente). Tenta whisper-1 nesse caso.
+    if (!transcription && usedModel === 'gpt-4o-transcribe') {
+      this.logger.warn(`[Whisper] gpt-4o-transcribe vazio msg=${messageId} — tentando whisper-1`);
+      try {
+        const result = await transcribeWithModel('whisper-1');
+        transcription = (result.text || '').trim();
+        usedModel = 'whisper-1';
+      } catch (fallbackErr: any) {
+        this.logger.warn(`[Whisper] whisper-1 fallback vazio: ${fallbackErr?.message || fallbackErr}`);
+      }
+    }
+
+    if (!transcription) {
+      throw new BadRequestException({
+        code: 'transcription_empty',
+        message: 'Áudio inaudível ou sem fala — peça pro cliente reenviar',
+      });
+    }
 
     // Salvar no banco
     await this.prisma.message.update({
@@ -707,7 +809,7 @@ export class MessagesService {
       data: { text: transcription },
     });
 
-    this.logger.log(`[Whisper] Transcrição salva para msg ${messageId}`);
+    this.logger.log(`[Whisper] Transcrição salva msg=${messageId} modelo=${usedModel}`);
     return { transcription };
   }
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -69,6 +70,42 @@ export class AudioRetranscribeCronService {
       });
 
       if (audioMessages.length === 0) return;
+
+      // Antes de enfileirar retry, faz HEAD/GET nos audios cujo file_path
+      // no DB existe mas o arquivo fisico pode ter sumido (cenario classico
+      // de volume nao montado — bug 2026-04-27). O endpoint @Public GET
+      // /media/:id ja tem auto-retry interno: se o arquivo nao existe
+      // no FS, dispara retryDownload via Evolution (se < 48h). Sem este
+      // pre-fetch, o retry de transcricao ia bater no mesmo file_path
+      // orfao no AiProcessor.
+      //
+      // Best-effort: se nao conseguir, segue pra enfileirar IA mesmo
+      // assim. Audios do WhatsApp sao pequenos (~5KB), entao o GET pleno
+      // nao adiciona overhead significativo. Usa Range: bytes=0-0 pra so
+      // pegar 1 byte (o controller ainda dispara o fluxo de retryDownload
+      // se o arquivo nao existir antes de servir).
+      const apiInternalUrl = process.env.API_INTERNAL_URL || 'http://crm-api:3001';
+      let recovered = 0;
+      let recoveryFailed = 0;
+      for (const m of audioMessages) {
+        try {
+          const r = await axios.get(`${apiInternalUrl}/media/${m.id}`, {
+            timeout: 60_000,
+            responseType: 'arraybuffer',
+            headers: { Range: 'bytes=0-0' },
+            validateStatus: (s) => s < 500,
+          });
+          if (r.status === 200 || r.status === 206) recovered++;
+          else recoveryFailed++;
+        } catch {
+          recoveryFailed++;
+        }
+      }
+      if (recovered > 0 || recoveryFailed > 0) {
+        this.logger.log(
+          `[AUDIO-RETRY] Pre-recovery: ${recovered} arquivos OK, ${recoveryFailed} irrecuperaveis`,
+        );
+      }
 
       // Agrupa por conversation_id (1 job por conversa)
       const conversationIds = Array.from(

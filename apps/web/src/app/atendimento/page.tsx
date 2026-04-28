@@ -2240,9 +2240,18 @@ export default function Dashboard() {
     try {
       const res = await api.post(`/messages/${msgId}/transcribe`);
       setMessages(prev => prev.map((m: any) => m.id === msgId ? { ...m, text: res.data.transcription } : m));
-    } catch (e) {
+    } catch (e: any) {
       console.error('Erro ao transcrever áudio', e);
-      showError('Falha ao transcrever áudio');
+      // Backend agora retorna { code, message } estruturado. Cobre:
+      //   media_not_ready / openai_not_configured / media_lost /
+      //   media_expired / openai_error / transcription_empty /
+      //   media_inconsistent
+      // Cai no fallback generico se vier qualquer outro shape.
+      const payload = e?.response?.data;
+      const friendly = typeof payload?.message === 'string'
+        ? payload.message
+        : (typeof payload?.error?.message === 'string' ? payload.error.message : 'Falha ao transcrever áudio');
+      showError(friendly);
     } finally {
       setTranscribing(prev => ({ ...prev, [msgId]: false }));
     }

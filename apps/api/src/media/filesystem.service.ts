@@ -26,6 +26,24 @@ export class FileStorageService implements OnModuleInit {
     } catch (e: any) {
       this.logger.error(`[FS] Falha ao criar ${this.basePath}: ${e.message}`);
     }
+
+    // Health check explicito no boot — alerta loud se o volume nao estiver
+    // montado/escrivivel. Sem isso, o problema so aparece quando o primeiro
+    // audio do WhatsApp chega, ja com cliente reclamando que a transcricao
+    // nao funcionou. Bug reportado 2026-04-27: volume crm_media nao foi
+    // montado no Swarm apos um deploy via Portainer (stack file estava
+    // desatualizado), e o sistema ficou ~10h escrevendo audios em FS
+    // efemero antes de alguem perceber.
+    const health = await this.healthCheck();
+    if (!health.ok || !health.writable) {
+      this.logger.error(
+        `[FS][CRITICAL] MEDIA_STORAGE_PATH nao escrivivel! basePath=${health.basePath} ` +
+        `Audios e midias do WhatsApp NAO serao persistidos. Verifique o mount do volume ` +
+        `crm_media no docker-compose/Portainer.`,
+      );
+    } else {
+      this.logger.log(`[FS] Health check OK — volume escrivivel`);
+    }
   }
 
   /** Converte messageId + extensão em path relativo particionado por YYYY/MM */

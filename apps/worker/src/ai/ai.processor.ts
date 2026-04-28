@@ -255,7 +255,10 @@ export class AiProcessor extends WorkerHost {
 
       try {
         // Busca o buffer via HTTP do crm-api (GET /media/:messageId).
-        // Esse endpoint eh @Public e faz fallback filesystem -> S3 -> CDN.
+        // Esse endpoint eh @Public e faz fallback filesystem -> S3 -> CDN
+        // -> retryDownload via Evolution. Se o controller retornar 404, o
+        // arquivo eh definitivamente irrecuperavel (passou de 48h da Evolution
+        // ou Media record corrompido) — cai no placeholder educado.
         const mediaUrl = `${apiInternalUrl}/media/${msg.id}`;
         const sizeKB = media?.size ? (media.size / 1024).toFixed(1) : '?';
         this.logger.log(
@@ -267,6 +270,17 @@ export class AiProcessor extends WorkerHost {
           timeout: 30_000,
           validateStatus: (s) => s < 400,
         });
+
+        // Defensivo: o controller pode retornar 200 com body vazio em race
+        // condition rara (file_path no DB mas write nao terminou). Pula sem
+        // queimar token do Whisper.
+        if (!resp.data || resp.data.byteLength === 0) {
+          this.logger.warn(
+            `[AI] Body vazio do GET /media/${msg.id} (race condition?). Pulando transcricao.`,
+          );
+          msg.text = '[o cliente enviou um áudio mas não foi possível ouvir — peça educadamente para repetir por texto ou enviar outro áudio]';
+          continue;
+        }
         const buffer: Buffer = Buffer.from(resp.data);
         const contentType = (resp.headers['content-type'] as string) || media.mime_type || 'audio/ogg';
         const mimeBase = contentType.split(';')[0].trim();
