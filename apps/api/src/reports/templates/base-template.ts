@@ -342,11 +342,24 @@ export function renderTable(
   const rowHeight = options.rowHeight || 18;
   const headerFill = options.headerFill || '#3d2914';
 
-  // Calcula larguras
-  const fixedTotal = columns.reduce((acc, c) => acc + (c.width || 0), 0);
+  // Calcula larguras — defensivo contra colunas mal dimensionadas.
+  // Bug 2026-04-28: dashboard-snapshot tinha 520pt fixos em A4 retrato (util 482pt),
+  // fazendo flex receber 0 ou negativo, e doc.text com width=-8 quebrava PDFKit
+  // silenciosamente. Salvaguarda: redistribui proporcionalmente se overflow.
+  let fixedTotal = columns.reduce((acc, c) => acc + (c.width || 0), 0);
   const flexCount = columns.filter((c) => !c.width).length;
-  const flexWidth = flexCount > 0 ? Math.max(0, (fullWidth - fixedTotal) / flexCount) : 0;
-  const widths = columns.map((c) => c.width || flexWidth);
+  let widths: number[];
+
+  if (fixedTotal > fullWidth) {
+    // Overflow: encolhe TODAS as colunas proporcionalmente pra caber
+    const scale = fullWidth / fixedTotal;
+    widths = columns.map((c) => (c.width || 50) * scale);
+  } else {
+    const flexWidth = flexCount > 0 ? Math.max(20, (fullWidth - fixedTotal) / flexCount) : 0;
+    widths = columns.map((c) => c.width || flexWidth);
+  }
+  // Garante minimo absoluto pra prevenir width negativo no doc.text
+  widths = widths.map((w) => Math.max(20, w));
 
   // Header
   let y = doc.y;

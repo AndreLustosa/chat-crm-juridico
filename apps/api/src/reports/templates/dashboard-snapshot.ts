@@ -67,7 +67,13 @@ export interface DashboardSnapshotData {
 
 export function buildDashboardSnapshotPdf(data: DashboardSnapshotData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const ctx = createReportContext({
+    // Bug 2026-04-28: exceptions sincronas durante render (ex: width negativo
+    // em renderTable, divisao por zero em delta) faziam o Promise nunca
+    // resolver/rejeitar — frontend ficava pendurado ate timeout 60s, mostrando
+    // "Erro ao gerar PDF" generico sem info util. try/catch garante reject.
+    let ctx: ReturnType<typeof createReportContext> | null = null;
+    try {
+    ctx = createReportContext({
       title: 'Dashboard Financeiro — Snapshot',
       generatedBy: data.generatedBy,
       filters: {
@@ -173,13 +179,15 @@ export function buildDashboardSnapshotPdf(data: DashboardSnapshotData): Promise<
     if (data.includeDetailTable !== false && data.pendingCharges.length > 0) {
       ctx.doc.addPage();
       renderSectionTitle(ctx, 'Anexo — Cobranças pendentes', `${data.pendingCharges.length} parcelas em aberto`);
+      // Larguras dimensionadas pra A4 retrato (util ~482pt). Total: 435pt
+      // + flex Asaas ~47pt = 482pt. Em paisagem expande naturalmente via flex.
       const chargeCols: TableColumn[] = [
-        { header: 'Cliente', width: 160 },
-        { header: 'Processo', width: 130 },
-        { header: 'Vencimento', width: 80, align: 'center' },
-        { header: 'Valor', width: 80, align: 'right' },
-        { header: 'Status', width: 70, align: 'center' },
-        { header: 'Asaas', align: 'center' },
+        { header: 'Cliente', width: 150 },
+        { header: 'Processo', width: 100 },
+        { header: 'Vencimento', width: 70, align: 'center' },
+        { header: 'Valor', width: 70, align: 'right' },
+        { header: 'Status', width: 60, align: 'center' },
+        { header: 'Asaas', align: 'center' }, // flex absorve resto
       ];
       const chargeRows = data.pendingCharges.map((c) => ({
         Cliente: c.leadName,
@@ -199,6 +207,11 @@ export function buildDashboardSnapshotPdf(data: DashboardSnapshotData): Promise<
     renderFooterAllPages(ctx);
 
     ctx.doc.end();
+    } catch (err: any) {
+      // Se ctx ja foi criado, encerra o doc pra liberar stream
+      try { ctx?.doc?.end(); } catch { /* ignore */ }
+      reject(new Error(`Falha ao gerar Dashboard Snapshot: ${err?.message || err}`));
+    }
   });
 }
 
