@@ -34,8 +34,15 @@ interface DashboardData {
     active_campaigns: number;
     paused_campaigns: number;
   };
-  timeseries?: { date: string; spend: number; leads: number }[];
-  top_campaigns?: { id: string; name: string; cpl: number }[];
+  timeseries?: { date: string; spend_brl: number; leads: number }[];
+  top_campaigns?: {
+    id: string;
+    name: string;
+    channel_type: string | null;
+    cost_brl: number;
+    conversions: number;
+    cpl_brl: number;
+  }[];
   at_risk_campaigns?: { id: string; name: string; reason: string }[];
 }
 
@@ -164,7 +171,7 @@ export function DashboardTab() {
         />
       </div>
 
-      {/* ─── Gráficos (placeholders Fase 3) ─────────────────────────────── */}
+      {/* ─── Gráficos ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-bold text-foreground mb-1">
@@ -173,9 +180,7 @@ export function DashboardTab() {
           <p className="text-[11px] text-muted-foreground mb-4">
             Gasto vs. leads nos últimos 30 dias
           </p>
-          <div className="h-48 rounded-lg bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">
-            (gráfico será implementado na Fase 3)
-          </div>
+          <Timeseries data={data?.timeseries ?? []} />
         </div>
 
         <div className="bg-card border border-border rounded-xl p-5">
@@ -183,11 +188,9 @@ export function DashboardTab() {
             Top campanhas
           </h3>
           <p className="text-[11px] text-muted-foreground mb-4">
-            Por menor CPL no período
+            Menor gasto com conversões nos últimos 7 dias
           </p>
-          <div className="h-48 rounded-lg bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">
-            (lista será implementada na Fase 3)
-          </div>
+          <TopCampaigns data={data?.top_campaigns ?? []} />
         </div>
       </div>
 
@@ -198,6 +201,120 @@ export function DashboardTab() {
           {new Date(data.account.last_sync_at).toLocaleString('pt-BR')}
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Componentes auxiliares ────────────────────────────────────────────────
+
+/**
+ * Gráfico de barras simples (sem dependência de lib) — barras verticais
+ * com altura proporcional ao gasto. Tooltip via title nativo.
+ */
+function Timeseries({
+  data,
+}: {
+  data: { date: string; spend_brl: number; leads: number }[];
+}) {
+  if (data.length === 0) {
+    return (
+      <div className="h-48 rounded-lg bg-muted/30 flex items-center justify-center text-xs text-muted-foreground">
+        Sem dados ainda — aguarde primeiro sync.
+      </div>
+    );
+  }
+
+  const maxSpend = Math.max(...data.map((d) => d.spend_brl), 1);
+  const totalSpend = data.reduce((s, d) => s + d.spend_brl, 0);
+  const totalLeads = data.reduce((s, d) => s + d.leads, 0);
+
+  return (
+    <div>
+      <div className="flex items-end h-48 gap-px">
+        {data.map((d) => {
+          const heightPct = (d.spend_brl / maxSpend) * 100;
+          const dayLabel = d.date.slice(8, 10) + '/' + d.date.slice(5, 7);
+          return (
+            <div
+              key={d.date}
+              className="flex-1 flex flex-col-reverse min-w-[8px]"
+              title={`${dayLabel}: ${fmtBRL(d.spend_brl)} • ${d.leads} leads`}
+            >
+              <div
+                className="bg-primary/70 hover:bg-primary rounded-t transition-colors"
+                style={{ height: `${heightPct}%`, minHeight: d.spend_brl > 0 ? '2px' : '0' }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex justify-between mt-2 text-[10px] text-muted-foreground tabular-nums">
+        <span>{data[0]?.date.slice(8, 10) + '/' + data[0]?.date.slice(5, 7)}</span>
+        <span>{data[data.length - 1]?.date.slice(8, 10) + '/' + data[data.length - 1]?.date.slice(5, 7)}</span>
+      </div>
+      <div className="flex justify-between mt-3 pt-3 border-t border-border text-[11px] text-muted-foreground">
+        <span>
+          Total gasto: <strong className="text-foreground">{fmtBRL(totalSpend)}</strong>
+        </span>
+        <span>
+          Total leads: <strong className="text-foreground">{totalLeads}</strong>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lista compacta de top 5 campanhas com CPL/gasto/conversões.
+ */
+function TopCampaigns({
+  data,
+}: {
+  data: {
+    id: string;
+    name: string;
+    channel_type: string | null;
+    cost_brl: number;
+    conversions: number;
+    cpl_brl: number;
+  }[];
+}) {
+  if (data.length === 0) {
+    return (
+      <div className="h-48 rounded-lg bg-muted/30 flex items-center justify-center text-xs text-muted-foreground text-center px-4">
+        Sem campanhas com conversões nos últimos 7 dias.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {data.map((c, i) => (
+        <div
+          key={c.id}
+          className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/30"
+        >
+          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+            {i + 1}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-foreground truncate" title={c.name}>
+              {c.name}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {c.channel_type ?? '—'} · {c.conversions} conv · {fmtBRL(c.cost_brl)} gasto
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-xs font-bold text-foreground tabular-nums">
+              {fmtBRL(c.cpl_brl)}
+            </div>
+            <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
+              CPL
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
