@@ -17,8 +17,12 @@ version: '3.8'
 
 services:
   # ------ Banco de Dados ------
+  # IMPORTANTE: usa pgvector/pgvector:pg15 (NAO postgres:15-alpine) porque
+  # o schema usa coluna `vector(1536)` no model Memory pra embeddings OpenAI.
+  # Sem pgvector, prisma db push falha. Producao ja roda essa imagem desde
+  # o setup do sistema de memoria (commit ~2026-04-18 do model Memory).
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
