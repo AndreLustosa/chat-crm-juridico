@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   TrendingUp,
@@ -50,7 +50,31 @@ interface AccountState {
   } | null;
 }
 
+/**
+ * Wrapper com Suspense — exigido pelo Next.js 16 quando se usa
+ * `useSearchParams()` durante prerender. Sem isso o build de producao quebra:
+ *   "useSearchParams() should be wrapped in a suspense boundary"
+ */
 export default function TrafegoPage() {
+  return (
+    <Suspense fallback={<PageLoading />}>
+      <TrafegoPageInner />
+    </Suspense>
+  );
+}
+
+function PageLoading() {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+        <Loader2 size={28} className="animate-spin" />
+        <p className="text-sm">Carregando...</p>
+      </div>
+    </div>
+  );
+}
+
+function TrafegoPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const perms = useRole();
