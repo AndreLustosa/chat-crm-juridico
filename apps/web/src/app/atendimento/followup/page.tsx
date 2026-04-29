@@ -2626,12 +2626,12 @@ export default function FollowupPage() {
                   <input
                     type="number"
                     min={5}
-                    max={60}
+                    max={3600}
                     className={inputCls()}
                     value={broadcastInterval}
-                    onChange={e => setBroadcastInterval(Math.max(5, Math.min(60, Number(e.target.value))))}
+                    onChange={e => setBroadcastInterval(Math.max(5, Math.min(3600, Number(e.target.value))))}
                   />
-                  <p className="text-xs text-muted-foreground mt-1">Mín 5s, recomendado 10s+</p>
+                  <p className="text-xs text-muted-foreground mt-1">Mín 5s, máx 3600s (1h). Para reduzir risco de banimento, use ≥60s. Ex.: 60=1min, 300=5min, 1800=30min, 3600=1h.</p>
                 </div>
                 <div className="flex items-end">
                   <button

@@ -824,7 +824,7 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
         tenant_id: tenantId,
         created_by_id: userId,
         total_targets: uniqueTargets.length,
-        interval_ms: Math.max(5000, Math.min(60000, data.interval_ms)),
+        interval_ms: Math.max(5000, Math.min(3600000, data.interval_ms)),
         custom_prompt: data.custom_prompt,
         filter_json: { type: data.type, days_ahead: data.days_ahead },
         status: 'ENVIANDO',
