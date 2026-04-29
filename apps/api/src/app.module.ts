@@ -57,6 +57,7 @@ import { PortalDocumentsModule } from './portal-documents/portal-documents.modul
 import { PortalPaymentsModule } from './portal-payments/portal-payments.module';
 import { PortalContractsModule } from './portal-contracts/portal-contracts.module';
 import { PortalSchedulingModule } from './portal-scheduling/portal-scheduling.module';
+import { TrafegoModule } from './trafego/trafego.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -138,6 +139,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     PortalPaymentsModule,
     PortalContractsModule,
     PortalSchedulingModule,
+    TrafegoModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

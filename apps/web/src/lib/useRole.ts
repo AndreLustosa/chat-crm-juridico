@@ -22,6 +22,8 @@ export interface RoleInfo {
   canViewDjen: boolean;          // publicações DJEN
   canViewFinanceiro: boolean;    // módulo financeiro
   canViewAdvogado: boolean;      // triagem e peticionamento
+  canViewTrafego: boolean;       // módulo de gestão de tráfego Google Ads
+  canManageTrafego: boolean;     // editar settings, conectar conta OAuth
 }
 
 /** Lê os roles do JWT salvo no localStorage e retorna helpers de permissão. */
@@ -74,5 +76,7 @@ function buildInfo(roles: AppRole[], userId: string | null): RoleInfo {
     canViewDjen: has(['ADMIN', 'ADVOGADO']),
     canViewFinanceiro: has(['ADMIN', 'FINANCEIRO', 'ADVOGADO']),
     canViewAdvogado: has(['ADMIN', 'ADVOGADO']),
+    canViewTrafego: has(['ADMIN', 'ADVOGADO', 'OPERADOR']),
+    canManageTrafego: has(['ADMIN']),
   };
 }

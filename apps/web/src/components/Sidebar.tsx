@@ -8,6 +8,7 @@ import {
   MessageSquare, BarChart2, Scale, BookOpen, Calendar,
   LayoutDashboard, Gavel, Wallet, HelpCircle,
   ChevronRight, ClipboardList, Sparkles, Wrench,
+  TrendingUp,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
@@ -294,8 +295,15 @@ export function Sidebar() {
       label: 'Analytics',
       href: '/atendimento/marketing/analytics',
       icon: <BarChart2 size={20} strokeWidth={2} />,
-      match: (p) => p.startsWith('/atendimento/marketing'),
+      match: (p) => p.startsWith('/atendimento/marketing/analytics') || p.startsWith('/atendimento/marketing/landing-pages'),
       show: perms.canViewAnalytics,
+    },
+    trafego: {
+      label: 'Tráfego (Google Ads)',
+      href: '/atendimento/marketing/trafego',
+      icon: <TrendingUp size={20} strokeWidth={2} />,
+      match: (p) => p.startsWith('/atendimento/marketing/trafego'),
+      show: perms.canViewTrafego,
     },
     ferramentas: {
       label: 'Ferramentas',
@@ -334,7 +342,7 @@ export function Sidebar() {
     {
       id: 'gestao',
       label: 'Gestão',
-      items: [allItems.followup, allItems.financeiro, allItems.analytics].filter(i => i.show),
+      items: [allItems.followup, allItems.financeiro, allItems.analytics, allItems.trafego].filter(i => i.show),
     },
     {
       id: 'ferramentas',

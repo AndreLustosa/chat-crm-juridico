@@ -8,27 +8,27 @@ datasource db {
 }
 
 model Tenant {
-  id                 String             @id @default(uuid())
-  name               String
-  conversations      Conversation[]
-  leads              Lead[]
-  tasks              Task[]
-  users              User[]
-  inboxes            Inbox[]
-  instances          Instance[]
-  legal_cases        LegalCase[]
-  calendar_events    CalendarEvent[]
-  appointment_types  AppointmentType[]
-  holidays           Holiday[]
-  case_documents     CaseDocument[]
-  task_attachments   TaskAttachment[]
-  case_transcriptions CaseTranscription[]
-  case_deadlines     CaseDeadline[]
-  petitions          CasePetition[]
-  legal_templates    LegalTemplate[]
-  case_honorarios        CaseHonorario[]
-  ai_chats               AiChat[]
-  followup_sequences     FollowupSequence[]
+  id                        String                           @id @default(uuid())
+  name                      String
+  conversations             Conversation[]
+  leads                     Lead[]
+  tasks                     Task[]
+  users                     User[]
+  inboxes                   Inbox[]
+  instances                 Instance[]
+  legal_cases               LegalCase[]
+  calendar_events           CalendarEvent[]
+  appointment_types         AppointmentType[]
+  holidays                  Holiday[]
+  case_documents            CaseDocument[]
+  task_attachments          TaskAttachment[]
+  case_transcriptions       CaseTranscription[]
+  case_deadlines            CaseDeadline[]
+  petitions                 CasePetition[]
+  legal_templates           LegalTemplate[]
+  case_honorarios           CaseHonorario[]
+  ai_chats                  AiChat[]
+  followup_sequences        FollowupSequence[]
   financial_transactions    FinancialTransaction[]
   financial_categories      FinancialCategory[]
   payment_gateway_customers PaymentGatewayCustomer[]
@@ -45,111 +45,117 @@ model Tenant {
   monthly_goals             MonthlyGoal[]
   financial_attachments     FinancialTransactionAttachment[]
   reports                   Report[]
+  traffic_accounts          TrafficAccount[]
+  traffic_campaigns         TrafficCampaign[]
+  traffic_metrics_daily     TrafficMetricDaily[]
+  traffic_alerts            TrafficAlert[]
+  traffic_settings          TrafficSettings?
+  traffic_sync_logs         TrafficSyncLog[]
 }
 
 model User {
-  id                       String                 @id @default(uuid())
-  tenant_id                String?
-  name                     String
-  email                    String                 @unique
-  phone                    String?
-  password_hash            String
-  roles                    String[]               @default(["OPERADOR"])
-  specialties              String[]               @default([])
-  oab_number               String?                // Número OAB (ex: "14209")
-  oab_uf                   String?                // UF da OAB (ex: "AL")
+  id                             String                           @id @default(uuid())
+  tenant_id                      String?
+  name                           String
+  email                          String                           @unique
+  phone                          String?
+  password_hash                  String
+  roles                          String[]                         @default(["OPERADOR"])
+  specialties                    String[]                         @default([])
+  oab_number                     String? // Número OAB (ex: "14209")
+  oab_uf                         String? // UF da OAB (ex: "AL")
   // Provider de transcrição preferido: 'whisper-local' | 'groq' | NULL (usa default global TRANSCRIPTION_PROVIDER)
   // Configurado pelo admin em Configurações > Transcrição.
-  transcription_provider   String?
-  created_at               DateTime               @default(now())
-  updated_at               DateTime               @updatedAt
-  audit_logs               AuditLog[]
-  assigned_convos          Conversation[]         @relation("AssignedUser")
-  lawyer_convos            Conversation[]         @relation("AssignedLawyer")
-  lead_notes               LeadNote[]
-  stage_history_actor      LeadStageHistory[]     @relation("StageHistoryActor")
-  inboxes                  Inbox[]
-  sectors                  Sector[]               @relation("SectorUsers")
-  tasks                    Task[]
-  tenant                   Tenant?                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  lawyer_cases             LegalCase[]            @relation("LawyerCases")
-  task_comments            TaskComment[]
-  supervisors              User[]                 @relation("InternSupervisors")
-  interns                  User[]                 @relation("InternSupervisors")
-  calendar_events_assigned  CalendarEvent[]        @relation("EventAssigned")
-  calendar_events_created   CalendarEvent[]        @relation("EventCreator")
-  calendar_events_completed CalendarEvent[]        @relation("EventCompleter")
-  tasks_completed           Task[]                 @relation("TaskCompleter")
-  deadlines_completed       CaseDeadline[]         @relation("DeadlineCompleter")
-  schedules                 UserSchedule[]
-  calendar_event_comments   CalendarEventComment[]
-  transfer_audios           TransferAudio[]        @relation("AudioUploader")
-  uploaded_documents        CaseDocument[]         @relation("DocumentUploader")
-  uploaded_task_attachments TaskAttachment[]       @relation("TaskAttachmentUploader")
-  uploaded_transcriptions   CaseTranscription[]    @relation("TranscriptionUploader")
-  created_deadlines         CaseDeadline[]         @relation("DeadlineCreator")
-  authored_petitions       CasePetition[]         @relation("PetitionAuthor")
-  reviewed_petitions       CasePetition[]         @relation("PetitionReviewer")
-  saved_versions           PetitionVersion[]      @relation("VersionSaver")
-  created_templates        LegalTemplate[]        @relation("TemplateCreator")
-  ai_chats                 AiChat[]               @relation("AiChatOwner")
-  cs_leads                 Lead[]                 @relation("CSManager")
-  financial_transactions   FinancialTransaction[] @relation("FinancialLawyer")
-  monthly_goals_as_lawyer  MonthlyGoal[]          @relation("MonthlyGoalLawyer")
-  monthly_goals_created    MonthlyGoal[]          @relation("MonthlyGoalCreator")
+  transcription_provider         String?
+  created_at                     DateTime                         @default(now())
+  updated_at                     DateTime                         @updatedAt
+  audit_logs                     AuditLog[]
+  assigned_convos                Conversation[]                   @relation("AssignedUser")
+  lawyer_convos                  Conversation[]                   @relation("AssignedLawyer")
+  lead_notes                     LeadNote[]
+  stage_history_actor            LeadStageHistory[]               @relation("StageHistoryActor")
+  inboxes                        Inbox[]
+  sectors                        Sector[]                         @relation("SectorUsers")
+  tasks                          Task[]
+  tenant                         Tenant?                          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lawyer_cases                   LegalCase[]                      @relation("LawyerCases")
+  task_comments                  TaskComment[]
+  supervisors                    User[]                           @relation("InternSupervisors")
+  interns                        User[]                           @relation("InternSupervisors")
+  calendar_events_assigned       CalendarEvent[]                  @relation("EventAssigned")
+  calendar_events_created        CalendarEvent[]                  @relation("EventCreator")
+  calendar_events_completed      CalendarEvent[]                  @relation("EventCompleter")
+  tasks_completed                Task[]                           @relation("TaskCompleter")
+  deadlines_completed            CaseDeadline[]                   @relation("DeadlineCompleter")
+  schedules                      UserSchedule[]
+  calendar_event_comments        CalendarEventComment[]
+  transfer_audios                TransferAudio[]                  @relation("AudioUploader")
+  uploaded_documents             CaseDocument[]                   @relation("DocumentUploader")
+  uploaded_task_attachments      TaskAttachment[]                 @relation("TaskAttachmentUploader")
+  uploaded_transcriptions        CaseTranscription[]              @relation("TranscriptionUploader")
+  created_deadlines              CaseDeadline[]                   @relation("DeadlineCreator")
+  authored_petitions             CasePetition[]                   @relation("PetitionAuthor")
+  reviewed_petitions             CasePetition[]                   @relation("PetitionReviewer")
+  saved_versions                 PetitionVersion[]                @relation("VersionSaver")
+  created_templates              LegalTemplate[]                  @relation("TemplateCreator")
+  ai_chats                       AiChat[]                         @relation("AiChatOwner")
+  cs_leads                       Lead[]                           @relation("CSManager")
+  financial_transactions         FinancialTransaction[]           @relation("FinancialLawyer")
+  monthly_goals_as_lawyer        MonthlyGoal[]                    @relation("MonthlyGoalLawyer")
+  monthly_goals_created          MonthlyGoal[]                    @relation("MonthlyGoalCreator")
   financial_attachments_uploaded FinancialTransactionAttachment[] @relation("FinancialAttachmentUploader")
-  reports_generated        Report[]               @relation("ReportGeneratedBy")
-  tax_records              TaxRecord[]            @relation("TaxRecordLawyer")
-  conversation_notes       ConversationNote[]     @relation("ConversationNoteAuthor")
-  broadcast_jobs           BroadcastJob[]
-  notification_setting     NotificationSetting?
-  conversation_mutes       ConversationMute[]
-  notifications            Notification[]
-  push_subscriptions       PushSubscription[]
+  reports_generated              Report[]                         @relation("ReportGeneratedBy")
+  tax_records                    TaxRecord[]                      @relation("TaxRecordLawyer")
+  conversation_notes             ConversationNote[]               @relation("ConversationNoteAuthor")
+  broadcast_jobs                 BroadcastJob[]
+  notification_setting           NotificationSetting?
+  conversation_mutes             ConversationMute[]
+  notifications                  Notification[]
+  push_subscriptions             PushSubscription[]
 }
 
 model Lead {
-  id                   String               @id @default(uuid())
-  tenant_id            String?
-  name                 String?
-  phone                String               @unique
-  email                String?
-  origin               String?
-  stage                String               @default("QUALIFICANDO")
-  stage_entered_at     DateTime             @default(now())
-  loss_reason          String?
-  profile_picture_url  String?
-  tags                 String[]
-  created_at           DateTime             @default(now())
-  updated_at           DateTime             @updatedAt
+  id                  String   @id @default(uuid())
+  tenant_id           String?
+  name                String?
+  phone               String   @unique
+  email               String?
+  origin              String?
+  stage               String   @default("QUALIFICANDO")
+  stage_entered_at    DateTime @default(now())
+  loss_reason         String?
+  profile_picture_url String?
+  tags                String[]
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 
   // ─── Separação Lead vs Cliente ────────────────────────────
   // Quando true: lead se tornou cliente (contrato assinado/FINALIZADO)
-  is_client            Boolean              @default(false)
-  became_client_at     DateTime?
+  is_client        Boolean   @default(false)
+  became_client_at DateTime?
   // Operador que fechou a venda — mantém vínculo pós-conversão
-  cs_user_id           String?
-  cs_user              User?                @relation("CSManager", fields: [cs_user_id], references: [id], onDelete: SetNull)
+  cs_user_id       String?
+  cs_user          User?     @relation("CSManager", fields: [cs_user_id], references: [id], onDelete: SetNull)
 
   // Opt-out de lembretes de cobrança via WhatsApp. Cliente pode pedir
   // pra parar de receber mensagens de honorarios sem afetar outras
   // notificacoes (movimentacoes, agendamento).
-  payment_reminders_disabled Boolean       @default(false)
+  payment_reminders_disabled Boolean @default(false)
 
   // Google Drive
   google_drive_folder_id String?
 
-  profile              LeadProfile?
-  conversations        Conversation[]
-  tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  tasks                Task[]
-  legal_cases          LegalCase[]
-  ficha_trabalhista    FichaTrabalhista?
-  calendar_events      CalendarEvent[]
-  last_followup_at     DateTime?
-  notes                LeadNote[]
-  stage_history        LeadStageHistory[]
-  contract_signatures  ContractSignature[]
+  profile                   LeadProfile?
+  conversations             Conversation[]
+  tenant                    Tenant?                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tasks                     Task[]
+  legal_cases               LegalCase[]
+  ficha_trabalhista         FichaTrabalhista?
+  calendar_events           CalendarEvent[]
+  last_followup_at          DateTime?
+  notes                     LeadNote[]
+  stage_history             LeadStageHistory[]
+  contract_signatures       ContractSignature[]
   followup_enrollments      FollowupEnrollment[]
   financial_transactions    FinancialTransaction[]
   payment_gateway_customers PaymentGatewayCustomer[]
@@ -167,25 +173,23 @@ model Lead {
 
 /**
  * Codigo OTP de login do cliente no portal (passwordless via WhatsApp).
- *
  * Fluxo:
- *   1. Cliente digita telefone no /portal/login
- *   2. Backend cria ClientLoginCode com sha256(codigo) e TTL 10min
- *   3. WhatsApp do cliente recebe "Seu codigo: 1234"
- *   4. Cliente digita 4 digitos, backend valida e emite JWT (audience=client)
- *
+ * 1. Cliente digita telefone no /portal/login
+ * 2. Backend cria ClientLoginCode com sha256(codigo) e TTL 10min
+ * 3. WhatsApp do cliente recebe "Seu codigo: 1234"
+ * 4. Cliente digita 4 digitos, backend valida e emite JWT (audience=client)
  * code_hash: NUNCA armazenar plaintext. sha256(code) — sufientemente seguro
  * pra OTP curto + TTL 10min + max 5 attempts.
  */
 model ClientLoginCode {
-  id          String    @id @default(uuid())
-  lead_id     String
-  code_hash   String    // sha256 do codigo de 4 digitos
-  expires_at  DateTime  // now + 10min
-  attempts    Int       @default(0)
-  used_at     DateTime?
-  ip_address  String?
-  created_at  DateTime  @default(now())
+  id         String    @id @default(uuid())
+  lead_id    String
+  code_hash  String // sha256 do codigo de 4 digitos
+  expires_at DateTime // now + 10min
+  attempts   Int       @default(0)
+  used_at    DateTime?
+  ip_address String?
+  created_at DateTime  @default(now())
 
   lead Lead @relation(fields: [lead_id], references: [id], onDelete: Cascade)
 
@@ -201,8 +205,8 @@ model Conversation {
   external_id                String?
   status                     String              @default("ABERTO")
   ai_mode                    Boolean             @default(true)
-  ai_mode_disabled_at        DateTime?           // Timestamp de quando ai_mode foi desligado (para auto-reativação)
-  ai_mode_source             String?             // "MANUAL" | "CRON_AFTER_HOURS" | null — origem da última mudança em ai_mode
+  ai_mode_disabled_at        DateTime? // Timestamp de quando ai_mode foi desligado (para auto-reativação)
+  ai_mode_source             String? // "MANUAL" | "CRON_AFTER_HOURS" | null — origem da última mudança em ai_mode
   assigned_user_id           String?
   inbox_id                   String?
   instance_name              String? // Nome da instancia de origem (ex: wa1)
@@ -283,13 +287,13 @@ model MessageReaction {
 model Media {
   id            String   @id @default(uuid())
   message_id    String   @unique
-  s3_key        String?  /// DEPRECATED: path no MinIO (mídias antigas). Novo: usar file_path.
-  file_path     String?  /// Path relativo a MEDIA_STORAGE_PATH (ex: "2026/04/uuid.ogg")
+  s3_key        String? /// DEPRECATED: path no MinIO (mídias antigas). Novo: usar file_path.
+  file_path     String? /// Path relativo a MEDIA_STORAGE_PATH (ex: "2026/04/uuid.ogg")
   mime_type     String
   size          Int?
   duration      Int?
   checksum      String?
-  original_url  String?  /// URL temporária Evolution CDN (fallback, expira ~48h)
+  original_url  String? /// URL temporária Evolution CDN (fallback, expira ~48h)
   original_name String?
   created_at    DateTime @default(now())
   message       Message  @relation(fields: [message_id], references: [id], onDelete: Cascade)
@@ -354,25 +358,25 @@ model Task {
 // diligencia (cobertura pra casos tipo "ir ao cartorio comprar selo"
 // que nao tem processo associado mas tem comprovante).
 model TaskAttachment {
-  id              String   @id @default(uuid())
-  tenant_id       String?
-  task_id         String
-  uploaded_by_id  String
-  name            String   // Nome amigavel — pode ser editado pelo usuario
-  original_name   String   // Nome original do arquivo no upload
-  s3_key          String   // Chave no MinIO/S3 (mesmo bucket de CaseDocument)
-  mime_type       String
-  size            Int      // bytes
+  id             String   @id @default(uuid())
+  tenant_id      String?
+  task_id        String
+  uploaded_by_id String
+  name           String // Nome amigavel — pode ser editado pelo usuario
+  original_name  String // Nome original do arquivo no upload
+  s3_key         String // Chave no MinIO/S3 (mesmo bucket de CaseDocument)
+  mime_type      String
+  size           Int // bytes
   // Pasta sugerida (CLIENTE/CONTRATOS/etc) — usada quando o documento eh
   // espelhado no workspace do processo. Sem efeito quando Task nao tem
   // legal_case_id.
-  folder          String   @default("OUTROS")
-  description     String?
-  created_at      DateTime @default(now())
+  folder         String   @default("OUTROS")
+  description    String?
+  created_at     DateTime @default(now())
 
-  task            Task    @relation(fields: [task_id], references: [id], onDelete: Cascade)
-  tenant          Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  uploaded_by     User    @relation("TaskAttachmentUploader", fields: [uploaded_by_id], references: [id])
+  task        Task    @relation(fields: [task_id], references: [id], onDelete: Cascade)
+  tenant      Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  uploaded_by User    @relation("TaskAttachmentUploader", fields: [uploaded_by_id], references: [id])
 
   @@index([task_id])
   @@index([tenant_id])
@@ -587,54 +591,54 @@ model Sector {
 }
 
 model LegalCase {
-  id               String    @id @default(uuid())
-  tenant_id        String?
-  lead_id          String
-  conversation_id  String?
-  lawyer_id        String
-  case_number      String?
-  legal_area       String?
-  stage            String    @default("VIABILIDADE")
-  in_tracking      Boolean   @default(false) // true = passou para menu Processos
-  tracking_stage   String? // stage dentro do menu Processos
-  filed_at         DateTime? // quando foi protocolado/ajuizado
-  archived         Boolean   @default(false)
-  archive_reason   String?
-  renounced        Boolean   @default(false) // renúncia: advogado não atua mais no processo
-  renounced_at     DateTime?
-  notes            String?
-  court            String?
-  action_type      String? // Tipo de ação (Reclamatória Trabalhista, Indenizatória, etc.)
-  claim_value      Decimal? // Valor da causa
-  sentence_value   Decimal? // Valor da condenação (preenchido na EXECUCAO)
-  sentence_date    DateTime? // Data da sentença/acórdão
-  sentence_type    String? // PROCEDENTE, PARCIAL, IMPROCEDENTE, ACORDO
-  opposing_party   String? // Parte contrária (nome)
+  id                     String    @id @default(uuid())
+  tenant_id              String?
+  lead_id                String
+  conversation_id        String?
+  lawyer_id              String
+  case_number            String?
+  legal_area             String?
+  stage                  String    @default("VIABILIDADE")
+  in_tracking            Boolean   @default(false) // true = passou para menu Processos
+  tracking_stage         String? // stage dentro do menu Processos
+  filed_at               DateTime? // quando foi protocolado/ajuizado
+  archived               Boolean   @default(false)
+  archive_reason         String?
+  renounced              Boolean   @default(false) // renúncia: advogado não atua mais no processo
+  renounced_at           DateTime?
+  notes                  String?
+  court                  String?
+  action_type            String? // Tipo de ação (Reclamatória Trabalhista, Indenizatória, etc.)
+  claim_value            Decimal? // Valor da causa
+  sentence_value         Decimal? // Valor da condenação (preenchido na EXECUCAO)
+  sentence_date          DateTime? // Data da sentença/acórdão
+  sentence_type          String? // PROCEDENTE, PARCIAL, IMPROCEDENTE, ACORDO
+  opposing_party         String? // Parte contrária (nome)
   // Polo processual do cliente. true = cliente eh autor (polo ativo),
   // false = cliente eh reu (polo passivo). Default true porque a maior parte
   // dos processos do escritorio eh com o cliente autorando a acao.
   // A IA usa esse campo pra se referir corretamente ao processo ("seu processo
   // contra X" vs "processo de X contra voce"). Adicionado 2026-04-24.
-  client_is_author Boolean @default(true)
-  judge            String? // Juiz/Desembargador
-  priority         String    @default("NORMAL") // URGENTE | NORMAL | BAIXA
+  client_is_author       Boolean   @default(true)
+  judge                  String? // Juiz/Desembargador
+  priority               String    @default("NORMAL") // URGENTE | NORMAL | BAIXA
   google_drive_folder_id String? // Pasta do caso no Google Drive
-  stage_changed_at DateTime  @default(now()) // quando mudou de etapa
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  stage_changed_at       DateTime  @default(now()) // quando mudou de etapa
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
 
-  lead              Lead              @relation(fields: [lead_id], references: [id], onDelete: Cascade)
-  conversation      Conversation?     @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
-  lawyer            User              @relation("LawyerCases", fields: [lawyer_id], references: [id])
-  tenant            Tenant?           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  tasks             Task[]
-  events            CaseEvent[]
-  djen_publications DjenPublication[]
-  calendar_events   CalendarEvent[]
-  documents         CaseDocument[]
-  deadlines         CaseDeadline[]
-  petitions         CasePetition[]
-  transcriptions    CaseTranscription[]
+  lead                   Lead                   @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  conversation           Conversation?          @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
+  lawyer                 User                   @relation("LawyerCases", fields: [lawyer_id], references: [id])
+  tenant                 Tenant?                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tasks                  Task[]
+  events                 CaseEvent[]
+  djen_publications      DjenPublication[]
+  calendar_events        CalendarEvent[]
+  documents              CaseDocument[]
+  deadlines              CaseDeadline[]
+  petitions              CasePetition[]
+  transcriptions         CaseTranscription[]
   honorarios             CaseHonorario[]
   financial_transactions FinancialTransaction[]
   gateway_charges        PaymentGatewayCharge[]
@@ -649,20 +653,20 @@ model LegalCase {
 model CaseEvent {
   id            String    @id @default(uuid())
   case_id       String
-  type          String    // MOVIMENTACAO, PUBLICACAO, MANUAL, etc.
+  type          String // MOVIMENTACAO, PUBLICACAO, MANUAL, etc.
   title         String
   description   String?
-  source        String?   // ESAJ, DJEN, MANUAL
+  source        String? // ESAJ, DJEN, MANUAL
   reference_url String?
   event_date    DateTime?
   created_at    DateTime  @default(now())
 
   // Campos para sync ESAJ — dedup e notificação
-  movement_hash       String?   @unique  // SHA256(case_number|date|description)
-  notified_at         DateTime?           // quando WhatsApp foi enviado ao advogado
-  client_notified_at  DateTime?           // quando WhatsApp foi enviado ao cliente
-  client_explanation  String?             // explicação leiga gerada pela IA on-demand (cache)
-  source_raw          Json?               // dado bruto da movimentação
+  movement_hash      String?   @unique // SHA256(case_number|date|description)
+  notified_at        DateTime? // quando WhatsApp foi enviado ao advogado
+  client_notified_at DateTime? // quando WhatsApp foi enviado ao cliente
+  client_explanation String? // explicação leiga gerada pela IA on-demand (cache)
+  source_raw         Json? // dado bruto da movimentação
 
   legal_case LegalCase @relation(fields: [case_id], references: [id], onDelete: Cascade)
 
@@ -842,45 +846,45 @@ model FollowupMessage {
 // ===============================================
 
 model BroadcastJob {
-  id             String          @id @default(cuid())
-  tenant_id      String?
-  name           String
-  type           String          @default("AUDIENCIA")
-  status         String          @default("PENDENTE")
-  filter_json    Json?
-  custom_prompt  String?         @db.Text
-  total_targets  Int             @default(0)
-  sent_count     Int             @default(0)
-  failed_count   Int             @default(0)
-  interval_ms    Int             @default(10000)
-  started_at     DateTime?
-  completed_at   DateTime?
-  created_by_id  String
-  created_at     DateTime        @default(now())
-  updated_at     DateTime        @updatedAt
+  id            String    @id @default(cuid())
+  tenant_id     String?
+  name          String
+  type          String    @default("AUDIENCIA")
+  status        String    @default("PENDENTE")
+  filter_json   Json?
+  custom_prompt String?   @db.Text
+  total_targets Int       @default(0)
+  sent_count    Int       @default(0)
+  failed_count  Int       @default(0)
+  interval_ms   Int       @default(10000)
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_by_id String
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
 
-  tenant         Tenant?         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  created_by     User            @relation(fields: [created_by_id], references: [id])
-  items          BroadcastItem[]
+  tenant     Tenant?         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by User            @relation(fields: [created_by_id], references: [id])
+  items      BroadcastItem[]
 
   @@index([tenant_id, status])
   @@index([created_at])
 }
 
 model BroadcastItem {
-  id             String       @id @default(cuid())
+  id             String    @id @default(cuid())
   broadcast_id   String
   lead_id        String
   event_id       String?
   phone          String
-  generated_text String?      @db.Text
-  status         String       @default("PENDENTE")
+  generated_text String?   @db.Text
+  status         String    @default("PENDENTE")
   sent_at        DateTime?
   error          String?
-  created_at     DateTime     @default(now())
+  created_at     DateTime  @default(now())
 
-  broadcast      BroadcastJob @relation(fields: [broadcast_id], references: [id], onDelete: Cascade)
-  lead           Lead         @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  broadcast BroadcastJob @relation(fields: [broadcast_id], references: [id], onDelete: Cascade)
+  lead      Lead         @relation(fields: [lead_id], references: [id], onDelete: Cascade)
 
   @@index([broadcast_id, status])
   @@index([lead_id])
@@ -914,9 +918,9 @@ model CalendarEvent {
   // Audit de cumprimento — populado pelo EventsService quando status muda
   // para CONCLUIDO/CANCELADO/ADIADO. Nota fica disponivel no Workspace/Agenda
   // pra revisao posterior (ex: "audiencia ocorreu, acordo celebrado").
-  completed_at     DateTime?
-  completed_by_id  String?
-  completion_note  String?
+  completed_at    DateTime?
+  completed_by_id String?
+  completion_note String?
 
   // Recurrence
   recurrence_rule String? // DAILY, WEEKLY, BIWEEKLY, MONTHLY, CUSTOM
@@ -1057,24 +1061,24 @@ model CalendarEventComment {
 // ===============================================
 
 model CaseDocument {
-  id             String   @id @default(uuid())
-  tenant_id      String?
-  legal_case_id  String
-  uploaded_by_id String
-  folder         String   @default("OUTROS") // CLIENTE, PROVAS, CONTRATOS, PETICOES, DECISOES, PROCURACOES, OUTROS
-  name           String // Nome exibido
-  original_name  String // Nome original do arquivo
-  s3_key         String // Chave no MinIO/S3
-  mime_type      String
-  size           Int // bytes
-  version        Int      @default(1)
-  parent_id      String? // Para versionamento: aponta pro doc original
-  description    String?
+  id                  String   @id @default(uuid())
+  tenant_id           String?
+  legal_case_id       String
+  uploaded_by_id      String
+  folder              String   @default("OUTROS") // CLIENTE, PROVAS, CONTRATOS, PETICOES, DECISOES, PROCURACOES, OUTROS
+  name                String // Nome exibido
+  original_name       String // Nome original do arquivo
+  s3_key              String // Chave no MinIO/S3
+  mime_type           String
+  size                Int // bytes
+  version             Int      @default(1)
+  parent_id           String? // Para versionamento: aponta pro doc original
+  description         String?
   // true = doc subido pelo cliente via /portal/enviar-documento. uploaded_by_id
   // aponta pro advogado responsavel (FK exige User), mas a UI deve mostrar
   // "Enviado pelo cliente" quando esta flag for true.
-  uploaded_via_portal Boolean @default(false)
-  created_at     DateTime @default(now())
+  uploaded_via_portal Boolean  @default(false)
+  created_at          DateTime @default(now())
 
   legal_case  LegalCase      @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
   uploaded_by User           @relation("DocumentUploader", fields: [uploaded_by_id], references: [id])
@@ -1093,42 +1097,42 @@ model CaseDocument {
 // ===============================================
 
 model CaseTranscription {
-  id             String    @id @default(uuid())
-  tenant_id      String?
+  id              String    @id @default(uuid())
+  tenant_id       String?
   // legal_case_id NULLABLE: transcrições avulsas (sem processo vinculado) são criadas
   // a partir do menu Ferramentas. Quando vinculadas, aparecem também na aba do workspace.
-  legal_case_id  String?
-  uploaded_by_id String
-  title          String
+  legal_case_id   String?
+  uploaded_by_id  String
+  title           String
   // Job lifecycle: PENDING -> CONVERTING -> TRANSCRIBING -> DONE | ERROR
-  status         String    @default("PENDING")
-  progress       Int       @default(0) // 0-100
-  error_message  String?
+  status          String    @default("PENDING")
+  progress        Int       @default(0) // 0-100
+  error_message   String?
   // Provider usado (whisper-local, groq, ...) — permite histórico se trocar depois
-  provider       String    @default("whisper-local")
-  model          String? // ex: "large-v3"
-  diarize        Boolean   @default(true)
+  provider        String    @default("whisper-local")
+  model           String? // ex: "large-v3"
+  diarize         Boolean   @default(true)
   // Storage no MinIO/S3 (bucket chat-crm-media)
-  source_s3_key  String // arquivo original enviado (ASF, MP4, MKV, etc.)
-  source_mime    String
-  source_size    Int
+  source_s3_key   String // arquivo original enviado (ASF, MP4, MKV, etc.)
+  source_mime     String
+  source_size     Int
   // Convertido pra MP4 web-friendly (h264+aac) — usado no player do frontend
-  video_s3_key   String?
+  video_s3_key    String?
   // Áudio extraído (WAV 16kHz) — só guardamos se precisar reprocessar
-  audio_s3_key   String?
+  audio_s3_key    String?
   // Resultado final
-  language       String? // "pt", etc.
-  duration_sec   Float? // duração do áudio
-  text           String? @db.Text // texto corrido (todos falantes juntos)
-  segments_json  Json? // [{start,end,text,speaker}] - bloco por bloco
-  words_json     Json? // [{start,end,word,speaker,score}] - word-level
-  speakers_json  Json? // [{id:"SPEAKER_00", label:"Juiz", color:"#..."}] - labels editáveis
+  language        String? // "pt", etc.
+  duration_sec    Float? // duração do áudio
+  text            String?   @db.Text // texto corrido (todos falantes juntos)
+  segments_json   Json? // [{start,end,text,speaker}] - bloco por bloco
+  words_json      Json? // [{start,end,word,speaker,score}] - word-level
+  speakers_json   Json? // [{id:"SPEAKER_00", label:"Juiz", color:"#..."}] - labels editáveis
   // Job tracking
   external_job_id String? // id no crm-whisper (pra polling/retomada)
-  started_at     DateTime?
-  finished_at    DateTime?
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
+  started_at      DateTime?
+  finished_at     DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
 
   legal_case  LegalCase? @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
   uploaded_by User       @relation("TranscriptionUploader", fields: [uploaded_by_id], references: [id])
@@ -1184,13 +1188,13 @@ model CaseDeadline {
 // ===============================================
 
 model CasePetition {
-  id            String   @id @default(uuid())
-  tenant_id     String?
-  legal_case_id String
-  created_by_id String
-  title         String
-  type          String // INICIAL, CONTESTACAO, REPLICA, EMBARGOS, RECURSO, MANIFESTACAO, OUTRO
-  status         String   @default("RASCUNHO") // RASCUNHO, EM_REVISAO, APROVADA, PROTOCOLADA
+  id             String    @id @default(uuid())
+  tenant_id      String?
+  legal_case_id  String
+  created_by_id  String
+  title          String
+  type           String // INICIAL, CONTESTACAO, REPLICA, EMBARGOS, RECURSO, MANIFESTACAO, OUTRO
+  status         String    @default("RASCUNHO") // RASCUNHO, EM_REVISAO, APROVADA, PROTOCOLADA
   content_json   Json? // Tiptap JSON (editor state)
   content_html   String? // HTML renderizado (para export)
   template_id    String? // Se gerada a partir de template
@@ -1200,8 +1204,8 @@ model CasePetition {
   reviewed_at    DateTime? // Quando revisou
   google_doc_id  String? // Google Docs document ID
   google_doc_url String? // URL completa do Google Doc
-  created_at     DateTime @default(now())
-  updated_at     DateTime @updatedAt
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
 
   legal_case  LegalCase         @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
   created_by  User              @relation("PetitionAuthor", fields: [created_by_id], references: [id])
@@ -1256,22 +1260,22 @@ model LegalTemplate {
 }
 
 model CaseHonorario {
-  id                   String    @id @default(uuid())
-  tenant_id            String?
-  legal_case_id        String
-  type                 String // CONTRATUAL, SUCUMBENCIA, ENTRADA, ACORDO
-  total_value          Decimal
-  success_percentage   Decimal?  // Percentual de sucumbência (ex: 20.00 = 20%)
-  calculated_value     Decimal?  // Auto-calculado: sentence_value × percentage / 100
-  sentence_value       Decimal?  // Valor da condenação (SUCUMBENCIA)
-  interest_rate        Decimal?  // Taxa de juros mensal (padrão: 1% = juros legais)
-  base_date            DateTime? // Data base para cálculo de juros
-  status               String    @default("ATIVO") // ATIVO, FINALIZADO, CANCELADO
-  installment_count    Int       @default(1)
-  contract_date        DateTime?
-  notes                String?
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  id                 String    @id @default(uuid())
+  tenant_id          String?
+  legal_case_id      String
+  type               String // CONTRATUAL, SUCUMBENCIA, ENTRADA, ACORDO
+  total_value        Decimal
+  success_percentage Decimal? // Percentual de sucumbência (ex: 20.00 = 20%)
+  calculated_value   Decimal? // Auto-calculado: sentence_value × percentage / 100
+  sentence_value     Decimal? // Valor da condenação (SUCUMBENCIA)
+  interest_rate      Decimal? // Taxa de juros mensal (padrão: 1% = juros legais)
+  base_date          DateTime? // Data base para cálculo de juros
+  status             String    @default("ATIVO") // ATIVO, FINALIZADO, CANCELADO
+  installment_count  Int       @default(1)
+  contract_date      DateTime?
+  notes              String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
 
   legal_case LegalCase          @relation(fields: [legal_case_id], references: [id], onDelete: Cascade)
   tenant     Tenant?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -1292,7 +1296,7 @@ model HonorarioPayment {
   notes          String?
   created_at     DateTime  @default(now())
 
-  honorario             CaseHonorario          @relation(fields: [honorario_id], references: [id], onDelete: Cascade)
+  honorario             CaseHonorario         @relation(fields: [honorario_id], references: [id], onDelete: Cascade)
   financial_transaction FinancialTransaction?
   gateway_charge        PaymentGatewayCharge?
 
@@ -1305,19 +1309,19 @@ model HonorarioPayment {
 // ===============================================
 
 model LeadHonorario {
-  id                 String    @id @default(uuid())
+  id                 String   @id @default(uuid())
   tenant_id          String?
   lead_id            String
-  type               String    // CONTRATUAL, ENTRADA, ACORDO
+  type               String // CONTRATUAL, ENTRADA, ACORDO
   total_value        Decimal
-  success_percentage Decimal?  // % sucumbência negociada antecipadamente
-  installment_count  Int       @default(1)
-  entry_value        Decimal?  // Valor de entrada separado
+  success_percentage Decimal? // % sucumbência negociada antecipadamente
+  installment_count  Int      @default(1)
+  entry_value        Decimal? // Valor de entrada separado
   notes              String?
-  status             String    @default("NEGOCIANDO") // NEGOCIANDO, ACEITO, RECUSADO, CONVERTIDO
-  promoted_to_id     String?   // ID do CaseHonorario após conversão
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
+  status             String   @default("NEGOCIANDO") // NEGOCIANDO, ACEITO, RECUSADO, CONVERTIDO
+  promoted_to_id     String? // ID do CaseHonorario após conversão
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
 
   lead     Lead                   @relation(fields: [lead_id], references: [id], onDelete: Cascade)
   tenant   Tenant?                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -1328,15 +1332,15 @@ model LeadHonorario {
 }
 
 model LeadHonorarioPayment {
-  id                  String    @id @default(uuid())
-  lead_honorario_id   String
-  amount              Decimal
-  due_date            DateTime?
-  paid_at             DateTime?
-  payment_method      String?   // PIX, BOLETO, CARTAO, DINHEIRO, TRANSFERENCIA
-  status              String    @default("PENDENTE") // PENDENTE, PAGO, ATRASADO
-  notes               String?
-  created_at          DateTime  @default(now())
+  id                String    @id @default(uuid())
+  lead_honorario_id String
+  amount            Decimal
+  due_date          DateTime?
+  paid_at           DateTime?
+  payment_method    String? // PIX, BOLETO, CARTAO, DINHEIRO, TRANSFERENCIA
+  status            String    @default("PENDENTE") // PENDENTE, PAGO, ATRASADO
+  notes             String?
+  created_at        DateTime  @default(now())
 
   lead_honorario        LeadHonorario         @relation(fields: [lead_honorario_id], references: [id], onDelete: Cascade)
   financial_transaction FinancialTransaction?
@@ -1436,47 +1440,47 @@ model AutomationRule {
 // ===============================================
 
 model FinancialTransaction {
-  id                   String    @id @default(uuid())
-  tenant_id            String?
-  type                 String // RECEITA, DESPESA
-  category             String // HONORARIO, CONSULTA, CUSTAS_JUDICIAIS, PERICIA, DESLOCAMENTO, ESCRITORIO, OUTRO
-  description          String
-  amount               Decimal
-  date                 DateTime  @default(now()) // data da transação
-  due_date             DateTime? // vencimento (para receitas/despesas futuras)
-  paid_at              DateTime? // quando foi efetivamente pago/recebido
-  payment_method       String? // PIX, BOLETO, CARTAO, DINHEIRO, TRANSFERENCIA
-  status               String    @default("PENDENTE") // PENDENTE, PAGO, CANCELADO
-  reference_id         String? // ID externo (gateway, NFS-e, etc.)
-  notes                String?
-  visible_to_lawyer    Boolean   @default(true) // Se false, advogado não vê esta despesa
+  id                String    @id @default(uuid())
+  tenant_id         String?
+  type              String // RECEITA, DESPESA
+  category          String // HONORARIO, CONSULTA, CUSTAS_JUDICIAIS, PERICIA, DESLOCAMENTO, ESCRITORIO, OUTRO
+  description       String
+  amount            Decimal
+  date              DateTime  @default(now()) // data da transação
+  due_date          DateTime? // vencimento (para receitas/despesas futuras)
+  paid_at           DateTime? // quando foi efetivamente pago/recebido
+  payment_method    String? // PIX, BOLETO, CARTAO, DINHEIRO, TRANSFERENCIA
+  status            String    @default("PENDENTE") // PENDENTE, PAGO, CANCELADO
+  reference_id      String? // ID externo (gateway, NFS-e, etc.)
+  notes             String?
+  visible_to_lawyer Boolean   @default(true) // Se false, advogado não vê esta despesa
 
   // Recorrência
   is_recurring          Boolean   @default(false)
-  recurrence_pattern    String?   // MENSAL, TRIMESTRAL, SEMESTRAL, ANUAL
-  recurrence_day        Int?      // Dia do mês para vencimento (1-31)
+  recurrence_pattern    String? // MENSAL, TRIMESTRAL, SEMESTRAL, ANUAL
+  recurrence_day        Int? // Dia do mês para vencimento (1-31)
   recurrence_end_date   DateTime? // Quando parar (null = indefinido)
-  parent_transaction_id String?   // Referência à transação mãe
+  parent_transaction_id String? // Referência à transação mãe
 
   // Vínculos opcionais
-  legal_case_id        String?
-  lead_id              String?
-  lawyer_id            String?
-  honorario_payment_id        String?   @unique // 1:1 com HonorarioPayment
-  lead_honorario_payment_id   String?   @unique // 1:1 com LeadHonorarioPayment
+  legal_case_id             String?
+  lead_id                   String?
+  lawyer_id                 String?
+  honorario_payment_id      String? @unique // 1:1 com HonorarioPayment
+  lead_honorario_payment_id String? @unique // 1:1 com LeadHonorarioPayment
 
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
-  tenant            Tenant?           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  legal_case        LegalCase?        @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
-  lead              Lead?             @relation(fields: [lead_id], references: [id], onDelete: SetNull)
-  lawyer            User?             @relation("FinancialLawyer", fields: [lawyer_id], references: [id], onDelete: SetNull)
-  honorario_payment      HonorarioPayment?      @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
-  lead_honorario_payment LeadHonorarioPayment?  @relation(fields: [lead_honorario_payment_id], references: [id], onDelete: SetNull)
+  tenant                 Tenant?                          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  legal_case             LegalCase?                       @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  lead                   Lead?                            @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  lawyer                 User?                            @relation("FinancialLawyer", fields: [lawyer_id], references: [id], onDelete: SetNull)
+  honorario_payment      HonorarioPayment?                @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
+  lead_honorario_payment LeadHonorarioPayment?            @relation(fields: [lead_honorario_payment_id], references: [id], onDelete: SetNull)
   gateway_charge         PaymentGatewayCharge?
-  nota_fiscal       NotaFiscal?
-  attachments       FinancialTransactionAttachment[]
+  nota_fiscal            NotaFiscal?
+  attachments            FinancialTransactionAttachment[]
 
   @@index([tenant_id, date])
   @@index([type, status])
@@ -1492,15 +1496,15 @@ model FinancialTransaction {
 /// que armazenar blobs no S3 e expira sozinho). Registros antigos podem ser
 /// purgados via cron (default: 90 dias).
 model Report {
-  id          String   @id @default(uuid())
-  tenant_id   String?
-  user_id     String?  /// quem gerou (auditoria)
+  id           String   @id @default(uuid())
+  tenant_id    String?
+  user_id      String? /// quem gerou (auditoria)
   /// Tipo do relatório: 'dashboard-snapshot', 'transactions-statement',
   /// 'charges-list', 'dre', 'cash-flow', etc.
-  kind        String
+  kind         String
   /// Parâmetros originais (period, lawyerId, filters, etc) — usados pra
   /// regenerar o PDF idêntico ao primeiro download.
-  params      Json
+  params       Json
   /// Display name pra UI (ex.: "Snapshot dashboard — Abril/2026")
   display_name String
   generated_at DateTime @default(now())
@@ -1521,8 +1525,8 @@ model FinancialTransactionAttachment {
   id             String   @id @default(uuid())
   tenant_id      String?
   transaction_id String
-  filename       String   /// Nome original do arquivo (ex: "nota-fiscal-001.pdf")
-  mime_type      String   /// "application/pdf", "image/jpeg", etc
+  filename       String /// Nome original do arquivo (ex: "nota-fiscal-001.pdf")
+  mime_type      String /// "application/pdf", "image/jpeg", etc
   size_bytes     Int
   /// S3 key (ou path local) onde o arquivo esta armazenado.
   /// Padrao: "financial-attachments/<tenant_id>/<transaction_id>/<id>-<filename>"
@@ -1530,9 +1534,9 @@ model FinancialTransactionAttachment {
   uploaded_by_id String?
   created_at     DateTime @default(now())
 
-  tenant       Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  transaction  FinancialTransaction @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
-  uploaded_by  User?                @relation("FinancialAttachmentUploader", fields: [uploaded_by_id], references: [id], onDelete: SetNull)
+  tenant      Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  transaction FinancialTransaction @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
+  uploaded_by User?                @relation("FinancialAttachmentUploader", fields: [uploaded_by_id], references: [id], onDelete: SetNull)
 
   @@index([transaction_id])
   @@index([tenant_id, created_at])
@@ -1564,18 +1568,18 @@ model FinancialCategory {
 /// is null — gerenciado via SQL manual em manual-sql/ pq Prisma nao expressa
 /// indices parciais com COALESCE.
 model MonthlyGoal {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   tenant_id     String?
   /// NULL = escopo escritorio. UUID = advogado especifico.
   lawyer_id     String?
   year          Int
   month         Int // 1-12 (validado no app)
   /// 'REALIZED' | 'CONTRACTED'
-  kind          String   @default("REALIZED")
-  value         Decimal  @db.Decimal(14, 2)
+  kind          String    @default("REALIZED")
+  value         Decimal   @db.Decimal(14, 2)
   created_by_id String?
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
   deleted_at    DateTime?
 
   tenant     Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -1592,15 +1596,15 @@ model MonthlyGoal {
 // ===============================================
 
 model PaymentGatewayCustomer {
-  id             String    @id @default(uuid())
+  id             String   @id @default(uuid())
   tenant_id      String?
   lead_id        String
-  gateway        String    @default("ASAAS") // ASAAS, EFIBANK
+  gateway        String   @default("ASAAS") // ASAAS, EFIBANK
   external_id    String // ID do cliente no gateway
   cpf_cnpj       String?
-  sync_status    String    @default("SYNCED") // SYNCED, ERROR
-  last_synced_at DateTime  @default(now())
-  created_at     DateTime  @default(now())
+  sync_status    String   @default("SYNCED") // SYNCED, ERROR
+  last_synced_at DateTime @default(now())
+  created_at     DateTime @default(now())
 
   lead   Lead    @relation(fields: [lead_id], references: [id], onDelete: Cascade)
   tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -1611,54 +1615,54 @@ model PaymentGatewayCustomer {
 }
 
 model PaymentGatewayCharge {
-  id                   String    @id @default(uuid())
+  id                   String   @id @default(uuid())
   tenant_id            String?
-  honorario_payment_id String?   @unique
-  transaction_id       String?   @unique
+  honorario_payment_id String?  @unique
+  transaction_id       String?  @unique
   legal_case_id        String?
-  gateway              String    @default("ASAAS")
-  external_id          String    @unique // ID da cobrança no gateway
+  gateway              String   @default("ASAAS")
+  external_id          String   @unique // ID da cobrança no gateway
   customer_external_id String // ID do cliente no gateway
   billing_type         String // PIX, BOLETO, CREDIT_CARD
   amount               Decimal
   due_date             DateTime
-  status               String    @default("PENDING") // PENDING, RECEIVED, CONFIRMED, OVERDUE, REFUNDED, DELETED, CANCELLED
+  status               String   @default("PENDING") // PENDING, RECEIVED, CONFIRMED, OVERDUE, REFUNDED, DELETED, CANCELLED
   description          String?
 
   // PIX
-  pix_qr_code          String?
-  pix_copy_paste       String?
-  pix_expiration_date  DateTime?
+  pix_qr_code         String?
+  pix_copy_paste      String?
+  pix_expiration_date DateTime?
 
   // Boleto
-  boleto_url           String?
-  boleto_barcode       String?
+  boleto_url     String?
+  boleto_barcode String?
 
   // Resultado
-  invoice_url          String?
-  paid_at              DateTime?
-  payment_date         DateTime?
-  net_value            Decimal?
-  webhook_payload      Json?
+  invoice_url     String?
+  paid_at         DateTime?
+  payment_date    DateTime?
+  net_value       Decimal?
+  webhook_payload Json?
 
-  idempotency_key      String?   @unique
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  idempotency_key String?  @unique
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
 
   // Tracking de cobranca enviada ao cliente — evita spam e permite
   // escalonamento (1=cordial, 2=firme, 3=urgente, 4+=alerta interno).
   // last_reminder_kind eh string descritiva tipo 'initial' | 'pre-due-3d' |
   // 'pre-due-1d' | 'pre-due-0d' | 'overdue-1d' | 'overdue-3d' | 'overdue-7d'.
   last_reminder_sent_at DateTime?
-  reminder_count        Int      @default(0)
+  reminder_count        Int       @default(0)
   last_reminder_kind    String?
 
-  lead_honorario_payment_id String?  @unique
-  honorario_payment    HonorarioPayment?      @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
-  lead_honorario_payment LeadHonorarioPayment? @relation(fields: [lead_honorario_payment_id], references: [id], onDelete: SetNull)
-  transaction          FinancialTransaction?  @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
-  legal_case           LegalCase?             @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
-  tenant               Tenant?                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lead_honorario_payment_id String?               @unique
+  honorario_payment         HonorarioPayment?     @relation(fields: [honorario_payment_id], references: [id], onDelete: SetNull)
+  lead_honorario_payment    LeadHonorarioPayment? @relation(fields: [lead_honorario_payment_id], references: [id], onDelete: SetNull)
+  transaction               FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  legal_case                LegalCase?            @relation(fields: [legal_case_id], references: [id], onDelete: SetNull)
+  tenant                    Tenant?               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, status])
   @@index([customer_external_id])
@@ -1671,42 +1675,42 @@ model PaymentGatewayCharge {
 // ===============================================
 
 model NotaFiscal {
-  id                   String    @id @default(uuid())
+  id                   String  @id @default(uuid())
   tenant_id            String?
-  transaction_id       String?   @unique // 1:1 com FinancialTransaction
+  transaction_id       String? @unique // 1:1 com FinancialTransaction
   honorario_payment_id String?
   lead_id              String?
 
   // NFS-e data
-  numero               String?
-  codigo_verificacao   String?
-  status               String    @default("PENDENTE") // PENDENTE, EMITIDA, CANCELADA, ERRO
-  servico_codigo       String?   // Código CNAE ou LC 116
-  servico_descricao    String    @default("Serviços advocatícios")
-  valor                Decimal
-  aliquota_iss         Decimal?  @default(5.00)
-  valor_iss            Decimal?
+  numero             String?
+  codigo_verificacao String?
+  status             String   @default("PENDENTE") // PENDENTE, EMITIDA, CANCELADA, ERRO
+  servico_codigo     String? // Código CNAE ou LC 116
+  servico_descricao  String   @default("Serviços advocatícios")
+  valor              Decimal
+  aliquota_iss       Decimal? @default(5.00)
+  valor_iss          Decimal?
 
   // Tomador (cliente)
-  tomador_cpf_cnpj     String?
-  tomador_nome         String?
-  tomador_email        String?
+  tomador_cpf_cnpj String?
+  tomador_nome     String?
+  tomador_email    String?
 
   // Integração com agregador
-  provider             String?   // ENOTAS, NFEIO, FOCUSNFE
-  external_id          String?   @unique
-  xml_url              String?
-  pdf_url              String?
-  error_message        String?
+  provider      String? // ENOTAS, NFEIO, FOCUSNFE
+  external_id   String? @unique
+  xml_url       String?
+  pdf_url       String?
+  error_message String?
 
-  emitida_em           DateTime?
-  cancelada_em         DateTime?
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
+  emitida_em   DateTime?
+  cancelada_em DateTime?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
 
-  transaction          FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
-  lead                 Lead?                @relation(fields: [lead_id], references: [id], onDelete: SetNull)
-  tenant               Tenant?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  transaction FinancialTransaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  lead        Lead?                 @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  tenant      Tenant?               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, status])
   @@index([lead_id])
@@ -1718,43 +1722,43 @@ model NotaFiscal {
 // ===============================================
 
 model TaxRecord {
-  id               String    @id @default(uuid())
-  tenant_id        String?
-  lawyer_id        String
-  year             Int
-  month            Int // 1-12
+  id        String  @id @default(uuid())
+  tenant_id String?
+  lawyer_id String
+  year      Int
+  month     Int // 1-12
 
-  total_revenue    Decimal   @default(0)
-  total_deductions Decimal   @default(0)
-  taxable_income   Decimal   @default(0)
-  tax_due          Decimal   @default(0)
+  total_revenue    Decimal @default(0)
+  total_deductions Decimal @default(0)
+  taxable_income   Decimal @default(0)
+  tax_due          Decimal @default(0)
 
-  darf_code        String    @default("0190") // Carnê-Leão
-  darf_due_date    DateTime?
-  darf_paid        Boolean   @default(false)
-  darf_paid_at     DateTime?
-  notes            String?
+  darf_code     String    @default("0190") // Carnê-Leão
+  darf_due_date DateTime?
+  darf_paid     Boolean   @default(false)
+  darf_paid_at  DateTime?
+  notes         String?
 
-  created_at       DateTime  @default(now())
-  updated_at       DateTime  @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
-  lawyer           User      @relation("TaxRecordLawyer", fields: [lawyer_id], references: [id], onDelete: Cascade)
-  tenant           Tenant?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lawyer User    @relation("TaxRecordLawyer", fields: [lawyer_id], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@unique([tenant_id, lawyer_id, year, month])
   @@index([lawyer_id, year])
 }
 
 model ConversationNote {
-  id              String       @id @default(uuid())
+  id              String   @id @default(uuid())
   conversation_id String
   user_id         String
   text            String
-  created_at      DateTime     @default(now())
-  updated_at      DateTime     @updatedAt
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
 
-  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  user            User         @relation("ConversationNoteAuthor", fields: [user_id], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  user         User         @relation("ConversationNoteAuthor", fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([conversation_id, created_at])
 }
@@ -1793,10 +1797,10 @@ model Notification {
   id                String    @id @default(uuid())
   user_id           String
   tenant_id         String?
-  notification_type String    /// incoming_message, transfer_request, task_overdue, etc.
+  notification_type String /// incoming_message, transfer_request, task_overdue, etc.
   title             String
   body              String?
-  data              Json?     /// { conversationId, taskId, caseId, etc. }
+  data              Json? /// { conversationId, taskId, caseId, etc. }
   read_at           DateTime?
   /// Quando o WhatsApp fallback foi enviado pra essa notif. Usado pra dedup
   /// agressivo (1 WA por conversa por hora, independente de read_at).
@@ -1813,9 +1817,9 @@ model Notification {
 
 /// Subscriptions de Web Push — permite notificações com a aba do navegador fechada.
 model PushSubscription {
-  id         String   @id @default(uuid())
-  user_id    String
-  endpoint   String   @unique
+  id          String   @id @default(uuid())
+  user_id     String
+  endpoint    String   @unique
   keys_p256dh String
   keys_auth   String
   user_agent  String?
@@ -1835,20 +1839,20 @@ model PushSubscription {
 /// (pgvector) é adicionada via migration SQL — Prisma não suporta vector
 /// nativamente. Use $queryRaw/$executeRaw para operações envolvendo embedding.
 model Memory {
-  id            String    @id @default(uuid())
-  tenant_id     String
+  id        String @id @default(uuid())
+  tenant_id String
 
   /// "lead" | "organization"
-  scope         String
+  scope    String
   /// ID do lead (scope=lead) ou ID do tenant (scope=organization)
-  scope_id      String
+  scope_id String
 
   /// "semantic" | "episodic" | "procedural"
-  type          String    @default("semantic")
+  type        String  @default("semantic")
   /// Subcategoria (scope=organization): office_info | team | fees | procedures | court_info | legal_knowledge | contacts | rules
-  subcategory   String?
+  subcategory String?
 
-  content       String    @db.Text
+  content String @db.Text
 
   /// Embedding OpenAI text-embedding-3-small (1536 dim). Tipo pgvector —
   /// Prisma nao suporta nativamente, entao usamos Unsupported. Isso impede
@@ -1856,14 +1860,14 @@ model Memory {
   /// Leitura/escrita sempre via $queryRawUnsafe/$executeRawUnsafe.
   /// IMPORTANTE: a extensao pgvector deve estar habilitada no Postgres antes
   /// do primeiro `db push` em ambientes novos — ver manual-sql/2026-04-18-memory-system.sql.
-  embedding     Unsupported("vector(1536)")?
+  embedding Unsupported("vector(1536)")?
 
   // Proveniência
   /// "batch" | "manual" | "system" | "retroactive"
-  source_type   String
+  source_type String
   /// ID da conversa que originou (quando source_type=batch)
-  source_id     String?
-  confidence    Float     @default(1.0)
+  source_id   String?
+  confidence  Float   @default(1.0)
 
   // Ciclo de vida
   /// "active" | "superseded" | "archived"
@@ -1874,10 +1878,10 @@ model Memory {
   last_accessed DateTime?
   expires_at    DateTime?
 
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
-  tenant        Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, scope, scope_id])
   @@index([status])
@@ -1888,20 +1892,20 @@ model Memory {
 /// Regenerado pelo cron noturno após extração de memórias. É o "cartão" que
 /// a IA lê antes de responder para já conhecer o cliente sem repetir perguntas.
 model LeadProfile {
-  id            String    @id @default(uuid())
-  tenant_id     String
-  lead_id       String    @unique
-  lead          Lead      @relation(fields: [lead_id], references: [id], onDelete: Cascade)
-  tenant        Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  id        String @id @default(uuid())
+  tenant_id String
+  lead_id   String @unique
+  lead      Lead   @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  tenant    Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   /// Texto corrido (~300 palavras) — injetado no system prompt
-  summary       String    @db.Text
+  summary String @db.Text
   /// JSON estruturado: name, cpf, cases[], preferences, pending, sentiment, risk_flags…
-  facts         Json      @default("{}")
+  facts   Json   @default("{}")
 
-  generated_at  DateTime  @default(now())
-  message_count Int       @default(0)
-  version       Int       @default(1)
+  generated_at  DateTime @default(now())
+  message_count Int      @default(0)
+  version       Int      @default(1)
 
   @@index([tenant_id])
 }
@@ -1918,14 +1922,14 @@ model LeadProfile {
 /// Na injecao, substitui `{{office_memories}}` no prompt — reduz ruido,
 /// resolve conflitos e descarta memorias de baixa confianca.
 model OrganizationProfile {
-  id            String   @id @default(uuid())
-  tenant_id     String   @unique
-  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  id        String @id @default(uuid())
+  tenant_id String @unique
+  tenant    Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   /// Texto estruturado em 4 secoes (About, Team, Procedures, Rules) — ~500 palavras
-  summary       String   @db.Text
+  summary String @db.Text
   /// JSON estruturado: office_info, team[], fees, procedures[], rules[], etc.
-  facts         Json     @default("{}")
+  facts   Json   @default("{}")
 
   /// Quantas memorias ativas foram usadas como fonte na ultima geracao
   source_memory_count Int @default(0)
@@ -1933,7 +1937,7 @@ model OrganizationProfile {
   /// Timestamp da ultima edicao manual do admin. Quando nao-null, o cron
   /// automatico das 02h PULA este tenant (nao sobrescreve a edicao). Limpo
   /// quando o admin clica "Regenerar" explicitamente via UI/API.
-  manually_edited_at  DateTime?
+  manually_edited_at DateTime?
 
   /// Marca ate quando as memorias ja foram incorporadas ao summary
   /// (modo incremental). Na proxima regen incremental, so processa memorias
@@ -1941,6 +1945,281 @@ model OrganizationProfile {
   /// o texto existente. Resetado pelo botao "Refazer do zero" (from-scratch).
   last_incorporated_at DateTime?
 
-  generated_at  DateTime @default(now())
-  version       Int      @default(1)
+  generated_at DateTime @default(now())
+  version      Int      @default(1)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULO: Gestao de Trafego Google Ads
+// ─────────────────────────────────────────────────────────────────────────────
+// Single-account scope: cada tenant conecta UMA conta Ads (anunciante)
+// via OAuth. O modulo le metricas via Google Ads API e armazena snapshots
+// diarios para dashboard/alertas/relatorios. NAO faz mutate de campanhas.
+//
+// Fluxo:
+//   1. Admin conecta conta -> TrafficAccount com refresh_token (cripto AES-256)
+//   2. Worker (cron 06h Maceio) le metricas dos ultimos 7 dias e upserta
+//      em TrafficMetricDaily (idempotente via unique constraint)
+//   3. TrafficSyncLog grava cada execucao (success/error/duration) — auditoria
+//   4. Regras de TrafficSettings disparam TrafficAlert quando KPIs saem da meta
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Conta Google Ads conectada via OAuth 2.0.
+///
+/// Single-account por tenant nesta fase (unique tenant_id). Para suportar
+/// multiplas contas no futuro, basta remover o @unique do tenant_id e
+/// adicionar selector na UI.
+///
+/// refresh_token: criptografado com AES-256-GCM (TrafficCryptoService).
+/// developer_token: NAO armazenado aqui — vem da env GOOGLE_ADS_DEVELOPER_TOKEN
+/// (compartilhado entre todos os tenants). login_customer_id eh o ID da MCC
+/// que autoriza a chamada (sem tracos, ex: "2736107831").
+model TrafficAccount {
+  id                String    @id @default(uuid())
+  tenant_id         String    @unique
+  /// Customer ID da conta-alvo (anunciante), sem tracos. Ex: "4464129633"
+  customer_id       String
+  /// Customer ID da MCC que detem o developer token. Ex: "2736107831"
+  login_customer_id String?
+  /// Email do Google que autorizou o OAuth (display only).
+  authorized_email  String?
+  /// Display name do anunciante (cacheado da API). Ex: "André Lustosa Advogados"
+  account_name      String?
+  /// Moeda da conta (ISO 4217). Ex: "BRL", "USD"
+  currency_code     String?
+  /// Timezone IANA da conta. Ex: "America/Maceio"
+  time_zone         String?
+  /// Refresh token OAuth criptografado (AES-256-GCM). Formato: iv:authTag:ciphertext
+  /// (base64). Decriptado apenas em memoria pelo worker durante sync.
+  refresh_token_enc String    @db.Text
+  /// Status da conexao: "ACTIVE" | "REVOKED" | "ERROR" | "PENDING"
+  status            String    @default("ACTIVE")
+  /// Quando o ultimo sync rodou com sucesso. null = nunca sincronizou.
+  last_sync_at      DateTime?
+  /// Mensagem do ultimo erro (se status=ERROR). null = sem erro pendente.
+  last_error        String?   @db.Text
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  tenant        Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  campaigns     TrafficCampaign[]
+  metrics_daily TrafficMetricDaily[]
+  sync_logs     TrafficSyncLog[]
+  alerts        TrafficAlert[]
+
+  @@index([status])
+  @@index([last_sync_at])
+}
+
+/// Cache de metadata de campanhas Google Ads (atualizado a cada sync).
+/// NAO eh fonte da verdade — apenas snapshot local pra exibir lista sem bater
+/// na API. Os campos mutaveis (status, budget, name) sao reescritos em cada sync.
+///
+/// google_campaign_id eh o ID numerico vindo da API (campaign.id). Combinado
+/// com account_id forma a chave natural unica.
+model TrafficCampaign {
+  id                  String    @id @default(uuid())
+  tenant_id           String
+  account_id          String
+  /// ID numerico do Google (campaign.id). Ex: "21458273619"
+  google_campaign_id  String
+  /// Nome da campanha vindo da API
+  name                String
+  /// Status: "ENABLED" | "PAUSED" | "REMOVED"
+  status              String
+  /// Tipo: "SEARCH" | "PERFORMANCE_MAX" | "DISPLAY" | "VIDEO" | "DEMAND_GEN" etc.
+  channel_type        String?
+  /// Orcamento diario em micros (1 BRL = 1.000.000 micros). null se shared budget.
+  daily_budget_micros BigInt?
+  /// Estrategia de lance: "MAXIMIZE_CONVERSIONS" | "TARGET_CPA" | etc.
+  bidding_strategy    String?
+  /// Datas da campanha (vindas da API)
+  start_date          DateTime?
+  end_date            DateTime?
+
+  // ─── Anotacoes internas (do escritorio, nao da API) ─────────────────────
+  /// Marcada como favorita no painel
+  is_favorite          Boolean  @default(false)
+  /// Pausada internamente (nao reflete no Google Ads — apenas oculta do dashboard)
+  is_archived_internal Boolean  @default(false)
+  /// Tags arbitrarias do operador (ex: ["maceio", "trabalhista"])
+  tags                 String[] @default([])
+  /// Notas livres
+  notes                String?  @db.Text
+
+  /// Ultima vez que esta campanha foi vista no sync (detecta REMOVED)
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant        Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account       TrafficAccount       @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  metrics_daily TrafficMetricDaily[]
+
+  @@unique([account_id, google_campaign_id])
+  @@index([tenant_id, status])
+  @@index([is_favorite])
+  @@index([last_seen_at])
+}
+
+/// Metricas agregadas por dia x campanha. Granularidade minima do dashboard.
+/// Idempotente via unique (campaign_id, date) — re-sync sobrescreve.
+///
+/// Valores monetarios em micros (1 BRL = 1.000.000) — padrao Google Ads API,
+/// evita arredondamento de Decimal e simplifica BigInt.
+model TrafficMetricDaily {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  account_id  String
+  campaign_id String
+  date        DateTime @db.Date
+
+  // ─── Metricas brutas da API ─────────────────────────────────────────────
+  impressions       Int     @default(0)
+  clicks            Int     @default(0)
+  cost_micros       BigInt  @default(0) // gasto em micros
+  conversions       Decimal @default(0) // pode ser fracionario (atribuicao)
+  conversions_value Decimal @default(0) // valor das conversoes (se configurado)
+
+  // ─── Derivadas (calculadas no upsert pra acelerar query do dashboard) ───
+  /// CTR = clicks / impressions (0..1)
+  ctr                  Decimal @default(0)
+  /// CPC medio em micros = cost_micros / clicks (null se clicks=0)
+  avg_cpc_micros       BigInt?
+  /// CPL = cost_micros / conversions, em micros (null se conversions=0)
+  cost_per_conv_micros BigInt?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_id, date])
+  @@index([tenant_id, date])
+  @@index([account_id, date])
+  @@index([date])
+}
+
+/// Log estruturado de cada execucao do sync (cron ou manual).
+/// Usado pra debug, auditoria e exibicao do "ultimo sync" no dashboard.
+/// Retencao: 90 dias (purge via cron).
+model TrafficSyncLog {
+  id             String    @id @default(uuid())
+  tenant_id      String
+  account_id     String
+  /// "CRON" | "MANUAL" | "OAUTH_CALLBACK"
+  trigger        String
+  /// "SUCCESS" | "ERROR" | "PARTIAL"
+  status         String
+  /// Range sincronizado (inclusive)
+  date_from      DateTime? @db.Date
+  date_to        DateTime? @db.Date
+  /// Quantas linhas de TrafficMetricDaily foram upsertadas
+  rows_upserted  Int       @default(0)
+  /// Quantas campanhas foram detectadas
+  campaigns_seen Int       @default(0)
+  /// Stack/mensagem de erro (se status != SUCCESS)
+  error_message  String?   @db.Text
+  /// Duracao em ms
+  duration_ms    Int?
+  started_at     DateTime  @default(now())
+  finished_at    DateTime?
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, started_at(sort: Desc)])
+  @@index([account_id, status, started_at(sort: Desc)])
+  @@index([started_at])
+}
+
+/// Alertas operacionais detectados pelo motor de regras (TrafficAlertEvaluator).
+/// Disparados pelo cron pos-sync. Notificam via canais configurados em
+/// TrafficSettings (email/whatsapp/inapp).
+///
+/// dedupe_key: hash determinÃ­stico (kind + campaign_id + date_bucket) pra
+/// evitar disparar o mesmo alerta multiplas vezes no mesmo periodo.
+model TrafficAlert {
+  id              String    @id @default(uuid())
+  tenant_id       String
+  account_id      String
+  /// ID da campanha relacionada (null se alerta de conta)
+  campaign_id     String?
+  /// "HIGH_CPL" | "LOW_CTR" | "BUDGET_EXHAUSTED" | "ZERO_CONVERSIONS"
+  /// "CAMPAIGN_PAUSED" | "OVERSPEND" | "NO_DATA" | "API_ERROR"
+  kind            String
+  /// "INFO" | "WARNING" | "CRITICAL"
+  severity        String    @default("WARNING")
+  /// Mensagem human-readable (ex: "CPL da campanha X subiu 45% em 7 dias")
+  message         String    @db.Text
+  /// Contexto estruturado (valores observados, threshold, etc)
+  context         Json      @default("{}")
+  /// Hash pra dedupe (evita re-disparar mesmo alerta)
+  dedupe_key      String
+  /// Status do alerta: "OPEN" | "ACKNOWLEDGED" | "RESOLVED" | "MUTED"
+  status          String    @default("OPEN")
+  /// Quem reconheceu (null = nao acknowledged)
+  acknowledged_by String?
+  acknowledged_at DateTime?
+  /// Quando foi notificado por email/WA (null = ainda nao)
+  notified_at     DateTime?
+  created_at      DateTime  @default(now())
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@unique([dedupe_key])
+  @@index([tenant_id, status, created_at(sort: Desc)])
+  @@index([account_id, kind])
+  @@index([severity, status])
+}
+
+/// Configuracoes do modulo de trafego por tenant (singleton).
+/// Metas, thresholds de alerta, canais de notificacao.
+model TrafficSettings {
+  id        String @id @default(uuid())
+  tenant_id String @unique
+
+  // ─── Metas (em micros — padrao API) ─────────────────────────────────────
+  /// CPL alvo em micros (BRL). Default: 50 BRL = 50_000_000 micros
+  target_cpl_micros          BigInt  @default(50000000)
+  /// CTR alvo (0..1). Default: 0.03 = 3%
+  target_ctr                 Decimal @default(0.03)
+  /// ROAS alvo (multiplicador). Default: 3.0
+  target_roas                Decimal @default(3.0)
+  /// Orcamento diario total alvo em micros. null = sem alvo agregado.
+  target_daily_budget_micros BigInt?
+
+  // ─── Thresholds de alerta ───────────────────────────────────────────────
+  /// Disparar HIGH_CPL se CPL > target_cpl * (1 + cpl_alert_threshold).
+  /// Default: 0.30 = +30%
+  cpl_alert_threshold Decimal @default(0.30)
+  /// Disparar LOW_CTR se CTR < target_ctr * (1 - ctr_alert_threshold).
+  /// Default: 0.30 = -30%
+  ctr_alert_threshold Decimal @default(0.30)
+  /// Janela de dias para avaliar tendencia de CPL/CTR. Default: 7
+  alert_window_days   Int     @default(7)
+
+  // ─── Canais de notificacao ──────────────────────────────────────────────
+  /// Enviar alertas por email (usa NotificationSetting do user?)
+  notify_email          Boolean @default(true)
+  /// Enviar alertas por WhatsApp (reusa servico whatsapp existente)
+  notify_whatsapp       Boolean @default(false)
+  /// Telefone destinatario do WhatsApp (E.164). null = usa do admin.
+  notify_whatsapp_phone String?
+  /// Notificacao in-app (sino do CRM)
+  notify_inapp          Boolean @default(true)
+
+  // ─── Sync ───────────────────────────────────────────────────────────────
+  /// Hora local (Maceio) que o cron diario roda. Default: 6 (06:00)
+  sync_hour_local Int     @default(6)
+  /// Habilitar sync automatico
+  sync_enabled    Boolean @default(true)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 }

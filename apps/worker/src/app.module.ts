@@ -17,6 +17,7 @@ import { FinanceiroRecurringModule } from './financeiro/financeiro-recurring.mod
 import { NotificationWhatsappModule } from './notification-whatsapp/notification-whatsapp.module';
 import { AfterHoursModule } from './after-hours/after-hours.module';
 import { MemoryModule } from './memory/memory.module';
+import { TrafegoModule } from './trafego/trafego.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { MemoryModule } from './memory/memory.module';
     NotificationWhatsappModule,
     AfterHoursModule,
     MemoryModule,
+    TrafegoModule,
   ],
 })
 export class AppModule {}
