@@ -1620,9 +1620,19 @@ ${pub.conteudo.slice(0, 6000)}`;
       return;
     }
 
-    // Buscar instância WhatsApp do lead (da última conversa)
+    // Buscar instância WhatsApp do lead (da última conversa).
+    // Filtra por instancia REGISTRADA pra evitar escolher orfas/residuais
+    // que sairiam pelo numero errado (incidente 2026-04-29).
+    const knownInstances = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+
     const lastConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: lead.id },
+      where: {
+        lead_id: lead.id,
+        ...(knownInstances.length > 0 ? { instance_name: { in: knownInstances } } : {}),
+      },
       orderBy: { last_message_at: 'desc' },
       select: { instance_name: true },
     });

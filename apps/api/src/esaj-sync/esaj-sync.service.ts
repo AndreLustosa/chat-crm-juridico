@@ -511,9 +511,23 @@ export class EsajSyncService {
         .join('\n');
     }
 
-    // Buscar instancia WhatsApp do lead (mesma da ultima conversa)
+    // Buscar instancia WhatsApp do lead (mesma da ultima conversa).
+    // CRITICAL 2026-04-29: filtra por instancia REGISTRADA na tabela Instance.
+    // Sem isso, conversas presas em instancias orfas/residuais (ex: webhook
+    // de outro escritorio mal roteado) eram escolhidas e a mensagem saia
+    // pelo numero errado. Incidente: comunicado do Alessandro foi enviado
+    // pelo numero do Lexcon porque uma conversa "AGENTE" (instancia do
+    // Lexcon, nunca cadastrada aqui) era a mais recente.
+    const knownInstances = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+
     const lastConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: lead.id },
+      where: {
+        lead_id: lead.id,
+        ...(knownInstances.length > 0 ? { instance_name: { in: knownInstances } } : {}),
+      },
       orderBy: { last_message_at: 'desc' },
       select: { instance_name: true },
     });

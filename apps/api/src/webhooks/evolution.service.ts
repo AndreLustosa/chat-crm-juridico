@@ -97,9 +97,15 @@ export class EvolutionService implements OnApplicationBootstrap {
     this.logger.debug(`Payload: ${summarizePayload(payload)}`);
     const dataPayload = payload?.data as any;
     const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
-    
+
+    // Defesa em profundidade: se a instancia nao esta cadastrada, REJEITA
+    // o webhook. Antes loguava warning e seguia, o que permitiu Evolution
+    // server compartilhado entre 2 escritorios contaminar este banco com
+    // mensagens/leads do outro tenant (incidente 2026-04-29: instancia
+    // AGENTE pertencia ao Lexcon mas o webhook caia aqui).
     if (!inbox) {
-      this.logger.warn(`[WEBHOOK] No inbox found for instanceName: ${instanceName}. Message might be lost or assigned to no tenant.`);
+      this.logger.warn(`[WEBHOOK-REJECT] messages.upsert de instancia nao registrada "${instanceName}" — payload descartado pra evitar contaminacao cross-tenant`);
+      return;
     }
 
     const inboxId = inbox?.inbox_id || null;
@@ -668,6 +674,10 @@ export class EvolutionService implements OnApplicationBootstrap {
     const dataPayload = payload?.data as any;
     const instanceName = payload?.instance || payload?.instanceId;
     const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] chats.upsert de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
     const inboxId = inbox?.inbox_id || null;
 
     const chats = Array.isArray(dataPayload)
@@ -795,6 +805,10 @@ export class EvolutionService implements OnApplicationBootstrap {
     // tava sendo "fechado" indevidamente).
     const instanceName = payload?.instance || payload?.instanceId;
     const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] chats.delete de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
     const tenantId = inbox?.tenant_id ?? null;
 
     for (const chat of chats) {
@@ -825,6 +839,16 @@ export class EvolutionService implements OnApplicationBootstrap {
 
   async handleMessagesUpdate(payload: EvolutionWebhookPayload) {
     this.logger.log(`[WEBHOOK] messages.update received`);
+
+    // Rejeita webhooks de instancia nao registrada — defesa contra Evolution
+    // server compartilhado mandando status update de outro escritorio pra ca.
+    const instanceName = payload?.instance || payload?.instanceId;
+    const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] messages.update de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
+
     const updates = Array.isArray(payload?.data) ? payload.data : [payload?.data];
 
     for (const update of updates) {
@@ -866,6 +890,10 @@ export class EvolutionService implements OnApplicationBootstrap {
     this.logger.debug(`Recebendo webhook de contatos: ${summarizePayload(payload)}`);
     const instanceName = payload?.instance || payload?.instanceId;
     const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] contacts.upsert de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
     const tenantId = inbox?.tenant_id ?? null;
     const contacts = Array.isArray(payload?.data)
       ? (payload.data as any[])
@@ -928,6 +956,15 @@ export class EvolutionService implements OnApplicationBootstrap {
 
   async handleMessagesDelete(payload: EvolutionWebhookPayload) {
     this.logger.log(`[WEBHOOK] messages.delete received`);
+
+    // Rejeita webhooks de instancia nao registrada
+    const instanceName = payload?.instance || payload?.instanceId;
+    const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] messages.delete de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
+
     const data = payload?.data;
     // Evolution v2: { key: { remoteJid, fromMe, id }, ... } or data directly
     const messageKey = data?.key || data;
@@ -960,6 +997,10 @@ export class EvolutionService implements OnApplicationBootstrap {
     const data = payload?.data;
     const instanceName = payload?.instance || payload?.instanceId;
     const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] contacts.update de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
     const tenantId = inbox?.tenant_id ?? null;
     const contacts = Array.isArray(data) ? data : [data];
 
@@ -1023,6 +1064,14 @@ export class EvolutionService implements OnApplicationBootstrap {
     const data = payload?.data;
     const instanceName = payload?.instance || payload?.instanceId;
     const state = data?.state || data?.status || 'unknown';
+
+    // Rejeita connection.update de instancia nao registrada — Evolution
+    // server compartilhado nao deve manchar dashboard de outro escritorio.
+    const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] connection.update de instancia nao registrada "${instanceName}" (state=${state}) — descartado`);
+      return;
+    }
 
     this.chatGateway.emitConnectionStatusUpdate({
       instanceName: instanceName || 'unknown',
@@ -1370,6 +1419,10 @@ export class EvolutionService implements OnApplicationBootstrap {
     // 2026-04-29).
     const instanceName = payload?.instance || payload?.instanceId;
     const inbox = instanceName ? await this.inboxesService.findByInstanceName(instanceName) : null;
+    if (!inbox) {
+      this.logger.warn(`[WEBHOOK-REJECT] presence.update de instancia nao registrada "${instanceName}" — descartado`);
+      return;
+    }
     const tenantId = inbox?.tenant_id ?? null;
 
     const lead = await this.prisma.lead.findFirst({

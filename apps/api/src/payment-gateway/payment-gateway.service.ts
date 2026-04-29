@@ -1253,8 +1253,19 @@ export class PaymentGatewayService {
       clientPhone = clientPhone.slice(0, 4) + clientPhone.slice(5);
     }
 
+    // Filtra por instancia REGISTRADA — vide incidente 2026-04-29 (defesa
+    // contra mensagens saindo pelo numero errado de Evolution compartilhado).
+    const knownInstances = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+
     const lastConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: lead.id, status: { not: 'ENCERRADO' } },
+      where: {
+        lead_id: lead.id,
+        status: { not: 'ENCERRADO' },
+        ...(knownInstances.length > 0 ? { instance_name: { in: knownInstances } } : {}),
+      },
       orderBy: { last_message_at: 'desc' },
       select: { id: true, instance_name: true },
     }).catch(() => null);
@@ -1330,9 +1341,19 @@ export class PaymentGatewayService {
       await this.prisma.lead.update({ where: { id: lead.id }, data: { phone: clientPhone } }).catch(() => {});
     }
 
-    // Buscar ou criar conversa para o lead
+    // Buscar ou criar conversa para o lead — filtra por instancia
+    // registrada (defesa contra Evolution compartilhado, vide 2026-04-29).
+    const knownInstances = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+
     let lastConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: lead.id, status: { not: 'ENCERRADO' } },
+      where: {
+        lead_id: lead.id,
+        status: { not: 'ENCERRADO' },
+        ...(knownInstances.length > 0 ? { instance_name: { in: knownInstances } } : {}),
+      },
       orderBy: { last_message_at: 'desc' },
       select: { id: true, instance_name: true },
     }).catch(() => null);

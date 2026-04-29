@@ -403,9 +403,20 @@ export class CalendarReminderWorker extends WorkerHost {
         clientMsg = templateCliente(event, minutesBefore);
       }
 
-      // Busca a conversa ativa para salvar a mensagem
+      // Busca a conversa ativa para salvar a mensagem.
+      // Filtra por instancia registrada — evita salvar outbound em conversa
+      // de instancia orfa (Evolution compartilhado, vide 2026-04-29).
+      const knownInstances = (await this.prisma.instance.findMany({
+        where: { type: 'whatsapp' },
+        select: { name: true },
+      })).map(i => i.name);
+
       const lastConvo = await this.prisma.conversation.findFirst({
-        where: { lead_id: event.lead.id, status: { not: 'ENCERRADO' } },
+        where: {
+          lead_id: event.lead.id,
+          status: { not: 'ENCERRADO' },
+          ...(knownInstances.length > 0 ? { instance_name: { in: knownInstances } } : {}),
+        },
         orderBy: { last_message_at: 'desc' },
         select: { id: true, instance_name: true },
       }).catch(() => null);
@@ -533,9 +544,19 @@ export class CalendarReminderWorker extends WorkerHost {
         : this.templateHearingScheduled(event, firstName);
     }
 
-    // Busca a conversa ativa para salvar a mensagem (visível ao operador)
+    // Busca a conversa ativa para salvar a mensagem (visível ao operador).
+    // Filtra por instancia registrada (defesa pos-incidente 2026-04-29).
+    const knownInstancesForSave = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+
     const lastConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
+      where: {
+        lead_id: leadId,
+        status: { not: 'ENCERRADO' },
+        ...(knownInstancesForSave.length > 0 ? { instance_name: { in: knownInstancesForSave } } : {}),
+      },
       orderBy: { last_message_at: 'desc' },
       select: { id: true, ai_mode: true, instance_name: true },
     }).catch(() => null);
@@ -792,9 +813,20 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
   // no WhatsappService — envio ainda pode funcionar em instâncias single-tenant.
 
   private async resolveInstanceName(leadId: string): Promise<string | undefined> {
+    // Filtra niveis 1 e 2 por instancia REGISTRADA — defesa contra
+    // conversas presas em instancias orfas (Evolution compartilhado de
+    // outro escritorio, vide incidente 2026-04-29).
+    const knownInstances = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+    const instanceFilter = knownInstances.length > 0
+      ? { instance_name: { in: knownInstances } }
+      : {};
+
     // Nível 1: conversa ativa
     const activeConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
+      where: { lead_id: leadId, status: { not: 'ENCERRADO' }, ...instanceFilter },
       orderBy: { last_message_at: 'desc' },
       select: { instance_name: true },
     }).catch(() => null);
@@ -802,7 +834,7 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
 
     // Nível 2: qualquer conversa (inclusive encerradas)
     const anyConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: leadId, instance_name: { not: null } },
+      where: { lead_id: leadId, instance_name: { not: null }, ...instanceFilter },
       orderBy: { last_message_at: 'desc' },
       select: { instance_name: true },
     }).catch(() => null);

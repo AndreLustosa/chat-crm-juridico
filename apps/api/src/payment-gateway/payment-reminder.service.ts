@@ -521,9 +521,20 @@ export class PaymentReminderService {
       return null;
     }
 
-    // Pega ultima conversa do lead pra usar mesma instance Evolution
+    // Pega ultima conversa do lead pra usar mesma instance Evolution.
+    // Filtra por instancia REGISTRADA (Evolution compartilhado pode ter
+    // residuo de outro escritorio — vide 2026-04-29).
+    const knownInstances = (await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    })).map(i => i.name);
+
     const lastConvo = await this.prisma.conversation.findFirst({
-      where: { lead_id: leadId, status: { not: 'ENCERRADO' } },
+      where: {
+        lead_id: leadId,
+        status: { not: 'ENCERRADO' },
+        ...(knownInstances.length > 0 ? { instance_name: { in: knownInstances } } : {}),
+      },
       orderBy: { last_message_at: 'desc' },
       select: { id: true, instance_name: true },
     }).catch(() => null);
