@@ -498,7 +498,20 @@ export class WhatsappService {
     }
   }
 
-  async fetchChats(instanceName: string) {
+  /**
+   * Busca chats da instância via Evolution API.
+   *
+   * @param options.maxPages — limite de paginas a buscar. Default 20 (legacy).
+   *   Resync passa `1-2` pra nao baixar 10.900 chats e travar event loop.
+   * @param options.cutoffTs — se preenchido, para de paginar quando todos os
+   *   chats da pagina sao mais antigos que esse timestamp (otimizacao pro resync).
+   */
+  async fetchChats(
+    instanceName: string,
+    options: { maxPages?: number; cutoffTs?: number } = {},
+  ) {
+    const maxPages = options.maxPages ?? 20;
+    const cutoffTs = options.cutoffTs;
     try {
       // POST /chat/findChats com { where: {} } para trazer TODOS os chats (incluindo não salvos)
       let data = await this.request(
@@ -519,16 +532,16 @@ export class WhatsappService {
       }
 
       const list = Array.isArray(data) ? data : (data as any)?.data || [];
-      this.logger.log(`fetchChats ${instanceName}: ${list.length} chats retornados`);
+      this.logger.log(`fetchChats ${instanceName}: ${list.length} chats retornados (maxPages=${maxPages})`);
 
       // Se poucos resultados, tentar paginar (algumas versões limitam por padrão)
-      if (list.length > 0) {
+      if (list.length > 0 && maxPages > 1) {
         let allChats = [...list];
         let page = 2;
         const pageSize = list.length; // usar o tamanho da primeira página como referência
 
         // Se a primeira página retornou um número "redondo" (múltiplo de 50/100), provavelmente há mais
-        while (pageSize >= 50 && page <= 20) {
+        while (pageSize >= 50 && page <= maxPages) {
           try {
             const moreData = await this.request(
               'POST',
@@ -540,6 +553,20 @@ export class WhatsappService {
             allChats = [...allChats, ...moreList];
             this.logger.log(`fetchChats ${instanceName} page ${page}: +${moreList.length} chats`);
             if (moreList.length < pageSize) break; // última página
+
+            // Otimizacao: se cutoffTs definido e TODOS chats dessa pagina sao
+            // antigos, para de paginar (resto so vai trazer chats antigos).
+            if (cutoffTs) {
+              const allOld = moreList.every((c: any) => {
+                const ts = c?.lastMessage?.messageTimestamp ? Number(c.lastMessage.messageTimestamp) * 1000 : 0;
+                return ts > 0 && ts < cutoffTs;
+              });
+              if (allOld) {
+                this.logger.log(`fetchChats ${instanceName}: pagina ${page} toda anterior ao cutoff — para de paginar`);
+                break;
+              }
+            }
+
             page++;
           } catch {
             break; // paginação não suportada nesta versão

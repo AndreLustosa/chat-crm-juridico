@@ -1048,28 +1048,60 @@ export class EvolutionService implements OnApplicationBootstrap {
     // ─── FASE 1: Descobrir chats novos via Evolution API ──────────────
     // Busca chats recentes do WhatsApp e cria leads/conversas para os que
     // NÃO existem no CRM (mensagens que chegaram durante a queda do servidor).
+    //
+    // CRITICAL: Bug 2026-04-28 — fetchChats sem limite + loop iterando 10.900
+    // chats com 2 queries cada saturava event loop por 50-100s, causando
+    // ping timeout no Socket.IO e SIGKILL pelo Swarm. Fixes:
+    //   1) maxPages=2 (em vez de 20) e cutoffTs no fetchChats — limita HTTP
+    //   2) Pre-filtro CPU-only por cutoff/jid/phone ANTES de qualquer DB query
+    //   3) Hard cap de 200 chats consultam DB
+    //   4) Yield event loop a cada 25 iteracoes pra Socket.IO heartbeat passar
     try {
-      const recentChats = await this.whatsappService.fetchChats(instanceName);
+      const cutoffTs = Date.now() - cutoffHours * 3600 * 1000;
+      const recentChats = await this.whatsappService.fetchChats(instanceName, {
+        maxPages: 2, // ~1100 chats max em vez de 10.900
+        cutoffTs,    // para paginacao ainda mais cedo
+      });
       const inbox = await this.inboxesService.findByInstanceName(instanceName);
       const inboxId = inbox?.inbox_id || null;
       const tenantId = inbox?.tenant_id || null;
 
-      // Filtrar apenas chats com mensagens recentes dentro da janela configurada
-      const cutoffTs = Date.now() - cutoffHours * 3600 * 1000;
-
-      for (const chat of recentChats) {
-        if (!chat) continue;
+      // Pre-filtro CPU-only: descarta chats antes de tocar no DB.
+      // Reduz drasticamente o numero de iteracoes que fazem await Prisma.
+      const candidates = recentChats.filter((chat: any) => {
+        if (!chat) return false;
         const remoteJid = (chat.remoteJidAlt || chat.remoteJid) as string;
-        if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast') || remoteJid.includes('status@')) continue;
+        if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast') || remoteJid.includes('status@')) return false;
+        const lastMsgTs = chat.lastMessage?.messageTimestamp ? Number(chat.lastMessage.messageTimestamp) * 1000 : 0;
+        if (lastMsgTs > 0 && lastMsgTs < cutoffTs) return false;
+        return true;
+      });
+
+      // Hard cap: nunca consulta DB pra mais que MAX_DB_LOOKUPS chats. Mesmo
+      // com pre-filtro, se tiver 5000 chats sem timestamp valido, ainda da
+      // ruim. 200 cobre 99% dos casos reais.
+      const MAX_DB_LOOKUPS = 200;
+      const toProcess = candidates.slice(0, MAX_DB_LOOKUPS);
+      if (candidates.length > MAX_DB_LOOKUPS) {
+        this.logger.warn(`[RESYNC] FASE 1: ${candidates.length} candidatos, processando apenas ${MAX_DB_LOOKUPS} mais recentes`);
+      } else {
+        this.logger.log(`[RESYNC] FASE 1: ${recentChats.length} chats fetched, ${candidates.length} candidatos pos-filtro`);
+      }
+
+      let i = 0;
+      for (const chat of toProcess) {
+        i++;
+        // Yield event loop a cada 25 iteracoes — libera thread principal pra
+        // responder Socket.IO heartbeat e outros endpoints durante o resync.
+        if (i % 25 === 0) await new Promise((r) => setImmediate(r));
 
         const phone = extractPhone(chat.remoteJid as string, chat.remoteJidAlt as string);
         if (!phone || phone.length > 13 || phone.length < 10) continue;
 
-        // Verificar se tem mensagem recente (dentro da janela de cutoff)
         const lastMsgTs = chat.lastMessage?.messageTimestamp
           ? Number(chat.lastMessage.messageTimestamp) * 1000
           : 0;
-        if (lastMsgTs > 0 && lastMsgTs < cutoffTs) continue; // Chat antigo, ignorar
+        const remoteJid = (chat.remoteJidAlt || chat.remoteJid) as string;
 
         // Verificar se já existe conversa ABERTA para este lead
         const existingLead = await this.leadsService.findByPhone(phone);
@@ -1180,9 +1212,11 @@ export class EvolutionService implements OnApplicationBootstrap {
   // ao voltar do ar.
 
   async onApplicationBootstrap(): Promise<void> {
-    // Delay de 20s para garantir que Redis/Prisma/BullMQ estejam 100% prontos
+    // Delay de 30s para garantir que Redis/Prisma/BullMQ estejam 100% prontos
     // e dar tempo da Evolution API reentregar webhooks que estavam em retry.
-    const BOOT_DELAY = 20000;
+    // Bug 2026-04-28: 20s era curto demais — Socket.IO ainda nao estava
+    // estavel quando resync comecava e travava event loop por ~60s.
+    const BOOT_DELAY = 30000;
 
     this.logger.log(`[BOOT] Resync de startup agendado para daqui a ${BOOT_DELAY / 1000}s`);
 
