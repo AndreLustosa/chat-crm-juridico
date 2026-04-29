@@ -82,14 +82,32 @@ export class TrafegoConfigService {
     );
   }
 
-  /** Frontend base URL pra redirect pos-OAuth — nao secreto. */
+  /**
+   * Frontend base URL pra redirect pos-OAuth — nao secreto.
+   *
+   * Resolucao em ordem:
+   *   1. Configurado em TrafficSettings (UI admin)
+   *   2. Env FRONTEND_BASE_URL
+   *   3. Derivado do oauth_redirect_uri (mesmo host) — fallback robusto:
+   *      se admin configurou redirect_uri, eh seguro assumir mesmo dominio.
+   *   4. localhost:3000 — apenas como ultimo recurso pra dev local.
+   */
   async getFrontendBaseUrl(tenantId: string): Promise<string> {
     const settings = await this.getSettings(tenantId);
-    return (
-      settings?.frontend_base_url ||
-      process.env.FRONTEND_BASE_URL ||
-      'http://localhost:3000'
-    );
+    if (settings?.frontend_base_url) return settings.frontend_base_url;
+    if (process.env.FRONTEND_BASE_URL) return process.env.FRONTEND_BASE_URL;
+
+    // Fallback inteligente: deriva do redirect_uri (sempre configurado)
+    const redirectUri = await this.getOAuthRedirectUri(tenantId);
+    if (redirectUri) {
+      try {
+        const url = new URL(redirectUri);
+        return `${url.protocol}//${url.host}`;
+      } catch {
+        // url malformada — cai no localhost
+      }
+    }
+    return 'http://localhost:3000';
   }
 
   // ─── API publica (mascarada) ────────────────────────────────────────────
