@@ -83,6 +83,7 @@ function TrafegoPageInner() {
   const [account, setAccount] = useState<AccountState | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [defaultTabSet, setDefaultTabSet] = useState(false);
 
   // ─── Trata callback OAuth ────────────────────────────────────────────────
   useEffect(() => {
@@ -105,8 +106,20 @@ function TrafegoPageInner() {
     try {
       const { data } = await api.get<AccountState>('/trafego/account');
       setAccount(data);
+      // No primeiro load: se nao tem conta, abre direto em Configuracoes
+      // (onde o admin precisa preencher credenciais antes de poder conectar).
+      setDefaultTabSet((prev) => {
+        if (prev) return prev;
+        if (!data.connected) setTab('configuracoes');
+        return true;
+      });
     } catch {
       setAccount({ connected: false, account: null });
+      setDefaultTabSet((prev) => {
+        if (prev) return prev;
+        setTab('configuracoes');
+        return true;
+      });
     } finally {
       setLoading(false);
     }
@@ -139,21 +152,6 @@ function TrafegoPageInner() {
         <div className="flex flex-col items-center gap-2 text-muted-foreground">
           <Loader2 size={28} className="animate-spin" />
           <p className="text-sm">Carregando...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Sem conta conectada → tela de conexão ──────────────────────────────
-  if (!account?.connected) {
-    return (
-      <div className="h-full overflow-y-auto p-6 lg:p-8">
-        <Header onSyncNow={null} syncing={false} account={null} />
-        <div className="mt-8">
-          <ConnectGoogleAdsCard
-            canManage={perms.canManageTrafego}
-            onConnected={loadAccount}
-          />
         </div>
       </div>
     );
@@ -206,13 +204,23 @@ function TrafegoPageInner() {
         })}
       </div>
 
-      {/* Tab content */}
+      {/* Aviso fixo no topo quando ainda nao conectou */}
+      {!account?.connected && tab !== 'configuracoes' && (
+        <div className="mb-6">
+          <ConnectGoogleAdsCard
+            canManage={perms.canManageTrafego}
+            onConnected={loadAccount}
+          />
+        </div>
+      )}
+
+      {/* Tab content — Configuracoes sempre acessivel pra preencher credenciais */}
       <div>
-        {tab === 'dashboard' && <DashboardTab />}
-        {tab === 'campanhas' && (
+        {tab === 'dashboard' && account?.connected && <DashboardTab />}
+        {tab === 'campanhas' && account?.connected && (
           <CampanhasTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'leads' && (
+        {tab === 'leads' && account?.connected && (
           <PlaceholderTab
             icon={Users}
             title="Leads atribuídos a campanhas"
@@ -220,7 +228,7 @@ function TrafegoPageInner() {
             phase="Fase 3"
           />
         )}
-        {tab === 'relatorios' && (
+        {tab === 'relatorios' && account?.connected && (
           <PlaceholderTab
             icon={FileText}
             title="Relatórios em PDF"
@@ -228,8 +236,10 @@ function TrafegoPageInner() {
             phase="Fase 4"
           />
         )}
-        {tab === 'alertas' && <AlertasTab canManage={perms.canManageTrafego} />}
-        {tab === 'ia' && (
+        {tab === 'alertas' && account?.connected && (
+          <AlertasTab canManage={perms.canManageTrafego} />
+        )}
+        {tab === 'ia' && account?.connected && (
           <PlaceholderTab
             icon={Sparkles}
             title="IA Otimizadora"
@@ -237,6 +247,8 @@ function TrafegoPageInner() {
             phase="Fase 5"
           />
         )}
+        {/* Configuracoes: SEMPRE acessivel — eh aqui que admin preenche
+            credenciais antes de poder conectar a conta. */}
         {tab === 'configuracoes' && (
           <ConfiguracoesTab canManage={perms.canManageTrafego} />
         )}
