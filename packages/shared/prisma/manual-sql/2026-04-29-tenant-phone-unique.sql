@@ -69,9 +69,27 @@ DROP INDEX IF EXISTS "Lead_tenant_id_phone_idx";
 -- Nome canonico que o Prisma gera pra `@@unique([tenant_id, phone])`.
 -- PostgreSQL trata NULL como distinto em UNIQUE por padrao, entao
 -- multiplos leads com tenant_id=NULL e mesmo phone permanecem permitidos
--- (matching com schema Prisma + comportamento existente em produçao).
-ALTER TABLE "Lead"
-  ADD CONSTRAINT "Lead_tenant_id_phone_key" UNIQUE (tenant_id, phone);
+-- (matching com schema Prisma + comportamento existente em producao).
+--
+-- Idempotencia: PostgreSQL nao tem `ADD CONSTRAINT IF NOT EXISTS`, entao
+-- checa via pg_constraint. Importante porque um banco (lustosa) ja tem
+-- esse constraint criado por migration anterior, enquanto outro (lexcon)
+-- ainda nao tem.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'Lead_tenant_id_phone_key'
+      AND conrelid = '"Lead"'::regclass
+  ) THEN
+    ALTER TABLE "Lead"
+      ADD CONSTRAINT "Lead_tenant_id_phone_key" UNIQUE (tenant_id, phone);
+    RAISE NOTICE 'Constraint Lead_tenant_id_phone_key criado';
+  ELSE
+    RAISE NOTICE 'Constraint Lead_tenant_id_phone_key ja existe — skip';
+  END IF;
+END $$;
 
 -- ─── (5) Cria index nao-unique em (phone) ─────────────────────────────────
 -- Cobre buscas cross-tenant (portal-auth.service.ts, leads-cleanup, etc).
