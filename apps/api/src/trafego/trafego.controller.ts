@@ -16,6 +16,7 @@ import {
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoConfigService } from './trafego-config.service';
@@ -82,7 +83,11 @@ export class TrafegoController {
   /**
    * Callback do Google. NAO usa JwtAuthGuard porque o Google nao manda nosso JWT.
    * A seguranca vem do `state` validado em memoria + redirect_uri whitelistado.
+   *
+   * @Public() bypassa o JwtAuthGuard global (set como APP_GUARD em app.module).
+   * Sem isso, requests do Google Auth retornam 401 antes de chegar no handler.
    */
+  @Public()
   @Get('oauth/callback')
   async oauthCallback(
     @Query('code') code: string,
