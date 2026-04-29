@@ -118,7 +118,12 @@ model Lead {
   id                  String   @id @default(uuid())
   tenant_id           String?
   name                String?
-  phone               String   @unique
+  // Unicidade ISOLADA por tenant — vide @@unique([tenant_id, phone]).
+  // Antes era @unique global, mas isso impedia dois tenants distintos de
+  // terem o mesmo telefone como lead, causando vazamento entre tenants
+  // (notificacao do tenant A indo pra cliente cadastrado no tenant B).
+  // Bug reportado em 2026-04-29.
+  phone               String
   email               String?
   origin              String?
   stage               String   @default("QUALIFICANDO")
@@ -165,7 +170,8 @@ model Lead {
   client_login_codes        ClientLoginCode[]
   cpf_cnpj                  String? // CPF ou CNPJ — facilita match com Asaas
 
-  @@index([tenant_id, phone])
+  @@unique([tenant_id, phone])
+  @@index([phone])
   @@index([stage])
   @@index([cpf_cnpj])
   @@index([is_client])

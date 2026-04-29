@@ -31,26 +31,28 @@ export class LeadsCleanupService {
     this.logger.log('Iniciando deduplicação de telefones em batches...');
 
     while (true) {
-      // Busca apenas id e phone para minimizar uso de memória
+      // Busca apenas id, phone e tenant_id para minimizar uso de memória.
+      // tenant_id eh necessario pra dedup respeitar o isolamento entre
+      // escritorios (post-bug 2026-04-29: phone deixou de ser unique global).
       // Nota: cursor separado do findMany para evitar erro de inferência de tipo (TS7022)
-      const batch: { id: string; phone: string }[] = cursor
+      const batch: { id: string; phone: string; tenant_id: string | null }[] = cursor
         ? await this.prisma.lead.findMany({
             take: BATCH_SIZE,
             skip: 1,
             cursor: { id: cursor },
-            select: { id: true, phone: true },
+            select: { id: true, phone: true, tenant_id: true },
             orderBy: { id: 'asc' },
           })
         : await this.prisma.lead.findMany({
             take: BATCH_SIZE,
-            select: { id: true, phone: true },
+            select: { id: true, phone: true, tenant_id: true },
             orderBy: { id: 'asc' },
           });
 
       if (batch.length === 0) break;
 
       // Filtra apenas os que precisam de normalização (formato antigo: 13 dígitos)
-      const leadsWithOldFormat = batch.filter((lead: { id: string; phone: string }) => {
+      const leadsWithOldFormat = batch.filter((lead) => {
         const cleaned = lead.phone.replace(/\D/g, '');
         return (
           cleaned.length === 13 &&
@@ -63,8 +65,10 @@ export class LeadsCleanupService {
         try {
           const normalizedPhone = normalizeBrazilianPhone(oldLead.phone);
 
-          const normalizedLead = await this.prisma.lead.findUnique({
-            where: { phone: normalizedPhone },
+          // Dedup respeitando o tenant — leads do mesmo telefone em
+          // escritorios diferentes devem permanecer separados.
+          const normalizedLead = await this.prisma.lead.findFirst({
+            where: { phone: normalizedPhone, tenant_id: oldLead.tenant_id },
             select: { id: true },
           });
 

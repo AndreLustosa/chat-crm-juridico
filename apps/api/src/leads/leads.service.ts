@@ -261,14 +261,20 @@ export class LeadsService {
     //   Evita sobrescrever o nome real do cliente com o pushName do escritório.
     // - stage: webhook sempre envia 'QUALIFICANDO', mas o stage e gerenciado pela IA.
     // - profile_picture_url: só atualiza se o lead não tem foto OU se chegou uma URL válida.
-    const { phone: _phone, name: incomingName, stage: _stage, profile_picture_url: incomingPhoto, ...updateData } = data as any;
+    const { phone: _phone, name: incomingName, stage: _stage, profile_picture_url: incomingPhoto, tenant_id: rawTenantId, tenant: tenantConnect, ...updateData } = data as any;
 
-    this.logger.debug(`Upsert lead: raw=${data.phone} → stored=${phone}`);
+    // tenant_id pode chegar como `tenant_id: '...'` direto OU via `tenant: { connect: { id } }`.
+    // O upsert agora isola por tenant (vide bug 2026-04-29: phone deixou de ser
+    // unique global no schema). Sem o tenant, dois escritorios com o mesmo
+    // telefone se sobrescreviam.
+    const tenantId: string | null = rawTenantId ?? tenantConnect?.connect?.id ?? null;
+
+    this.logger.debug(`Upsert lead: raw=${data.phone} → stored=${phone} (tenant=${tenantId ?? 'null'})`);
 
     // Tenta atualizar o nome apenas se o lead existente não tiver nome
     if (incomingName) {
       await this.prisma.lead.updateMany({
-        where: { phone, name: null },
+        where: { phone, tenant_id: tenantId, name: null },
         data: { name: incomingName },
       });
     }
@@ -280,33 +286,50 @@ export class LeadsService {
       updateData.profile_picture_url = incomingPhoto;
     }
 
-    // Detecta se é criação (lead novo) para disparar notificação ao atendente
-    const existing = await this.prisma.lead.findUnique({ where: { phone }, select: { id: true } });
-
-    const lead = await this.prisma.lead.upsert({
-      where: { phone },
-      update: updateData,
-      create: { ...data, phone },
+    // findFirst+create/update em vez de Prisma.upsert porque tenant_id eh
+    // nullable: o composite key `tenant_id_phone` nao funciona em Prisma
+    // quando um dos campos pode ser null. A semantica final eh equivalente
+    // (lookup tenant-isolado, depois cria ou atualiza).
+    const existing = await this.prisma.lead.findFirst({
+      where: { phone, tenant_id: tenantId },
+      select: { id: true },
     });
 
-    if (!existing) {
+    let lead: Lead;
+    if (existing) {
+      lead = await this.prisma.lead.update({
+        where: { id: existing.id },
+        data: updateData,
+      });
+    } else {
+      lead = await this.prisma.lead.create({
+        data: { ...data, phone },
+      });
       this.notifyNewLead(lead, inboxId);
     }
 
     return lead;
   }
 
-  async findByPhone(phone: string): Promise<Lead | null> {
+  async findByPhone(phone: string, tenantId?: string | null): Promise<Lead | null> {
     // Busca ROBUSTA: cobre todas as 4 variantes plausíveis (10/11/12/13
     // dígitos, com/sem DDI, com/sem nono dígito). Antes só tentava
     // normalizado + raw, então leads cadastrados em formato intermediário
     // (ex: 11 dígitos com nono mas sem DDI) não apareciam. Bug reportado
     // 2026-04-24: usuário digitou 8296316935 no Cadastro Direto e o lead
     // existente não foi encontrado (estava em outro formato no banco).
+    //
+    // tenantId opcional: quando fornecido, limita ao tenant. Webhooks e
+    // fluxos cross-tenant (auth do portal) podem omitir, mas qualquer
+    // operacao que afete dados isolados por tenant DEVE passar pra evitar
+    // vazamento entre escritorios (bug 2026-04-29).
     const variants = phoneVariants(phone);
     if (variants.length === 0) return null;
     return this.prisma.lead.findFirst({
-      where: { phone: { in: variants } },
+      where: {
+        phone: { in: variants },
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
     });
   }
 

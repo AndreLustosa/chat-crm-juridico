@@ -1008,9 +1008,15 @@ export class LegalCasesService {
       // telefone 8296316935 existia como Lead PERDIDO mas o sistema
       // oferecia "Novo cliente" em vez de vincular ao existente.
       const variants = phoneVariants(normalizedPhone);
+      // CRITICAL: filtrar por tenant_id — sem isso, o cadastro de processo no
+      // tenant A acaba reaproveitando um Lead do tenant B (mesmo telefone),
+      // vazando o cliente entre escritorios. Bug 2026-04-29.
       const byPhone = variants.length > 0
         ? await this.prisma.lead.findFirst({
-            where: { phone: { in: variants } },
+            where: {
+              phone: { in: variants },
+              ...(data.tenant_id ? { tenant_id: data.tenant_id } : {}),
+            },
             select: { id: true, name: true, stage: true, loss_reason: true },
           })
         : null;
@@ -1350,10 +1356,15 @@ export class LegalCasesService {
         );
       }
 
-      // Busca robusta por variantes
+      // Busca robusta por variantes — filtra por tenant pra nao
+      // vincular processo a Lead de outro escritorio (vide bug
+      // 2026-04-29 sobre vazamento entre tenants).
       const variants = phoneVariants(normalizedPhone);
       const byPhone = await this.prisma.lead.findFirst({
-        where: { phone: { in: variants } },
+        where: {
+          phone: { in: variants },
+          ...(data.tenant_id ? { tenant_id: data.tenant_id } : {}),
+        },
         select: { id: true },
       });
 

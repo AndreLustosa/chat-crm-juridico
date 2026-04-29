@@ -461,6 +461,7 @@ export class EsajSyncService {
       legal_area: string | null;
       action_type: string | null;
       tracking_stage: string | null;
+      tenant_id: string | null;
       lead: { id: string; name: string | null; phone: string | null } | null;
     },
     newMovements: Array<{ date: string; description: string }>,
@@ -518,6 +519,17 @@ export class EsajSyncService {
     });
     const instance = lastConvo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
 
+    // Assinatura dinamica por tenant — antes era hardcoded "_André Lustosa Advogados_",
+    // o que vazava o nome do nosso escritorio em mensagens disparadas por outros
+    // tenants que compartilham a stack (bug 2026-04-29).
+    const tenant = legalCase.tenant_id
+      ? await this.prisma.tenant.findUnique({
+          where: { id: legalCase.tenant_id },
+          select: { name: true },
+        })
+      : null;
+    const signature = tenant?.name || 'André Lustosa Advogados';
+
     const message =
       `⚖️ *Atualização do seu processo*\n\n` +
       `Olá, ${firstName}! Houve uma nova movimentação no seu processo nº ${caseNumber}.\n\n` +
@@ -527,7 +539,7 @@ export class EsajSyncService {
         : '') +
       `Nosso advogado já foi avisado e está acompanhando. Se tiver dúvidas, pode responder esta mensagem.\n\n` +
       `🤖 _Esta é uma mensagem automática do sistema, gerada a partir de informações do tribunal._\n\n` +
-      `_André Lustosa Advogados_`;
+      `_${signature}_`;
 
     try {
       const result: any = await this.whatsapp.sendText(clientPhone, message, instance);
