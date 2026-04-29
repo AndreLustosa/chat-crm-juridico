@@ -148,6 +148,46 @@ export class TriggerSyncDto {
   date_to?: string;
 }
 
+// ─── Credenciais Google Ads (UI admin) ──────────────────────────────────────
+
+/**
+ * Atualiza credenciais Google Ads via UI.
+ * - undefined: preserva valor atual
+ * - null: apaga (cai no fallback de env)
+ * - string: armazena (secrets criptografados)
+ */
+export class UpdateCredentialsDto {
+  /** Developer Token da MCC (criptografado em repouso). */
+  @IsString()
+  @IsOptional()
+  google_ads_developer_token?: string | null;
+
+  /** Customer ID da MCC (sem tracos), ex: "2736107831". */
+  @IsString()
+  @IsOptional()
+  google_ads_login_customer_id?: string | null;
+
+  /** OAuth Client ID (publico), termina em ".apps.googleusercontent.com". */
+  @IsString()
+  @IsOptional()
+  oauth_client_id?: string | null;
+
+  /** OAuth Client Secret (criptografado), comeca com "GOCSPX-". */
+  @IsString()
+  @IsOptional()
+  oauth_client_secret?: string | null;
+
+  /** Redirect URI registrado no Cloud Console. */
+  @IsString()
+  @IsOptional()
+  oauth_redirect_uri?: string | null;
+
+  /** Base URL do frontend pra redirect pos-OAuth. */
+  @IsString()
+  @IsOptional()
+  frontend_base_url?: string | null;
+}
+
 // ─── Filtros do dashboard ───────────────────────────────────────────────────
 
 export class DashboardQueryDto {

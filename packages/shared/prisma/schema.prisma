@@ -2218,6 +2218,26 @@ model TrafficSettings {
   /// Habilitar sync automatico
   sync_enabled    Boolean @default(true)
 
+  // ─── Credenciais Google Ads API ─────────────────────────────────────────
+  // Configuradas via UI (admin) — substitui env vars. Quando null, sistema
+  // faz fallback pra env (compat com setup atual).
+  //
+  // Secrets criptografados com TRAFEGO_ENCRYPTION_KEY (mesma chave dos
+  // refresh_tokens). Nunca retornados em plaintext na API — get retorna
+  // mascarado (****1234), patch sobrescreve apenas se valor novo for enviado.
+  /// Developer Token do Google Ads (criptografado). Vem da MCC do escritorio.
+  google_ads_developer_token_enc String?
+  /// Customer ID da MCC (sem tracos), ex: "2736107831". Nao secreto.
+  google_ads_login_customer_id   String?
+  /// OAuth Client ID do Google Cloud (publico, vai no frontend OAuth flow).
+  oauth_client_id                String?
+  /// OAuth Client Secret (criptografado). Comeca com "GOCSPX-".
+  oauth_client_secret_enc        String?
+  /// URL pra onde Google redireciona apos consent. Ex: <api>/trafego/oauth/callback
+  oauth_redirect_uri             String?
+  /// Base URL do frontend (pra redirect pos-callback do nosso backend pro UI).
+  frontend_base_url              String?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 

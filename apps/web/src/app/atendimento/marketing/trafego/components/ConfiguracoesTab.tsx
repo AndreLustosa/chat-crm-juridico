@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Save, Mail, MessageCircle, Bell, Clock } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { CredentialsSection } from './CredentialsSection';
 
 interface Settings {
   target_cpl_brl: number;
@@ -67,6 +68,9 @@ export function ConfiguracoesTab({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {/* ─── Credenciais Google Ads (admin) ───────────────── */}
+      <CredentialsSection canManage={canManage} />
+
       {/* ─── Metas ──────────────────────────────────────────── */}
       <section className="bg-card border border-border rounded-xl p-5">
         <h3 className="text-sm font-bold text-foreground mb-4">Metas</h3>

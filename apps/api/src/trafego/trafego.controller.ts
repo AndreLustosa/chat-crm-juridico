@@ -18,11 +18,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
+import { TrafegoConfigService } from './trafego-config.service';
 import {
   AcknowledgeAlertDto,
   DashboardQueryDto,
   UpdateAccountDto,
   UpdateCampaignDto,
+  UpdateCredentialsDto,
   UpdateSettingsDto,
 } from './trafego.dto';
 
@@ -32,6 +34,7 @@ export class TrafegoController {
   constructor(
     private readonly service: TrafegoService,
     private readonly oauth: TrafegoOAuthService,
+    private readonly config: TrafegoConfigService,
   ) {}
 
   // ─── Dashboard ──────────────────────────────────────────────────────────
@@ -72,7 +75,7 @@ export class TrafegoController {
   @Get('oauth/start')
   @Roles('ADMIN')
   async oauthStart(@Req() req: any) {
-    const url = this.oauth.buildAuthUrl(req.user.tenant_id);
+    const url = await this.oauth.buildAuthUrl(req.user.tenant_id);
     return { authorize_url: url };
   }
 
@@ -173,6 +176,32 @@ export class TrafegoController {
   @Roles('ADMIN')
   async updateSettings(@Req() req: any, @Body() dto: UpdateSettingsDto) {
     return this.service.updateSettings(req.user.tenant_id, dto);
+  }
+
+  // ─── Credenciais Google Ads ─────────────────────────────────────────────
+
+  /**
+   * Retorna credenciais COM SECRETOS MASCARADOS.
+   * Resposta nunca contem developer_token nem oauth_client_secret em plaintext —
+   * apenas metadata (configurado/nao + ultimos 4 chars).
+   */
+  @Get('credentials')
+  @Roles('ADMIN')
+  async getCredentials(@Req() req: any) {
+    return this.config.getCredentialsMasked(req.user.tenant_id);
+  }
+
+  /**
+   * Atualiza credenciais. Campos undefined preservam valor atual; null apaga
+   * (e cai no fallback de env). Secretos sao criptografados em repouso.
+   */
+  @Patch('credentials')
+  @Roles('ADMIN')
+  async updateCredentials(
+    @Req() req: any,
+    @Body() dto: UpdateCredentialsDto,
+  ) {
+    return this.config.updateCredentials(req.user.tenant_id, dto);
   }
 
   // ─── Sync logs ──────────────────────────────────────────────────────────

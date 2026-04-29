@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrafegoCryptoService } from './trafego-crypto.service';
+import { TrafegoConfigService } from './trafego-config.service';
 
 /**
  * OAuth 2.0 helper para Google Ads API.
@@ -38,6 +39,7 @@ export class TrafegoOAuthService {
   constructor(
     private prisma: PrismaService,
     private crypto: TrafegoCryptoService,
+    private config: TrafegoConfigService,
   ) {
     // Limpa estados expirados a cada 5min
     setInterval(() => this.cleanupExpiredStates(), 5 * 60 * 1000).unref();
@@ -52,7 +54,7 @@ export class TrafegoOAuthService {
   }
 
   /** Gera URL de autorizacao Google + grava state pendente. */
-  buildAuthUrl(tenantId: string): string {
+  async buildAuthUrl(tenantId: string): Promise<string> {
     // Falha cedo se cripto nao tiver chave — evita usuario ir pro Google
     // e voltar pra um erro no callback.
     if (!this.crypto.isAvailable()) {
@@ -61,12 +63,12 @@ export class TrafegoOAuthService {
       );
     }
 
-    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
-    const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
+    const clientId = await this.config.getOAuthClientId(tenantId);
+    const redirectUri = await this.config.getOAuthRedirectUri(tenantId);
 
     if (!clientId || !redirectUri) {
       throw new ServiceUnavailableException(
-        'OAuth Google nao configurado no servidor. Defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_REDIRECT_URI.',
+        'OAuth Google nao configurado. Configure Client ID e Redirect URI em Configuracoes > Credenciais Google Ads.',
       );
     }
 
@@ -97,7 +99,7 @@ export class TrafegoOAuthService {
     }
     this.pendingStates.delete(state);
 
-    const tokens = await this.exchangeCodeForTokens(code);
+    const tokens = await this.exchangeCodeForTokens(pending.tenantId, code);
     if (!tokens.refresh_token) {
       throw new BadRequestException(
         'Google nao retornou refresh_token. Revogue o app em https://myaccount.google.com/permissions e tente novamente.',
@@ -105,14 +107,15 @@ export class TrafegoOAuthService {
     }
 
     const encrypted = this.crypto.encrypt(tokens.refresh_token);
-    const loginCustomerId = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || null;
+    const loginCustomerId = await this.config.getLoginCustomerId(pending.tenantId);
 
     // Pega email autorizado via tokeninfo
     const authorizedEmail = await this.fetchAuthorizedEmail(
       tokens.access_token,
     );
 
-    // Customer ID alvo: na Fase 1 vem da env. Multi-account: o usuario seleciona.
+    // Customer ID alvo: vem da env por enquanto (Fase 1 single-account).
+    // Multi-account: usuario seleciona via UI futuramente.
     const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID || null;
 
     await this.prisma.trafficAccount.upsert({
@@ -139,13 +142,15 @@ export class TrafegoOAuthService {
   }
 
   /** Troca refresh_token por access_token (chamado pelo worker em cada sync). */
-  async getAccessToken(refreshTokenEnc: string): Promise<string> {
+  async getAccessToken(tenantId: string, refreshTokenEnc: string): Promise<string> {
     const refreshToken = this.crypto.decrypt(refreshTokenEnc);
-    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const clientId = await this.config.getOAuthClientId(tenantId);
+    const clientSecret = await this.config.getOAuthClientSecret(tenantId);
 
     if (!clientId || !clientSecret) {
-      throw new InternalServerErrorException('OAuth Google nao configurado');
+      throw new InternalServerErrorException(
+        'OAuth Google nao configurado. Defina Client ID e Client Secret em Configuracoes.',
+      );
     }
 
     const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -183,11 +188,17 @@ export class TrafegoOAuthService {
   }
 
   private async exchangeCodeForTokens(
+    tenantId: string,
     code: string,
   ): Promise<{ access_token: string; refresh_token?: string }> {
-    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID!;
-    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET!;
-    const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI!;
+    const clientId = await this.config.getOAuthClientId(tenantId);
+    const clientSecret = await this.config.getOAuthClientSecret(tenantId);
+    const redirectUri = await this.config.getOAuthRedirectUri(tenantId);
+    if (!clientId || !clientSecret || !redirectUri) {
+      throw new InternalServerErrorException(
+        'OAuth Google nao configurado completamente. Defina Client ID, Client Secret e Redirect URI em Configuracoes.',
+      );
+    }
 
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',

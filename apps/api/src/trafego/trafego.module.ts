@@ -3,6 +3,7 @@ import { TrafegoController } from './trafego.controller';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoCryptoService } from './trafego-crypto.service';
+import { TrafegoConfigService } from './trafego-config.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -16,7 +17,17 @@ import { TrafegoCryptoService } from './trafego-crypto.service';
  */
 @Module({
   controllers: [TrafegoController],
-  providers: [TrafegoService, TrafegoOAuthService, TrafegoCryptoService],
-  exports: [TrafegoService, TrafegoOAuthService, TrafegoCryptoService],
+  providers: [
+    TrafegoService,
+    TrafegoOAuthService,
+    TrafegoCryptoService,
+    TrafegoConfigService,
+  ],
+  exports: [
+    TrafegoService,
+    TrafegoOAuthService,
+    TrafegoCryptoService,
+    TrafegoConfigService,
+  ],
 })
 export class TrafegoModule {}
