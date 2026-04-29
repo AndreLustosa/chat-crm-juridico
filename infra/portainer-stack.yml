@@ -104,6 +104,23 @@ services:
       - WEBHOOK_HMAC_REQUIRED=${WEBHOOK_HMAC_REQUIRED:-false}
       # Armazenamento de mídia em filesystem local (novo fluxo — substitui MinIO)
       - MEDIA_STORAGE_PATH=/var/lib/crm-media
+      # ─────────────────────────────────────────────────────────────────
+      # Modulo de Trafego (Google Ads) — opcional
+      # ─────────────────────────────────────────────────────────────────
+      # Sem TRAFEGO_ENCRYPTION_KEY a API ainda sobe (modulo fica
+      # desabilitado, retorna 503 em /trafego/oauth/start). Configure
+      # essas envs no Portainer quando for habilitar o modulo.
+      #
+      # Gere a chave com: openssl rand -hex 32
+      # FRONTEND_BASE_URL eh usado pra redirecionar apos OAuth callback.
+      - TRAFEGO_ENCRYPTION_KEY=${TRAFEGO_ENCRYPTION_KEY}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-https://andrelustosaadvogados.com.br/api/trafego/oauth/callback}
+      - GOOGLE_ADS_DEVELOPER_TOKEN=${GOOGLE_ADS_DEVELOPER_TOKEN}
+      - GOOGLE_ADS_LOGIN_CUSTOMER_ID=${GOOGLE_ADS_LOGIN_CUSTOMER_ID}
+      - GOOGLE_ADS_CUSTOMER_ID=${GOOGLE_ADS_CUSTOMER_ID}
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-https://andrelustosaadvogados.com.br}
     volumes:
       # Persiste áudios/documentos/imagens entre restarts do container.
       # Sem este volume, mídias são perdidas ao reiniciar o container.
@@ -154,6 +171,17 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
       - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
       - MEDIA_STORAGE_PATH=/var/lib/crm-media
+      # ─────────────────────────────────────────────────────────────────
+      # Modulo de Trafego (Google Ads) — worker precisa para sync diario
+      # ─────────────────────────────────────────────────────────────────
+      # Worker decripta refresh_token e troca por access_token a cada sync.
+      # Sem essas envs, o cron 06h fica em STUB (sem chamar Google Ads API).
+      - TRAFEGO_ENCRYPTION_KEY=${TRAFEGO_ENCRYPTION_KEY}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
+      - GOOGLE_ADS_DEVELOPER_TOKEN=${GOOGLE_ADS_DEVELOPER_TOKEN}
+      - GOOGLE_ADS_LOGIN_CUSTOMER_ID=${GOOGLE_ADS_LOGIN_CUSTOMER_ID}
+      - GOOGLE_ADS_CUSTOMER_ID=${GOOGLE_ADS_CUSTOMER_ID}
     volumes:
       # Compartilha o MESMO volume do crm-api: worker precisa ler/escrever mídia
       # (TTS cria áudio, transcrição lê áudio, etc).
