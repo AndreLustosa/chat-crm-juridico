@@ -76,6 +76,32 @@ services:
       restart_policy:
         condition: any
 
+  # ------ Whisper Server (Transcrição de Audiências) ------
+  # Primeiro boot baixa modelos (~5GB) em /models — cache persistente.
+  # Deploy detalhado em apps/whisper/DEPLOY.md.
+  crm-whisper:
+    image: andreflustosa/chat-crm-juridico-whisper:latest
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      - DEVICE=${WHISPER_DEVICE:-cpu}
+      - COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+      - LANGUAGE=pt
+      - DIARIZE=true
+      - HF_TOKEN=${HF_TOKEN}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
+      - S3_REGION=us-east-1
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
+      - S3_BUCKET=${S3_BUCKET:-chat-crm-media}
+    networks:
+      - default
+      - OrionNet
+    volumes:
+      - whisper_models:/models
+    deploy:
+      restart_policy:
+        condition: any
+
   # ------ NestJS Core API ------
   crm-api:
     image: andreflustosa/chat-crm-juridico-api:latest
@@ -235,6 +261,9 @@ volumes:
   pgdata_v2:
   redisdata:
   minio_data:
+  # Modelos do Whisper (~5GB no primeiro boot — large-v3). Cache persistente
+  # pra evitar re-download a cada redeploy.
+  whisper_models:
   # Volume para mídias (áudios, documentos, imagens) do CRM.
   # Compartilhado entre crm-api (escreve+lê) e crm-worker (lê p/ TTS, transcrição).
   # Backup: adicionar /var/lib/docker/volumes/*_crm_media ao rsync da VPS.

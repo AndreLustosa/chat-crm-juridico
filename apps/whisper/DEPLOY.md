@@ -56,9 +56,13 @@ docker push andreflustosa/chat-crm-juridico-web:latest
 
 ## 4. Update da stack no Portainer
 
-1. Edit stack → substituir YAML pelo novo [docker-compose.portainer.yml](../../docker-compose.portainer.yml)
+1. Edit stack → substituir YAML pelo [infra/portainer-stack.yml](../../infra/portainer-stack.yml) (canonico)
 2. "Update the stack" marcando "Re-pull image"
 3. Aguarda ~15min na primeira subida (whisper baixa modelos)
+
+> Nota: o Portainer mantem a propria copia do yml. Push no repo NAO
+> atualiza a stack automaticamente. Detalhes em
+> `memory/arquitetura_stacks_vps.md`.
 
 ## 5. Validação
 
