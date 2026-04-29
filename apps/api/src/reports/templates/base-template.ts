@@ -188,32 +188,43 @@ function renderFooterCurrentPage(ctx: ReportContext, pageNumber: number, totalPa
   const right = doc.page.width - PAGE_MARGIN_PT;
   const bottom = doc.page.height - PAGE_MARGIN_PT + 12;
 
-  doc.strokeColor(COLORS.rule).lineWidth(0.5).moveTo(left, bottom - 6).lineTo(right, bottom - 6).stroke();
+  // CRITICAL: Bug 2026-04-28 — cada doc.text() no footer estava em y >
+  // (page.height - page.margins.bottom), entao PDFKit auto-criava nova pagina
+  // a cada chamada (8 paginas extras vazias no PDF). Fix: zera margem inferior
+  // temporariamente pra desligar o auto-page-break, restaura depois.
+  const origBottomMargin = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
 
-  doc.font(FONTS.sans).fontSize(SIZES.meta).fillColor(COLORS.muted);
-  const generatedAt = formatDateTime(ctx.generatedAt);
-  doc.text(`Gerado em ${generatedAt}`, left, bottom, {
-    width: (right - left) / 2,
-    lineBreak: false,
-  });
-  doc.text(`Por: ${ctx.generatedBy}`, left, bottom + 10, {
-    width: (right - left) / 2,
-    lineBreak: false,
-  });
-  doc.text(`${pageNumber} / ${totalPages}`, left, bottom, {
-    width: right - left,
-    align: 'right',
-    lineBreak: false,
-  });
-  if (ctx.filters.summary) {
-    doc.fillColor(COLORS.faint);
-    doc.text(ctx.filters.summary, left + (right - left) / 2, bottom + 10, {
+  try {
+    doc.strokeColor(COLORS.rule).lineWidth(0.5).moveTo(left, bottom - 6).lineTo(right, bottom - 6).stroke();
+
+    doc.font(FONTS.sans).fontSize(SIZES.meta).fillColor(COLORS.muted);
+    const generatedAt = formatDateTime(ctx.generatedAt);
+    doc.text(`Gerado em ${generatedAt}`, left, bottom, {
       width: (right - left) / 2,
+      lineBreak: false,
+    });
+    doc.text(`Por: ${ctx.generatedBy}`, left, bottom + 10, {
+      width: (right - left) / 2,
+      lineBreak: false,
+    });
+    doc.text(`${pageNumber} / ${totalPages}`, left, bottom, {
+      width: right - left,
       align: 'right',
       lineBreak: false,
     });
+    if (ctx.filters.summary) {
+      doc.fillColor(COLORS.faint);
+      doc.text(ctx.filters.summary, left + (right - left) / 2, bottom + 10, {
+        width: (right - left) / 2,
+        align: 'right',
+        lineBreak: false,
+      });
+    }
+    doc.fillColor(COLORS.text);
+  } finally {
+    doc.page.margins.bottom = origBottomMargin;
   }
-  doc.fillColor(COLORS.text);
 }
 
 // ─── Cabeçalho da primeira página (título + filtros) ─────
@@ -330,6 +341,25 @@ export interface TableColumn {
   toneFor?: (row: any) => 'positive' | 'negative' | 'neutral' | undefined;
 }
 
+/**
+ * Trunca texto pra caber numa largura dada usando o text width medido pelo
+ * proprio PDFKit (precisao real, considerando fonte/tamanho ativos).
+ * Evita o bug onde lineBreak:false ainda quebra numeros longos sem espaco.
+ */
+function truncateToWidth(doc: any, text: string, maxWidth: number): string {
+  if (!text) return '';
+  if (doc.widthOfString(text) <= maxWidth) return text;
+  const ellipsis = '…';
+  const ellipsisW = doc.widthOfString(ellipsis);
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi + 1) / 2);
+    if (doc.widthOfString(text.slice(0, mid)) + ellipsisW <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo > 0 ? text.slice(0, lo) + ellipsis : ellipsis;
+}
+
 export function renderTable(
   ctx: ReportContext,
   columns: TableColumn[],
@@ -339,7 +369,7 @@ export function renderTable(
   const { doc } = ctx;
   const x0 = PAGE_MARGIN_PT;
   const fullWidth = doc.page.width - PAGE_MARGIN_PT * 2;
-  const rowHeight = options.rowHeight || 18;
+  const rowHeight = options.rowHeight || 20; // 18 → 20 dá mais ar
   const headerFill = options.headerFill || '#3d2914';
 
   // Calcula larguras — defensivo contra colunas mal dimensionadas.
@@ -369,11 +399,14 @@ export function renderTable(
     y = doc.y;
   }
   doc.rect(x0, y, fullWidth, rowHeight).fill(headerFill);
-  doc.font(FONTS.sansBold).fontSize(SIZES.small).fillColor('#ffffff');
+  // Header em fonte meta (9pt) em vez de small (10pt) — sobra mais espaco.
+  doc.font(FONTS.sansBold).fontSize(SIZES.meta).fillColor('#ffffff');
   let cursorX = x0;
   columns.forEach((col, i) => {
-    doc.text(col.header.toUpperCase(), cursorX + 4, y + 4, {
-      width: widths[i] - 8,
+    const innerW = widths[i] - 8;
+    const headerText = truncateToWidth(doc, col.header.toUpperCase(), innerW);
+    doc.text(headerText, cursorX + 4, y + 6, {
+      width: innerW,
       align: col.align || 'left',
       lineBreak: false,
     });
@@ -392,11 +425,13 @@ export function renderTable(
       y = doc.y;
       // Re-renderiza header na nova pagina
       doc.rect(x0, y, fullWidth, rowHeight).fill(headerFill);
-      doc.font(FONTS.sansBold).fontSize(SIZES.small).fillColor('#ffffff');
+      doc.font(FONTS.sansBold).fontSize(SIZES.meta).fillColor('#ffffff');
       let hx = x0;
       columns.forEach((col, i) => {
-        doc.text(col.header.toUpperCase(), hx + 4, y + 4, {
-          width: widths[i] - 8,
+        const innerW = widths[i] - 8;
+        const headerText = truncateToWidth(doc, col.header.toUpperCase(), innerW);
+        doc.text(headerText, hx + 4, y + 6, {
+          width: innerW,
           align: col.align || 'left',
           lineBreak: false,
         });
@@ -420,11 +455,14 @@ export function renderTable(
         tone === 'positive' ? COLORS.positive : tone === 'negative' ? COLORS.negative : COLORS.text;
 
       doc.fillColor(color).font(FONTS.body).fontSize(SIZES.small);
-      doc.text(String(value ?? ''), cx + 4, y + 4, {
-        width: widths[i] - 8,
+      const innerW = widths[i] - 8;
+      // Trunca manualmente — lineBreak:false + ellipsis:true do PDFKit ainda
+      // quebra numeros longos sem espaco (ex: "071310067202380200").
+      const display = truncateToWidth(doc, String(value ?? ''), innerW);
+      doc.text(display, cx + 4, y + 5, {
+        width: innerW,
         align: col.align || 'left',
         lineBreak: false,
-        ellipsis: true,
       });
       cx += widths[i];
     });

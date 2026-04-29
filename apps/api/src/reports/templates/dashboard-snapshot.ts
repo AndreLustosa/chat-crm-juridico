@@ -179,15 +179,15 @@ export function buildDashboardSnapshotPdf(data: DashboardSnapshotData): Promise<
     if (data.includeDetailTable !== false && data.pendingCharges.length > 0) {
       ctx.doc.addPage();
       renderSectionTitle(ctx, 'Anexo — Cobranças pendentes', `${data.pendingCharges.length} parcelas em aberto`);
-      // Larguras dimensionadas pra A4 retrato (util ~482pt). Total: 435pt
-      // + flex Asaas ~47pt = 482pt. Em paisagem expande naturalmente via flex.
+      // A4 retrato util ~482pt. Larguras: 130+100+65+65+55+flex(67) = 482.
+      // truncateToWidth no renderTable trunca textos que excedem a coluna.
       const chargeCols: TableColumn[] = [
-        { header: 'Cliente', width: 150 },
+        { header: 'Cliente', width: 130 },
         { header: 'Processo', width: 100 },
-        { header: 'Vencimento', width: 70, align: 'center' },
-        { header: 'Valor', width: 70, align: 'right' },
-        { header: 'Status', width: 60, align: 'center' },
-        { header: 'Asaas', align: 'center' }, // flex absorve resto
+        { header: 'Vencimento', width: 65, align: 'center' },
+        { header: 'Valor', width: 65, align: 'right' },
+        { header: 'Status', width: 55, align: 'center' },
+        { header: 'Asaas', align: 'center' }, // flex ~67pt
       ];
       const chargeRows = data.pendingCharges.map((c) => ({
         Cliente: c.leadName,
@@ -218,7 +218,11 @@ export function buildDashboardSnapshotPdf(data: DashboardSnapshotData): Promise<
 // ─── Helpers internos ───────────────────────────────────
 
 function deltaSublabel(deltaPct: number | null, previous: number, prevLabel: string): string {
-  if (deltaPct == null) return `vs ${prevLabel}: —`;
+  if (deltaPct == null) {
+    // previous=0 e current>0 → sem base de comparacao em vez de hifen seco
+    if (previous === 0) return `vs ${prevLabel}: sem base`;
+    return `vs ${prevLabel}: —`;
+  }
   const sign = deltaPct > 0 ? '+' : '';
   return `${sign}${deltaPct.toFixed(1)}% vs ${prevLabel} (${fmtBRL(previous)})`;
 }
@@ -258,7 +262,9 @@ function renderMonthOverMonthBlock(
     return {
       label: b.key,
       value: fmtBRL(b.current),
-      sublabel: `${prevLabel}: ${fmtBRL(b.previous)} · Δ ${sign}`,
+      // Times-Roman do PDFKit nao tem glyph pro Δ (Greek Delta) — virava "9B p"
+      // no PDF. Trocado por "Var:" pra ASCII puro.
+      sublabel: `${prevLabel}: ${fmtBRL(b.previous)} · Var ${sign}`,
       tone: tone as any,
     };
   });
