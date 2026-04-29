@@ -3,6 +3,7 @@ import {
   Logger,
   BadRequestException,
   InternalServerErrorException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrafegoCryptoService } from './trafego-crypto.service';
@@ -52,12 +53,20 @@ export class TrafegoOAuthService {
 
   /** Gera URL de autorizacao Google + grava state pendente. */
   buildAuthUrl(tenantId: string): string {
+    // Falha cedo se cripto nao tiver chave — evita usuario ir pro Google
+    // e voltar pra um erro no callback.
+    if (!this.crypto.isAvailable()) {
+      throw new ServiceUnavailableException(
+        'Modulo de trafego desabilitado: TRAFEGO_ENCRYPTION_KEY nao configurada no servidor.',
+      );
+    }
+
     const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
     const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
 
     if (!clientId || !redirectUri) {
-      throw new InternalServerErrorException(
-        'OAuth Google nao configurado. Defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_REDIRECT_URI.',
+      throw new ServiceUnavailableException(
+        'OAuth Google nao configurado no servidor. Defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_REDIRECT_URI.',
       );
     }
 
