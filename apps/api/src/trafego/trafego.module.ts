@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { TrafegoController } from './trafego.controller';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
@@ -16,6 +17,7 @@ import { TrafegoConfigService } from './trafego-config.service';
  *   - Fase 5: IA Otimizadora
  */
 @Module({
+  imports: [BullModule.registerQueue({ name: 'trafego-sync' })],
   controllers: [TrafegoController],
   providers: [
     TrafegoService,

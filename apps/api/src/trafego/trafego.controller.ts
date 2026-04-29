@@ -14,6 +14,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -36,6 +38,7 @@ export class TrafegoController {
     private readonly service: TrafegoService,
     private readonly oauth: TrafegoOAuthService,
     private readonly config: TrafegoConfigService,
+    @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
   ) {}
 
   // ─── Dashboard ──────────────────────────────────────────────────────────
@@ -121,7 +124,30 @@ export class TrafegoController {
     }
 
     try {
-      await this.oauth.handleCallback(code, state);
+      const { tenantId } = await this.oauth.handleCallback(code, state);
+
+      // Dispara primeiro sync logo apos OAuth — backfill 30 dias.
+      // Se falhar enfileirar (Redis offline), nao trava o callback —
+      // proximo cron 06h pega.
+      const account = await this.service.getAccount(tenantId);
+      if (account) {
+        try {
+          await this.syncQueue.add(
+            'trafego-sync-account',
+            { accountId: account.id, trigger: 'OAUTH_CALLBACK' },
+            {
+              jobId: `oauth-sync-${account.id}`,
+              removeOnComplete: 100,
+              removeOnFail: 50,
+              attempts: 2,
+              backoff: { type: 'exponential', delay: 5000 },
+            },
+          );
+        } catch {
+          // ignora — sync acontece no proximo cron
+        }
+      }
+
       return res.redirect(`${webBase}${successPath}`);
     } catch (e: any) {
       return res.redirect(
@@ -234,8 +260,15 @@ export class TrafegoController {
     );
   }
 
-  // ─── Sync manual (stub — worker real na Fase 2) ─────────────────────────
+  // ─── Sync manual ────────────────────────────────────────────────────────
 
+  /**
+   * Enfileira job 'trafego-sync-account' na BullMQ. Worker pega e roda
+   * GAQL queries contra Google Ads API.
+   *
+   * Idempotente: se chamado varias vezes em sequencia, BullMQ deduplica
+   * pelo jobId (= account.id) — apenas o ultimo eh processado.
+   */
   @Post('sync')
   @Roles('ADMIN', 'ADVOGADO')
   async triggerSync(@Req() req: any) {
@@ -246,10 +279,22 @@ export class TrafegoController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    // TODO: enfileirar job na BullMQ 'trafego-sync' (implementar na Fase 2)
+
+    await this.syncQueue.add(
+      'trafego-sync-account',
+      { accountId: account.id, trigger: 'MANUAL' },
+      {
+        jobId: `manual-sync-${account.id}`, // dedupe: substitui job pendente
+        removeOnComplete: 100,
+        removeOnFail: 50,
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    );
+
     return {
       ok: true,
-      message: 'Sync enfileirado (stub — implementacao real na Fase 2).',
+      message: 'Sync enfileirado. Os dados aparecerao em alguns minutos.',
     };
   }
 }
