@@ -11,6 +11,7 @@ import { HmacGuard } from './guards/hmac.guard';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AdminBotModule } from '../admin-bot/admin-bot.module';
 import { MediaModule } from '../media/media.module';
+import { MessagesModule } from '../messages/messages.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { MediaModule } from '../media/media.module';
     WhatsappModule,
     AdminBotModule,
     MediaModule,
+    MessagesModule,
     BullModule.registerQueue({ name: 'media-jobs' }),
     BullModule.registerQueue({ name: 'ai-jobs' }),
   ],

@@ -11,6 +11,7 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { FollowupService } from '../followup/followup.service';
 import { AdminBotService } from '../admin-bot/admin-bot.service';
 import { MediaDownloadService } from '../media/media-download.service';
+import { MessagesService } from '../messages/messages.service';
 
 interface EvolutionWebhookPayload {
   event: string;
@@ -1088,78 +1089,81 @@ export class EvolutionService implements OnApplicationBootstrap {
         this.logger.log(`[RESYNC] FASE 1: ${recentChats.length} chats fetched, ${candidates.length} candidatos pos-filtro`);
       }
 
-      let i = 0;
-      for (const chat of toProcess) {
-        i++;
-        // Yield event loop a cada 25 iteracoes — libera thread principal pra
-        // responder Socket.IO heartbeat e outros endpoints durante o resync.
-        if (i % 25 === 0) await new Promise((r) => setImmediate(r));
+      // Paralelismo controlado: chunks de 5 em vez de 1 por vez. Throughput
+      // 5x melhor que sequencial puro, mas nao satura pool (limite eh 25).
+      // Yield event loop entre chunks pra Socket.IO heartbeat passar.
+      const CHUNK_SIZE = 5;
+      for (let idx = 0; idx < toProcess.length; idx += CHUNK_SIZE) {
+        const chunk = toProcess.slice(idx, idx + CHUNK_SIZE);
+        await Promise.all(chunk.map(async (chat: any) => {
+          const phone = extractPhone(chat.remoteJid as string, chat.remoteJidAlt as string);
+          if (!phone || phone.length > 13 || phone.length < 10) return;
 
-        const phone = extractPhone(chat.remoteJid as string, chat.remoteJidAlt as string);
-        if (!phone || phone.length > 13 || phone.length < 10) continue;
+          const lastMsgTs = chat.lastMessage?.messageTimestamp
+            ? Number(chat.lastMessage.messageTimestamp) * 1000
+            : 0;
+          const remoteJid = (chat.remoteJidAlt || chat.remoteJid) as string;
 
-        const lastMsgTs = chat.lastMessage?.messageTimestamp
-          ? Number(chat.lastMessage.messageTimestamp) * 1000
-          : 0;
-        const remoteJid = (chat.remoteJidAlt || chat.remoteJid) as string;
+          // Verificar se já existe conversa ABERTA para este lead
+          const existingLead = await this.leadsService.findByPhone(phone);
+          if (existingLead) {
+            const existingConv = await this.prisma.conversation.findFirst({
+              where: { lead_id: existingLead.id, channel: 'whatsapp', status: { in: ['ABERTO', 'ADIADO'] } },
+            });
+            if (existingConv) return; // Já existe conversa ativa → será sincronizada na fase 2
+          }
 
-        // Verificar se já existe conversa ABERTA para este lead
-        const existingLead = await this.leadsService.findByPhone(phone);
-        if (existingLead) {
-          const existingConv = await this.prisma.conversation.findFirst({
-            where: { lead_id: existingLead.id, channel: 'whatsapp', status: { in: ['ABERTO', 'ADIADO'] } },
-          });
-          if (existingConv) continue; // Já existe conversa ativa → será sincronizada na fase 2
-        }
+          // Chat recente sem conversa no CRM → criar lead + conversa
+          const pushName = (chat.pushName as string) || (chat.name as string) || null;
+          if (!existingLead && !pushName) return; // Sem lead e sem nome → ignorar
 
-        // Chat recente sem conversa no CRM → criar lead + conversa
-        const pushName = (chat.pushName as string) || (chat.name as string) || null;
-        if (!existingLead && !pushName) continue; // Sem lead e sem nome → ignorar
-
-        const lead = await this.leadsService.upsert(
-          {
-            phone,
-            name: existingLead?.name ? null : pushName,
-            ...(chat.profilePicUrl ? { profile_picture_url: chat.profilePicUrl as string } : {}),
-            origin: 'whatsapp',
-            ...(tenantId ? { tenant: { connect: { id: tenantId } } } : {}),
-          },
-          inboxId, // isola notificacao de lead novo ao inbox do setor (resync pos-reconexao)
-        );
-
-        // Reabrir conversa fechada ou criar nova
-        let conv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO' },
-          orderBy: { last_message_at: 'desc' },
-        });
-
-        if (conv) {
-          conv = await this.prisma.conversation.update({
-            where: { id: conv.id },
-            data: {
-              status: 'ABERTO',
-              last_message_at: lastMsgTs ? new Date(lastMsgTs) : new Date(),
-              instance_name: instanceName,
-              ...(inboxId && !conv.inbox_id ? { inbox_id: inboxId } : {}),
+          const lead = await this.leadsService.upsert(
+            {
+              phone,
+              name: existingLead?.name ? null : pushName,
+              ...(chat.profilePicUrl ? { profile_picture_url: chat.profilePicUrl as string } : {}),
+              origin: 'whatsapp',
+              ...(tenantId ? { tenant: { connect: { id: tenantId } } } : {}),
             },
-          });
-        } else {
-          conv = await this.prisma.conversation.create({
-            data: {
-              lead_id: lead.id,
-              channel: 'whatsapp',
-              status: 'ABERTO',
-              external_id: remoteJid,
-              inbox_id: inboxId,
-              instance_name: instanceName,
-              tenant_id: tenantId,
-              last_message_at: lastMsgTs ? new Date(lastMsgTs) : new Date(),
-            },
-          });
-        }
+            inboxId, // isola notificacao de lead novo ao inbox do setor (resync pos-reconexao)
+          );
 
-        newConvsCreated++;
-        this.logger.log(`[RESYNC] Nova conversa criada para ${phone} (mensagem durante a queda)`);
+          // Reabrir conversa fechada ou criar nova
+          let conv = await this.prisma.conversation.findFirst({
+            where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO' },
+            orderBy: { last_message_at: 'desc' },
+          });
+
+          if (conv) {
+            conv = await this.prisma.conversation.update({
+              where: { id: conv.id },
+              data: {
+                status: 'ABERTO',
+                last_message_at: lastMsgTs ? new Date(lastMsgTs) : new Date(),
+                instance_name: instanceName,
+                ...(inboxId && !conv.inbox_id ? { inbox_id: inboxId } : {}),
+              },
+            });
+          } else {
+            conv = await this.prisma.conversation.create({
+              data: {
+                lead_id: lead.id,
+                channel: 'whatsapp',
+                status: 'ABERTO',
+                external_id: remoteJid,
+                inbox_id: inboxId,
+                instance_name: instanceName,
+                tenant_id: tenantId,
+                last_message_at: lastMsgTs ? new Date(lastMsgTs) : new Date(),
+              },
+            });
+          }
+
+          newConvsCreated++;
+          this.logger.log(`[RESYNC] Nova conversa criada para ${phone} (mensagem durante a queda)`);
+        }));
+        // Yield event loop entre chunks
+        await new Promise((r) => setImmediate(r));
       }
 
       if (newConvsCreated > 0) {
@@ -1182,25 +1186,50 @@ export class EvolutionService implements OnApplicationBootstrap {
       `[RESYNC] ${conversations.length} conversas ativas para resync na instância ${instanceName} (trigger=${reason})`,
     );
 
-    for (const conv of conversations) {
-      if (!conv.lead?.phone) continue;
-      await this.mediaQueue.add(
-        'sync_missed_messages',
-        { conversation_id: conv.id, instance_name: instanceName, phone: conv.lead.phone },
-        {
-          delay: STABILIZE_DELAY,
-          removeOnComplete: true,
-          removeOnFail: false,
-          // Retry automático: se o job falhar (timeout, instância momentaneamente
-          // fora, etc), tenta de novo 3x com backoff exponencial. Sem isso, um
-          // soluço na rede deixava a conversa sem sincronizar até o próximo cron.
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5000 },
-        },
-      );
+    // CRITICAL: Bug 2026-04-28 — antes enfileirava 100 jobs `sync_missed_messages`
+    // na queue media-jobs, mas NAO HAVIA WORKER consumindo. Resultado: jobs
+    // vazavam no Redis indefinidamente (cron a cada 15min empilhava +100/run).
+    // Fix: chamada direta ao messagesService.syncHistoryFromWhatsApp em background
+    // com paralelismo controlado (3 conversas por vez), apos STABILIZE_DELAY.
+    const conversationsToSync = conversations.filter((c) => !!c.lead?.phone);
+    if (conversationsToSync.length > 0) {
+      // Roda em background — webhook responde rapido, sync acontece off-thread.
+      setTimeout(async () => {
+        try {
+          // moduleRef.get pra resolver MessagesService em runtime sem injetar
+          // direto (mantem opcional, se faltar so loga warning).
+          const messagesService = this.moduleRef.get(MessagesService, { strict: false });
+          if (!messagesService) {
+            this.logger.warn('[RESYNC] FASE 2: MessagesService nao disponivel — skip');
+            return;
+          }
+
+          this.logger.log(`[RESYNC] FASE 2 iniciando sync inline de ${conversationsToSync.length} conversas (3 paralelas)`);
+
+          const PARALLEL_SYNC = 3;
+          let synced = 0;
+          for (let idx = 0; idx < conversationsToSync.length; idx += PARALLEL_SYNC) {
+            const chunk = conversationsToSync.slice(idx, idx + PARALLEL_SYNC);
+            await Promise.all(chunk.map(async (conv) => {
+              try {
+                await messagesService.syncHistoryFromWhatsApp(conv.id);
+                synced++;
+              } catch (e: any) {
+                this.logger.warn(`[RESYNC] FASE 2 falha sync conv ${conv.id}: ${e.message}`);
+              }
+            }));
+            // Yield event loop entre chunks pra Socket.IO continuar respondendo
+            await new Promise((r) => setImmediate(r));
+          }
+
+          this.logger.log(`[RESYNC] FASE 2 concluida: ${synced}/${conversationsToSync.length} conversas sincronizadas`);
+        } catch (e: any) {
+          this.logger.error(`[RESYNC] FASE 2 erro inesperado: ${e.message}`);
+        }
+      }, STABILIZE_DELAY);
     }
 
-    return { newConvsCreated, conversationsResynced: conversations.length };
+    return { newConvsCreated, conversationsResynced: conversationsToSync.length };
   }
 
   // ─── onApplicationBootstrap (fix principal) ─────────────────────
