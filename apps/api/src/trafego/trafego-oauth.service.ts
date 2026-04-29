@@ -114,9 +114,10 @@ export class TrafegoOAuthService {
       tokens.access_token,
     );
 
-    // Customer ID alvo: vem da env por enquanto (Fase 1 single-account).
-    // Multi-account: usuario seleciona via UI futuramente.
-    const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID || null;
+    // Customer ID alvo: DB-first (configurado via UI em
+    // Configuracoes > Credenciais), env-fallback. null = conta fica em
+    // status PENDING ate admin definir o ID.
+    const customerId = await this.config.getTargetCustomerId(pending.tenantId);
 
     await this.prisma.trafficAccount.upsert({
       where: { tenant_id: pending.tenantId },

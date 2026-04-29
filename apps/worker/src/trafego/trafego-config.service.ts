@@ -46,6 +46,16 @@ export class TrafegoConfigService {
     );
   }
 
+  /** Customer ID da conta-alvo (anunciante) — nao secreto. */
+  async getTargetCustomerId(tenantId: string): Promise<string | null> {
+    const settings = await this.getSettings(tenantId);
+    return (
+      settings?.google_ads_customer_id ||
+      process.env.GOOGLE_ADS_CUSTOMER_ID ||
+      null
+    );
+  }
+
   /** OAuth Client ID — nao secreto. */
   async getOAuthClientId(tenantId: string): Promise<string | null> {
     const settings = await this.getSettings(tenantId);

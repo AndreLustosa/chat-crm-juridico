@@ -167,6 +167,11 @@ export class UpdateCredentialsDto {
   @IsOptional()
   google_ads_login_customer_id?: string | null;
 
+  /** Customer ID da conta-alvo (anunciante), sem tracos. Ex: "4464129633". */
+  @IsString()
+  @IsOptional()
+  google_ads_customer_id?: string | null;
+
   /** OAuth Client ID (publico), termina em ".apps.googleusercontent.com". */
   @IsString()
   @IsOptional()

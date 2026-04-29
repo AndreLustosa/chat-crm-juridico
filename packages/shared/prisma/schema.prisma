@@ -2235,6 +2235,10 @@ model TrafficSettings {
   google_ads_developer_token_enc String?
   /// Customer ID da MCC (sem tracos), ex: "2736107831". Nao secreto.
   google_ads_login_customer_id   String?
+  /// Customer ID da conta-alvo (anunciante), sem tracos. Ex: "4464129633".
+  /// Quando definido, OAuth callback popula TrafficAccount.customer_id com este valor
+  /// e updateCredentials sincroniza com TrafficAccount existente (single-account scope).
+  google_ads_customer_id         String?
   /// OAuth Client ID do Google Cloud (publico, vai no frontend OAuth flow).
   oauth_client_id                String?
   /// OAuth Client Secret (criptografado). Comeca com "GOCSPX-".

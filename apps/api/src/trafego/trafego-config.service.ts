@@ -51,6 +51,16 @@ export class TrafegoConfigService {
     );
   }
 
+  /** Customer ID da conta-alvo (anunciante) — nao secreto. */
+  async getTargetCustomerId(tenantId: string): Promise<string | null> {
+    const settings = await this.getSettings(tenantId);
+    return (
+      settings?.google_ads_customer_id ||
+      process.env.GOOGLE_ADS_CUSTOMER_ID ||
+      null
+    );
+  }
+
   /** OAuth Client ID — nao secreto. */
   async getOAuthClientId(tenantId: string): Promise<string | null> {
     const settings = await this.getSettings(tenantId);
@@ -149,6 +159,10 @@ export class TrafegoConfigService {
         settings?.google_ads_login_customer_id ||
         process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID ||
         null,
+      google_ads_customer_id:
+        settings?.google_ads_customer_id ||
+        process.env.GOOGLE_ADS_CUSTOMER_ID ||
+        null,
       oauth_client_id:
         settings?.oauth_client_id || process.env.GOOGLE_OAUTH_CLIENT_ID || null,
       oauth_redirect_uri:
@@ -172,6 +186,7 @@ export class TrafegoConfigService {
     dto: {
       google_ads_developer_token?: string | null;
       google_ads_login_customer_id?: string | null;
+      google_ads_customer_id?: string | null;
       oauth_client_id?: string | null;
       oauth_client_secret?: string | null;
       oauth_redirect_uri?: string | null;
@@ -194,9 +209,16 @@ export class TrafegoConfigService {
           : this.crypto.encrypt(dto.oauth_client_secret);
     }
 
-    // Nao secretos: copia direto
+    // Nao secretos: copia direto. Customer IDs: limpa nao-digitos.
     if (dto.google_ads_login_customer_id !== undefined) {
-      data.google_ads_login_customer_id = dto.google_ads_login_customer_id;
+      data.google_ads_login_customer_id = dto.google_ads_login_customer_id
+        ? dto.google_ads_login_customer_id.replace(/\D/g, '')
+        : null;
+    }
+    if (dto.google_ads_customer_id !== undefined) {
+      data.google_ads_customer_id = dto.google_ads_customer_id
+        ? dto.google_ads_customer_id.replace(/\D/g, '')
+        : null;
     }
     if (dto.oauth_client_id !== undefined) {
       data.oauth_client_id = dto.oauth_client_id;
@@ -213,6 +235,26 @@ export class TrafegoConfigService {
       update: data,
       create: { tenant_id: tenantId, ...data },
     });
+
+    // Sincroniza customer_id pra TrafficAccount existente (single-account
+    // scope). Sem isso, conta criada via OAuth continua com customer_id
+    // vazio e sync falha com "conta sem customer_id alvo configurado".
+    if (data.google_ads_customer_id || data.google_ads_login_customer_id) {
+      await this.prisma.trafficAccount.updateMany({
+        where: { tenant_id: tenantId },
+        data: {
+          ...(data.google_ads_customer_id !== undefined && {
+            customer_id: data.google_ads_customer_id || '',
+          }),
+          ...(data.google_ads_login_customer_id !== undefined && {
+            login_customer_id: data.google_ads_login_customer_id,
+          }),
+          // Se a conta estava PENDING (sem customer_id) e agora tem,
+          // ativa pra worker pegar no proximo sync
+          ...(data.google_ads_customer_id && { status: 'ACTIVE' }),
+        },
+      });
+    }
 
     return this.getCredentialsMasked(tenantId);
   }

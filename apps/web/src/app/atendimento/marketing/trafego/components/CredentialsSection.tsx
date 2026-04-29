@@ -17,6 +17,7 @@ interface CredentialsState {
   developer_token: { source: 'db' | 'env' | 'none'; masked: string | null };
   oauth_client_secret: { source: 'db' | 'env' | 'none'; masked: string | null };
   google_ads_login_customer_id: string | null;
+  google_ads_customer_id: string | null;
   oauth_client_id: string | null;
   oauth_redirect_uri: string | null;
   frontend_base_url: string | null;
@@ -45,6 +46,7 @@ export function CredentialsSection({ canManage }: { canManage: boolean }) {
   const [showClientSecret, setShowClientSecret] = useState(false);
   const [redirectUri, setRedirectUri] = useState('');
   const [loginCustomerId, setLoginCustomerId] = useState('');
+  const [customerId, setCustomerId] = useState('');
   const [frontendBaseUrl, setFrontendBaseUrl] = useState('');
 
   async function load() {
@@ -55,6 +57,7 @@ export function CredentialsSection({ canManage }: { canManage: boolean }) {
       setClientId(data.oauth_client_id ?? '');
       setRedirectUri(data.oauth_redirect_uri ?? '');
       setLoginCustomerId(data.google_ads_login_customer_id ?? '');
+      setCustomerId(data.google_ads_customer_id ?? '');
       setFrontendBaseUrl(data.frontend_base_url ?? '');
       // Secretos: NUNCA preenche — vazio significa "nao mexer"
       setDevToken('');
@@ -78,6 +81,7 @@ export function CredentialsSection({ canManage }: { canManage: boolean }) {
         oauth_client_id: clientId || null,
         oauth_redirect_uri: redirectUri || null,
         google_ads_login_customer_id: loginCustomerId || null,
+        google_ads_customer_id: customerId || null,
         frontend_base_url: frontendBaseUrl || null,
       };
       // Secretos: so envia se foi preenchido. Vazio = mantem o atual.
@@ -197,8 +201,24 @@ export function CredentialsSection({ canManage }: { canManage: boolean }) {
           />
         </div>
 
-        {/* ─── OAuth Client ID ──────────────────────────────────── */}
+        {/* ─── Customer ID Alvo (anunciante) ────────────────────── */}
         <div>
+          <FieldLabel
+            label="Customer ID Alvo (anunciante)"
+            hint="Conta com as campanhas. Sem traços. Ex: 4464129633"
+          />
+          <input
+            type="text"
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value.replace(/\D/g, ''))}
+            disabled={!canManage}
+            placeholder="4464129633"
+            className={INPUT_CLS + ' font-mono'}
+          />
+        </div>
+
+        {/* ─── OAuth Client ID ──────────────────────────────────── */}
+        <div className="md:col-span-2">
           <FieldLabel
             label="OAuth Client ID"
             hint="Cloud Console → Credenciais"
