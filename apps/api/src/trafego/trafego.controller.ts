@@ -93,9 +93,23 @@ export class TrafegoController {
     @Query('code') code: string,
     @Query('state') state: string,
     @Query('error') error: string | undefined,
+    @Req() req: any,
     @Res() res: Response,
   ) {
-    const webBase = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+    // Resolve base URL pra redirect na seguinte ordem:
+    //   1. process.env.FRONTEND_BASE_URL (se admin override)
+    //   2. Header Host (X-Forwarded-Host atras de Traefik) — mesmo dominio
+    //      do request, sempre confiavel em prod
+    //   3. localhost:3000 (dev)
+    //
+    // NAO da pra usar TrafegoConfigService aqui ANTES de validar state
+    // (callback eh @Public, sem tenantId disponivel).
+    const forwardedHost = req.get('x-forwarded-host') || req.get('host');
+    const forwardedProto = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const webBase =
+      process.env.FRONTEND_BASE_URL ||
+      (forwardedHost ? `${forwardedProto}://${forwardedHost}` : null) ||
+      'http://localhost:3000';
     const successPath = '/atendimento/marketing/trafego?oauth=success';
     const errorPath = '/atendimento/marketing/trafego?oauth=error';
 
