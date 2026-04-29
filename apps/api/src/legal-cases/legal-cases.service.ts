@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
@@ -11,6 +13,8 @@ import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
+const CASE_WELCOME_DELAY_MS = 5 * 60 * 1000; // 5 minutos
+
 @Injectable()
 export class LegalCasesService {
   private readonly logger = new Logger(LegalCasesService.name);
@@ -21,7 +25,26 @@ export class LegalCasesService {
     @Inject(forwardRef(() => WhatsappService)) private whatsappService: WhatsappService,
     private calendarService: CalendarService,
     private settings: SettingsService,
+    @InjectQueue('followup-jobs') private followupQueue: Queue,
   ) {}
+
+  private async scheduleCaseWelcomeMessage(caseId: string) {
+    try {
+      await this.followupQueue.add(
+        'case-welcome-message',
+        { case_id: caseId },
+        {
+          delay: CASE_WELCOME_DELAY_MS,
+          jobId: `case-welcome-${caseId}`,
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      );
+      this.logger.log(`[CASE-WELCOME] Agendado para processo ${caseId} (+5min)`);
+    } catch (e: any) {
+      this.logger.warn(`[CASE-WELCOME] Falha ao agendar para ${caseId}: ${e.message}`);
+    }
+  }
 
   private tenantWhere(tenantId?: string) {
     return tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {};
@@ -128,6 +151,9 @@ export class LegalCasesService {
 
     // Vincular publicações DJEN existentes com o mesmo número de processo
     await this.reconcileDjenPublications(legalCase.id, (legalCase as any).case_number);
+
+    // Agendar comunicado de boas-vindas / alerta golpe (+5min)
+    await this.scheduleCaseWelcomeMessage(legalCase.id);
 
     return legalCase;
   }
@@ -1166,6 +1192,9 @@ export class LegalCasesService {
 
     // Vincular publicações DJEN existentes com o mesmo número de processo
     await this.reconcileDjenPublications(legalCase.id, data.case_number);
+
+    // Agendar comunicado de boas-vindas / alerta golpe (+5min)
+    await this.scheduleCaseWelcomeMessage(legalCase.id);
 
     return legalCase;
   }

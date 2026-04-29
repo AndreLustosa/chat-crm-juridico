@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { FollowupService } from './followup.service';
 import { FollowupAnalyzerService } from './followup-analyzer.service';
+import { buildCaseWelcomeMessage } from './case-welcome-message.template';
 import axios from 'axios';
 
 @Processor('followup-jobs')
@@ -23,6 +24,71 @@ export class FollowupProcessor extends WorkerHost {
     if (job.name === 'send-message') return this.sendMessage(job.data.message_id);
     if (job.name === 'broadcast-send') return this.processBroadcastItem(job.data.broadcast_id, job.data.item_id, job.data.custom_prompt);
     if (job.name === 'manual-legacy-followup') return this.processManualLegacy(job.data.lead_id, job.data.stage);
+    if (job.name === 'case-welcome-message') return this.processCaseWelcomeMessage(job.data.case_id);
+  }
+
+  /**
+   * Handler: comunicado de boas-vindas / alerta golpe enviado 5min apos
+   * cadastro de qualquer processo. Texto fica em case-welcome-message.template.ts.
+   */
+  private async processCaseWelcomeMessage(caseId: string) {
+    const legalCase = await this.prisma.legalCase.findUnique({
+      where: { id: caseId },
+      include: { lead: true },
+    });
+    if (!legalCase || !legalCase.lead) {
+      this.logger.warn(`[CASE-WELCOME] Processo ${caseId} ou lead nao encontrado — pulando`);
+      return;
+    }
+    const lead = legalCase.lead;
+    if (!lead.phone) {
+      this.logger.warn(`[CASE-WELCOME] Lead ${lead.id} sem telefone — pulando`);
+      return;
+    }
+
+    const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
+    if (!apiUrl) {
+      this.logger.warn('[CASE-WELCOME] EVOLUTION_API_URL nao configurada — pulando');
+      return;
+    }
+
+    const firstName = (lead.name || 'cliente').split(' ')[0];
+    const text = buildCaseWelcomeMessage(firstName);
+
+    const convo = await this.prisma.conversation.findFirst({
+      where: { lead_id: lead.id, status: 'ABERTO' },
+      orderBy: { last_message_at: 'desc' },
+    });
+    const instanceName = convo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
+
+    try {
+      await axios.post(
+        `${apiUrl}/message/sendText/${instanceName}`,
+        { number: lead.phone, text },
+        { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
+      );
+
+      if (convo) {
+        await this.prisma.message.create({
+          data: {
+            conversation_id: convo.id,
+            direction: 'out',
+            type: 'text',
+            text,
+            external_message_id: `sys_case_welcome_${Date.now()}`,
+            status: 'enviado',
+          },
+        });
+        await this.prisma.conversation.update({
+          where: { id: convo.id },
+          data: { last_message_at: new Date() },
+        });
+      }
+
+      this.logger.log(`[CASE-WELCOME] Enviado para ${lead.phone} (${lead.name}) — caso ${caseId}`);
+    } catch (e: any) {
+      this.logger.error(`[CASE-WELCOME] Falha ao enviar para ${lead.phone}: ${e.message}`);
+    }
   }
 
   /**
