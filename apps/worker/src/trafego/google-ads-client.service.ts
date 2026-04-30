@@ -91,13 +91,20 @@ export class GoogleAdsClientService {
    * mensagem util no TrafficSyncLog.
    */
   formatError(error: any): { kind: string; message: string } {
-    // GoogleAdsFailure — erro estruturado da API
+    // GoogleAdsFailure — erro estruturado da API. Pode ter MULTIPLOS errors,
+    // junta todos pra log nao perder info (campos invalidos numa query
+    // costumam ser listados todos juntos).
     if (error instanceof errors.GoogleAdsFailure) {
-      const first = error.errors?.[0];
-      const errCode = first?.error_code ? Object.values(first.error_code)[0] : '';
+      const all = (error.errors ?? []).map((e: any) => {
+        const code = e?.error_code ? Object.values(e.error_code)[0] : '';
+        return `[${code}] ${e?.message ?? 'sem msg'}`;
+      });
       return {
         kind: 'GoogleAdsFailure',
-        message: `${errCode}: ${first?.message ?? 'erro sem mensagem'}`.slice(0, 1000),
+        message: (all.length > 0
+          ? all.join(' | ')
+          : 'GoogleAdsFailure sem detalhes'
+        ).slice(0, 1500),
       };
     }
     // gRPC ou rede

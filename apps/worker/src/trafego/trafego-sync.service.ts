@@ -145,14 +145,15 @@ export class TrafegoSyncService extends WorkerHost {
 
     try {
       // ─── 1. Campaigns (metadata) ───────────────────────────────────────
+      // start_date/end_date sao "Unrecognized" por google-ads-api v23
+      // (provavel mismatch entre versao do SDK e da API). Removidos pra
+      // destravar — campos do schema continuam nullable, ficam null.
       const campaignRows: any[] = await customer.query(`
         SELECT
           campaign.id,
           campaign.name,
           campaign.status,
           campaign.advertising_channel_type,
-          campaign.start_date,
-          campaign.end_date,
           campaign.bidding_strategy_type,
           campaign_budget.amount_micros
         FROM campaign
@@ -179,8 +180,6 @@ export class TrafegoSyncService extends WorkerHost {
               ? BigInt(row.campaign_budget.amount_micros)
               : null,
             bidding_strategy: row.campaign?.bidding_strategy_type ?? null,
-            start_date: row.campaign?.start_date ? new Date(row.campaign.start_date) : null,
-            end_date: row.campaign?.end_date ? new Date(row.campaign.end_date) : null,
             last_seen_at: new Date(),
           },
           create: {
@@ -194,8 +193,6 @@ export class TrafegoSyncService extends WorkerHost {
               ? BigInt(row.campaign_budget.amount_micros)
               : null,
             bidding_strategy: row.campaign?.bidding_strategy_type ?? null,
-            start_date: row.campaign?.start_date ? new Date(row.campaign.start_date) : null,
-            end_date: row.campaign?.end_date ? new Date(row.campaign.end_date) : null,
           },
           select: { id: true, google_campaign_id: true },
         });
