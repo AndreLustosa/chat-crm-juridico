@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   UpdateAccountDto,
@@ -115,6 +115,318 @@ export class TrafegoService {
       where: { id: campaignId },
       data: dto,
     });
+  }
+
+  // ─── Ad Groups ──────────────────────────────────────────────────────────
+
+  async listAdGroups(
+    tenantId: string,
+    opts: { campaignId?: string; status?: string } = {},
+  ) {
+    const items = await this.prisma.trafficAdGroup.findMany({
+      where: {
+        tenant_id: tenantId,
+        ...(opts.campaignId ? { campaign_id: opts.campaignId } : {}),
+        ...(opts.status ? { status: opts.status } : {}),
+        is_archived_internal: false,
+      },
+      orderBy: { last_seen_at: 'desc' },
+      include: { campaign: { select: { id: true, name: true, status: true } } },
+    });
+    return items.map((i) => ({
+      ...i,
+      cpc_bid_micros: i.cpc_bid_micros?.toString() ?? null,
+      cpm_bid_micros: i.cpm_bid_micros?.toString() ?? null,
+      target_cpa_micros: i.target_cpa_micros?.toString() ?? null,
+      cpc_bid_brl: fromMicros(i.cpc_bid_micros),
+      target_cpa_brl: fromMicros(i.target_cpa_micros),
+    }));
+  }
+
+  // ─── Keywords ───────────────────────────────────────────────────────────
+
+  async listKeywords(
+    tenantId: string,
+    adGroupId: string,
+    opts: { negative?: boolean } = {},
+  ) {
+    const items = await this.prisma.trafficKeyword.findMany({
+      where: {
+        tenant_id: tenantId,
+        ad_group_id: adGroupId,
+        ...(typeof opts.negative === 'boolean' ? { negative: opts.negative } : {}),
+      },
+      orderBy: { last_seen_at: 'desc' },
+    });
+    return items.map((i) => ({
+      ...i,
+      cpc_bid_micros: i.cpc_bid_micros?.toString() ?? null,
+      cpc_bid_brl: fromMicros(i.cpc_bid_micros),
+    }));
+  }
+
+  // ─── Ads ────────────────────────────────────────────────────────────────
+
+  async listAds(tenantId: string, adGroupId: string) {
+    return this.prisma.trafficAd.findMany({
+      where: { tenant_id: tenantId, ad_group_id: adGroupId },
+      orderBy: { last_seen_at: 'desc' },
+    });
+  }
+
+  // ─── Budgets ────────────────────────────────────────────────────────────
+
+  async listBudgets(tenantId: string) {
+    const items = await this.prisma.trafficCampaignBudget.findMany({
+      where: { tenant_id: tenantId },
+      orderBy: { last_seen_at: 'desc' },
+    });
+    return items.map((i) => ({
+      ...i,
+      amount_micros: i.amount_micros.toString(),
+      amount_brl: fromMicros(i.amount_micros),
+    }));
+  }
+
+  // ─── Conversion Actions ─────────────────────────────────────────────────
+
+  /**
+   * Lista ConversionActions sincronizadas, com indicacao de quais estao
+   * mapeadas a eventos CRM.
+   */
+  async listConversionActions(tenantId: string) {
+    const items = await this.prisma.trafficConversionAction.findMany({
+      where: { tenant_id: tenantId },
+      orderBy: [{ status: 'asc' }, { name: 'asc' }],
+    });
+    return items.map((i) => ({
+      ...i,
+      default_value_micros: i.default_value_micros?.toString() ?? null,
+      default_value_brl: fromMicros(i.default_value_micros),
+    }));
+  }
+
+  /**
+   * Mapeia ConversionAction → evento CRM. crm_event_kind=null desfaz.
+   * Tambem permite ajustar default_value_brl.
+   */
+  async mapConversionAction(
+    tenantId: string,
+    conversionActionId: string,
+    dto: { crm_event_kind?: string | null; default_value_brl?: number | null },
+  ) {
+    const ca = await this.prisma.trafficConversionAction.findFirst({
+      where: { id: conversionActionId, tenant_id: tenantId },
+    });
+    if (!ca) throw new NotFoundException('Conversion action nao encontrada');
+
+    const updated = await this.prisma.trafficConversionAction.update({
+      where: { id: conversionActionId },
+      data: {
+        ...(dto.crm_event_kind !== undefined
+          ? { crm_event_kind: dto.crm_event_kind }
+          : {}),
+        ...(dto.default_value_brl !== undefined
+          ? {
+              default_value_micros:
+                dto.default_value_brl === null
+                  ? null
+                  : BigInt(Math.round(dto.default_value_brl * 1_000_000)),
+            }
+          : {}),
+      },
+    });
+    return {
+      ...updated,
+      default_value_micros: updated.default_value_micros?.toString() ?? null,
+      default_value_brl: fromMicros(updated.default_value_micros),
+    };
+  }
+
+  // ─── Mutate Logs (audit trail) ──────────────────────────────────────────
+
+  async listMutateLogs(
+    tenantId: string,
+    opts: { limit?: number; initiator?: string; status?: string } = {},
+  ) {
+    const items = await this.prisma.trafficMutateLog.findMany({
+      where: {
+        tenant_id: tenantId,
+        ...(opts.initiator ? { initiator: opts.initiator } : {}),
+        ...(opts.status ? { status: opts.status } : {}),
+      },
+      orderBy: { created_at: 'desc' },
+      take: opts.limit ?? 50,
+    });
+    return items.map((i) => ({
+      ...i,
+      confidence: i.confidence ? Number(i.confidence) : null,
+    }));
+  }
+
+  // ─── Mutate payload builder ─────────────────────────────────────────────
+  /**
+   * Resolve IDs locais → resource_names da Google Ads API + monta payload
+   * que o TrafegoMutateProcessor consome. Isolado aqui pra controller ficar
+   * fino e centralizar conversao BRL→micros.
+   */
+  async buildMutatePayload(
+    tenantId: string,
+    accountId: string,
+    customerId: string,
+    jobName: string,
+    raw: any,
+    initiator: string,
+    validateOnly: boolean,
+  ): Promise<any> {
+    const base = {
+      tenantId,
+      accountId,
+      initiator,
+      validateOnly,
+      confidence: null as number | null,
+      context: {
+        triggered_by: initiator,
+        reason: raw.reason,
+      } as Record<string, any>,
+    };
+
+    switch (jobName) {
+      case 'trafego-mutate-pause-campaign':
+      case 'trafego-mutate-resume-campaign': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          context: { ...base.context, campaign_id_local: camp.id },
+        };
+      }
+      case 'trafego-mutate-update-budget': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        if (!camp.daily_budget_micros) {
+          throw new HttpException(
+            'Campanha sem budget identificado. Sincronize antes.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        // Precisamos do resource_name do campaign_budget — buscar via google_campaign_id
+        // Estrategia: SDK retorna campaign.campaign_budget no sync — mas nao guardamos.
+        // Por ora, usamos lookup por amount_micros + reference_count (heuristico).
+        // Se TrafficCampaignBudget tiver o budget mais o vinculo campaign_budget eh
+        // necessario expandir o sync. Por hora, exigimos que admin escolha o budget
+        // em outro endpoint, ou sync adicione um campo `budget_resource_name` em
+        // TrafficCampaign. Vamos criar o resource_name a partir do google_campaign_id
+        // assumindo budget dedicado (caso comum no escritorio).
+        // TODO: persistir budget_id em TrafficCampaign no sync extended.
+        const newAmountMicros = BigInt(
+          Math.round(raw.new_amount_brl * 1_000_000),
+        );
+        return {
+          ...base,
+          // Usaremos placeholder. O processor pode descobrir budget via
+          // GAQL: SELECT campaign.campaign_budget FROM campaign WHERE campaign.id=X
+          // Mas pra simplificar agora, exigimos que o frontend ja envie o
+          // budget_resource_name via GET /budgets primeiro.
+          budgetResourceName: raw.budget_resource_name ?? null,
+          newAmountMicros: newAmountMicros.toString(),
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            new_amount_brl: raw.new_amount_brl,
+          },
+        };
+      }
+      case 'trafego-mutate-pause-ad-group':
+      case 'trafego-mutate-resume-ad-group': {
+        const ag = await this.requireAdGroup(tenantId, raw.adGroupId);
+        return {
+          ...base,
+          adGroupResourceName: `customers/${customerId}/adGroups/${ag.google_ad_group_id}`,
+          context: { ...base.context, ad_group_id_local: ag.id },
+        };
+      }
+      case 'trafego-mutate-add-keywords': {
+        const ag = await this.requireAdGroup(tenantId, raw.adGroupId);
+        return {
+          ...base,
+          adGroupResourceName: `customers/${customerId}/adGroups/${ag.google_ad_group_id}`,
+          keywords: (raw.keywords ?? []).map((kw: any) => ({
+            text: kw.text,
+            matchType: kw.match_type,
+            cpcBidMicros: kw.cpc_bid_brl
+              ? String(Math.round(kw.cpc_bid_brl * 1_000_000))
+              : null,
+          })),
+          context: { ...base.context, ad_group_id_local: ag.id },
+        };
+      }
+      case 'trafego-mutate-add-negatives': {
+        if (raw.scope === 'CAMPAIGN') {
+          const camp = await this.requireCampaign(tenantId, raw.campaignId);
+          return {
+            ...base,
+            scope: 'CAMPAIGN',
+            scopeResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+            negatives: (raw.negatives ?? []).map((kw: any) => ({
+              text: kw.text,
+              matchType: kw.match_type,
+            })),
+            context: { ...base.context, campaign_id_local: camp.id },
+          };
+        }
+        const ag = await this.requireAdGroup(tenantId, raw.adGroupId);
+        return {
+          ...base,
+          scope: 'AD_GROUP',
+          scopeResourceName: `customers/${customerId}/adGroups/${ag.google_ad_group_id}`,
+          negatives: (raw.negatives ?? []).map((kw: any) => ({
+            text: kw.text,
+            matchType: kw.match_type,
+          })),
+          context: { ...base.context, ad_group_id_local: ag.id },
+        };
+      }
+      case 'trafego-mutate-remove-keywords': {
+        const ids = (raw.keywordIds ?? []) as string[];
+        const kws = await this.prisma.trafficKeyword.findMany({
+          where: { tenant_id: tenantId, id: { in: ids } },
+          select: {
+            id: true,
+            ad_group: { select: { google_ad_group_id: true } },
+            google_criterion_id: true,
+          },
+        });
+        return {
+          ...base,
+          criterionResourceNames: kws.map(
+            (k) =>
+              `customers/${customerId}/adGroupCriteria/${k.ad_group.google_ad_group_id}~${k.google_criterion_id}`,
+          ),
+          context: { ...base.context, keyword_ids_local: kws.map((k) => k.id) },
+        };
+      }
+      default:
+        throw new HttpException(
+          `Job de mutate nao suportado: ${jobName}`,
+          HttpStatus.BAD_REQUEST,
+        );
+    }
+  }
+
+  private async requireCampaign(tenantId: string, campaignId: string) {
+    const camp = await this.prisma.trafficCampaign.findFirst({
+      where: { id: campaignId, tenant_id: tenantId },
+    });
+    if (!camp) throw new NotFoundException('Campanha nao encontrada');
+    return camp;
+  }
+
+  private async requireAdGroup(tenantId: string, adGroupId: string) {
+    const ag = await this.prisma.trafficAdGroup.findFirst({
+      where: { id: adGroupId, tenant_id: tenantId },
+    });
+    if (!ag) throw new NotFoundException('Ad group nao encontrado');
+    return ag;
   }
 
   // ─── Settings ───────────────────────────────────────────────────────────

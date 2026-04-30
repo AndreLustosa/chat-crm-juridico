@@ -7,6 +7,7 @@ import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { SettingsService } from '../settings/settings.service';
+import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
@@ -25,6 +26,7 @@ export class LegalCasesService {
     @Inject(forwardRef(() => WhatsappService)) private whatsappService: WhatsappService,
     private calendarService: CalendarService,
     private settings: SettingsService,
+    private trafegoEvents: TrafegoEventsService,
     @InjectQueue('followup-jobs') private followupQueue: Queue,
   ) {}
 
@@ -137,6 +139,16 @@ export class LegalCasesService {
         stage_entered_at: new Date(),
       },
     }).catch(() => {});
+
+    // Trafego: dispara OCI upload pra evento 'client.signed'.
+    // Silencioso (errors logados, nunca propagados).
+    if (data.tenant_id) {
+      this.trafegoEvents
+        .onClientSigned(data.lead_id, data.tenant_id)
+        .catch((err) =>
+          this.logger.warn(`[trafego-events] onClientSigned lead=${data.lead_id}: ${err}`),
+        );
+    }
 
     // Atribuir advogado nas conversas do lead
     await this.prisma.conversation.updateMany({

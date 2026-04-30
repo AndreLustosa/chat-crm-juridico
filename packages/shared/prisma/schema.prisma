@@ -8,49 +8,58 @@ datasource db {
 }
 
 model Tenant {
-  id                        String                           @id @default(uuid())
-  name                      String
-  conversations             Conversation[]
-  leads                     Lead[]
-  tasks                     Task[]
-  users                     User[]
-  inboxes                   Inbox[]
-  instances                 Instance[]
-  legal_cases               LegalCase[]
-  calendar_events           CalendarEvent[]
-  appointment_types         AppointmentType[]
-  holidays                  Holiday[]
-  case_documents            CaseDocument[]
-  task_attachments          TaskAttachment[]
-  case_transcriptions       CaseTranscription[]
-  case_deadlines            CaseDeadline[]
-  petitions                 CasePetition[]
-  legal_templates           LegalTemplate[]
-  case_honorarios           CaseHonorario[]
-  ai_chats                  AiChat[]
-  followup_sequences        FollowupSequence[]
-  financial_transactions    FinancialTransaction[]
-  financial_categories      FinancialCategory[]
-  payment_gateway_customers PaymentGatewayCustomer[]
-  payment_gateway_charges   PaymentGatewayCharge[]
-  notas_fiscais             NotaFiscal[]
-  tax_records               TaxRecord[]
-  broadcast_jobs            BroadcastJob[]
-  djen_ignored_processes    DjenIgnoredProcess[]
-  lead_honorarios           LeadHonorario[]
-  notifications             Notification[]
-  memories                  Memory[]
-  lead_profiles             LeadProfile[]
-  organization_profile      OrganizationProfile?
-  monthly_goals             MonthlyGoal[]
-  financial_attachments     FinancialTransactionAttachment[]
-  reports                   Report[]
-  traffic_accounts          TrafficAccount[]
-  traffic_campaigns         TrafficCampaign[]
-  traffic_metrics_daily     TrafficMetricDaily[]
-  traffic_alerts            TrafficAlert[]
-  traffic_settings          TrafficSettings?
-  traffic_sync_logs         TrafficSyncLog[]
+  id                         String                           @id @default(uuid())
+  name                       String
+  conversations              Conversation[]
+  leads                      Lead[]
+  tasks                      Task[]
+  users                      User[]
+  inboxes                    Inbox[]
+  instances                  Instance[]
+  legal_cases                LegalCase[]
+  calendar_events            CalendarEvent[]
+  appointment_types          AppointmentType[]
+  holidays                   Holiday[]
+  case_documents             CaseDocument[]
+  task_attachments           TaskAttachment[]
+  case_transcriptions        CaseTranscription[]
+  case_deadlines             CaseDeadline[]
+  petitions                  CasePetition[]
+  legal_templates            LegalTemplate[]
+  case_honorarios            CaseHonorario[]
+  ai_chats                   AiChat[]
+  followup_sequences         FollowupSequence[]
+  financial_transactions     FinancialTransaction[]
+  financial_categories       FinancialCategory[]
+  payment_gateway_customers  PaymentGatewayCustomer[]
+  payment_gateway_charges    PaymentGatewayCharge[]
+  notas_fiscais              NotaFiscal[]
+  tax_records                TaxRecord[]
+  broadcast_jobs             BroadcastJob[]
+  djen_ignored_processes     DjenIgnoredProcess[]
+  lead_honorarios            LeadHonorario[]
+  notifications              Notification[]
+  memories                   Memory[]
+  lead_profiles              LeadProfile[]
+  organization_profile       OrganizationProfile?
+  monthly_goals              MonthlyGoal[]
+  financial_attachments      FinancialTransactionAttachment[]
+  reports                    Report[]
+  traffic_accounts           TrafficAccount[]
+  traffic_campaigns          TrafficCampaign[]
+  traffic_metrics_daily      TrafficMetricDaily[]
+  traffic_alerts             TrafficAlert[]
+  traffic_settings           TrafficSettings?
+  traffic_sync_logs          TrafficSyncLog[]
+  traffic_mutate_logs        TrafficMutateLog[]
+  traffic_ad_groups          TrafficAdGroup[]
+  traffic_keywords           TrafficKeyword[]
+  traffic_ads                TrafficAd[]
+  traffic_budgets            TrafficCampaignBudget[]
+  traffic_bulk_jobs          TrafficBulkJob[]
+  traffic_conversion_actions TrafficConversionAction[]
+  traffic_oci_uploads        TrafficOCIUpload[]
+  traffic_lead_form_subs     TrafficLeadFormSubmission[]
 }
 
 model User {
@@ -150,9 +159,25 @@ model Lead {
   // Google Drive
   google_drive_folder_id String?
 
+  // ─── Atribuicao Google Ads (capturada no clique/form) ─────────
+  /// Click ID padrao Google Ads (web/Search). Valido por 90 dias.
+  google_gclid    String?
+  /// Click ID YouTube (iOS sem cookie)
+  google_gbraid   String?
+  /// Click ID Web (iOS sem cookie)
+  google_wbraid   String?
+  /// Quando o clique aconteceu (= criacao do lead se gclid presente)
+  google_click_at DateTime?
+  // UTM tags
+  utm_source      String?
+  utm_medium      String?
+  utm_campaign    String?
+  utm_content     String?
+  utm_term        String?
+
   profile                   LeadProfile?
   conversations             Conversation[]
-  tenant                    Tenant?                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tenant                    Tenant?                     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   tasks                     Task[]
   legal_cases               LegalCase[]
   ficha_trabalhista         FichaTrabalhista?
@@ -168,6 +193,8 @@ model Lead {
   broadcast_items           BroadcastItem[]
   lead_honorarios           LeadHonorario[]
   client_login_codes        ClientLoginCode[]
+  oci_uploads               TrafficOCIUpload[]
+  lead_form_submissions     TrafficLeadFormSubmission[]
   cpf_cnpj                  String? // CPF ou CNPJ — facilita match com Asaas
 
   @@unique([tenant_id, phone])
@@ -175,6 +202,9 @@ model Lead {
   @@index([stage])
   @@index([cpf_cnpj])
   @@index([is_client])
+  @@index([google_gclid])
+  @@index([google_gbraid])
+  @@index([google_wbraid])
 }
 
 /**
@@ -2007,11 +2037,20 @@ model TrafficAccount {
   created_at        DateTime  @default(now())
   updated_at        DateTime  @updatedAt
 
-  tenant        Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  campaigns     TrafficCampaign[]
-  metrics_daily TrafficMetricDaily[]
-  sync_logs     TrafficSyncLog[]
-  alerts        TrafficAlert[]
+  tenant             Tenant                      @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  campaigns          TrafficCampaign[]
+  metrics_daily      TrafficMetricDaily[]
+  sync_logs          TrafficSyncLog[]
+  alerts             TrafficAlert[]
+  mutate_logs        TrafficMutateLog[]
+  ad_groups          TrafficAdGroup[]
+  keywords           TrafficKeyword[]
+  ads                TrafficAd[]
+  budgets            TrafficCampaignBudget[]
+  bulk_jobs          TrafficBulkJob[]
+  conversion_actions TrafficConversionAction[]
+  oci_uploads        TrafficOCIUpload[]
+  lead_form_subs     TrafficLeadFormSubmission[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2053,6 +2092,19 @@ model TrafficCampaign {
   /// Notas livres
   notes                String?  @db.Text
 
+  /// Objetivo declarado pra distinguir KPIs e regras de avaliacao.
+  /// 'PERFORMANCE' (otimiza por conversao — default) | 'BRANDING' (otimiza
+  /// por alcance/awareness) | 'HYBRID' (remarketing). Deduzido do
+  /// channel_type por default (Search/PMax/LSA = PERFORMANCE,
+  /// Demand Gen/Display prospect = BRANDING, Display remarketing = HYBRID).
+  /// Admin pode override em Configuracoes.
+  objective String @default("PERFORMANCE")
+
+  /// Categoria interna do escritorio (servico). Usado pra tags + metas
+  /// diferenciadas por servico. Ex: "trabalhista", "civil", "empresarial",
+  /// "familia", "consumidor", "inventario", "penal".
+  service_category String?
+
   /// Ultima vez que esta campanha foi vista no sync (detecta REMOVED)
   last_seen_at DateTime @default(now())
   created_at   DateTime @default(now())
@@ -2061,11 +2113,14 @@ model TrafficCampaign {
   tenant        Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   account       TrafficAccount       @relation(fields: [account_id], references: [id], onDelete: Cascade)
   metrics_daily TrafficMetricDaily[]
+  ad_groups     TrafficAdGroup[]
 
   @@unique([account_id, google_campaign_id])
   @@index([tenant_id, status])
   @@index([is_favorite])
   @@index([last_seen_at])
+  @@index([service_category])
+  @@index([objective])
 }
 
 /// Metricas agregadas por dia x campanha. Granularidade minima do dashboard.
@@ -2252,4 +2307,452 @@ model TrafficSettings {
   updated_at DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+}
+
+/// Auditoria de toda escrita feita na Google Ads API (mutate).
+/// Toda chamada que altera estado da conta passa pelo GoogleAdsMutateService
+/// e grava aqui ANTES de executar. Permite replay/diagnostico, garante
+/// idempotencia via request_id e suporta reverso de operacoes recentes.
+///
+/// resource_type: "campaign" | "ad_group" | "ad_group_ad" | "ad_group_criterion"
+///                "campaign_budget" | "campaign_criterion" | "conversion_action"
+///                "customer_match_user_list" | "asset" | "remarketing_action"
+/// operation:     "create" | "update" | "remove"
+///
+/// payload guarda o array de operations enviado pra API (resource_name,
+/// update_mask, valores). result guarda os resource_names retornados
+/// (success) ou partial_failure_error (parcial).
+model TrafficMutateLog {
+  id            String   @id @default(uuid())
+  tenant_id     String
+  account_id    String
+  /// ID determinístico passado no header pra idempotencia. Mesma key = mesma resposta.
+  request_id    String   @unique
+  /// Tipo do recurso modificado (ex: "campaign")
+  resource_type String
+  /// Operação ("create" | "update" | "remove")
+  operation     String
+  /// Quem disparou — "ai_agent:hourly" | "ai_agent:daily" | "user:<userId>" | "system:sync"
+  initiator     String
+  /// Score de confiança da IA (null se nao foi IA). 0..1
+  confidence    Decimal?
+  /// Operations[] enviado pra API (sanitizado — sem secrets)
+  payload       Json     @default("{}")
+  /// Resposta da API (resource_names ou partial_failure_error)
+  result        Json     @default("{}")
+  /// "PENDING" | "SUCCESS" | "PARTIAL" | "FAILED" | "REVERTED"
+  status        String   @default("PENDING")
+  /// Mensagem de erro humana (preenche se FAILED ou PARTIAL)
+  error_message String?  @db.Text
+  /// Validate-only? (dry-run que nao persistiu na API)
+  validate_only Boolean  @default(false)
+  /// Tempo de execucao em ms (latencia da API)
+  duration_ms   Int?
+  /// Se foi revertido por outra operação, aponta o id da operação reverso
+  reverted_by   String?
+  /// IDs CRM relacionados (lead_id, campaign_id local, etc) pra correlação
+  context       Json     @default("{}")
+  created_at    DateTime @default(now())
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([account_id, resource_type, created_at(sort: Desc)])
+  @@index([initiator, created_at(sort: Desc)])
+  @@index([status])
+}
+
+/// Cache de ad_groups (grupos de anuncios) atualizado a cada sync.
+/// Hierarquia: Campaign > AdGroup > Ad/Keyword.
+///
+/// google_ad_group_id: ID numerico vindo de ad_group.id na API.
+/// Combinado com campaign_id forma a chave unica.
+model TrafficAdGroup {
+  id                   String   @id @default(uuid())
+  tenant_id            String
+  account_id           String
+  campaign_id          String
+  /// ID numerico do Google (ad_group.id)
+  google_ad_group_id   String
+  /// Nome do grupo
+  name                 String
+  /// Status: "ENABLED" | "PAUSED" | "REMOVED"
+  status               String
+  /// Tipo: "SEARCH_STANDARD" | "DISPLAY_STANDARD" | "VIDEO_BUMPER" etc.
+  type                 String?
+  /// Bid CPC manual em micros (se bidding strategy permitir)
+  cpc_bid_micros       BigInt?
+  /// Bid CPM manual em micros
+  cpm_bid_micros       BigInt?
+  /// Target CPA em micros (se TARGET_CPA na campanha ou override no grupo)
+  target_cpa_micros    BigInt?
+  /// Target ROAS multiplicador (se MAX_CONVERSION_VALUE)
+  target_roas          Decimal?
+  /// Pausada internamente (oculto do dashboard, sem mexer no Google)
+  is_archived_internal Boolean  @default(false)
+  /// Notas livres do operador
+  notes                String?  @db.Text
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount   @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign  @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  keywords TrafficKeyword[]
+  ads      TrafficAd[]
+
+  @@unique([campaign_id, google_ad_group_id])
+  @@index([tenant_id, status])
+  @@index([account_id, last_seen_at])
+}
+
+/// Cache de palavras-chave de Search/Shopping (ad_group_criterion type=KEYWORD).
+/// Tambem armazena negativas (negative=true). Lista crescente — IA aplica
+/// negatives obvios (>= 0.95 confidence) e operador revisa as restantes.
+///
+/// match_type: "EXACT" | "PHRASE" | "BROAD"
+/// quality_info: snapshot do quality_score, expected_ctr, ad_relevance,
+///               landing_page_experience (vem na API mas eh "static" — calculado
+///               no momento do sync, nao mais).
+model TrafficKeyword {
+  id                  String   @id @default(uuid())
+  tenant_id           String
+  account_id          String
+  ad_group_id         String
+  /// criterion_id do Google (ad_group_criterion.criterion_id)
+  google_criterion_id String
+  /// Texto da keyword (ex: "advogado trabalhista maceio")
+  text                String
+  /// Tipo de match: "EXACT" | "PHRASE" | "BROAD"
+  match_type          String
+  /// true se eh negativa (criterion.negative=true)
+  negative            Boolean  @default(false)
+  /// Status: "ENABLED" | "PAUSED" | "REMOVED"
+  status              String
+  /// CPC bid override no criterio (se nao usar do ad_group)
+  cpc_bid_micros      BigInt?
+  /// Quality Score (1-10), null se sem dados ainda
+  quality_score       Int?
+  /// JSON com expected_ctr, ad_relevance, landing_page_experience
+  quality_info        Json?
+  /// Adicionada pela IA (true) ou pelo operador (false)
+  added_by_ai         Boolean  @default(false)
+  /// Score de confiança da IA na adicao (null se manual)
+  ai_confidence       Decimal?
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  ad_group TrafficAdGroup @relation(fields: [ad_group_id], references: [id], onDelete: Cascade)
+
+  @@unique([ad_group_id, google_criterion_id])
+  @@index([tenant_id, negative])
+  @@index([account_id, status])
+  @@index([text])
+}
+
+/// Cache de anuncios (ad_group_ad). Inclui RSAs (Responsive Search Ads),
+/// Performance Max assets, Demand Gen ads etc.
+///
+/// approval_status: "APPROVED" | "DISAPPROVED" | "UNDER_REVIEW" | "ELIGIBLE"
+/// Critico para detectar reprovacao (mirror automatico em outros grupos).
+///
+/// final_urls/headlines/descriptions: arrays JSON do conteudo do anuncio.
+/// Validados pelo OABValidatorService antes de criar/atualizar.
+model TrafficAd {
+  id              String   @id @default(uuid())
+  tenant_id       String
+  account_id      String
+  ad_group_id     String
+  /// ad_group_ad.ad.id do Google
+  google_ad_id    String
+  /// Tipo: "RESPONSIVE_SEARCH_AD" | "EXPANDED_TEXT_AD" | "RESPONSIVE_DISPLAY_AD"
+  ///       "PERFORMANCE_MAX_AD" | "DEMAND_GEN_VIDEO_AD" etc.
+  ad_type         String
+  /// Status do ad_group_ad: "ENABLED" | "PAUSED" | "REMOVED"
+  status          String
+  /// Approval status do AdsApp policy summary
+  approval_status String?
+  /// Topics de policy violations (se DISAPPROVED). Array string
+  policy_topics   String[] @default([])
+  /// URLs finais (array)
+  final_urls      Json     @default("[]")
+  /// Headlines (RSA: array de {text, pinned_field?}). JSON pra flex.
+  headlines       Json     @default("[]")
+  /// Descriptions (RSA: array de {text, pinned_field?})
+  descriptions    Json     @default("[]")
+  /// Path1, Path2 (display URL paths)
+  path1           String?
+  path2           String?
+  /// Snapshot integral do ad object (pra reverter ou debug)
+  ad_payload      Json?
+  /// Adicionado pela IA (true) ou operador (false)
+  added_by_ai     Boolean  @default(false)
+  ai_confidence   Decimal?
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  ad_group TrafficAdGroup @relation(fields: [ad_group_id], references: [id], onDelete: Cascade)
+
+  @@unique([ad_group_id, google_ad_id])
+  @@index([tenant_id, approval_status])
+  @@index([account_id, status])
+  @@index([ad_type])
+}
+
+/// Cache de campaign_budgets (orçamento dedicado ou compartilhado).
+/// Uma budget pode ser usada por 1+ campanhas (shared). amount_micros eh
+/// o orçamento DIARIO em micros.
+model TrafficCampaignBudget {
+  id               String  @id @default(uuid())
+  tenant_id        String
+  account_id       String
+  /// campaign_budget.id do Google
+  google_budget_id String
+  /// Nome do budget
+  name             String?
+  /// Orcamento diario em micros
+  amount_micros    BigInt
+  /// Tipo: "STANDARD" (estandartizado) | "FIXED_DAILY"
+  delivery_method  String?
+  /// Compartilhado entre 1+ campanhas? (campaign_budget.explicitly_shared)
+  is_shared        Boolean @default(false)
+  /// Mesmo valor de reference_count da API (quantas campanhas usam)
+  reference_count  Int     @default(0)
+  /// Status: "ENABLED" | "REMOVED"
+  status           String  @default("ENABLED")
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@unique([account_id, google_budget_id])
+  @@index([tenant_id, is_shared])
+}
+
+/// Tracking de batch jobs (BatchJobService da API). Usa-se quando precisa
+/// fazer 100+ mutates simultaneos (ex: aplicar 200 negative keywords).
+/// Job roda async no Google — polling periodico atualiza status local.
+///
+/// resource_name vem da API ("customers/X/batchJobs/Y"). status:
+/// "PENDING" | "RUNNING" | "DONE" | "REMOVED"
+model TrafficBulkJob {
+  id            String    @id @default(uuid())
+  tenant_id     String
+  account_id    String
+  /// "customers/X/batchJobs/Y" — usado pra polling getOperations()
+  resource_name String    @unique
+  /// "ADD_NEGATIVES" | "PAUSE_KEYWORDS" | "BULK_BUDGET_UPDATE" | etc.
+  job_kind      String
+  /// "PENDING" | "RUNNING" | "DONE" | "FAILED" | "REMOVED"
+  status        String    @default("PENDING")
+  /// Quantas operations foram enfileiradas
+  total_ops     Int       @default(0)
+  /// Quantas tiveram sucesso (preenchido apos polling)
+  succeeded_ops Int       @default(0)
+  /// Quantas falharam
+  failed_ops    Int       @default(0)
+  /// Iniciador: "ai_agent:weekly" | "user:<id>" etc.
+  initiator     String
+  /// Snapshot das operations enviadas (pra replay/debug)
+  operations    Json      @default("[]")
+  /// Resultado consolidado (resource_names + erros)
+  result        Json      @default("{}")
+  /// Mensagem de erro top-level (quando status=FAILED)
+  error_message String?   @db.Text
+  /// Quando o job comecou no Google (api timestamp)
+  started_at    DateTime?
+  /// Quando o job terminou (DONE ou FAILED)
+  finished_at   DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, status])
+  @@index([account_id, job_kind, created_at(sort: Desc)])
+}
+
+/// Cache de ConversionActions configurados na conta + mapeamento pra eventos do CRM.
+/// Conversao = lead, agendamento, contrato assinado, pagamento.
+///
+/// crm_event_kind: nome do evento interno do CRM ("lead.created" |
+/// "lead.qualified" | "client.signed" | "payment.received") que dispara
+/// o upload OCI dessa conversao. null = nao mapeado (operador precisa configurar).
+///
+/// Categories Google: "DEFAULT" | "PAGE_VIEW" | "PURCHASE" | "SIGNUP"
+/// "LEAD" | "DOWNLOAD" | "ADD_TO_CART" | "BEGIN_CHECKOUT" | "SUBSCRIBE_PAID" etc.
+model TrafficConversionAction {
+  id                     String  @id @default(uuid())
+  tenant_id              String
+  account_id             String
+  /// conversion_action.id do Google
+  google_conversion_id   String
+  /// Nome (ex: "Lead Qualificado", "Contrato Assinado")
+  name                   String
+  /// Category Google
+  category               String
+  /// Status: "ENABLED" | "REMOVED" | "HIDDEN"
+  status                 String
+  /// Type: "AD_CALL" | "CLICK_TO_CALL" | "GOOGLE_PLAY_DOWNLOAD" |
+  ///       "UPLOAD_CLICKS" | "UPLOAD_CALLS" | "WEBPAGE" | "WEBSITE_CALL" etc.
+  type                   String?
+  /// Counting: "ONE_PER_CLICK" | "MANY_PER_CLICK"
+  counting_type          String?
+  /// Janela de atribuicao em dias (default 30)
+  click_through_lookback Int?
+  /// Inclui essa conversao no Smart Bidding? (default true)
+  include_in_conversions Boolean @default(true)
+  /// Mapeamento pra evento CRM. null = nao mapeado.
+  /// Valores: "lead.created" | "lead.qualified" | "client.signed" |
+  ///          "payment.received" | "appointment.scheduled" | custom
+  crm_event_kind         String?
+  /// Valor monetario default (em micros) atribuido a esse evento.
+  /// Usado quando upload OCI nao tem valor especifico.
+  default_value_micros   BigInt?
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account     TrafficAccount     @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  oci_uploads TrafficOCIUpload[]
+
+  @@unique([account_id, google_conversion_id])
+  @@index([tenant_id, status])
+  @@index([crm_event_kind])
+}
+
+/// Log de uploads OCI (Offline Conversion Imports) — sobe no Google Ads as
+/// conversoes que aconteceram OFFLINE depois do click (lead virou cliente,
+/// cliente pagou, etc). Via UploadClickConversion ou UploadCallConversion.
+///
+/// dedupe_chave (gclid + conversion_action + conversion_at): Google rejeita
+/// duplicatas do mesmo gclid x conversao x timestamp. Logamos pra evitar
+/// retry idempotentes derrubarem cota.
+///
+/// status: "PENDING" | "UPLOADED" | "FAILED" | "DUPLICATE_REJECTED"
+model TrafficOCIUpload {
+  id                   String    @id @default(uuid())
+  tenant_id            String
+  account_id           String
+  /// FK pra conversion action mapeada
+  conversion_action_id String
+  /// Lead CRM origem (null se upload manual)
+  lead_id              String?
+  /// gclid do click original (essencial — sem isso Google nao atribui)
+  gclid                String?
+  /// gbraid (iOS app campaigns)
+  gbraid               String?
+  /// wbraid (web cookieless)
+  wbraid               String?
+  /// SHA-256 do email normalizado (pra Enhanced Conversions for Leads)
+  email_sha256         String?
+  /// SHA-256 do telefone E.164 normalizado
+  phone_sha256         String?
+  /// Order ID custom (pra dedupe no Google: 1 conversao por order_id)
+  order_id             String?
+  /// Timestamp da conversao (quando o evento offline aconteceu)
+  conversion_at        DateTime
+  /// Valor da conversao em micros (null = usa default_value do conversion_action)
+  value_micros         BigInt?
+  /// Currency ISO 4217 (null = usa do account)
+  currency_code        String?
+  /// "PENDING" | "UPLOADED" | "FAILED" | "DUPLICATE_REJECTED"
+  status               String    @default("PENDING")
+  /// Mensagem de erro (se FAILED)
+  error_message        String?   @db.Text
+  /// Resposta da API (resource_names ou partial_failure)
+  api_response         Json?
+  /// Quando subiu pro Google (preenchido apos sucesso)
+  uploaded_at          DateTime?
+  /// Trigger event: "lead.created" | "client.signed" | "payment.received" | "manual"
+  trigger_event        String
+  /// Foi upload manual via UI? (true) ou automatico via listener? (false)
+  manual               Boolean   @default(false)
+  created_at           DateTime  @default(now())
+
+  tenant            Tenant                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account           TrafficAccount          @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  conversion_action TrafficConversionAction @relation(fields: [conversion_action_id], references: [id], onDelete: Cascade)
+  lead              Lead?                   @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+
+  /// Dedupe ativo: nao subir mesmo gclid+action+timestamp duas vezes
+  @@unique([conversion_action_id, gclid, conversion_at], name: "uq_oci_dedupe")
+  @@index([tenant_id, status, created_at(sort: Desc)])
+  @@index([account_id, status])
+  @@index([lead_id])
+  @@index([gclid])
+  @@index([email_sha256])
+  @@index([order_id])
+  @@index([conversion_at])
+}
+
+/// Submissoes do Lead Form Asset (formulario nativo do Google Ads).
+/// Recebidas via webhook configurado no asset (webhook_url + webhook_key).
+/// Convertidas em Lead do CRM e em UploadOCI quando lead vira cliente.
+///
+/// raw_payload guarda o JSON cru recebido pra debug. Campos extraidos
+/// (full_name, email, phone, gclid) ja sao populados em colunas dedicadas
+/// pra index e dedupe.
+model TrafficLeadFormSubmission {
+  id              String    @id @default(uuid())
+  tenant_id       String
+  account_id      String
+  /// asset.id do Lead Form
+  google_asset_id String?
+  /// campaign_id local (se conseguir mapear)
+  campaign_id     String?
+  /// gclid do click que gerou o lead
+  gclid           String?
+  gbraid          String?
+  wbraid          String?
+  /// Campos basicos extraidos do form
+  full_name       String?
+  email           String?
+  phone           String?
+  /// Outros campos (qualifiers, comentarios) — flex
+  custom_fields   Json      @default("{}")
+  /// IP do submitter (LGPD: anonimizar apos 30 dias se nao virou lead)
+  ip_address      String?
+  /// User agent do submitter
+  user_agent      String?
+  /// Lead criado a partir desse form (null se ainda nao processado ou rejeitado)
+  lead_id         String?
+  /// "PENDING" | "PROCESSED" | "DUPLICATE" | "REJECTED" | "ERROR"
+  status          String    @default("PENDING")
+  /// Mensagem de erro (se ERROR)
+  error_message   String?   @db.Text
+  /// Payload bruto recebido (audit trail)
+  raw_payload     Json      @default("{}")
+  /// Timestamp do submit no Google (vem no payload)
+  submitted_at    DateTime
+  created_at      DateTime  @default(now())
+  processed_at    DateTime?
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  lead    Lead?          @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+
+  @@index([tenant_id, status, created_at(sort: Desc)])
+  @@index([account_id, status])
+  @@index([gclid])
+  @@index([email])
+  @@index([phone])
+  @@index([lead_id])
 }

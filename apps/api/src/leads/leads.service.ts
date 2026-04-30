@@ -7,6 +7,7 @@ import { LegalCasesService } from '../legal-cases/legal-cases.service';
 import { AutomationsService } from '../automations/automations.service';
 import { FollowupService } from '../followup/followup.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
+import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
@@ -40,6 +41,7 @@ export class LeadsService {
     private automationsService: AutomationsService,
     private moduleRef: ModuleRef,
     private googleDriveService: GoogleDriveService,
+    private trafegoEvents: TrafegoEventsService,
   ) {}
 
   async create(data: Prisma.LeadCreateInput, inboxId?: string | null): Promise<Lead> {
@@ -50,6 +52,15 @@ export class LeadsService {
       this.logger.warn(`onNewLead automation error for lead ${lead.id}: ${err}`),
     );
     this.notifyNewLead(lead, inboxId);
+    // Trafego: dispara OCI upload se ConversionAction estiver mapeada a 'lead.created'.
+    // Silencioso se nao houver gclid ou se nao houver mapeamento.
+    if (lead.tenant_id) {
+      this.trafegoEvents
+        .onLeadCreated(lead.id, lead.tenant_id)
+        .catch((err) =>
+          this.logger.warn(`[trafego-events] onLeadCreated lead=${lead.id}: ${err}`),
+        );
+    }
     return lead;
   }
 

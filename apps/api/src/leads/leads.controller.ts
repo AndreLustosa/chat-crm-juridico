@@ -4,6 +4,7 @@ import { LeadsCleanupService } from './leads-cleanup.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CreateLeadDto, UpdateLeadDto, UpdateLeadStageDto, UpdateLeadPhoneDto } from './dto/create-lead.dto';
+import { extractAttribution } from '../trafego/attribution.helper';
 
 @UseGuards(JwtAuthGuard)
 @Controller('leads')
@@ -15,6 +16,14 @@ export class LeadsController {
 
   @Post()
   create(@Body() dto: CreateLeadDto, @Request() req: any) {
+    // Captura atribuicao (gclid/utm) se presente em body ou query.
+    // Frontend persiste o gclid em sessionStorage no clique do anuncio
+    // e envia como hidden field neste POST.
+    const attribution = extractAttribution({
+      body: req.body ?? {},
+      query: req.query ?? {},
+    });
+
     return this.leadsService.create({
       name: dto.name,
       phone: dto.phone,
@@ -22,6 +31,7 @@ export class LeadsController {
       origin: dto.origin,
       tags: dto.tags,
       tenant: req.user?.tenant_id ? { connect: { id: req.user.tenant_id } } : undefined,
+      ...attribution,
     });
   }
 

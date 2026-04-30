@@ -6,3 +6,4 @@ export * from './enums';
 export * from './business-hours';
 export * from './transcription';
 export * from './share-token';
+export * from './oab-validator';

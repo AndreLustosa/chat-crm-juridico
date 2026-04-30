@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAdsClientService } from './google-ads-client.service';
 import { TrafegoAlertEvaluatorService } from './trafego-alert-evaluator.service';
 import { TrafegoAlertNotifierService } from './trafego-alert-notifier.service';
+import { TrafegoSyncExtendedService } from './trafego-sync-extended.service';
 
 // ─── Helpers de conversao de tipos do Google Ads API → Prisma ──────────────
 //
@@ -91,6 +92,7 @@ export class TrafegoSyncService extends WorkerHost {
     private adsClient: GoogleAdsClientService,
     private alertEvaluator: TrafegoAlertEvaluatorService,
     private alertNotifier: TrafegoAlertNotifierService,
+    private syncExtended: TrafegoSyncExtendedService,
   ) {
     super();
   }
@@ -349,6 +351,26 @@ export class TrafegoSyncService extends WorkerHost {
           },
         });
         rowsUpserted++;
+      }
+
+      // ─── 2.5. Sync expandido (budgets, ad_groups, keywords, ads) ────────
+      // Roda em try interno: falhas individuais nao matam o sync principal
+      // (campanhas + metricas ja foram persistidas).
+      try {
+        const ext = await this.syncExtended.syncExtended(
+          customer,
+          account.tenant_id,
+          account.id,
+          campaignByGoogleId,
+        );
+        this.logger.log(
+          `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions` +
+            (ext.errors.length > 0 ? ` (${ext.errors.length} sub-erros)` : ''),
+        );
+      } catch (extErr: any) {
+        this.logger.warn(
+          `[TRAFEGO_SYNC] Sync expandido falhou: ${extErr?.message ?? extErr}`,
+        );
       }
 
       // ─── 3. Atualiza metadata da conta (currency, timezone, name) ───────

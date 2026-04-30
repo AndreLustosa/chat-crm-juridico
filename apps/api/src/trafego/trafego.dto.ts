@@ -193,6 +193,96 @@ export class UpdateCredentialsDto {
   frontend_base_url?: string | null;
 }
 
+// ─── Mutate (escrita na Google Ads API) ────────────────────────────────────
+
+/**
+ * Body comum dos endpoints de mutate. validate_only=true roda em dry-run
+ * (modo Conselheiro).
+ */
+export class MutateBaseDto {
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Atualizacao de orcamento. Recebe valor em REAIS (BRL) e converte
+ * pra micros internamente.
+ */
+export class UpdateBudgetDto {
+  @IsNumber()
+  @Min(1)
+  @Max(100000) // 100k BRL/dia eh teto sanity
+  new_amount_brl!: number;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Adiciona keywords positivas a um ad_group.
+ */
+export class AddKeywordsDto {
+  @IsArray()
+  keywords!: Array<{
+    text: string;
+    match_type: 'EXACT' | 'PHRASE' | 'BROAD';
+    cpc_bid_brl?: number;
+  }>;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Adiciona keywords negativas. Scope=CAMPAIGN ou AD_GROUP.
+ */
+export class AddNegativesDto {
+  @IsString()
+  @IsIn(['CAMPAIGN', 'AD_GROUP'])
+  scope!: 'CAMPAIGN' | 'AD_GROUP';
+
+  @IsArray()
+  negatives!: Array<{
+    text: string;
+    match_type: 'EXACT' | 'PHRASE' | 'BROAD';
+  }>;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+// ─── Conversion Actions ────────────────────────────────────────────────────
+
+/**
+ * Mapeia uma ConversionAction do Google a um evento do CRM. Quando o evento
+ * dispara (lead.created, client.signed, payment.received), o sistema sobe
+ * automaticamente um OCI nessa conversao.
+ */
+export class MapConversionActionDto {
+  /** Evento do CRM. null = desfazer mapeamento. */
+  @IsString()
+  @IsOptional()
+  crm_event_kind?: string | null;
+
+  /** Valor padrao em BRL atribuido a essa conversao. null = sem valor. */
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  default_value_brl?: number | null;
+}
+
 // ─── Filtros do dashboard ───────────────────────────────────────────────────
 
 export class DashboardQueryDto {

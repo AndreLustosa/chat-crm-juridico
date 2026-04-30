@@ -24,8 +24,13 @@ import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoConfigService } from './trafego-config.service';
 import {
   AcknowledgeAlertDto,
+  AddKeywordsDto,
+  AddNegativesDto,
   DashboardQueryDto,
+  MapConversionActionDto,
+  MutateBaseDto,
   UpdateAccountDto,
+  UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
   UpdateSettingsDto,
@@ -39,6 +44,7 @@ export class TrafegoController {
     private readonly oauth: TrafegoOAuthService,
     private readonly config: TrafegoConfigService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
+    @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
 
   // ─── Dashboard ──────────────────────────────────────────────────────────
@@ -368,6 +374,258 @@ export class TrafegoController {
    * Re-avalia regras de alerta sem rodar sync. Util pra testar regras ou
    * disparar reavaliacao apos admin mudar thresholds em Configuracoes.
    */
+  // ─── Mutate (write na Google Ads API) ──────────────────────────────────
+  //
+  // Todas as rotas de mutate enfileiram job na queue `trafego-mutate`. O
+  // worker (TrafegoMutateProcessor) processa com concurrency:1 por conta
+  // pra evitar race conditions.
+  //
+  // validate_only=true em modo "IA Conselheira": faz dry-run no Google,
+  // registra TrafficMutateLog mas nao aplica.
+  //
+  // initiator default: "user:<userId>". IA passa "ai_agent:<loop>" via
+  // chamada interna (nao via HTTP).
+
+  /** Lista ad_groups da conta (com filtro por campaign). */
+  @Get('ad-groups')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listAdGroups(
+    @Req() req: any,
+    @Query('campaign_id') campaignId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.service.listAdGroups(req.user.tenant_id, { campaignId, status });
+  }
+
+  /** Lista keywords de um ad_group. */
+  @Get('ad-groups/:adGroupId/keywords')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listKeywords(
+    @Req() req: any,
+    @Param('adGroupId') adGroupId: string,
+    @Query('negative') negative?: string,
+  ) {
+    const negativeFilter =
+      negative === 'true' ? true : negative === 'false' ? false : undefined;
+    return this.service.listKeywords(req.user.tenant_id, adGroupId, {
+      negative: negativeFilter,
+    });
+  }
+
+  /** Lista ads de um ad_group. */
+  @Get('ad-groups/:adGroupId/ads')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listAds(@Req() req: any, @Param('adGroupId') adGroupId: string) {
+    return this.service.listAds(req.user.tenant_id, adGroupId);
+  }
+
+  /** Lista budgets da conta. */
+  @Get('budgets')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listBudgets(@Req() req: any) {
+    return this.service.listBudgets(req.user.tenant_id);
+  }
+
+  /** Lista ConversionActions configuradas no Google Ads. */
+  @Get('conversion-actions')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listConversionActions(@Req() req: any) {
+    return this.service.listConversionActions(req.user.tenant_id);
+  }
+
+  /** Mapeia ConversionAction → evento CRM (lead.created, client.signed, etc). */
+  @Patch('conversion-actions/:id')
+  @Roles('ADMIN')
+  async mapConversionAction(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: MapConversionActionDto,
+  ) {
+    return this.service.mapConversionAction(req.user.tenant_id, id, dto);
+  }
+
+  /** Lista logs de mutate (audit trail). */
+  @Get('mutate-logs')
+  @Roles('ADMIN')
+  async listMutateLogs(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('initiator') initiator?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.service.listMutateLogs(req.user.tenant_id, {
+      limit: limit ? Math.min(200, Math.max(1, parseInt(limit))) : 50,
+      initiator,
+      status,
+    });
+  }
+
+  /** Pausa uma campanha no Google. */
+  @Post('campaigns/:id/pause')
+  @Roles('ADMIN', 'ADVOGADO')
+  async pauseCampaign(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: MutateBaseDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-pause-campaign', {
+      campaignId,
+      ...dto,
+    });
+  }
+
+  /** Reativa uma campanha no Google. */
+  @Post('campaigns/:id/resume')
+  @Roles('ADMIN', 'ADVOGADO')
+  async resumeCampaign(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: MutateBaseDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-resume-campaign', {
+      campaignId,
+      ...dto,
+    });
+  }
+
+  /** Atualiza budget diario. Recebe valor em BRL, converte pra micros. */
+  @Patch('campaigns/:id/budget')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateBudget(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateBudgetDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-update-budget', {
+      campaignId,
+      ...dto,
+    });
+  }
+
+  /** Pausa um ad_group. */
+  @Post('ad-groups/:id/pause')
+  @Roles('ADMIN', 'ADVOGADO')
+  async pauseAdGroup(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: MutateBaseDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-pause-ad-group', {
+      adGroupId,
+      ...dto,
+    });
+  }
+
+  /** Reativa um ad_group. */
+  @Post('ad-groups/:id/resume')
+  @Roles('ADMIN', 'ADVOGADO')
+  async resumeAdGroup(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: MutateBaseDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-resume-ad-group', {
+      adGroupId,
+      ...dto,
+    });
+  }
+
+  /** Adiciona keywords positivas. */
+  @Post('ad-groups/:id/keywords')
+  @Roles('ADMIN', 'ADVOGADO')
+  async addKeywords(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: AddKeywordsDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-add-keywords', {
+      adGroupId,
+      ...dto,
+    });
+  }
+
+  /** Adiciona negative keywords. Scope=CAMPAIGN ou AD_GROUP. */
+  @Post('campaigns/:id/negatives')
+  @Roles('ADMIN', 'ADVOGADO')
+  async addCampaignNegatives(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: AddNegativesDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-add-negatives', {
+      campaignId,
+      ...dto,
+    });
+  }
+
+  @Post('ad-groups/:id/negatives')
+  @Roles('ADMIN', 'ADVOGADO')
+  async addAdGroupNegatives(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: AddNegativesDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-add-negatives', {
+      adGroupId,
+      ...dto,
+    });
+  }
+
+  /** Remove (soft) uma keyword. */
+  @Delete('keywords/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeKeyword(
+    @Req() req: any,
+    @Param('id') keywordId: string,
+    @Body() dto: MutateBaseDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-remove-keywords', {
+      keywordIds: [keywordId],
+      ...dto,
+    });
+  }
+
+  // ─── Helper: enqueue mutate com resolucao de resource_names ─────────────
+  private async enqueueMutate(req: any, jobName: string, payload: any) {
+    const tenantId = req.user.tenant_id;
+    const account = await this.service.getAccount(tenantId);
+    if (!account) {
+      throw new HttpException(
+        'Conecte uma conta antes de executar acoes de mutate.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const initiator = `user:${req.user.id}`;
+    const validateOnly = !!payload.validate_only;
+
+    // Resolver IDs locais → resource_names da Google Ads API
+    const data = await this.service.buildMutatePayload(
+      tenantId,
+      account.id,
+      account.customer_id,
+      jobName,
+      payload,
+      initiator,
+      validateOnly,
+    );
+
+    await this.mutateQueue.add(jobName, data, {
+      jobId: `mutate-${jobName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      removeOnComplete: 100,
+      removeOnFail: 50,
+      attempts: 1, // Mutates nao retentam — caller decide se quer retry
+    });
+
+    return {
+      ok: true,
+      validate_only: validateOnly,
+      message: validateOnly
+        ? 'Mutate em DRY-RUN enfileirado (modo Conselheiro).'
+        : 'Mutate enfileirado. Acompanhe em /trafego/mutate-logs.',
+    };
+  }
+
   @Post('evaluate-alerts')
   @Roles('ADMIN')
   async evaluateAlerts(@Req() req: any) {

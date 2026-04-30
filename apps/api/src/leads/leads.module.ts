@@ -10,9 +10,10 @@ import { LegalCasesModule } from '../legal-cases/legal-cases.module';
 import { AutomationsModule } from '../automations/automations.module';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
 import { FinanceiroModule } from '../financeiro/financeiro.module';
+import { TrafegoModule } from '../trafego/trafego.module';
 
 @Module({
-  imports: [LegalCasesModule, AutomationsModule, GoogleDriveModule, FinanceiroModule],
+  imports: [LegalCasesModule, AutomationsModule, GoogleDriveModule, FinanceiroModule, TrafegoModule],
   controllers: [LeadsController, LeadNotesController, LeadHonorariosController],
   providers: [LeadsService, LeadsCleanupService, LeadNotesService, LeadHonorariosService],
   exports: [LeadsService],
