@@ -136,7 +136,8 @@ export class TrafegoController {
             'trafego-sync-account',
             { accountId: account.id, trigger: 'OAUTH_CALLBACK' },
             {
-              jobId: `oauth-sync-${account.id}`,
+              // Timestamp evita dedupe se OAuth eh refeito (token revogado etc)
+              jobId: `oauth-sync-${account.id}-${Date.now()}`,
               removeOnComplete: 100,
               removeOnFail: 50,
               attempts: 2,
@@ -280,11 +281,14 @@ export class TrafegoController {
       );
     }
 
+    // jobId com timestamp pra evitar dedupe silencioso do BullMQ — sem isso,
+    // se um job anterior falhou (ficou em failed zset) e o admin tenta de
+    // novo apos arrumar config, o novo add() seria descartado sem feedback.
     await this.syncQueue.add(
       'trafego-sync-account',
       { accountId: account.id, trigger: 'MANUAL' },
       {
-        jobId: `manual-sync-${account.id}`, // dedupe: substitui job pendente
+        jobId: `manual-sync-${account.id}-${Date.now()}`,
         removeOnComplete: 100,
         removeOnFail: 50,
         attempts: 2,
