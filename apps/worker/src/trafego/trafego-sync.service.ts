@@ -7,11 +7,17 @@ import { enums } from 'google-ads-api';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAdsClientService } from './google-ads-client.service';
 
-/**
- * Helpers de conversao de enum: SDK retorna enums como inteiros (proto),
- * mas Prisma + UI esperam strings ('ENABLED', 'PAUSED', 'SEARCH', etc).
- * Reverse-mapping via objeto enum do SDK.
- */
+// ─── Helpers de conversao de tipos do Google Ads API → Prisma ──────────────
+//
+// Google Ads API declara varios campos como int64 mas a API computa alguns
+// como divisao (ex: average_cpc = cost_micros / clicks) e devolve floats
+// mesmo nesses campos "inteiros". Sem arredondamento, BigInt() lanca
+// "RangeError: cannot be converted to BigInt because it is not an integer".
+//
+// Centralizamos aqui pra nao ter caso-a-caso espalhado.
+
+/** SDK retorna enums proto como inteiros (status=3); UI/dashboard espera
+ *  strings nominais (status='PAUSED'). Reverse-mapping via enum bidirecional. */
 function enumToStr<E extends Record<number | string, any>>(
   enumObj: E,
   value: number | undefined | null,
@@ -19,6 +25,32 @@ function enumToStr<E extends Record<number | string, any>>(
 ): string | null {
   if (value === undefined || value === null) return fallback;
   return (enumObj[value] as string) ?? fallback;
+}
+
+/**
+ * Converte qualquer valor (number, string, BigInt) pra BigInt seguro.
+ * Arredonda decimais (Math.round) — necessario pra campos como
+ * average_cpc / cost_per_conversion que vem como float mesmo declarados
+ * como int64 na API. Retorna null pra valores ausentes/invalidos.
+ */
+function toBigIntSafe(
+  value: number | string | bigint | null | undefined,
+): bigint | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'bigint') return value;
+  const num = typeof value === 'string' ? Number(value) : value;
+  if (!Number.isFinite(num)) return null;
+  return BigInt(Math.round(num));
+}
+
+/** Converte pra Number defensivamente. Strings → numero, NaN → fallback. */
+function toNumberSafe(
+  value: number | string | null | undefined,
+  fallback = 0,
+): number {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = typeof value === 'string' ? Number(value) : value;
+  return Number.isFinite(num) ? num : fallback;
 }
 
 /**
@@ -193,9 +225,7 @@ export class TrafegoSyncService extends WorkerHost {
             enums.AdvertisingChannelType,
             row.campaign?.advertising_channel_type,
           ),
-          daily_budget_micros: row.campaign_budget?.amount_micros
-            ? BigInt(row.campaign_budget.amount_micros)
-            : null,
+          daily_budget_micros: toBigIntSafe(row.campaign_budget?.amount_micros),
           bidding_strategy: enumToStr(
             enums.BiddingStrategyType,
             row.campaign?.bidding_strategy_type,
@@ -248,18 +278,19 @@ export class TrafegoSyncService extends WorkerHost {
         const dateStr = row.segments?.date;
         if (!dateStr) continue;
 
-        const impressions = Number(row.metrics?.impressions ?? 0);
-        const clicks = Number(row.metrics?.clicks ?? 0);
-        const costMicros = BigInt(row.metrics?.cost_micros ?? 0);
-        const conversions = Number(row.metrics?.conversions ?? 0);
-        const conversionsValue = Number(row.metrics?.conversions_value ?? 0);
-        const ctr = Number(row.metrics?.ctr ?? 0);
-        const avgCpcMicros = row.metrics?.average_cpc
-          ? BigInt(row.metrics.average_cpc)
-          : null;
-        const costPerConvMicros = row.metrics?.cost_per_conversion
-          ? BigInt(row.metrics.cost_per_conversion)
-          : null;
+        // ─── Conversoes seguras de tipo ─────────────────────────────────
+        // BigInt's via toBigIntSafe (lida com float — average_cpc e
+        // cost_per_conversion sao calculados como divisao pela API e
+        // podem vir decimais mesmo declarados como int64).
+        // Number's via toNumberSafe (lida com string-numero do SDK).
+        const impressions = toNumberSafe(row.metrics?.impressions);
+        const clicks = toNumberSafe(row.metrics?.clicks);
+        const costMicros = toBigIntSafe(row.metrics?.cost_micros) ?? 0n;
+        const conversions = toNumberSafe(row.metrics?.conversions);
+        const conversionsValue = toNumberSafe(row.metrics?.conversions_value);
+        const ctr = toNumberSafe(row.metrics?.ctr);
+        const avgCpcMicros = toBigIntSafe(row.metrics?.average_cpc);
+        const costPerConvMicros = toBigIntSafe(row.metrics?.cost_per_conversion);
 
         await this.prisma.trafficMetricDaily.upsert({
           where: {
