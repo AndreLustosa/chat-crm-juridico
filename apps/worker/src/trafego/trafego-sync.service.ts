@@ -3,8 +3,23 @@ import { Cron } from '@nestjs/schedule';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import type { Customer } from 'google-ads-api';
+import { enums } from 'google-ads-api';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAdsClientService } from './google-ads-client.service';
+
+/**
+ * Helpers de conversao de enum: SDK retorna enums como inteiros (proto),
+ * mas Prisma + UI esperam strings ('ENABLED', 'PAUSED', 'SEARCH', etc).
+ * Reverse-mapping via objeto enum do SDK.
+ */
+function enumToStr<E extends Record<number | string, any>>(
+  enumObj: E,
+  value: number | undefined | null,
+  fallback: string | null = null,
+): string | null {
+  if (value === undefined || value === null) return fallback;
+  return (enumObj[value] as string) ?? fallback;
+}
 
 /**
  * Sync diario de metricas Google Ads.
@@ -168,12 +183,23 @@ export class TrafegoSyncService extends WorkerHost {
 
         const baseData = {
           name: row.campaign?.name ?? '(sem nome)',
-          status: row.campaign?.status ?? 'UNSPECIFIED',
-          channel_type: row.campaign?.advertising_channel_type ?? null,
+          // Enums do SDK vem como inteiro; converte pra nome string
+          // ('ENABLED' | 'PAUSED' | 'REMOVED' | etc) que o resto do
+          // sistema (UI, dashboard) consome.
+          status:
+            enumToStr(enums.CampaignStatus, row.campaign?.status, 'UNSPECIFIED') ??
+            'UNSPECIFIED',
+          channel_type: enumToStr(
+            enums.AdvertisingChannelType,
+            row.campaign?.advertising_channel_type,
+          ),
           daily_budget_micros: row.campaign_budget?.amount_micros
             ? BigInt(row.campaign_budget.amount_micros)
             : null,
-          bidding_strategy: row.campaign?.bidding_strategy_type ?? null,
+          bidding_strategy: enumToStr(
+            enums.BiddingStrategyType,
+            row.campaign?.bidding_strategy_type,
+          ),
         };
 
         const upserted = await this.prisma.trafficCampaign.upsert({
