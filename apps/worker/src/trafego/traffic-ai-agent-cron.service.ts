@@ -65,6 +65,22 @@ export class TrafficAIAgentCronService {
   }
 
   /**
+   * Sprint G.2 — Escalation diário 22:00 Maceió.
+   * Varre TrafficIADecision com action=SUGGEST + human_feedback=null e:
+   *   - Após `escalation_hours` (default 48h) sem resposta, conta strike +1
+   *   - Após `max_resuggestion_strikes` (default 3) sem resposta,
+   *     auto-marca como IGNORED com nota "expirou sem feedback"
+   *   - A re-sugestão da mesma kind+resource_id no próximo loop fica
+   *     suprimida pelo cooldown IGNORED (G.1)
+   */
+  @Cron('0 22 * * *', { timeZone: 'America/Maceio' })
+  async runEscalation() {
+    await this.runForAllEnabledAccounts('ESCALATION', (id) =>
+      this.agent.escalateOrAutoIgnore(id),
+    );
+  }
+
+  /**
    * Itera contas ACTIVE com agent_enabled=true (e hourly_enabled=true se filtro
    * extra for pedido) e executa o loop. Erros são logados mas não bloqueiam.
    */

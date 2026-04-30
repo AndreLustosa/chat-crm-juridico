@@ -67,6 +67,13 @@ interface Policy {
   daily_cron: string;
   weekly_cron: string;
   monthly_cron: string;
+  // Sprint G
+  llm_provider: 'anthropic' | 'openai';
+  llm_summary_model: string;
+  llm_classify_model: string;
+  ignored_cooldown_days: number;
+  reverted_penalty_days: number;
+  max_resuggestion_strikes: number;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -139,15 +146,30 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
     }
   }
 
-  async function feedback(d: Decision, fb: 'APPROVED' | 'REVERTED' | 'IGNORED') {
+  async function feedback(
+    d: Decision,
+    fb: 'APPROVED' | 'REVERTED' | 'IGNORED',
+    permanent = false,
+  ) {
     if (!canManage) return;
+    if (
+      permanent &&
+      !confirm(
+        `Ignorar PERMANENTEMENTE esta sugestão? A IA não vai mais sugerir "${KIND_LABEL[d.decision_kind] ?? d.decision_kind}" para "${d.resource_name ?? '—'}" pelos próximos 365 dias.`,
+      )
+    ) {
+      return;
+    }
     try {
       await api.post(`/trafego/ai/decisions/${d.id}/feedback`, {
         feedback: fb,
+        permanent: permanent || undefined,
       });
       setDecisions((prev) => prev.filter((x) => x.id !== d.id));
       setPendingCount((c) => Math.max(0, c - 1));
-      showSuccess('Feedback registrado.');
+      showSuccess(
+        permanent ? 'Veto permanente registrado.' : 'Feedback registrado.',
+      );
     } catch (err: any) {
       const msg = err?.response?.data?.message || 'Erro ao registrar feedback';
       showError(msg);
@@ -157,10 +179,11 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
   async function patchPolicy(patch: Partial<Policy>) {
     if (!canManage || !policy) return;
     try {
+      // Campos que vêm como string mas servidor espera number
       const numericKeys = ['min_confidence_for_auto', 'max_budget_change_percent'];
       const payload: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(patch)) {
-        payload[k] = numericKeys.includes(k) ? Number(v) : v;
+        payload[k] = numericKeys.includes(k) && typeof v === 'string' ? Number(v) : v;
       }
       const { data } = await api.patch<Policy>('/trafego/ai/policy', payload);
       setPolicy(data);
@@ -359,7 +382,11 @@ function DecisionList({
 }: {
   decisions: Decision[];
   canManage: boolean;
-  onFeedback: (d: Decision, f: 'APPROVED' | 'REVERTED' | 'IGNORED') => void;
+  onFeedback: (
+    d: Decision,
+    f: 'APPROVED' | 'REVERTED' | 'IGNORED',
+    permanent?: boolean,
+  ) => void;
 }) {
   return (
     <div className="space-y-3">
@@ -382,13 +409,24 @@ function DecisionCard({
 }: {
   decision: Decision;
   canManage: boolean;
-  onFeedback: (d: Decision, f: 'APPROVED' | 'REVERTED' | 'IGNORED') => void;
+  onFeedback: (
+    d: Decision,
+    f: 'APPROVED' | 'REVERTED' | 'IGNORED',
+    permanent?: boolean,
+  ) => void;
 }) {
   const style = ACTION_STYLE[decision.action] ?? ACTION_STYLE.SUGGEST;
   const reasons: string[] = Array.isArray(decision.reasons)
     ? (decision.reasons as string[])
     : [];
   const showActions = canManage && !decision.human_feedback;
+
+  // Sprint G.5 — Quantas vezes a IA tentou sugerir isso (vem em inputs.suggestion_strikes)
+  const strikes =
+    decision.inputs && typeof decision.inputs === 'object'
+      ? Number((decision.inputs as any).suggestion_strikes ?? 0)
+      : 0;
+
   return (
     <div className={`rounded-xl border p-4 ${style.bg}`}>
       <div className="flex items-start gap-3">
@@ -404,6 +442,14 @@ function DecisionCard({
             {decision.confidence && (
               <span className="text-[10px] text-muted-foreground border border-border rounded px-1.5 py-0.5 bg-card/50">
                 conf {decision.confidence}
+              </span>
+            )}
+            {strikes > 0 && (
+              <span
+                className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-amber-500/15 text-amber-700 border border-amber-500/30"
+                title={`Esta é a ${strikes + 1}ª vez que sugiro isto sem resposta`}
+              >
+                {strikes + 1}ª vez
               </span>
             )}
             <span className="text-[11px] text-muted-foreground ml-auto">
@@ -435,7 +481,7 @@ function DecisionCard({
           )}
 
           {showActions && decision.action === 'SUGGEST' && (
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex gap-2 flex-wrap">
               <button
                 onClick={() => onFeedback(decision, 'APPROVED')}
                 className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-700"
@@ -447,6 +493,13 @@ function DecisionCard({
                 className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded bg-card hover:bg-accent border border-border"
               >
                 <Eye size={12} /> Ignorar
+              </button>
+              <button
+                onClick={() => onFeedback(decision, 'IGNORED', true)}
+                className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-700"
+                title="Não quero mais ver esta sugestão (365 dias)"
+              >
+                <Eye size={12} /> Ignorar definitivamente
               </button>
             </div>
           )}
@@ -613,6 +666,78 @@ function PolicyPanel({
         />
       </div>
 
+      {/* Sprint G — Seletor de modelo de IA + cooldowns */}
+      <div className="pt-2 border-t border-border space-y-3">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Modelo de IA
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <ModelField
+            label="Provider"
+            value={policy.llm_provider}
+            options={[
+              { v: 'anthropic', label: 'Anthropic (Claude)' },
+              { v: 'openai', label: 'OpenAI (GPT)' },
+            ]}
+            disabled={!canManage}
+            onChange={(v) =>
+              onChange({ llm_provider: v as 'anthropic' | 'openai' })
+            }
+          />
+          <ModelField
+            label="Modelo p/ resumos (PDF + WhatsApp)"
+            value={policy.llm_summary_model}
+            options={getModelOptions(policy.llm_provider)}
+            disabled={!canManage}
+            onChange={(v) => onChange({ llm_summary_model: v })}
+          />
+          <ModelField
+            label="Modelo p/ classificar termos"
+            value={policy.llm_classify_model}
+            options={getModelOptions(policy.llm_provider)}
+            disabled={!canManage}
+            onChange={(v) => onChange({ llm_classify_model: v })}
+            hint="Use barato — roda em loop semanal"
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Os modelos usam a API key configurada em Ajustes IA do CRM. Sem key,
+          a IA cai pra textos pré-formatados (não falha).
+        </p>
+      </div>
+
+      <div className="pt-2 border-t border-border">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+          Memória / Repetição
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+          <NumberField
+            label="Cooldown se IGNORADA (dias)"
+            value={policy.ignored_cooldown_days}
+            min={0}
+            max={365}
+            disabled={!canManage}
+            onChange={(v) => onChange({ ignored_cooldown_days: v })}
+          />
+          <NumberField
+            label="Penalidade se REVERTIDA (dias)"
+            value={policy.reverted_penalty_days}
+            min={0}
+            max={365}
+            disabled={!canManage}
+            onChange={(v) => onChange({ reverted_penalty_days: v })}
+          />
+          <NumberField
+            label="Strikes p/ auto-IGNORE"
+            value={policy.max_resuggestion_strikes}
+            min={1}
+            max={20}
+            disabled={!canManage}
+            onChange={(v) => onChange({ max_resuggestion_strikes: v })}
+          />
+        </div>
+      </div>
+
       {policy.mode === 'AUTONOMOUS' && !policy.shadow_mode && (
         <div className="text-[11px] flex items-center gap-2 text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
           <AlertTriangle size={13} />
@@ -620,6 +745,96 @@ function PolicyPanel({
           confidence ≥ {policy.min_confidence_for_auto}.
         </div>
       )}
+    </div>
+  );
+}
+
+const ANTHROPIC_MODELS = [
+  { v: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (rápido + barato)' },
+  { v: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (equilíbrio)' },
+  { v: 'claude-opus-4-6', label: 'Claude Opus 4.6 (mais preciso)' },
+];
+const OPENAI_MODELS = [
+  { v: 'gpt-4o-mini', label: 'GPT-4o mini (barato)' },
+  { v: 'gpt-4.1-nano', label: 'GPT-4.1 nano' },
+  { v: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
+  { v: 'gpt-4.1', label: 'GPT-4.1' },
+  { v: 'gpt-4o', label: 'GPT-4o' },
+];
+function getModelOptions(provider: 'anthropic' | 'openai') {
+  return provider === 'openai' ? OPENAI_MODELS : ANTHROPIC_MODELS;
+}
+
+function ModelField({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ v: string; label: string }>;
+  disabled?: boolean;
+  onChange: (v: string) => void;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+        {label}
+      </label>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2 py-1.5 text-xs rounded-md bg-card border border-border disabled:opacity-50"
+      >
+        {/* Inclui o valor atual mesmo se não estiver na lista (custom) */}
+        {!options.find((o) => o.v === value) && value && (
+          <option value={value}>{value}</option>
+        )}
+        {options.map((o) => (
+          <option key={o.v} value={o.v}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] font-semibold text-muted-foreground mb-1">
+        {label}
+      </label>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full px-2 py-1.5 text-xs rounded-md bg-card border border-border disabled:opacity-50"
+      />
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { TrafficRecommendationsService } from './traffic-recommendations.service
 import { TrafficRecommendationsProcessor } from './traffic-recommendations.processor';
 import { TrafficReachPlannerService } from './traffic-reach-planner.service';
 import { TrafficReachPlannerProcessor } from './traffic-reach-planner.processor';
+import { TrafficLLMService } from './traffic-llm.service';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { TrafficReachPlannerProcessor } from './traffic-reach-planner.processor'
     TrafficRecommendationsProcessor,
     TrafficReachPlannerService,
     TrafficReachPlannerProcessor,
+    TrafficLLMService,
   ],
   exports: [
     TrafficOCIService,
@@ -63,6 +65,7 @@ import { TrafficReachPlannerProcessor } from './traffic-reach-planner.processor'
     TrafficCustomerMatchService,
     TrafficRecommendationsService,
     TrafficReachPlannerService,
+    TrafficLLMService,
   ],
 })
 export class TrafegoModule {}

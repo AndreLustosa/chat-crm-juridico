@@ -348,6 +348,16 @@ export class AiDecisionFeedbackDto {
   @IsString()
   @IsOptional()
   note?: string;
+
+  /**
+   * Sprint G.5 — Quando true e feedback=IGNORED, cria TrafficIAMemory com
+   * TTL 365d pra suprimir esta combinação (decision_kind, resource_id) por
+   * 1 ano (efetivamente "ignorar permanentemente"). O filtro de memória
+   * adaptativa respeita esse veto.
+   */
+  @IsBoolean()
+  @IsOptional()
+  permanent?: boolean;
 }
 
 export class AiTriggerLoopDto {
@@ -448,6 +458,38 @@ export class UpdateAiPolicyDto {
   @IsBoolean()
   @IsOptional()
   shadow_mode?: boolean;
+
+  // ─── Sprint G: LLM + cooldowns ─────────────────────────────────────────
+  @IsString()
+  @IsOptional()
+  @IsIn(['anthropic', 'openai'])
+  llm_provider?: 'anthropic' | 'openai';
+
+  @IsString()
+  @IsOptional()
+  llm_summary_model?: string;
+
+  @IsString()
+  @IsOptional()
+  llm_classify_model?: string;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(365)
+  ignored_cooldown_days?: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(365)
+  reverted_penalty_days?: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(20)
+  max_resuggestion_strikes?: number;
 }
 
 // ─── Lead Form Asset (Sprint D) ─────────────────────────────────────────────

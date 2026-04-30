@@ -99,6 +99,7 @@ export class TrafegoAiService {
     feedback: 'APPROVED' | 'REVERTED' | 'IGNORED',
     note: string | undefined,
     userId: string,
+    opts: { permanent?: boolean } = {},
   ) {
     const decision = await this.prisma.trafficIADecision.findUnique({
       where: { id: decisionId },
@@ -112,17 +113,55 @@ export class TrafegoAiService {
         HttpStatus.CONFLICT,
       );
     }
+
+    const finalNote = opts.permanent
+      ? `[PERMANENTE] ${note?.slice(0, 950) ?? 'Veto permanente do admin'}`
+      : note?.slice(0, 1000) ?? null;
+
     const updated = await this.prisma.trafficIADecision.update({
       where: { id: decisionId },
       data: {
         human_feedback: feedback,
         feedback_at: new Date(),
-        feedback_note: note?.slice(0, 1000) ?? null,
+        feedback_note: finalNote,
       },
     });
 
+    // Sprint G.5 — Veto permanente cria entrada em TrafficIAMemory com TTL
+    // longo (365d). O filtro de memória adaptativa respeita: além do
+    // cooldown IGNORED por 30d (default), checa também por essa key e
+    // suprime totalmente.
+    if (opts.permanent && feedback === 'IGNORED') {
+      const memKey = `permanent_ignore:${decision.decision_kind}|${decision.resource_id ?? '_'}`;
+      await this.prisma.trafficIAMemory.upsert({
+        where: { tenant_id_key: { tenant_id: tenantId, key: memKey } },
+        update: {
+          value: {
+            decision_id: decisionId,
+            resource_name: decision.resource_name,
+            note: finalNote,
+            by_user_id: userId,
+            at: new Date().toISOString(),
+          } as any,
+          expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        },
+        create: {
+          tenant_id: tenantId,
+          key: memKey,
+          value: {
+            decision_id: decisionId,
+            resource_name: decision.resource_name,
+            note: finalNote,
+            by_user_id: userId,
+            at: new Date().toISOString(),
+          } as any,
+          expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        },
+      });
+    }
+
     this.logger.log(
-      `[ai-feedback] decision=${decisionId} feedback=${feedback} userId=${userId}`,
+      `[ai-feedback] decision=${decisionId} feedback=${feedback} permanent=${!!opts.permanent} userId=${userId}`,
     );
     return updated;
   }
@@ -165,6 +204,13 @@ export class TrafegoAiService {
       escalation_hours: number;
       hourly_enabled: boolean;
       shadow_mode: boolean;
+      // Sprint G
+      llm_provider: 'anthropic' | 'openai';
+      llm_summary_model: string;
+      llm_classify_model: string;
+      ignored_cooldown_days: number;
+      reverted_penalty_days: number;
+      max_resuggestion_strikes: number;
     }>,
   ) {
     const data: Prisma.TrafficIAPolicyUpdateInput = {};

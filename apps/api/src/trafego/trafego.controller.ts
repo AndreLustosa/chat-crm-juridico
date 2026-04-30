@@ -702,6 +702,7 @@ export class TrafegoController {
       dto.feedback,
       dto.note,
       req.user.id,
+      { permanent: !!dto.permanent },
     );
   }
 

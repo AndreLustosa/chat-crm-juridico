@@ -2941,6 +2941,24 @@ model TrafficIAPolicy {
   /// nos primeiros 14 dias pra calibrar antes de soltar Autonomo.
   shadow_mode Boolean @default(true)
 
+  // ─── Sprint G: configuracao de LLM ──────────────────────────────────────
+  /// Provider do LLM usado para tarefas que exigem inteligencia natural
+  /// (classify search terms, gerar summary). 'openai' | 'anthropic'
+  llm_provider       String @default("anthropic")
+  /// Modelo padrao pra summary writing. Default claude-haiku-4-5 (rapido + barato).
+  llm_summary_model  String @default("claude-haiku-4-5")
+  /// Modelo padrao pra classificacao de search terms (loop weekly — usar barato).
+  llm_classify_model String @default("claude-haiku-4-5")
+
+  // ─── Sprint G: cooldowns adaptativos ─────────────────────────────────────
+  /// Janela em dias durante a qual uma sugestao IGNORED pelo admin nao deve
+  /// reaparecer pra mesma combinacao (decision_kind, resource_id).
+  ignored_cooldown_days    Int @default(30)
+  /// Janela em dias pra penalizar confidence apos REVERTED.
+  reverted_penalty_days    Int @default(90)
+  /// Numero maximo de re-sugestoes (escalation strikes) antes de auto-IGNORE.
+  max_resuggestion_strikes Int @default(3)
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 

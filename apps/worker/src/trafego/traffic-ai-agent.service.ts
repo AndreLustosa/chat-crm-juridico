@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAdsMutateService } from './google-ads-mutate.service';
 import { TrafegoAlertNotifierService } from './trafego-alert-notifier.service';
+import { TrafficLLMService } from './traffic-llm.service';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -33,6 +34,7 @@ export class TrafficAIAgentService {
     private prisma: PrismaService,
     private mutate: GoogleAdsMutateService,
     private notifier: TrafegoAlertNotifierService,
+    private llm: TrafficLLMService,
   ) {}
 
   // ──────────────────────────────────────────────────────────────────────
@@ -43,6 +45,16 @@ export class TrafficAIAgentService {
     return this.runLoop(accountId, 'DAILY');
   }
   async runWeeklyLoop(accountId: string): Promise<LoopReport> {
+    // Sprint G.3 — antes do loop padrão, deixa LLM classificar search terms
+    // ruins (cria candidates ADD_NEGATIVE_KEYWORD que entram no diagnose
+    // via lookup determinístico no próximo passo).
+    try {
+      await this.llm.classifyBadSearchTerms(accountId);
+    } catch (err: any) {
+      this.logger.warn(
+        `[ai-agent] llm.classifyBadSearchTerms falhou (account=${accountId}): ${err?.message ?? err}`,
+      );
+    }
     return this.runLoop(accountId, 'WEEKLY');
   }
   async runMonthlyLoop(accountId: string): Promise<LoopReport> {
@@ -77,7 +89,17 @@ export class TrafficAIAgentService {
       return emptyReport(accountId, loopKind);
     }
 
-    const candidates = await this.diagnose(ctx, loopKind);
+    const rawCandidates = await this.diagnose(ctx, loopKind);
+    // Memória adaptativa (Sprint G.1): suprime IGNORED em cooldown,
+    // penaliza REVERTED, reforça APPROVED, conta strikes de re-sugestão.
+    const candidates: DecisionCandidate[] = [];
+    let suppressedByMemory = 0;
+    for (const cand of rawCandidates) {
+      const filtered = this.applyMemoryFilter(cand, ctx);
+      if (filtered) candidates.push(filtered);
+      else suppressedByMemory++;
+    }
+
     const persisted: PersistedDecision[] = [];
     let executed = 0;
     let suggested = 0;
@@ -112,7 +134,8 @@ export class TrafficAIAgentService {
     this.logger.log(
       `[ai-agent] loop=${loopKind} account=${accountId} ` +
         `decisions=${persisted.length} exec=${executed} sug=${suggested} ` +
-        `blocked=${blocked} failed=${failed} (${durationMs}ms)`,
+        `blocked=${blocked} failed=${failed} ` +
+        `suppressed_by_memory=${suppressedByMemory} (${durationMs}ms)`,
     );
 
     return {
@@ -200,14 +223,33 @@ export class TrafficAIAgentService {
       },
     });
 
+    // Janela ampla pra alimentar memória adaptativa (cooldowns IGNORED,
+    // penalty REVERTED, reforço APPROVED). 120 dias cobre folgas dos
+    // defaults reverted_penalty_days=90 e ignored_cooldown_days=30.
+    const ninetyDaysAgo = new Date(today);
+    ninetyDaysAgo.setUTCDate(ninetyDaysAgo.getUTCDate() - 120);
     const recentDecisions = await this.prisma.trafficIADecision.findMany({
       where: {
         account_id: accountId,
-        created_at: { gte: sevenDaysAgo },
+        created_at: { gte: ninetyDaysAgo },
       },
       orderBy: { created_at: 'desc' },
-      take: 100,
+      take: 500,
     });
+
+    // Sprint G.5 — Memória de vetos permanentes do admin.
+    // Carrega keys 'permanent_ignore:<kind>|<resource_id>' válidas.
+    const permanentVetos = await this.prisma.trafficIAMemory.findMany({
+      where: {
+        tenant_id: account.tenant_id,
+        key: { startsWith: 'permanent_ignore:' },
+        OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }],
+      },
+      select: { key: true },
+    });
+    const permanentVetoSet = new Set(
+      permanentVetos.map((m) => m.key.replace(/^permanent_ignore:/, '')),
+    );
 
     return {
       account,
@@ -220,6 +262,7 @@ export class TrafficAIAgentService {
       disapprovedAds: ads,
       todayActionsCount,
       recentDecisions,
+      permanentVetoSet,
     };
   }
 
@@ -517,6 +560,110 @@ export class TrafficAIAgentService {
   }
 
   // ──────────────────────────────────────────────────────────────────────
+  // Memory filter (Sprint G.1) — adapta candidato com base no histórico
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Aplica memória adaptativa em um candidato:
+   *  - Suprime se IGNORED dentro da janela de cooldown (ignored_cooldown_days)
+   *  - Penaliza confidence se REVERTED dentro da janela (reverted_penalty_days)
+   *  - Reforça confidence se APPROVED previamente
+   *  - Conta strikes pra escalation (suggestionStrikes na decisão)
+   *  - Pula tudo isso se decision_kind for um diagnóstico puro sem resource_id
+   *    associado (warning operacional não dedupa por target).
+   *
+   * Retorna `null` quando o candidato deve ser totalmente suprimido.
+   */
+  private applyMemoryFilter(
+    cand: DecisionCandidate,
+    ctx: AgentContext,
+  ): DecisionCandidate | null {
+    const policy = ctx.policy as any;
+    const cooldownDays: number = policy.ignored_cooldown_days ?? 30;
+    const penaltyDays: number = policy.reverted_penalty_days ?? 90;
+
+    // Veto permanente do admin (Sprint G.5) tem prioridade absoluta
+    const permanentKey = `${cand.kind}|${cand.resourceId ?? '_'}`;
+    if (ctx.permanentVetoSet.has(permanentKey)) {
+      this.logger.log(
+        `[ai-agent] memory: permanent veto kind=${cand.kind} resource=${cand.resourceId}`,
+      );
+      return null;
+    }
+
+    const matches = ctx.recentDecisions.filter((d: any) => {
+      if (d.decision_kind !== cand.kind) return false;
+      // Quando candidato não tem resource_id, comparamos apenas por kind
+      if (!cand.resourceId) return d.resource_id == null;
+      return d.resource_id === cand.resourceId;
+    });
+
+    if (matches.length === 0) return cand;
+
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const ignoredCutoff = now - cooldownDays * day;
+    const revertedCutoff = now - penaltyDays * day;
+
+    // 1. IGNORED dentro da janela → suprime totalmente
+    const recentIgnored = matches.find((d: any) => {
+      if (d.human_feedback !== 'IGNORED') return false;
+      const at = (d.feedback_at ?? d.created_at) as Date;
+      return at.getTime() >= ignoredCutoff;
+    });
+    if (recentIgnored) {
+      this.logger.log(
+        `[ai-agent] memory: suppress kind=${cand.kind} resource=${cand.resourceId} ` +
+          `(IGNORED em ${(recentIgnored.feedback_at ?? recentIgnored.created_at).toISOString().slice(0, 10)})`,
+      );
+      return null;
+    }
+
+    // 2. REVERTED dentro da janela → penaliza confidence + força SUGGEST
+    const recentReverted = matches.find((d: any) => {
+      if (d.human_feedback !== 'REVERTED') return false;
+      const at = (d.feedback_at ?? d.created_at) as Date;
+      return at.getTime() >= revertedCutoff;
+    });
+    if (recentReverted) {
+      cand.confidence = Math.max(0, cand.confidence - 0.2);
+      cand.forceSuggest = true;
+      cand.reasons.push(
+        `Admin reverteu sugestão similar em ${(recentReverted.feedback_at ?? recentReverted.created_at).toLocaleDateString?.('pt-BR') ?? '—'}; confidence reduzida.`,
+      );
+    }
+
+    // 3. APPROVED previamente (sem REVERTED recente) → reforça confidence
+    const previouslyApproved = matches.some(
+      (d: any) => d.human_feedback === 'APPROVED',
+    );
+    if (previouslyApproved && !recentReverted) {
+      cand.confidence = Math.min(1, cand.confidence + 0.1);
+      cand.reasons.push(
+        'Admin aprovou sugestão similar antes; confidence reforçada.',
+      );
+    }
+
+    // 4. SUGGEST pendente sem feedback (na janela curta de 14d) → strikes
+    const fourteenDaysAgo = now - 14 * day;
+    const pendingSuggests = matches.filter(
+      (d: any) =>
+        d.action === 'SUGGEST' &&
+        d.human_feedback == null &&
+        (d.created_at as Date).getTime() > fourteenDaysAgo,
+    );
+    if (pendingSuggests.length > 0) {
+      const ordinal = pendingSuggests.length + 1;
+      cand.suggestionStrikes = pendingSuggests.length;
+      cand.reasons.push(
+        `${ordinal}ª vez sugerindo isto em 14 dias sem resposta — escalando atenção.`,
+      );
+    }
+
+    return cand;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
   // Evaluate + Execute (ou Suggest)
   // ──────────────────────────────────────────────────────────────────────
 
@@ -665,6 +812,15 @@ export class TrafficAIAgentService {
     extra: { executed?: boolean; mutateLogId?: string } = {},
   ): Promise<PersistedDecision> {
     const summary = this.buildSummary(cand, action);
+    // Sprint G.5 — strikes ficam dentro de inputs.suggestion_strikes pra UI
+    // poder exibir badge "Xª vez sugerindo".
+    const inputsWithStrikes = {
+      ...(cand.inputs ?? {}),
+      ...(cand.suggestionStrikes
+        ? { suggestion_strikes: cand.suggestionStrikes }
+        : {}),
+    };
+
     const decision = await this.prisma.trafficIADecision.create({
       data: {
         tenant_id: ctx.account.tenant_id,
@@ -674,7 +830,7 @@ export class TrafficAIAgentService {
         resource_type: cand.resourceType ?? null,
         resource_id: cand.resourceId ?? null,
         resource_name: cand.resourceName ?? null,
-        inputs: cand.inputs as Prisma.InputJsonValue,
+        inputs: inputsWithStrikes as Prisma.InputJsonValue,
         confidence: new Prisma.Decimal(cand.confidence.toFixed(3)),
         reasons: reasons as unknown as Prisma.InputJsonValue,
         action,
@@ -707,6 +863,112 @@ export class TrafficAIAgentService {
     const target = cand.resourceName ? ` em "${cand.resourceName}"` : '';
     const kindLabel = humanizeKind(cand.kind);
     return `${verbo}: ${kindLabel}${target}.`;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Escalation (Sprint G.2)
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Para uma conta: marca SUGGEST sem feedback como IGNORED quando há
+   * mais de N strikes (re-sugestões) acumulados sem resposta. Antes
+   * disso, só registra a contagem em TrafficIAMemory pra log.
+   *
+   * Heurística:
+   *   - "strike" = qtd de SUGGEST com mesma kind+resource_id sem feedback,
+   *      após o primeiro `escalation_hours` (default 48h)
+   *   - Quando strikes ≥ `max_resuggestion_strikes` (default 3), o item
+   *      MAIS RECENTE vira human_feedback=IGNORED com note explícita.
+   *   - As anteriores ficam como estão (auditoria histórica).
+   */
+  async escalateOrAutoIgnore(accountId: string): Promise<EscalationReport> {
+    const account = await this.prisma.trafficAccount.findUnique({
+      where: { id: accountId },
+    });
+    if (!account || account.status !== 'ACTIVE') {
+      return { accountId, escalated: 0, autoIgnored: 0 };
+    }
+    const policy = await this.ensurePolicy(account.tenant_id);
+    const escalationHours = policy.escalation_hours ?? 48;
+    const maxStrikes = (policy as any).max_resuggestion_strikes ?? 3;
+
+    const cutoff = new Date(Date.now() - escalationHours * 60 * 60 * 1000);
+
+    // Pega todas SUGGEST sem feedback com created_at < cutoff (sentaram tempo demais)
+    const stale = await this.prisma.trafficIADecision.findMany({
+      where: {
+        account_id: accountId,
+        action: 'SUGGEST',
+        human_feedback: null,
+        created_at: { lt: cutoff },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+    if (stale.length === 0) {
+      return { accountId, escalated: 0, autoIgnored: 0 };
+    }
+
+    // Agrupa por (kind, resource_id) — strikes = tamanho do grupo
+    const groups = new Map<string, typeof stale>();
+    for (const d of stale) {
+      const key = `${d.decision_kind}|${d.resource_id ?? '_'}`;
+      const list = groups.get(key) ?? [];
+      list.push(d);
+      groups.set(key, list);
+    }
+
+    let escalated = 0;
+    let autoIgnored = 0;
+
+    for (const [key, list] of groups) {
+      if (list.length >= maxStrikes) {
+        // Auto-IGNORE da mais recente. As outras ficam em status histórico.
+        const latest = list[0];
+        await this.prisma.trafficIADecision.update({
+          where: { id: latest.id },
+          data: {
+            human_feedback: 'IGNORED',
+            feedback_at: new Date(),
+            feedback_note: `Auto-IGNORE: ${list.length} sugestões em ${escalationHours}h+ sem resposta do admin (max_resuggestion_strikes=${maxStrikes}).`,
+          },
+        });
+        autoIgnored++;
+
+        // Memória persistente — admin vê na UI quantas vezes foi auto-ignorado
+        await this.prisma.trafficIAMemory.upsert({
+          where: {
+            tenant_id_key: {
+              tenant_id: account.tenant_id,
+              key: `auto_ignore:${key}`,
+            },
+          },
+          update: {
+            value: {
+              count: list.length,
+              last_at: new Date().toISOString(),
+            } as any,
+            expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+          },
+          create: {
+            tenant_id: account.tenant_id,
+            key: `auto_ignore:${key}`,
+            value: {
+              count: list.length,
+              last_at: new Date().toISOString(),
+            } as any,
+            expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+          },
+        });
+      } else {
+        escalated++;
+      }
+    }
+
+    this.logger.log(
+      `[ai-agent] escalation account=${accountId} stale_groups=${groups.size} ` +
+        `escalated=${escalated} auto_ignored=${autoIgnored}`,
+    );
+    return { accountId, escalated, autoIgnored };
   }
 
   // ──────────────────────────────────────────────────────────────────────
@@ -762,16 +1024,27 @@ export class TrafficAIAgentService {
     const dateBucket = new Date().toISOString().slice(0, 10);
     const dedupeKey = `ai-${loopKind.toLowerCase()}-${dateBucket}-${ctx.account.id}`;
 
-    const summary = `IA (${loopKind.toLowerCase()}): ${executed} executadas, ${suggested} sugestões, ${blocked} bloqueadas.`;
-    const message = persisted
-      .slice(0, 5)
-      .map((p) => `• ${p.summary}`)
-      .join('\n');
+    // Sprint G.4 — Resumo gerado por LLM (com fallback determinístico).
+    // Notificação do admin via WhatsApp tem tom mais natural.
+    const llmSummary = await this.llm.generateSummary(
+      ctx.account.tenant_id,
+      persisted.map((p) => ({
+        action: p.action,
+        kind: p.kind,
+        resourceName: p.resourceName,
+        confidence: p.confidence,
+        summary: p.summary,
+      })),
+      'whatsapp',
+    );
+
+    const headerStats = `IA (${loopKind.toLowerCase()}): ${executed} executadas, ${suggested} sugestões, ${blocked} bloqueadas.`;
+    const message = `${headerStats}\n\n${llmSummary}`;
 
     const alert = await this.prisma.trafficAlert.upsert({
       where: { dedupe_key: dedupeKey },
       update: {
-        message: `${summary}\n${message}`,
+        message,
         context: {
           loop_kind: loopKind,
           executed,
@@ -786,7 +1059,7 @@ export class TrafficAIAgentService {
         account_id: ctx.account.id,
         kind: 'AI_DECISIONS_AVAILABLE',
         severity: executed > 0 ? 'INFO' : 'WARNING',
-        message: `${summary}\n${message}`,
+        message,
         dedupe_key: dedupeKey,
         context: {
           loop_kind: loopKind,
@@ -849,6 +1122,8 @@ type DecisionCandidate = {
   /** se true, força action='SUGGEST' ignorando policy (regra de negócio explícita) */
   forceSuggest?: boolean;
   autoApply?: AutoApplyPayload;
+  /** Sprint G.1 — quantas vezes sugerimos isto sem resposta do admin (janela 14d) */
+  suggestionStrikes?: number;
 };
 
 type PersistedDecision = {
@@ -899,6 +1174,8 @@ type AgentContext = {
   disapprovedAds: any[];
   todayActionsCount: number;
   recentDecisions: any[];
+  /** Sprint G.5 — keys '<kind>|<resource_id>' marcadas como veto permanente */
+  permanentVetoSet: Set<string>;
 };
 
 export type LoopReport = {
@@ -910,6 +1187,12 @@ export type LoopReport = {
   suggested: number;
   blocked: number;
   failed: number;
+};
+
+export type EscalationReport = {
+  accountId: string;
+  escalated: number;
+  autoIgnored: number;
 };
 
 function emptyReport(accountId: string, loopKind: LoopKind): LoopReport {
