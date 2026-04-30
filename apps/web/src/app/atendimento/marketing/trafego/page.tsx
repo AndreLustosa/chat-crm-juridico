@@ -15,6 +15,7 @@ import {
   Sparkles,
   Target,
   Lightbulb,
+  Tv,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -30,12 +31,14 @@ import { RelatoriosTab } from './components/RelatoriosTab';
 import { ConversoesTab } from './components/ConversoesTab';
 import { IaOtimizadoraTab } from './components/IaOtimizadoraTab';
 import { RecomendacoesTab } from './components/RecomendacoesTab';
+import { BrandingTab } from './components/BrandingTab';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'campanhas', label: 'Campanhas', icon: Megaphone },
   { id: 'conversoes', label: 'Conversões', icon: Target },
   { id: 'recomendacoes', label: 'Recomendações', icon: Lightbulb },
+  { id: 'branding', label: 'Branding (PMax/Reach)', icon: Tv },
   { id: 'leads', label: 'Leads', icon: Users },
   { id: 'relatorios', label: 'Relatórios', icon: FileText },
   { id: 'alertas', label: 'Alertas', icon: Bell },
@@ -264,6 +267,9 @@ function TrafegoPageInner() {
         )}
         {tab === 'recomendacoes' && account?.connected && (
           <RecomendacoesTab canManage={perms.canManageTrafego} />
+        )}
+        {tab === 'branding' && account?.connected && (
+          <BrandingTab canManage={perms.canManageTrafego} />
         )}
         {tab === 'leads' && account?.connected && (
           <PlaceholderTab

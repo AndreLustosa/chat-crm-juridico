@@ -547,3 +547,43 @@ export class ApplyRecommendationDto {
   @IsOptional()
   force?: boolean;
 }
+
+// ─── Reach Planner (Sprint F) ───────────────────────────────────────────────
+
+export class GenerateReachForecastDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(180)
+  duration_days?: number;
+
+  @IsArray()
+  @IsString({ each: true })
+  location_ids!: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  age_ranges?: string[];
+
+  @IsArray()
+  @IsOptional()
+  genders?: any[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  devices?: Array<'DESKTOP' | 'MOBILE' | 'TABLET' | 'CONNECTED_TV'>;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['YOUTUBE', 'GOOGLE_VIDEO_PARTNERS', 'YOUTUBE_AND_PARTNERS'])
+  network?: 'YOUTUBE' | 'GOOGLE_VIDEO_PARTNERS' | 'YOUTUBE_AND_PARTNERS';
+
+  @IsArray()
+  products!: Array<{ code: string; budget_brl: number }>;
+}

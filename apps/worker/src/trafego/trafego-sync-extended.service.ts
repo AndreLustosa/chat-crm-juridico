@@ -71,6 +71,8 @@ export class TrafegoSyncExtendedService {
     keywords: number;
     ads: number;
     conversionActions: number;
+    assetGroups: number;
+    assetGroupAssets: number;
     errors: string[];
   }> {
     const stats = {
@@ -79,6 +81,8 @@ export class TrafegoSyncExtendedService {
       keywords: 0,
       ads: 0,
       conversionActions: 0,
+      assetGroups: 0,
+      assetGroupAssets: 0,
       errors: [] as string[],
     };
 
@@ -147,6 +151,39 @@ export class TrafegoSyncExtendedService {
       const msg = `conversion_actions: ${e?.message ?? e}`;
       this.logger.warn(`[sync-extended] ${msg}`);
       stats.errors.push(msg);
+    }
+
+    // ─── 6. Asset Groups (PMax + Demand Gen) ────────────────────────────
+    const assetGroupByGoogleId = new Map<string, string>();
+    try {
+      const result = await this.syncAssetGroups(
+        customer,
+        tenantId,
+        accountId,
+        campaignByGoogleId,
+      );
+      stats.assetGroups = result.count;
+      for (const [k, v] of result.mapping) assetGroupByGoogleId.set(k, v);
+    } catch (e: any) {
+      const msg = `asset_groups: ${e?.message ?? e}`;
+      this.logger.warn(`[sync-extended] ${msg}`);
+      stats.errors.push(msg);
+    }
+
+    // ─── 7. Asset Group Assets (link N:N com performance_label) ─────────
+    if (assetGroupByGoogleId.size > 0) {
+      try {
+        stats.assetGroupAssets = await this.syncAssetGroupAssets(
+          customer,
+          tenantId,
+          accountId,
+          assetGroupByGoogleId,
+        );
+      } catch (e: any) {
+        const msg = `asset_group_assets: ${e?.message ?? e}`;
+        this.logger.warn(`[sync-extended] ${msg}`);
+        stats.errors.push(msg);
+      }
     }
 
     return stats;
@@ -513,6 +550,187 @@ export class TrafegoSyncExtendedService {
           account_id: accountId,
           ad_group_id: ourAdGroupId,
           google_ad_id: googleAdId,
+          ...data,
+        },
+      });
+      count++;
+    }
+    return count;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Sprint F — Asset Groups (PMax + Demand Gen)
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Sincroniza asset_group das campanhas PMax e Demand Gen. Retorna
+   * mapping google_asset_group_id → local id pra usar no sync de assets.
+   */
+  private async syncAssetGroups(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    campaignByGoogleId: Map<string, string>,
+  ): Promise<{ count: number; mapping: Map<string, string> }> {
+    const rows: any[] = await customer.query(`
+      SELECT
+        asset_group.id,
+        asset_group.name,
+        asset_group.status,
+        asset_group.ad_strength,
+        asset_group.primary_status,
+        asset_group.campaign,
+        campaign.id
+      FROM asset_group
+      WHERE asset_group.status != 'REMOVED'
+    `);
+
+    const mapping = new Map<string, string>();
+    let count = 0;
+    for (const row of rows) {
+      const googleId = String(row.asset_group?.id);
+      if (!googleId) continue;
+      const campaignGoogleId = String(row.campaign?.id ?? '');
+      const localCampaignId = campaignByGoogleId.get(campaignGoogleId);
+      if (!localCampaignId) continue; // campanha não veio no main sync — skip
+
+      const resourceName =
+        typeof row.asset_group?.resource_name === 'string'
+          ? row.asset_group.resource_name
+          : `customers/${(customer as any).credentials?.customer_id ?? ''}/assetGroups/${googleId}`;
+
+      const data = {
+        google_resource_name: resourceName,
+        campaign_id: localCampaignId,
+        name: row.asset_group?.name ?? '(sem nome)',
+        status:
+          enumToStr(enums.AssetGroupStatus, row.asset_group?.status, 'UNSPECIFIED') ??
+          'UNSPECIFIED',
+        ad_strength: enumToStr(
+          enums.AdStrength,
+          row.asset_group?.ad_strength,
+          null,
+        ),
+        primary_status: enumToStr(
+          enums.AssetGroupPrimaryStatus,
+          row.asset_group?.primary_status,
+          null,
+        ),
+      };
+
+      const upserted = await this.prisma.trafficAssetGroup.upsert({
+        where: {
+          account_id_google_asset_group_id: {
+            account_id: accountId,
+            google_asset_group_id: googleId,
+          },
+        },
+        update: { ...data, last_seen_at: new Date() },
+        create: {
+          tenant_id: tenantId,
+          account_id: accountId,
+          google_asset_group_id: googleId,
+          ...data,
+        },
+      });
+      mapping.set(googleId, upserted.id);
+      count++;
+    }
+    return { count, mapping };
+  }
+
+  /**
+   * Sincroniza asset_group_asset (link N:N entre AssetGroup × Asset).
+   * Traz performance_label que o Google calcula → identifica assets LOW
+   * pra serem trocados.
+   */
+  private async syncAssetGroupAssets(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    assetGroupByGoogleId: Map<string, string>,
+  ): Promise<number> {
+    const rows: any[] = await customer.query(`
+      SELECT
+        asset_group_asset.asset_group,
+        asset_group_asset.asset,
+        asset_group_asset.field_type,
+        asset_group_asset.performance_label,
+        asset_group_asset.status,
+        asset_group.id,
+        asset.id,
+        asset.type,
+        asset.name,
+        asset.text_asset.text,
+        asset.image_asset.full_size.url,
+        asset.youtube_video_asset.youtube_video_id,
+        asset.call_to_action_asset.call_to_action
+      FROM asset_group_asset
+    `);
+
+    let count = 0;
+    for (const row of rows) {
+      const agGoogleId = String(row.asset_group?.id ?? '');
+      const localAg = assetGroupByGoogleId.get(agGoogleId);
+      if (!localAg) continue;
+
+      const assetResourceName = row.asset_group_asset?.asset as string | undefined;
+      const googleAssetId = String(row.asset?.id ?? '');
+      if (!assetResourceName || !googleAssetId) continue;
+
+      const fieldType =
+        enumToStr(enums.AssetFieldType, row.asset_group_asset?.field_type, 'UNSPECIFIED') ??
+        'UNSPECIFIED';
+
+      const assetType = enumToStr(enums.AssetType, row.asset?.type, null);
+      const youtubeId = row.asset?.youtube_video_asset?.youtube_video_id;
+
+      const text =
+        typeof row.asset?.text_asset?.text === 'string'
+          ? row.asset.text_asset.text
+          : typeof row.asset?.call_to_action_asset?.call_to_action === 'string'
+            ? row.asset.call_to_action_asset.call_to_action
+            : null;
+
+      const url =
+        typeof row.asset?.image_asset?.full_size?.url === 'string'
+          ? row.asset.image_asset.full_size.url
+          : youtubeId
+            ? `https://www.youtube.com/watch?v=${youtubeId}`
+            : null;
+
+      const data = {
+        asset_resource_name: assetResourceName,
+        google_asset_id: googleAssetId,
+        asset_type: assetType,
+        asset_text: text,
+        asset_url: url,
+        field_type: fieldType,
+        performance_label: enumToStr(
+          enums.AssetPerformanceLabel,
+          row.asset_group_asset?.performance_label,
+          null,
+        ),
+        status: enumToStr(
+          enums.AssetLinkStatus,
+          row.asset_group_asset?.status,
+          null,
+        ),
+      };
+
+      await this.prisma.trafficAssetGroupAsset.upsert({
+        where: {
+          asset_group_id_google_asset_id_field_type: {
+            asset_group_id: localAg,
+            google_asset_id: googleAssetId,
+            field_type: fieldType,
+          },
+        },
+        update: { ...data, last_seen_at: new Date() },
+        create: {
+          tenant_id: tenantId,
+          account_id: accountId,
+          asset_group_id: localAg,
           ...data,
         },
       });

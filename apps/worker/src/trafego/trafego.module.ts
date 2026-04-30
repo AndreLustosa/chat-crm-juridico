@@ -20,6 +20,8 @@ import { TrafficCustomerMatchService } from './traffic-customer-match.service';
 import { TrafficCustomerMatchProcessor } from './traffic-customer-match.processor';
 import { TrafficRecommendationsService } from './traffic-recommendations.service';
 import { TrafficRecommendationsProcessor } from './traffic-recommendations.processor';
+import { TrafficReachPlannerService } from './traffic-reach-planner.service';
+import { TrafficReachPlannerProcessor } from './traffic-reach-planner.processor';
 
 @Module({
   imports: [
@@ -31,6 +33,7 @@ import { TrafficRecommendationsProcessor } from './traffic-recommendations.proce
     BullModule.registerQueue({ name: 'trafego-ai-agent' }),
     BullModule.registerQueue({ name: 'trafego-customer-match' }),
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
+    BullModule.registerQueue({ name: 'trafego-reach-planner' }),
   ],
   providers: [
     TrafegoCryptoService,
@@ -51,12 +54,15 @@ import { TrafficRecommendationsProcessor } from './traffic-recommendations.proce
     TrafficCustomerMatchProcessor,
     TrafficRecommendationsService,
     TrafficRecommendationsProcessor,
+    TrafficReachPlannerService,
+    TrafficReachPlannerProcessor,
   ],
   exports: [
     TrafficOCIService,
     TrafficAIAgentService,
     TrafficCustomerMatchService,
     TrafficRecommendationsService,
+    TrafficReachPlannerService,
   ],
 })
 export class TrafegoModule {}

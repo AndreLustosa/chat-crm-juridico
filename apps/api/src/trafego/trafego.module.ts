@@ -10,6 +10,8 @@ import { TrafegoAiService } from './trafego-ai.service';
 import { TrafegoLeadFormService } from './trafego-lead-form.service';
 import { TrafegoAudiencesService } from './trafego-audiences.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
+import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
+import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -29,6 +31,7 @@ import { TrafegoRecommendationsService } from './trafego-recommendations.service
     BullModule.registerQueue({ name: 'trafego-ai-agent' }),
     BullModule.registerQueue({ name: 'trafego-customer-match' }),
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
+    BullModule.registerQueue({ name: 'trafego-reach-planner' }),
   ],
   controllers: [TrafegoController],
   providers: [
@@ -41,6 +44,8 @@ import { TrafegoRecommendationsService } from './trafego-recommendations.service
     TrafegoLeadFormService,
     TrafegoAudiencesService,
     TrafegoRecommendationsService,
+    TrafegoAssetGroupsService,
+    TrafegoReachPlannerService,
   ],
   exports: [
     TrafegoService,
@@ -52,6 +57,8 @@ import { TrafegoRecommendationsService } from './trafego-recommendations.service
     TrafegoLeadFormService,
     TrafegoAudiencesService,
     TrafegoRecommendationsService,
+    TrafegoAssetGroupsService,
+    TrafegoReachPlannerService,
   ],
 })
 export class TrafegoModule {}

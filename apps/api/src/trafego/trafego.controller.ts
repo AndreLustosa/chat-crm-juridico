@@ -26,6 +26,8 @@ import { TrafegoAiService } from './trafego-ai.service';
 import { TrafegoLeadFormService } from './trafego-lead-form.service';
 import { TrafegoAudiencesService } from './trafego-audiences.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
+import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
+import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
@@ -35,6 +37,7 @@ import {
   ApplyRecommendationDto,
   CreateUserListDto,
   DashboardQueryDto,
+  GenerateReachForecastDto,
   ListAiDecisionsDto,
   ListLeadFormSubmissionsDto,
   ListRecommendationsDto,
@@ -60,6 +63,8 @@ export class TrafegoController {
     private readonly leadForm: TrafegoLeadFormService,
     private readonly audiences: TrafegoAudiencesService,
     private readonly recommendations: TrafegoRecommendationsService,
+    private readonly assetGroups: TrafegoAssetGroupsService,
+    private readonly reachPlanner: TrafegoReachPlannerService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -871,5 +876,53 @@ export class TrafegoController {
     return this.recommendations.enqueueDismiss(req.user.tenant_id, id, {
       resolvedBy: req.user.id,
     });
+  }
+
+  // ─── Asset Groups (PMax/Demand Gen — Sprint F) ──────────────────────────
+
+  @Get('asset-groups')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listAssetGroups(@Req() req: any, @Query('limit') limit?: string) {
+    return this.assetGroups.listAll(req.user.tenant_id, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Get('campaigns/:campaignId/asset-groups')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listAssetGroupsForCampaign(
+    @Req() req: any,
+    @Param('campaignId') campaignId: string,
+  ) {
+    return this.assetGroups.listForCampaign(req.user.tenant_id, campaignId);
+  }
+
+  // ─── Reach Planner (Sprint F) ───────────────────────────────────────────
+
+  @Get('reach-forecasts')
+  @Roles('ADMIN', 'ADVOGADO')
+  async listReachForecasts(@Req() req: any, @Query('limit') limit?: string) {
+    return this.reachPlanner.listForecasts(req.user.tenant_id, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Get('reach-forecasts/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getReachForecast(@Req() req: any, @Param('id') id: string) {
+    return this.reachPlanner.getForecast(req.user.tenant_id, id);
+  }
+
+  @Post('reach-forecasts')
+  @Roles('ADMIN', 'ADVOGADO')
+  async generateReachForecast(
+    @Req() req: any,
+    @Body() dto: GenerateReachForecastDto,
+  ) {
+    return this.reachPlanner.enqueueGenerate(
+      req.user.tenant_id,
+      dto,
+      req.user.id,
+    );
   }
 }

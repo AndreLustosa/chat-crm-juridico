@@ -66,6 +66,9 @@ model Tenant {
   traffic_user_lists         TrafficUserList[]
   traffic_user_list_members  TrafficUserListMember[]
   traffic_recommendations    TrafficRecommendation[]
+  traffic_asset_groups       TrafficAssetGroup[]
+  traffic_asset_group_assets TrafficAssetGroupAsset[]
+  traffic_reach_forecasts    TrafficReachForecast[]
 }
 
 model User {
@@ -2061,6 +2064,9 @@ model TrafficAccount {
   user_lists         TrafficUserList[]
   user_list_members  TrafficUserListMember[]
   recommendations    TrafficRecommendation[]
+  asset_groups       TrafficAssetGroup[]
+  asset_group_assets TrafficAssetGroupAsset[]
+  reach_forecasts    TrafficReachForecast[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2128,6 +2134,7 @@ model TrafficCampaign {
   account       TrafficAccount       @relation(fields: [account_id], references: [id], onDelete: Cascade)
   metrics_daily TrafficMetricDaily[]
   ad_groups     TrafficAdGroup[]
+  asset_groups  TrafficAssetGroup[]
 
   @@unique([account_id, google_campaign_id])
   @@index([tenant_id, status])
@@ -3125,4 +3132,139 @@ model TrafficRecommendation {
   @@index([tenant_id, status, recommendation_type])
   @@index([account_id, status])
   @@index([campaign_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PMAX / DEMAND GEN — Asset Groups (Sprint F)
+//
+// Estrutura: Campaign (PERFORMANCE_MAX|DEMAND_GEN) → AssetGroup → Asset.
+// asset_group_asset eh a tabela de ligacao N:N (AssetGroup × Asset com
+// field_type, ex: HEADLINE/IMAGE/VIDEO/CTA/LOGO).
+//
+// Cache local serve pra:
+//   - Listar asset groups na UI sem hit na API a cada visita
+//   - Identificar assets com performance_label=LOW (Google avalia)
+//   - Mostrar ad_strength (POOR | AVERAGE | GOOD | EXCELLENT)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Cache de asset_group da Google Ads API (PMax + Demand Gen).
+model TrafficAssetGroup {
+  id          String @id @default(uuid())
+  tenant_id   String
+  account_id  String
+  campaign_id String
+
+  /// asset_group.id do Google
+  google_asset_group_id String
+  /// asset_group resource_name 'customers/X/assetGroups/Y'
+  google_resource_name  String
+
+  /// Nome do asset group
+  name           String
+  /// "ENABLED" | "PAUSED" | "REMOVED"
+  status         String
+  /// Ad strength agregado: "POOR" | "AVERAGE" | "GOOD" | "EXCELLENT" | "UNRATED"
+  ad_strength    String?
+  /// Final URL principal do asset group
+  primary_status String?
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  group_assets TrafficAssetGroupAsset[]
+
+  @@unique([account_id, google_asset_group_id])
+  @@index([tenant_id, status])
+  @@index([campaign_id])
+}
+
+/// Cache de asset_group_asset (link N:N entre AssetGroup × Asset). Cada
+/// link tem um field_type (qual papel o asset cumpre no group) e um
+/// performance_label avaliado pelo Google.
+model TrafficAssetGroupAsset {
+  id             String @id @default(uuid())
+  tenant_id      String
+  account_id     String
+  asset_group_id String
+
+  /// Resource name do asset 'customers/X/assets/Y'
+  asset_resource_name String
+  /// asset.id do Google
+  google_asset_id     String
+  /// Tipo do asset: TEXT | IMAGE | YOUTUBE_VIDEO | CALL_TO_ACTION | etc
+  asset_type          String?
+  /// Conteudo do asset (text quando TEXT, url quando IMAGE/VIDEO etc)
+  asset_text          String? @db.Text
+  /// URL absoluta do recurso (image_url, video_url)
+  asset_url           String?
+
+  /// Field type: HEADLINE | LONG_HEADLINE | DESCRIPTION | MARKETING_IMAGE
+  /// SQUARE_MARKETING_IMAGE | LOGO | YOUTUBE_VIDEO | CALL_TO_ACTION_SELECTION
+  /// BUSINESS_NAME | etc
+  field_type String
+
+  /// Avaliacao do Google: LOW | GOOD | BEST | LEARNING | PENDING | UNSPECIFIED
+  performance_label String?
+
+  /// Status do link: ENABLED | PAUSED | REMOVED
+  status String?
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant      Tenant            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account     TrafficAccount    @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  asset_group TrafficAssetGroup @relation(fields: [asset_group_id], references: [id], onDelete: Cascade)
+
+  @@unique([asset_group_id, google_asset_id, field_type])
+  @@index([account_id, performance_label])
+  @@index([asset_type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// REACH PLANNING (Sprint F)
+//
+// Forecasts gerados pelo admin via UI (planejamento de campanha branding
+// pre-execucao). Cache permite reabrir o forecast sem re-rodar a API.
+// ─────────────────────────────────────────────────────────────────────────
+
+model TrafficReachForecast {
+  id         String @id @default(uuid())
+  tenant_id  String
+  account_id String
+
+  /// Nome dado pelo admin ao forecast
+  name String
+
+  /// Snapshot dos parametros enviados (location_ids, age_ranges, devices,
+  /// products, budgets, duration). Util pra reproduzir o calculo.
+  request_params Json
+
+  /// Resposta crua da API (curves + base_metrics). Pode ser grande.
+  response_payload Json
+
+  /// Resumo extraido pra exibir na UI sem parsear JSON inteiro:
+  ///   total_reach, on_target_reach, total_impressions, total_views,
+  ///   total_cost_micros, cpm_micros, on_target_cpm_micros
+  summary Json
+
+  /// Status do request: "PENDING" | "READY" | "ERROR"
+  status        String  @default("PENDING")
+  error_message String? @db.Text
+
+  created_by String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([account_id, status])
 }
