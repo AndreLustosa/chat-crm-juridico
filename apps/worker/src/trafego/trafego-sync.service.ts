@@ -165,38 +165,34 @@ export class TrafegoSyncService extends WorkerHost {
       const campaignByGoogleId = new Map<string, string>(); // google_campaign_id -> our id
       for (const row of campaignRows) {
         const googleCampaignId = String(row.campaign?.id);
-        const result = await this.prisma.trafficCampaign.upsert({
+
+        const baseData = {
+          name: row.campaign?.name ?? '(sem nome)',
+          status: row.campaign?.status ?? 'UNSPECIFIED',
+          channel_type: row.campaign?.advertising_channel_type ?? null,
+          daily_budget_micros: row.campaign_budget?.amount_micros
+            ? BigInt(row.campaign_budget.amount_micros)
+            : null,
+          bidding_strategy: row.campaign?.bidding_strategy_type ?? null,
+        };
+
+        const upserted = await this.prisma.trafficCampaign.upsert({
           where: {
             account_id_google_campaign_id: {
               account_id: account.id,
               google_campaign_id: googleCampaignId,
             },
           },
-          update: {
-            name: row.campaign?.name ?? '(sem nome)',
-            status: row.campaign?.status ?? 'UNSPECIFIED',
-            channel_type: row.campaign?.advertising_channel_type ?? null,
-            daily_budget_micros: row.campaign_budget?.amount_micros
-              ? BigInt(row.campaign_budget.amount_micros)
-              : null,
-            bidding_strategy: row.campaign?.bidding_strategy_type ?? null,
-            last_seen_at: new Date(),
-          },
+          update: { ...baseData, last_seen_at: new Date() },
           create: {
             tenant_id: account.tenant_id,
             account_id: account.id,
             google_campaign_id: googleCampaignId,
-            name: row.campaign?.name ?? '(sem nome)',
-            status: row.campaign?.status ?? 'UNSPECIFIED',
-            channel_type: row.campaign?.advertising_channel_type ?? null,
-            daily_budget_micros: row.campaign_budget?.amount_micros
-              ? BigInt(row.campaign_budget.amount_micros)
-              : null,
-            bidding_strategy: row.campaign?.bidding_strategy_type ?? null,
+            ...baseData,
           },
-          select: { id: true, google_campaign_id: true },
         });
-        campaignByGoogleId.set(result.google_campaign_id, result.id);
+        // googleCampaignId ja temos no escopo, evita depender de select
+        campaignByGoogleId.set(googleCampaignId, upserted.id);
       }
 
       // ─── 2. Metricas diarias por campanha ──────────────────────────────
