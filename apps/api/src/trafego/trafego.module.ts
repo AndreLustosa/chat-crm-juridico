@@ -12,6 +12,8 @@ import { TrafegoAudiencesService } from './trafego-audiences.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
 import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
 import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
+import { TrafegoChatService } from './trafego-chat.service';
+import { TrafegoBackfillService } from './trafego-backfill.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -32,6 +34,8 @@ import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
     BullModule.registerQueue({ name: 'trafego-customer-match' }),
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
     BullModule.registerQueue({ name: 'trafego-reach-planner' }),
+    BullModule.registerQueue({ name: 'trafego-backfill' }),
+    BullModule.registerQueue({ name: 'trafego-chat' }),
   ],
   controllers: [TrafegoController],
   providers: [
@@ -46,6 +50,8 @@ import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
     TrafegoRecommendationsService,
     TrafegoAssetGroupsService,
     TrafegoReachPlannerService,
+    TrafegoChatService,
+    TrafegoBackfillService,
   ],
   exports: [
     TrafegoService,
@@ -59,6 +65,8 @@ import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
     TrafegoRecommendationsService,
     TrafegoAssetGroupsService,
     TrafegoReachPlannerService,
+    TrafegoChatService,
+    TrafegoBackfillService,
   ],
 })
 export class TrafegoModule {}

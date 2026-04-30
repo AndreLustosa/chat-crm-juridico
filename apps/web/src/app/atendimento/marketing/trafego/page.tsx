@@ -16,6 +16,7 @@ import {
   Target,
   Lightbulb,
   Tv,
+  MessageSquare,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -32,6 +33,7 @@ import { ConversoesTab } from './components/ConversoesTab';
 import { IaOtimizadoraTab } from './components/IaOtimizadoraTab';
 import { RecomendacoesTab } from './components/RecomendacoesTab';
 import { BrandingTab } from './components/BrandingTab';
+import { ConversarTab } from './components/ConversarTab';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -43,6 +45,7 @@ const TABS = [
   { id: 'relatorios', label: 'Relatórios', icon: FileText },
   { id: 'alertas', label: 'Alertas', icon: Bell },
   { id: 'ia', label: 'IA Otimizadora', icon: Sparkles },
+  { id: 'conversar', label: 'Conversar', icon: MessageSquare },
   { id: 'configuracoes', label: 'Configurações', icon: SettingsIcon },
 ] as const;
 
@@ -287,6 +290,9 @@ function TrafegoPageInner() {
         )}
         {tab === 'ia' && account?.connected && (
           <IaOtimizadoraTab canManage={perms.canManageTrafego} />
+        )}
+        {tab === 'conversar' && account?.connected && (
+          <ConversarTab canManage={perms.canManageTrafego} />
         )}
         {/* Configuracoes: SEMPRE acessivel — eh aqui que admin preenche
             credenciais antes de poder conectar a conta. */}

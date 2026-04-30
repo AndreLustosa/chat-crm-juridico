@@ -69,6 +69,8 @@ model Tenant {
   traffic_asset_groups       TrafficAssetGroup[]
   traffic_asset_group_assets TrafficAssetGroupAsset[]
   traffic_reach_forecasts    TrafficReachForecast[]
+  traffic_chat_sessions      TrafficChatSession[]
+  traffic_chat_messages      TrafficChatMessage[]
 }
 
 model User {
@@ -2043,8 +2045,26 @@ model TrafficAccount {
   last_sync_at      DateTime?
   /// Mensagem do ultimo erro (se status=ERROR). null = sem erro pendente.
   last_error        String?   @db.Text
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
+
+  // ─── Sprint H.1: backfill historico ─────────────────────────────────────
+  /// Status do backfill historico (sync de meses anteriores ao default 30d):
+  /// 'NONE' (default — nunca rodou) | 'RUNNING' | 'DONE' | 'ERROR'
+  backfill_status       String    @default("NONE")
+  /// Data inicial alvo (ex: 2020-01-01) escolhida pelo admin no botao "Baixar historico"
+  backfill_target_from  DateTime?
+  /// Ultimo mes ja sincronizado pelo backfill (cursor pra retomar de onde parou)
+  backfill_cursor       DateTime?
+  /// Total de meses a importar (calculado no inicio)
+  backfill_total_months Int       @default(0)
+  /// Meses ja importados (pra UI mostrar progresso)
+  backfill_done_months  Int       @default(0)
+  /// Quando backfill terminou com sucesso
+  backfill_completed_at DateTime?
+  /// Mensagem de erro do backfill (se status=ERROR)
+  backfill_error        String?   @db.Text
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
   tenant             Tenant                      @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   campaigns          TrafficCampaign[]
@@ -2067,9 +2087,12 @@ model TrafficAccount {
   asset_groups       TrafficAssetGroup[]
   asset_group_assets TrafficAssetGroupAsset[]
   reach_forecasts    TrafficReachForecast[]
+  chat_sessions      TrafficChatSession[]
+  chat_messages      TrafficChatMessage[]
 
   @@index([status])
   @@index([last_sync_at])
+  @@index([backfill_status])
 }
 
 /// Cache de metadata de campanhas Google Ads (atualizado a cada sync).
@@ -3285,4 +3308,112 @@ model TrafficReachForecast {
 
   @@index([tenant_id, created_at(sort: Desc)])
   @@index([account_id, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CHAT (Sprint H.2) — conversa direta com a IA do Trafego
+//
+// User envia mensagem -> IA usa tool calling pra consultar metricas/decisions
+// e responde com analise. Pode propor acoes via tool 'propose_action' que
+// criam um item PENDING_APPROVAL no chat — admin clica "Aplicar" pra rodar
+// o mutate de verdade (com OAB validator + audit trail completo).
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Sessao de chat. Cada aba aberta = 1 session.
+/// Memória conversacional fica dentro da session — sessions diferentes
+/// começam do zero. Persiste pro admin reabrir conversas antigas.
+model TrafficChatSession {
+  id         String @id @default(uuid())
+  tenant_id  String
+  account_id String
+  /// User que abriu a session (admin ou advogado)
+  user_id    String
+
+  /// Titulo gerado automaticamente (1ª mensagem do user, truncada) ou
+  /// editado pelo admin
+  title String
+
+  /// "OPEN" | "ARCHIVED"
+  status String @default("OPEN")
+
+  started_at       DateTime @default(now())
+  last_activity_at DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  /// Provider/modelo usado (snapshot — pra audit caso troquem em policy)
+  llm_provider String?
+  llm_model    String?
+
+  /// Tokens totais e custo BRL acumulado da session
+  total_tokens_input  Int     @default(0)
+  total_tokens_output Int     @default(0)
+  total_cost_brl      Decimal @default(0) @db.Decimal(10, 4)
+
+  tenant   Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount       @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  messages TrafficChatMessage[]
+
+  @@index([tenant_id, status, last_activity_at(sort: Desc)])
+  @@index([user_id, last_activity_at(sort: Desc)])
+}
+
+/// Cada mensagem trocada na session. Inclui mensagens do user, da IA e
+/// resultados de tool calls (estruturados pra audit).
+model TrafficChatMessage {
+  id         String @id @default(uuid())
+  tenant_id  String
+  account_id String
+  session_id String
+
+  /// "user" | "assistant" | "tool" | "system"
+  role String
+
+  /// Texto da mensagem (vazio quando role='tool' — info vai em tool_*)
+  content String @db.Text
+
+  /// Quando role='assistant', lista de tool_calls que a IA fez:
+  /// [{id, name, arguments(json string)}]
+  tool_calls Json?
+
+  /// Quando role='tool', referencia o tool_call_id e tem o resultado:
+  /// {tool_call_id, name, result_json}
+  tool_result_for String?
+  tool_result     Json?
+
+  /// Sprint H.4 — Quando a IA propos uma acao (tool propose_action), o
+  /// resultado fica aqui pra UI exibir card "Aplicar/Rejeitar":
+  ///   {action_kind, resource_type, resource_id, params, oab_violations,
+  ///    confidence, reason}
+  /// Status:
+  ///   "PENDING_APPROVAL" | "APPLIED" | "REJECTED" | "EXPIRED"
+  proposed_action               Json?
+  proposed_action_status        String?
+  /// FK pro TrafficMutateLog se foi APPLIED (audit trail completo)
+  proposed_action_mutate_log_id String?
+  /// Quando admin clicou Aplicar/Rejeitar
+  proposed_action_resolved_at   DateTime?
+  /// Quem aprovou/rejeitou (User.id)
+  proposed_action_resolved_by   String?
+
+  /// Tokens consumidos por essa mensagem (granular pra cost tracking)
+  tokens_input  Int     @default(0)
+  tokens_output Int     @default(0)
+  /// Custo USD/BRL convertido (snapshot do pricing do modelo)
+  cost_brl      Decimal @default(0) @db.Decimal(10, 4)
+
+  /// Modelo que gerou (assistant) — pra audit cross-mensagens
+  model_used String?
+
+  /// Erro do LLM call se falhou
+  error_message String? @db.Text
+
+  created_at DateTime @default(now())
+
+  tenant  Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount     @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  session TrafficChatSession @relation(fields: [session_id], references: [id], onDelete: Cascade)
+
+  @@index([session_id, created_at])
+  @@index([tenant_id, role, created_at(sort: Desc)])
+  @@index([proposed_action_status])
 }

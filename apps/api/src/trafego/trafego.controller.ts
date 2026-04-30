@@ -28,6 +28,8 @@ import { TrafegoAudiencesService } from './trafego-audiences.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
 import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
 import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
+import { TrafegoChatService } from './trafego-chat.service';
+import { TrafegoBackfillService } from './trafego-backfill.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
@@ -35,9 +37,13 @@ import {
   AiDecisionFeedbackDto,
   AiTriggerLoopDto,
   ApplyRecommendationDto,
+  CreateChatSessionDto,
   CreateUserListDto,
   DashboardQueryDto,
   GenerateReachForecastDto,
+  RejectChatActionDto,
+  SendChatMessageDto,
+  StartBackfillDto,
   ListAiDecisionsDto,
   ListLeadFormSubmissionsDto,
   ListRecommendationsDto,
@@ -65,6 +71,8 @@ export class TrafegoController {
     private readonly recommendations: TrafegoRecommendationsService,
     private readonly assetGroups: TrafegoAssetGroupsService,
     private readonly reachPlanner: TrafegoReachPlannerService,
+    private readonly chat: TrafegoChatService,
+    private readonly backfillSvc: TrafegoBackfillService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -924,6 +932,102 @@ export class TrafegoController {
       req.user.tenant_id,
       dto,
       req.user.id,
+    );
+  }
+
+  // ─── Backfill histórico (Sprint H.1) ────────────────────────────────────
+
+  @Post('backfill/start')
+  @Roles('ADMIN')
+  async startBackfill(@Req() req: any, @Body() dto: StartBackfillDto) {
+    return this.backfillSvc.start(req.user.tenant_id, dto.target_from);
+  }
+
+  @Get('backfill/status')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getBackfillStatus(@Req() req: any) {
+    return this.backfillSvc.getStatus(req.user.tenant_id);
+  }
+
+  @Post('backfill/cancel')
+  @Roles('ADMIN')
+  async cancelBackfill(@Req() req: any) {
+    return this.backfillSvc.cancel(req.user.tenant_id);
+  }
+
+  // ─── Chat com a IA (Sprint H.5) ─────────────────────────────────────────
+
+  @Post('chat/sessions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createChatSession(@Req() req: any, @Body() dto: CreateChatSessionDto) {
+    return this.chat.createSession(
+      req.user.tenant_id,
+      req.user.id,
+      dto.title,
+    );
+  }
+
+  @Get('chat/sessions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async listChatSessions(@Req() req: any) {
+    return this.chat.listSessions(req.user.tenant_id, req.user.id);
+  }
+
+  @Get('chat/sessions/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getChatSession(@Req() req: any, @Param('id') id: string) {
+    return this.chat.getSession(req.user.tenant_id, id, req.user.id);
+  }
+
+  @Get('chat/sessions/:id/messages')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getChatMessages(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('after') after?: string,
+  ) {
+    return this.chat.getMessages(req.user.tenant_id, id, req.user.id, after);
+  }
+
+  @Post('chat/sessions/:id/messages')
+  @Roles('ADMIN', 'ADVOGADO')
+  async sendChatMessage(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: SendChatMessageDto,
+  ) {
+    return this.chat.sendMessage(
+      req.user.tenant_id,
+      id,
+      req.user.id,
+      dto.text,
+    );
+  }
+
+  @Delete('chat/sessions/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async archiveChatSession(@Req() req: any, @Param('id') id: string) {
+    return this.chat.archiveSession(req.user.tenant_id, id, req.user.id);
+  }
+
+  @Post('chat/messages/:id/apply')
+  @Roles('ADMIN', 'ADVOGADO')
+  async applyChatAction(@Req() req: any, @Param('id') id: string) {
+    return this.chat.applyAction(req.user.tenant_id, id, req.user.id);
+  }
+
+  @Post('chat/messages/:id/reject')
+  @Roles('ADMIN', 'ADVOGADO')
+  async rejectChatAction(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: RejectChatActionDto,
+  ) {
+    return this.chat.rejectAction(
+      req.user.tenant_id,
+      id,
+      req.user.id,
+      dto.note,
     );
   }
 }

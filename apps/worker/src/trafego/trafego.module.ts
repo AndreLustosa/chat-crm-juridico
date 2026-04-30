@@ -23,6 +23,11 @@ import { TrafficRecommendationsProcessor } from './traffic-recommendations.proce
 import { TrafficReachPlannerService } from './traffic-reach-planner.service';
 import { TrafficReachPlannerProcessor } from './traffic-reach-planner.processor';
 import { TrafficLLMService } from './traffic-llm.service';
+import { TrafficBackfillService } from './traffic-backfill.service';
+import { TrafficBackfillProcessor } from './traffic-backfill.processor';
+import { TrafficChatService } from './traffic-chat.service';
+import { TrafficChatApplyService } from './traffic-chat-apply.service';
+import { TrafficChatProcessor } from './traffic-chat.processor';
 
 @Module({
   imports: [
@@ -35,6 +40,8 @@ import { TrafficLLMService } from './traffic-llm.service';
     BullModule.registerQueue({ name: 'trafego-customer-match' }),
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
     BullModule.registerQueue({ name: 'trafego-reach-planner' }),
+    BullModule.registerQueue({ name: 'trafego-backfill' }),
+    BullModule.registerQueue({ name: 'trafego-chat' }),
   ],
   providers: [
     TrafegoCryptoService,
@@ -58,6 +65,11 @@ import { TrafficLLMService } from './traffic-llm.service';
     TrafficReachPlannerService,
     TrafficReachPlannerProcessor,
     TrafficLLMService,
+    TrafficBackfillService,
+    TrafficBackfillProcessor,
+    TrafficChatService,
+    TrafficChatApplyService,
+    TrafficChatProcessor,
   ],
   exports: [
     TrafficOCIService,
@@ -66,6 +78,9 @@ import { TrafficLLMService } from './traffic-llm.service';
     TrafficRecommendationsService,
     TrafficReachPlannerService,
     TrafficLLMService,
+    TrafficBackfillService,
+    TrafficChatService,
+    TrafficChatApplyService,
   ],
 })
 export class TrafegoModule {}

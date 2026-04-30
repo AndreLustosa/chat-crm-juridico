@@ -592,6 +592,34 @@ export class ApplyRecommendationDto {
 
 // ─── Reach Planner (Sprint F) ───────────────────────────────────────────────
 
+// ─── Backfill (Sprint H.1) ──────────────────────────────────────────────────
+
+export class StartBackfillDto {
+  /** YYYY-MM-DD. Default 24 meses atrás. Max 5 anos. */
+  @IsString()
+  @IsOptional()
+  target_from?: string;
+}
+
+// ─── Chat (Sprint H.5) ──────────────────────────────────────────────────────
+
+export class CreateChatSessionDto {
+  @IsString()
+  @IsOptional()
+  title?: string;
+}
+
+export class SendChatMessageDto {
+  @IsString()
+  text!: string;
+}
+
+export class RejectChatActionDto {
+  @IsString()
+  @IsOptional()
+  note?: string;
+}
+
 export class GenerateReachForecastDto {
   @IsString()
   @IsOptional()
