@@ -63,6 +63,8 @@ model Tenant {
   traffic_ia_decisions       TrafficIADecision[]
   traffic_ia_memory          TrafficIAMemory[]
   traffic_ia_policy          TrafficIAPolicy?
+  traffic_user_lists         TrafficUserList[]
+  traffic_user_list_members  TrafficUserListMember[]
 }
 
 model User {
@@ -2055,6 +2057,8 @@ model TrafficAccount {
   oci_uploads        TrafficOCIUpload[]
   lead_form_subs     TrafficLeadFormSubmission[]
   ia_decisions       TrafficIADecision[]
+  user_lists         TrafficUserList[]
+  user_list_members  TrafficUserListMember[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2310,6 +2314,17 @@ model TrafficSettings {
   oauth_redirect_uri             String?
   /// Base URL do frontend (pra redirect pos-callback do nosso backend pro UI).
   frontend_base_url              String?
+
+  // ─── Sprint D: Lead Form Asset webhook ──────────────────────────────────
+  /// Secret compartilhado configurado no Lead Form Asset do Google Ads.
+  /// Google envia em cada submit (param `google_key` na URL ou header).
+  /// Webhook so processa requests com key matching — anti-spam.
+  lead_form_webhook_secret   String?
+  /// Auto-cria Lead no CRM ao receber submission. Default: true.
+  /// Quando false, submissions ficam em PENDING pra revisao manual.
+  lead_form_auto_create_lead Boolean @default(true)
+  /// Stage default do Lead criado a partir de Lead Form. Ex: "INTERESSADO".
+  lead_form_default_stage    String  @default("INTERESSADO")
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -2921,4 +2936,114 @@ model TrafficIAPolicy {
   updated_at DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CUSTOMER MATCH (Sprint D)
+//
+// User lists pra remarketing/exclusao. Cada lista mantem um espelho local
+// dos members (hash SHA-256 de email/phone) pra detectar diff entre o que
+// esta no Google Ads e o que deveria estar (com base nos clientes/leads do
+// CRM). Worker faz upload incremental via OfflineUserDataJobService.
+//
+// Tipos comuns:
+//   - "CLIENTES_ATIVOS"      pra excluir das prospect campaigns
+//   - "LEADS_QUALIFICADOS"   pra remarketing de quem virou lead mas nao
+//                            assinou ainda
+//   - "LOOKALIKE_BASE"       pra usar como seed do Similar audiences
+// ─────────────────────────────────────────────────────────────────────────
+
+/// User list (audience) sincronizada com o Google Ads.
+model TrafficUserList {
+  id         String @id @default(uuid())
+  tenant_id  String
+  account_id String
+
+  /// user_list.id retornado pelo Google Ads (numerico). Null antes do 1o
+  /// upload bem-sucedido.
+  google_user_list_id  String?
+  /// user_list resource_name 'customers/X/userLists/Y'
+  google_resource_name String?
+
+  /// Nome da lista no Google Ads (padrao: "{tenant} — {kind}")
+  name        String
+  /// Descricao livre exibida no Google Ads
+  description String?
+
+  /// Tipo logico interno do CRM:
+  ///   "CLIENTES_ATIVOS" — clientes assinados (uso: exclude prospect campaigns)
+  ///   "LEADS_QUALIFICADOS" — leads em estagio avancado (uso: remarketing)
+  ///   "LOOKALIKE_BASE" — base pra similar audiences
+  ///   "CUSTOM" — admin definiu manualmente
+  kind String
+
+  /// CRM_BASED_USER_LIST com upload type FIRST_PARTY (LGPD-friendly).
+  /// Membership lifespan em dias (max 540 do Google).
+  membership_lifespan_days Int @default(540)
+
+  /// Status interno: "DRAFT" | "SYNCING" | "READY" | "ERROR"
+  status        String  @default("DRAFT")
+  /// Mensagem de erro do ultimo upload (se ERROR)
+  error_message String? @db.Text
+
+  /// Contagem reportada pelo Google na ultima sync
+  google_size_reported Int?
+  /// Contagem local (TrafficUserListMember)
+  local_size           Int  @default(0)
+
+  last_synced_at DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  members TrafficUserListMember[]
+
+  @@unique([account_id, kind])
+  @@index([tenant_id, status])
+}
+
+/// Member individual de uma user list. email_sha256 e phone_sha256 sao os
+/// hashes que efetivamente sobem pro Google (PII NUNCA sai em claro).
+///
+/// op_pending controla o que precisa ser feito no proximo upload:
+///   "ADD"     — ainda nao subiu
+///   "REMOVE"  — precisa remover do Google Ads (cliente saiu da audiencia)
+///   null      — sincronizado, nada pendente
+model TrafficUserListMember {
+  id           String @id @default(uuid())
+  tenant_id    String
+  account_id   String
+  user_list_id String
+
+  /// FK opcional pra Lead/Client local (audit trail)
+  lead_id String?
+
+  /// SHA-256 lowercase do email (Google espera assim)
+  email_sha256      String?
+  /// SHA-256 lowercase do telefone E.164 (com +55, sem espacos)
+  phone_sha256      String?
+  /// SHA-256 do first_name lowercase trimmed
+  first_name_sha256 String?
+  /// SHA-256 do last_name lowercase trimmed
+  last_name_sha256  String?
+
+  /// Op pendente: 'ADD' | 'REMOVE' | null (sincronizado)
+  op_pending    String?
+  /// Quando foi adicionado/removido com sucesso no Google
+  synced_at     DateTime?
+  /// Erro do ultimo attempt
+  error_message String?   @db.Text
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account   TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  user_list TrafficUserList @relation(fields: [user_list_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_list_id, email_sha256, phone_sha256])
+  @@index([account_id, op_pending])
+  @@index([lead_id])
 }

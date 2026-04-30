@@ -16,6 +16,8 @@ import { TrafficOCIProcessor } from './trafego-oci.processor';
 import { TrafficAIAgentService } from './traffic-ai-agent.service';
 import { TrafficAIAgentCronService } from './traffic-ai-agent-cron.service';
 import { TrafficAIAgentProcessor } from './traffic-ai-agent.processor';
+import { TrafficCustomerMatchService } from './traffic-customer-match.service';
+import { TrafficCustomerMatchProcessor } from './traffic-customer-match.processor';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { TrafficAIAgentProcessor } from './traffic-ai-agent.processor';
     BullModule.registerQueue({ name: 'trafego-mutate' }),
     BullModule.registerQueue({ name: 'trafego-oci' }),
     BullModule.registerQueue({ name: 'trafego-ai-agent' }),
+    BullModule.registerQueue({ name: 'trafego-customer-match' }),
   ],
   providers: [
     TrafegoCryptoService,
@@ -41,7 +44,9 @@ import { TrafficAIAgentProcessor } from './traffic-ai-agent.processor';
     TrafficAIAgentService,
     TrafficAIAgentCronService,
     TrafficAIAgentProcessor,
+    TrafficCustomerMatchService,
+    TrafficCustomerMatchProcessor,
   ],
-  exports: [TrafficOCIService, TrafficAIAgentService],
+  exports: [TrafficOCIService, TrafficAIAgentService, TrafficCustomerMatchService],
 })
 export class TrafegoModule {}

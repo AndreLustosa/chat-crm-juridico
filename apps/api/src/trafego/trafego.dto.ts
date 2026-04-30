@@ -449,3 +449,60 @@ export class UpdateAiPolicyDto {
   @IsOptional()
   shadow_mode?: boolean;
 }
+
+// ─── Lead Form Asset (Sprint D) ─────────────────────────────────────────────
+
+export class ListLeadFormSubmissionsDto {
+  @IsString()
+  @IsOptional()
+  @IsIn(['PENDING', 'PROCESSED', 'DUPLICATE', 'REJECTED', 'ERROR'])
+  status?: 'PENDING' | 'PROCESSED' | 'DUPLICATE' | 'REJECTED' | 'ERROR';
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
+export class UpdateLeadFormSettingsDto {
+  @IsString()
+  @IsOptional()
+  lead_form_webhook_secret?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  lead_form_auto_create_lead?: boolean;
+
+  @IsString()
+  @IsOptional()
+  lead_form_default_stage?: string;
+}
+
+// ─── Customer Match (Sprint D) ──────────────────────────────────────────────
+
+export class CreateUserListDto {
+  @IsString()
+  @IsIn(['CLIENTES_ATIVOS', 'LEADS_QUALIFICADOS', 'LOOKALIKE_BASE', 'CUSTOM'])
+  kind!: 'CLIENTES_ATIVOS' | 'LEADS_QUALIFICADOS' | 'LOOKALIKE_BASE' | 'CUSTOM';
+
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(540)
+  membership_lifespan_days?: number;
+}
+
+export class TriggerCustomerMatchSyncDto {
+  @IsString()
+  @IsOptional()
+  user_list_id?: string;
+}

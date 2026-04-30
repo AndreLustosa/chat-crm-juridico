@@ -478,6 +478,23 @@ export class TrafegoService {
     return this.serializeSettings(settings);
   }
 
+  /**
+   * Upsert direto dos campos de Lead Form Asset (Sprint D). Endpoint
+   * separado de updateSettings pra manter granularidade de permissão e
+   * não inflar o DTO geral.
+   */
+  async upsertLeadFormSettings(
+    tenantId: string,
+    data: Record<string, unknown>,
+  ) {
+    const settings = await this.prisma.trafficSettings.upsert({
+      where: { tenant_id: tenantId },
+      update: data as any,
+      create: { tenant_id: tenantId, ...(data as any) },
+    });
+    return this.serializeSettings(settings);
+  }
+
   private serializeSettings(s: any) {
     return {
       ...s,

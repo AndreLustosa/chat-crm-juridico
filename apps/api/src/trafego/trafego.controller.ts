@@ -23,14 +23,18 @@ import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoConfigService } from './trafego-config.service';
 import { TrafegoAiService } from './trafego-ai.service';
+import { TrafegoLeadFormService } from './trafego-lead-form.service';
+import { TrafegoAudiencesService } from './trafego-audiences.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
   AddNegativesDto,
   AiDecisionFeedbackDto,
   AiTriggerLoopDto,
+  CreateUserListDto,
   DashboardQueryDto,
   ListAiDecisionsDto,
+  ListLeadFormSubmissionsDto,
   MapConversionActionDto,
   MutateBaseDto,
   UpdateAccountDto,
@@ -38,6 +42,7 @@ import {
   UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
+  UpdateLeadFormSettingsDto,
   UpdateSettingsDto,
 } from './trafego.dto';
 
@@ -49,6 +54,8 @@ export class TrafegoController {
     private readonly oauth: TrafegoOAuthService,
     private readonly config: TrafegoConfigService,
     private readonly ai: TrafegoAiService,
+    private readonly leadForm: TrafegoLeadFormService,
+    private readonly audiences: TrafegoAudiencesService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -705,5 +712,118 @@ export class TrafegoController {
   @Roles('ADMIN', 'ADVOGADO')
   async triggerAiLoop(@Req() req: any, @Body() dto: AiTriggerLoopDto) {
     return this.ai.triggerLoop(req.user.tenant_id, dto.loop_kind ?? 'TRIGGERED');
+  }
+
+  // ─── Lead Form Asset (Sprint D) ─────────────────────────────────────────
+
+  /**
+   * Webhook recebido pelo Google Ads quando um Lead Form é submetido.
+   *
+   * URL configurada no asset (campo "Webhook URL"):
+   *   https://api.andrelustosaadvogados.com.br/trafego/lead-form-webhook
+   *     ?tenant_id=<UUID>&google_key=<secret>
+   *
+   * Endpoint público (Google não envia JWT). Autenticação via:
+   *   - tenant_id na query → resolve TrafficSettings
+   *   - google_key na query OU body → match com lead_form_webhook_secret
+   *
+   * Idempotência: cada lead_id do Google gera 1 TrafficLeadFormSubmission;
+   * Lead é deduplicado por (tenant_id, phone) — submissions duplicadas
+   * caem em status='DUPLICATE' apontando pro Lead existente.
+   *
+   * Sempre retorna 200 OK quando passa autenticação — Google desabilita
+   * forms com taxa de erro alta. Erros internos ficam em error_message
+   * pra troubleshooting.
+   */
+  @Public()
+  @Post('lead-form-webhook')
+  async leadFormWebhook(
+    @Req() req: any,
+    @Query('tenant_id') tenantId: string | undefined,
+    @Query('google_key') googleKey: string | undefined,
+    @Body() body: Record<string, any>,
+  ) {
+    return this.leadForm.processWebhook(
+      tenantId,
+      googleKey,
+      body ?? {},
+      (req?.headers ?? {}) as Record<string, any>,
+    );
+  }
+
+  @Get('lead-form-submissions')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listLeadFormSubmissions(
+    @Req() req: any,
+    @Query() query: ListLeadFormSubmissionsDto,
+  ) {
+    return this.leadForm.listSubmissions(req.user.tenant_id, {
+      status: query.status,
+      limit: query.limit,
+    });
+  }
+
+  /**
+   * Atualiza somente os campos de Lead Form Asset em TrafficSettings.
+   * Endpoint dedicado pra evitar inflar UpdateSettingsDto com campos novos
+   * e simplificar permissões (só ADMIN pode rotacionar o secret).
+   */
+  @Patch('lead-form-settings')
+  @Roles('ADMIN')
+  async updateLeadFormSettings(
+    @Req() req: any,
+    @Body() dto: UpdateLeadFormSettingsDto,
+  ) {
+    const tenantId = req.user.tenant_id;
+    const data: Record<string, unknown> = {};
+    if (dto.lead_form_webhook_secret !== undefined) {
+      data.lead_form_webhook_secret = dto.lead_form_webhook_secret;
+    }
+    if (dto.lead_form_auto_create_lead !== undefined) {
+      data.lead_form_auto_create_lead = dto.lead_form_auto_create_lead;
+    }
+    if (dto.lead_form_default_stage !== undefined) {
+      data.lead_form_default_stage = dto.lead_form_default_stage;
+    }
+    const updated = await this.service.upsertLeadFormSettings(tenantId, data);
+    return updated;
+  }
+
+  // ─── Customer Match (Sprint D) ──────────────────────────────────────────
+
+  @Get('audiences')
+  @Roles('ADMIN', 'ADVOGADO')
+  async listAudiences(@Req() req: any) {
+    return this.audiences.list(req.user.tenant_id);
+  }
+
+  @Get('audiences/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getAudience(@Req() req: any, @Param('id') id: string) {
+    return this.audiences.get(req.user.tenant_id, id);
+  }
+
+  @Post('audiences')
+  @Roles('ADMIN')
+  async createAudience(@Req() req: any, @Body() dto: CreateUserListDto) {
+    return this.audiences.create(req.user.tenant_id, dto);
+  }
+
+  @Delete('audiences/:id')
+  @Roles('ADMIN')
+  async deleteAudience(@Req() req: any, @Param('id') id: string) {
+    return this.audiences.delete(req.user.tenant_id, id);
+  }
+
+  @Post('audiences/:id/rebuild')
+  @Roles('ADMIN', 'ADVOGADO')
+  async rebuildAudience(@Req() req: any, @Param('id') id: string) {
+    return this.audiences.enqueueRebuild(req.user.tenant_id, id);
+  }
+
+  @Post('audiences/:id/sync')
+  @Roles('ADMIN')
+  async syncAudience(@Req() req: any, @Param('id') id: string) {
+    return this.audiences.enqueueSync(req.user.tenant_id, id);
   }
 }

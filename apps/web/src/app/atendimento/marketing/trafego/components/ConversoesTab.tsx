@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Loader2, Target, Inbox, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { LeadFormCard } from './LeadFormCard';
+import { AudiencesCard } from './AudiencesCard';
 
 interface ConversionAction {
   id: string;
@@ -285,6 +287,12 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
           </table>
         )}
       </div>
+
+      {/* Lead Form Asset — captura direto do anúncio */}
+      <LeadFormCard canManage={canManage} />
+
+      {/* Customer Match — audiences sincronizadas com Google Ads */}
+      <AudiencesCard canManage={canManage} />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { TrafegoCryptoService } from './trafego-crypto.service';
 import { TrafegoConfigService } from './trafego-config.service';
 import { TrafegoEventsService } from './trafego-events.service';
 import { TrafegoAiService } from './trafego-ai.service';
+import { TrafegoLeadFormService } from './trafego-lead-form.service';
+import { TrafegoAudiencesService } from './trafego-audiences.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -24,6 +26,7 @@ import { TrafegoAiService } from './trafego-ai.service';
     BullModule.registerQueue({ name: 'trafego-mutate' }),
     BullModule.registerQueue({ name: 'trafego-oci' }),
     BullModule.registerQueue({ name: 'trafego-ai-agent' }),
+    BullModule.registerQueue({ name: 'trafego-customer-match' }),
   ],
   controllers: [TrafegoController],
   providers: [
@@ -33,6 +36,8 @@ import { TrafegoAiService } from './trafego-ai.service';
     TrafegoConfigService,
     TrafegoEventsService,
     TrafegoAiService,
+    TrafegoLeadFormService,
+    TrafegoAudiencesService,
   ],
   exports: [
     TrafegoService,
@@ -41,6 +46,8 @@ import { TrafegoAiService } from './trafego-ai.service';
     TrafegoConfigService,
     TrafegoEventsService,
     TrafegoAiService,
+    TrafegoLeadFormService,
+    TrafegoAudiencesService,
   ],
 })
 export class TrafegoModule {}
