@@ -56,10 +56,17 @@ export function extractAttribution(input: AttributionInput): AttributionFields {
   if (gbraid !== null) out.google_gbraid = gbraid;
   if (wbraid !== null) out.google_wbraid = wbraid;
 
-  // Click timestamp — frontend deveria mandar (sessao); fallback now()
+  // Click timestamp — frontend deveria mandar (sessao); fallback now().
+  // Validamos a string parseada pra evitar Invalid Date entrando no Prisma
+  // (gera erro 500 em POST /leads quando body vem com timestamp malformado).
   if (gclid || gbraid || wbraid) {
     const clickAt = pick('click_at') ?? pick('google_click_at');
-    out.google_click_at = clickAt ? new Date(clickAt) : new Date();
+    if (clickAt) {
+      const parsed = new Date(clickAt);
+      out.google_click_at = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    } else {
+      out.google_click_at = new Date();
+    }
   }
 
   const utmSource = pick('utm_source');

@@ -309,25 +309,21 @@ export class TrafegoService {
             HttpStatus.BAD_REQUEST,
           );
         }
-        // Precisamos do resource_name do campaign_budget — buscar via google_campaign_id
-        // Estrategia: SDK retorna campaign.campaign_budget no sync — mas nao guardamos.
-        // Por ora, usamos lookup por amount_micros + reference_count (heuristico).
-        // Se TrafficCampaignBudget tiver o budget mais o vinculo campaign_budget eh
-        // necessario expandir o sync. Por hora, exigimos que admin escolha o budget
-        // em outro endpoint, ou sync adicione um campo `budget_resource_name` em
-        // TrafficCampaign. Vamos criar o resource_name a partir do google_campaign_id
-        // assumindo budget dedicado (caso comum no escritorio).
-        // TODO: persistir budget_id em TrafficCampaign no sync extended.
+        // budget_resource_name eh populado pelo sync (campaign.campaign_budget
+        // vem na GAQL). Sem ele nao temos como atualizar via mutate, e o
+        // processor falharia silenciosamente — preferimos 409 explicito.
+        if (!camp.budget_resource_name) {
+          throw new HttpException(
+            'Campanha ainda sem budget vinculado em cache. Rode "Sincronizar agora" antes de atualizar o orçamento.',
+            HttpStatus.CONFLICT,
+          );
+        }
         const newAmountMicros = BigInt(
           Math.round(raw.new_amount_brl * 1_000_000),
         );
         return {
           ...base,
-          // Usaremos placeholder. O processor pode descobrir budget via
-          // GAQL: SELECT campaign.campaign_budget FROM campaign WHERE campaign.id=X
-          // Mas pra simplificar agora, exigimos que o frontend ja envie o
-          // budget_resource_name via GET /budgets primeiro.
-          budgetResourceName: raw.budget_resource_name ?? null,
+          budgetResourceName: camp.budget_resource_name,
           newAmountMicros: newAmountMicros.toString(),
           context: {
             ...base.context,

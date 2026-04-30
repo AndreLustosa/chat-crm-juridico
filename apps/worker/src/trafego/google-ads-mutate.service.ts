@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Customer } from 'google-ads-api';
-import { randomUUID, createHash } from 'crypto';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAdsClientService } from './google-ads-client.service';
 import {
@@ -376,21 +376,30 @@ export class GoogleAdsMutateService {
 
   /**
    * request_id determinístico baseado em (tenant, account, resource, op,
-   * payload-hash, initiator). Mesmo input = mesmo id = idempotencia.
-   * Caller pode passar requestId customizado pra controlar dedupe.
+   * payload-hash, initiator). Mesmo input = mesmo id = idempotencia real.
+   *
+   * Por que determinístico? Retries (BullMQ, falha de rede, click duplo)
+   * precisam reaproveitar o mesmo log e nao executar o mutate duas vezes.
+   * Caller que QUER um id unico (ex: forcar reexecucao apos rollback) deve
+   * passar `req.requestId` explicitamente.
    */
   private generateRequestId(req: MutateRequest): string {
     const payloadStr = JSON.stringify(req.operations, this.bigIntReplacer);
     const hash = createHash('sha256')
       .update(req.tenantId)
+      .update('|')
       .update(req.accountId)
+      .update('|')
       .update(req.resourceType)
+      .update('|')
       .update(req.operation)
+      .update('|')
       .update(payloadStr)
+      .update('|')
       .update(req.initiator)
       .digest('hex')
-      .slice(0, 16);
-    return `mut-${Date.now()}-${hash}-${randomUUID().slice(0, 8)}`;
+      .slice(0, 32);
+    return `mut-${hash}`;
   }
 
   private async persistOABBlock(

@@ -228,6 +228,7 @@ export class TrafegoSyncService extends WorkerHost {
           campaign.status,
           campaign.advertising_channel_type,
           campaign.bidding_strategy_type,
+          campaign.campaign_budget,
           campaign_budget.amount_micros
         FROM campaign
         WHERE campaign.status != 'REMOVED'
@@ -252,6 +253,11 @@ export class TrafegoSyncService extends WorkerHost {
             row.campaign?.advertising_channel_type,
           ),
           daily_budget_micros: toBigIntSafe(row.campaign_budget?.amount_micros),
+          budget_resource_name:
+            typeof row.campaign?.campaign_budget === 'string' &&
+            row.campaign.campaign_budget.length > 0
+              ? row.campaign.campaign_budget
+              : null,
           bidding_strategy: enumToStr(
             enums.BiddingStrategyType,
             row.campaign?.bidding_strategy_type,

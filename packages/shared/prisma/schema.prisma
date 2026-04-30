@@ -2063,24 +2063,28 @@ model TrafficAccount {
 /// google_campaign_id eh o ID numerico vindo da API (campaign.id). Combinado
 /// com account_id forma a chave natural unica.
 model TrafficCampaign {
-  id                  String    @id @default(uuid())
-  tenant_id           String
-  account_id          String
+  id                   String    @id @default(uuid())
+  tenant_id            String
+  account_id           String
   /// ID numerico do Google (campaign.id). Ex: "21458273619"
-  google_campaign_id  String
+  google_campaign_id   String
   /// Nome da campanha vindo da API
-  name                String
+  name                 String
   /// Status: "ENABLED" | "PAUSED" | "REMOVED"
-  status              String
+  status               String
   /// Tipo: "SEARCH" | "PERFORMANCE_MAX" | "DISPLAY" | "VIDEO" | "DEMAND_GEN" etc.
-  channel_type        String?
+  channel_type         String?
   /// Orcamento diario em micros (1 BRL = 1.000.000 micros). null se shared budget.
-  daily_budget_micros BigInt?
+  daily_budget_micros  BigInt?
+  /// resource_name do campaign_budget vinculado (ex: "customers/X/campaignBudgets/Y").
+  /// Cache vinda do sync (campaign.campaign_budget). Necessario pra mutates de budget
+  /// sem precisar fazer round-trip no Google Ads.
+  budget_resource_name String?
   /// Estrategia de lance: "MAXIMIZE_CONVERSIONS" | "TARGET_CPA" | etc.
-  bidding_strategy    String?
+  bidding_strategy     String?
   /// Datas da campanha (vindas da API)
-  start_date          DateTime?
-  end_date            DateTime?
+  start_date           DateTime?
+  end_date             DateTime?
 
   // ─── Anotacoes internas (do escritorio, nao da API) ─────────────────────
   /// Marcada como favorita no painel
