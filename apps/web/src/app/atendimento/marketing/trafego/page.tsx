@@ -84,6 +84,7 @@ function TrafegoPageInner() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [defaultTabSet, setDefaultTabSet] = useState(false);
+  const [openAlertsCount, setOpenAlertsCount] = useState(0);
 
   // ─── Trata callback OAuth ────────────────────────────────────────────────
   useEffect(() => {
@@ -128,6 +129,30 @@ function TrafegoPageInner() {
   useEffect(() => {
     loadAccount();
   }, [loadAccount]);
+
+  // Polling do contador de alertas OPEN — atualiza a cada 60s.
+  // So conta se conta esta conectada (pra evitar 503 em loop).
+  useEffect(() => {
+    if (!account?.connected) return;
+
+    let cancelled = false;
+    const fetchCount = async () => {
+      try {
+        const { data } = await api.get<{ id: string }[]>(
+          '/trafego/alerts?status=OPEN&limit=100',
+        );
+        if (!cancelled) setOpenAlertsCount(data.length);
+      } catch {
+        // silencioso — contador eh nice-to-have
+      }
+    };
+    fetchCount();
+    const t = setInterval(fetchCount, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [account?.connected]);
 
   // ─── Permissao ───────────────────────────────────────────────────────────
   if (!perms.canViewTrafego) {
@@ -187,6 +212,7 @@ function TrafegoPageInner() {
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
+          const showAlertsBadge = t.id === 'alertas' && openAlertsCount > 0;
           return (
             <button
               key={t.id}
@@ -199,6 +225,11 @@ function TrafegoPageInner() {
             >
               <Icon size={16} />
               {t.label}
+              {showAlertsBadge && (
+                <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center">
+                  {openAlertsCount > 99 ? '99+' : openAlertsCount}
+                </span>
+              )}
             </button>
           );
         })}

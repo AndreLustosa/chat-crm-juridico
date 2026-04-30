@@ -301,4 +301,35 @@ export class TrafegoController {
       message: 'Sync enfileirado. Os dados aparecerao em alguns minutos.',
     };
   }
+
+  /**
+   * Re-avalia regras de alerta sem rodar sync. Util pra testar regras ou
+   * disparar reavaliacao apos admin mudar thresholds em Configuracoes.
+   */
+  @Post('evaluate-alerts')
+  @Roles('ADMIN')
+  async evaluateAlerts(@Req() req: any) {
+    const account = await this.service.getAccount(req.user.tenant_id);
+    if (!account) {
+      throw new HttpException(
+        'Conecte uma conta antes de avaliar alertas.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    await this.syncQueue.add(
+      'trafego-evaluate-alerts',
+      { accountId: account.id },
+      {
+        jobId: `eval-alerts-${account.id}-${Date.now()}`,
+        removeOnComplete: 50,
+        removeOnFail: 20,
+      },
+    );
+
+    return {
+      ok: true,
+      message: 'Avaliacao de alertas enfileirada. Resultados em ~10s.',
+    };
+  }
 }

@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, AlertCircle, Info, Bell, Loader2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  AlertCircle,
+  Info,
+  Bell,
+  Loader2,
+  Zap,
+} from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 
@@ -26,6 +33,7 @@ const KIND_LABEL: Record<string, string> = {
   BUDGET_EXHAUSTED: 'Orçamento esgotado',
   ZERO_CONVERSIONS: 'Sem conversões',
   CAMPAIGN_PAUSED: 'Campanha pausada',
+  PAUSED_BUT_SPENDING: 'Pausada mas gastando',
   OVERSPEND: 'Gasto acima do esperado',
   NO_DATA: 'Sem dados recentes',
   API_ERROR: 'Erro na API',
@@ -34,6 +42,7 @@ const KIND_LABEL: Record<string, string> = {
 export function AlertasTab({ canManage }: { canManage: boolean }) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [evaluating, setEvaluating] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -49,7 +58,26 @@ export function AlertasTab({ canManage }: { canManage: boolean }) {
 
   useEffect(() => {
     load();
+    // Polling leve a cada 60s — refresca lista quando worker cria alertas novos
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
   }, []);
+
+  async function evaluateNow() {
+    if (!canManage) return;
+    setEvaluating(true);
+    try {
+      await api.post('/trafego/evaluate-alerts');
+      showSuccess('Avaliação iniciada. Recarregando em 10s...');
+      // Aguarda worker processar e recarrega
+      setTimeout(() => load(), 10_000);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || 'Erro ao iniciar avaliação';
+      showError(msg);
+    } finally {
+      setEvaluating(false);
+    }
+  }
 
   async function acknowledge(a: Alert, status: 'ACKNOWLEDGED' | 'RESOLVED' | 'MUTED') {
     if (!canManage) return;
@@ -62,32 +90,70 @@ export function AlertasTab({ canManage }: { canManage: boolean }) {
     }
   }
 
+  // Header com botão "Avaliar agora" — sempre visível, mesmo loading/vazio
+  const Header = () => (
+    <div className="flex items-center justify-between mb-4">
+      <div>
+        <h3 className="text-base font-bold text-foreground">
+          Alertas operacionais
+        </h3>
+        <p className="text-[11px] text-muted-foreground">
+          {alerts.length === 0
+            ? 'Avaliados automaticamente após cada sync (06h Maceió)'
+            : `${alerts.length} alerta(s) aberto(s)`}
+        </p>
+      </div>
+      {canManage && (
+        <button
+          onClick={evaluateNow}
+          disabled={evaluating}
+          className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-border bg-card hover:bg-accent disabled:opacity-50"
+        >
+          {evaluating ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <Zap size={15} />
+          )}
+          Avaliar agora
+        </button>
+      )}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="bg-card border border-border rounded-xl p-12 flex flex-col items-center text-muted-foreground">
-        <Loader2 size={28} className="animate-spin mb-2" />
-        <p className="text-sm">Carregando alertas...</p>
+      <div>
+        <Header />
+        <div className="bg-card border border-border rounded-xl p-12 flex flex-col items-center text-muted-foreground">
+          <Loader2 size={28} className="animate-spin mb-2" />
+          <p className="text-sm">Carregando alertas...</p>
+        </div>
       </div>
     );
   }
 
   if (alerts.length === 0) {
     return (
-      <div className="bg-card border border-border rounded-xl p-12 text-center">
-        <Bell size={40} className="mx-auto text-emerald-500 mb-3" />
-        <h3 className="text-base font-bold text-foreground mb-1">
-          Tudo em ordem 🎉
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          Nenhum alerta operacional aberto. Continuaremos monitorando
-          automaticamente após cada sync.
-        </p>
+      <div>
+        <Header />
+        <div className="bg-card border border-border rounded-xl p-12 text-center">
+          <Bell size={40} className="mx-auto text-emerald-500 mb-3" />
+          <h3 className="text-base font-bold text-foreground mb-1">
+            Tudo em ordem 🎉
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Nenhum alerta operacional aberto. Continuaremos monitorando
+            automaticamente após cada sync.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div>
+      <Header />
+      <div className="space-y-3">
       {alerts.map((a) => {
         const style = SEVERITY_STYLE[a.severity] ?? SEVERITY_STYLE.INFO;
         const Icon = style.icon;
@@ -136,6 +202,7 @@ export function AlertasTab({ canManage }: { canManage: boolean }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

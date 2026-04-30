@@ -6,6 +6,8 @@ import type { Customer } from 'google-ads-api';
 import { enums } from 'google-ads-api';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleAdsClientService } from './google-ads-client.service';
+import { TrafegoAlertEvaluatorService } from './trafego-alert-evaluator.service';
+import { TrafegoAlertNotifierService } from './trafego-alert-notifier.service';
 
 // ─── Helpers de conversao de tipos do Google Ads API → Prisma ──────────────
 //
@@ -87,6 +89,8 @@ export class TrafegoSyncService extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private adsClient: GoogleAdsClientService,
+    private alertEvaluator: TrafegoAlertEvaluatorService,
+    private alertNotifier: TrafegoAlertNotifierService,
   ) {
     super();
   }
@@ -94,11 +98,31 @@ export class TrafegoSyncService extends WorkerHost {
   // ─── Processor BullMQ ────────────────────────────────────────────────────
 
   /**
-   * Job 'trafego-sync-account' (enfileirado pela API quando admin clica
-   * "Sincronizar agora"). Tambem usado pelo cron pra cada conta.
+   * Process jobs. Roteia por job.name:
+   *   - 'trafego-sync-account': sync completo (queries Google + upsert + alertas)
+   *   - 'trafego-evaluate-alerts': re-avalia regras sem rodar sync
+   *     (util pra testar regras ou re-avaliar apos admin mudar thresholds)
    */
-  async process(job: Job<{ accountId: string; trigger: 'CRON' | 'MANUAL' | 'OAUTH_CALLBACK' }>) {
-    const { accountId, trigger } = job.data;
+  async process(
+    job: Job<{
+      accountId: string;
+      trigger?: 'CRON' | 'MANUAL' | 'OAUTH_CALLBACK';
+    }>,
+  ) {
+    if (job.name === 'trafego-evaluate-alerts') {
+      const newAlertIds = await this.alertEvaluator.evaluateForAccount(
+        job.data.accountId,
+      );
+      if (newAlertIds.length > 0) {
+        await this.alertNotifier.notifyAlerts(newAlertIds);
+      }
+      this.logger.log(
+        `[TRAFEGO_EVAL] Conta ${job.data.accountId}: ${newAlertIds.length} alerta(s) novos`,
+      );
+      return;
+    }
+    // default: sync
+    const { accountId, trigger = 'MANUAL' } = job.data;
     await this.syncAccount(accountId, trigger);
   }
 
@@ -378,6 +402,22 @@ export class TrafegoSyncService extends WorkerHost {
       this.logger.log(
         `[TRAFEGO_SYNC] Conta ${account.customer_id}: ${campaignsSeen} campanhas, ${rowsUpserted} rows upsertadas em ${finishedAt.getTime() - startedAt.getTime()}ms`,
       );
+
+      // ─── 5. Avaliacao de alertas (pos-sync) ────────────────────────────
+      // Roda em try separado: sync ja foi sucesso, falha aqui nao deve
+      // marcar a conta como erro nem reverter o estado.
+      try {
+        const newAlertIds = await this.alertEvaluator.evaluateForAccount(
+          account.id,
+        );
+        if (newAlertIds.length > 0) {
+          await this.alertNotifier.notifyAlerts(newAlertIds);
+        }
+      } catch (alertError: any) {
+        this.logger.error(
+          `[TRAFEGO_SYNC] Avaliacao de alertas falhou (sync ja OK): ${alertError.message}`,
+        );
+      }
     } catch (e: any) {
       await this.recordFailure(account, trigger, startedAt, e, {
         rowsUpserted,
