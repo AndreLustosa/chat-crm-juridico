@@ -27,6 +27,7 @@ import { ConfiguracoesTab } from './components/ConfiguracoesTab';
 import { PlaceholderTab } from './components/PlaceholderTab';
 import { RelatoriosTab } from './components/RelatoriosTab';
 import { ConversoesTab } from './components/ConversoesTab';
+import { IaOtimizadoraTab } from './components/IaOtimizadoraTab';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -273,12 +274,7 @@ function TrafegoPageInner() {
           <AlertasTab canManage={perms.canManageTrafego} />
         )}
         {tab === 'ia' && account?.connected && (
-          <PlaceholderTab
-            icon={Sparkles}
-            title="IA Otimizadora"
-            description="Em breve: pergunte 'onde cortar verba?', 'por que CPL subiu?', 'palavras com desperdício?' — análise feita sobre os dados internos."
-            phase="Fase 5"
-          />
+          <IaOtimizadoraTab canManage={perms.canManageTrafego} />
         )}
         {/* Configuracoes: SEMPRE acessivel — eh aqui que admin preenche
             credenciais antes de poder conectar a conta. */}

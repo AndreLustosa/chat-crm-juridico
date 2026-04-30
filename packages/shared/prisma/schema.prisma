@@ -60,6 +60,9 @@ model Tenant {
   traffic_conversion_actions TrafficConversionAction[]
   traffic_oci_uploads        TrafficOCIUpload[]
   traffic_lead_form_subs     TrafficLeadFormSubmission[]
+  traffic_ia_decisions       TrafficIADecision[]
+  traffic_ia_memory          TrafficIAMemory[]
+  traffic_ia_policy          TrafficIAPolicy?
 }
 
 model User {
@@ -2051,6 +2054,7 @@ model TrafficAccount {
   conversion_actions TrafficConversionAction[]
   oci_uploads        TrafficOCIUpload[]
   lead_form_subs     TrafficLeadFormSubmission[]
+  ia_decisions       TrafficIADecision[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2759,4 +2763,162 @@ model TrafficLeadFormSubmission {
   @@index([email])
   @@index([phone])
   @@index([lead_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AI AGENT (Sprint C)
+//
+// Toda decisao tomada pela IA (executada, sugerida ou bloqueada) eh persistida
+// pra auditoria. Policy define limites de auto-execucao por tenant. Memory
+// guarda estado entre loops (ex: "ja avaliei essa campanha como morta ha 3
+// dias e admin nao agiu — escalar prioridade").
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Decisao tomada pela IA. Auditoria perpetua — nunca apagar (regra OAB).
+/// Cada loop (HOURLY/DAILY/WEEKLY/MONTHLY/TRIGGERED) gera 0+ decisoes.
+model TrafficIADecision {
+  id         String @id @default(uuid())
+  tenant_id  String
+  account_id String
+
+  /// Loop que gerou: 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'TRIGGERED'
+  loop_kind String
+
+  /// Tipo: 'ADD_NEGATIVE_KEYWORD' | 'PAUSE_AD_REPROVED' |
+  /// 'BUDGET_INCREASE_SUGGESTION' | 'CAMPAIGN_DEAD_ALERT' |
+  /// 'HIGH_CPL_WARNING' | 'LOW_CTR_WARNING' | 'ZERO_CONVERSIONS' |
+  /// 'OVERSPEND' | etc.
+  decision_kind String
+
+  /// Recurso afetado (se aplicavel)
+  resource_type String? // 'CAMPAIGN' | 'AD_GROUP' | 'KEYWORD' | etc
+  resource_id   String? // FK semântica (TrafficCampaign.id, etc)
+  resource_name String? // nome humano pra exibir na UI
+
+  /// Inputs usados (snapshot dos dados que alimentaram a decisao)
+  inputs Json
+
+  /// Score de confidence (0..1)
+  confidence Decimal @db.Decimal(4, 3)
+
+  /// Razoes estruturadas (JSON array de strings em pt-BR)
+  reasons Json
+
+  /// Que faria? Ja fez?
+  /// 'EXECUTE' (auto-aplicada) | 'SUGGEST' (sugerida ao humano) |
+  /// 'BLOCK' (bloqueada por OAB) | 'NOTIFY_ONLY' (so alerta, sem mutate) |
+  /// 'FAILED' (tentou executar e falhou)
+  action        String
+  executed      Boolean @default(false)
+  /// FK pra TrafficMutateLog se executou
+  mutate_log_id String?
+
+  /// Feedback do humano: 'APPROVED' | 'REVERTED' | 'IGNORED' | null
+  human_feedback String?
+  feedback_at    DateTime?
+  feedback_note  String?   @db.Text
+
+  /// Texto resumido pra UI (1 frase pt-BR). Gerado pela LLM ou template.
+  summary String? @db.Text
+
+  created_at DateTime @default(now())
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, decision_kind, created_at(sort: Desc)])
+  @@index([account_id, action, created_at(sort: Desc)])
+  @@index([action, human_feedback])
+  @@index([executed, created_at(sort: Desc)])
+}
+
+/// Memoria persistente da IA entre loops. Chave/valor com TTL opcional.
+/// Exemplos de chave:
+///   - 'last_daily_run_at'           — debouncing
+///   - 'campaign_X_dead_check_count' — escalation tracking
+///   - 'overspend_X_notified_at'     — anti-spam de alertas
+model TrafficIAMemory {
+  id        String @id @default(uuid())
+  tenant_id String
+
+  key   String
+  value Json
+
+  expires_at DateTime?
+  updated_at DateTime  @updatedAt
+  created_at DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, key])
+  @@index([expires_at])
+}
+
+/// Policy do AI agent — toggle Conselheiro vs Autonomo + limites granulares.
+/// 1 row por tenant. agent_enabled=false desliga TODOS os loops; toggles
+/// individuais (auto_apply_*) controlam quais acoes podem ser executadas
+/// automaticamente em modo Autonomo. Modo Conselheiro = todos auto_apply_*
+/// false (so sugere, nunca executa).
+model TrafficIAPolicy {
+  id        String @id @default(uuid())
+  tenant_id String @unique
+
+  /// Habilita IA agente em geral (cron loops rodam ou nao)
+  agent_enabled Boolean @default(false)
+
+  /// Modo geral: 'ADVISOR' (so sugere) | 'AUTONOMOUS' (executa quando confidence >= threshold).
+  /// Pra quem quer toggle simples sem mexer em cada auto_apply_*. Quando
+  /// 'ADVISOR', todos auto_apply_* sao ignorados (forcado false).
+  mode String @default("ADVISOR")
+
+  /// Maximo de acoes auto-executadas por dia (rate limit hard)
+  max_auto_actions_per_day Int @default(10)
+
+  /// Confidence minimo pra auto-executar (default 0.95 = bem conservador)
+  min_confidence_for_auto Decimal @default(0.95) @db.Decimal(4, 3)
+
+  /// Toggle granular por tipo de acao (modo AUTONOMOUS)
+  auto_apply_negative_keywords         Boolean @default(false)
+  auto_apply_pause_disapproved         Boolean @default(true)
+  auto_apply_rsa_asset_recommendations Boolean @default(false)
+  auto_apply_budget_changes            Boolean @default(false)
+  auto_apply_bidding_strategy_changes  Boolean @default(false)
+
+  /// Limites de mutate (anti-explosao)
+  /// Maximo de mudanca em budget por aplicacao (0.20 = 20%)
+  max_budget_change_percent  Decimal @default(0.20) @db.Decimal(4, 3)
+  /// Quantas mudancas de budget por semana (anti-pingue-pongue)
+  max_budget_change_per_week Int     @default(1)
+  /// Maximo de negative keywords auto-aplicadas por semana
+  max_negatives_per_week     Int     @default(20)
+
+  /// Janela de rollback (horas) — se admin reverter dentro dessa janela,
+  /// IA marca como REVERTED e ajusta confidence pra mesma decisao no futuro
+  rollback_window_hours Int @default(24)
+
+  /// Canais de notificacao
+  notify_admin_email    Boolean @default(true)
+  notify_admin_whatsapp Boolean @default(true)
+  notify_admin_inapp    Boolean @default(true)
+
+  /// Se admin nao responde sugestao em N horas, IA escala (notif. mais forte)
+  escalation_hours Int @default(48)
+
+  /// Schedule dos loops (cron strings em pt-BR friendly format)
+  /// Default: daily 06:30, weekly Mon 09:00, monthly day 1 09:00
+  daily_cron   String @default("30 6 * * *")
+  weekly_cron  String @default("0 9 * * 1")
+  monthly_cron String @default("0 9 1 * *")
+
+  /// Hourly loop (ex: alertas de overspend mid-day) — opcional
+  hourly_enabled Boolean @default(false)
+
+  /// Shadow mode: IA "decide" mas nao executa (so loga + notifica). Util
+  /// nos primeiros 14 dias pra calibrar antes de soltar Autonomo.
+  shadow_mode Boolean @default(true)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 }

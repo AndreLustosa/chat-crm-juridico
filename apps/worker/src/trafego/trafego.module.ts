@@ -13,6 +13,9 @@ import { TrafegoMutateProcessor } from './trafego-mutate.processor';
 import { TrafegoSyncExtendedService } from './trafego-sync-extended.service';
 import { TrafficOCIService } from './trafego-oci.service';
 import { TrafficOCIProcessor } from './trafego-oci.processor';
+import { TrafficAIAgentService } from './traffic-ai-agent.service';
+import { TrafficAIAgentCronService } from './traffic-ai-agent-cron.service';
+import { TrafficAIAgentProcessor } from './traffic-ai-agent.processor';
 
 @Module({
   imports: [
@@ -21,6 +24,7 @@ import { TrafficOCIProcessor } from './trafego-oci.processor';
     BullModule.registerQueue({ name: 'trafego-sync' }),
     BullModule.registerQueue({ name: 'trafego-mutate' }),
     BullModule.registerQueue({ name: 'trafego-oci' }),
+    BullModule.registerQueue({ name: 'trafego-ai-agent' }),
   ],
   providers: [
     TrafegoCryptoService,
@@ -34,7 +38,10 @@ import { TrafficOCIProcessor } from './trafego-oci.processor';
     TrafegoMutateProcessor,
     TrafficOCIService,
     TrafficOCIProcessor,
+    TrafficAIAgentService,
+    TrafficAIAgentCronService,
+    TrafficAIAgentProcessor,
   ],
-  exports: [TrafficOCIService],
+  exports: [TrafficOCIService, TrafficAIAgentService],
 })
 export class TrafegoModule {}

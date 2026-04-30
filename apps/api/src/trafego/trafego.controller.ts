@@ -22,14 +22,19 @@ import { Public } from '../auth/decorators/public.decorator';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoConfigService } from './trafego-config.service';
+import { TrafegoAiService } from './trafego-ai.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
   AddNegativesDto,
+  AiDecisionFeedbackDto,
+  AiTriggerLoopDto,
   DashboardQueryDto,
+  ListAiDecisionsDto,
   MapConversionActionDto,
   MutateBaseDto,
   UpdateAccountDto,
+  UpdateAiPolicyDto,
   UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
@@ -43,6 +48,7 @@ export class TrafegoController {
     private readonly service: TrafegoService,
     private readonly oauth: TrafegoOAuthService,
     private readonly config: TrafegoConfigService,
+    private readonly ai: TrafegoAiService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -651,5 +657,53 @@ export class TrafegoController {
       ok: true,
       message: 'Avaliacao de alertas enfileirada. Resultados em ~10s.',
     };
+  }
+
+  // ─── IA Otimizadora (Sprint C) ──────────────────────────────────────────
+
+  @Get('ai/decisions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async listAiDecisions(@Req() req: any, @Query() query: ListAiDecisionsDto) {
+    return this.ai.listDecisions(req.user.tenant_id, {
+      action: query.action,
+      kind: query.kind,
+      loopKind: query.loop_kind,
+      feedback: query.feedback,
+      limit: query.limit,
+    });
+  }
+
+  @Post('ai/decisions/:id/feedback')
+  @Roles('ADMIN', 'ADVOGADO')
+  async submitAiDecisionFeedback(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: AiDecisionFeedbackDto,
+  ) {
+    return this.ai.submitFeedback(
+      req.user.tenant_id,
+      id,
+      dto.feedback,
+      dto.note,
+      req.user.id,
+    );
+  }
+
+  @Get('ai/policy')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getAiPolicy(@Req() req: any) {
+    return this.ai.getPolicy(req.user.tenant_id);
+  }
+
+  @Patch('ai/policy')
+  @Roles('ADMIN')
+  async updateAiPolicy(@Req() req: any, @Body() dto: UpdateAiPolicyDto) {
+    return this.ai.updatePolicy(req.user.tenant_id, dto);
+  }
+
+  @Post('ai/trigger')
+  @Roles('ADMIN', 'ADVOGADO')
+  async triggerAiLoop(@Req() req: any, @Body() dto: AiTriggerLoopDto) {
+    return this.ai.triggerLoop(req.user.tenant_id, dto.loop_kind ?? 'TRIGGERED');
   }
 }

@@ -310,3 +310,142 @@ export class DashboardQueryDto {
   @IsOptional()
   compare_to?: string;
 }
+
+// ─── IA Otimizadora (Sprint C) ─────────────────────────────────────────────
+
+export class ListAiDecisionsDto {
+  @IsString()
+  @IsOptional()
+  @IsIn(['EXECUTE', 'SUGGEST', 'BLOCK', 'NOTIFY_ONLY', 'FAILED'])
+  action?: 'EXECUTE' | 'SUGGEST' | 'BLOCK' | 'NOTIFY_ONLY' | 'FAILED';
+
+  @IsString()
+  @IsOptional()
+  kind?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'TRIGGERED'])
+  loop_kind?: 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'TRIGGERED';
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['APPROVED', 'REVERTED', 'IGNORED', 'PENDING'])
+  feedback?: 'APPROVED' | 'REVERTED' | 'IGNORED' | 'PENDING';
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
+export class AiDecisionFeedbackDto {
+  @IsString()
+  @IsIn(['APPROVED', 'REVERTED', 'IGNORED'])
+  feedback!: 'APPROVED' | 'REVERTED' | 'IGNORED';
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+}
+
+export class AiTriggerLoopDto {
+  @IsString()
+  @IsOptional()
+  @IsIn(['DAILY', 'WEEKLY', 'MONTHLY', 'TRIGGERED'])
+  loop_kind?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'TRIGGERED';
+}
+
+export class UpdateAiPolicyDto {
+  @IsBoolean()
+  @IsOptional()
+  agent_enabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['ADVISOR', 'AUTONOMOUS'])
+  mode?: 'ADVISOR' | 'AUTONOMOUS';
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(500)
+  max_auto_actions_per_day?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0.5)
+  @Max(1)
+  min_confidence_for_auto?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  auto_apply_negative_keywords?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  auto_apply_pause_disapproved?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  auto_apply_rsa_asset_recommendations?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  auto_apply_budget_changes?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  auto_apply_bidding_strategy_changes?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0.01)
+  @Max(0.5)
+  max_budget_change_percent?: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(7)
+  max_budget_change_per_week?: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0)
+  @Max(500)
+  max_negatives_per_week?: number;
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(168)
+  rollback_window_hours?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  notify_admin_email?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  notify_admin_whatsapp?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  notify_admin_inapp?: boolean;
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(168)
+  escalation_hours?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  hourly_enabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  shadow_mode?: boolean;
+}

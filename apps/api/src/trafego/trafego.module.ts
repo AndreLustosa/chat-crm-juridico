@@ -6,6 +6,7 @@ import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoCryptoService } from './trafego-crypto.service';
 import { TrafegoConfigService } from './trafego-config.service';
 import { TrafegoEventsService } from './trafego-events.service';
+import { TrafegoAiService } from './trafego-ai.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -15,13 +16,14 @@ import { TrafegoEventsService } from './trafego-events.service';
  *   - Fase 2: Worker sincroniza metricas reais via Google Ads API
  *   - Fase 3: Dashboard com KPIs/graficos
  *   - Fase 4: Alertas + Relatorios PDF
- *   - Fase 5: IA Otimizadora
+ *   - Fase 5 (Sprint C): IA Otimizadora — TrafficIADecision/Policy/Memory
  */
 @Module({
   imports: [
     BullModule.registerQueue({ name: 'trafego-sync' }),
     BullModule.registerQueue({ name: 'trafego-mutate' }),
     BullModule.registerQueue({ name: 'trafego-oci' }),
+    BullModule.registerQueue({ name: 'trafego-ai-agent' }),
   ],
   controllers: [TrafegoController],
   providers: [
@@ -30,6 +32,7 @@ import { TrafegoEventsService } from './trafego-events.service';
     TrafegoCryptoService,
     TrafegoConfigService,
     TrafegoEventsService,
+    TrafegoAiService,
   ],
   exports: [
     TrafegoService,
@@ -37,6 +40,7 @@ import { TrafegoEventsService } from './trafego-events.service';
     TrafegoCryptoService,
     TrafegoConfigService,
     TrafegoEventsService,
+    TrafegoAiService,
   ],
 })
 export class TrafegoModule {}
