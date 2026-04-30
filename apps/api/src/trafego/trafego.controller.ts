@@ -302,6 +302,68 @@ export class TrafegoController {
     };
   }
 
+  // ─── Relatorios PDF (Fase 4B) ──────────────────────────────────────────
+
+  /**
+   * Gera PDF de snapshot do trafego pra um periodo. Faz download direto.
+   *
+   * Query params:
+   *   from — data inicio (YYYY-MM-DD)
+   *   to   — data fim (YYYY-MM-DD)
+   *   label — opcional, ex: "Abril/2026"
+   */
+  @Get('reports/generate')
+  @Roles('ADMIN', 'ADVOGADO')
+  async generateReport(
+    @Req() req: any,
+    @Res() res: Response,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('label') label?: string,
+  ) {
+    if (!from || !to) {
+      throw new HttpException(
+        'Parametros from e to (YYYY-MM-DD) sao obrigatorios.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const buffer = await this.service.generateReport(
+        req.user.tenant_id,
+        req.user.id,
+        req.user.name,
+        from,
+        to,
+        label,
+      );
+
+      const filename = `trafego_${from}_a_${to}.pdf`;
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': buffer.length.toString(),
+      });
+      res.send(buffer);
+    } catch (e: any) {
+      // Log no servidor pra debug, mas resposta limpa pro cliente
+      throw new HttpException(
+        `Erro ao gerar PDF: ${e.message ?? 'desconhecido'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /** Lista historico de relatorios gerados (registros em Report table). */
+  @Get('reports')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listReports(@Req() req: any, @Query('limit') limit: string) {
+    return this.service.listReports(
+      req.user.tenant_id,
+      limit ? parseInt(limit, 10) : 50,
+    );
+  }
+
   /**
    * Re-avalia regras de alerta sem rodar sync. Util pra testar regras ou
    * disparar reavaliacao apos admin mudar thresholds em Configuracoes.

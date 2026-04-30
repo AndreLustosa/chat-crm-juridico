@@ -24,6 +24,7 @@ import { CampanhasTab } from './components/CampanhasTab';
 import { AlertasTab } from './components/AlertasTab';
 import { ConfiguracoesTab } from './components/ConfiguracoesTab';
 import { PlaceholderTab } from './components/PlaceholderTab';
+import { RelatoriosTab } from './components/RelatoriosTab';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -260,12 +261,7 @@ function TrafegoPageInner() {
           />
         )}
         {tab === 'relatorios' && account?.connected && (
-          <PlaceholderTab
-            icon={FileText}
-            title="Relatórios em PDF"
-            description="Em breve: exportação mensal/semanal de performance com gráficos, evolução e comparativo de períodos."
-            phase="Fase 4"
-          />
+          <RelatoriosTab canManage={perms.canManageTrafego} />
         )}
         {tab === 'alertas' && account?.connected && (
           <AlertasTab canManage={perms.canManageTrafego} />

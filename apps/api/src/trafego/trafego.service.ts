@@ -5,6 +5,10 @@ import {
   UpdateCampaignDto,
   UpdateSettingsDto,
 } from './trafego.dto';
+import {
+  buildTrafegoSnapshotPdf,
+  TrafegoSnapshotData,
+} from '../reports/templates/trafego-snapshot';
 
 const MICROS_PER_BRL = 1_000_000n;
 
@@ -423,5 +427,212 @@ export class TrafegoService {
         thirty_days_ago: thirtyDaysAgo.toISOString().slice(0, 10),
       },
     };
+  }
+
+  // ─── Relatorios PDF (Fase 4B) ───────────────────────────────────────────
+
+  /**
+   * Gera PDF de snapshot do trafego pra um periodo. Coleta dados do banco
+   * e chama o template `trafego-snapshot.ts`. Tambem registra no historico
+   * (Report table) pra usuario re-baixar/listar.
+   */
+  async generateReport(
+    tenantId: string,
+    actorId: string,
+    actorName: string,
+    fromIso: string,
+    toIso: string,
+    label?: string,
+  ): Promise<Buffer> {
+    const account = await this.getAccount(tenantId);
+    if (!account) {
+      throw new NotFoundException('Conta de trafego nao conectada');
+    }
+
+    const dateFrom = new Date(fromIso);
+    dateFrom.setUTCHours(0, 0, 0, 0);
+    const dateTo = new Date(toIso);
+    dateTo.setUTCHours(0, 0, 0, 0);
+
+    if (dateFrom > dateTo) {
+      throw new NotFoundException('Periodo invalido (from > to)');
+    }
+
+    // ─── Coleta de dados ──────────────────────────────────────────────
+    const [
+      totalAgg,
+      campaignAggs,
+      dailyAggs,
+      campaignsCount,
+    ] = await Promise.all([
+      this.prisma.trafficMetricDaily.aggregate({
+        where: {
+          tenant_id: tenantId,
+          date: { gte: dateFrom, lte: dateTo },
+        },
+        _sum: {
+          cost_micros: true,
+          impressions: true,
+          clicks: true,
+          conversions: true,
+          conversions_value: true,
+        },
+      }),
+      this.prisma.trafficMetricDaily.groupBy({
+        by: ['campaign_id'],
+        where: {
+          tenant_id: tenantId,
+          date: { gte: dateFrom, lte: dateTo },
+        },
+        _sum: {
+          cost_micros: true,
+          impressions: true,
+          clicks: true,
+          conversions: true,
+        },
+      }),
+      this.prisma.trafficMetricDaily.groupBy({
+        by: ['date'],
+        where: {
+          tenant_id: tenantId,
+          date: { gte: dateFrom, lte: dateTo },
+        },
+        _sum: {
+          cost_micros: true,
+          impressions: true,
+          clicks: true,
+          conversions: true,
+        },
+        orderBy: { date: 'asc' },
+      }),
+      this.prisma.trafficCampaign.groupBy({
+        by: ['status'],
+        where: { tenant_id: tenantId, is_archived_internal: false },
+        _count: { _all: true },
+      }),
+    ]);
+
+    // Enriquecer agregados de campanha com nome/status/canal
+    const campaignIds = campaignAggs.map((a) => a.campaign_id);
+    const campaignDetails = await this.prisma.trafficCampaign.findMany({
+      where: { id: { in: campaignIds } },
+      select: { id: true, name: true, status: true, channel_type: true },
+    });
+    const detailMap = new Map(campaignDetails.map((c) => [c.id, c]));
+
+    // ─── Calcula KPIs ─────────────────────────────────────────────────
+    const microsToBRL = (m: bigint | null | undefined): number =>
+      m ? Number(m) / 1_000_000 : 0;
+
+    const totalSpend = microsToBRL(totalAgg._sum.cost_micros);
+    const totalImpressions = Number(totalAgg._sum.impressions ?? 0);
+    const totalClicks = Number(totalAgg._sum.clicks ?? 0);
+    const totalConversions = Number(totalAgg._sum.conversions ?? 0);
+    const totalConvValue = Number(totalAgg._sum.conversions_value ?? 0);
+
+    const cpl = totalConversions > 0 ? totalSpend / totalConversions : 0;
+    const ctr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+    const avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
+    const roas = totalSpend > 0 ? totalConvValue / totalSpend : 0;
+
+    const activeCount =
+      campaignsCount.find((c) => c.status === 'ENABLED')?._count._all ?? 0;
+    const pausedCount =
+      campaignsCount.find((c) => c.status === 'PAUSED')?._count._all ?? 0;
+
+    const periodLabel =
+      label ||
+      `${dateFrom.toISOString().slice(0, 10)} a ${dateTo.toISOString().slice(0, 10)}`;
+
+    // ─── Monta dados pro template ─────────────────────────────────────
+    const reportData: TrafegoSnapshotData = {
+      period: {
+        from: dateFrom.toISOString().slice(0, 10),
+        to: dateTo.toISOString().slice(0, 10),
+        label: periodLabel,
+      },
+      account: {
+        customer_id: account.customer_id,
+        account_name: account.account_name,
+        last_sync_at: account.last_sync_at?.toISOString() ?? null,
+      },
+      generatedBy: actorName,
+      kpis: {
+        spend_brl: totalSpend,
+        leads: Math.round(totalConversions),
+        cpl_brl: cpl,
+        ctr,
+        avg_cpc_brl: avgCpc,
+        roas,
+        impressions: totalImpressions,
+        clicks: totalClicks,
+        active_campaigns: activeCount,
+        paused_campaigns: pausedCount,
+      },
+      byCampaign: campaignAggs
+        .map((a) => {
+          const meta = detailMap.get(a.campaign_id);
+          const cost = microsToBRL(a._sum.cost_micros);
+          const conv = Number(a._sum.conversions ?? 0);
+          return {
+            name: meta?.name ?? '(removida)',
+            status: meta?.status ?? 'UNSPECIFIED',
+            channel_type: meta?.channel_type ?? null,
+            impressions: Number(a._sum.impressions ?? 0),
+            clicks: Number(a._sum.clicks ?? 0),
+            cost_brl: cost,
+            conversions: conv,
+            cpl_brl: conv > 0 ? cost / conv : 0,
+          };
+        })
+        .sort((a, b) => b.cost_brl - a.cost_brl), // mais gasto primeiro
+      byDay: dailyAggs.map((d) => {
+        const impressions = Number(d._sum.impressions ?? 0);
+        const clicks = Number(d._sum.clicks ?? 0);
+        return {
+          date: d.date.toISOString().slice(0, 10),
+          impressions,
+          clicks,
+          cost_brl: microsToBRL(d._sum.cost_micros),
+          conversions: Number(d._sum.conversions ?? 0),
+          ctr: impressions > 0 ? clicks / impressions : 0,
+        };
+      }),
+    };
+
+    // ─── Gera PDF + registra historico (fire-and-forget) ─────────────
+    const buffer = await buildTrafegoSnapshotPdf(reportData);
+
+    this.prisma.report
+      .create({
+        data: {
+          tenant_id: tenantId,
+          user_id: actorId,
+          kind: 'trafego-snapshot',
+          display_name: `Trafego — ${periodLabel}`,
+          params: {
+            from: reportData.period.from,
+            to: reportData.period.to,
+            label: periodLabel,
+          },
+        },
+      })
+      .catch((e) => {
+        this.logger.warn(
+          `[REPORTS] Falha registrando historico (silencioso): ${e.message}`,
+        );
+      });
+
+    return buffer;
+  }
+
+  /** Lista historico de relatorios de trafego do tenant. */
+  async listReports(tenantId: string, limit = 50) {
+    return this.prisma.report.findMany({
+      where: { tenant_id: tenantId, kind: 'trafego-snapshot' },
+      orderBy: { generated_at: 'desc' },
+      take: limit,
+      include: { user: { select: { id: true, name: true } } },
+    });
   }
 }
