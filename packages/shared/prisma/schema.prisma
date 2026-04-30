@@ -65,6 +65,7 @@ model Tenant {
   traffic_ia_policy          TrafficIAPolicy?
   traffic_user_lists         TrafficUserList[]
   traffic_user_list_members  TrafficUserListMember[]
+  traffic_recommendations    TrafficRecommendation[]
 }
 
 model User {
@@ -2059,6 +2060,7 @@ model TrafficAccount {
   ia_decisions       TrafficIADecision[]
   user_lists         TrafficUserList[]
   user_list_members  TrafficUserListMember[]
+  recommendations    TrafficRecommendation[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -3046,4 +3048,81 @@ model TrafficUserListMember {
   @@unique([user_list_id, email_sha256, phone_sha256])
   @@index([account_id, op_pending])
   @@index([lead_id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// RECOMMENDATIONS API (Sprint E)
+//
+// Cache local das recommendations vindas da Google Ads API. Cada
+// recomendacao passa por OAB validator antes de ser elegivel pra apply
+// automatico (ex: TEXT_AD com "garantia" eh BLOCKED). Admin pode aplicar
+// manualmente a partir da UI mesmo se filtro OAB pegar (override).
+//
+// status:
+//   "PENDING"      — vista no Google, ainda nao avaliada
+//   "OAB_BLOCKED"  — OAB validator reprovou (admin pode override)
+//   "READY"        — passou OAB, pronta pra aplicar (manual ou auto)
+//   "APPLIED"      — aplicada com sucesso (referencia mutate_log_id)
+//   "DISMISSED"    — admin descartou (registra dismiss no Google tambem)
+//   "EXPIRED"      — sumiu da listagem do Google (ja nao aplicavel)
+//   "ERROR"        — apply tentou mas falhou
+// ─────────────────────────────────────────────────────────────────────────
+
+model TrafficRecommendation {
+  id         String @id @default(uuid())
+  tenant_id  String
+  account_id String
+
+  /// resource_name 'customers/X/recommendations/Y'
+  google_resource_name String
+  /// Tipo: 'KEYWORD' | 'KEYWORD_NEGATIVE' | 'CAMPAIGN_BUDGET' |
+  /// 'TEXT_AD' | 'RESPONSIVE_SEARCH_AD' | 'RESPONSIVE_SEARCH_AD_ASSET' |
+  /// 'CALLOUT_ASSET' | 'SITELINK_ASSET' | 'TARGET_CPA_OPT_IN' |
+  /// 'TARGET_ROAS_OPT_IN' | 'MAXIMIZE_CONVERSIONS_OPT_IN' |
+  /// 'KEYWORD_MATCH_TYPE' | 'USE_BROAD_MATCH_KEYWORD' | 'OPTIMIZE_AD_ROTATION'
+  /// | etc — ver api-recommendations.md (80+ tipos)
+  recommendation_type  String
+
+  /// FK semantica pra recurso afetado (TrafficCampaign.id, TrafficAdGroup.id)
+  campaign_id String?
+  ad_group_id String?
+
+  /// Snapshot completo do payload da API (todos os campos do tipo)
+  payload Json
+
+  /// Impact projetado: clicks/conversions/cost ANTES e DEPOIS de aplicar
+  impact_base      Json?
+  impact_potential Json?
+
+  /// Status interno (vide enum acima)
+  status String @default("PENDING")
+
+  /// Resultado da validacao OAB (se aplicavel ao tipo)
+  oab_violations Json?
+  /// Razoes filtragem (mensagens pt-BR pra exibir no UI)
+  oab_summary    String? @db.Text
+
+  /// Quando applied/dismissed
+  resolved_at   DateTime?
+  /// FK pra TrafficMutateLog se applied
+  mutate_log_id String?
+  /// Erro do ultimo apply (se ERROR)
+  error_message String?   @db.Text
+
+  /// Quem aplicou/descartou (User.id ou 'AI_AGENT')
+  resolved_by String?
+
+  /// Quando viu no Google pela primeira vez / ultima vez
+  first_seen_at DateTime @default(now())
+  last_seen_at  DateTime @default(now())
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@unique([account_id, google_resource_name])
+  @@index([tenant_id, status, recommendation_type])
+  @@index([account_id, status])
+  @@index([campaign_id])
 }

@@ -25,16 +25,19 @@ import { TrafegoConfigService } from './trafego-config.service';
 import { TrafegoAiService } from './trafego-ai.service';
 import { TrafegoLeadFormService } from './trafego-lead-form.service';
 import { TrafegoAudiencesService } from './trafego-audiences.service';
+import { TrafegoRecommendationsService } from './trafego-recommendations.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
   AddNegativesDto,
   AiDecisionFeedbackDto,
   AiTriggerLoopDto,
+  ApplyRecommendationDto,
   CreateUserListDto,
   DashboardQueryDto,
   ListAiDecisionsDto,
   ListLeadFormSubmissionsDto,
+  ListRecommendationsDto,
   MapConversionActionDto,
   MutateBaseDto,
   UpdateAccountDto,
@@ -56,6 +59,7 @@ export class TrafegoController {
     private readonly ai: TrafegoAiService,
     private readonly leadForm: TrafegoLeadFormService,
     private readonly audiences: TrafegoAudiencesService,
+    private readonly recommendations: TrafegoRecommendationsService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -825,5 +829,47 @@ export class TrafegoController {
   @Roles('ADMIN')
   async syncAudience(@Req() req: any, @Param('id') id: string) {
     return this.audiences.enqueueSync(req.user.tenant_id, id);
+  }
+
+  // ─── Recommendations API (Sprint E) ─────────────────────────────────────
+
+  @Get('recommendations')
+  @Roles('ADMIN', 'ADVOGADO')
+  async listRecommendations(
+    @Req() req: any,
+    @Query() query: ListRecommendationsDto,
+  ) {
+    return this.recommendations.list(req.user.tenant_id, {
+      status: query.status,
+      type: query.type,
+      limit: query.limit,
+    });
+  }
+
+  @Post('recommendations/sync')
+  @Roles('ADMIN', 'ADVOGADO')
+  async syncRecommendations(@Req() req: any) {
+    return this.recommendations.triggerSync(req.user.tenant_id);
+  }
+
+  @Post('recommendations/:id/apply')
+  @Roles('ADMIN', 'ADVOGADO')
+  async applyRecommendation(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: ApplyRecommendationDto,
+  ) {
+    return this.recommendations.enqueueApply(req.user.tenant_id, id, {
+      force: !!dto.force,
+      resolvedBy: req.user.id,
+    });
+  }
+
+  @Post('recommendations/:id/dismiss')
+  @Roles('ADMIN', 'ADVOGADO')
+  async dismissRecommendation(@Req() req: any, @Param('id') id: string) {
+    return this.recommendations.enqueueDismiss(req.user.tenant_id, id, {
+      resolvedBy: req.user.id,
+    });
   }
 }

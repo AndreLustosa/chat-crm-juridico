@@ -9,6 +9,7 @@ import { TrafegoEventsService } from './trafego-events.service';
 import { TrafegoAiService } from './trafego-ai.service';
 import { TrafegoLeadFormService } from './trafego-lead-form.service';
 import { TrafegoAudiencesService } from './trafego-audiences.service';
+import { TrafegoRecommendationsService } from './trafego-recommendations.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -27,6 +28,7 @@ import { TrafegoAudiencesService } from './trafego-audiences.service';
     BullModule.registerQueue({ name: 'trafego-oci' }),
     BullModule.registerQueue({ name: 'trafego-ai-agent' }),
     BullModule.registerQueue({ name: 'trafego-customer-match' }),
+    BullModule.registerQueue({ name: 'trafego-recommendations' }),
   ],
   controllers: [TrafegoController],
   providers: [
@@ -38,6 +40,7 @@ import { TrafegoAudiencesService } from './trafego-audiences.service';
     TrafegoAiService,
     TrafegoLeadFormService,
     TrafegoAudiencesService,
+    TrafegoRecommendationsService,
   ],
   exports: [
     TrafegoService,
@@ -48,6 +51,7 @@ import { TrafegoAudiencesService } from './trafego-audiences.service';
     TrafegoAiService,
     TrafegoLeadFormService,
     TrafegoAudiencesService,
+    TrafegoRecommendationsService,
   ],
 })
 export class TrafegoModule {}

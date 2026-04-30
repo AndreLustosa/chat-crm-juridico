@@ -506,3 +506,44 @@ export class TriggerCustomerMatchSyncDto {
   @IsOptional()
   user_list_id?: string;
 }
+
+// ─── Recommendations API (Sprint E) ─────────────────────────────────────────
+
+export class ListRecommendationsDto {
+  @IsString()
+  @IsOptional()
+  @IsIn([
+    'PENDING',
+    'READY',
+    'OAB_BLOCKED',
+    'APPLIED',
+    'DISMISSED',
+    'EXPIRED',
+    'ERROR',
+  ])
+  status?:
+    | 'PENDING'
+    | 'READY'
+    | 'OAB_BLOCKED'
+    | 'APPLIED'
+    | 'DISMISSED'
+    | 'EXPIRED'
+    | 'ERROR';
+
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  @Max(300)
+  limit?: number;
+}
+
+export class ApplyRecommendationDto {
+  /** Bypass do filtro OAB (admin override). Default false. */
+  @IsBoolean()
+  @IsOptional()
+  force?: boolean;
+}
