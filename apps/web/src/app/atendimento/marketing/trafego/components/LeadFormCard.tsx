@@ -54,24 +54,51 @@ export function LeadFormCard({ canManage }: { canManage: boolean }) {
 
   async function load() {
     setLoading(true);
-    try {
-      const [subsRes, settingsRes] = await Promise.all([
-        api.get<Submission[]>('/trafego/lead-form-submissions?limit=20'),
-        api.get<LeadFormSettings>('/trafego/settings'),
-      ]);
-      setSubs(subsRes.data);
-      setSettings({
-        lead_form_webhook_secret: (settingsRes.data as any).lead_form_webhook_secret ?? null,
-        lead_form_auto_create_lead:
-          (settingsRes.data as any).lead_form_auto_create_lead ?? true,
-        lead_form_default_stage:
-          (settingsRes.data as any).lead_form_default_stage ?? 'INTERESSADO',
-      });
-    } catch {
-      showError('Erro ao carregar Lead Forms.');
-    } finally {
-      setLoading(false);
+    // Carregamentos isolados — uma falha não derruba a outra. Se settings
+    // falhar, ainda dá pra ver as submissions (e vice-versa).
+    const [subsRes, settingsRes] = await Promise.allSettled([
+      api.get<Submission[]>('/trafego/lead-form-submissions', {
+        params: { limit: 20 },
+      }),
+      api.get<LeadFormSettings>('/trafego/settings'),
+    ]);
+
+    if (subsRes.status === 'fulfilled') {
+      setSubs(Array.isArray(subsRes.value.data) ? subsRes.value.data : []);
+    } else {
+      const msg =
+        (subsRes.reason as any)?.response?.data?.message ??
+        (subsRes.reason as any)?.message ??
+        'desconhecido';
+      showError(`Erro ao listar submissions: ${msg}`);
     }
+
+    if (settingsRes.status === 'fulfilled') {
+      const data = settingsRes.value.data as any;
+      setSettings({
+        lead_form_webhook_secret:
+          typeof data?.lead_form_webhook_secret === 'string'
+            ? data.lead_form_webhook_secret
+            : null,
+        lead_form_auto_create_lead:
+          typeof data?.lead_form_auto_create_lead === 'boolean'
+            ? data.lead_form_auto_create_lead
+            : true,
+        lead_form_default_stage:
+          typeof data?.lead_form_default_stage === 'string' &&
+          data.lead_form_default_stage.length > 0
+            ? data.lead_form_default_stage
+            : 'INTERESSADO',
+      });
+    } else {
+      const msg =
+        (settingsRes.reason as any)?.response?.data?.message ??
+        (settingsRes.reason as any)?.message ??
+        'desconhecido';
+      showError(`Erro ao carregar settings de Lead Form: ${msg}`);
+    }
+
+    setLoading(false);
   }
 
   useEffect(() => {
