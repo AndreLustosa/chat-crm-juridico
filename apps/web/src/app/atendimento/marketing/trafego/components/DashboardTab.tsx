@@ -60,6 +60,30 @@ const fmtPct = (v: number) =>
     maximumFractionDigits: 2,
   }).format(v || 0);
 
+/**
+ * Cor do ROAS por faixa: vermelho (deficit), amarelo (perto do break-even),
+ * verde (lucrativo), muted quando nao ha dados (sync sem conversions_value).
+ */
+function roasAccent(
+  roas: number,
+): 'danger' | 'warning' | 'success' | 'muted' {
+  if (roas <= 0) return 'muted';
+  if (roas < 1) return 'danger';
+  if (roas < 2) return 'warning';
+  return 'success';
+}
+
+function roasHint(roas: number): string | undefined {
+  if (roas <= 0) {
+    // ROAS depende de conversions_value > 0. Se for 0, normalmente eh
+    // ConversionAction sem valor padrao configurado no Google.
+    return 'Sem valor de conversão — defina default_value nas ConversionActions';
+  }
+  if (roas < 1) return 'Abaixo do break-even (1x)';
+  if (roas < 2) return 'Próximo do break-even';
+  return undefined;
+}
+
 export function DashboardTab() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -152,7 +176,8 @@ export function DashboardTab() {
         <KpiCard
           label="ROAS estimado"
           value={`${(k?.roas_estimated ?? 0).toFixed(2)}x`}
-          accent="success"
+          accent={roasAccent(k?.roas_estimated ?? 0)}
+          hint={roasHint(k?.roas_estimated ?? 0)}
           loading={loading}
         />
         <KpiCard
