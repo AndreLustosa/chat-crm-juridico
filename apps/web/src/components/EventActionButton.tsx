@@ -101,6 +101,9 @@ export function EventActionButton({
   const [hearingResult, setHearingResult] = useState('');
   const [hearingDeadlineDate, setHearingDeadlineDate] = useState('');
   const [hearingDeadlineTitle, setHearingDeadlineTitle] = useState('');
+  const [acordoValue, setAcordoValue] = useState('');
+  const [feePercentage, setFeePercentage] = useState('20');
+  const [installmentCount, setInstallmentCount] = useState('1');
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -238,18 +241,28 @@ export function EventActionButton({
       showError('Informe o prazo de Alegações Finais');
       return;
     }
+    if (hearingResult === 'ACORDO_CELEBRADO' && acordoValue && !parseFloat(acordoValue)) {
+      showError('Informe um valor de acordo válido');
+      return;
+    }
     setLoading('complete');
     try {
-      await api.post('/events/complete-hearing', {
+      const payload: any = {
         id,
         result: hearingResult,
         note: note.trim() || undefined,
         deadline_date: hearingDeadlineDate ? hearingDeadlineDate + ':00.000Z' : undefined,
         deadline_title: hearingDeadlineTitle.trim() || undefined,
-      });
+      };
+      if (hearingResult === 'ACORDO_CELEBRADO' && acordoValue) {
+        payload.acordo_value = parseFloat(acordoValue);
+        payload.fee_percentage = parseFloat(feePercentage) || 20;
+        payload.installment_count = parseInt(installmentCount, 10) || 1;
+      }
+      await api.post('/events/complete-hearing', payload);
       const msgs: Record<string, string> = {
         INSTRUCAO_ENCERRADA: 'Audiência concluída — prazo de Alegações Finais criado',
-        ACORDO_CELEBRADO: 'Audiência concluída — processo avançado para Execução',
+        ACORDO_CELEBRADO: acordoValue ? 'Audiência concluída — honorários de acordo cadastrados' : 'Audiência concluída — processo avançado para Execução',
         SENTENCA_PROFERIDA: 'Audiência concluída — processo avançado para Julgamento',
         REDESIGNADA: 'Audiência redesignada',
       };
@@ -259,6 +272,9 @@ export function EventActionButton({
       setHearingResult('');
       setHearingDeadlineDate('');
       setHearingDeadlineTitle('');
+      setAcordoValue('');
+      setFeePercentage('20');
+      setInstallmentCount('1');
       setNote('');
       onActionComplete?.();
     } catch (e: any) {
@@ -542,6 +558,11 @@ export function EventActionButton({
                     setHearingDeadlineDate('');
                     setHearingDeadlineTitle('');
                   }
+                  if (e.target.value !== 'ACORDO_CELEBRADO') {
+                    setAcordoValue('');
+                    setFeePercentage('20');
+                    setInstallmentCount('1');
+                  }
                 }}
                 className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 autoFocus
@@ -578,6 +599,59 @@ export function EventActionButton({
                 </>
               )}
 
+              {hearingResult === 'ACORDO_CELEBRADO' && (
+                <>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Valor total do acordo (R$)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={acordoValue}
+                    onChange={e => setAcordoValue(e.target.value)}
+                    placeholder="Ex: 50000.00"
+                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                        Honorários (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        max="100"
+                        value={feePercentage}
+                        onChange={e => setFeePercentage(e.target.value)}
+                        className="w-full mt-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                        Parcelas
+                      </label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="120"
+                        value={installmentCount}
+                        onChange={e => setInstallmentCount(e.target.value)}
+                        className="w-full mt-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+                  </div>
+                  {acordoValue && parseFloat(acordoValue) > 0 && (
+                    <p className="text-[11px] text-emerald-400">
+                      Honorários: R$ {(parseFloat(acordoValue) * (parseFloat(feePercentage) || 20) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      {parseInt(installmentCount) > 1 && ` (${installmentCount}x de R$ ${(parseFloat(acordoValue) * (parseFloat(feePercentage) || 20) / 100 / parseInt(installmentCount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`}
+                    </p>
+                  )}
+                </>
+              )}
+
               {hearingResult === 'REDESIGNADA' && (
                 <>
                   <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -605,7 +679,7 @@ export function EventActionButton({
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setShowHearingForm(false); setHearingResult(''); setHearingDeadlineDate(''); setHearingDeadlineTitle(''); setNote(''); }}
+                  onClick={() => { setShowHearingForm(false); setHearingResult(''); setHearingDeadlineDate(''); setHearingDeadlineTitle(''); setAcordoValue(''); setFeePercentage('20'); setInstallmentCount('1'); setNote(''); }}
                   className="flex-1 py-1.5 rounded-md text-[11px] text-muted-foreground hover:bg-accent transition-colors"
                 >
                   Voltar

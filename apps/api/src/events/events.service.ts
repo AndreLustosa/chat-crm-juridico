@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { CalendarService } from '../calendar/calendar.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CaseDeadlinesService } from '../case-deadlines/case-deadlines.service';
+import { HonorariosService } from '../honorarios/honorarios.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type EventTarget =
@@ -31,6 +32,7 @@ export class EventsService {
     private calendarService: CalendarService,
     private tasksService: TasksService,
     private caseDeadlinesService: CaseDeadlinesService,
+    private honorariosService: HonorariosService,
     private prisma: PrismaService,
   ) {}
 
@@ -281,6 +283,9 @@ export class EventsService {
       result: string;
       deadline_date?: string;
       deadline_title?: string;
+      acordo_value?: number;
+      fee_percentage?: number;
+      installment_count?: number;
     },
     userId: string,
     tenantId?: string,
@@ -315,7 +320,12 @@ export class EventsService {
 
     await this.calendarService.updateStatus(eventId, 'CONCLUIDO', fullNote || undefined, userId);
 
-    const results: { completed: true; deadline_created?: boolean; stage_advanced?: string } = { completed: true };
+    const results: {
+      completed: true;
+      deadline_created?: boolean;
+      stage_advanced?: string;
+      honorario_created?: boolean;
+    } = { completed: true };
 
     if (data.result === 'INSTRUCAO_ENCERRADA' && data.deadline_date && event.legal_case_id) {
       await this.caseDeadlinesService.create(
@@ -330,6 +340,28 @@ export class EventsService {
         tenantId,
       );
       results.deadline_created = true;
+    }
+
+    if (data.result === 'ACORDO_CELEBRADO' && data.acordo_value && event.legal_case_id) {
+      const feeValue = data.fee_percentage
+        ? Math.round(data.acordo_value * data.fee_percentage) / 100
+        : data.acordo_value;
+      try {
+        await this.honorariosService.create(
+          event.legal_case_id,
+          {
+            type: 'ACORDO',
+            total_value: feeValue,
+            installment_count: data.installment_count || 1,
+            notes: `Acordo celebrado em audiência — valor total R$ ${data.acordo_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${data.fee_percentage ? ` (${data.fee_percentage}% honorários)` : ''}`,
+          },
+          tenantId,
+          userId,
+        );
+        results.honorario_created = true;
+      } catch (err: any) {
+        this.logger.warn(`[CompleteHearing] Falha ao criar honorário: ${err.message}`);
+      }
     }
 
     if (event.legal_case_id && data.result !== 'OUTRA') {

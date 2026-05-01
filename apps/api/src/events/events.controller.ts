@@ -82,12 +82,23 @@ export class EventsController {
       note?: string;
       deadline_date?: string;
       deadline_title?: string;
+      acordo_value?: number;
+      fee_percentage?: number;
+      installment_count?: number;
     },
     @Request() req: any,
   ) {
     return this.eventsService.completeHearing(
       body.id,
-      { note: body.note, result: body.result, deadline_date: body.deadline_date, deadline_title: body.deadline_title },
+      {
+        note: body.note,
+        result: body.result,
+        deadline_date: body.deadline_date,
+        deadline_title: body.deadline_title,
+        acordo_value: body.acordo_value,
+        fee_percentage: body.fee_percentage,
+        installment_count: body.installment_count,
+      },
       req.user?.id,
       req.user?.tenant_id,
     );
