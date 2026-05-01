@@ -286,6 +286,20 @@ export class MapConversionActionDto {
 // ─── Filtros do dashboard ───────────────────────────────────────────────────
 
 export class DashboardQueryDto {
+  /**
+   * Atalho de período para os KPIs principais. Sobrescreve date_from/date_to
+   * quando presente. Default: '7d'.
+   *   - today      → apenas hoje
+   *   - 7d         → últimos 7 dias (default histórico do dashboard)
+   *   - 30d        → últimos 30 dias
+   *   - month      → 1º dia do mês corrente até hoje
+   *   - prev_month → mês anterior completo
+   */
+  @IsString()
+  @IsOptional()
+  @IsIn(['today', '7d', '30d', 'month', 'prev_month'])
+  period?: 'today' | '7d' | '30d' | 'month' | 'prev_month';
+
   /** ISO date (YYYY-MM-DD). Default: 30d atras. */
   @IsString()
   @IsOptional()

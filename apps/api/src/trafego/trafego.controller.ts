@@ -30,6 +30,7 @@ import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
 import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
 import { TrafegoChatService } from './trafego-chat.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
+import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
@@ -73,6 +74,7 @@ export class TrafegoController {
     private readonly reachPlanner: TrafegoReachPlannerService,
     private readonly chat: TrafegoChatService,
     private readonly backfillSvc: TrafegoBackfillService,
+    private readonly mappingAi: TrafegoMappingAiService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -83,6 +85,7 @@ export class TrafegoController {
   @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
   async dashboard(@Req() req: any, @Query() query: DashboardQueryDto) {
     return this.service.getDashboard(req.user.tenant_id, {
+      period: query.period,
       dateFrom: query.date_from,
       dateTo: query.date_to,
       channelType: query.channel_type,
@@ -200,9 +203,12 @@ export class TrafegoController {
   async listCampaigns(
     @Req() req: any,
     @Query('include_archived') includeArchived: string,
+    @Query('days') days: string,
   ) {
+    const daysNum = days ? parseInt(days, 10) : undefined;
     return this.service.listCampaigns(req.user.tenant_id, {
       includeArchived: includeArchived === 'true',
+      days: Number.isFinite(daysNum) ? daysNum : undefined,
     });
   }
 
@@ -472,6 +478,19 @@ export class TrafegoController {
     @Body() dto: MapConversionActionDto,
   ) {
     return this.service.mapConversionAction(req.user.tenant_id, id, dto);
+  }
+
+  /**
+   * Sugere mapeamento ConversionAction → evento CRM via Claude API.
+   * Retorna lista de sugestões (sem aplicar) — front aplica o que o admin
+   * aprovar via PATCH conversion-actions/:id.
+   *
+   * Custo: 1 chamada Claude (haiku) com prompt batch de TODAS as actions.
+   */
+  @Post('conversion-actions/ai-suggestions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async suggestConversionMappings(@Req() req: any) {
+    return this.mappingAi.suggestMappings(req.user.tenant_id);
   }
 
   /** Lista logs de mutate (audit trail). */

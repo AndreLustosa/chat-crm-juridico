@@ -83,22 +83,67 @@ export class TrafegoService {
 
   async listCampaigns(
     tenantId: string,
-    opts: { includeArchived?: boolean } = {},
+    opts: { includeArchived?: boolean; days?: number } = {},
   ) {
-    const campaigns = await this.prisma.trafficCampaign.findMany({
-      where: {
-        tenant_id: tenantId,
-        ...(opts.includeArchived ? {} : { is_archived_internal: false }),
-      },
-      orderBy: [{ is_favorite: 'desc' }, { last_seen_at: 'desc' }],
-    });
+    // Janela default 30d para metrics agregados — UI passa days=30 explicito.
+    // Bound entre 1 e 90 pra evitar agg pesado em base grande.
+    const windowDays = Math.min(90, Math.max(1, opts.days ?? 30));
 
-    // Serializa BigInt pra JSON-friendly
-    return campaigns.map((c) => ({
-      ...c,
-      daily_budget_micros: c.daily_budget_micros?.toString() ?? null,
-      daily_budget_brl: fromMicros(c.daily_budget_micros),
-    }));
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const windowStart = new Date(today);
+    windowStart.setUTCDate(windowStart.getUTCDate() - windowDays);
+
+    const [campaigns, perCampaignAgg] = await Promise.all([
+      this.prisma.trafficCampaign.findMany({
+        where: {
+          tenant_id: tenantId,
+          ...(opts.includeArchived ? {} : { is_archived_internal: false }),
+        },
+        orderBy: [{ is_favorite: 'desc' }, { last_seen_at: 'desc' }],
+      }),
+      this.prisma.trafficMetricDaily.groupBy({
+        by: ['campaign_id'],
+        where: {
+          tenant_id: tenantId,
+          date: { gte: windowStart },
+        },
+        _sum: {
+          cost_micros: true,
+          impressions: true,
+          clicks: true,
+          conversions: true,
+        },
+      }),
+    ]);
+
+    const aggMap = new Map(
+      perCampaignAgg.map((a) => [a.campaign_id, a._sum]),
+    );
+
+    // Serializa BigInt pra JSON-friendly + agrega metrics_window
+    return campaigns.map((c) => {
+      const agg = aggMap.get(c.id);
+      const cost = agg?.cost_micros ? Number(agg.cost_micros) / 1_000_000 : 0;
+      const conversions = Number(agg?.conversions ?? 0);
+      const clicks = Number(agg?.clicks ?? 0);
+      const impressions = Number(agg?.impressions ?? 0);
+      return {
+        ...c,
+        daily_budget_micros: c.daily_budget_micros?.toString() ?? null,
+        daily_budget_brl: fromMicros(c.daily_budget_micros),
+        metrics_window: {
+          days: windowDays,
+          spend_brl: cost,
+          conversions,
+          clicks,
+          impressions,
+          cpl_brl: conversions > 0 ? cost / conversions : 0,
+          ctr: impressions > 0 ? clicks / impressions : 0,
+          avg_cpc_brl: clicks > 0 ? cost / clicks : 0,
+        },
+      };
+    });
   }
 
   async updateCampaign(
@@ -572,6 +617,7 @@ export class TrafegoService {
   async getDashboard(
     tenantId: string,
     _opts: {
+      period?: 'today' | '7d' | '30d' | 'month' | 'prev_month';
       dateFrom?: string;
       dateTo?: string;
       channelType?: string;
@@ -606,6 +652,28 @@ export class TrafegoService {
     const thirtyDaysAgo = new Date(today);
     thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
+    // ─── Período selecionável (atalho que sobrepoe date_from/to) ─────────
+    // 'today'/'7d'/'30d'/'month'/'prev_month' definem rangeFrom..rangeTo;
+    // os KPIs agregados (spend, cpl, ctr, avg_cpc) sao calculados sobre
+    // ESSE range em vez do default fixo de 7d.
+    const period = _opts.period ?? '7d';
+    let rangeFrom = sevenDaysAgo;
+    let rangeTo = today;
+    if (period === 'today') {
+      rangeFrom = today;
+    } else if (period === '30d') {
+      rangeFrom = thirtyDaysAgo;
+    } else if (period === 'month') {
+      rangeFrom = monthStart;
+    } else if (period === 'prev_month') {
+      const prevMonthEnd = new Date(monthStart);
+      prevMonthEnd.setUTCDate(prevMonthEnd.getUTCDate() - 1);
+      const prevMonthStart = new Date(prevMonthEnd);
+      prevMonthStart.setUTCDate(1);
+      rangeFrom = prevMonthStart;
+      rangeTo = prevMonthEnd;
+    }
+
     if (account.last_sync_at === null) {
       return {
         connected: true,
@@ -621,6 +689,7 @@ export class TrafegoService {
       monthAgg,
       last7dAgg,
       last30dAgg,
+      rangeAgg,
       campaignsCount,
       timeseries,
       topCampaigns,
@@ -630,12 +699,12 @@ export class TrafegoService {
         where: { tenant_id: tenantId, date: today },
         _sum: { cost_micros: true, conversions: true, clicks: true, impressions: true },
       }),
-      // Mes corrente
+      // Mes corrente — usado pra pacing mensal independente do period
       this.prisma.trafficMetricDaily.aggregate({
         where: { tenant_id: tenantId, date: { gte: monthStart } },
         _sum: { cost_micros: true, conversions: true },
       }),
-      // 7 dias (medias)
+      // 7 dias — sempre calculado pra mostrar "média 7d" ao lado do "leads hoje"
       this.prisma.trafficMetricDaily.aggregate({
         where: { tenant_id: tenantId, date: { gte: sevenDaysAgo } },
         _sum: {
@@ -645,10 +714,23 @@ export class TrafegoService {
           conversions: true,
         },
       }),
-      // 30 dias (ROAS)
+      // 30 dias (ROAS) — janela fixa porque ROAS precisa de massa critica
       this.prisma.trafficMetricDaily.aggregate({
         where: { tenant_id: tenantId, date: { gte: thirtyDaysAgo } },
         _sum: { cost_micros: true, conversions_value: true },
+      }),
+      // Período selecionado — KPIs principais (spend, cpl, ctr, cpc)
+      this.prisma.trafficMetricDaily.aggregate({
+        where: {
+          tenant_id: tenantId,
+          date: { gte: rangeFrom, lte: rangeTo },
+        },
+        _sum: {
+          cost_micros: true,
+          clicks: true,
+          impressions: true,
+          conversions: true,
+        },
       }),
       // Campaign counts por status
       this.prisma.trafficCampaign.groupBy({
@@ -685,16 +767,63 @@ export class TrafegoService {
     const sumCostMonth = microsToBRL(monthAgg._sum.cost_micros);
     const sumCost7d = microsToBRL(last7dAgg._sum.cost_micros);
     const sumCost30d = microsToBRL(last30dAgg._sum.cost_micros);
+    const sumCostRange = microsToBRL(rangeAgg._sum.cost_micros);
 
     const conversions7d = Number(last7dAgg._sum.conversions ?? 0);
     const conversions30dValue = Number(last30dAgg._sum.conversions_value ?? 0);
-    const clicks7d = Number(last7dAgg._sum.clicks ?? 0);
-    const impressions7d = Number(last7dAgg._sum.impressions ?? 0);
+    const conversionsRange = Number(rangeAgg._sum.conversions ?? 0);
+    const clicksRange = Number(rangeAgg._sum.clicks ?? 0);
+    const impressionsRange = Number(rangeAgg._sum.impressions ?? 0);
 
-    const cpl7d = conversions7d > 0 ? sumCost7d / conversions7d : 0;
-    const ctr7d = impressions7d > 0 ? clicks7d / impressions7d : 0;
-    const avgCpc7d = clicks7d > 0 ? sumCost7d / clicks7d : 0;
+    // KPIs do período selecionado
+    const cplRange = conversionsRange > 0 ? sumCostRange / conversionsRange : 0;
+    const ctrRange = impressionsRange > 0 ? clicksRange / impressionsRange : 0;
+    const avgCpcRange = clicksRange > 0 ? sumCostRange / clicksRange : 0;
     const roas30d = sumCost30d > 0 ? conversions30dValue / sumCost30d : 0;
+
+    // Média de leads/dia nos últimos 7d (excluindo hoje pra comparativo limpo).
+    // Divisor 7 (não 6) — manter consistente com a janela.
+    const leadsAvg7d = conversions7d / 7;
+
+    // ─── Pacing mensal ──────────────────────────────────────────────────
+    // Compara gasto-mes vs orcamento esperado (target_daily_budget × dias).
+    // Se admin nao configurou meta, retorna null.
+    const settings = await this.prisma.trafficSettings.findUnique({
+      where: { tenant_id: tenantId },
+      select: { target_daily_budget_micros: true },
+    });
+    const dayOfMonth = today.getUTCDate();
+    let pacing: {
+      target_monthly_brl: number;
+      target_to_date_brl: number;
+      spent_brl: number;
+      pct_used: number;
+      pct_expected: number;
+      status: 'AHEAD' | 'ON_TRACK' | 'BEHIND';
+    } | null = null;
+    if (settings?.target_daily_budget_micros) {
+      const targetDailyBrl =
+        Number(settings.target_daily_budget_micros) / 1_000_000;
+      // Dias no mês corrente: usa Date(year, month+1, 0).getDate()
+      const daysInMonth = new Date(
+        today.getUTCFullYear(),
+        today.getUTCMonth() + 1,
+        0,
+      ).getDate();
+      const targetMonthly = targetDailyBrl * daysInMonth;
+      const targetToDate = targetDailyBrl * dayOfMonth;
+      const pctUsed = targetMonthly > 0 ? sumCostMonth / targetMonthly : 0;
+      const pctExpected = dayOfMonth / daysInMonth;
+      const ratio = pctExpected > 0 ? pctUsed / pctExpected : 0;
+      pacing = {
+        target_monthly_brl: targetMonthly,
+        target_to_date_brl: targetToDate,
+        spent_brl: sumCostMonth,
+        pct_used: pctUsed,
+        pct_expected: pctExpected,
+        status: ratio > 1.1 ? 'AHEAD' : ratio < 0.85 ? 'BEHIND' : 'ON_TRACK',
+      };
+    }
 
     const activeCount =
       campaignsCount.find((c) => c.status === 'ENABLED')?._count._all ?? 0;
@@ -727,17 +856,22 @@ export class TrafegoService {
       connected: true,
       synced: true,
       account,
+      period,
       kpis: {
         spend_today_brl: sumCostToday,
         spend_month_brl: sumCostMonth,
+        spend_range_brl: sumCostRange,
         leads_today: Number(todayAgg._sum.conversions ?? 0),
-        cpl_brl: cpl7d,
-        ctr: ctr7d,
-        avg_cpc_brl: avgCpc7d,
+        leads_avg_7d: leadsAvg7d,
+        leads_range: conversionsRange,
+        cpl_brl: cplRange,
+        ctr: ctrRange,
+        avg_cpc_brl: avgCpcRange,
         roas_estimated: roas30d,
         active_campaigns: activeCount,
         paused_campaigns: pausedCount,
       },
+      pacing,
       timeseries: timeseries.map((d) => ({
         date: d.date.toISOString().slice(0, 10),
         spend_brl: microsToBRL(d._sum.cost_micros),
@@ -750,6 +884,8 @@ export class TrafegoService {
         month_start: monthStart.toISOString().slice(0, 10),
         seven_days_ago: sevenDaysAgo.toISOString().slice(0, 10),
         thirty_days_ago: thirtyDaysAgo.toISOString().slice(0, 10),
+        range_from: rangeFrom.toISOString().slice(0, 10),
+        range_to: rangeTo.toISOString().slice(0, 10),
       },
     };
   }
