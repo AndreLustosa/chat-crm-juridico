@@ -25,6 +25,8 @@ import { SearchTermsCard } from './SearchTermsCard';
 import { CreateCampaignWizard } from './CreateCampaignWizard';
 import { BiddingStrategyModal } from './BiddingStrategyModal';
 import { CreateRsaModal } from './CreateRsaModal';
+import { ImpressionShareBar } from './ImpressionShareBar';
+import { AdStrengthBadge } from './AdStrengthBadge';
 
 interface MetricsWindow {
   days: number;
@@ -35,6 +37,12 @@ interface MetricsWindow {
   cpl_brl: number;
   ctr: number;
   avg_cpc_brl: number;
+  // P2: impression share fields
+  impression_share: number | null;
+  lost_is_budget: number | null;
+  lost_is_rank: number | null;
+  top_impression_share: number | null;
+  abs_top_impression_share: number | null;
 }
 
 interface Campaign {
@@ -49,6 +57,7 @@ interface Campaign {
   is_archived_internal: boolean;
   tags: string[];
   notes: string | null;
+  ad_strength: 'POOR' | 'AVERAGE' | 'GOOD' | 'EXCELLENT' | 'PENDING' | 'NO_ADS' | null;
   metrics_window?: MetricsWindow;
 }
 
@@ -67,7 +76,8 @@ type SortKey =
   | 'daily_budget_brl'
   | 'conversions'
   | 'cpl_brl'
-  | 'ctr';
+  | 'ctr'
+  | 'imp_share';
 
 const STATUS_BADGE: Record<string, string> = {
   ENABLED: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
@@ -230,6 +240,10 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
         case 'ctr':
           av = a.metrics_window?.ctr ?? 0;
           bv = b.metrics_window?.ctr ?? 0;
+          break;
+        case 'imp_share':
+          av = a.metrics_window?.impression_share ?? -1;
+          bv = b.metrics_window?.impression_share ?? -1;
           break;
       }
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
@@ -588,6 +602,18 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                 align="right"
                 title="Click-through rate últimos 30 dias"
               />
+              <SortableHeader
+                label="Imp. Share"
+                k="imp_share"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+                align="left"
+                title="Parcela de impressões (% das buscas em que apareceu)"
+              />
+              <th className="text-left px-3 py-3" title="Força do anúncio (Google) — calculada a partir do melhor RSA da campanha">
+                Ad Strength
+              </th>
               <th className="text-left px-3 py-3">Tags</th>
               <th className="text-right px-3 py-3 w-32">Ações</th>
             </tr>
@@ -656,6 +682,12 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     {m && m.impressions > 0 ? fmtPct(m.ctr) : '—'}
+                  </td>
+                  <td className="px-3 py-3 w-32">
+                    <ImpressionShareBar share={m?.impression_share ?? null} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <AdStrengthBadge strength={c.ad_strength} />
                   </td>
                   <td className="px-3 py-3">
                     {tagsEditId === c.id ? (
@@ -741,7 +773,7 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
             })}
             {filteredCampaigns.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={12} className="px-3 py-8 text-center text-sm text-muted-foreground">
                   Nenhuma campanha bate com os filtros.{' '}
                   <button
                     type="button"

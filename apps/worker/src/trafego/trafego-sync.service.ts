@@ -286,6 +286,8 @@ export class TrafegoSyncService extends WorkerHost {
       // ─── 2. Metricas diarias por campanha ──────────────────────────────
       const fromStr = dateFrom.toISOString().slice(0, 10); // YYYY-MM-DD
       const toStr = dateTo.toISOString().slice(0, 10);
+      // P2: impression_share fields adicionados — só funcionam em campanhas
+      // SEARCH (Google retorna null pra outros tipos, tratamos como undefined).
       const metricRows: any[] = await customer.query(`
         SELECT
           campaign.id,
@@ -297,7 +299,12 @@ export class TrafegoSyncService extends WorkerHost {
           metrics.conversions_value,
           metrics.ctr,
           metrics.average_cpc,
-          metrics.cost_per_conversion
+          metrics.cost_per_conversion,
+          metrics.search_impression_share,
+          metrics.search_budget_lost_impression_share,
+          metrics.search_rank_lost_impression_share,
+          metrics.search_top_impression_share,
+          metrics.search_absolute_top_impression_share
         FROM campaign
         WHERE segments.date BETWEEN '${fromStr}' AND '${toStr}'
       `);
@@ -311,10 +318,6 @@ export class TrafegoSyncService extends WorkerHost {
         if (!dateStr) continue;
 
         // ─── Conversoes seguras de tipo ─────────────────────────────────
-        // BigInt's via toBigIntSafe (lida com float — average_cpc e
-        // cost_per_conversion sao calculados como divisao pela API e
-        // podem vir decimais mesmo declarados como int64).
-        // Number's via toNumberSafe (lida com string-numero do SDK).
         const impressions = toNumberSafe(row.metrics?.impressions);
         const clicks = toNumberSafe(row.metrics?.clicks);
         const costMicros = toBigIntSafe(row.metrics?.cost_micros) ?? 0n;
@@ -323,6 +326,28 @@ export class TrafegoSyncService extends WorkerHost {
         const ctr = toNumberSafe(row.metrics?.ctr);
         const avgCpcMicros = toBigIntSafe(row.metrics?.average_cpc);
         const costPerConvMicros = toBigIntSafe(row.metrics?.cost_per_conversion);
+
+        // P2: impression share — Google retorna -1 quando "rare data
+        // condition" (volume insuficiente p/ calcular). Tratamos como null.
+        const sanitizeShare = (v: any): number | null => {
+          const n = toNumberSafe(v);
+          if (n === null || n === undefined) return null;
+          if (n < 0 || n > 1) return null;
+          return n;
+        };
+        const impShare = sanitizeShare(row.metrics?.search_impression_share);
+        const lostBudget = sanitizeShare(
+          row.metrics?.search_budget_lost_impression_share,
+        );
+        const lostRank = sanitizeShare(
+          row.metrics?.search_rank_lost_impression_share,
+        );
+        const topShare = sanitizeShare(
+          row.metrics?.search_top_impression_share,
+        );
+        const absTopShare = sanitizeShare(
+          row.metrics?.search_absolute_top_impression_share,
+        );
 
         await this.prisma.trafficMetricDaily.upsert({
           where: {
@@ -340,6 +365,11 @@ export class TrafegoSyncService extends WorkerHost {
             ctr,
             avg_cpc_micros: avgCpcMicros,
             cost_per_conv_micros: costPerConvMicros,
+            search_impression_share: impShare,
+            search_lost_is_budget: lostBudget,
+            search_lost_is_rank: lostRank,
+            search_top_impression_share: topShare,
+            search_abs_top_impression_share: absTopShare,
           },
           create: {
             tenant_id: account.tenant_id,
@@ -354,6 +384,11 @@ export class TrafegoSyncService extends WorkerHost {
             ctr,
             avg_cpc_micros: avgCpcMicros,
             cost_per_conv_micros: costPerConvMicros,
+            search_impression_share: impShare,
+            search_lost_is_budget: lostBudget,
+            search_lost_is_rank: lostRank,
+            search_top_impression_share: topShare,
+            search_abs_top_impression_share: absTopShare,
           },
         });
         rowsUpserted++;
@@ -375,7 +410,7 @@ export class TrafegoSyncService extends WorkerHost {
           campaignByGoogleId,
         );
         this.logger.log(
-          `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions` +
+          `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions, ${ext.hourly ?? 0} hourly, ${ext.device ?? 0} device` +
             (ext.errors.length > 0 ? ` (${ext.errors.length} sub-erros)` : ''),
         );
         extendedErrors = ext.errors;

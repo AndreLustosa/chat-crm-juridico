@@ -73,6 +73,8 @@ model Tenant {
   traffic_chat_messages      TrafficChatMessage[]
   traffic_search_terms       TrafficSearchTerm[]
   traffic_landing_pages      LandingPage[]
+  traffic_metrics_hourly     TrafficMetricHourly[]
+  traffic_metrics_device     TrafficMetricDevice[]
 }
 
 model User {
@@ -2093,6 +2095,8 @@ model TrafficAccount {
   chat_messages      TrafficChatMessage[]
   search_terms       TrafficSearchTerm[]
   landing_pages      LandingPage[]
+  metrics_hourly     TrafficMetricHourly[]
+  metrics_device     TrafficMetricDevice[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2157,13 +2161,15 @@ model TrafficCampaign {
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 
-  tenant        Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  account       TrafficAccount       @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  metrics_daily TrafficMetricDaily[]
-  ad_groups     TrafficAdGroup[]
-  asset_groups  TrafficAssetGroup[]
-  search_terms  TrafficSearchTerm[]
-  landing_pages LandingPage[]
+  tenant         Tenant                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account        TrafficAccount        @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  metrics_daily  TrafficMetricDaily[]
+  ad_groups      TrafficAdGroup[]
+  asset_groups   TrafficAssetGroup[]
+  search_terms   TrafficSearchTerm[]
+  landing_pages  LandingPage[]
+  metrics_hourly TrafficMetricHourly[]
+  metrics_device TrafficMetricDevice[]
 
   @@unique([account_id, google_campaign_id])
   @@index([tenant_id, status])
@@ -2200,6 +2206,18 @@ model TrafficMetricDaily {
   /// CPL = cost_micros / conversions, em micros (null se conversions=0)
   cost_per_conv_micros BigInt?
 
+  // ─── P2: Impression share (Google Ads search_impression_share) ───────
+  /// % de buscas em que o anúncio apareceu (0..1). null se não calculado.
+  search_impression_share        Decimal?
+  /// % de impressões perdidas por orçamento limitado (0..1)
+  search_lost_is_budget          Decimal?
+  /// % de impressões perdidas por rank/qualidade (0..1)
+  search_lost_is_rank            Decimal?
+  /// % no top (1ª-4ª posição) — search_top_impression_share (0..1)
+  search_top_impression_share    Decimal?
+  /// % no topo absoluto (1ª posição) — abs_top (0..1)
+  search_abs_top_impression_share Decimal?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -2211,6 +2229,66 @@ model TrafficMetricDaily {
   @@index([tenant_id, date])
   @@index([account_id, date])
   @@index([date])
+}
+
+/// P2 (Sprint I) — Métricas agregadas por hora × dia × campanha. Suporta
+/// heatmap de "quando os leads aparecem" (segments.hour). Idempotente via
+/// unique (campaign_id, date, hour).
+model TrafficMetricHourly {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  account_id  String
+  campaign_id String
+  date        DateTime @db.Date
+  /// Hora do dia (0-23) no fuso horário da conta Google Ads
+  hour        Int
+
+  impressions Int    @default(0)
+  clicks      Int    @default(0)
+  cost_micros BigInt @default(0)
+  conversions Decimal @default(0)
+  conversions_value Decimal @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_id, date, hour])
+  @@index([tenant_id, date])
+  @@index([campaign_id, date])
+}
+
+/// P2 (Sprint I) — Métricas agregadas por dispositivo × campanha. Suporta
+/// donut "Performance por dispositivo". Idempotente via unique
+/// (campaign_id, date, device).
+model TrafficMetricDevice {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  account_id  String
+  campaign_id String
+  date        DateTime @db.Date
+  /// "MOBILE" | "DESKTOP" | "TABLET" | "OTHER" | "CONNECTED_TV"
+  device      String
+
+  impressions Int    @default(0)
+  clicks      Int    @default(0)
+  cost_micros BigInt @default(0)
+  conversions Decimal @default(0)
+  conversions_value Decimal @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_id, date, device])
+  @@index([tenant_id, date])
+  @@index([campaign_id, date])
 }
 
 /// Log estruturado de cada execucao do sync (cron ou manual).
@@ -2552,6 +2630,8 @@ model TrafficAd {
   /// Path1, Path2 (display URL paths)
   path1           String?
   path2           String?
+  /// P2 — Ad Strength do Google: "PENDING"|"NO_ADS"|"POOR"|"AVERAGE"|"GOOD"|"EXCELLENT"
+  ad_strength     String?
   /// Snapshot integral do ad object (pra reverter ou debug)
   ad_payload      Json?
   /// Adicionado pela IA (true) ou operador (false)

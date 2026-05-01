@@ -74,6 +74,8 @@ export class TrafegoSyncExtendedService {
     assetGroups: number;
     assetGroupAssets: number;
     searchTerms: number;
+    hourly: number;
+    device: number;
     errors: string[];
   }> {
     const stats = {
@@ -85,6 +87,8 @@ export class TrafegoSyncExtendedService {
       assetGroups: 0,
       assetGroupAssets: 0,
       searchTerms: 0,
+      hourly: 0,
+      device: 0,
       errors: [] as string[],
     };
 
@@ -205,7 +209,187 @@ export class TrafegoSyncExtendedService {
       stats.errors.push(msg);
     }
 
+    // ─── 9. Hourly metrics (P2) ────────────────────────────────────────
+    // segments.hour pra heatmap "quando os leads aparecem". Janela 30d.
+    try {
+      stats.hourly = await this.syncHourlyMetrics(
+        customer,
+        tenantId,
+        accountId,
+        campaignByGoogleId,
+      );
+    } catch (e: any) {
+      const msg = `hourly_metrics: ${e?.message ?? e}`;
+      this.logger.warn(`[sync-extended] ${msg}`);
+      stats.errors.push(msg);
+    }
+
+    // ─── 10. Device metrics (P2) ───────────────────────────────────────
+    // segments.device pra donut "Performance por dispositivo". Janela 30d.
+    try {
+      stats.device = await this.syncDeviceMetrics(
+        customer,
+        tenantId,
+        accountId,
+        campaignByGoogleId,
+      );
+    } catch (e: any) {
+      const msg = `device_metrics: ${e?.message ?? e}`;
+      this.logger.warn(`[sync-extended] ${msg}`);
+      stats.errors.push(msg);
+    }
+
     return stats;
+  }
+
+  /**
+   * P2 — Sync de métricas hora × dia × campanha (segments.hour). Janela
+   * 30d. Idempotente via @@unique([campaign_id, date, hour]).
+   *
+   * Volume: 24h × 30d × 10 campanhas = 7.200 linhas/sync. Aceitável.
+   */
+  private async syncHourlyMetrics(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    campaignByGoogleId: Map<string, string>,
+  ): Promise<number> {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+    const fromStr = thirtyDaysAgo.toISOString().slice(0, 10);
+    const toStr = today.toISOString().slice(0, 10);
+
+    const rows: any[] = await customer.query(`
+      SELECT
+        campaign.id,
+        segments.date,
+        segments.hour,
+        metrics.impressions,
+        metrics.clicks,
+        metrics.cost_micros,
+        metrics.conversions,
+        metrics.conversions_value
+      FROM campaign
+      WHERE segments.date BETWEEN '${fromStr}' AND '${toStr}'
+    `);
+
+    let count = 0;
+    for (const row of rows) {
+      const googleCampaignId = String(row.campaign?.id);
+      const ourCampaignId = campaignByGoogleId.get(googleCampaignId);
+      if (!ourCampaignId) continue;
+      const dateStr = row.segments?.date;
+      const hour = toNumberSafe(row.segments?.hour);
+      if (!dateStr || hour === null || hour === undefined) continue;
+      if (hour < 0 || hour > 23) continue;
+
+      const data = {
+        impressions: toNumberSafe(row.metrics?.impressions, 0) ?? 0,
+        clicks: toNumberSafe(row.metrics?.clicks, 0) ?? 0,
+        cost_micros: toBigIntSafe(row.metrics?.cost_micros) ?? 0n,
+        conversions: toNumberSafe(row.metrics?.conversions, 0) ?? 0,
+        conversions_value:
+          toNumberSafe(row.metrics?.conversions_value, 0) ?? 0,
+      };
+
+      await this.prisma.trafficMetricHourly.upsert({
+        where: {
+          campaign_id_date_hour: {
+            campaign_id: ourCampaignId,
+            date: new Date(dateStr),
+            hour,
+          },
+        },
+        update: data,
+        create: {
+          tenant_id: tenantId,
+          account_id: accountId,
+          campaign_id: ourCampaignId,
+          date: new Date(dateStr),
+          hour,
+          ...data,
+        },
+      });
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * P2 — Sync de métricas device × dia × campanha (segments.device).
+   * Janela 30d. Idempotente via @@unique([campaign_id, date, device]).
+   *
+   * Volume: 4 devices × 30d × 10 campanhas = 1.200 linhas/sync.
+   */
+  private async syncDeviceMetrics(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    campaignByGoogleId: Map<string, string>,
+  ): Promise<number> {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+    const fromStr = thirtyDaysAgo.toISOString().slice(0, 10);
+    const toStr = today.toISOString().slice(0, 10);
+
+    const rows: any[] = await customer.query(`
+      SELECT
+        campaign.id,
+        segments.date,
+        segments.device,
+        metrics.impressions,
+        metrics.clicks,
+        metrics.cost_micros,
+        metrics.conversions,
+        metrics.conversions_value
+      FROM campaign
+      WHERE segments.date BETWEEN '${fromStr}' AND '${toStr}'
+    `);
+
+    let count = 0;
+    for (const row of rows) {
+      const googleCampaignId = String(row.campaign?.id);
+      const ourCampaignId = campaignByGoogleId.get(googleCampaignId);
+      if (!ourCampaignId) continue;
+      const dateStr = row.segments?.date;
+      const device =
+        enumToStr(enums.Device, row.segments?.device, 'OTHER') ?? 'OTHER';
+      if (!dateStr) continue;
+
+      const data = {
+        impressions: toNumberSafe(row.metrics?.impressions, 0) ?? 0,
+        clicks: toNumberSafe(row.metrics?.clicks, 0) ?? 0,
+        cost_micros: toBigIntSafe(row.metrics?.cost_micros) ?? 0n,
+        conversions: toNumberSafe(row.metrics?.conversions, 0) ?? 0,
+        conversions_value:
+          toNumberSafe(row.metrics?.conversions_value, 0) ?? 0,
+      };
+
+      await this.prisma.trafficMetricDevice.upsert({
+        where: {
+          campaign_id_date_device: {
+            campaign_id: ourCampaignId,
+            date: new Date(dateStr),
+            device,
+          },
+        },
+        update: data,
+        create: {
+          tenant_id: tenantId,
+          account_id: accountId,
+          campaign_id: ourCampaignId,
+          date: new Date(dateStr),
+          device,
+          ...data,
+        },
+      });
+      count++;
+    }
+    return count;
   }
 
   /**
@@ -652,6 +836,7 @@ export class TrafegoSyncExtendedService {
         ad_group_ad.ad.responsive_search_ad.path1,
         ad_group_ad.ad.responsive_search_ad.path2,
         ad_group_ad.status,
+        ad_group_ad.ad_strength,
         ad_group_ad.policy_summary.approval_status,
         ad_group.id
       FROM ad_group_ad
@@ -693,6 +878,8 @@ export class TrafegoSyncExtendedService {
           enums.PolicyApprovalStatus,
           row.ad_group_ad?.policy_summary?.approval_status,
         ),
+        // P2: ad_strength — "PENDING"|"NO_ADS"|"POOR"|"AVERAGE"|"GOOD"|"EXCELLENT"
+        ad_strength: enumToStr(enums.AdStrength, row.ad_group_ad?.ad_strength),
         final_urls: finalUrls as any,
         headlines: headlines as any,
         descriptions: descriptions as any,

@@ -19,6 +19,12 @@ import {
   Megaphone,
   Trash2,
   AlertCircle,
+  Clock,
+  Smartphone,
+  Monitor,
+  Tablet,
+  Tv,
+  HelpCircle,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -26,6 +32,8 @@ import { showError, showSuccess } from '@/lib/toast';
 import { KpiCard } from '../../components/KpiCard';
 import { BiddingStrategyModal } from '../../components/BiddingStrategyModal';
 import { CreateRsaModal } from '../../components/CreateRsaModal';
+import { ImpressionShareSegmentedBar } from '../../components/ImpressionShareBar';
+import { AdStrengthBadge } from '../../components/AdStrengthBadge';
 
 interface CampaignFull {
   id: string;
@@ -39,6 +47,14 @@ interface CampaignFull {
   is_archived_internal: boolean;
   tags: string[];
   notes: string | null;
+  ad_strength:
+    | 'POOR'
+    | 'AVERAGE'
+    | 'GOOD'
+    | 'EXCELLENT'
+    | 'PENDING'
+    | 'NO_ADS'
+    | null;
   metrics_window?: {
     days: number;
     spend_brl: number;
@@ -48,7 +64,43 @@ interface CampaignFull {
     cpl_brl: number;
     ctr: number;
     avg_cpc_brl: number;
+    impression_share: number | null;
+    lost_is_budget: number | null;
+    lost_is_rank: number | null;
+    top_impression_share: number | null;
+    abs_top_impression_share: number | null;
   };
+}
+
+interface HourlyMetrics {
+  days: number;
+  cells: {
+    dow: number;
+    hour: number;
+    impressions: number;
+    clicks: number;
+    cost_brl: number;
+    conversions: number;
+    cpl_brl: number;
+    ctr: number;
+  }[];
+}
+
+interface DeviceMetrics {
+  days: number;
+  total_cost_brl: number;
+  total_conversions: number;
+  items: {
+    device: string;
+    impressions: number;
+    clicks: number;
+    cost_brl: number;
+    conversions: number;
+    cpl_brl: number;
+    ctr: number;
+    spend_share: number;
+    conv_share: number;
+  }[];
 }
 
 interface AdGroup {
@@ -123,7 +175,14 @@ const STATUS_LABEL: Record<string, string> = {
   REMOVED: 'Removida',
 };
 
-type Tab = 'overview' | 'keywords' | 'search-terms' | 'ads' | 'negatives';
+type Tab =
+  | 'overview'
+  | 'keywords'
+  | 'search-terms'
+  | 'ads'
+  | 'schedule'
+  | 'devices'
+  | 'negatives';
 
 export default function CampaignDetailPage() {
   const params = useParams<{ id: string }>();
@@ -136,6 +195,8 @@ export default function CampaignDetailPage() {
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [ads, setAds] = useState<Ad[]>([]);
   const [searchTerms, setSearchTerms] = useState<SearchTerm[]>([]);
+  const [hourly, setHourly] = useState<HourlyMetrics | null>(null);
+  const [devices, setDevices] = useState<DeviceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
@@ -189,12 +250,25 @@ export default function CampaignDetailPage() {
         setAds(adsResults.flat());
       }
 
-      // 4) Search terms da campanha
-      const { data: terms } = await api.get<SearchTerm[]>(
-        '/trafego/search-terms',
-        { params: { campaign_id: id, limit: 200 } },
-      );
+      // 4) Search terms + hourly + devices em paralelo
+      const [{ data: terms }, hourlyResp, deviceResp] = await Promise.all([
+        api.get<SearchTerm[]>('/trafego/search-terms', {
+          params: { campaign_id: id, limit: 200 },
+        }),
+        api
+          .get<HourlyMetrics>(`/trafego/campaigns/${id}/hourly-metrics`, {
+            params: { days: 30 },
+          })
+          .catch(() => ({ data: null })),
+        api
+          .get<DeviceMetrics>(`/trafego/campaigns/${id}/device-metrics`, {
+            params: { days: 30 },
+          })
+          .catch(() => ({ data: null })),
+      ]);
       setSearchTerms(terms);
+      setHourly(hourlyResp.data ?? null);
+      setDevices(deviceResp.data ?? null);
     } catch (err: any) {
       showError(err?.response?.data?.message ?? 'Falha ao carregar campanha.');
     } finally {
@@ -313,7 +387,7 @@ export default function CampaignDetailPage() {
       </button>
 
       {/* Header */}
-      <div className="bg-card border border-border rounded-xl p-5 mb-6">
+      <div className="bg-card border border-border rounded-xl p-5 mb-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -325,6 +399,7 @@ export default function CampaignDetailPage() {
               >
                 {STATUS_LABEL[campaign.status] ?? campaign.status}
               </span>
+              <AdStrengthBadge strength={campaign.ad_strength} />
               {perms.canManageTrafego && (
                 <button
                   type="button"
@@ -404,6 +479,40 @@ export default function CampaignDetailPage() {
         </div>
       </div>
 
+      {/* P2 — Barra de saúde (impression share segmentada) */}
+      {m && (
+        <div className="bg-card border border-border rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-foreground">
+              Saúde da campanha (30d)
+            </h3>
+            <div className="flex items-center gap-3 text-[11px]">
+              {m.top_impression_share !== null && (
+                <span className="text-muted-foreground">
+                  No top:{' '}
+                  <strong className="text-foreground">
+                    {(m.top_impression_share * 100).toFixed(0)}%
+                  </strong>
+                </span>
+              )}
+              {m.abs_top_impression_share !== null && (
+                <span className="text-muted-foreground">
+                  Topo absoluto:{' '}
+                  <strong className="text-foreground">
+                    {(m.abs_top_impression_share * 100).toFixed(0)}%
+                  </strong>
+                </span>
+              )}
+            </div>
+          </div>
+          <ImpressionShareSegmentedBar
+            share={m.impression_share}
+            lostBudget={m.lost_is_budget}
+            lostRank={m.lost_is_rank}
+          />
+        </div>
+      )}
+
       {/* KPIs (30d) */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mb-6">
         <KpiCard
@@ -470,6 +579,18 @@ export default function CampaignDetailPage() {
           label={`Anúncios (${ads.length})`}
         />
         <TabButton
+          active={tab === 'schedule'}
+          onClick={() => setTab('schedule')}
+          icon={Clock}
+          label="Horários"
+        />
+        <TabButton
+          active={tab === 'devices'}
+          onClick={() => setTab('devices')}
+          icon={Smartphone}
+          label="Dispositivos"
+        />
+        <TabButton
           active={tab === 'negatives'}
           onClick={() => setTab('negatives')}
           icon={ShieldX}
@@ -497,6 +618,8 @@ export default function CampaignDetailPage() {
         />
       )}
       {tab === 'ads' && <AdsTab ads={ads} adGroups={adGroups} />}
+      {tab === 'schedule' && <ScheduleTab data={hourly} />}
+      {tab === 'devices' && <DevicesTab data={devices} />}
       {tab === 'negatives' && (
         <NegativesTab
           negatives={negativeKw}
@@ -1051,6 +1174,365 @@ function AdsTab({ ads, adGroups }: { ads: Ad[]; adGroups: AdGroup[] }) {
       })}
     </div>
   );
+}
+
+// ─── Tab: Horários (heatmap hora × dia da semana) ─────────────────────────
+
+const DOW_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function ScheduleTab({ data }: { data: HourlyMetrics | null }) {
+  if (!data || data.cells.length === 0) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-12 text-center">
+        <Clock size={36} className="mx-auto text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">
+          Sem dados horários ainda. Aguarde o próximo sync (segments.hour
+          é populado a cada 6h pelo cron).
+        </p>
+      </div>
+    );
+  }
+
+  // Encontra max conversions pra escala de cor
+  const maxConv = Math.max(...data.cells.map((c) => c.conversions), 1);
+  const totalConv = data.cells.reduce((s, c) => s + c.conversions, 0);
+  const totalCost = data.cells.reduce((s, c) => s + c.cost_brl, 0);
+
+  function cellColor(conv: number): string {
+    if (conv === 0) return 'bg-muted';
+    const intensity = conv / maxConv;
+    if (intensity < 0.2) return 'bg-violet-500/15';
+    if (intensity < 0.4) return 'bg-violet-500/30';
+    if (intensity < 0.6) return 'bg-violet-500/50';
+    if (intensity < 0.8) return 'bg-violet-500/70';
+    return 'bg-violet-500/90';
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">
+              Heatmap: hora × dia da semana
+            </h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Quanto mais escuro, mais conversões. Dados dos últimos {data.days}
+              {' '}dias agregados.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+            <span>
+              Total:{' '}
+              <strong className="text-foreground">
+                {totalConv.toFixed(1)}
+              </strong>{' '}
+              conv
+            </span>
+            <span>
+              Gasto:{' '}
+              <strong className="text-foreground">
+                {fmtBRL(totalCost)}
+              </strong>
+            </span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <div className="inline-block min-w-full">
+            {/* Header das horas */}
+            <div className="flex items-center mb-1">
+              <div className="w-10 shrink-0" />
+              {Array.from({ length: 24 }).map((_, hour) => (
+                <div
+                  key={hour}
+                  className="flex-1 text-[9px] text-center text-muted-foreground tabular-nums min-w-[16px]"
+                >
+                  {hour % 3 === 0 ? hour : ''}
+                </div>
+              ))}
+            </div>
+
+            {/* Grid 7×24 */}
+            {DOW_LABELS.map((dowLabel, dow) => (
+              <div
+                key={dow}
+                className="flex items-center mb-0.5"
+              >
+                <div className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                  {dowLabel}
+                </div>
+                {Array.from({ length: 24 }).map((_, hour) => {
+                  const cell = data.cells.find(
+                    (c) => c.dow === dow && c.hour === hour,
+                  );
+                  if (!cell) return null;
+                  return (
+                    <div
+                      key={hour}
+                      className={`flex-1 h-7 mx-0.5 rounded-sm transition-colors hover:ring-2 hover:ring-violet-400 cursor-pointer ${cellColor(cell.conversions)} min-w-[16px]`}
+                      title={`${dowLabel} ${hour}h — ${cell.conversions.toFixed(1)} conv • ${fmtBRL(cell.cost_brl)} • CPL ${cell.conversions > 0 ? fmtBRL(cell.cpl_brl) : '—'}`}
+                    />
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Legenda */}
+        <div className="flex items-center justify-end gap-2 mt-4 text-[10px] text-muted-foreground">
+          <span>Menos</span>
+          <div className="w-4 h-3 rounded-sm bg-muted" />
+          <div className="w-4 h-3 rounded-sm bg-violet-500/15" />
+          <div className="w-4 h-3 rounded-sm bg-violet-500/30" />
+          <div className="w-4 h-3 rounded-sm bg-violet-500/50" />
+          <div className="w-4 h-3 rounded-sm bg-violet-500/70" />
+          <div className="w-4 h-3 rounded-sm bg-violet-500/90" />
+          <span>Mais</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab: Dispositivos ────────────────────────────────────────────────────
+
+const DEVICE_META: Record<
+  string,
+  { icon: any; label: string; color: string }
+> = {
+  MOBILE: {
+    icon: Smartphone,
+    label: 'Mobile',
+    color: 'bg-violet-500',
+  },
+  DESKTOP: {
+    icon: Monitor,
+    label: 'Desktop',
+    color: 'bg-emerald-500',
+  },
+  TABLET: {
+    icon: Tablet,
+    label: 'Tablet',
+    color: 'bg-amber-500',
+  },
+  CONNECTED_TV: {
+    icon: Tv,
+    label: 'Connected TV',
+    color: 'bg-sky-500',
+  },
+  OTHER: {
+    icon: HelpCircle,
+    label: 'Outro',
+    color: 'bg-muted-foreground',
+  },
+};
+
+function DevicesTab({ data }: { data: DeviceMetrics | null }) {
+  if (!data || data.items.length === 0) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-12 text-center">
+        <Smartphone size={36} className="mx-auto text-muted-foreground mb-2" />
+        <p className="text-sm text-muted-foreground">
+          Sem dados por dispositivo ainda. Aguarde o próximo sync.
+        </p>
+      </div>
+    );
+  }
+
+  // Detecta o melhor device por CPL (entre os com >=3 conversões)
+  const winners = data.items.filter((i) => i.conversions >= 3);
+  const bestByCpl = winners.length > 0
+    ? winners.reduce((b, c) => (c.cpl_brl < b.cpl_brl ? c : b))
+    : null;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Donut visual */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-bold text-foreground mb-1">
+          Distribuição de gasto
+        </h3>
+        <p className="text-[11px] text-muted-foreground mb-4">
+          Como o orçamento se divide entre dispositivos.
+        </p>
+
+        {/* Donut SVG */}
+        <DeviceDonut items={data.items} totalCost={data.total_cost_brl} />
+
+        {/* Legenda */}
+        <div className="space-y-1 mt-4">
+          {data.items.map((item) => {
+            const meta = DEVICE_META[item.device] ?? DEVICE_META.OTHER;
+            const Icon = meta.icon;
+            const isWinner = bestByCpl?.device === item.device;
+            return (
+              <div
+                key={item.device}
+                className={`flex items-center gap-2 p-2 rounded text-xs ${
+                  isWinner ? 'bg-emerald-500/10 border border-emerald-500/30' : ''
+                }`}
+              >
+                <div className={`w-2 h-2 rounded-full ${meta.color}`} />
+                <Icon size={12} className="text-muted-foreground" />
+                <span className="font-semibold text-foreground flex-1">
+                  {meta.label}
+                </span>
+                <span className="tabular-nums text-muted-foreground">
+                  {(item.spend_share * 100).toFixed(0)}%
+                </span>
+                <span className="tabular-nums font-semibold text-foreground">
+                  {fmtBRL(item.cost_brl)}
+                </span>
+                {isWinner && (
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700">
+                    melhor CPL
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Tabela detalhada */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="p-4 border-b border-border">
+          <h3 className="text-sm font-bold text-foreground">Detalhes</h3>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Performance por dispositivo nos últimos {data.days} dias.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <tr>
+                <th className="text-left px-3 py-2">Device</th>
+                <th className="text-right px-3 py-2">Conv</th>
+                <th className="text-right px-3 py-2">Gasto</th>
+                <th className="text-right px-3 py-2">CPL</th>
+                <th className="text-right px-3 py-2">CTR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((item) => {
+                const meta = DEVICE_META[item.device] ?? DEVICE_META.OTHER;
+                return (
+                  <tr key={item.device} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${meta.color}`} />
+                        <span className="text-xs font-semibold">
+                          {meta.label}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {item.conversions.toFixed(1)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {fmtBRL(item.cost_brl)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                      {item.conversions > 0 ? fmtBRL(item.cpl_brl) : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {item.impressions > 0 ? fmtPct(item.ctr) : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Donut de dispositivos — SVG inline sem dep externa. Cada segmento tem
+ * tamanho proporcional ao spend_share.
+ */
+function DeviceDonut({
+  items,
+  totalCost,
+}: {
+  items: DeviceMetrics['items'];
+  totalCost: number;
+}) {
+  const size = 200;
+  const radius = 80;
+  const strokeWidth = 28;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  let offset = 0;
+  const segments = items.map((item) => {
+    const meta = DEVICE_META[item.device] ?? DEVICE_META.OTHER;
+    const length = item.spend_share * circumference;
+    const seg = {
+      device: item.device,
+      label: meta.label,
+      strokeColor: cssColorFromBg(meta.color),
+      length,
+      offset,
+      pct: item.spend_share,
+    };
+    offset += length;
+    return seg;
+  });
+
+  return (
+    <div className="flex justify-center">
+      <div className="relative">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle
+            cx={cx}
+            cy={cy}
+            r={radius}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            className="text-muted/30"
+          />
+          {segments.map((seg) => (
+            <circle
+              key={seg.device}
+              cx={cx}
+              cy={cy}
+              r={radius}
+              fill="none"
+              stroke={seg.strokeColor}
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${seg.length} ${circumference}`}
+              strokeDashoffset={-seg.offset}
+              transform={`rotate(-90 ${cx} ${cy})`}
+            />
+          ))}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Gasto total
+          </div>
+          <div className="text-lg font-bold text-foreground tabular-nums">
+            {fmtBRL(totalCost)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Mapeia classes Tailwind bg-* pra cor CSS. Restrito aos devices conhecidos. */
+function cssColorFromBg(bg: string): string {
+  if (bg.includes('violet')) return 'rgb(139 92 246)';
+  if (bg.includes('emerald')) return 'rgb(16 185 129)';
+  if (bg.includes('amber')) return 'rgb(245 158 11)';
+  if (bg.includes('sky')) return 'rgb(14 165 233)';
+  return 'rgb(115 115 115)';
 }
 
 // ─── Tab: Negatives ───────────────────────────────────────────────────────

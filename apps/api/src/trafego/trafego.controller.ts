@@ -601,6 +601,42 @@ export class TrafegoController {
     );
   }
 
+  /**
+   * Métricas hora × dia da semana de uma campanha — heatmap "quando os
+   * leads aparecem". Default 30d. Retorna 168 cells (7 dias × 24 horas).
+   */
+  @Get('campaigns/:id/hourly-metrics')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getCampaignHourly(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('days') days?: string,
+  ) {
+    return this.service.getCampaignHourlyMetrics(
+      req.user.tenant_id,
+      id,
+      days ? parseInt(days, 10) : 30,
+    );
+  }
+
+  /**
+   * Métricas por dispositivo (mobile/desktop/tablet) de uma campanha.
+   * Inclui spend_share + conv_share pra donut.
+   */
+  @Get('campaigns/:id/device-metrics')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getCampaignDevice(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('days') days?: string,
+  ) {
+    return this.service.getCampaignDeviceMetrics(
+      req.user.tenant_id,
+      id,
+      days ? parseInt(days, 10) : 30,
+    );
+  }
+
   /** Atualiza estratégia de lance da campanha (Fase 4c). */
   @Patch('campaigns/:id/bidding-strategy')
   @Roles('ADMIN', 'ADVOGADO')

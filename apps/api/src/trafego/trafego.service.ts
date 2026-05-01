@@ -94,36 +94,94 @@ export class TrafegoService {
     const windowStart = new Date(today);
     windowStart.setUTCDate(windowStart.getUTCDate() - windowDays);
 
-    const [campaigns, perCampaignAgg] = await Promise.all([
-      this.prisma.trafficCampaign.findMany({
-        where: {
-          tenant_id: tenantId,
-          ...(opts.includeArchived ? {} : { is_archived_internal: false }),
-        },
-        orderBy: [{ is_favorite: 'desc' }, { last_seen_at: 'desc' }],
-      }),
-      this.prisma.trafficMetricDaily.groupBy({
-        by: ['campaign_id'],
-        where: {
-          tenant_id: tenantId,
-          date: { gte: windowStart },
-        },
-        _sum: {
-          cost_micros: true,
-          impressions: true,
-          clicks: true,
-          conversions: true,
-        },
-      }),
-    ]);
+    const [campaigns, perCampaignAgg, perCampaignShareAvg, adStrengthAgg] =
+      await Promise.all([
+        this.prisma.trafficCampaign.findMany({
+          where: {
+            tenant_id: tenantId,
+            ...(opts.includeArchived ? {} : { is_archived_internal: false }),
+          },
+          orderBy: [{ is_favorite: 'desc' }, { last_seen_at: 'desc' }],
+        }),
+        this.prisma.trafficMetricDaily.groupBy({
+          by: ['campaign_id'],
+          where: {
+            tenant_id: tenantId,
+            date: { gte: windowStart },
+          },
+          _sum: {
+            cost_micros: true,
+            impressions: true,
+            clicks: true,
+            conversions: true,
+          },
+        }),
+        // P2: avg de impression_share na janela. Usamos _avg (Prisma)
+        // — Google retorna 0..1 por dia, média de N dias = visão "típica".
+        this.prisma.trafficMetricDaily.groupBy({
+          by: ['campaign_id'],
+          where: {
+            tenant_id: tenantId,
+            date: { gte: windowStart },
+            search_impression_share: { not: null },
+          },
+          _avg: {
+            search_impression_share: true,
+            search_lost_is_budget: true,
+            search_lost_is_rank: true,
+            search_top_impression_share: true,
+            search_abs_top_impression_share: true,
+          },
+        }),
+        // P2: best ad_strength por campanha. Joinea via ad_group_id no
+        // worst-case mas como Prisma groupBy não suporta join, agrupamos
+        // ads ENABLED por ad_group e depois mapeamos no service.
+        this.prisma.trafficAd.findMany({
+          where: {
+            tenant_id: tenantId,
+            status: 'ENABLED',
+            ad_strength: { not: null },
+          },
+          select: {
+            ad_strength: true,
+            ad_group: { select: { campaign_id: true } },
+          },
+        }),
+      ]);
 
     const aggMap = new Map(
       perCampaignAgg.map((a) => [a.campaign_id, a._sum]),
     );
+    const shareMap = new Map(
+      perCampaignShareAvg.map((a) => [a.campaign_id, a._avg]),
+    );
 
-    // Serializa BigInt pra JSON-friendly + agrega metrics_window
+    // Best ad_strength por campanha (POOR=1, AVERAGE=2, GOOD=3, EXCELLENT=4)
+    const STRENGTH_RANK: Record<string, number> = {
+      EXCELLENT: 4,
+      GOOD: 3,
+      AVERAGE: 2,
+      POOR: 1,
+      PENDING: 0,
+      NO_ADS: 0,
+    };
+    const bestStrengthByCampaign = new Map<string, string>();
+    for (const ad of adStrengthAgg) {
+      const cid = ad.ad_group?.campaign_id;
+      if (!cid || !ad.ad_strength) continue;
+      const current = bestStrengthByCampaign.get(cid);
+      if (
+        !current ||
+        (STRENGTH_RANK[ad.ad_strength] ?? 0) > (STRENGTH_RANK[current] ?? 0)
+      ) {
+        bestStrengthByCampaign.set(cid, ad.ad_strength);
+      }
+    }
+
+    // Serializa BigInt pra JSON-friendly + agrega metrics_window + imp_share
     return campaigns.map((c) => {
       const agg = aggMap.get(c.id);
+      const share = shareMap.get(c.id);
       const cost = agg?.cost_micros ? Number(agg.cost_micros) / 1_000_000 : 0;
       const conversions = Number(agg?.conversions ?? 0);
       const clicks = Number(agg?.clicks ?? 0);
@@ -132,6 +190,8 @@ export class TrafegoService {
         ...c,
         daily_budget_micros: c.daily_budget_micros?.toString() ?? null,
         daily_budget_brl: fromMicros(c.daily_budget_micros),
+        // Best ad_strength entre os ads ENABLED dessa campanha
+        ad_strength: bestStrengthByCampaign.get(c.id) ?? null,
         metrics_window: {
           days: windowDays,
           spend_brl: cost,
@@ -141,9 +201,163 @@ export class TrafegoService {
           cpl_brl: conversions > 0 ? cost / conversions : 0,
           ctr: impressions > 0 ? clicks / impressions : 0,
           avg_cpc_brl: clicks > 0 ? cost / clicks : 0,
+          // P2: impression share médio na janela
+          impression_share: share?.search_impression_share
+            ? Number(share.search_impression_share)
+            : null,
+          lost_is_budget: share?.search_lost_is_budget
+            ? Number(share.search_lost_is_budget)
+            : null,
+          lost_is_rank: share?.search_lost_is_rank
+            ? Number(share.search_lost_is_rank)
+            : null,
+          top_impression_share: share?.search_top_impression_share
+            ? Number(share.search_top_impression_share)
+            : null,
+          abs_top_impression_share: share?.search_abs_top_impression_share
+            ? Number(share.search_abs_top_impression_share)
+            : null,
         },
       };
     });
+  }
+
+  // ─── P2: Hourly + Device endpoints (detalhe campanha) ──────────────────
+
+  /**
+   * Métricas hora × dia da semana de uma campanha (últimos N dias, default
+   * 30). Já retorna agregado pra heatmap (24×7 = 168 buckets).
+   */
+  async getCampaignHourlyMetrics(
+    tenantId: string,
+    campaignId: string,
+    days = 30,
+  ) {
+    await this.requireCampaign(tenantId, campaignId);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const windowStart = new Date(today);
+    windowStart.setUTCDate(windowStart.getUTCDate() - days);
+
+    const rows = await this.prisma.trafficMetricHourly.findMany({
+      where: {
+        campaign_id: campaignId,
+        date: { gte: windowStart },
+      },
+      select: {
+        date: true,
+        hour: true,
+        impressions: true,
+        clicks: true,
+        cost_micros: true,
+        conversions: true,
+      },
+    });
+
+    // Agrega por (dow, hour). dow: 0=Dom..6=Sab (UTC do db.Date).
+    type Cell = {
+      dow: number;
+      hour: number;
+      impressions: number;
+      clicks: number;
+      cost_brl: number;
+      conversions: number;
+    };
+    const grid = new Map<string, Cell>();
+    for (let dow = 0; dow < 7; dow++) {
+      for (let hour = 0; hour < 24; hour++) {
+        grid.set(`${dow}-${hour}`, {
+          dow,
+          hour,
+          impressions: 0,
+          clicks: 0,
+          cost_brl: 0,
+          conversions: 0,
+        });
+      }
+    }
+    for (const r of rows) {
+      const dow = r.date.getUTCDay();
+      const key = `${dow}-${r.hour}`;
+      const cell = grid.get(key);
+      if (!cell) continue;
+      cell.impressions += r.impressions;
+      cell.clicks += r.clicks;
+      cell.cost_brl += Number(r.cost_micros) / 1_000_000;
+      cell.conversions += Number(r.conversions);
+    }
+
+    return {
+      days,
+      cells: [...grid.values()].map((c) => ({
+        ...c,
+        cpl_brl: c.conversions > 0 ? c.cost_brl / c.conversions : 0,
+        ctr: c.impressions > 0 ? c.clicks / c.impressions : 0,
+      })),
+    };
+  }
+
+  /**
+   * Métricas por dispositivo agregadas no período (default 30d).
+   */
+  async getCampaignDeviceMetrics(
+    tenantId: string,
+    campaignId: string,
+    days = 30,
+  ) {
+    await this.requireCampaign(tenantId, campaignId);
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const windowStart = new Date(today);
+    windowStart.setUTCDate(windowStart.getUTCDate() - days);
+
+    const aggs = await this.prisma.trafficMetricDevice.groupBy({
+      by: ['device'],
+      where: {
+        campaign_id: campaignId,
+        date: { gte: windowStart },
+      },
+      _sum: {
+        impressions: true,
+        clicks: true,
+        cost_micros: true,
+        conversions: true,
+        conversions_value: true,
+      },
+    });
+
+    const totalCost = aggs.reduce(
+      (s, a) => s + (a._sum.cost_micros ? Number(a._sum.cost_micros) : 0),
+      0,
+    );
+    const totalConv = aggs.reduce(
+      (s, a) => s + Number(a._sum.conversions ?? 0),
+      0,
+    );
+
+    return {
+      days,
+      total_cost_brl: totalCost / 1_000_000,
+      total_conversions: totalConv,
+      items: aggs.map((a) => {
+        const cost = a._sum.cost_micros ? Number(a._sum.cost_micros) / 1_000_000 : 0;
+        const conv = Number(a._sum.conversions ?? 0);
+        const clicks = Number(a._sum.clicks ?? 0);
+        const impressions = Number(a._sum.impressions ?? 0);
+        return {
+          device: a.device,
+          impressions,
+          clicks,
+          cost_brl: cost,
+          conversions: conv,
+          cpl_brl: conv > 0 ? cost / conv : 0,
+          ctr: impressions > 0 ? clicks / impressions : 0,
+          // % do total de gastos (pra donut)
+          spend_share: totalCost > 0 ? Number(a._sum.cost_micros) / totalCost : 0,
+          conv_share: totalConv > 0 ? conv / totalConv : 0,
+        };
+      }),
+    };
   }
 
   async updateCampaign(
