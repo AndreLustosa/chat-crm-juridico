@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { HelpCircle, LucideIcon, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 export interface KpiTooltipInfo {
@@ -106,36 +107,74 @@ function MetricHelp({
   label: string;
 }) {
   const title = info.title ?? label;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 16, top: 16 });
+
+  const showTooltip = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect || typeof window === 'undefined') {
+      setOpen(true);
+      return;
+    }
+
+    const margin = 16;
+    const width = Math.min(320, window.innerWidth - margin * 2);
+    const estimatedHeight = 260;
+    const left = Math.min(
+      Math.max(rect.right - width, margin),
+      window.innerWidth - width - margin,
+    );
+    const belowTop = rect.bottom + 8;
+    const top =
+      belowTop + estimatedHeight > window.innerHeight
+        ? Math.max(rect.top - estimatedHeight - 8, margin)
+        : belowTop;
+
+    setPosition({ left, top });
+    setOpen(true);
+  };
 
   return (
-    <span className="relative inline-flex group/help">
+    <span className="inline-flex">
       <button
+        ref={buttonRef}
         type="button"
         aria-label={`Entender ${label}`}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={showTooltip}
+        onBlur={() => setOpen(false)}
         className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <HelpCircle size={14} strokeWidth={2.2} />
       </button>
-      <span className="pointer-events-none absolute right-0 top-6 z-50 hidden w-[min(320px,calc(100vw-2rem))] rounded-lg border border-border bg-popover p-3 text-left shadow-xl group-hover/help:block group-focus-within/help:block">
-        <span className="block text-[12px] font-bold text-foreground mb-1">
-          {title}
+      {open && (
+        <span
+          role="tooltip"
+          className="pointer-events-none fixed z-[9999] w-[min(320px,calc(100vw-2rem))] rounded-lg border border-border bg-popover p-3 text-left shadow-xl"
+          style={{ left: position.left, top: position.top }}
+        >
+          <span className="block text-[12px] font-bold text-foreground mb-1">
+            {title}
+          </span>
+          <span className="block text-[11px] leading-relaxed text-muted-foreground">
+            {info.description}
+          </span>
+          <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-foreground/70">
+            Valor ideal
+          </span>
+          <span className="block text-[11px] leading-relaxed text-muted-foreground">
+            {info.ideal}
+          </span>
+          <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-foreground/70">
+            Como conquistar
+          </span>
+          <span className="block text-[11px] leading-relaxed text-muted-foreground">
+            {info.howTo}
+          </span>
         </span>
-        <span className="block text-[11px] leading-relaxed text-muted-foreground">
-          {info.description}
-        </span>
-        <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-foreground/70">
-          Valor ideal
-        </span>
-        <span className="block text-[11px] leading-relaxed text-muted-foreground">
-          {info.ideal}
-        </span>
-        <span className="mt-2 block text-[10px] font-bold uppercase tracking-wider text-foreground/70">
-          Como conquistar
-        </span>
-        <span className="block text-[11px] leading-relaxed text-muted-foreground">
-          {info.howTo}
-        </span>
-      </span>
+      )}
     </span>
   );
 }

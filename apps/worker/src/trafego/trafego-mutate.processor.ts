@@ -17,6 +17,7 @@ import { type AdContent } from '@crm/shared';
 export const MUTATE_JOBS = {
   PAUSE_CAMPAIGN: 'trafego-mutate-pause-campaign',
   RESUME_CAMPAIGN: 'trafego-mutate-resume-campaign',
+  REMOVE_CAMPAIGN: 'trafego-mutate-remove-campaign',
   UPDATE_BUDGET: 'trafego-mutate-update-budget',
   PAUSE_AD_GROUP: 'trafego-mutate-pause-ad-group',
   RESUME_AD_GROUP: 'trafego-mutate-resume-ad-group',
@@ -52,6 +53,7 @@ export type PauseCampaignPayload = BaseMutatePayload & {
 };
 
 export type ResumeCampaignPayload = PauseCampaignPayload;
+export type RemoveCampaignPayload = PauseCampaignPayload;
 
 export type UpdateBudgetPayload = BaseMutatePayload & {
   /// resource_name do campaign_budget existente
@@ -200,6 +202,8 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.pauseCampaign(job.data);
       case MUTATE_JOBS.RESUME_CAMPAIGN:
         return await this.resumeCampaign(job.data);
+      case MUTATE_JOBS.REMOVE_CAMPAIGN:
+        return await this.removeCampaign(job.data);
       case MUTATE_JOBS.UPDATE_BUDGET:
         return await this.updateBudget(job.data);
       case MUTATE_JOBS.PAUSE_AD_GROUP:
@@ -283,6 +287,29 @@ export class TrafegoMutateProcessor extends WorkerHost {
         p.accountId,
         p.campaignResourceName,
         'ENABLED',
+      );
+    }
+    return result;
+  }
+
+  private async removeCampaign(p: RemoveCampaignPayload): Promise<MutateResult> {
+    const result = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign',
+      operation: 'remove',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [p.campaignResourceName],
+    });
+    if (result.status === 'SUCCESS' && !p.validateOnly) {
+      await this.updateLocalCampaignStatus(
+        p.tenantId,
+        p.accountId,
+        p.campaignResourceName,
+        'REMOVED',
       );
     }
     return result;

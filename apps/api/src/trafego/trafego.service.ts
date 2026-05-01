@@ -106,7 +106,9 @@ export class TrafegoService {
         this.prisma.trafficCampaign.findMany({
           where: {
             tenant_id: tenantId,
-            ...(opts.includeArchived ? {} : { is_archived_internal: false }),
+            ...(opts.includeArchived
+              ? {}
+              : { is_archived_internal: false, status: { not: 'REMOVED' } }),
           },
           orderBy: [{ is_favorite: 'desc' }, { last_seen_at: 'desc' }],
         }),
@@ -846,7 +848,8 @@ export class TrafegoService {
 
     switch (jobName) {
       case 'trafego-mutate-pause-campaign':
-      case 'trafego-mutate-resume-campaign': {
+      case 'trafego-mutate-resume-campaign':
+      case 'trafego-mutate-remove-campaign': {
         const camp = await this.requireCampaign(tenantId, raw.campaignId);
         return {
           ...base,

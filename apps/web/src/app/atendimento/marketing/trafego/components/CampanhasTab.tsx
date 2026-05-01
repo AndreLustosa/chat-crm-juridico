@@ -10,6 +10,7 @@ import {
   Pause,
   Play,
   Edit3,
+  Trash2,
   X,
   Search,
   Plus,
@@ -120,6 +121,17 @@ const fmtPct = (v: number) =>
  *   - "Display" → "display"
  *   - "Trabalhista"|"Civil"|"Criminal"|"Família"|"Previdenciário" → área
  */
+function getApiErrorMessage(err: unknown, fallback: string) {
+  if (typeof err !== 'object' || err === null || !('response' in err)) {
+    return fallback;
+  }
+  const response = (err as { response?: { data?: { message?: unknown } } })
+    .response;
+  return typeof response?.data?.message === 'string'
+    ? response.data.message
+    : fallback;
+}
+
 function suggestTagsFromName(name: string): string[] {
   const n = name.toLowerCase();
   const out = new Set<string>();
@@ -205,8 +217,8 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
         if (!a.is_favorite && b.is_favorite) return 1;
       }
 
-      let av: any;
-      let bv: any;
+      let av: string | number;
+      let bv: string | number;
       switch (sortKey) {
         case 'favorite':
           av = a.is_favorite ? 1 : 0;
@@ -287,8 +299,27 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
       // Optimistic UI: status muda em ~5s; resync sera no proximo cron, mas o
       // mirror local do worker ja atualiza o cache.
       setTimeout(load, 4000);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao executar acao.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Falha ao executar acao.'));
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  async function deleteCampaign(c: Campaign) {
+    if (!canManage || c.status === 'REMOVED') return;
+    const confirmMsg =
+      `Excluir a campanha "${c.name}" no Google Ads?\n\n` +
+      'Esta acao remove a campanha da conta e nao pode ser desfeita por esta tela.';
+    if (!confirm(confirmMsg)) return;
+    setActingId(c.id);
+    try {
+      await api.delete(`/trafego/campaigns/${c.id}`);
+      showSuccess('Exclusao enfileirada.');
+      setCampaigns((prev) => prev.filter((x) => x.id !== c.id));
+      setTimeout(load, 4000);
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Falha ao excluir campanha.'));
     } finally {
       setActingId(null);
     }
@@ -584,7 +615,7 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                 Ad Strength
               </th>
               <th className="text-left px-3 py-3">Tags</th>
-              <th className="text-right px-3 py-3 w-32">Ações</th>
+              <th className="text-right px-3 py-3 w-40">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -734,6 +765,14 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                         className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
                       >
                         {c.status === 'PAUSED' ? <Play size={14} /> : <Pause size={14} />}
+                      </button>
+                      <button
+                        onClick={() => deleteCampaign(c)}
+                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
+                        title="Excluir campanha"
+                        className="p-1.5 rounded hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
+                      >
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </td>

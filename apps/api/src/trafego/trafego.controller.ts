@@ -738,6 +738,20 @@ export class TrafegoController {
     });
   }
 
+  /** Remove uma campanha no Google. */
+  @Delete('campaigns/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeCampaign(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: MutateBaseDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-remove-campaign', {
+      campaignId,
+      ...dto,
+    });
+  }
+
   /** Atualiza budget diario. Recebe valor em BRL, converte pra micros. */
   @Patch('campaigns/:id/budget')
   @Roles('ADMIN', 'ADVOGADO')
