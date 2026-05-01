@@ -1837,9 +1837,13 @@ export default function AdvogadoPage() {
   // BUG FIX: archivedCount via fetch separado
   const [archivedTotal, setArchivedTotal] = useState(0);
 
-  // Prazos e petições pendentes
+  // Prazos, tarefas e audiências pendentes
   const [deadlines, setDeadlines] = useState<any[]>([]);
   const [showDeadlines, setShowDeadlines] = useState(true);
+  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
+  const [showTasks, setShowTasks] = useState(true);
+  const [pendingHearings, setPendingHearings] = useState<any[]>([]);
+  const [showHearings, setShowHearings] = useState(true);
   const [interns, setInterns] = useState<{ id: string; name: string }[]>([]);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -2022,12 +2026,14 @@ export default function AdvogadoPage() {
 
     api.get('/calendar/events', { params })
       .then(r => {
-        const items = (r.data || []).filter((e: any) =>
-          ['AGENDADO', 'CONFIRMADO'].includes(e.status) && e.type === 'PRAZO'
+        const active = (r.data || []).filter((e: any) =>
+          ['AGENDADO', 'CONFIRMADO'].includes(e.status)
         );
-        setDeadlines(items.sort((a: any, b: any) =>
-          new Date(a.start_at).getTime() - new Date(b.start_at).getTime()
-        ).slice(0, 50));
+        const sorted = (arr: any[]) =>
+          arr.sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+        setDeadlines(sorted(active.filter((e: any) => e.type === 'PRAZO')).slice(0, 50));
+        setPendingTasks(sorted(active.filter((e: any) => ['TAREFA', 'CONSULTA', 'OUTRO'].includes(e.type))).slice(0, 50));
+        setPendingHearings(sorted(active.filter((e: any) => ['AUDIENCIA', 'PERICIA'].includes(e.type))).slice(0, 50));
       })
       .catch(() => {});
   }, [isAdmin, lawyerFilter]);
@@ -2582,6 +2588,364 @@ export default function AdvogadoPage() {
             })()}
 
             {/* Prazos e Petições Pendentes */}
+            {/* Audiências e Perícias pendentes */}
+            {view === 'active' && pendingHearings.length > 0 && (
+              <div className="mx-6 mt-4 shrink-0">
+                <button
+                  onClick={() => setShowHearings(!showHearings)}
+                  className="flex items-center gap-2 text-[12px] font-bold text-amber-400 uppercase tracking-wider mb-2 hover:opacity-80 transition-opacity"
+                >
+                  <ChevronRight size={14} className={`transition-transform ${showHearings ? 'rotate-90' : ''}`} />
+                  <Gavel size={13} />
+                  Audiências e Perícias ({pendingHearings.length})
+                </button>
+                {showHearings && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {pendingHearings.map((d: any) => {
+                      const isOverdue = new Date(d.start_at) < new Date();
+                      const caseId = d.legal_case_id || d.legal_case?.id;
+                      const delegateOpen = delegateOpenId === `hearing-${d.id}`;
+
+                      const doAssign = async (newId: string | null, newName: string | null) => {
+                        setAssigningId(d.id);
+                        try {
+                          await api.patch(`/calendar/events/${d.id}`, { assigned_user_id: newId });
+                          setPendingHearings(prev => prev.map(item =>
+                            item.id === d.id
+                              ? { ...item, assigned_user_id: newId, assigned_user: newId ? { id: newId, name: newName } : null }
+                              : item
+                          ));
+                          showSuccess(newId ? `Delegado para ${newName}` : 'Atribuição removida');
+                        } catch {
+                          showError('Erro ao delegar');
+                        } finally {
+                          setAssigningId(null);
+                          setDelegateOpenId(null);
+                        }
+                      };
+
+                      return (
+                        <div
+                          key={d.id}
+                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          className={`bg-card border rounded-xl p-3 transition-all group ${
+                            caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
+                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-amber-500/15 text-amber-400">
+                              {d.type === 'PERICIA' ? 'PERÍCIA' : 'AUDIÊNCIA'}
+                            </span>
+                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              {isOverdue && ' (passada)'}
+                            </span>
+                          </div>
+
+                          <p className="text-[12px] font-semibold text-foreground leading-snug mb-1">
+                            {d.title}
+                          </p>
+
+                          <div className="flex items-center gap-3 text-[10px] mb-2 flex-wrap">
+                            {d.lead?.name && (
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <User size={9} />
+                                {d.lead.name}
+                              </span>
+                            )}
+                            {d.assigned_user ? (
+                              <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                                <UserCheck size={9} />
+                                {d.assigned_user.name}
+                              </span>
+                            ) : (
+                              <span className="text-amber-400/80 italic flex items-center gap-1">
+                                <AlertTriangle size={9} />
+                                Sem responsável
+                              </span>
+                            )}
+                          </div>
+
+                          <div
+                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <div className="relative">
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setDelegateOpenId(delegateOpen ? null : `hearing-${d.id}`);
+                                }}
+                                disabled={assigningId === d.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/25 text-blue-400 text-[11px] font-bold hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                              >
+                                {assigningId === d.id ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  <UserPlus size={11} />
+                                )}
+                                Delegar
+                                <ChevronDown size={9} className={`transition-transform ${delegateOpen ? 'rotate-180' : ''}`} />
+                              </button>
+                              {delegateOpen && (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-20"
+                                    onClick={e => { e.stopPropagation(); setDelegateOpenId(null); }}
+                                  />
+                                  <div className="absolute right-0 top-full mt-1 z-30 w-[220px] bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+                                    <div className="py-1 max-h-[260px] overflow-y-auto custom-scrollbar">
+                                      {currentUserId && d.assigned_user_id !== currentUserId && (
+                                        <button
+                                          onClick={() => doAssign(currentUserId, 'Você')}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-emerald-500/10 text-left transition-colors"
+                                        >
+                                          <UserCheck size={12} className="text-emerald-400" />
+                                          Eu mesmo
+                                        </button>
+                                      )}
+                                      {d.assigned_user_id && (
+                                        <button
+                                          onClick={() => doAssign(null, null)}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-muted-foreground hover:bg-red-500/10 text-left transition-colors"
+                                        >
+                                          <X size={12} />
+                                          Remover atribuição
+                                        </button>
+                                      )}
+                                      {interns.length > 0 ? (
+                                        <>
+                                          <div className="px-3 py-1.5 border-t border-border/30 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                                            Estagiários
+                                          </div>
+                                          {interns.map(i => (
+                                            <button
+                                              key={i.id}
+                                              onClick={() => doAssign(i.id, i.name)}
+                                              disabled={d.assigned_user_id === i.id}
+                                              className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-blue-500/10 text-left transition-colors disabled:opacity-40 disabled:cursor-default"
+                                            >
+                                              <UserCheck size={12} className="text-blue-400" />
+                                              {i.name}
+                                              {d.assigned_user_id === i.id && (
+                                                <span className="ml-auto text-[9px] text-emerald-400">atual</span>
+                                              )}
+                                            </button>
+                                          ))}
+                                        </>
+                                      ) : (
+                                        <div className="px-3 py-2 text-[10px] text-muted-foreground italic">
+                                          Nenhum estagiário vinculado
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            <EventActionButton
+                              type="CALENDAR"
+                              id={d.id}
+                              currentStatus={d.status}
+                              label="Cumprir"
+                              completionNote={d.completion_note}
+                              completedBy={d.completed_by}
+                              completedAt={d.completed_at}
+                              legalCaseId={d.legal_case?.id ?? d.legal_case_id ?? null}
+                              currentTrackingStage={d.legal_case?.tracking_stage ?? null}
+                              onActionComplete={() => {
+                                setPendingHearings(prev => prev.filter(item => item.id !== d.id));
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tarefas pendentes atribuídas ao advogado */}
+            {view === 'active' && pendingTasks.length > 0 && (
+              <div className="mx-6 mt-4 shrink-0">
+                <button
+                  onClick={() => setShowTasks(!showTasks)}
+                  className="flex items-center gap-2 text-[12px] font-bold text-blue-400 uppercase tracking-wider mb-2 hover:opacity-80 transition-opacity"
+                >
+                  <ChevronRight size={14} className={`transition-transform ${showTasks ? 'rotate-90' : ''}`} />
+                  <CheckSquare size={13} />
+                  Tarefas e Consultas ({pendingTasks.length})
+                </button>
+                {showTasks && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {pendingTasks.map((d: any) => {
+                      const isOverdue = new Date(d.start_at) < new Date();
+                      const caseId = d.legal_case_id || d.legal_case?.id;
+                      const delegateOpen = delegateOpenId === `task-${d.id}`;
+
+                      const doAssign = async (newId: string | null, newName: string | null) => {
+                        setAssigningId(d.id);
+                        try {
+                          await api.patch(`/calendar/events/${d.id}`, { assigned_user_id: newId });
+                          setPendingTasks(prev => prev.map(item =>
+                            item.id === d.id
+                              ? { ...item, assigned_user_id: newId, assigned_user: newId ? { id: newId, name: newName } : null }
+                              : item
+                          ));
+                          showSuccess(newId ? `Delegado para ${newName}` : 'Atribuição removida');
+                        } catch {
+                          showError('Erro ao delegar');
+                        } finally {
+                          setAssigningId(null);
+                          setDelegateOpenId(null);
+                        }
+                      };
+
+                      return (
+                        <div
+                          key={d.id}
+                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          className={`bg-card border rounded-xl p-3 transition-all group ${
+                            caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
+                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-blue-500/15 text-blue-400">
+                              TAREFA
+                            </span>
+                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              {isOverdue && ' (vencida)'}
+                            </span>
+                          </div>
+
+                          <p className="text-[12px] font-semibold text-foreground leading-snug mb-1">
+                            {d.title}
+                          </p>
+
+                          <div className="flex items-center gap-3 text-[10px] mb-2 flex-wrap">
+                            {d.lead?.name && (
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <User size={9} />
+                                {d.lead.name}
+                              </span>
+                            )}
+                            {d.assigned_user ? (
+                              <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                                <UserCheck size={9} />
+                                {d.assigned_user.name}
+                              </span>
+                            ) : (
+                              <span className="text-amber-400/80 italic flex items-center gap-1">
+                                <AlertTriangle size={9} />
+                                Sem responsável
+                              </span>
+                            )}
+                          </div>
+
+                          <div
+                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <div className="relative">
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setDelegateOpenId(delegateOpen ? null : `task-${d.id}`);
+                                }}
+                                disabled={assigningId === d.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/25 text-blue-400 text-[11px] font-bold hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                              >
+                                {assigningId === d.id ? (
+                                  <Loader2 size={11} className="animate-spin" />
+                                ) : (
+                                  <UserPlus size={11} />
+                                )}
+                                Delegar
+                                <ChevronDown size={9} className={`transition-transform ${delegateOpen ? 'rotate-180' : ''}`} />
+                              </button>
+                              {delegateOpen && (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-20"
+                                    onClick={e => { e.stopPropagation(); setDelegateOpenId(null); }}
+                                  />
+                                  <div className="absolute right-0 top-full mt-1 z-30 w-[220px] bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+                                    <div className="py-1 max-h-[260px] overflow-y-auto custom-scrollbar">
+                                      {currentUserId && d.assigned_user_id !== currentUserId && (
+                                        <button
+                                          onClick={() => doAssign(currentUserId, 'Você')}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-emerald-500/10 text-left transition-colors"
+                                        >
+                                          <UserCheck size={12} className="text-emerald-400" />
+                                          Eu mesmo
+                                        </button>
+                                      )}
+                                      {d.assigned_user_id && (
+                                        <button
+                                          onClick={() => doAssign(null, null)}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-muted-foreground hover:bg-red-500/10 text-left transition-colors"
+                                        >
+                                          <X size={12} />
+                                          Remover atribuição
+                                        </button>
+                                      )}
+                                      {interns.length > 0 ? (
+                                        <>
+                                          <div className="px-3 py-1.5 border-t border-border/30 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                                            Estagiários
+                                          </div>
+                                          {interns.map(i => (
+                                            <button
+                                              key={i.id}
+                                              onClick={() => doAssign(i.id, i.name)}
+                                              disabled={d.assigned_user_id === i.id}
+                                              className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-blue-500/10 text-left transition-colors disabled:opacity-40 disabled:cursor-default"
+                                            >
+                                              <UserCheck size={12} className="text-blue-400" />
+                                              {i.name}
+                                              {d.assigned_user_id === i.id && (
+                                                <span className="ml-auto text-[9px] text-emerald-400">atual</span>
+                                              )}
+                                            </button>
+                                          ))}
+                                        </>
+                                      ) : (
+                                        <div className="px-3 py-2 text-[10px] text-muted-foreground italic">
+                                          Nenhum estagiário vinculado
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            <EventActionButton
+                              type="CALENDAR"
+                              id={d.id}
+                              currentStatus={d.status}
+                              label="Cumprir"
+                              completionNote={d.completion_note}
+                              completedBy={d.completed_by}
+                              completedAt={d.completed_at}
+                              legalCaseId={d.legal_case?.id ?? d.legal_case_id ?? null}
+                              currentTrackingStage={d.legal_case?.tracking_stage ?? null}
+                              onActionComplete={() => {
+                                setPendingTasks(prev => prev.filter(item => item.id !== d.id));
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* shrink-0: nao esticar; a pagina rola verticalmente, entao os
                 prazos ocupam altura natural e o kanban fica abaixo, acessivel
                 via scroll da pagina inteira. */}
