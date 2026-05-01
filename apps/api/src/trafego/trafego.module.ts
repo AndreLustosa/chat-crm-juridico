@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { SettingsModule } from '../settings/settings.module';
 import { TrafegoController } from './trafego.controller';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
@@ -14,6 +15,7 @@ import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
 import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
 import { TrafegoChatService } from './trafego-chat.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
+import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -27,6 +29,7 @@ import { TrafegoBackfillService } from './trafego-backfill.service';
  */
 @Module({
   imports: [
+    SettingsModule,
     BullModule.registerQueue({ name: 'trafego-sync' }),
     BullModule.registerQueue({ name: 'trafego-mutate' }),
     BullModule.registerQueue({ name: 'trafego-oci' }),
@@ -52,6 +55,7 @@ import { TrafegoBackfillService } from './trafego-backfill.service';
     TrafegoReachPlannerService,
     TrafegoChatService,
     TrafegoBackfillService,
+    TrafegoMappingAiService,
   ],
   exports: [
     TrafegoService,
@@ -67,6 +71,7 @@ import { TrafegoBackfillService } from './trafego-backfill.service';
     TrafegoReachPlannerService,
     TrafegoChatService,
     TrafegoBackfillService,
+    TrafegoMappingAiService,
   ],
 })
 export class TrafegoModule {}
