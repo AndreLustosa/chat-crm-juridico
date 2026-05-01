@@ -1,6 +1,5 @@
 import { Metadata } from 'next';
 import localFont from 'next/font/local';
-import { Playfair_Display } from 'next/font/google';
 
 export const metadata: Metadata = {
   title: 'Portal do Cliente | André Lustosa Advogados',
@@ -17,15 +16,15 @@ const neueMontreal = localFont({
   display: 'swap',
 });
 
-const playfair = Playfair_Display({
-  subsets: ['latin'],
+const displayFont = localFont({
+  src: [{ path: '../../../public/fonts/NeueMontreal-Medium.woff2', weight: '500', style: 'normal' }],
   variable: '--font-playfair',
   display: 'swap',
 });
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className={`${neueMontreal.variable} ${playfair.variable} font-sans min-h-screen bg-[#0a0a0f] text-white flex flex-col`}>
+    <div className={`${neueMontreal.variable} ${displayFont.variable} font-sans min-h-screen bg-[#0a0a0f] text-white flex flex-col`}>
       {children}
     </div>
   );

@@ -13,8 +13,7 @@
 }
 
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  --font-ubuntu: var(--font-ubuntu), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-ubuntu), ui-sans-serif, system-ui, sans-serif;
   
   /* Variáveis Semânticas do Tailwind v4 herdando os Temas */
   --color-border: var(--border-default);

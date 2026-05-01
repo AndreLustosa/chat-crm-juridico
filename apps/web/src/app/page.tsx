@@ -1,7 +1,6 @@
 import { HomeTemplate } from '@/components/lp/templates/HomeTemplate';
 import { LPTracker } from '@/components/lp/LPTracker';
 import localFont from 'next/font/local';
-import { Playfair_Display } from 'next/font/google';
 import Script from 'next/script';
 import { Metadata } from 'next';
 
@@ -94,8 +93,8 @@ const neueMontreal = localFont({
   display: 'swap',
 });
 
-const playfair = Playfair_Display({
-  subsets: ['latin'],
+const displayFont = localFont({
+  src: [{ path: '../../public/fonts/NeueMontreal-Medium.woff2', weight: '500', style: 'normal' }],
   variable: '--font-playfair',
   display: 'swap',
 });
@@ -188,7 +187,7 @@ export default function Home() {
   };
 
   return (
-    <div className={`${neueMontreal.variable} ${playfair.variable} font-sans`}>
+    <div className={`${neueMontreal.variable} ${displayFont.variable} font-sans`}>
       <Script
         id="json-ld"
         type="application/ld+json"

@@ -1,18 +1,31 @@
-import type { Metadata } from 'next';
-import { Ubuntu_Sans } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import localFont from 'next/font/local';
 import './globals.css';
 import { Providers } from './providers';
 import { GTMScript, GTMNoScript } from '@/components/GTMScript';
 import { Toaster } from 'react-hot-toast';
 
-const ubuntuSans = Ubuntu_Sans({
-  subsets: ['latin'],
+const ubuntuSans = localFont({
+  src: [
+    { path: '../../public/fonts/NeueMontreal-Regular.woff2', weight: '400', style: 'normal' },
+    { path: '../../public/fonts/NeueMontreal-Medium.woff2', weight: '500', style: 'normal' },
+  ],
   variable: '--font-ubuntu',
+  display: 'swap',
 });
 
+const appUrl =
+  process.env.NEXT_PUBLIC_APP_URL || 'https://andrelustosaadvogados.com.br';
+
 export const metadata: Metadata = {
+  metadataBase: new URL(appUrl),
   title: 'André Lustosa Advogados | Advocacia Especializada',
   description: 'Escritório de advocacia especializado em direito previdenciário, trabalhista e cível em Alagoas.',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -23,10 +36,6 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" suppressHydrationWarning className={ubuntuSans.variable}>
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet" />
         {/* Google Tag Manager */}
         <GTMScript />
       </head>
