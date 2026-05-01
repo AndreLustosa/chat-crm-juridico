@@ -345,20 +345,40 @@ function Header({
         </div>
       </div>
 
-      {onSyncNow && (
-        <button
-          onClick={onSyncNow}
-          disabled={syncing}
-          className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-border bg-card hover:bg-accent disabled:opacity-50"
+      <div className="flex items-center gap-2 flex-wrap">
+        <a
+          href="/atendimento/marketing/trafego/termos-busca"
+          className="text-xs font-semibold px-3 py-2 rounded-lg border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground"
         >
-          {syncing ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : (
-            <RefreshCw size={15} />
-          )}
-          Sincronizar agora
-        </button>
-      )}
+          Termos de busca
+        </a>
+        <a
+          href="/atendimento/marketing/trafego/alertas"
+          className="text-xs font-semibold px-3 py-2 rounded-lg border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground"
+        >
+          Alertas
+        </a>
+        <a
+          href="/atendimento/marketing/trafego/configuracoes"
+          className="text-xs font-semibold px-3 py-2 rounded-lg border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground"
+        >
+          Config.
+        </a>
+        {onSyncNow && (
+          <button
+            onClick={onSyncNow}
+            disabled={syncing}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-border bg-card hover:bg-accent disabled:opacity-50"
+          >
+            {syncing ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <RefreshCw size={15} />
+            )}
+            Sincronizar agora
+          </button>
+        )}
+      </div>
     </div>
   );
 }

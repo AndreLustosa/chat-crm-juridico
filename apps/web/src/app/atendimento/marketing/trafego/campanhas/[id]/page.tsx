@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Loader2,
@@ -34,6 +34,8 @@ import { BiddingStrategyModal } from '../../components/BiddingStrategyModal';
 import { CreateRsaModal } from '../../components/CreateRsaModal';
 import { ImpressionShareSegmentedBar } from '../../components/ImpressionShareBar';
 import { AdStrengthBadge } from '../../components/AdStrengthBadge';
+import { MatchTypeBadge } from '../../components/MatchTypeBadge';
+import { AddNegativesModal } from '../../components/AddNegativesModal';
 
 interface CampaignFull {
   id: string;
@@ -126,6 +128,7 @@ interface Ad {
   ad_type: string;
   status: string;
   approval_status: string | null;
+  ad_strength: string | null;
   final_urls: string[];
   headlines: { text?: string }[];
   descriptions: { text?: string }[];
@@ -184,11 +187,43 @@ type Tab =
   | 'devices'
   | 'negatives';
 
+const VALID_TABS: Tab[] = [
+  'overview',
+  'keywords',
+  'search-terms',
+  'ads',
+  'schedule',
+  'devices',
+  'negatives',
+];
+
 export default function CampaignDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <CampaignDetailPageInner />
+    </Suspense>
+  );
+}
+
+function CampaignDetailPageInner() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const perms = useRole();
   const id = params.id;
+
+  // Tab via URL (?tab=keywords) pra deep-link.
+  const tab: Tab = (() => {
+    const t = searchParams.get('tab');
+    return t && (VALID_TABS as string[]).includes(t) ? (t as Tab) : 'overview';
+  })();
+  function setTab(next: Tab) {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (next === 'overview') sp.delete('tab');
+    else sp.set('tab', next);
+    const qs = sp.toString();
+    router.replace(qs ? `?${qs}` : '?', { scroll: false });
+  }
 
   const [campaign, setCampaign] = useState<CampaignFull | null>(null);
   const [adGroups, setAdGroups] = useState<AdGroup[]>([]);
@@ -199,11 +234,11 @@ export default function CampaignDetailPage() {
   const [devices, setDevices] = useState<DeviceMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
-  const [tab, setTab] = useState<Tab>('overview');
   const [biddingOpen, setBiddingOpen] = useState(false);
   const [rsaOpen, setRsaOpen] = useState<{ id: string; name: string } | null>(
     null,
   );
+  const [negativesModalOpen, setNegativesModalOpen] = useState(false);
 
   // ─── Load ────────────────────────────────────────────────────────────
   async function load() {
@@ -600,7 +635,11 @@ export default function CampaignDetailPage() {
 
       {/* Tab content */}
       {tab === 'overview' && (
-        <OverviewTab campaign={campaign} adGroups={adGroups} />
+        <OverviewTab
+          campaign={campaign}
+          adGroups={adGroups}
+          hourly={hourly}
+        />
       )}
       {tab === 'keywords' && (
         <KeywordsTab
@@ -608,6 +647,7 @@ export default function CampaignDetailPage() {
           adGroups={adGroups}
           canManage={perms.canManageTrafego}
           onRemove={removeKeyword}
+          searchTerms={searchTerms}
         />
       )}
       {tab === 'search-terms' && (
@@ -626,6 +666,7 @@ export default function CampaignDetailPage() {
           adGroups={adGroups}
           canManage={perms.canManageTrafego}
           onRemove={removeKeyword}
+          onAdd={() => setNegativesModalOpen(true)}
         />
       )}
 
@@ -653,6 +694,14 @@ export default function CampaignDetailPage() {
           onCreated={() => setTimeout(load, 5000)}
         />
       )}
+      <AddNegativesModal
+        open={negativesModalOpen}
+        campaignId={campaign.id}
+        campaignName={campaign.name}
+        defaultAdGroupId={adGroups.length === 1 ? adGroups[0].id : null}
+        onClose={() => setNegativesModalOpen(false)}
+        onSaved={() => setTimeout(load, 4000)}
+      />
     </div>
   );
 }
@@ -689,79 +738,168 @@ function TabButton({
 function OverviewTab({
   campaign,
   adGroups,
+  hourly,
 }: {
   campaign: CampaignFull;
   adGroups: AdGroup[];
+  hourly: HourlyMetrics | null;
 }) {
+  const m = campaign.metrics_window;
+  // Timeseries derivada do hourly (agrega por dia da semana já existe na API,
+  // mas pra gráfico temporal precisamos reagrupar por dia). Pra MVP usamos
+  // hourly mesmo agregando.
+  const dailySeries = useMemo(() => {
+    if (!hourly?.cells) return [];
+    // hourly.cells já está no formato (dow, hour) agregado — não temos data
+    // bruta aqui, então o gráfico vai mostrar "padrão semanal". Em vez disso,
+    // reaproveitamos os dados como "performance ao longo do tempo" via index.
+    // Para um gráfico real de tendência, seria preciso outro endpoint.
+    // Por ora: agrega por dow (domingo→sábado) — visão semanal típica.
+    const byDow = new Map<number, { spend: number; conv: number; clicks: number; impressions: number }>();
+    for (const c of hourly.cells) {
+      const cur = byDow.get(c.dow) ?? {
+        spend: 0,
+        conv: 0,
+        clicks: 0,
+        impressions: 0,
+      };
+      cur.spend += c.cost_brl;
+      cur.conv += c.conversions;
+      cur.clicks += c.clicks;
+      cur.impressions += c.impressions;
+      byDow.set(c.dow, cur);
+    }
+    const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    return labels.map((label, dow) => {
+      const v = byDow.get(dow) ?? { spend: 0, conv: 0, clicks: 0, impressions: 0 };
+      return {
+        label,
+        spend: v.spend,
+        conv: v.conv,
+        cpc: v.clicks > 0 ? v.spend / v.clicks : 0,
+        cpl: v.conv > 0 ? v.spend / v.conv : 0,
+        ctr: v.impressions > 0 ? v.clicks / v.impressions : 0,
+      };
+    });
+  }, [hourly]);
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="text-sm font-bold text-foreground mb-3">
-          Estrutura da campanha
-        </h3>
-        <div className="space-y-2 text-sm">
-          <Row k="Tipo" v={campaign.channel_type ?? '—'} />
-          <Row
-            k="Estratégia de lance"
-            v={campaign.bidding_strategy ?? '—'}
-          />
-          <Row k="Budget diário" v={fmtBRL(campaign.daily_budget_brl)} />
-          <Row k="Status" v={STATUS_LABEL[campaign.status] ?? campaign.status} />
-          <Row k="Ad groups" v={String(adGroups.length)} />
-          {campaign.tags.length > 0 && (
-            <Row
-              k="Tags"
-              v={
-                <div className="flex gap-1 flex-wrap">
-                  {campaign.tags.map((t) => (
-                    <span
-                      key={t}
-                      className="text-[10px] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              }
-            />
+    <div className="space-y-4">
+      {/* Posição no leilão (3 mini-cards) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <AuctionPositionCard
+          label="Topo absoluto"
+          value={m?.abs_top_impression_share ?? null}
+          hint="1ª posição"
+          colorThreshold={{ good: 0.2, warn: 0.05 }}
+        />
+        <AuctionPositionCard
+          label="Topo (1ª–4ª)"
+          value={m?.top_impression_share ?? null}
+          hint="Acima da dobra"
+          colorThreshold={{ good: 0.5, warn: 0.25 }}
+        />
+        <AuctionPositionCard
+          label="Imp. Share"
+          value={m?.impression_share ?? null}
+          hint="% das buscas que apareceu"
+          colorThreshold={{ good: 0.5, warn: 0.25 }}
+        />
+      </div>
+
+      {/* Gráficos */}
+      {dailySeries.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-sm font-bold text-foreground mb-1">
+              CPC × CPL × CTR por dia da semana
+            </h3>
+            <p className="text-[11px] text-muted-foreground mb-4">
+              Agregado dos últimos 30 dias. Dias em que CPL é alto sem CPC
+              alto = problema de conversão na LP/match.
+            </p>
+            <DualAxisChart series={dailySeries} />
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-sm font-bold text-foreground mb-1">
+              Gasto × Conversões por dia da semana
+            </h3>
+            <p className="text-[11px] text-muted-foreground mb-4">
+              Barras = gasto, linha = conversões. Mostra os melhores e
+              piores dias da semana.
+            </p>
+            <SpendVsConvChart series={dailySeries} />
+          </div>
+        </div>
+      )}
+
+      {/* Estrutura + Ad Groups */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-bold text-foreground mb-3">
+            Estrutura da campanha
+          </h3>
+          <div className="space-y-2 text-sm">
+            <Row k="Tipo" v={campaign.channel_type ?? '—'} />
+            <Row k="Estratégia de lance" v={campaign.bidding_strategy ?? '—'} />
+            <Row k="Budget diário" v={fmtBRL(campaign.daily_budget_brl)} />
+            <Row k="Status" v={STATUS_LABEL[campaign.status] ?? campaign.status} />
+            <Row k="Ad groups" v={String(adGroups.length)} />
+            {campaign.tags.length > 0 && (
+              <Row
+                k="Tags"
+                v={
+                  <div className="flex gap-1 flex-wrap">
+                    {campaign.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="text-[10px] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                }
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="text-sm font-bold text-foreground mb-3">
+            Ad Groups ({adGroups.length})
+          </h3>
+          {adGroups.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Nenhum ad_group nesta campanha. Crie um diretamente no Google
+              Ads ou aguarde o sync próximo cron.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {adGroups.map((g) => (
+                <li
+                  key={g.id}
+                  className="flex items-center justify-between text-xs py-1 border-b border-border last:border-0"
+                >
+                  <span className="text-foreground font-medium">{g.name}</span>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      g.status === 'ENABLED'
+                        ? 'bg-emerald-500/15 text-emerald-600'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {g.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>
 
-      <div className="bg-card border border-border rounded-xl p-5">
-        <h3 className="text-sm font-bold text-foreground mb-3">
-          Ad Groups ({adGroups.length})
-        </h3>
-        {adGroups.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            Nenhum ad_group nesta campanha. Crie um diretamente no Google Ads
-            ou aguarde o sync próximo cron.
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {adGroups.map((g) => (
-              <li
-                key={g.id}
-                className="flex items-center justify-between text-xs py-1 border-b border-border last:border-0"
-              >
-                <span className="text-foreground font-medium">{g.name}</span>
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                    g.status === 'ENABLED'
-                      ? 'bg-emerald-500/15 text-emerald-600'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {g.status}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
       {campaign.notes && (
-        <div className="bg-card border border-border rounded-xl p-5 lg:col-span-2">
+        <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-bold text-foreground mb-2">
             Notas internas
           </h3>
@@ -770,6 +908,233 @@ function OverviewTab({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function AuctionPositionCard({
+  label,
+  value,
+  hint,
+  colorThreshold,
+}: {
+  label: string;
+  value: number | null;
+  hint: string;
+  colorThreshold: { good: number; warn: number };
+}) {
+  const display =
+    value === null ? '—' : `${(value * 100).toFixed(1)}%`;
+  const color =
+    value === null
+      ? 'text-muted-foreground'
+      : value >= colorThreshold.good
+        ? 'text-emerald-500'
+        : value >= colorThreshold.warn
+          ? 'text-amber-500'
+          : 'text-red-500';
+  return (
+    <div className="bg-card border border-border rounded-xl p-4">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">
+        {label}
+      </div>
+      <div className={`text-2xl font-bold tabular-nums ${color}`}>
+        {display}
+      </div>
+      <div className="text-[11px] text-muted-foreground mt-0.5">{hint}</div>
+    </div>
+  );
+}
+
+/**
+ * Gráfico SVG inline com 2 eixos: esquerdo (CPC + CPL em R$) e direito (CTR %).
+ */
+function DualAxisChart({
+  series,
+}: {
+  series: { label: string; cpc: number; cpl: number; ctr: number }[];
+}) {
+  const W = 100;
+  const H = 100;
+  const maxLeft =
+    Math.max(
+      ...series.map((s) => Math.max(s.cpc, s.cpl)),
+      1,
+    ) * 1.1;
+  const maxRight = Math.max(...series.map((s) => s.ctr), 0.01) * 1.1;
+
+  function xPos(i: number): number {
+    return (i / Math.max(1, series.length - 1)) * W;
+  }
+  function yPosLeft(v: number): number {
+    return H - (v / maxLeft) * H;
+  }
+  function yPosRight(v: number): number {
+    return H - (v / maxRight) * H;
+  }
+  function pathOf(values: number[], yFn: (v: number) => number): string {
+    return values
+      .map((v, i) => {
+        const x = xPos(i);
+        const y = yFn(v);
+        return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="w-full h-48"
+        role="img"
+        aria-label="CPC, CPL e CTR por dia da semana"
+      >
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={W}
+            y1={H * f}
+            y2={H * f}
+            stroke="currentColor"
+            strokeWidth={0.2}
+            className="text-border"
+          />
+        ))}
+        <path
+          d={pathOf(series.map((s) => s.cpc), yPosLeft)}
+          fill="none"
+          stroke="rgb(59 130 246)"
+          strokeWidth={1.2}
+          vectorEffect="non-scaling-stroke"
+        />
+        <path
+          d={pathOf(series.map((s) => s.cpl), yPosLeft)}
+          fill="none"
+          stroke="rgb(16 185 129)"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+        <path
+          d={pathOf(series.map((s) => s.ctr), yPosRight)}
+          fill="none"
+          stroke="rgb(245 158 11)"
+          strokeWidth={1}
+          strokeDasharray="3 2"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      <div className="flex justify-between mt-1 text-[10px] text-muted-foreground tabular-nums">
+        {series.map((s) => (
+          <span key={s.label}>{s.label}</span>
+        ))}
+      </div>
+      <div className="flex gap-4 mt-3 pt-3 border-t border-border text-[11px] flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-blue-500" />
+          <span className="text-muted-foreground">CPC (R$, esq.)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span className="text-muted-foreground">CPL (R$, esq.)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="w-2 h-0.5 bg-amber-500"
+            style={{ borderTop: '1px dashed rgb(245 158 11)' }}
+          />
+          <span className="text-muted-foreground">CTR (%, dir.)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Gráfico SVG: barras (gasto) + linha sobreposta (conversões).
+ */
+function SpendVsConvChart({
+  series,
+}: {
+  series: { label: string; spend: number; conv: number }[];
+}) {
+  const W = 100;
+  const H = 100;
+  const maxSpend = Math.max(...series.map((s) => s.spend), 1) * 1.1;
+  const maxConv = Math.max(...series.map((s) => s.conv), 1) * 1.1;
+  const barWidth = W / series.length;
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="w-full h-48"
+        role="img"
+        aria-label="Gasto e conversões por dia da semana"
+      >
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={W}
+            y1={H * f}
+            y2={H * f}
+            stroke="currentColor"
+            strokeWidth={0.2}
+            className="text-border"
+          />
+        ))}
+        {/* Barras de gasto */}
+        {series.map((s, i) => {
+          const x = i * barWidth + barWidth * 0.15;
+          const barW = barWidth * 0.7;
+          const barH = (s.spend / maxSpend) * H;
+          const y = H - barH;
+          return (
+            <rect
+              key={`bar-${i}`}
+              x={x}
+              y={y}
+              width={barW}
+              height={barH}
+              fill="rgb(99 102 241)"
+              opacity={0.55}
+            />
+          );
+        })}
+        {/* Linha de conversões */}
+        <path
+          d={series
+            .map((s, i) => {
+              const x = i * barWidth + barWidth / 2;
+              const y = H - (s.conv / maxConv) * H;
+              return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+            })
+            .join(' ')}
+          fill="none"
+          stroke="rgb(16 185 129)"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      <div className="flex justify-between mt-1 text-[10px] text-muted-foreground tabular-nums">
+        {series.map((s) => (
+          <span key={s.label}>{s.label}</span>
+        ))}
+      </div>
+      <div className="flex gap-4 mt-3 pt-3 border-t border-border text-[11px] flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm bg-indigo-500/55" />
+          <span className="text-muted-foreground">Gasto (R$)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span className="text-muted-foreground">Conversões</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -796,16 +1161,90 @@ function KeywordsTab({
   adGroups,
   canManage,
   onRemove,
+  searchTerms,
 }: {
   keywords: Keyword[];
   adGroups: AdGroup[];
   canManage: boolean;
   onRemove: (kw: Keyword) => void;
+  searchTerms: SearchTerm[];
 }) {
   const adGroupMap = useMemo(
     () => new Map(adGroups.map((g) => [g.id, g.name])),
     [adGroups],
   );
+
+  // Proxy de métricas por keyword: agrega search_terms cujo "termo digitado"
+  // bateria com a keyword. Inexato mas é o melhor que temos sem
+  // metrics_per_keyword. Qualidade: termos exatos contam pra keyword
+  // exata, termos contendo a keyword contam pra phrase/broad.
+  const metricsByKw = useMemo(() => {
+    const m = new Map<
+      string,
+      { spend: number; clicks: number; conversions: number }
+    >();
+    for (const kw of keywords) {
+      const text = kw.text.toLowerCase();
+      const matches = searchTerms.filter((t) => {
+        const term = t.search_term.toLowerCase();
+        if (kw.match_type === 'EXACT') return term === text;
+        if (kw.match_type === 'PHRASE') return term.includes(text);
+        return term.split(/\s+/).some((w) => w === text) || term.includes(text);
+      });
+      const spend = matches.reduce((s, t) => s + t.cost_brl, 0);
+      const clicks = matches.reduce((s, t) => s + t.clicks, 0);
+      const conv = matches.reduce((s, t) => s + t.conversions, 0);
+      m.set(kw.id, { spend, clicks, conversions: conv });
+    }
+    return m;
+  }, [keywords, searchTerms]);
+
+  // Ordenação local
+  const [sortKey, setSortKey] = useState<
+    'spend' | 'clicks' | 'conv' | 'qs' | 'text'
+  >('spend');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  function toggleSort(k: typeof sortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSortKey(k);
+      setSortDir(k === 'text' ? 'asc' : 'desc');
+    }
+  }
+  const sorted = useMemo(() => {
+    const arr = [...keywords];
+    arr.sort((a, b) => {
+      let av: any;
+      let bv: any;
+      const ma = metricsByKw.get(a.id);
+      const mb = metricsByKw.get(b.id);
+      switch (sortKey) {
+        case 'text':
+          av = a.text;
+          bv = b.text;
+          break;
+        case 'qs':
+          av = a.quality_score ?? -1;
+          bv = b.quality_score ?? -1;
+          break;
+        case 'spend':
+          av = ma?.spend ?? 0;
+          bv = mb?.spend ?? 0;
+          break;
+        case 'clicks':
+          av = ma?.clicks ?? 0;
+          bv = mb?.clicks ?? 0;
+          break;
+        case 'conv':
+          av = ma?.conversions ?? 0;
+          bv = mb?.conversions ?? 0;
+          break;
+      }
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [keywords, metricsByKw, sortKey, sortDir]);
 
   if (keywords.length === 0) {
     return (
@@ -819,63 +1258,119 @@ function KeywordsTab({
     );
   }
 
+  function SortHead({
+    label,
+    k,
+    align = 'left',
+  }: {
+    label: string;
+    k: typeof sortKey;
+    align?: 'left' | 'right';
+  }) {
+    const active = sortKey === k;
+    return (
+      <th
+        className={`px-3 py-2.5 ${align === 'right' ? 'text-right' : 'text-left'} cursor-pointer hover:text-foreground`}
+        onClick={() => toggleSort(k)}
+      >
+        <span className={active ? 'text-foreground' : ''}>
+          {label} {active ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+        </span>
+      </th>
+    );
+  }
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-x-auto">
-      <table className="w-full text-sm min-w-[800px]">
+      <table className="w-full text-sm min-w-[1000px]">
         <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
           <tr>
-            <th className="text-left px-3 py-2.5">Keyword</th>
+            <SortHead label="Keyword" k="text" />
             <th className="text-left px-3 py-2.5">Match</th>
             <th className="text-left px-3 py-2.5">Ad group</th>
-            <th className="text-right px-3 py-2.5">QS</th>
-            <th className="text-right px-3 py-2.5">CPC bid</th>
+            <SortHead label="QS" k="qs" align="right" />
+            <SortHead label="Gasto" k="spend" align="right" />
+            <SortHead label="Clicks" k="clicks" align="right" />
+            <SortHead label="Conv" k="conv" align="right" />
+            <th className="text-right px-3 py-2.5">CPL</th>
             <th className="text-left px-3 py-2.5">Status</th>
             <th className="text-right px-3 py-2.5 w-20">Ação</th>
           </tr>
         </thead>
         <tbody>
-          {keywords.map((kw) => (
-            <tr key={kw.id} className="border-t border-border">
-              <td className="px-3 py-2 font-mono text-xs">{kw.text}</td>
-              <td className="px-3 py-2 text-xs text-muted-foreground">
-                {kw.match_type}
-              </td>
-              <td className="px-3 py-2 text-xs">
-                {adGroupMap.get(kw.ad_group_id) ?? '—'}
-              </td>
-              <td className="px-3 py-2 text-right">
-                <QualityScoreBadge score={kw.quality_score} />
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums text-xs">
-                {kw.cpc_bid_brl !== null ? fmtBRL(kw.cpc_bid_brl) : '—'}
-              </td>
-              <td className="px-3 py-2">
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    kw.status === 'ENABLED'
-                      ? 'bg-emerald-500/15 text-emerald-600'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {kw.status}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-right">
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(kw)}
-                    title="Remover keyword"
-                    className="p-1 text-muted-foreground hover:text-red-500"
+          {sorted.map((kw) => {
+            const mx = metricsByKw.get(kw.id);
+            const offender =
+              !!mx && mx.spend > 10 && mx.conversions === 0;
+            const cpl = mx && mx.conversions > 0 ? mx.spend / mx.conversions : 0;
+            return (
+              <tr
+                key={kw.id}
+                className={`border-t border-border ${offender ? 'bg-red-500/5' : ''}`}
+              >
+                <td className="px-3 py-2 font-mono text-xs">
+                  {offender && (
+                    <AlertCircle
+                      size={11}
+                      className="inline text-red-500 mr-1"
+                    />
+                  )}
+                  {kw.text}
+                </td>
+                <td className="px-3 py-2">
+                  <MatchTypeBadge type={kw.match_type} />
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {adGroupMap.get(kw.ad_group_id) ?? '—'}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <QualityScoreBadge score={kw.quality_score} />
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {mx ? fmtBRL(mx.spend) : '—'}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {mx?.clicks ?? '—'}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {mx ? mx.conversions.toFixed(1) : '—'}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {cpl > 0 ? fmtBRL(cpl) : '—'}
+                </td>
+                <td className="px-3 py-2">
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      kw.status === 'ENABLED'
+                        ? 'bg-emerald-500/15 text-emerald-600'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
                   >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+                    {kw.status}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() => onRemove(kw)}
+                      title="Remover keyword"
+                      className="p-1 text-muted-foreground hover:text-red-500"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      <div className="px-3 py-2 border-t border-border text-[10px] text-muted-foreground">
+        * Métricas por keyword são proxy via search_terms (Gasto/Conv reais
+        agregados pelos termos disparados). Pra exatidão use o relatório
+        oficial do Google Ads.
+      </div>
     </div>
   );
 }
@@ -1056,122 +1551,193 @@ function AdsTab({ ads, adGroups }: { ads: Ad[]; adGroups: AdGroup[] }) {
 
   return (
     <div className="space-y-3">
-      {ads.map((ad) => {
-        const headlines = (ad.headlines ?? [])
-          .map((h) => h?.text ?? '')
-          .filter(Boolean);
-        const descriptions = (ad.descriptions ?? [])
-          .map((d) => d?.text ?? '')
-          .filter(Boolean);
-        const finalUrl = ad.final_urls?.[0] ?? null;
-        const headlinesLowWarning = headlines.length < 8;
-        const descriptionsLowWarning = descriptions.length < 3;
+      {ads.map((ad) => (
+        <RsaCard
+          key={ad.id}
+          ad={ad}
+          adGroupName={adGroupMap.get(ad.ad_group_id) ?? '—'}
+        />
+      ))}
+    </div>
+  );
+}
 
-        return (
-          <div
-            key={ad.id}
-            className="bg-card border border-border rounded-xl p-4"
+const STRENGTH_PROGRESS: Record<
+  string,
+  { pct: number; color: string; label: string }
+> = {
+  EXCELLENT: { pct: 100, color: 'bg-emerald-500', label: 'EXCELENTE' },
+  GOOD: { pct: 75, color: 'bg-sky-500', label: 'BOM' },
+  AVERAGE: { pct: 50, color: 'bg-amber-500', label: 'MÉDIO' },
+  POOR: { pct: 25, color: 'bg-red-500', label: 'FRACO' },
+  PENDING: { pct: 0, color: 'bg-muted-foreground', label: 'PENDENTE' },
+  NO_ADS: { pct: 0, color: 'bg-muted-foreground', label: 'SEM ANÚNCIOS' },
+};
+
+function RsaCard({ ad, adGroupName }: { ad: Ad; adGroupName: string }) {
+  const headlines = (ad.headlines ?? [])
+    .map((h) => h?.text ?? '')
+    .filter(Boolean);
+  const descriptions = (ad.descriptions ?? [])
+    .map((d) => d?.text ?? '')
+    .filter(Boolean);
+  const finalUrl = ad.final_urls?.[0] ?? null;
+
+  const [showAllHeadlines, setShowAllHeadlines] = useState(false);
+  const headlinesPreview = 6;
+  const visibleHeadlines = showAllHeadlines
+    ? headlines
+    : headlines.slice(0, headlinesPreview);
+
+  const headlineCountColor =
+    headlines.length === 15
+      ? 'text-emerald-500'
+      : headlines.length >= 8
+        ? 'text-amber-500'
+        : 'text-red-500';
+  const descriptionCountColor =
+    descriptions.length === 4
+      ? 'text-emerald-500'
+      : descriptions.length === 3
+        ? 'text-amber-500'
+        : 'text-red-500';
+
+  const strength = STRENGTH_PROGRESS[ad.ad_strength ?? 'PENDING'] ??
+    STRENGTH_PROGRESS.PENDING;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-4">
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold text-foreground">{ad.ad_type}</span>
+          <span className="text-[10px] text-muted-foreground">
+            · {adGroupName}
+          </span>
+          <span
+            className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+              ad.status === 'ENABLED'
+                ? 'bg-emerald-500/15 text-emerald-600'
+                : 'bg-muted text-muted-foreground'
+            }`}
           >
-            <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-foreground">
-                  {ad.ad_type}
-                </span>
-                <span className="text-[10px] text-muted-foreground">
-                  · {adGroupMap.get(ad.ad_group_id) ?? '—'}
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                    ad.status === 'ENABLED'
-                      ? 'bg-emerald-500/15 text-emerald-600'
-                      : 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {ad.status}
-                </span>
-                {ad.approval_status && (
-                  <span
-                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                      ad.approval_status === 'APPROVED'
-                        ? 'bg-emerald-500/15 text-emerald-600'
-                        : ad.approval_status === 'DISAPPROVED'
-                          ? 'bg-red-500/15 text-red-700'
-                          : 'bg-amber-500/15 text-amber-700'
-                    }`}
-                  >
-                    {ad.approval_status}
-                  </span>
-                )}
-              </div>
-            </div>
+            {ad.status}
+          </span>
+          {ad.approval_status && (
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                ad.approval_status === 'APPROVED'
+                  ? 'bg-emerald-500/15 text-emerald-600'
+                  : ad.approval_status === 'DISAPPROVED'
+                    ? 'bg-red-500/15 text-red-700'
+                    : 'bg-amber-500/15 text-amber-700'
+              }`}
+            >
+              {ad.approval_status}
+            </span>
+          )}
+        </div>
+      </div>
 
-            <div className="mb-3">
-              <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                <span>
-                  Headlines ({headlines.length}/15)
-                </span>
-                {headlinesLowWarning && (
-                  <span className="text-red-500 font-bold normal-case tracking-normal flex items-center gap-1">
-                    <AlertCircle size={10} /> Recomenda-se ≥8
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {headlines.map((h, i) => (
-                  <span
-                    key={i}
-                    className="text-xs font-mono px-2 py-1 bg-muted/40 rounded"
-                  >
-                    {h}
-                  </span>
-                ))}
-              </div>
-            </div>
+      {/* Ad Strength com barra de progresso visual */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+          <span>Força do anúncio</span>
+          <strong className="text-foreground tabular-nums">{strength.label}</strong>
+        </div>
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
+          <div
+            className={`h-full transition-all ${strength.color}`}
+            style={{ width: `${strength.pct}%` }}
+          />
+        </div>
+      </div>
 
-            <div className="mb-3">
-              <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                <span>Descrições ({descriptions.length}/4)</span>
-                {descriptionsLowWarning && (
-                  <span className="text-red-500 font-bold normal-case tracking-normal flex items-center gap-1">
-                    <AlertCircle size={10} /> Recomenda-se ≥3
-                  </span>
-                )}
-              </div>
-              <div className="space-y-1">
-                {descriptions.map((d, i) => (
-                  <div
-                    key={i}
-                    className="text-xs font-mono px-2 py-1 bg-muted/40 rounded"
-                  >
-                    {d}
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* Headlines em grid com expansão */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          <span>
+            Headlines{' '}
+            <span className={`tabular-nums font-bold ${headlineCountColor}`}>
+              ({headlines.length}/15)
+            </span>
+          </span>
+          {headlines.length < 8 && (
+            <span className="text-red-500 font-bold normal-case tracking-normal flex items-center gap-1">
+              <AlertCircle size={10} /> Recomenda-se ≥8
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          {visibleHeadlines.map((h, i) => (
+            <span
+              key={i}
+              className="text-xs px-2 py-1.5 bg-muted/40 rounded border border-border truncate"
+              title={h}
+            >
+              {h}
+            </span>
+          ))}
+          {headlines.length > headlinesPreview && (
+            <button
+              type="button"
+              onClick={() => setShowAllHeadlines((v) => !v)}
+              className="text-xs px-2 py-1.5 bg-violet-500/10 rounded border border-violet-500/30 text-violet-700 dark:text-violet-300 font-semibold hover:bg-violet-500/20"
+            >
+              {showAllHeadlines
+                ? 'Mostrar menos'
+                : `+${headlines.length - headlinesPreview} mais`}
+            </button>
+          )}
+        </div>
+      </div>
 
-            {finalUrl && (
-              <div className="text-xs text-muted-foreground">
-                <strong className="text-foreground">URL:</strong>{' '}
-                <a
-                  href={finalUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-mono hover:underline"
-                >
-                  {finalUrl}
-                </a>
-                {(ad.path1 || ad.path2) && (
-                  <span className="font-mono">
-                    {' '}
-                    /{ad.path1 ?? ''}
-                    {ad.path2 ? `/${ad.path2}` : ''}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {/* Descrições */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+          <span>
+            Descrições{' '}
+            <span className={`tabular-nums font-bold ${descriptionCountColor}`}>
+              ({descriptions.length}/4)
+            </span>
+          </span>
+          {descriptions.length < 3 && (
+            <span className="text-red-500 font-bold normal-case tracking-normal flex items-center gap-1">
+              <AlertCircle size={10} /> Recomenda-se ≥3
+            </span>
+          )}
+        </div>
+        <div className="space-y-1">
+          {descriptions.map((d, i) => (
+            <div
+              key={i}
+              className="text-xs px-2 py-1.5 bg-muted/40 rounded border border-border"
+            >
+              {d}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {finalUrl && (
+        <div className="text-xs text-muted-foreground mb-3">
+          <strong className="text-foreground">URL:</strong>{' '}
+          <a
+            href={finalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono hover:underline"
+          >
+            {finalUrl}
+          </a>
+          {(ad.path1 || ad.path2) && (
+            <span className="font-mono">
+              {' '}
+              /{ad.path1 ?? ''}
+              {ad.path2 ? `/${ad.path2}` : ''}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1542,36 +2108,99 @@ function NegativesTab({
   adGroups,
   canManage,
   onRemove,
+  onAdd,
 }: {
   negatives: Keyword[];
   adGroups: AdGroup[];
   canManage: boolean;
   onRemove: (kw: Keyword) => void;
+  onAdd: () => void;
 }) {
   const adGroupMap = useMemo(
     () => new Map(adGroups.map((g) => [g.id, g.name])),
     [adGroups],
   );
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return negatives;
+    return negatives.filter((n) => n.text.toLowerCase().includes(q));
+  }, [negatives, search]);
 
-  if (negatives.length === 0) {
-    return (
-      <div className="bg-card border border-border rounded-xl p-12 text-center">
-        <ShieldX size={36} className="mx-auto text-muted-foreground mb-2" />
-        <p className="text-sm text-muted-foreground">
-          Nenhuma palavra negativa configurada. Adicione via "Termos de busca →
-          Negativar" para limpar termos off-topic.
-        </p>
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="text-sm font-bold text-foreground">
+            Palavras negativas
+          </h3>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            <strong className="text-foreground">{negatives.length}</strong>{' '}
+            palavra{negatives.length === 1 ? '' : 's'} negativa
+            {negatives.length === 1 ? '' : 's'} ativa
+            {negatives.length === 1 ? '' : 's'}
+          </p>
+        </div>
+        <div className="flex gap-2 items-center">
+          {negatives.length > 0 && (
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filtrar..."
+              className="px-3 py-1.5 text-xs bg-card border border-border rounded-lg w-48"
+            />
+          )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={onAdd}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white"
+            >
+              <ShieldX size={13} />
+              Adicionar negativa
+            </button>
+          )}
+        </div>
       </div>
-    );
-  }
 
+      {negatives.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl p-12 text-center">
+          <ShieldX size={36} className="mx-auto text-muted-foreground mb-2" />
+          <p className="text-sm text-muted-foreground">
+            Nenhuma palavra negativa configurada. Use o botão acima ou negative
+            termos via Tab "Termos de busca".
+          </p>
+        </div>
+      ) : (
+        <NegativesTable
+          rows={filtered}
+          adGroupMap={adGroupMap}
+          canManage={canManage}
+          onRemove={onRemove}
+        />
+      )}
+    </div>
+  );
+}
+
+function NegativesTable({
+  rows,
+  adGroupMap,
+  canManage,
+  onRemove,
+}: {
+  rows: Keyword[];
+  adGroupMap: Map<string, string>;
+  canManage: boolean;
+  onRemove: (kw: Keyword) => void;
+}) {
   return (
     <div className="bg-card border border-border rounded-xl overflow-x-auto">
       <div className="px-4 py-2 border-b border-border bg-red-500/5 text-xs">
-        <strong>{negatives.length}</strong> palavra
-        {negatives.length === 1 ? '' : 's'} negativa
-        {negatives.length === 1 ? '' : 's'} ativa
-        {negatives.length === 1 ? '' : 's'}
+        <strong>{rows.length}</strong> palavra
+        {rows.length === 1 ? '' : 's'} negativa
+        {rows.length === 1 ? '' : 's'} no filtro
       </div>
       <table className="w-full text-sm min-w-[600px]">
         <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -1583,11 +2212,11 @@ function NegativesTab({
           </tr>
         </thead>
         <tbody>
-          {negatives.map((kw) => (
+          {rows.map((kw) => (
             <tr key={kw.id} className="border-t border-border">
               <td className="px-3 py-2 font-mono text-xs">{kw.text}</td>
-              <td className="px-3 py-2 text-xs text-muted-foreground">
-                {kw.match_type}
+              <td className="px-3 py-2">
+                <MatchTypeBadge type={kw.match_type} />
               </td>
               <td className="px-3 py-2 text-xs">
                 {adGroupMap.get(kw.ad_group_id) ?? '—'}
