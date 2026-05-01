@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { IaOtimizaPanel } from './IaOtimizaPanel';
 
 type LoopKind = 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'TRIGGERED';
 type Action = 'EXECUTE' | 'SUGGEST' | 'BLOCK' | 'NOTIFY_ONLY' | 'FAILED';
@@ -235,6 +236,11 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
           onFeedback={feedback}
         />
       )}
+
+      {/* IA Otimiza — insights manuais (Fase 5) */}
+      <div className="mt-6 pt-6 border-t border-border">
+        <IaOtimizaPanel canManage={canManage} />
+      </div>
     </div>
   );
 }
