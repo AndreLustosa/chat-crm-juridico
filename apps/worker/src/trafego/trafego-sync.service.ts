@@ -362,6 +362,11 @@ export class TrafegoSyncService extends WorkerHost {
       // ─── 2.5. Sync expandido (budgets, ad_groups, keywords, ads) ────────
       // Roda em try interno: falhas individuais nao matam o sync principal
       // (campanhas + metricas ja foram persistidas).
+      //
+      // Sub-erros (ext.errors) sao propagados pro TrafficSyncLog.error_message
+      // mesmo em status SUCCESS — sem isso, conversion_actions/keywords
+      // falhando ficavam invisiveis pro admin (so log do servidor).
+      let extendedErrors: string[] = [];
       try {
         const ext = await this.syncExtended.syncExtended(
           customer,
@@ -373,10 +378,11 @@ export class TrafegoSyncService extends WorkerHost {
           `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions` +
             (ext.errors.length > 0 ? ` (${ext.errors.length} sub-erros)` : ''),
         );
+        extendedErrors = ext.errors;
       } catch (extErr: any) {
-        this.logger.warn(
-          `[TRAFEGO_SYNC] Sync expandido falhou: ${extErr?.message ?? extErr}`,
-        );
+        const msg = `sync-extended fatal: ${extErr?.message ?? extErr}`;
+        this.logger.warn(`[TRAFEGO_SYNC] ${msg}`);
+        extendedErrors = [msg];
       }
 
       // ─── 3. Atualiza metadata da conta (currency, timezone, name) ───────
@@ -402,13 +408,18 @@ export class TrafegoSyncService extends WorkerHost {
       }
 
       // ─── 4. Sucesso — registra log + atualiza last_sync ─────────────────
+      // Se sub-syncs (conversion_actions, keywords, ads) falharam mas
+      // metricas principais persistiram, marca PARTIAL e expoe os sub-erros
+      // em error_message — admin enxerga em /trafego/sync-logs sem precisar
+      // de acesso aos logs do container.
       const finishedAt = new Date();
+      const hasExtendedErrors = extendedErrors.length > 0;
       await this.prisma.trafficSyncLog.create({
         data: {
           tenant_id: account.tenant_id,
           account_id: account.id,
           trigger,
-          status: 'SUCCESS',
+          status: hasExtendedErrors ? 'PARTIAL' : 'SUCCESS',
           date_from: dateFrom,
           date_to: dateTo,
           rows_upserted: rowsUpserted,
@@ -416,6 +427,9 @@ export class TrafegoSyncService extends WorkerHost {
           duration_ms: finishedAt.getTime() - startedAt.getTime(),
           started_at: startedAt,
           finished_at: finishedAt,
+          error_message: hasExtendedErrors
+            ? extendedErrors.join('\n').slice(0, 2000)
+            : null,
         },
       });
       await this.prisma.trafficAccount.update({
