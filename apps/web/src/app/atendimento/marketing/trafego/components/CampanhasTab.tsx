@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { SearchTermsCard } from './SearchTermsCard';
 
 interface MetricsWindow {
   days: number;
@@ -541,6 +542,9 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
           </tbody>
         </table>
       </div>
+
+      {/* Search Terms Report (Fase 4a) */}
+      <SearchTermsCard canManage={canManage} />
 
       {budgetEditId !== null && (
         <div

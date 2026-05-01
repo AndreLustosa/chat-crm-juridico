@@ -233,6 +233,75 @@ export class TrafegoService {
     }));
   }
 
+  // ─── Search Terms (Fase 4a) ─────────────────────────────────────────────
+
+  /**
+   * Lista termos de pesquisa cacheados pelo sync. Suporta filtros de
+   * pior-performance (gasto sem conversao) — UI usa pra surface
+   * candidatos a negativar.
+   *
+   * Filtros:
+   *   - campaignId / adGroupId: escopa
+   *   - minSpendBrl: descarta termos com gasto irrisorio (default 0)
+   *   - zeroConvOnly: so termos com 0 conversoes (alvos prioritarios pra negativar)
+   *   - search: substring no termo (case-insensitive)
+   */
+  async listSearchTerms(
+    tenantId: string,
+    opts: {
+      campaignId?: string;
+      adGroupId?: string;
+      minSpendBrl?: number;
+      zeroConvOnly?: boolean;
+      search?: string;
+      limit?: number;
+    } = {},
+  ) {
+    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+    const where: any = { tenant_id: tenantId };
+    if (opts.campaignId) where.campaign_id = opts.campaignId;
+    if (opts.adGroupId) where.ad_group_id = opts.adGroupId;
+    if (opts.zeroConvOnly) where.conversions = { lte: 0 };
+    if (opts.minSpendBrl !== undefined && opts.minSpendBrl > 0) {
+      where.cost_micros = {
+        gte: BigInt(Math.round(opts.minSpendBrl * 1_000_000)),
+      };
+    }
+    if (opts.search && opts.search.length > 0) {
+      where.search_term = { contains: opts.search, mode: 'insensitive' };
+    }
+
+    const items = await this.prisma.trafficSearchTerm.findMany({
+      where,
+      orderBy: [{ cost_micros: 'desc' }, { last_seen_at: 'desc' }],
+      take: limit,
+      include: {
+        campaign: { select: { id: true, name: true } },
+        ad_group: { select: { id: true, name: true } },
+      },
+    });
+
+    return items.map((i) => ({
+      id: i.id,
+      search_term: i.search_term,
+      match_type: i.match_type,
+      status: i.status,
+      campaign_id: i.campaign_id,
+      campaign_name: i.campaign?.name ?? null,
+      ad_group_id: i.ad_group_id,
+      ad_group_name: i.ad_group?.name ?? null,
+      impressions: i.impressions,
+      clicks: i.clicks,
+      cost_micros: i.cost_micros.toString(),
+      cost_brl: Number(i.cost_micros) / 1_000_000,
+      conversions: i.conversions,
+      conversions_value: i.conversions_value,
+      cpl_brl: i.conversions > 0 ? Number(i.cost_micros) / 1_000_000 / i.conversions : 0,
+      ctr: i.impressions > 0 ? i.clicks / i.impressions : 0,
+      last_seen_at: i.last_seen_at,
+    }));
+  }
+
   // ─── Conversion Actions ─────────────────────────────────────────────────
 
   /**

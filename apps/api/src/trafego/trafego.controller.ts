@@ -493,6 +493,32 @@ export class TrafegoController {
     return this.mappingAi.suggestMappings(req.user.tenant_id);
   }
 
+  /**
+   * Lista search terms cacheados (Sprint I — Fase 4a). Worker popula via
+   * search_term_view a cada sync. Default: piores ofensores (sem
+   * conversao + maior gasto).
+   */
+  @Get('search-terms')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listSearchTerms(
+    @Req() req: any,
+    @Query('campaign_id') campaignId?: string,
+    @Query('ad_group_id') adGroupId?: string,
+    @Query('min_spend_brl') minSpendBrl?: string,
+    @Query('zero_conv_only') zeroConvOnly?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.listSearchTerms(req.user.tenant_id, {
+      campaignId,
+      adGroupId,
+      minSpendBrl: minSpendBrl ? Number(minSpendBrl) : undefined,
+      zeroConvOnly: zeroConvOnly === 'true',
+      search,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
   /** Lista logs de mutate (audit trail). */
   @Get('mutate-logs')
   @Roles('ADMIN')

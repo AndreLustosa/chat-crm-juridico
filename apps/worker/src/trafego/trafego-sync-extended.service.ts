@@ -73,6 +73,7 @@ export class TrafegoSyncExtendedService {
     conversionActions: number;
     assetGroups: number;
     assetGroupAssets: number;
+    searchTerms: number;
     errors: string[];
   }> {
     const stats = {
@@ -83,6 +84,7 @@ export class TrafegoSyncExtendedService {
       conversionActions: 0,
       assetGroups: 0,
       assetGroupAssets: 0,
+      searchTerms: 0,
       errors: [] as string[],
     };
 
@@ -186,7 +188,169 @@ export class TrafegoSyncExtendedService {
       }
     }
 
+    // ─── 8. Search Terms (Fase 4a) ─────────────────────────────────────
+    // search_term_view: termos REAIS digitados no Google que dispararam
+    // clicks. Janela 30d. Permite ao admin negativar termos off-topic.
+    try {
+      stats.searchTerms = await this.syncSearchTerms(
+        customer,
+        tenantId,
+        accountId,
+        campaignByGoogleId,
+        adGroupByGoogleId,
+      );
+    } catch (e: any) {
+      const msg = `search_terms: ${e?.message ?? e}`;
+      this.logger.warn(`[sync-extended] ${msg}`);
+      stats.errors.push(msg);
+    }
+
     return stats;
+  }
+
+  /**
+   * Sincroniza search_term_view dos ultimos 30 dias. Idempotente via
+   * @@unique([campaign_id, ad_group_id, search_term]). Re-sync atualiza
+   * metricas; termos que nao apareceram no novo sync ficam com
+   * last_seen_at desatualizado (sem auto-purge — admin decide).
+   */
+  private async syncSearchTerms(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    campaignByGoogleId: Map<string, string>,
+    adGroupByGoogleId: Map<string, string>,
+  ): Promise<number> {
+    const rows: any[] = await customer.query(`
+      SELECT
+        search_term_view.search_term,
+        search_term_view.status,
+        segments.search_term_match_type,
+        ad_group.id,
+        campaign.id,
+        metrics.impressions,
+        metrics.clicks,
+        metrics.cost_micros,
+        metrics.conversions,
+        metrics.conversions_value
+      FROM search_term_view
+      WHERE segments.date DURING LAST_30_DAYS
+      LIMIT 5000
+    `);
+
+    // Agrega por (campaign, ad_group, term) — search_term_view retorna 1
+    // linha por dia, e queremos snapshot agregado.
+    type Bucket = {
+      tenantId: string;
+      accountId: string;
+      campaignId: string | null;
+      adGroupId: string | null;
+      term: string;
+      matchType: string | null;
+      status: string | null;
+      impressions: number;
+      clicks: number;
+      cost_micros: bigint;
+      conversions: number;
+      conversions_value: number;
+    };
+    const buckets = new Map<string, Bucket>();
+    for (const row of rows) {
+      const term = row.search_term_view?.search_term;
+      if (!term || typeof term !== 'string') continue;
+      const googleCampaignId = String(row.campaign?.id ?? '');
+      const googleAdGroupId = String(row.ad_group?.id ?? '');
+      const localCampaignId = campaignByGoogleId.get(googleCampaignId) ?? null;
+      const localAdGroupId = adGroupByGoogleId.get(googleAdGroupId) ?? null;
+      const key = `${localCampaignId ?? '_'}|${localAdGroupId ?? '_'}|${term}`;
+
+      const cost = toBigIntSafe(row.metrics?.cost_micros) ?? 0n;
+      const impressions = toNumberSafe(row.metrics?.impressions, 0) ?? 0;
+      const clicks = toNumberSafe(row.metrics?.clicks, 0) ?? 0;
+      const conversions = toNumberSafe(row.metrics?.conversions, 0) ?? 0;
+      const conversionsValue =
+        toNumberSafe(row.metrics?.conversions_value, 0) ?? 0;
+
+      const matchType =
+        enumToStr(
+          enums.SearchTermMatchType,
+          row.segments?.search_term_match_type,
+          null,
+        ) ?? null;
+      const status =
+        enumToStr(
+          enums.SearchTermTargetingStatus,
+          row.search_term_view?.status,
+          null,
+        ) ?? null;
+
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.impressions += impressions;
+        existing.clicks += clicks;
+        existing.cost_micros += cost;
+        existing.conversions += conversions;
+        existing.conversions_value += conversionsValue;
+        // Match type pode variar entre dias — guarda o "mais amplo" só se
+        // ainda nao tem; senao mantem o primeiro visto (estavel).
+        if (!existing.matchType && matchType) existing.matchType = matchType;
+        if (!existing.status && status) existing.status = status;
+      } else {
+        buckets.set(key, {
+          tenantId,
+          accountId,
+          campaignId: localCampaignId,
+          adGroupId: localAdGroupId,
+          term,
+          matchType,
+          status,
+          impressions,
+          clicks,
+          cost_micros: cost,
+          conversions,
+          conversions_value: conversionsValue,
+        });
+      }
+    }
+
+    // Upsert um a um — postgres unique constraint cobre dedupe.
+    let count = 0;
+    for (const b of buckets.values()) {
+      // unique key requer campaign_id e ad_group_id setados pra dedupe
+      // funcionar (NULLs em postgres nao se igualam). Pulamos termos
+      // sem mapping local — sao raros e sem context util.
+      if (!b.campaignId || !b.adGroupId) continue;
+      const data = {
+        match_type: b.matchType,
+        status: b.status,
+        impressions: b.impressions,
+        clicks: b.clicks,
+        cost_micros: b.cost_micros,
+        conversions: b.conversions,
+        conversions_value: b.conversions_value,
+        last_seen_at: new Date(),
+      };
+      await this.prisma.trafficSearchTerm.upsert({
+        where: {
+          campaign_id_ad_group_id_search_term: {
+            campaign_id: b.campaignId,
+            ad_group_id: b.adGroupId,
+            search_term: b.term,
+          },
+        },
+        update: data,
+        create: {
+          tenant_id: b.tenantId,
+          account_id: b.accountId,
+          campaign_id: b.campaignId,
+          ad_group_id: b.adGroupId,
+          search_term: b.term,
+          ...data,
+        },
+      });
+      count++;
+    }
+    return count;
   }
 
   private async syncConversionActions(
