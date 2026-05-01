@@ -15,16 +15,16 @@ import {
   Gauge,
   Eye,
   Percent,
-  PieChart,
   GitCompare,
   Bell,
   AlertCircle,
   AlertTriangle,
   Info,
   CheckCircle2,
+  type LucideIcon,
 } from 'lucide-react';
 import api from '@/lib/api';
-import { KpiCard } from './KpiCard';
+import { KpiCard, type KpiTooltipInfo } from './KpiCard';
 
 type Period = 'today' | '7d' | '30d' | 'month' | 'prev_month';
 
@@ -167,6 +167,88 @@ interface RecentAlert {
 
 const VALID_PERIODS: Period[] = ['today', '7d', '30d', 'month', 'prev_month'];
 
+const KPI_HELP: Record<
+  | 'spend'
+  | 'leads'
+  | 'cpl'
+  | 'cpc'
+  | 'ctr'
+  | 'conversionRate'
+  | 'impressions'
+  | 'roas'
+  | 'monthlySpend'
+  | 'activeCampaigns'
+  | 'pausedCampaigns',
+  KpiTooltipInfo
+> = {
+  spend: {
+    title: 'Gasto do periodo',
+    description: 'Quanto foi investido em Google Ads dentro do periodo selecionado.',
+    ideal: 'Nao existe valor universal: o ideal e gastar o suficiente para gerar leads qualificados sem ultrapassar o CPL-alvo e a meta mensal.',
+    howTo: 'Defina orcamento mensal, acompanhe o pacing, pause termos ruins e concentre verba nas campanhas com menor CPL e melhor conversao em cliente.',
+  },
+  leads: {
+    title: 'Leads gerados',
+    description: 'Quantidade de contatos/conversoes atribuida ao Google Ads no periodo.',
+    ideal: 'Deve crescer mantendo qualidade. Se o volume sobe e o CPL/ROAS pioram, o trafego esta ficando caro ou pouco qualificado.',
+    howTo: 'Melhore palavras-chave, anuncios, landing pages e atendimento rapido no WhatsApp; corte buscas sem intencao juridica real.',
+  },
+  cpl: {
+    title: 'CPL - custo por lead',
+    description: 'Media paga para gerar um lead. Formula: gasto dividido pela quantidade de leads.',
+    ideal: 'Quanto menor, melhor, desde que o lead seja qualificado. Para escritorio juridico, compare com ticket medio e taxa de fechamento.',
+    howTo: 'Negativar termos irrelevantes, separar campanhas por area, melhorar pagina/formulario e priorizar audiencias e palavras que viram cliente.',
+  },
+  cpc: {
+    title: 'CPC - custo por clique',
+    description: 'Media paga por cada clique no anuncio. Indica competitividade e eficiencia do leilao.',
+    ideal: 'Menor que a media historica da conta e sustentavel para gerar leads dentro do CPL-alvo.',
+    howTo: 'Aumente qualidade do anuncio, use palavras mais especificas, ajuste lances/horarios e remova termos caros que nao convertem.',
+  },
+  ctr: {
+    title: 'CTR - taxa de cliques',
+    description: 'Percentual de impressoes que viraram clique. Mostra se anuncio e oferta chamam atencao.',
+    ideal: 'Em pesquisa, busque acima de 4% a 6%; em display/branding, valores menores podem ser normais.',
+    howTo: 'Escreva anuncios mais aderentes a dor do cliente, inclua cidade/area juridica, extensoes e palavras-chave bem agrupadas.',
+  },
+  conversionRate: {
+    title: 'Taxa de conversao',
+    description: 'Percentual de cliques que viraram lead/conversao.',
+    ideal: 'Quanto maior, melhor. Uma boa referencia inicial e acima de 8% a 12% em trafego de alta intencao.',
+    howTo: 'Otimize landing page, deixe WhatsApp/formulario facil, carregamento rapido, prova social e mensagem alinhada ao anuncio.',
+  },
+  impressions: {
+    title: 'Impressoes',
+    description: 'Quantidade de vezes que os anuncios apareceram. Mede alcance, nao resultado sozinho.',
+    ideal: 'O suficiente para gerar cliques e leads; muitas impressoes com CTR baixo indicam anuncio ou publico fraco.',
+    howTo: 'Revise correspondencias, segmentacao, criativos e limite exibicoes em pesquisas amplas que nao trazem intencao de contratar.',
+  },
+  roas: {
+    title: 'ROAS estimado',
+    description: 'Retorno estimado sobre o investimento: valor de conversao dividido pelo gasto.',
+    ideal: 'Acima de 1x paga o investimento; acima de 2x tende a ser saudavel, dependendo de honorarios, margem e ciclo de fechamento.',
+    howTo: 'Configure valor de conversao, acompanhe contratos fechados, invista nas campanhas que geram receita e reduza gasto onde so ha lead ruim.',
+  },
+  monthlySpend: {
+    title: 'Gasto no mes',
+    description: 'Total investido desde o inicio do mes atual, usado para controlar ritmo de verba.',
+    ideal: 'Deve ficar proximo do pacing esperado: nem queimar a verba cedo, nem sobrar verba quando ha campanhas rentaveis.',
+    howTo: 'Configure meta mensal, distribua verba por campanha, acompanhe diariamente e ajuste orcamento conforme CPL e qualidade dos leads.',
+  },
+  activeCampaigns: {
+    title: 'Campanhas ativas',
+    description: 'Campanhas habilitadas e aptas a veicular anuncios.',
+    ideal: 'Ter apenas campanhas com objetivo claro, verba suficiente e acompanhamento de conversao funcionando.',
+    howTo: 'Mantenha ativas as campanhas lucrativas ou em teste controlado; organize por area juridica, regiao e estrategia de lance.',
+  },
+  pausedCampaigns: {
+    title: 'Campanhas pausadas',
+    description: 'Campanhas desligadas temporariamente. Nao gastam verba nem geram leads enquanto pausadas.',
+    ideal: 'Zero pausadas sem motivo. Pausar e saudavel quando a campanha esta cara, duplicada, sazonal ou aguardando ajuste.',
+    howTo: 'Revise o motivo de pausa, corrija tracking/anuncios/landing page e reative so quando houver verba, meta e criterio de sucesso.',
+  },
+};
+
 export function DashboardTab() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -289,7 +371,6 @@ export function DashboardTab() {
   const dCtr = compareOn && cmp ? delta(k?.ctr ?? 0, cmp.ctr) : null;
   const dConvRate = compareOn && cmp ? delta(k?.conversion_rate ?? 0, cmp.conversion_rate) : null;
   const dImp = compareOn && cmp ? delta(k?.impressions_range ?? 0, cmp.impressions) : null;
-  const dClicks = compareOn && cmp ? delta(k?.clicks_range ?? 0, cmp.clicks) : null;
 
   return (
     <div className="space-y-6">
@@ -326,6 +407,7 @@ export function DashboardTab() {
           icon={DollarSign}
           accent="primary"
           delta={dSpend}
+          tooltip={KPI_HELP.spend}
           loading={loading}
         />
         <KpiCard
@@ -345,6 +427,7 @@ export function DashboardTab() {
               : undefined
           }
           delta={isToday ? null : dLeads}
+          tooltip={KPI_HELP.leads}
           loading={loading}
         />
         <KpiCard
@@ -354,6 +437,7 @@ export function DashboardTab() {
           accent="warning"
           delta={dCpl}
           deltaInverted
+          tooltip={KPI_HELP.cpl}
           loading={loading}
         />
         <KpiCard
@@ -362,6 +446,7 @@ export function DashboardTab() {
           accent="muted"
           delta={dCpc}
           deltaInverted
+          tooltip={KPI_HELP.cpc}
           loading={loading}
         />
       </div>
@@ -374,6 +459,7 @@ export function DashboardTab() {
           icon={MousePointerClick}
           accent="muted"
           delta={dCtr}
+          tooltip={KPI_HELP.ctr}
           loading={loading}
         />
         <KpiCard
@@ -383,6 +469,7 @@ export function DashboardTab() {
           accent="muted"
           hint="conv / clicks"
           delta={dConvRate}
+          tooltip={KPI_HELP.conversionRate}
           loading={loading}
         />
         <KpiCard
@@ -392,6 +479,7 @@ export function DashboardTab() {
           accent="muted"
           hint={`${fmtNum(k?.clicks_range ?? 0)} cliques`}
           delta={dImp}
+          tooltip={KPI_HELP.impressions}
           loading={loading}
         />
         <KpiCard
@@ -399,6 +487,7 @@ export function DashboardTab() {
           value={`${(k?.roas_estimated ?? 0).toFixed(2)}x`}
           accent={roasAccent(k?.roas_estimated ?? 0)}
           hint={roasHint(k?.roas_estimated ?? 0)}
+          tooltip={KPI_HELP.roas}
           loading={loading}
         />
       </div>
@@ -415,6 +504,7 @@ export function DashboardTab() {
               ? `meta R$ ${(data.pacing.target_monthly_brl ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
               : 'configure meta em Settings p/ pacing'
           }
+          tooltip={KPI_HELP.monthlySpend}
           loading={loading}
         />
         <KpiCard
@@ -422,6 +512,7 @@ export function DashboardTab() {
           value={String(k?.active_campaigns ?? 0)}
           icon={PlayCircle}
           accent="success"
+          tooltip={KPI_HELP.activeCampaigns}
           loading={loading}
         />
         <KpiCard
@@ -429,6 +520,7 @@ export function DashboardTab() {
           value={String(k?.paused_campaigns ?? 0)}
           icon={PauseCircle}
           accent="muted"
+          tooltip={KPI_HELP.pausedCampaigns}
           loading={loading}
         />
       </div>
@@ -490,7 +582,7 @@ export function DashboardTab() {
 
 const ALERT_SEVERITY_STYLE: Record<
   RecentAlert['severity'],
-  { color: string; icon: any; label: string }
+  { color: string; icon: LucideIcon; label: string }
 > = {
   CRITICAL: {
     color: 'text-red-500',
