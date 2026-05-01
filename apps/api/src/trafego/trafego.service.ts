@@ -515,6 +515,100 @@ export class TrafegoService {
           context: { ...base.context, keyword_ids_local: kws.map((k) => k.id) },
         };
       }
+      case 'trafego-mutate-create-search-campaign': {
+        // Validação: TARGET_CPA exige target_cpa_brl
+        if (raw.bidding_strategy === 'TARGET_CPA' && !raw.target_cpa_brl) {
+          throw new HttpException(
+            'TARGET_CPA exige target_cpa_brl.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        return {
+          ...base,
+          customerId,
+          name: raw.name,
+          dailyBudgetMicros: BigInt(
+            Math.round(raw.daily_budget_brl * 1_000_000),
+          ).toString(),
+          biddingStrategy: raw.bidding_strategy,
+          targetCpaMicros: raw.target_cpa_brl
+            ? BigInt(Math.round(raw.target_cpa_brl * 1_000_000)).toString()
+            : null,
+          geoTargetIds: raw.geo_target_ids ?? ['1001775'], // Brasil
+          languageIds: raw.language_ids ?? ['1014'], // Portuguese
+          finalUrl: raw.final_url ?? null,
+          initialStatus: raw.initial_status ?? 'PAUSED',
+          context: {
+            ...base.context,
+            campaign_name: raw.name,
+            daily_budget_brl: raw.daily_budget_brl,
+          },
+        };
+      }
+      case 'trafego-mutate-update-bidding-strategy': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        if (raw.bidding_strategy === 'TARGET_CPA' && !raw.target_cpa_brl) {
+          throw new HttpException(
+            'TARGET_CPA exige target_cpa_brl.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        if (raw.bidding_strategy === 'TARGET_ROAS' && !raw.target_roas) {
+          throw new HttpException(
+            'TARGET_ROAS exige target_roas.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          biddingStrategy: raw.bidding_strategy,
+          targetCpaMicros: raw.target_cpa_brl
+            ? BigInt(Math.round(raw.target_cpa_brl * 1_000_000)).toString()
+            : null,
+          targetRoas: raw.target_roas ?? null,
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            new_bidding_strategy: raw.bidding_strategy,
+          },
+        };
+      }
+      case 'trafego-mutate-create-rsa': {
+        const ag = await this.requireAdGroup(tenantId, raw.adGroupId);
+        // Validação básica de tamanho — Google exige 3..15 headlines, 2..4 desc
+        const headlines = (raw.headlines ?? []) as string[];
+        const descriptions = (raw.descriptions ?? []) as string[];
+        if (headlines.length < 3 || headlines.length > 15) {
+          throw new HttpException(
+            'RSA exige 3 a 15 headlines.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        if (descriptions.length < 2 || descriptions.length > 4) {
+          throw new HttpException(
+            'RSA exige 2 a 4 descrições.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        return {
+          ...base,
+          adGroupResourceName: `customers/${customerId}/adGroups/${ag.google_ad_group_id}`,
+          ad: {
+            headlines,
+            descriptions,
+            final_url: raw.final_url,
+            path1: raw.path1,
+            path2: raw.path2,
+          },
+          preview: !!raw.preview,
+          context: {
+            ...base.context,
+            ad_group_id_local: ag.id,
+            final_url: raw.final_url,
+          },
+        };
+      }
       default:
         throw new HttpException(
           `Job de mutate nao suportado: ${jobName}`,

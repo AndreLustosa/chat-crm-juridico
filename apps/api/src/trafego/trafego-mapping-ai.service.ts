@@ -197,4 +197,175 @@ Responda APENAS um JSON válido (sem markdown), formato:
       total_unmapped: totalUnmapped,
     };
   }
+
+  /**
+   * Gera 15 headlines + 4 descrições para um RSA (Responsive Search Ad)
+   * baseado em área do Direito + cidade. OAB-aware: nunca usa termos que
+   * a IA do projeto considera vetados (ex: "garantia de resultado",
+   * "primeiro lugar"). Quem valida na ponta é o GoogleAdsMutateService
+   * via OAB validator (já existente).
+   *
+   * Retorna estrutura pronta pra alimentar o endpoint POST
+   * /trafego/ad-groups/:id/ads/rsa.
+   *
+   * Falha clara (412) quando ANTHROPIC_API_KEY não configurada.
+   */
+  async generateRsa(
+    tenantId: string,
+    input: {
+      practiceArea: string;
+      city: string;
+      differentials?: string;
+      finalUrl?: string;
+    },
+  ): Promise<{
+    headlines: string[];
+    descriptions: string[];
+    path1: string | null;
+    path2: string | null;
+    model: string;
+    raw_text: string;
+  }> {
+    const key =
+      (await this.settings.get('ANTHROPIC_API_KEY')) ||
+      process.env.ANTHROPIC_API_KEY;
+    if (!key) {
+      throw new HttpException(
+        'ANTHROPIC_API_KEY não configurada. Configure em Configurações > IA antes de usar "Gerar RSA com IA".',
+        HttpStatus.PRECONDITION_FAILED,
+      );
+    }
+
+    // Modelo para criatividade — usa modelo de "summary" do TrafficIAPolicy
+    // se configurado (mais capaz que o de classify). Fallback Sonnet 4.6.
+    const policy = await this.prisma.trafficIAPolicy.findUnique({
+      where: { tenant_id: tenantId },
+      select: { llm_summary_model: true },
+    });
+    const model = policy?.llm_summary_model || 'claude-sonnet-4-6';
+
+    const systemPrompt = `Você é um copywriter especialista em Google Ads para advogados brasileiros. Gera RSAs (Responsive Search Ads) que respeitam o Código de Ética da OAB.
+
+REGRAS OAB OBRIGATÓRIAS — nunca viole:
+- NÃO prometa resultado ("garantimos vitória", "100% de êxito", "vencemos sempre")
+- NÃO use superlativos sem base ("o melhor", "número 1", "líder")
+- NÃO mencione preços, taxas ou descontos como atrativo
+- NÃO faça comparação direta com outros escritórios
+- NÃO use termos sensacionalistas ("rápido", "imediato", "garantido")
+- USE linguagem profissional, jurídica, sóbria
+- USE call-to-action educativo ("consulte um advogado", "tire suas dúvidas")
+
+LIMITES TÉCNICOS Google Ads:
+- 15 headlines, máx 30 caracteres CADA (conte caractere por caractere)
+- 4 descriptions, máx 90 caracteres CADA
+- 2 paths display URL, máx 15 caracteres cada (sem espaços, sem acentos, lowercase)
+- Variar tom: alguns headlines diretos, outros consultivos, outros com CTA
+- Incluir keyword principal (área do Direito) em ~3 headlines
+- Incluir cidade em ~2 headlines
+
+Responda APENAS um JSON válido (sem markdown), formato:
+{
+  "headlines": ["...", "..."],
+  "descriptions": ["...", "...", "...", "..."],
+  "path1": "...",
+  "path2": "..."
+}`;
+
+    const userPrompt = `Gere RSA para:
+- Área do Direito: ${input.practiceArea}
+- Cidade: ${input.city}
+${input.differentials ? `- Diferenciais: ${input.differentials}` : ''}
+${input.finalUrl ? `- Landing page: ${input.finalUrl}` : ''}
+
+15 headlines (máx 30 chars). 4 descriptions (máx 90 chars). 2 paths (máx 15 chars, sem acento/espaço).`;
+
+    const client = new Anthropic({ apiKey: key });
+    let raw = '';
+    try {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 1500,
+        temperature: 0.7,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      });
+      raw = ((response.content[0] as any)?.text || '').trim();
+    } catch (e: any) {
+      this.logger.error(`[generate-rsa] Anthropic falhou: ${e?.message ?? e}`);
+      throw new HttpException(
+        `Falha ao chamar Claude API: ${e?.message ?? 'desconhecido'}`,
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new HttpException(
+        'IA retornou resposta sem JSON válido — tente novamente.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      throw new HttpException(
+        'IA retornou JSON inválido — tente novamente.',
+        HttpStatus.BAD_GATEWAY,
+      );
+    }
+
+    // Validação + truncagem defensiva — Google rejeita > limite com erro
+    // genérico; melhor cortar aqui pra dar UX clara.
+    const headlines = Array.isArray(parsed.headlines)
+      ? parsed.headlines
+          .filter((h: any) => typeof h === 'string' && h.length > 0)
+          .map((h: string) => h.slice(0, 30))
+          .slice(0, 15)
+      : [];
+    const descriptions = Array.isArray(parsed.descriptions)
+      ? parsed.descriptions
+          .filter((d: any) => typeof d === 'string' && d.length > 0)
+          .map((d: string) => d.slice(0, 90))
+          .slice(0, 4)
+      : [];
+
+    if (headlines.length < 3 || descriptions.length < 2) {
+      throw new HttpException(
+        `IA gerou ${headlines.length} headlines e ${descriptions.length} descriptions — abaixo do mínimo (3/2). Tente novamente ou adicione mais contexto.`,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    const path1 =
+      typeof parsed.path1 === 'string'
+        ? this.sanitizePath(parsed.path1).slice(0, 15)
+        : null;
+    const path2 =
+      typeof parsed.path2 === 'string'
+        ? this.sanitizePath(parsed.path2).slice(0, 15)
+        : null;
+
+    this.logger.log(
+      `[generate-rsa] tenant=${tenantId} model=${model} area=${input.practiceArea} city=${input.city} headlines=${headlines.length} descs=${descriptions.length}`,
+    );
+
+    return {
+      headlines,
+      descriptions,
+      path1: path1 && path1.length > 0 ? path1 : null,
+      path2: path2 && path2.length > 0 ? path2 : null,
+      model,
+      raw_text: raw,
+    };
+  }
+
+  /** Path display URL: lowercase, sem espaços, sem acentos, alphanum + hyphen. */
+  private sanitizePath(s: string): string {
+    return s
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '');
+  }
 }

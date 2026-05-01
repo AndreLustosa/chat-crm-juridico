@@ -39,9 +39,12 @@ import {
   AiTriggerLoopDto,
   ApplyRecommendationDto,
   CreateChatSessionDto,
+  CreateRsaDto,
+  CreateSearchCampaignDto,
   CreateUserListDto,
   DashboardQueryDto,
   GenerateReachForecastDto,
+  GenerateRsaDto,
   RejectChatActionDto,
   SendChatMessageDto,
   StartBackfillDto,
@@ -52,6 +55,7 @@ import {
   MutateBaseDto,
   UpdateAccountDto,
   UpdateAiPolicyDto,
+  UpdateBiddingStrategyDto,
   UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
@@ -455,6 +459,40 @@ export class TrafegoController {
     return this.service.listAds(req.user.tenant_id, adGroupId);
   }
 
+  /**
+   * Cria RSA num ad_group (Fase 4d). Validador OAB roda automaticamente
+   * no GoogleAdsMutateService — primeira violação aborta o batch e
+   * retorna FAILED com lista de termos vetados.
+   */
+  @Post('ad-groups/:id/ads/rsa')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createRsa(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: CreateRsaDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-create-rsa', {
+      adGroupId,
+      ...dto,
+    });
+  }
+
+  /**
+   * Gera variações de headlines + descriptions usando Claude API (Fase 4d).
+   * Retorna JSON pronto pra alimentar POST /ad-groups/:id/ads/rsa.
+   * Não cria nada no Google — admin revisa antes de aplicar.
+   */
+  @Post('ai/generate-rsa')
+  @Roles('ADMIN', 'ADVOGADO')
+  async generateRsa(@Req() req: any, @Body() dto: GenerateRsaDto) {
+    return this.mappingAi.generateRsa(req.user.tenant_id, {
+      practiceArea: dto.practice_area,
+      city: dto.city,
+      differentials: dto.differentials,
+      finalUrl: dto.final_url,
+    });
+  }
+
   /** Lista budgets da conta. */
   @Get('budgets')
   @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
@@ -533,6 +571,43 @@ export class TrafegoController {
       initiator,
       status,
     });
+  }
+
+  /**
+   * Cria nova campanha Search do zero (Sprint I — Fase 4b). Pipeline:
+   *   1. Cria campaign_budget
+   *   2. Cria campaign apontando pro budget
+   *   3. Aplica geo_targets + languages via campaign_criterion
+   *
+   * Default: PAUSED (admin ativa explicitamente). Idempotência via jobId
+   * com timestamp — re-clique acidental não duplica.
+   */
+  @Post('campaigns')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createCampaign(
+    @Req() req: any,
+    @Body() dto: CreateSearchCampaignDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-create-search-campaign',
+      dto,
+    );
+  }
+
+  /** Atualiza estratégia de lance da campanha (Fase 4c). */
+  @Patch('campaigns/:id/bidding-strategy')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateBiddingStrategy(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateBiddingStrategyDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-bidding-strategy',
+      { campaignId, ...dto },
+    );
   }
 
   /** Pausa uma campanha no Google. */

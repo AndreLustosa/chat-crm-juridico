@@ -521,6 +521,168 @@ export class ListLeadFormSubmissionsDto {
   limit?: number;
 }
 
+// ─── Sprint I (Fase 4) — Criar campanha + Bidding + RSA ────────────────────
+
+export class CreateSearchCampaignDto {
+  @IsString()
+  name!: string;
+
+  /** Orçamento diário em BRL (convertido pra micros internamente). */
+  @IsNumber()
+  @Min(1)
+  daily_budget_brl!: number;
+
+  @IsString()
+  @IsIn([
+    'MAXIMIZE_CONVERSIONS',
+    'MAXIMIZE_CLICKS',
+    'MANUAL_CPC',
+    'TARGET_CPA',
+  ])
+  bidding_strategy!:
+    | 'MAXIMIZE_CONVERSIONS'
+    | 'MAXIMIZE_CLICKS'
+    | 'MANUAL_CPC'
+    | 'TARGET_CPA';
+
+  /** Obrigatório se bidding_strategy=TARGET_CPA. Em BRL. */
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  target_cpa_brl?: number;
+
+  /**
+   * IDs numéricos de geo_target_constants do Google. Default: ["1001775"]
+   * (Brasil). Para cidades específicas use o código do AdWords (ex:
+   * "1031620" = Maceió/AL).
+   */
+  @IsArray()
+  @IsString({ each: true })
+  geo_target_ids!: string[];
+
+  /** IDs numéricos de language_constants. Default: ["1014"] (Portuguese). */
+  @IsArray()
+  @IsString({ each: true })
+  language_ids!: string[];
+
+  @IsString()
+  @IsOptional()
+  final_url?: string;
+
+  /** Status inicial — default 'PAUSED' por segurança. */
+  @IsString()
+  @IsIn(['ENABLED', 'PAUSED'])
+  @IsOptional()
+  initial_status?: 'ENABLED' | 'PAUSED';
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+export class UpdateBiddingStrategyDto {
+  @IsString()
+  @IsIn([
+    'MAXIMIZE_CONVERSIONS',
+    'MAXIMIZE_CLICKS',
+    'MANUAL_CPC',
+    'TARGET_CPA',
+    'TARGET_ROAS',
+    'MAXIMIZE_CONVERSION_VALUE',
+  ])
+  bidding_strategy!:
+    | 'MAXIMIZE_CONVERSIONS'
+    | 'MAXIMIZE_CLICKS'
+    | 'MANUAL_CPC'
+    | 'TARGET_CPA'
+    | 'TARGET_ROAS'
+    | 'MAXIMIZE_CONVERSION_VALUE';
+
+  /** Em BRL — obrigatório se TARGET_CPA. */
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  target_cpa_brl?: number;
+
+  /** Multiplicador — obrigatório se TARGET_ROAS. Ex: 3.5 = 350%. */
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  target_roas?: number;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+export class CreateRsaDto {
+  /** Final URL — landing page do anúncio. */
+  @IsString()
+  final_url!: string;
+
+  /**
+   * Headlines (3..15). Google exige mínimo 3, máximo 15.
+   * Limit: 30 chars cada.
+   */
+  @IsArray()
+  @IsString({ each: true })
+  headlines!: string[];
+
+  /**
+   * Descriptions (2..4). Google exige mínimo 2, máximo 4.
+   * Limit: 90 chars cada.
+   */
+  @IsArray()
+  @IsString({ each: true })
+  descriptions!: string[];
+
+  /** Path1/Path2 — display URL (opcional, max 15 chars cada). */
+  @IsString()
+  @IsOptional()
+  path1?: string;
+
+  @IsString()
+  @IsOptional()
+  path2?: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  /** Modo dry-run — Google valida mas não cria. */
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+export class GenerateRsaDto {
+  /** Área do Direito (ex: "trabalhista", "criminal", "previdenciário"). */
+  @IsString()
+  practice_area!: string;
+
+  /** Cidade alvo (ex: "Maceió"). */
+  @IsString()
+  city!: string;
+
+  /** Diferenciais opcionais (ex: "20 anos", "primeira consulta gratuita"). */
+  @IsString()
+  @IsOptional()
+  differentials?: string;
+
+  /** URL final da landing page — vai pro contexto do prompt. */
+  @IsString()
+  @IsOptional()
+  final_url?: string;
+}
+
 export class UpdateLeadFormSettingsDto {
   @IsString()
   @IsOptional()

@@ -11,10 +11,16 @@ import {
   Edit3,
   X,
   Search,
+  Plus,
+  TrendingUp,
+  FileText,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { SearchTermsCard } from './SearchTermsCard';
+import { CreateCampaignWizard } from './CreateCampaignWizard';
+import { BiddingStrategyModal } from './BiddingStrategyModal';
+import { CreateRsaModal } from './CreateRsaModal';
 
 interface MetricsWindow {
   days: number;
@@ -34,11 +40,19 @@ interface Campaign {
   status: 'ENABLED' | 'PAUSED' | 'REMOVED';
   channel_type: string | null;
   daily_budget_brl: number | null;
+  bidding_strategy: string | null;
   is_favorite: boolean;
   is_archived_internal: boolean;
   tags: string[];
   notes: string | null;
   metrics_window?: MetricsWindow;
+}
+
+interface AdGroupOption {
+  id: string;
+  name: string;
+  campaign_id: string;
+  campaign?: { name?: string | null } | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -110,6 +124,14 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
   const [search, setSearch] = useState('');
   const [tagsEditId, setTagsEditId] = useState<string | null>(null);
   const [tagsInput, setTagsInput] = useState('');
+  const [createWizardOpen, setCreateWizardOpen] = useState(false);
+  const [biddingCampaign, setBiddingCampaign] = useState<Campaign | null>(null);
+  const [rsaAdGroup, setRsaAdGroup] = useState<AdGroupOption | null>(null);
+  const [adGroupPickerCampaignId, setAdGroupPickerCampaignId] = useState<
+    string | null
+  >(null);
+  const [adGroupOptions, setAdGroupOptions] = useState<AdGroupOption[]>([]);
+  const [adGroupPickerLoading, setAdGroupPickerLoading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -253,6 +275,32 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
     }
   }
 
+  async function openRsaPicker(campaign: Campaign) {
+    if (!canManage) return;
+    setAdGroupPickerCampaignId(campaign.id);
+    setAdGroupPickerLoading(true);
+    try {
+      const { data } = await api.get<AdGroupOption[]>('/trafego/ad-groups', {
+        params: { campaign_id: campaign.id },
+      });
+      const opts = (data ?? []).map((ag) => ({
+        ...ag,
+        campaign: { name: campaign.name },
+      }));
+      setAdGroupOptions(opts);
+      if (opts.length === 1) {
+        // Atalho: campanha com 1 só ad_group abre direto o RSA modal
+        setRsaAdGroup(opts[0]);
+        setAdGroupPickerCampaignId(null);
+      }
+    } catch {
+      showError('Erro ao listar ad_groups dessa campanha.');
+      setAdGroupPickerCampaignId(null);
+    } finally {
+      setAdGroupPickerLoading(false);
+    }
+  }
+
   async function applySuggestedTags(c: Campaign) {
     if (!canManage) return;
     const suggested = suggestTagsFromName(c.name);
@@ -301,6 +349,20 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="space-y-3">
+      {/* ─── Header com action buttons ─────────────────────────────────── */}
+      {canManage && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCreateWizardOpen(true)}
+            className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
+          >
+            <Plus size={13} />
+            Nova campanha
+          </button>
+        </div>
+      )}
+
       {/* ─── Filtros ───────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border">
@@ -509,6 +571,22 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                         <Edit3 size={14} />
                       </button>
                       <button
+                        onClick={() => setBiddingCampaign(c)}
+                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
+                        title="Estratégia de lance"
+                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
+                      >
+                        <TrendingUp size={14} />
+                      </button>
+                      <button
+                        onClick={() => openRsaPicker(c)}
+                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
+                        title="Novo anúncio (RSA)"
+                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
+                      >
+                        <FileText size={14} />
+                      </button>
+                      <button
                         onClick={() => pauseOrResume(c)}
                         disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
                         title={c.status === 'PAUSED' ? 'Reativar' : 'Pausar'}
@@ -545,6 +623,82 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
 
       {/* Search Terms Report (Fase 4a) */}
       <SearchTermsCard canManage={canManage} />
+
+      {/* Wizard Criar Campanha (Fase 4b) */}
+      <CreateCampaignWizard
+        open={createWizardOpen}
+        onClose={() => setCreateWizardOpen(false)}
+        onCreated={() => setTimeout(load, 5000)}
+      />
+
+      {/* Modal Estratégia de Lance (Fase 4c) */}
+      <BiddingStrategyModal
+        campaign={biddingCampaign}
+        onClose={() => setBiddingCampaign(null)}
+        onUpdated={() => setTimeout(load, 5000)}
+      />
+
+      {/* Modal Criar RSA (Fase 4d) */}
+      <CreateRsaModal
+        adGroup={rsaAdGroup}
+        onClose={() => setRsaAdGroup(null)}
+        onCreated={() => {}}
+      />
+
+      {/* Picker de Ad Group quando campanha tem múltiplos */}
+      {adGroupPickerCampaignId && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setAdGroupPickerCampaignId(null);
+          }}
+        >
+          <div className="bg-card border border-border rounded-xl w-full max-w-md p-5">
+            <h3 className="text-base font-bold text-foreground mb-1">
+              Selecione o ad_group
+            </h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              Esta campanha tem múltiplos grupos. Escolha qual receberá o
+              novo anúncio.
+            </p>
+            {adGroupPickerLoading ? (
+              <div className="py-8 text-center">
+                <Loader2 size={24} className="animate-spin mx-auto" />
+              </div>
+            ) : adGroupOptions.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">
+                Nenhum ad_group ativo nesta campanha. Crie um primeiro no
+                Google Ads ou aguarde sync.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {adGroupOptions.map((ag) => (
+                  <button
+                    key={ag.id}
+                    type="button"
+                    onClick={() => {
+                      setRsaAdGroup(ag);
+                      setAdGroupPickerCampaignId(null);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-md hover:bg-accent border border-border text-sm"
+                  >
+                    {ag.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAdGroupPickerCampaignId(null)}
+                className="px-3 py-1.5 text-xs rounded-md border border-border hover:bg-accent"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {budgetEditId !== null && (
         <div
