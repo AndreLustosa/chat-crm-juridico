@@ -64,22 +64,24 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
   const [actions, setActions] = useState<ConversionAction[]>([]);
   const [uploads, setUploads] = useState<OCIUpload[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [a, u] = await Promise.all([
-        api.get<ConversionAction[]>('/trafego/conversion-actions'),
-        // Como nao ha endpoint listOCIUploads ainda, usamos mutate-logs filtrado
-        // pelo trigger oci-* (futuro): por ora, lista vazia.
-        // TODO: criar endpoint /trafego/oci-uploads
-        Promise.resolve({ data: [] as OCIUpload[] }),
-      ]);
-      setActions(a.data);
-      setUploads(u.data);
-    } catch {
-      showError('Erro carregando conversoes.');
+      const a = await api.get<ConversionAction[]>('/trafego/conversion-actions');
+      setActions(Array.isArray(a.data) ? a.data : []);
+      // Endpoint /trafego/oci-uploads ainda nao existe — placeholder ate Sprint OCI.
+      setUploads([]);
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ??
+        err?.message ??
+        'Falha desconhecida ao listar ConversionActions';
+      setLoadError(msg);
+      showError(`Erro ao carregar ConversionActions: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -138,7 +140,23 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
           </p>
         </div>
 
-        {actions.length === 0 ? (
+        {loadError ? (
+          <div className="p-12 text-center">
+            <AlertCircle size={40} className="mx-auto text-red-500 mb-3" />
+            <h3 className="text-base font-bold text-foreground mb-1">
+              Falha ao carregar ConversionActions
+            </h3>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto mb-3">
+              {loadError}
+            </p>
+            <button
+              onClick={load}
+              className="text-xs font-semibold px-3 py-1.5 rounded-md bg-card hover:bg-accent border border-border"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : actions.length === 0 ? (
           <div className="p-12 text-center">
             <Inbox size={40} className="mx-auto text-muted-foreground mb-3" />
             <h3 className="text-base font-bold text-foreground mb-1">
@@ -146,7 +164,9 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
             </h3>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
               Crie ConversionActions no Google Ads (tipo "Lead" ou
-              "Upload"), aguarde o proximo sync e elas aparecerao aqui.
+              "Upload"), aguarde o proximo sync e elas aparecerao aqui. Se ja
+              criou no Google, abra <strong>Sync logs</strong> em Configurações
+              pra ver se houve falha no sub-sync.
             </p>
           </div>
         ) : (
