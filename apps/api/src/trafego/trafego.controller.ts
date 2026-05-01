@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -42,6 +43,7 @@ import {
   ApplyRecommendationDto,
   CreateChatSessionDto,
   CreateLandingPageDto,
+  UpdateAdScheduleDto,
   CreateRsaDto,
   CreateSearchCampaignDto,
   CreateUserListDto,
@@ -616,6 +618,45 @@ export class TrafegoController {
       req.user.tenant_id,
       id,
       days ? parseInt(days, 10) : 30,
+    );
+  }
+
+  /**
+   * Lista o agendamento (ad_schedule) atual da campanha. Quando vazio,
+   * campanha roda 24/7. Sincronizado pelo cron via campaign_criterion.
+   */
+  @Get('campaigns/:id/schedule')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getCampaignSchedule(@Req() req: any, @Param('id') id: string) {
+    return this.service.getCampaignSchedule(req.user.tenant_id, id);
+  }
+
+  /**
+   * Atualiza agendamento — substituição atômica. Lista vazia volta a
+   * campanha pra 24/7. validate_only=true faz dry-run.
+   */
+  @Put('campaigns/:id/schedule')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateCampaignSchedule(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateAdScheduleDto,
+  ) {
+    // Validação adicional: end > start no mesmo dia
+    for (const s of dto.slots) {
+      const startMinutes = s.start_hour * 60 + s.start_minute;
+      const endMinutes = s.end_hour * 60 + s.end_minute;
+      if (endMinutes <= startMinutes) {
+        throw new HttpException(
+          `Slot ${s.day_of_week} ${s.start_hour}:${String(s.start_minute).padStart(2, '0')}–${s.end_hour}:${String(s.end_minute).padStart(2, '0')}: fim precisa ser depois do início.`,
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    }
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-ad-schedule',
+      { campaignId: id, ...dto },
     );
   }
 

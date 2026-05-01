@@ -663,6 +663,69 @@ export class CreateRsaDto {
   validate_only?: boolean;
 }
 
+// ─── Ad Schedule (P3) ──────────────────────────────────────────────────────
+
+/** Um slot de horário de veiculação. */
+class AdScheduleSlotDto {
+  @IsString()
+  @IsIn([
+    'MONDAY',
+    'TUESDAY',
+    'WEDNESDAY',
+    'THURSDAY',
+    'FRIDAY',
+    'SATURDAY',
+    'SUNDAY',
+  ])
+  day_of_week!:
+    | 'MONDAY'
+    | 'TUESDAY'
+    | 'WEDNESDAY'
+    | 'THURSDAY'
+    | 'FRIDAY'
+    | 'SATURDAY'
+    | 'SUNDAY';
+
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  start_hour!: number;
+
+  @IsInt()
+  @IsIn([0, 15, 30, 45])
+  start_minute!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(24)
+  end_hour!: number;
+
+  @IsInt()
+  @IsIn([0, 15, 30, 45])
+  end_minute!: number;
+
+  /** Bid modifier 0.1..10.0. null/omitido = sem ajuste. */
+  @IsNumber()
+  @Min(0.1)
+  @Max(10)
+  @IsOptional()
+  bid_modifier?: number | null;
+}
+
+export class UpdateAdScheduleDto {
+  /** Lista de slots (substituição completa). Vazio = roda 24/7. */
+  @IsArray()
+  slots!: AdScheduleSlotDto[];
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
 // ─── Landing Pages (Fase 4f) ───────────────────────────────────────────────
 
 export class CreateLandingPageDto {

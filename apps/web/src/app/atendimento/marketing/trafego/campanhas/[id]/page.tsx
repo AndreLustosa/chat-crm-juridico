@@ -38,6 +38,7 @@ import { MatchTypeBadge } from '../../components/MatchTypeBadge';
 import { AddNegativesModal } from '../../components/AddNegativesModal';
 import { EditBudgetModal } from '../../components/EditBudgetModal';
 import { Pagination } from '../../components/Pagination';
+import { EditScheduleModal } from '../../components/EditScheduleModal';
 
 interface CampaignFull {
   id: string;
@@ -105,6 +106,24 @@ interface DeviceMetrics {
     spend_share: number;
     conv_share: number;
   }[];
+}
+
+interface ScheduleSlot {
+  id: string;
+  google_criterion_id: string;
+  day_of_week:
+    | 'MONDAY'
+    | 'TUESDAY'
+    | 'WEDNESDAY'
+    | 'THURSDAY'
+    | 'FRIDAY'
+    | 'SATURDAY'
+    | 'SUNDAY';
+  start_hour: number;
+  start_minute: number;
+  end_hour: number;
+  end_minute: number;
+  bid_modifier: number | null;
 }
 
 interface AdGroup {
@@ -234,6 +253,7 @@ function CampaignDetailPageInner() {
   const [searchTerms, setSearchTerms] = useState<SearchTerm[]>([]);
   const [hourly, setHourly] = useState<HourlyMetrics | null>(null);
   const [devices, setDevices] = useState<DeviceMetrics | null>(null);
+  const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [biddingOpen, setBiddingOpen] = useState(false);
@@ -242,6 +262,7 @@ function CampaignDetailPageInner() {
   );
   const [negativesModalOpen, setNegativesModalOpen] = useState(false);
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
   // ─── Load ────────────────────────────────────────────────────────────
   async function load() {
@@ -288,8 +309,13 @@ function CampaignDetailPageInner() {
         setAds(adsResults.flat());
       }
 
-      // 4) Search terms + hourly + devices em paralelo
-      const [{ data: terms }, hourlyResp, deviceResp] = await Promise.all([
+      // 4) Search terms + hourly + devices + schedule em paralelo
+      const [
+        { data: terms },
+        hourlyResp,
+        deviceResp,
+        scheduleResp,
+      ] = await Promise.all([
         api.get<SearchTerm[]>('/trafego/search-terms', {
           params: { campaign_id: id, limit: 200 },
         }),
@@ -303,10 +329,14 @@ function CampaignDetailPageInner() {
             params: { days: 30 },
           })
           .catch(() => ({ data: null })),
+        api
+          .get<{ slots: ScheduleSlot[] }>(`/trafego/campaigns/${id}/schedule`)
+          .catch(() => ({ data: { slots: [] } })),
       ]);
       setSearchTerms(terms);
       setHourly(hourlyResp.data ?? null);
       setDevices(deviceResp.data ?? null);
+      setScheduleSlots(scheduleResp.data?.slots ?? []);
     } catch (err: any) {
       showError(err?.response?.data?.message ?? 'Falha ao carregar campanha.');
     } finally {
@@ -669,7 +699,14 @@ function CampaignDetailPageInner() {
         />
       )}
       {tab === 'ads' && <AdsTab ads={ads} adGroups={adGroups} />}
-      {tab === 'schedule' && <ScheduleTab data={hourly} />}
+      {tab === 'schedule' && (
+        <ScheduleTab
+          data={hourly}
+          slots={scheduleSlots}
+          canManage={perms.canManageTrafego}
+          onEdit={() => setScheduleModalOpen(true)}
+        />
+      )}
       {tab === 'devices' && <DevicesTab data={devices} />}
       {tab === 'negatives' && (
         <NegativesTab
@@ -720,6 +757,14 @@ function CampaignDetailPageInner() {
         currentBudgetBrl={campaign.daily_budget_brl}
         onClose={() => setBudgetModalOpen(false)}
         onSaved={() => setTimeout(load, 4000)}
+      />
+      <EditScheduleModal
+        open={scheduleModalOpen}
+        campaignId={campaign.id}
+        campaignName={campaign.name}
+        initialSlots={scheduleSlots}
+        onClose={() => setScheduleModalOpen(false)}
+        onSaved={() => setTimeout(load, 5000)}
       />
     </div>
   );
@@ -1782,23 +1827,23 @@ function RsaCard({ ad, adGroupName }: { ad: Ad; adGroupName: string }) {
 
 const DOW_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
-function ScheduleTab({ data }: { data: HourlyMetrics | null }) {
-  if (!data || data.cells.length === 0) {
-    return (
-      <div className="bg-card border border-border rounded-xl p-12 text-center">
-        <Clock size={36} className="mx-auto text-muted-foreground mb-2" />
-        <p className="text-sm text-muted-foreground">
-          Sem dados horários ainda. Aguarde o próximo sync (segments.hour
-          é populado a cada 6h pelo cron).
-        </p>
-      </div>
-    );
-  }
-
-  // Encontra max conversions pra escala de cor
-  const maxConv = Math.max(...data.cells.map((c) => c.conversions), 1);
-  const totalConv = data.cells.reduce((s, c) => s + c.conversions, 0);
-  const totalCost = data.cells.reduce((s, c) => s + c.cost_brl, 0);
+function ScheduleTab({
+  data,
+  slots,
+  canManage,
+  onEdit,
+}: {
+  data: HourlyMetrics | null;
+  slots: ScheduleSlot[];
+  canManage: boolean;
+  onEdit: () => void;
+}) {
+  // Encontra max conversions pra escala de cor (defaults se sem dados)
+  const cells = data?.cells ?? [];
+  const maxConv = Math.max(...cells.map((c) => c.conversions), 1);
+  const totalConv = cells.reduce((s, c) => s + c.conversions, 0);
+  const totalCost = cells.reduce((s, c) => s + c.cost_brl, 0);
+  const noHeatmap = !data || cells.length === 0;
 
   function cellColor(conv: number): string {
     if (conv === 0) return 'bg-muted';
@@ -1812,88 +1857,212 @@ function ScheduleTab({ data }: { data: HourlyMetrics | null }) {
 
   return (
     <div className="space-y-3">
-      <div className="bg-card border border-border rounded-xl p-5">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-foreground">
-              Heatmap: hora × dia da semana
-            </h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Quanto mais escuro, mais conversões. Dados dos últimos {data.days}
-              {' '}dias agregados.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <span>
-              Total:{' '}
-              <strong className="text-foreground">
-                {totalConv.toFixed(1)}
-              </strong>{' '}
-              conv
-            </span>
-            <span>
-              Gasto:{' '}
-              <strong className="text-foreground">
-                {fmtBRL(totalCost)}
-              </strong>
-            </span>
-          </div>
+      {/* Heatmap (se houver dados) */}
+      {noHeatmap ? (
+        <div className="bg-card border border-border rounded-xl p-8 text-center">
+          <Clock size={28} className="mx-auto text-muted-foreground mb-2" />
+          <p className="text-xs text-muted-foreground">
+            Sem dados horários ainda — aguarde o próximo sync.
+          </p>
         </div>
+      ) : (
+        <div className="bg-card border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">
+                Heatmap: hora × dia da semana
+              </h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Quanto mais escuro, mais conversões. Dados dos últimos {data!.days}
+                {' '}dias agregados.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+              <span>
+                Total:{' '}
+                <strong className="text-foreground">
+                  {totalConv.toFixed(1)}
+                </strong>{' '}
+                conv
+              </span>
+              <span>
+                Gasto:{' '}
+                <strong className="text-foreground">
+                  {fmtBRL(totalCost)}
+                </strong>
+              </span>
+            </div>
+          </div>
 
-        <div className="overflow-x-auto">
-          <div className="inline-block min-w-full">
-            {/* Header das horas */}
-            <div className="flex items-center mb-1">
-              <div className="w-10 shrink-0" />
-              {Array.from({ length: 24 }).map((_, hour) => (
-                <div
-                  key={hour}
-                  className="flex-1 text-[9px] text-center text-muted-foreground tabular-nums min-w-[16px]"
-                >
-                  {hour % 3 === 0 ? hour : ''}
+          <div className="overflow-x-auto">
+            <div className="inline-block min-w-full">
+              <div className="flex items-center mb-1">
+                <div className="w-10 shrink-0" />
+                {Array.from({ length: 24 }).map((_, hour) => (
+                  <div
+                    key={hour}
+                    className="flex-1 text-[9px] text-center text-muted-foreground tabular-nums min-w-[16px]"
+                  >
+                    {hour % 3 === 0 ? hour : ''}
+                  </div>
+                ))}
+              </div>
+
+              {DOW_LABELS.map((dowLabel, dow) => (
+                <div key={dow} className="flex items-center mb-0.5">
+                  <div className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                    {dowLabel}
+                  </div>
+                  {Array.from({ length: 24 }).map((_, hour) => {
+                    const cell = cells.find(
+                      (c) => c.dow === dow && c.hour === hour,
+                    );
+                    if (!cell) return null;
+                    return (
+                      <div
+                        key={hour}
+                        className={`flex-1 h-7 mx-0.5 rounded-sm transition-colors hover:ring-2 hover:ring-violet-400 cursor-pointer ${cellColor(cell.conversions)} min-w-[16px]`}
+                        title={`${dowLabel} ${hour}h — ${cell.conversions.toFixed(1)} conv • ${fmtBRL(cell.cost_brl)} • CPL ${cell.conversions > 0 ? fmtBRL(cell.cpl_brl) : '—'}`}
+                      />
+                    );
+                  })}
                 </div>
               ))}
             </div>
+          </div>
 
-            {/* Grid 7×24 */}
-            {DOW_LABELS.map((dowLabel, dow) => (
-              <div
-                key={dow}
-                className="flex items-center mb-0.5"
-              >
-                <div className="w-10 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                  {dowLabel}
-                </div>
-                {Array.from({ length: 24 }).map((_, hour) => {
-                  const cell = data.cells.find(
-                    (c) => c.dow === dow && c.hour === hour,
-                  );
-                  if (!cell) return null;
-                  return (
-                    <div
-                      key={hour}
-                      className={`flex-1 h-7 mx-0.5 rounded-sm transition-colors hover:ring-2 hover:ring-violet-400 cursor-pointer ${cellColor(cell.conversions)} min-w-[16px]`}
-                      title={`${dowLabel} ${hour}h — ${cell.conversions.toFixed(1)} conv • ${fmtBRL(cell.cost_brl)} • CPL ${cell.conversions > 0 ? fmtBRL(cell.cpl_brl) : '—'}`}
-                    />
-                  );
-                })}
-              </div>
-            ))}
+          <div className="flex items-center justify-end gap-2 mt-4 text-[10px] text-muted-foreground">
+            <span>Menos</span>
+            <div className="w-4 h-3 rounded-sm bg-muted" />
+            <div className="w-4 h-3 rounded-sm bg-violet-500/15" />
+            <div className="w-4 h-3 rounded-sm bg-violet-500/30" />
+            <div className="w-4 h-3 rounded-sm bg-violet-500/50" />
+            <div className="w-4 h-3 rounded-sm bg-violet-500/70" />
+            <div className="w-4 h-3 rounded-sm bg-violet-500/90" />
+            <span>Mais</span>
           </div>
         </div>
+      )}
 
-        {/* Legenda */}
-        <div className="flex items-center justify-end gap-2 mt-4 text-[10px] text-muted-foreground">
-          <span>Menos</span>
-          <div className="w-4 h-3 rounded-sm bg-muted" />
-          <div className="w-4 h-3 rounded-sm bg-violet-500/15" />
-          <div className="w-4 h-3 rounded-sm bg-violet-500/30" />
-          <div className="w-4 h-3 rounded-sm bg-violet-500/50" />
-          <div className="w-4 h-3 rounded-sm bg-violet-500/70" />
-          <div className="w-4 h-3 rounded-sm bg-violet-500/90" />
-          <span>Mais</span>
+      {/* Tabela do agendamento atual */}
+      <ScheduleConfigCard
+        slots={slots}
+        canManage={canManage}
+        onEdit={onEdit}
+      />
+    </div>
+  );
+}
+
+const DAY_LABEL_LONG: Record<string, string> = {
+  MONDAY: 'Segunda',
+  TUESDAY: 'Terça',
+  WEDNESDAY: 'Quarta',
+  THURSDAY: 'Quinta',
+  FRIDAY: 'Sexta',
+  SATURDAY: 'Sábado',
+  SUNDAY: 'Domingo',
+};
+
+const DAY_ORDER: Record<string, number> = {
+  MONDAY: 0,
+  TUESDAY: 1,
+  WEDNESDAY: 2,
+  THURSDAY: 3,
+  FRIDAY: 4,
+  SATURDAY: 5,
+  SUNDAY: 6,
+};
+
+function ScheduleConfigCard({
+  slots,
+  canManage,
+  onEdit,
+}: {
+  slots: ScheduleSlot[];
+  canManage: boolean;
+  onEdit: () => void;
+}) {
+  const sorted = useMemo(() => {
+    return [...slots].sort((a, b) => {
+      const dow = (DAY_ORDER[a.day_of_week] ?? 99) - (DAY_ORDER[b.day_of_week] ?? 99);
+      if (dow !== 0) return dow;
+      return (
+        a.start_hour * 60 + a.start_minute - (b.start_hour * 60 + b.start_minute)
+      );
+    });
+  }, [slots]);
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between p-4 border-b border-border flex-wrap gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-foreground">
+            Agendamento atual ({slots.length === 0 ? '24/7' : `${slots.length} slot${slots.length === 1 ? '' : 's'}`})
+          </h3>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Quando a campanha veicula. Sem slots = roda 24/7.
+          </p>
         </div>
+        {canManage && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white"
+          >
+            <Edit3 size={12} />
+            Editar agendamento
+          </button>
+        )}
       </div>
+
+      {slots.length === 0 ? (
+        <div className="p-6 text-center text-sm text-muted-foreground">
+          Sem slots configurados — campanha veicula 24/7 (todos os dias e horas).
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="text-left px-4 py-2.5">Dia</th>
+              <th className="text-left px-4 py-2.5">Horário</th>
+              <th className="text-left px-4 py-2.5">Ajuste de lance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((s) => {
+              const startStr = `${String(s.start_hour).padStart(2, '0')}:${String(s.start_minute).padStart(2, '0')}`;
+              const endStr = `${String(s.end_hour).padStart(2, '0')}:${String(s.end_minute).padStart(2, '0')}`;
+              const modifier =
+                s.bid_modifier !== null && s.bid_modifier !== undefined
+                  ? Math.round((s.bid_modifier - 1) * 100)
+                  : null;
+              return (
+                <tr key={s.id} className="border-t border-border">
+                  <td className="px-4 py-2 text-xs font-semibold">
+                    {DAY_LABEL_LONG[s.day_of_week] ?? s.day_of_week}
+                  </td>
+                  <td className="px-4 py-2 text-xs tabular-nums">
+                    {startStr} – {endStr}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {modifier === null ? (
+                      <span className="text-muted-foreground">Padrão (0%)</span>
+                    ) : (
+                      <span
+                        className={`font-bold ${modifier > 0 ? 'text-emerald-600' : 'text-red-600'}`}
+                      >
+                        {modifier > 0 ? '+' : ''}
+                        {modifier}%
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

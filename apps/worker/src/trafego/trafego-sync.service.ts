@@ -410,7 +410,7 @@ export class TrafegoSyncService extends WorkerHost {
           campaignByGoogleId,
         );
         this.logger.log(
-          `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions, ${ext.hourly ?? 0} hourly, ${ext.device ?? 0} device` +
+          `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions, ${ext.hourly ?? 0} hourly, ${ext.device ?? 0} device, ${(ext as any).adSchedules ?? 0} schedules` +
             (ext.errors.length > 0 ? ` (${ext.errors.length} sub-erros)` : ''),
         );
         extendedErrors = ext.errors;

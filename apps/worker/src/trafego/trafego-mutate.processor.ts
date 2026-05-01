@@ -28,6 +28,7 @@ export const MUTATE_JOBS = {
   CREATE_RSA: 'trafego-mutate-create-rsa',
   CREATE_SEARCH_CAMPAIGN: 'trafego-mutate-create-search-campaign',
   UPDATE_BIDDING_STRATEGY: 'trafego-mutate-update-bidding-strategy',
+  UPDATE_AD_SCHEDULE: 'trafego-mutate-update-ad-schedule',
 } as const;
 
 /**
@@ -146,6 +147,32 @@ export type UpdateBiddingStrategyPayload = BaseMutatePayload & {
   targetRoas?: number | null;
 };
 
+export type UpdateAdSchedulePayload = BaseMutatePayload & {
+  /// Customer ID (sem traços) pra montar resource_names
+  customerId: string;
+  /// google_campaign_id (numérico)
+  googleCampaignId: string;
+  /// Resource names dos schedules existentes a remover.
+  /// Formato: customers/X/campaignCriteria/Y~Z
+  existingResourceNames: string[];
+  /// Novos slots a criar (substituição completa)
+  newSlots: Array<{
+    dayOfWeek:
+      | 'MONDAY'
+      | 'TUESDAY'
+      | 'WEDNESDAY'
+      | 'THURSDAY'
+      | 'FRIDAY'
+      | 'SATURDAY'
+      | 'SUNDAY';
+    startHour: number;
+    startMinute: 0 | 15 | 30 | 45;
+    endHour: number;
+    endMinute: 0 | 15 | 30 | 45;
+    bidModifier?: number | null;
+  }>;
+};
+
 /**
  * Processor de mutates. concurrency:1 garante ordem na conta.
  *
@@ -195,6 +222,8 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.createSearchCampaign(job.data);
       case MUTATE_JOBS.UPDATE_BIDDING_STRATEGY:
         return await this.updateBiddingStrategy(job.data);
+      case MUTATE_JOBS.UPDATE_AD_SCHEDULE:
+        return await this.updateAdSchedule(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -760,6 +789,110 @@ export class TrafegoMutateProcessor extends WorkerHost {
       }
     }
     return result;
+  }
+
+  /**
+   * Atualiza ad_schedule (horário de veiculação) de uma campanha. Como
+   * Google Ads não tem "update" pra ad_schedule criteria, fazemos
+   * SUBSTITUIÇÃO ATÔMICA: remove TODOS os existentes + cria os novos.
+   *
+   * Importante:
+   *   - Quando newSlots é vazio: campanha volta a rodar 24/7.
+   *   - Falha em qualquer passo aborta sem rollback (audit_log mostra).
+   *   - Mirror local: rola o sync do worker no próximo ciclo (não
+   *     mexemos em TrafficAdSchedule aqui — sync do extended faz purge
+   *     se forem removidos no Google).
+   */
+  private async updateAdSchedule(
+    p: UpdateAdSchedulePayload,
+  ): Promise<MutateResult> {
+    // Passo 1: remove todos os existentes
+    if (p.existingResourceNames.length > 0) {
+      const removeResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_criterion',
+        operation: 'remove',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: {
+          ...p.context,
+          step: 'remove_existing_schedules',
+          count: p.existingResourceNames.length,
+        },
+        operations: p.existingResourceNames,
+      });
+      if (removeResult.status !== 'SUCCESS') {
+        return removeResult;
+      }
+    }
+
+    // Passo 2: cria novos slots (se houver)
+    if (p.newSlots.length === 0) {
+      // Sem slots novos = campanha 24/7. Registra um mutate vazio no
+      // audit log pra ficar claro que foi intencional.
+      return await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_criterion',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: {
+          ...p.context,
+          step: 'no_slots_24_7',
+          note: 'Campanha volta a rodar 24/7 (todos os schedules removidos).',
+        },
+        operations: [],
+      });
+    }
+
+    const minuteEnumKey = (m: number): keyof typeof enums.MinuteOfHour => {
+      if (m === 15) return 'FIFTEEN';
+      if (m === 30) return 'THIRTY';
+      if (m === 45) return 'FORTY_FIVE';
+      return 'ZERO';
+    };
+
+    const operations = p.newSlots.map((slot) => {
+      const op: any = {
+        campaign: `customers/${p.customerId}/campaigns/${p.googleCampaignId}`,
+        ad_schedule: {
+          day_of_week: enums.DayOfWeek[slot.dayOfWeek],
+          start_hour: slot.startHour,
+          start_minute: enums.MinuteOfHour[minuteEnumKey(slot.startMinute)],
+          // end_hour 24 = TWENTY_FOUR no enum do Google
+          end_hour: slot.endHour,
+          end_minute: enums.MinuteOfHour[minuteEnumKey(slot.endMinute)],
+        },
+      };
+      if (
+        slot.bidModifier !== null &&
+        slot.bidModifier !== undefined &&
+        slot.bidModifier > 0
+      ) {
+        op.bid_modifier = slot.bidModifier;
+      }
+      return op;
+    });
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign_criterion',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        step: 'create_new_schedules',
+        slot_count: p.newSlots.length,
+      },
+      operations,
+    });
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

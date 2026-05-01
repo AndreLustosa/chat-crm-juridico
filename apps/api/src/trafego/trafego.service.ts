@@ -222,6 +222,32 @@ export class TrafegoService {
     });
   }
 
+  // ─── P3: Ad Schedule ───────────────────────────────────────────────────
+
+  /**
+   * Lista o agendamento atual de uma campanha (cache local sincronizado
+   * pelo syncAdSchedules).
+   */
+  async getCampaignSchedule(tenantId: string, campaignId: string) {
+    await this.requireCampaign(tenantId, campaignId);
+    const items = await this.prisma.trafficAdSchedule.findMany({
+      where: { campaign_id: campaignId },
+      orderBy: [{ day_of_week: 'asc' }, { start_hour: 'asc' }],
+    });
+    return {
+      slots: items.map((s) => ({
+        id: s.id,
+        google_criterion_id: s.google_criterion_id,
+        day_of_week: s.day_of_week,
+        start_hour: s.start_hour,
+        start_minute: s.start_minute,
+        end_hour: s.end_hour,
+        end_minute: s.end_minute,
+        bid_modifier: s.bid_modifier ? Number(s.bid_modifier) : null,
+      })),
+    };
+  }
+
   // ─── P2: Hourly + Device endpoints (detalhe campanha) ──────────────────
 
   /**
@@ -785,6 +811,43 @@ export class TrafegoService {
             ...base.context,
             campaign_id_local: camp.id,
             new_bidding_strategy: raw.bidding_strategy,
+          },
+        };
+      }
+      case 'trafego-mutate-update-ad-schedule': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        // Pega resource_names dos schedules existentes pra remoção atômica
+        const existing = await this.prisma.trafficAdSchedule.findMany({
+          where: { campaign_id: camp.id },
+          select: { google_criterion_id: true },
+        });
+        const existingResourceNames = existing.map(
+          (s) =>
+            `customers/${customerId}/campaignCriteria/${camp.google_campaign_id}~${s.google_criterion_id}`,
+        );
+        // Sanitização defensiva dos slots vindos do front
+        const newSlots = ((raw.slots ?? []) as any[]).map((s) => ({
+          dayOfWeek: s.day_of_week,
+          startHour: Number(s.start_hour),
+          startMinute: Number(s.start_minute) as 0 | 15 | 30 | 45,
+          endHour: Number(s.end_hour),
+          endMinute: Number(s.end_minute) as 0 | 15 | 30 | 45,
+          bidModifier:
+            s.bid_modifier !== null && s.bid_modifier !== undefined
+              ? Number(s.bid_modifier)
+              : null,
+        }));
+        return {
+          ...base,
+          customerId,
+          googleCampaignId: camp.google_campaign_id,
+          existingResourceNames,
+          newSlots,
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            slot_count: newSlots.length,
+            removing: existingResourceNames.length,
           },
         };
       }

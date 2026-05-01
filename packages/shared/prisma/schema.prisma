@@ -75,6 +75,7 @@ model Tenant {
   traffic_landing_pages      LandingPage[]
   traffic_metrics_hourly     TrafficMetricHourly[]
   traffic_metrics_device     TrafficMetricDevice[]
+  traffic_ad_schedules       TrafficAdSchedule[]
 }
 
 model User {
@@ -2097,6 +2098,7 @@ model TrafficAccount {
   landing_pages      LandingPage[]
   metrics_hourly     TrafficMetricHourly[]
   metrics_device     TrafficMetricDevice[]
+  ad_schedules       TrafficAdSchedule[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2170,6 +2172,7 @@ model TrafficCampaign {
   landing_pages  LandingPage[]
   metrics_hourly TrafficMetricHourly[]
   metrics_device TrafficMetricDevice[]
+  ad_schedules   TrafficAdSchedule[]
 
   @@unique([account_id, google_campaign_id])
   @@index([tenant_id, status])
@@ -2259,6 +2262,54 @@ model TrafficMetricHourly {
   @@unique([campaign_id, date, hour])
   @@index([tenant_id, date])
   @@index([campaign_id, date])
+}
+
+/// P3 (Sprint I) — Ad Schedule criteria por campanha. Cada linha = um
+/// slot (ex: Segunda 09:00-18:00 com bid_modifier 1.0). Quando campanha
+/// não tem nenhum schedule, roda 24/7 (não-presença = todos os slots).
+///
+/// Editar = substituição atômica via UPDATE_AD_SCHEDULE: remove os
+/// existentes + cria os novos numa única operação batch.
+///
+/// Sync via GAQL `campaign_criterion WHERE type=AD_SCHEDULE` traz
+/// google_criterion_id (necessário pra remoção no mutate).
+///
+/// Convenção start/end:
+///   - start_hour: 0-23
+///   - start_minute: 0/15/30/45 (Google só aceita esses)
+///   - end_hour: 0-24 (24 = "fim do dia", expressed as TWENTY_FOUR)
+///   - end_minute: 0/15/30/45
+///
+/// bid_modifier: 0.5 = -50%, 1.0 = sem ajuste, 1.5 = +50%. Range Google:
+/// 0.1 a 10.0. null = "padrão" (sem modifier).
+model TrafficAdSchedule {
+  id          String @id @default(uuid())
+  tenant_id   String
+  account_id  String
+  campaign_id String
+  /// google criterion_id (pra mutate remove referenciar)
+  google_criterion_id String
+
+  /// "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY"
+  day_of_week  String
+  start_hour   Int
+  start_minute Int
+  end_hour     Int
+  end_minute   Int
+  /// Bid modifier (1.0 = sem ajuste). null quando padrão.
+  bid_modifier Decimal?
+
+  last_seen_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_id, google_criterion_id])
+  @@index([tenant_id, day_of_week])
+  @@index([campaign_id])
 }
 
 /// P2 (Sprint I) — Métricas agregadas por dispositivo × campanha. Suporta

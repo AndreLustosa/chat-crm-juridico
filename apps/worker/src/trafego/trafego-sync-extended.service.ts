@@ -76,6 +76,7 @@ export class TrafegoSyncExtendedService {
     searchTerms: number;
     hourly: number;
     device: number;
+    adSchedules: number;
     errors: string[];
   }> {
     const stats = {
@@ -89,6 +90,7 @@ export class TrafegoSyncExtendedService {
       searchTerms: 0,
       hourly: 0,
       device: 0,
+      adSchedules: 0,
       errors: [] as string[],
     };
 
@@ -239,7 +241,157 @@ export class TrafegoSyncExtendedService {
       stats.errors.push(msg);
     }
 
+    // ─── 11. Ad Schedules (P3) ─────────────────────────────────────────
+    // campaign_criterion type=AD_SCHEDULE. Cache local pro editor de
+    // horários da página de detalhe.
+    try {
+      stats.adSchedules = await this.syncAdSchedules(
+        customer,
+        tenantId,
+        accountId,
+        campaignByGoogleId,
+      );
+    } catch (e: any) {
+      const msg = `ad_schedules: ${e?.message ?? e}`;
+      this.logger.warn(`[sync-extended] ${msg}`);
+      stats.errors.push(msg);
+    }
+
     return stats;
+  }
+
+  /**
+   * P3 — Sync de campaign_criterion type=AD_SCHEDULE. Idempotente via
+   * @@unique([campaign_id, google_criterion_id]).
+   *
+   * Apaga schedules locais que sumiram do Google (campanha removeu
+   * slot) — mas só pra campanhas presentes no campaignByGoogleId; se
+   * a campanha foi removida do Google entre as 2 queries, o cache
+   * fica até o cron de purge.
+   */
+  private async syncAdSchedules(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    campaignByGoogleId: Map<string, string>,
+  ): Promise<number> {
+    const rows: any[] = await customer.query(`
+      SELECT
+        campaign_criterion.criterion_id,
+        campaign_criterion.ad_schedule.day_of_week,
+        campaign_criterion.ad_schedule.start_hour,
+        campaign_criterion.ad_schedule.start_minute,
+        campaign_criterion.ad_schedule.end_hour,
+        campaign_criterion.ad_schedule.end_minute,
+        campaign_criterion.bid_modifier,
+        campaign.id
+      FROM campaign_criterion
+      WHERE campaign_criterion.type = 'AD_SCHEDULE'
+        AND campaign_criterion.status != 'REMOVED'
+    `);
+
+    // Map de schedules vistos por campanha — pra purge ao final
+    const seenByCampaign = new Map<string, Set<string>>();
+    let count = 0;
+
+    for (const row of rows) {
+      const googleCampaignId = String(row.campaign?.id ?? '');
+      const ourCampaignId = campaignByGoogleId.get(googleCampaignId);
+      if (!ourCampaignId) continue;
+      const criterionId = String(
+        row.campaign_criterion?.criterion_id ?? '',
+      );
+      if (!criterionId) continue;
+
+      const sched = row.campaign_criterion?.ad_schedule ?? {};
+      const dayOfWeek =
+        enumToStr(enums.DayOfWeek, sched.day_of_week, null) ?? null;
+      // Google pode retornar minutes como enum (ZERO=0, FIFTEEN=15, etc)
+      const minuteEnum: Record<string, number> = {
+        ZERO: 0,
+        FIFTEEN: 15,
+        THIRTY: 30,
+        FORTY_FIVE: 45,
+      };
+      const sm =
+        typeof sched.start_minute === 'number'
+          ? sched.start_minute
+          : minuteEnum[String(sched.start_minute)] ?? 0;
+      const em =
+        typeof sched.end_minute === 'number'
+          ? sched.end_minute
+          : minuteEnum[String(sched.end_minute)] ?? 0;
+      // Hour: Google retorna número direto (0-24)
+      const sh = toNumberSafe(sched.start_hour, 0) ?? 0;
+      // Google retorna end_hour 24 como TWENTY_FOUR enum às vezes
+      const ehRaw = sched.end_hour;
+      const eh =
+        typeof ehRaw === 'number'
+          ? ehRaw
+          : ehRaw === 'TWENTY_FOUR'
+            ? 24
+            : toNumberSafe(ehRaw, 24) ?? 24;
+
+      if (!dayOfWeek) continue;
+
+      const data = {
+        day_of_week: dayOfWeek,
+        start_hour: sh,
+        start_minute: sm,
+        end_hour: eh,
+        end_minute: em,
+        bid_modifier: toNumberSafe(row.campaign_criterion?.bid_modifier),
+        last_seen_at: new Date(),
+      };
+
+      await this.prisma.trafficAdSchedule.upsert({
+        where: {
+          campaign_id_google_criterion_id: {
+            campaign_id: ourCampaignId,
+            google_criterion_id: criterionId,
+          },
+        },
+        update: data,
+        create: {
+          tenant_id: tenantId,
+          account_id: accountId,
+          campaign_id: ourCampaignId,
+          google_criterion_id: criterionId,
+          ...data,
+        },
+      });
+
+      const set = seenByCampaign.get(ourCampaignId) ?? new Set();
+      set.add(criterionId);
+      seenByCampaign.set(ourCampaignId, set);
+      count++;
+    }
+
+    // Purge: remove cache local de slots que não voltaram no sync
+    // (admin removeu pela UI do Google ou pelo nosso UPDATE_AD_SCHEDULE).
+    // Limita às campanhas que apareceram no sync (evita mexer em campanhas
+    // removidas que ainda têm cache).
+    for (const [campaignId, seen] of seenByCampaign) {
+      await this.prisma.trafficAdSchedule.deleteMany({
+        where: {
+          campaign_id: campaignId,
+          google_criterion_id: { notIn: [...seen] },
+        },
+      });
+    }
+    // E pra campanhas que tinham schedules mas voltaram com 0 slots
+    // (admin desativou todos via Google → campanha agora roda 24/7),
+    // apaga tudo dessas campanhas.
+    const campaignsWithoutSchedules = [...campaignByGoogleId.values()].filter(
+      (id) => !seenByCampaign.has(id),
+    );
+    if (campaignsWithoutSchedules.length > 0) {
+      await this.prisma.trafficAdSchedule.deleteMany({
+        where: { campaign_id: { in: campaignsWithoutSchedules } },
+      });
+    }
+
+    return count;
   }
 
   /**
