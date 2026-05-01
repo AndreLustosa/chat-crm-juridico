@@ -4,8 +4,8 @@
   "private": true,
   "description": "Chat + CRM Jurídico Monorepo",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
