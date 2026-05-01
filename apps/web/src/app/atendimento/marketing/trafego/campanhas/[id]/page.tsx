@@ -36,6 +36,7 @@ import { ImpressionShareSegmentedBar } from '../../components/ImpressionShareBar
 import { AdStrengthBadge } from '../../components/AdStrengthBadge';
 import { MatchTypeBadge } from '../../components/MatchTypeBadge';
 import { AddNegativesModal } from '../../components/AddNegativesModal';
+import { EditBudgetModal } from '../../components/EditBudgetModal';
 
 interface CampaignFull {
   id: string;
@@ -239,6 +240,7 @@ function CampaignDetailPageInner() {
     null,
   );
   const [negativesModalOpen, setNegativesModalOpen] = useState(false);
+  const [budgetModalOpen, setBudgetModalOpen] = useState(false);
 
   // ─── Load ────────────────────────────────────────────────────────────
   async function load() {
@@ -491,6 +493,14 @@ function CampaignDetailPageInner() {
               </button>
               <button
                 type="button"
+                onClick={() => setBudgetModalOpen(true)}
+                disabled={campaign.status === 'REMOVED'}
+                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-border hover:bg-accent disabled:opacity-50"
+              >
+                <Edit3 size={13} /> Orçamento
+              </button>
+              <button
+                type="button"
                 onClick={() => setBiddingOpen(true)}
                 disabled={campaign.status === 'REMOVED'}
                 className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-border hover:bg-accent disabled:opacity-50"
@@ -700,6 +710,14 @@ function CampaignDetailPageInner() {
         campaignName={campaign.name}
         defaultAdGroupId={adGroups.length === 1 ? adGroups[0].id : null}
         onClose={() => setNegativesModalOpen(false)}
+        onSaved={() => setTimeout(load, 4000)}
+      />
+      <EditBudgetModal
+        open={budgetModalOpen}
+        campaignId={campaign.id}
+        campaignName={campaign.name}
+        currentBudgetBrl={campaign.daily_budget_brl}
+        onClose={() => setBudgetModalOpen(false)}
         onSaved={() => setTimeout(load, 4000)}
       />
     </div>

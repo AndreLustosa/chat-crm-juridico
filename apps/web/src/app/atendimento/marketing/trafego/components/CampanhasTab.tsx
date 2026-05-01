@@ -27,6 +27,7 @@ import { BiddingStrategyModal } from './BiddingStrategyModal';
 import { CreateRsaModal } from './CreateRsaModal';
 import { ImpressionShareBar } from './ImpressionShareBar';
 import { AdStrengthBadge } from './AdStrengthBadge';
+import { EditBudgetModal } from './EditBudgetModal';
 
 interface MetricsWindow {
   days: number;
@@ -139,10 +140,9 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
-  const [budgetEditId, setBudgetEditId] = useState<string | null>(null);
-  const [budgetInputBrl, setBudgetInputBrl] = useState('');
-  const [budgetReason, setBudgetReason] = useState('');
-  const [budgetValidateOnly, setBudgetValidateOnly] = useState(false);
+  const [budgetEditCampaign, setBudgetEditCampaign] = useState<Campaign | null>(
+    null,
+  );
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -296,38 +296,7 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
 
   function openBudgetModal(c: Campaign) {
     if (!canManage) return;
-    setBudgetEditId(c.id);
-    setBudgetInputBrl(c.daily_budget_brl?.toString() ?? '');
-    setBudgetReason('');
-    setBudgetValidateOnly(false);
-  }
-
-  async function submitBudget() {
-    if (!budgetEditId) return;
-    const n = parseFloat(budgetInputBrl.replace(',', '.'));
-    if (!Number.isFinite(n) || n < 1) {
-      showError('Informe valor valido (>= 1 BRL).');
-      return;
-    }
-    setActingId(budgetEditId);
-    try {
-      await api.patch(`/trafego/campaigns/${budgetEditId}/budget`, {
-        new_amount_brl: n,
-        reason: budgetReason || undefined,
-        validate_only: budgetValidateOnly,
-      });
-      showSuccess(
-        budgetValidateOnly
-          ? 'Validacao em dry-run enfileirada.'
-          : 'Atualizacao de orcamento enfileirada.',
-      );
-      setBudgetEditId(null);
-      setTimeout(load, 4000);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao atualizar orcamento.');
-    } finally {
-      setActingId(null);
-    }
+    setBudgetEditCampaign(c);
   }
 
   async function toggleFavorite(c: Campaign) {
@@ -872,69 +841,14 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
         </div>
       )}
 
-      {budgetEditId !== null && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setBudgetEditId(null);
-          }}
-        >
-          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold text-foreground mb-1">
-              Atualizar orçamento diário
-            </h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              Altera o orçamento da campanha no Google Ads. Em "modo conselheiro",
-              o sistema só registra a sugestão sem aplicar.
-            </p>
-            <label className="block text-xs font-semibold text-muted-foreground mb-1">
-              Novo valor diário (R$)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="1"
-              value={budgetInputBrl}
-              onChange={(e) => setBudgetInputBrl(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm mb-3"
-              autoFocus
-            />
-            <label className="block text-xs font-semibold text-muted-foreground mb-1">
-              Motivo (opcional, fica no audit log)
-            </label>
-            <input
-              type="text"
-              value={budgetReason}
-              onChange={(e) => setBudgetReason(e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm mb-3"
-              placeholder="Ex: aumentar pra capturar mais leads em fim de mês"
-            />
-            <label className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
-              <input
-                type="checkbox"
-                checked={budgetValidateOnly}
-                onChange={(e) => setBudgetValidateOnly(e.target.checked)}
-              />
-              Modo conselheiro (validar sem aplicar)
-            </label>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setBudgetEditId(null)}
-                className="px-4 py-2 text-sm rounded-md border border-border hover:bg-accent"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={submitBudget}
-                disabled={actingId === budgetEditId}
-                className="px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground font-semibold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {actingId === budgetEditId ? 'Enviando...' : 'Confirmar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <EditBudgetModal
+        open={!!budgetEditCampaign}
+        campaignId={budgetEditCampaign?.id ?? null}
+        campaignName={budgetEditCampaign?.name ?? ''}
+        currentBudgetBrl={budgetEditCampaign?.daily_budget_brl ?? null}
+        onClose={() => setBudgetEditCampaign(null)}
+        onSaved={() => setTimeout(load, 4000)}
+      />
     </div>
   );
 }
