@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useState, useCallback, Suspense } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   TrendingUp,
   LayoutDashboard,
@@ -18,41 +18,44 @@ import {
   Tv,
   MessageSquare,
   Globe,
-} from 'lucide-react';
-import api from '@/lib/api';
-import { useRole } from '@/lib/useRole';
-import { showError, showSuccess } from '@/lib/toast';
+  Swords,
+} from "lucide-react";
+import api from "@/lib/api";
+import { useRole } from "@/lib/useRole";
+import { showError, showSuccess } from "@/lib/toast";
 
-import { ConnectGoogleAdsCard } from './components/ConnectGoogleAdsCard';
-import { DashboardTab } from './components/DashboardTab';
-import { CampanhasTab } from './components/CampanhasTab';
-import { AlertasTab } from './components/AlertasTab';
-import { ConfiguracoesTab } from './components/ConfiguracoesTab';
-import { PlaceholderTab } from './components/PlaceholderTab';
-import { RelatoriosTab } from './components/RelatoriosTab';
-import { ConversoesTab } from './components/ConversoesTab';
-import { IaOtimizadoraTab } from './components/IaOtimizadoraTab';
-import { RecomendacoesTab } from './components/RecomendacoesTab';
-import { BrandingTab } from './components/BrandingTab';
-import { ConversarTab } from './components/ConversarTab';
-import { LandingPagesTab } from './components/LandingPagesTab';
+import { ConnectGoogleAdsCard } from "./components/ConnectGoogleAdsCard";
+import { DashboardTab } from "./components/DashboardTab";
+import { CampanhasTab } from "./components/CampanhasTab";
+import { AlertasTab } from "./components/AlertasTab";
+import { ConfiguracoesTab } from "./components/ConfiguracoesTab";
+import { PlaceholderTab } from "./components/PlaceholderTab";
+import { RelatoriosTab } from "./components/RelatoriosTab";
+import { ConversoesTab } from "./components/ConversoesTab";
+import { IaOtimizadoraTab } from "./components/IaOtimizadoraTab";
+import { RecomendacoesTab } from "./components/RecomendacoesTab";
+import { BrandingTab } from "./components/BrandingTab";
+import { ConversarTab } from "./components/ConversarTab";
+import { LandingPagesTab } from "./components/LandingPagesTab";
+import { AuctionInsightsTab } from "./components/AuctionInsightsTab";
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'campanhas', label: 'Campanhas', icon: Megaphone },
-  { id: 'conversoes', label: 'Conversões', icon: Target },
-  { id: 'recomendacoes', label: 'Recomendações', icon: Lightbulb },
-  { id: 'branding', label: 'Branding (PMax/Reach)', icon: Tv },
-  { id: 'landing-pages', label: 'Landing Pages', icon: Globe },
-  { id: 'leads', label: 'Leads', icon: Users },
-  { id: 'relatorios', label: 'Relatórios', icon: FileText },
-  { id: 'alertas', label: 'Alertas', icon: Bell },
-  { id: 'ia', label: 'IA Otimizadora', icon: Sparkles },
-  { id: 'conversar', label: 'Conversar', icon: MessageSquare },
-  { id: 'configuracoes', label: 'Configurações', icon: SettingsIcon },
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "campanhas", label: "Campanhas", icon: Megaphone },
+  { id: "leilao", label: "Leilão", icon: Swords },
+  { id: "conversoes", label: "Conversões", icon: Target },
+  { id: "recomendacoes", label: "Recomendações", icon: Lightbulb },
+  { id: "branding", label: "Branding (PMax/Reach)", icon: Tv },
+  { id: "landing-pages", label: "Landing Pages", icon: Globe },
+  { id: "leads", label: "Leads", icon: Users },
+  { id: "relatorios", label: "Relatórios", icon: FileText },
+  { id: "alertas", label: "Alertas", icon: Bell },
+  { id: "ia", label: "IA Otimizadora", icon: Sparkles },
+  { id: "conversar", label: "Conversar", icon: MessageSquare },
+  { id: "configuracoes", label: "Configurações", icon: SettingsIcon },
 ] as const;
 
-type TabId = (typeof TABS)[number]['id'];
+type TabId = (typeof TABS)[number]["id"];
 
 interface AccountState {
   connected: boolean;
@@ -96,46 +99,46 @@ function TrafegoPageInner() {
   const search = useSearchParams();
   const perms = useRole();
 
-  const [tab, setTab] = useState<TabId>('dashboard');
+  const [tab, setTab] = useState<TabId>("dashboard");
   const [account, setAccount] = useState<AccountState | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [defaultTabSet, setDefaultTabSet] = useState(false);
+  const [, setDefaultTabSet] = useState(false);
   const [openAlertsCount, setOpenAlertsCount] = useState(0);
 
   // ─── Trata callback OAuth ────────────────────────────────────────────────
   useEffect(() => {
-    const oauthStatus = search.get('oauth');
+    const oauthStatus = search.get("oauth");
     if (!oauthStatus) return;
 
-    if (oauthStatus === 'success') {
-      showSuccess('Conta Google Ads conectada com sucesso!');
-    } else if (oauthStatus === 'error') {
-      const reason = search.get('reason') || 'Erro desconhecido';
+    if (oauthStatus === "success") {
+      showSuccess("Conta Google Ads conectada com sucesso!");
+    } else if (oauthStatus === "error") {
+      const reason = search.get("reason") || "Erro desconhecido";
       showError(`Falha ao conectar: ${decodeURIComponent(reason)}`);
     }
 
     // Limpa querystring sem recarregar a pagina
-    router.replace('/atendimento/marketing/trafego');
+    router.replace("/atendimento/marketing/trafego");
   }, [search, router]);
 
   // ─── Carrega estado da conta ────────────────────────────────────────────
   const loadAccount = useCallback(async () => {
     try {
-      const { data } = await api.get<AccountState>('/trafego/account');
+      const { data } = await api.get<AccountState>("/trafego/account");
       setAccount(data);
       // No primeiro load: se nao tem conta, abre direto em Configuracoes
       // (onde o admin precisa preencher credenciais antes de poder conectar).
       setDefaultTabSet((prev) => {
         if (prev) return prev;
-        if (!data.connected) setTab('configuracoes');
+        if (!data.connected) setTab("configuracoes");
         return true;
       });
     } catch {
       setAccount({ connected: false, account: null });
       setDefaultTabSet((prev) => {
         if (prev) return prev;
-        setTab('configuracoes');
+        setTab("configuracoes");
         return true;
       });
     } finally {
@@ -156,7 +159,7 @@ function TrafegoPageInner() {
     const fetchCount = async () => {
       try {
         const { data } = await api.get<{ id: string }[]>(
-          '/trafego/alerts?status=OPEN&limit=100',
+          "/trafego/alerts?status=OPEN&limit=100",
         );
         if (!cancelled) setOpenAlertsCount(data.length);
       } catch {
@@ -203,12 +206,20 @@ function TrafegoPageInner() {
   async function syncNow() {
     setSyncing(true);
     try {
-      await api.post('/trafego/sync');
-      showSuccess('Sync iniciado. Os dados aparecerão em alguns minutos.');
+      await api.post("/trafego/sync");
+      showSuccess("Sync iniciado. Os dados aparecerão em alguns minutos.");
       // Recarrega estado da conta
       await loadAccount();
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Erro ao iniciar sync';
+    } catch (err: unknown) {
+      const msg =
+        typeof err === "object" &&
+        err !== null &&
+        "response" in err &&
+        typeof (err as { response?: { data?: { message?: unknown } } }).response
+          ?.data?.message === "string"
+          ? (err as { response: { data: { message: string } } }).response.data
+              .message
+          : "Erro ao iniciar sync";
       showError(msg);
     } finally {
       setSyncing(false);
@@ -229,22 +240,22 @@ function TrafegoPageInner() {
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
-          const showAlertsBadge = t.id === 'alertas' && openAlertsCount > 0;
+          const showAlertsBadge = t.id === "alertas" && openAlertsCount > 0;
           return (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 active
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
               }`}
             >
               <Icon size={16} />
               {t.label}
               {showAlertsBadge && (
                 <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold leading-[18px] text-center">
-                  {openAlertsCount > 99 ? '99+' : openAlertsCount}
+                  {openAlertsCount > 99 ? "99+" : openAlertsCount}
                 </span>
               )}
             </button>
@@ -253,7 +264,7 @@ function TrafegoPageInner() {
       </div>
 
       {/* Aviso fixo no topo quando ainda nao conectou */}
-      {!account?.connected && tab !== 'configuracoes' && (
+      {!account?.connected && tab !== "configuracoes" && (
         <div className="mb-6">
           <ConnectGoogleAdsCard
             canManage={perms.canManageTrafego}
@@ -264,23 +275,24 @@ function TrafegoPageInner() {
 
       {/* Tab content — Configuracoes sempre acessivel pra preencher credenciais */}
       <div>
-        {tab === 'dashboard' && account?.connected && <DashboardTab />}
-        {tab === 'campanhas' && account?.connected && (
+        {tab === "dashboard" && account?.connected && <DashboardTab />}
+        {tab === "campanhas" && account?.connected && (
           <CampanhasTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'conversoes' && account?.connected && (
+        {tab === "leilao" && account?.connected && <AuctionInsightsTab />}
+        {tab === "conversoes" && account?.connected && (
           <ConversoesTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'recomendacoes' && account?.connected && (
+        {tab === "recomendacoes" && account?.connected && (
           <RecomendacoesTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'branding' && account?.connected && (
+        {tab === "branding" && account?.connected && (
           <BrandingTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'landing-pages' && account?.connected && (
+        {tab === "landing-pages" && account?.connected && (
           <LandingPagesTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'leads' && account?.connected && (
+        {tab === "leads" && account?.connected && (
           <PlaceholderTab
             icon={Users}
             title="Leads atribuídos a campanhas"
@@ -288,21 +300,21 @@ function TrafegoPageInner() {
             phase="Fase 3"
           />
         )}
-        {tab === 'relatorios' && account?.connected && (
+        {tab === "relatorios" && account?.connected && (
           <RelatoriosTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'alertas' && account?.connected && (
+        {tab === "alertas" && account?.connected && (
           <AlertasTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'ia' && account?.connected && (
+        {tab === "ia" && account?.connected && (
           <IaOtimizadoraTab canManage={perms.canManageTrafego} />
         )}
-        {tab === 'conversar' && account?.connected && (
+        {tab === "conversar" && account?.connected && (
           <ConversarTab canManage={perms.canManageTrafego} />
         )}
         {/* Configuracoes: SEMPRE acessivel — eh aqui que admin preenche
             credenciais antes de poder conectar a conta. */}
-        {tab === 'configuracoes' && (
+        {tab === "configuracoes" && (
           <ConfiguracoesTab canManage={perms.canManageTrafego} />
         )}
       </div>
@@ -334,11 +346,11 @@ function Header({
           <p className="text-sm text-muted-foreground">
             {account?.account?.account_name ??
               account?.account?.customer_id ??
-              'Google Ads — central de monitoramento'}
+              "Google Ads — central de monitoramento"}
             {account?.account?.last_sync_at && (
               <span className="ml-2 text-[11px]">
-                · último sync{' '}
-                {new Date(account.account.last_sync_at).toLocaleString('pt-BR')}
+                · último sync{" "}
+                {new Date(account.account.last_sync_at).toLocaleString("pt-BR")}
               </span>
             )}
           </p>

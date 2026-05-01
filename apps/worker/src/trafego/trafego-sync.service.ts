@@ -148,7 +148,9 @@ export class TrafegoSyncService extends WorkerHost {
       return;
     }
 
-    this.logger.log(`[TRAFEGO_SYNC] Sync diario de ${accounts.length} conta(s)`);
+    this.logger.log(
+      `[TRAFEGO_SYNC] Sync diario de ${accounts.length} conta(s)`,
+    );
 
     for (const account of accounts) {
       const enabled = account.tenant?.traffic_settings?.sync_enabled ?? true;
@@ -175,7 +177,9 @@ export class TrafegoSyncService extends WorkerHost {
       where: { started_at: { lt: cutoff } },
     });
     if (result.count > 0) {
-      this.logger.log(`[TRAFEGO_SYNC] Purge: ${result.count} log(s) > 90d removido(s)`);
+      this.logger.log(
+        `[TRAFEGO_SYNC] Purge: ${result.count} log(s) > 90d removido(s)`,
+      );
     }
   }
 
@@ -200,14 +204,19 @@ export class TrafegoSyncService extends WorkerHost {
 
     // Decide range: primeiro sync da conta = lookback maior
     const isFirstSync = account.last_sync_at === null;
-    const lookback = isFirstSync ? this.INITIAL_LOOKBACK_DAYS : this.DEFAULT_LOOKBACK_DAYS;
+    const lookback = isFirstSync
+      ? this.INITIAL_LOOKBACK_DAYS
+      : this.DEFAULT_LOOKBACK_DAYS;
     const dateTo = new Date();
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - lookback);
 
     let customer: Customer;
     try {
-      customer = await this.adsClient.getCustomer(account.tenant_id, account.id);
+      customer = await this.adsClient.getCustomer(
+        account.tenant_id,
+        account.id,
+      );
     } catch (e: any) {
       await this.recordFailure(account, trigger, startedAt, e);
       return;
@@ -246,8 +255,11 @@ export class TrafegoSyncService extends WorkerHost {
           // ('ENABLED' | 'PAUSED' | 'REMOVED' | etc) que o resto do
           // sistema (UI, dashboard) consome.
           status:
-            enumToStr(enums.CampaignStatus, row.campaign?.status, 'UNSPECIFIED') ??
-            'UNSPECIFIED',
+            enumToStr(
+              enums.CampaignStatus,
+              row.campaign?.status,
+              'UNSPECIFIED',
+            ) ?? 'UNSPECIFIED',
           channel_type: enumToStr(
             enums.AdvertisingChannelType,
             row.campaign?.advertising_channel_type,
@@ -325,7 +337,9 @@ export class TrafegoSyncService extends WorkerHost {
         const conversionsValue = toNumberSafe(row.metrics?.conversions_value);
         const ctr = toNumberSafe(row.metrics?.ctr);
         const avgCpcMicros = toBigIntSafe(row.metrics?.average_cpc);
-        const costPerConvMicros = toBigIntSafe(row.metrics?.cost_per_conversion);
+        const costPerConvMicros = toBigIntSafe(
+          row.metrics?.cost_per_conversion,
+        );
 
         // P2: impression share — Google retorna -1 quando "rare data
         // condition" (volume insuficiente p/ calcular). Tratamos como null.
@@ -401,7 +415,23 @@ export class TrafegoSyncService extends WorkerHost {
       // Sub-erros (ext.errors) sao propagados pro TrafficSyncLog.error_message
       // mesmo em status SUCCESS — sem isso, conversion_actions/keywords
       // falhando ficavam invisiveis pro admin (so log do servidor).
-      let extendedErrors: string[] = [];
+      const extendedErrors: string[] = [];
+      try {
+        const auctionRows = await this.syncAuctionInsights(
+          customer,
+          account.tenant_id,
+          account.id,
+          campaignByGoogleId,
+          dateFrom,
+          dateTo,
+        );
+        this.logger.log(`[TRAFEGO_SYNC] Auction Insights: ${auctionRows} rows`);
+      } catch (auctionErr: any) {
+        const msg = `auction insights indisponivel: ${auctionErr?.message ?? auctionErr}`;
+        this.logger.warn(`[TRAFEGO_SYNC] ${msg}`);
+        extendedErrors.push(msg);
+      }
+
       try {
         const ext = await this.syncExtended.syncExtended(
           customer,
@@ -413,11 +443,11 @@ export class TrafegoSyncService extends WorkerHost {
           `[TRAFEGO_SYNC] Extended: ${ext.budgets} budgets, ${ext.adGroups} ad_groups, ${ext.keywords} keywords, ${ext.ads} ads, ${ext.conversionActions} conv_actions, ${ext.hourly ?? 0} hourly, ${ext.device ?? 0} device, ${(ext as any).adSchedules ?? 0} schedules` +
             (ext.errors.length > 0 ? ` (${ext.errors.length} sub-erros)` : ''),
         );
-        extendedErrors = ext.errors;
+        extendedErrors.push(...ext.errors);
       } catch (extErr: any) {
         const msg = `sync-extended fatal: ${extErr?.message ?? extErr}`;
         this.logger.warn(`[TRAFEGO_SYNC] ${msg}`);
-        extendedErrors = [msg];
+        extendedErrors.push(msg);
       }
 
       // ─── 3. Atualiza metadata da conta (currency, timezone, name) ───────
@@ -439,7 +469,9 @@ export class TrafegoSyncService extends WorkerHost {
         }
       } catch (e: any) {
         // Nao critico — se falhar, segue
-        this.logger.warn(`[TRAFEGO_SYNC] Falha lendo customer info: ${e.message}`);
+        this.logger.warn(
+          `[TRAFEGO_SYNC] Falha lendo customer info: ${e.message}`,
+        );
       }
 
       // ─── 4. Sucesso — registra log + atualiza last_sync ─────────────────
@@ -506,6 +538,96 @@ export class TrafegoSyncService extends WorkerHost {
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────
+
+  private async syncAuctionInsights(
+    customer: Customer,
+    tenantId: string,
+    accountId: string,
+    campaignByGoogleId: Map<string, string>,
+    dateFrom: Date,
+    dateTo: Date,
+  ): Promise<number> {
+    const fromStr = dateFrom.toISOString().slice(0, 10);
+    const toStr = dateTo.toISOString().slice(0, 10);
+
+    const rows: any[] = await customer.query(`
+      SELECT
+        campaign.id,
+        segments.date,
+        segments.auction_insight_domain,
+        metrics.auction_insight_search_impression_share,
+        metrics.auction_insight_search_overlap_rate,
+        metrics.auction_insight_search_position_above_rate,
+        metrics.auction_insight_search_top_impression_percentage,
+        metrics.auction_insight_search_absolute_top_impression_percentage,
+        metrics.auction_insight_search_outranking_share
+      FROM campaign
+      WHERE segments.date BETWEEN '${fromStr}' AND '${toStr}'
+    `);
+
+    const sanitizeAuctionShare = (value: unknown): number | null => {
+      if (value === null || value === undefined || value === '') return null;
+      const num = typeof value === 'string' ? Number(value) : Number(value);
+      if (!Number.isFinite(num) || num < 0 || num > 1) return null;
+      return num;
+    };
+
+    const data = rows
+      .map((row) => {
+        const googleCampaignId = String(row.campaign?.id ?? '');
+        const campaignId = campaignByGoogleId.get(googleCampaignId);
+        const dateStr = row.segments?.date;
+        const domain = String(
+          row.segments?.auction_insight_domain ?? '',
+        ).trim();
+        if (!campaignId || !dateStr || !domain) return null;
+
+        return {
+          tenant_id: tenantId,
+          account_id: accountId,
+          campaign_id: campaignId,
+          date: new Date(dateStr),
+          domain,
+          impression_share: sanitizeAuctionShare(
+            row.metrics?.auction_insight_search_impression_share,
+          ),
+          overlap_rate: sanitizeAuctionShare(
+            row.metrics?.auction_insight_search_overlap_rate,
+          ),
+          position_above_rate: sanitizeAuctionShare(
+            row.metrics?.auction_insight_search_position_above_rate,
+          ),
+          top_impression_rate: sanitizeAuctionShare(
+            row.metrics?.auction_insight_search_top_impression_percentage,
+          ),
+          abs_top_impression_rate: sanitizeAuctionShare(
+            row.metrics
+              ?.auction_insight_search_absolute_top_impression_percentage,
+          ),
+          outranking_share: sanitizeAuctionShare(
+            row.metrics?.auction_insight_search_outranking_share,
+          ),
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+
+    await this.prisma.trafficAuctionInsightDaily.deleteMany({
+      where: {
+        tenant_id: tenantId,
+        account_id: accountId,
+        date: { gte: new Date(fromStr), lte: new Date(toStr) },
+      },
+    });
+
+    if (data.length === 0) return 0;
+
+    await this.prisma.trafficAuctionInsightDaily.createMany({
+      data,
+      skipDuplicates: true,
+    });
+
+    return data.length;
+  }
 
   private async recordFailure(
     account: any,

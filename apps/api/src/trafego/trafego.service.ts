@@ -1,4 +1,10 @@
-import { HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   UpdateAccountDto,
@@ -149,9 +155,7 @@ export class TrafegoService {
         }),
       ]);
 
-    const aggMap = new Map(
-      perCampaignAgg.map((a) => [a.campaign_id, a._sum]),
-    );
+    const aggMap = new Map(perCampaignAgg.map((a) => [a.campaign_id, a._sum]));
     const shareMap = new Map(
       perCampaignShareAvg.map((a) => [a.campaign_id, a._avg]),
     );
@@ -228,6 +232,120 @@ export class TrafegoService {
    * Lista o agendamento atual de uma campanha (cache local sincronizado
    * pelo syncAdSchedules).
    */
+  async getAuctionInsights(
+    tenantId: string,
+    opts: { days?: number; campaignId?: string } = {},
+  ) {
+    const windowDays = Math.min(90, Math.max(1, opts.days ?? 30));
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const windowStart = new Date(today);
+    windowStart.setUTCDate(windowStart.getUTCDate() - windowDays);
+
+    if (opts.campaignId) {
+      const campaign = await this.prisma.trafficCampaign.findFirst({
+        where: { id: opts.campaignId, tenant_id: tenantId },
+        select: { id: true },
+      });
+      if (!campaign) throw new NotFoundException('Campanha nao encontrada');
+    }
+
+    const where = {
+      tenant_id: tenantId,
+      date: { gte: windowStart },
+      ...(opts.campaignId ? { campaign_id: opts.campaignId } : {}),
+    };
+
+    const [domains, self, lastAuctionSyncError] = await Promise.all([
+      this.prisma.trafficAuctionInsightDaily.groupBy({
+        by: ['domain'],
+        where,
+        _avg: {
+          impression_share: true,
+          overlap_rate: true,
+          position_above_rate: true,
+          top_impression_rate: true,
+          abs_top_impression_rate: true,
+          outranking_share: true,
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.trafficMetricDaily.aggregate({
+        where,
+        _avg: {
+          search_impression_share: true,
+          search_top_impression_share: true,
+          search_abs_top_impression_share: true,
+        },
+      }),
+      this.prisma.trafficSyncLog.findFirst({
+        where: {
+          tenant_id: tenantId,
+          error_message: { contains: 'auction insights' },
+        },
+        orderBy: { started_at: 'desc' },
+        select: { error_message: true, started_at: true },
+      }),
+    ]);
+
+    const rows = domains
+      .map((d) => ({
+        domain: d.domain,
+        impression_share:
+          d._avg.impression_share === null
+            ? null
+            : Number(d._avg.impression_share),
+        overlap_rate:
+          d._avg.overlap_rate === null ? null : Number(d._avg.overlap_rate),
+        position_above_rate:
+          d._avg.position_above_rate === null
+            ? null
+            : Number(d._avg.position_above_rate),
+        top_impression_rate:
+          d._avg.top_impression_rate === null
+            ? null
+            : Number(d._avg.top_impression_rate),
+        abs_top_impression_rate:
+          d._avg.abs_top_impression_rate === null
+            ? null
+            : Number(d._avg.abs_top_impression_rate),
+        outranking_share:
+          d._avg.outranking_share === null
+            ? null
+            : Number(d._avg.outranking_share),
+        samples: d._count._all,
+      }))
+      .sort(
+        (a, b) =>
+          (b.impression_share ?? -1) - (a.impression_share ?? -1) ||
+          (b.overlap_rate ?? -1) - (a.overlap_rate ?? -1),
+      );
+
+    return {
+      days: windowDays,
+      self: {
+        impression_share:
+          self._avg.search_impression_share === null
+            ? null
+            : Number(self._avg.search_impression_share),
+        top_impression_rate:
+          self._avg.search_top_impression_share === null
+            ? null
+            : Number(self._avg.search_top_impression_share),
+        abs_top_impression_rate:
+          self._avg.search_abs_top_impression_share === null
+            ? null
+            : Number(self._avg.search_abs_top_impression_share),
+      },
+      rows,
+      unavailable_reason:
+        rows.length === 0 && lastAuctionSyncError?.error_message
+          ? lastAuctionSyncError.error_message
+          : null,
+      last_error_at: lastAuctionSyncError?.started_at ?? null,
+    };
+  }
+
   async getCampaignSchedule(tenantId: string, campaignId: string) {
     await this.requireCampaign(tenantId, campaignId);
     const items = await this.prisma.trafficAdSchedule.findMany({
@@ -366,7 +484,9 @@ export class TrafegoService {
       total_cost_brl: totalCost / 1_000_000,
       total_conversions: totalConv,
       items: aggs.map((a) => {
-        const cost = a._sum.cost_micros ? Number(a._sum.cost_micros) / 1_000_000 : 0;
+        const cost = a._sum.cost_micros
+          ? Number(a._sum.cost_micros) / 1_000_000
+          : 0;
         const conv = Number(a._sum.conversions ?? 0);
         const clicks = Number(a._sum.clicks ?? 0);
         const impressions = Number(a._sum.impressions ?? 0);
@@ -379,7 +499,8 @@ export class TrafegoService {
           cpl_brl: conv > 0 ? cost / conv : 0,
           ctr: impressions > 0 ? clicks / impressions : 0,
           // % do total de gastos (pra donut)
-          spend_share: totalCost > 0 ? Number(a._sum.cost_micros) / totalCost : 0,
+          spend_share:
+            totalCost > 0 ? Number(a._sum.cost_micros) / totalCost : 0,
           conv_share: totalConv > 0 ? conv / totalConv : 0,
         };
       }),
@@ -439,7 +560,9 @@ export class TrafegoService {
       where: {
         tenant_id: tenantId,
         ad_group_id: adGroupId,
-        ...(typeof opts.negative === 'boolean' ? { negative: opts.negative } : {}),
+        ...(typeof opts.negative === 'boolean'
+          ? { negative: opts.negative }
+          : {}),
       },
       orderBy: { last_seen_at: 'desc' },
     });
@@ -536,7 +659,10 @@ export class TrafegoService {
       cost_brl: Number(i.cost_micros) / 1_000_000,
       conversions: i.conversions,
       conversions_value: i.conversions_value,
-      cpl_brl: i.conversions > 0 ? Number(i.cost_micros) / 1_000_000 / i.conversions : 0,
+      cpl_brl:
+        i.conversions > 0
+          ? Number(i.cost_micros) / 1_000_000 / i.conversions
+          : 0,
       ctr: i.impressions > 0 ? i.clicks / i.impressions : 0,
       last_seen_at: i.last_seen_at,
     }));
@@ -985,7 +1111,8 @@ export class TrafegoService {
       ...s,
       target_cpl_micros: s.target_cpl_micros?.toString() ?? null,
       target_cpl_brl: fromMicros(s.target_cpl_micros),
-      target_daily_budget_micros: s.target_daily_budget_micros?.toString() ?? null,
+      target_daily_budget_micros:
+        s.target_daily_budget_micros?.toString() ?? null,
       target_daily_budget_brl: fromMicros(s.target_daily_budget_micros),
     };
   }
@@ -1150,7 +1277,12 @@ export class TrafegoService {
       // Hoje
       this.prisma.trafficMetricDaily.aggregate({
         where: { tenant_id: tenantId, date: today },
-        _sum: { cost_micros: true, conversions: true, clicks: true, impressions: true },
+        _sum: {
+          cost_micros: true,
+          conversions: true,
+          clicks: true,
+          impressions: true,
+        },
       }),
       // Mes corrente — usado pra pacing mensal independente do period
       this.prisma.trafficMetricDaily.aggregate({
@@ -1235,7 +1367,12 @@ export class TrafegoService {
           date: { gte: sevenDaysAgo },
           conversions: { gt: 0 },
         },
-        _sum: { cost_micros: true, conversions: true, clicks: true, impressions: true },
+        _sum: {
+          cost_micros: true,
+          conversions: true,
+          clicks: true,
+          impressions: true,
+        },
         orderBy: { _sum: { cost_micros: 'asc' } },
         take: 5,
       }),
@@ -1452,58 +1589,54 @@ export class TrafegoService {
     }
 
     // ─── Coleta de dados ──────────────────────────────────────────────
-    const [
-      totalAgg,
-      campaignAggs,
-      dailyAggs,
-      campaignsCount,
-    ] = await Promise.all([
-      this.prisma.trafficMetricDaily.aggregate({
-        where: {
-          tenant_id: tenantId,
-          date: { gte: dateFrom, lte: dateTo },
-        },
-        _sum: {
-          cost_micros: true,
-          impressions: true,
-          clicks: true,
-          conversions: true,
-          conversions_value: true,
-        },
-      }),
-      this.prisma.trafficMetricDaily.groupBy({
-        by: ['campaign_id'],
-        where: {
-          tenant_id: tenantId,
-          date: { gte: dateFrom, lte: dateTo },
-        },
-        _sum: {
-          cost_micros: true,
-          impressions: true,
-          clicks: true,
-          conversions: true,
-        },
-      }),
-      this.prisma.trafficMetricDaily.groupBy({
-        by: ['date'],
-        where: {
-          tenant_id: tenantId,
-          date: { gte: dateFrom, lte: dateTo },
-        },
-        _sum: {
-          cost_micros: true,
-          impressions: true,
-          clicks: true,
-          conversions: true,
-        },
-        orderBy: { date: 'asc' },
-      }),
-      this.prisma.trafficCampaign.groupBy({
-        by: ['status'],
-        where: { tenant_id: tenantId, is_archived_internal: false },
-        _count: { _all: true },
-      }),
-    ]);
+    const [totalAgg, campaignAggs, dailyAggs, campaignsCount] =
+      await Promise.all([
+        this.prisma.trafficMetricDaily.aggregate({
+          where: {
+            tenant_id: tenantId,
+            date: { gte: dateFrom, lte: dateTo },
+          },
+          _sum: {
+            cost_micros: true,
+            impressions: true,
+            clicks: true,
+            conversions: true,
+            conversions_value: true,
+          },
+        }),
+        this.prisma.trafficMetricDaily.groupBy({
+          by: ['campaign_id'],
+          where: {
+            tenant_id: tenantId,
+            date: { gte: dateFrom, lte: dateTo },
+          },
+          _sum: {
+            cost_micros: true,
+            impressions: true,
+            clicks: true,
+            conversions: true,
+          },
+        }),
+        this.prisma.trafficMetricDaily.groupBy({
+          by: ['date'],
+          where: {
+            tenant_id: tenantId,
+            date: { gte: dateFrom, lte: dateTo },
+          },
+          _sum: {
+            cost_micros: true,
+            impressions: true,
+            clicks: true,
+            conversions: true,
+          },
+          orderBy: { date: 'asc' },
+        }),
+        this.prisma.trafficCampaign.groupBy({
+          by: ['status'],
+          where: { tenant_id: tenantId, is_archived_internal: false },
+          _count: { _all: true },
+        }),
+      ]);
 
     // Enriquecer agregados de campanha com nome/status/canal
     const campaignIds = campaignAggs.map((a) => a.campaign_id);

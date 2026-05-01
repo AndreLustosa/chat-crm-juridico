@@ -76,6 +76,7 @@ model Tenant {
   traffic_metrics_hourly     TrafficMetricHourly[]
   traffic_metrics_device     TrafficMetricDevice[]
   traffic_ad_schedules       TrafficAdSchedule[]
+  traffic_auction_insights   TrafficAuctionInsightDaily[]
 }
 
 model User {
@@ -2071,7 +2072,7 @@ model TrafficAccount {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  tenant             Tenant                      @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tenant             Tenant                       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   campaigns          TrafficCampaign[]
   metrics_daily      TrafficMetricDaily[]
   sync_logs          TrafficSyncLog[]
@@ -2099,6 +2100,7 @@ model TrafficAccount {
   metrics_hourly     TrafficMetricHourly[]
   metrics_device     TrafficMetricDevice[]
   ad_schedules       TrafficAdSchedule[]
+  auction_insights   TrafficAuctionInsightDaily[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2163,16 +2165,17 @@ model TrafficCampaign {
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 
-  tenant         Tenant                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  account        TrafficAccount        @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  metrics_daily  TrafficMetricDaily[]
-  ad_groups      TrafficAdGroup[]
-  asset_groups   TrafficAssetGroup[]
-  search_terms   TrafficSearchTerm[]
-  landing_pages  LandingPage[]
-  metrics_hourly TrafficMetricHourly[]
-  metrics_device TrafficMetricDevice[]
-  ad_schedules   TrafficAdSchedule[]
+  tenant           Tenant                       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account          TrafficAccount               @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  metrics_daily    TrafficMetricDaily[]
+  ad_groups        TrafficAdGroup[]
+  asset_groups     TrafficAssetGroup[]
+  search_terms     TrafficSearchTerm[]
+  landing_pages    LandingPage[]
+  metrics_hourly   TrafficMetricHourly[]
+  metrics_device   TrafficMetricDevice[]
+  ad_schedules     TrafficAdSchedule[]
+  auction_insights TrafficAuctionInsightDaily[]
 
   @@unique([account_id, google_campaign_id])
   @@index([tenant_id, status])
@@ -2211,13 +2214,13 @@ model TrafficMetricDaily {
 
   // ─── P2: Impression share (Google Ads search_impression_share) ───────
   /// % de buscas em que o anúncio apareceu (0..1). null se não calculado.
-  search_impression_share        Decimal?
+  search_impression_share         Decimal?
   /// % de impressões perdidas por orçamento limitado (0..1)
-  search_lost_is_budget          Decimal?
+  search_lost_is_budget           Decimal?
   /// % de impressões perdidas por rank/qualidade (0..1)
-  search_lost_is_rank            Decimal?
+  search_lost_is_rank             Decimal?
   /// % no top (1ª-4ª posição) — search_top_impression_share (0..1)
-  search_top_impression_share    Decimal?
+  search_top_impression_share     Decimal?
   /// % no topo absoluto (1ª posição) — abs_top (0..1)
   search_abs_top_impression_share Decimal?
 
@@ -2237,6 +2240,37 @@ model TrafficMetricDaily {
 /// P2 (Sprint I) — Métricas agregadas por hora × dia × campanha. Suporta
 /// heatmap de "quando os leads aparecem" (segments.hour). Idempotente via
 /// unique (campaign_id, date, hour).
+model TrafficAuctionInsightDaily {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  account_id  String
+  campaign_id String
+  date        DateTime @db.Date
+
+  /// Dominio visivel do participante no relatorio de leilao. Ex: "jusfy.com".
+  domain String
+
+  impression_share        Decimal?
+  overlap_rate            Decimal?
+  position_above_rate     Decimal?
+  top_impression_rate     Decimal?
+  abs_top_impression_rate Decimal?
+  outranking_share        Decimal?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount  @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+
+  @@unique([campaign_id, date, domain])
+  @@index([tenant_id, date])
+  @@index([account_id, date])
+  @@index([campaign_id, date])
+  @@index([domain])
+}
+
 model TrafficMetricHourly {
   id          String   @id @default(uuid())
   tenant_id   String
@@ -2246,10 +2280,10 @@ model TrafficMetricHourly {
   /// Hora do dia (0-23) no fuso horário da conta Google Ads
   hour        Int
 
-  impressions Int    @default(0)
-  clicks      Int    @default(0)
-  cost_micros BigInt @default(0)
-  conversions Decimal @default(0)
+  impressions       Int     @default(0)
+  clicks            Int     @default(0)
+  cost_micros       BigInt  @default(0)
+  conversions       Decimal @default(0)
   conversions_value Decimal @default(0)
 
   created_at DateTime @default(now())
@@ -2283,10 +2317,10 @@ model TrafficMetricHourly {
 /// bid_modifier: 0.5 = -50%, 1.0 = sem ajuste, 1.5 = +50%. Range Google:
 /// 0.1 a 10.0. null = "padrão" (sem modifier).
 model TrafficAdSchedule {
-  id          String @id @default(uuid())
-  tenant_id   String
-  account_id  String
-  campaign_id String
+  id                  String @id @default(uuid())
+  tenant_id           String
+  account_id          String
+  campaign_id         String
   /// google criterion_id (pra mutate remove referenciar)
   google_criterion_id String
 
@@ -2324,10 +2358,10 @@ model TrafficMetricDevice {
   /// "MOBILE" | "DESKTOP" | "TABLET" | "OTHER" | "CONNECTED_TV"
   device      String
 
-  impressions Int    @default(0)
-  clicks      Int    @default(0)
-  cost_micros BigInt @default(0)
-  conversions Decimal @default(0)
+  impressions       Int     @default(0)
+  clicks            Int     @default(0)
+  cost_micros       BigInt  @default(0)
+  conversions       Decimal @default(0)
   conversions_value Decimal @default(0)
 
   created_at DateTime @default(now())
@@ -2588,11 +2622,11 @@ model TrafficAdGroup {
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
 
-  tenant   Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  account  TrafficAccount      @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  campaign TrafficCampaign     @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
-  keywords TrafficKeyword[]
-  ads      TrafficAd[]
+  tenant       Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account      TrafficAccount      @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign     TrafficCampaign     @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  keywords     TrafficKeyword[]
+  ads          TrafficAd[]
   search_terms TrafficSearchTerm[]
 
   @@unique([campaign_id, google_ad_group_id])
@@ -3568,9 +3602,9 @@ model TrafficChatMessage {
 /// addNegatives existente — sem cache de "pending negatives" (a confirmação
 /// é o próprio mutate processing).
 model TrafficSearchTerm {
-  id         String @id @default(uuid())
-  tenant_id  String
-  account_id String
+  id          String  @id @default(uuid())
+  tenant_id   String
+  account_id  String
   campaign_id String?
   ad_group_id String?
 
@@ -3582,20 +3616,20 @@ model TrafficSearchTerm {
   status      String?
 
   /// Métricas agregadas na janela (30d default)
-  impressions  Int    @default(0)
-  clicks       Int    @default(0)
-  cost_micros  BigInt @default(0)
-  conversions  Float  @default(0)
-  conversions_value Float @default(0)
+  impressions       Int    @default(0)
+  clicks            Int    @default(0)
+  cost_micros       BigInt @default(0)
+  conversions       Float  @default(0)
+  conversions_value Float  @default(0)
 
   /// Última vez que apareceu no sync (pra purge eventual)
   last_seen_at DateTime @default(now())
   created_at   DateTime @default(now())
 
-  tenant   Tenant            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  account  TrafficAccount    @relation(fields: [account_id], references: [id], onDelete: Cascade)
-  campaign TrafficCampaign?  @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
-  ad_group TrafficAdGroup?   @relation(fields: [ad_group_id], references: [id], onDelete: Cascade)
+  tenant   Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount   @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  campaign TrafficCampaign? @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  ad_group TrafficAdGroup?  @relation(fields: [ad_group_id], references: [id], onDelete: Cascade)
 
   @@unique([campaign_id, ad_group_id, search_term])
   @@index([tenant_id, last_seen_at])
@@ -3630,19 +3664,19 @@ model LandingPage {
 
   // ─── PageSpeed Insights (gratuito via Google Cloud) ─────────────────
   /// Score mobile (0-100). Default 0 = nunca rodou.
-  pagespeed_mobile      Int     @default(0)
+  pagespeed_mobile  Int       @default(0)
   /// Score desktop (0-100)
-  pagespeed_desktop     Int     @default(0)
+  pagespeed_desktop Int       @default(0)
   /// LCP em ms (Largest Contentful Paint)
-  lcp_ms                Int?
+  lcp_ms            Int?
   /// CLS x100 (Cumulative Layout Shift, valor original 0..1)
-  cls_x100              Int?
+  cls_x100          Int?
   /// FID/INP em ms (First Input Delay / Interaction to Next Paint)
-  inp_ms                Int?
+  inp_ms            Int?
   /// Última vez que rodou PageSpeed Insights
-  last_pagespeed_at     DateTime?
+  last_pagespeed_at DateTime?
   /// JSON crú do PageSpeed (audits relevantes pra evitar inflar)
-  pagespeed_data        Json?
+  pagespeed_data    Json?
 
   // ─── Análise IA (Claude) ────────────────────────────────────────────
   /// Última vez que IA analisou
@@ -3652,16 +3686,16 @@ model LandingPage {
 
   // ─── Métricas (cache — populado via job semanal) ────────────────────
   /// Clicks que tiveram esse URL como final_url nos últimos 30d
-  clicks_30d       Int     @default(0)
+  clicks_30d      Int   @default(0)
   /// Conversões dessas sessões
-  conversions_30d  Float   @default(0)
+  conversions_30d Float @default(0)
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  tenant   Tenant            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-  account  TrafficAccount?   @relation(fields: [account_id], references: [id], onDelete: SetNull)
-  campaign TrafficCampaign?  @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
+  tenant   Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount?  @relation(fields: [account_id], references: [id], onDelete: SetNull)
+  campaign TrafficCampaign? @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
 
   @@unique([tenant_id, url])
   @@index([tenant_id, last_pagespeed_at])

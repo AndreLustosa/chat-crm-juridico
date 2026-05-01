@@ -159,7 +159,8 @@ export class TrafegoController {
     // NAO da pra usar TrafegoConfigService aqui ANTES de validar state
     // (callback eh @Public, sem tenantId disponivel).
     const forwardedHost = req.get('x-forwarded-host') || req.get('host');
-    const forwardedProto = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const forwardedProto =
+      req.get('x-forwarded-proto') || req.protocol || 'https';
     const webBase =
       process.env.FRONTEND_BASE_URL ||
       (forwardedHost ? `${forwardedProto}://${forwardedHost}` : null) ||
@@ -168,7 +169,9 @@ export class TrafegoController {
     const errorPath = '/atendimento/marketing/trafego?oauth=error';
 
     if (error) {
-      return res.redirect(`${webBase}${errorPath}&reason=${encodeURIComponent(error)}`);
+      return res.redirect(
+        `${webBase}${errorPath}&reason=${encodeURIComponent(error)}`,
+      );
     }
     if (!code || !state) {
       return res.redirect(`${webBase}${errorPath}&reason=missing_params`);
@@ -221,6 +224,20 @@ export class TrafegoController {
     return this.service.listCampaigns(req.user.tenant_id, {
       includeArchived: includeArchived === 'true',
       days: Number.isFinite(daysNum) ? daysNum : undefined,
+    });
+  }
+
+  @Get('auction-insights')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async auctionInsights(
+    @Req() req: any,
+    @Query('days') days: string,
+    @Query('campaign_id') campaignId?: string,
+  ) {
+    const daysNum = days ? parseInt(days, 10) : undefined;
+    return this.service.getAuctionInsights(req.user.tenant_id, {
+      days: Number.isFinite(daysNum) ? daysNum : undefined,
+      campaignId: campaignId || undefined,
     });
   }
 
@@ -297,10 +314,7 @@ export class TrafegoController {
    */
   @Patch('credentials')
   @Roles('ADMIN')
-  async updateCredentials(
-    @Req() req: any,
-    @Body() dto: UpdateCredentialsDto,
-  ) {
+  async updateCredentials(@Req() req: any, @Body() dto: UpdateCredentialsDto) {
     return this.config.updateCredentials(req.user.tenant_id, dto);
   }
 
@@ -442,7 +456,10 @@ export class TrafegoController {
     @Query('campaign_id') campaignId?: string,
     @Query('status') status?: string,
   ) {
-    return this.service.listAdGroups(req.user.tenant_id, { campaignId, status });
+    return this.service.listAdGroups(req.user.tenant_id, {
+      campaignId,
+      status,
+    });
   }
 
   /** Lista keywords de um ad_group. */
@@ -592,10 +609,7 @@ export class TrafegoController {
    */
   @Post('campaigns')
   @Roles('ADMIN', 'ADVOGADO')
-  async createCampaign(
-    @Req() req: any,
-    @Body() dto: CreateSearchCampaignDto,
-  ) {
+  async createCampaign(@Req() req: any, @Body() dto: CreateSearchCampaignDto) {
     return await this.enqueueMutate(
       req,
       'trafego-mutate-create-search-campaign',
@@ -653,11 +667,10 @@ export class TrafegoController {
         );
       }
     }
-    return await this.enqueueMutate(
-      req,
-      'trafego-mutate-update-ad-schedule',
-      { campaignId: id, ...dto },
-    );
+    return await this.enqueueMutate(req, 'trafego-mutate-update-ad-schedule', {
+      campaignId: id,
+      ...dto,
+    });
   }
 
   /**
@@ -932,7 +945,10 @@ export class TrafegoController {
   @Post('ai/trigger')
   @Roles('ADMIN', 'ADVOGADO')
   async triggerAiLoop(@Req() req: any, @Body() dto: AiTriggerLoopDto) {
-    return this.ai.triggerLoop(req.user.tenant_id, dto.loop_kind ?? 'TRIGGERED');
+    return this.ai.triggerLoop(
+      req.user.tenant_id,
+      dto.loop_kind ?? 'TRIGGERED',
+    );
   }
 
   // ─── Lead Form Asset (Sprint D) ─────────────────────────────────────────
@@ -1163,11 +1179,7 @@ export class TrafegoController {
   @Post('chat/sessions')
   @Roles('ADMIN', 'ADVOGADO')
   async createChatSession(@Req() req: any, @Body() dto: CreateChatSessionDto) {
-    return this.chat.createSession(
-      req.user.tenant_id,
-      req.user.id,
-      dto.title,
-    );
+    return this.chat.createSession(req.user.tenant_id, req.user.id, dto.title);
   }
 
   @Get('chat/sessions')
@@ -1199,12 +1211,7 @@ export class TrafegoController {
     @Param('id') id: string,
     @Body() dto: SendChatMessageDto,
   ) {
-    return this.chat.sendMessage(
-      req.user.tenant_id,
-      id,
-      req.user.id,
-      dto.text,
-    );
+    return this.chat.sendMessage(req.user.tenant_id, id, req.user.id, dto.text);
   }
 
   @Delete('chat/sessions/:id')
@@ -1252,10 +1259,7 @@ export class TrafegoController {
 
   @Post('landing-pages')
   @Roles('ADMIN', 'ADVOGADO')
-  async createLandingPage(
-    @Req() req: any,
-    @Body() dto: CreateLandingPageDto,
-  ) {
+  async createLandingPage(@Req() req: any, @Body() dto: CreateLandingPageDto) {
     return this.landingPages.create(req.user.tenant_id, {
       url: dto.url,
       title: dto.title,
