@@ -1,9 +1,30 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Star, Loader2, Inbox, Tag, Pause, Play, Edit3 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Star,
+  Loader2,
+  Inbox,
+  Tag,
+  Pause,
+  Play,
+  Edit3,
+  X,
+  Search,
+} from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+
+interface MetricsWindow {
+  days: number;
+  spend_brl: number;
+  conversions: number;
+  clicks: number;
+  impressions: number;
+  cpl_brl: number;
+  ctr: number;
+  avg_cpc_brl: number;
+}
 
 interface Campaign {
   id: string;
@@ -16,6 +37,7 @@ interface Campaign {
   is_archived_internal: boolean;
   tags: string[];
   notes: string | null;
+  metrics_window?: MetricsWindow;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -30,6 +52,12 @@ const STATUS_LABEL: Record<string, string> = {
   REMOVED: 'Removida',
 };
 
+const FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'ALL', label: 'Todas' },
+  { value: 'ENABLED', label: 'Ativas' },
+  { value: 'PAUSED', label: 'Pausadas' },
+];
+
 const fmtBRL = (v: number | null) =>
   v === null
     ? '—'
@@ -37,6 +65,36 @@ const fmtBRL = (v: number | null) =>
         style: 'currency',
         currency: 'BRL',
       }).format(v);
+
+const fmtPct = (v: number) =>
+  new Intl.NumberFormat('pt-BR', {
+    style: 'percent',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(v || 0);
+
+/**
+ * Sugere tags com base no nome da campanha. Heurística simples:
+ *   - "Search"|"Pesquisa"  → "search"
+ *   - "PMax"|"Performance Max" → "pmax"
+ *   - "Display" → "display"
+ *   - "Trabalhista"|"Civil"|"Criminal"|"Família"|"Previdenciário" → área
+ */
+function suggestTagsFromName(name: string): string[] {
+  const n = name.toLowerCase();
+  const out = new Set<string>();
+  if (/(search|pesquisa)/.test(n)) out.add('search');
+  if (/(pmax|performance.?max)/.test(n)) out.add('pmax');
+  if (/display/.test(n)) out.add('display');
+  if (/youtube|video/.test(n)) out.add('video');
+  if (/(trabalhista|trabalho|clt)/.test(n)) out.add('trabalhista');
+  if (/(c[ií]vel|civil)/.test(n)) out.add('civil');
+  if (/(criminal|penal)/.test(n)) out.add('criminal');
+  if (/(fam[ií]lia|div[oó]rcio|alimento)/.test(n)) out.add('familia');
+  if (/(previdenci[aá]rio|inss|aposentadoria)/.test(n)) out.add('previdenciario');
+  if (/(empresarial|empresa|tribut[aá]rio)/.test(n)) out.add('empresarial');
+  return [...out];
+}
 
 export function CampanhasTab({ canManage }: { canManage: boolean }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -46,11 +104,18 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
   const [budgetInputBrl, setBudgetInputBrl] = useState('');
   const [budgetReason, setBudgetReason] = useState('');
   const [budgetValidateOnly, setBudgetValidateOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [tagsEditId, setTagsEditId] = useState<string | null>(null);
+  const [tagsInput, setTagsInput] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      const { data } = await api.get<Campaign[]>('/trafego/campaigns');
+      const { data } = await api.get<Campaign[]>('/trafego/campaigns', {
+        params: { days: 30 },
+      });
       setCampaigns(data);
     } catch {
       showError('Erro ao carregar campanhas.');
@@ -62,6 +127,26 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
   useEffect(() => {
     load();
   }, []);
+
+  // Tags conhecidas (todas as tags atuais + 5 mais populares como sugestão)
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of campaigns) {
+      for (const t of c.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }, [campaigns]);
+
+  // Aplica filtros (status + tag + busca por nome)
+  const filteredCampaigns = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return campaigns.filter((c) => {
+      if (statusFilter !== 'ALL' && c.status !== statusFilter) return false;
+      if (tagFilter && !c.tags.includes(tagFilter)) return false;
+      if (q && !c.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [campaigns, statusFilter, tagFilter, search]);
 
   async function pauseOrResume(c: Campaign) {
     if (!canManage) return;
@@ -140,6 +225,55 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
     }
   }
 
+  function openTagsEditor(c: Campaign) {
+    if (!canManage) return;
+    setTagsEditId(c.id);
+    setTagsInput(c.tags.join(', '));
+  }
+
+  async function saveTags(c: Campaign) {
+    if (!canManage) return;
+    const tags = tagsInput
+      .split(/[,\s]+/)
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length > 0);
+    setActingId(c.id);
+    try {
+      await api.patch(`/trafego/campaigns/${c.id}`, { tags });
+      setCampaigns((prev) =>
+        prev.map((x) => (x.id === c.id ? { ...x, tags } : x)),
+      );
+      setTagsEditId(null);
+      showSuccess('Tags atualizadas.');
+    } catch {
+      showError('Erro ao salvar tags.');
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  async function applySuggestedTags(c: Campaign) {
+    if (!canManage) return;
+    const suggested = suggestTagsFromName(c.name);
+    if (suggested.length === 0) {
+      showError('Sem sugestões para esta campanha.');
+      return;
+    }
+    const merged = [...new Set([...c.tags, ...suggested])];
+    setActingId(c.id);
+    try {
+      await api.patch(`/trafego/campaigns/${c.id}`, { tags: merged });
+      setCampaigns((prev) =>
+        prev.map((x) => (x.id === c.id ? { ...x, tags: merged } : x)),
+      );
+      showSuccess(`Sugestões aplicadas: ${suggested.join(', ')}`);
+    } catch {
+      showError('Erro ao aplicar sugestões.');
+    } finally {
+      setActingId(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="bg-card border border-border rounded-xl p-12 flex flex-col items-center text-muted-foreground">
@@ -165,100 +299,248 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-          <tr>
-            <th className="text-left px-4 py-3 w-10"></th>
-            <th className="text-left px-4 py-3">Campanha</th>
-            <th className="text-left px-4 py-3">Tipo</th>
-            <th className="text-left px-4 py-3">Status</th>
-            <th className="text-right px-4 py-3">Orçamento/dia</th>
-            <th className="text-left px-4 py-3">Tags</th>
-            <th className="text-right px-4 py-3 w-28">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map((c) => (
-            <tr
-              key={c.id}
-              className="border-t border-border hover:bg-accent/30 transition-colors"
+    <div className="space-y-3">
+      {/* ─── Filtros ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border">
+          {FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setStatusFilter(opt.value)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                statusFilter === opt.value
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              <td className="px-4 py-3">
-                <button
-                  onClick={() => toggleFavorite(c)}
-                  disabled={!canManage}
-                  className="text-muted-foreground hover:text-amber-500 disabled:cursor-not-allowed"
-                  title={c.is_favorite ? 'Remover favorita' : 'Marcar favorita'}
-                >
-                  <Star
-                    size={16}
-                    fill={c.is_favorite ? 'currentColor' : 'none'}
-                    className={c.is_favorite ? 'text-amber-500' : ''}
-                  />
-                </button>
-              </td>
-              <td className="px-4 py-3">
-                <div className="font-medium text-foreground">{c.name}</div>
-                <div className="text-[11px] text-muted-foreground font-mono">
-                  ID {c.google_campaign_id}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-muted-foreground">
-                {c.channel_type ?? '—'}
-              </td>
-              <td className="px-4 py-3">
-                <span
-                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                    STATUS_BADGE[c.status] ?? 'bg-muted text-muted-foreground'
-                  }`}
-                >
-                  {STATUS_LABEL[c.status] ?? c.status}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-right tabular-nums">
-                {fmtBRL(c.daily_budget_brl)}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex gap-1 flex-wrap">
-                  {c.tags.map((t) => (
-                    <span
-                      key={t}
-                      className="text-[10px] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded"
-                    >
-                      <Tag size={9} className="inline mr-0.5" />
-                      {t}
-                    </span>
-                  ))}
-                  {c.tags.length === 0 && (
-                    <span className="text-[11px] text-muted-foreground">—</span>
-                  )}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-right">
-                <div className="inline-flex gap-1">
-                  <button
-                    onClick={() => openBudgetModal(c)}
-                    disabled={!canManage || actingId === c.id}
-                    title="Editar orçamento"
-                    className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
-                  >
-                    <Edit3 size={14} />
-                  </button>
-                  <button
-                    onClick={() => pauseOrResume(c)}
-                    disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
-                    title={c.status === 'PAUSED' ? 'Reativar' : 'Pausar'}
-                    className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
-                  >
-                    {c.status === 'PAUSED' ? <Play size={14} /> : <Pause size={14} />}
-                  </button>
-                </div>
-              </td>
-            </tr>
+              {opt.label}
+            </button>
           ))}
-        </tbody>
-      </table>
+        </div>
+
+        <div className="relative">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome..."
+            className="pl-7 pr-3 py-1.5 text-xs bg-card border border-border rounded-lg w-52"
+          />
+        </div>
+
+        {allTags.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[11px] text-muted-foreground">tags:</span>
+            <button
+              type="button"
+              onClick={() => setTagFilter(null)}
+              className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                tagFilter === null
+                  ? 'bg-primary/15 text-primary border border-primary/30'
+                  : 'bg-muted/40 text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              todas
+            </button>
+            {allTags.slice(0, 8).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTagFilter(tagFilter === t ? null : t)}
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                  tagFilter === t
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'bg-muted/40 text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                <Tag size={9} className="inline mr-0.5" />
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <span className="text-[11px] text-muted-foreground ml-auto">
+          {filteredCampaigns.length}/{campaigns.length} campanha
+          {campaigns.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {/* ─── Tabela ────────────────────────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm min-w-[1100px]">
+          <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="text-left px-3 py-3 w-8"></th>
+              <th className="text-left px-3 py-3">Campanha</th>
+              <th className="text-left px-3 py-3">Tipo</th>
+              <th className="text-left px-3 py-3">Status</th>
+              <th className="text-right px-3 py-3">Orçamento/dia</th>
+              <th className="text-right px-3 py-3" title="Conversões últimos 30 dias">
+                Conv (30d)
+              </th>
+              <th className="text-right px-3 py-3" title="Custo por lead últimos 30 dias">
+                CPL (30d)
+              </th>
+              <th className="text-right px-3 py-3" title="Click-through rate últimos 30 dias">
+                CTR (30d)
+              </th>
+              <th className="text-left px-3 py-3">Tags</th>
+              <th className="text-right px-3 py-3 w-24">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredCampaigns.map((c) => {
+              const m = c.metrics_window;
+              return (
+                <tr
+                  key={c.id}
+                  className="border-t border-border hover:bg-accent/30 transition-colors"
+                >
+                  <td className="px-3 py-3">
+                    <button
+                      onClick={() => toggleFavorite(c)}
+                      disabled={!canManage}
+                      className="text-muted-foreground hover:text-amber-500 disabled:cursor-not-allowed"
+                      title={c.is_favorite ? 'Remover favorita' : 'Marcar favorita'}
+                    >
+                      <Star
+                        size={16}
+                        fill={c.is_favorite ? 'currentColor' : 'none'}
+                        className={c.is_favorite ? 'text-amber-500' : ''}
+                      />
+                    </button>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="font-medium text-foreground">{c.name}</div>
+                    <div className="text-[11px] text-muted-foreground font-mono">
+                      ID {c.google_campaign_id}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-muted-foreground">
+                    {c.channel_type ?? '—'}
+                  </td>
+                  <td className="px-3 py-3">
+                    <button
+                      type="button"
+                      onClick={() => pauseOrResume(c)}
+                      disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
+                      title={c.status === 'PAUSED' ? 'Reativar' : 'Pausar'}
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full transition-opacity ${
+                        STATUS_BADGE[c.status] ?? 'bg-muted text-muted-foreground'
+                      } ${
+                        canManage && c.status !== 'REMOVED'
+                          ? 'hover:opacity-80 cursor-pointer'
+                          : 'cursor-default'
+                      } disabled:opacity-50`}
+                    >
+                      {STATUS_LABEL[c.status] ?? c.status}
+                    </button>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {fmtBRL(c.daily_budget_brl)}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {m?.conversions ?? 0}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {m && m.conversions > 0 ? fmtBRL(m.cpl_brl) : '—'}
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums">
+                    {m && m.impressions > 0 ? fmtPct(m.ctr) : '—'}
+                  </td>
+                  <td className="px-3 py-3">
+                    {tagsEditId === c.id ? (
+                      <TagsEditor
+                        value={tagsInput}
+                        onChange={setTagsInput}
+                        onSave={() => saveTags(c)}
+                        onCancel={() => setTagsEditId(null)}
+                        knownTags={allTags}
+                        suggestions={suggestTagsFromName(c.name)}
+                      />
+                    ) : (
+                      <div
+                        className="flex gap-1 flex-wrap items-center cursor-pointer"
+                        onClick={() => openTagsEditor(c)}
+                        title={canManage ? 'Editar tags' : ''}
+                      >
+                        {c.tags.map((t) => (
+                          <span
+                            key={t}
+                            className="text-[10px] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded"
+                          >
+                            <Tag size={9} className="inline mr-0.5" />
+                            {t}
+                          </span>
+                        ))}
+                        {c.tags.length === 0 && canManage && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              applySuggestedTags(c);
+                            }}
+                            className="text-[10px] text-muted-foreground hover:text-primary"
+                          >
+                            + sugerir
+                          </button>
+                        )}
+                        {c.tags.length === 0 && !canManage && (
+                          <span className="text-[11px] text-muted-foreground">—</span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="inline-flex gap-1">
+                      <button
+                        onClick={() => openBudgetModal(c)}
+                        disabled={!canManage || actingId === c.id}
+                        title="Editar orçamento"
+                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        onClick={() => pauseOrResume(c)}
+                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
+                        title={c.status === 'PAUSED' ? 'Reativar' : 'Pausar'}
+                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
+                      >
+                        {c.status === 'PAUSED' ? <Play size={14} /> : <Pause size={14} />}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {filteredCampaigns.length === 0 && (
+              <tr>
+                <td colSpan={10} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  Nenhuma campanha bate com os filtros.{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatusFilter('ALL');
+                      setTagFilter(null);
+                      setSearch('');
+                    }}
+                    className="text-primary font-semibold hover:underline"
+                  >
+                    Limpar filtros
+                  </button>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {budgetEditId !== null && (
         <div
@@ -321,6 +603,108 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Editor de tags inline com autocomplete ─────────────────────────────────
+
+function TagsEditor({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+  knownTags,
+  suggestions,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+  knownTags: string[];
+  suggestions: string[];
+}) {
+  // Autocomplete: tags já presentes neste valor + sugeridas
+  const currentTokens = value
+    .split(/[,\s]+/)
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  const lastToken = currentTokens[currentTokens.length - 1] ?? '';
+  const candidates = useMemo(() => {
+    const pool = [...new Set([...knownTags, ...suggestions])];
+    return pool
+      .filter((t) => !currentTokens.slice(0, -1).includes(t))
+      .filter((t) => t.startsWith(lastToken) && t !== lastToken)
+      .slice(0, 6);
+  }, [knownTags, suggestions, currentTokens, lastToken]);
+
+  function pickSuggestion(t: string) {
+    const tokens = currentTokens.slice(0, -1);
+    tokens.push(t);
+    onChange(tokens.join(', ') + ', ');
+  }
+
+  return (
+    <div className="flex flex-col gap-1 min-w-[220px]">
+      <div className="flex gap-1">
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onSave();
+            } else if (e.key === 'Escape') {
+              onCancel();
+            }
+          }}
+          placeholder="ex: search, trabalhista"
+          className="flex-1 px-2 py-1 text-xs bg-background border border-border rounded"
+        />
+        <button
+          type="button"
+          onClick={onSave}
+          className="px-2 py-1 text-[11px] font-bold rounded bg-violet-600 hover:bg-violet-700 text-white"
+        >
+          OK
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-1.5 py-1 text-[11px] rounded hover:bg-accent text-muted-foreground"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      {(candidates.length > 0 || suggestions.length > 0) && (
+        <div className="flex gap-1 flex-wrap">
+          {candidates.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => pickSuggestion(t)}
+              className="text-[10px] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded hover:bg-primary/20"
+            >
+              {t}
+            </button>
+          ))}
+          {candidates.length === 0 &&
+            suggestions
+              .filter((s) => !currentTokens.includes(s))
+              .map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => pickSuggestion(s)}
+                  className="text-[10px] font-semibold px-1.5 py-0.5 bg-amber-500/10 text-amber-700 rounded hover:bg-amber-500/20"
+                  title="Sugestão automática baseada no nome"
+                >
+                  + {s}
+                </button>
+              ))}
         </div>
       )}
     </div>
