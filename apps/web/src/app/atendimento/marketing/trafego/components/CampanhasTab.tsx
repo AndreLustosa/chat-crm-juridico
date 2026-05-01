@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Star,
   Loader2,
@@ -14,6 +15,9 @@ import {
   Plus,
   TrendingUp,
   FileText,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -54,6 +58,16 @@ interface AdGroupOption {
   campaign_id: string;
   campaign?: { name?: string | null } | null;
 }
+
+type SortKey =
+  | 'favorite'
+  | 'name'
+  | 'channel_type'
+  | 'status'
+  | 'daily_budget_brl'
+  | 'conversions'
+  | 'cpl_brl'
+  | 'ctr';
 
 const STATUS_BADGE: Record<string, string> = {
   ENABLED: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
@@ -132,6 +146,8 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
   >(null);
   const [adGroupOptions, setAdGroupOptions] = useState<AdGroupOption[]>([]);
   const [adGroupPickerLoading, setAdGroupPickerLoading] = useState(false);
+  const [sortKey, setSortKey] = useState<SortKey>('favorite');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   async function load() {
     setLoading(true);
@@ -160,16 +176,85 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [campaigns]);
 
-  // Aplica filtros (status + tag + busca por nome)
+  // Aplica filtros (status + tag + busca por nome) + ordenação por coluna
   const filteredCampaigns = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return campaigns.filter((c) => {
+    const filtered = campaigns.filter((c) => {
       if (statusFilter !== 'ALL' && c.status !== statusFilter) return false;
       if (tagFilter && !c.tags.includes(tagFilter)) return false;
       if (q && !c.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [campaigns, statusFilter, tagFilter, search]);
+
+    // Ordena: favoritas sempre primeiro independente do sortKey escolhido
+    // (exceto quando sortKey === 'favorite', aí é o critério principal).
+    const sorted = [...filtered].sort((a, b) => {
+      // Favoritas no topo (a menos que esteja ordenando por outra coisa que justifique)
+      if (sortKey !== 'favorite') {
+        if (a.is_favorite && !b.is_favorite) return -1;
+        if (!a.is_favorite && b.is_favorite) return 1;
+      }
+
+      let av: any;
+      let bv: any;
+      switch (sortKey) {
+        case 'favorite':
+          av = a.is_favorite ? 1 : 0;
+          bv = b.is_favorite ? 1 : 0;
+          break;
+        case 'name':
+          av = a.name.toLowerCase();
+          bv = b.name.toLowerCase();
+          break;
+        case 'channel_type':
+          av = (a.channel_type ?? '').toLowerCase();
+          bv = (b.channel_type ?? '').toLowerCase();
+          break;
+        case 'status':
+          av = a.status;
+          bv = b.status;
+          break;
+        case 'daily_budget_brl':
+          av = a.daily_budget_brl ?? -1;
+          bv = b.daily_budget_brl ?? -1;
+          break;
+        case 'conversions':
+          av = a.metrics_window?.conversions ?? 0;
+          bv = b.metrics_window?.conversions ?? 0;
+          break;
+        case 'cpl_brl':
+          // CPL=0 vai pro fim (sem conversões = sem CPL)
+          av = a.metrics_window?.cpl_brl || Number.POSITIVE_INFINITY;
+          bv = b.metrics_window?.cpl_brl || Number.POSITIVE_INFINITY;
+          break;
+        case 'ctr':
+          av = a.metrics_window?.ctr ?? 0;
+          bv = b.metrics_window?.ctr ?? 0;
+          break;
+      }
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return sorted;
+  }, [campaigns, statusFilter, tagFilter, search, sortKey, sortDir]);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      // Default direction por tipo: numéricos = desc (maior primeiro), texto = asc
+      const isNumeric =
+        key === 'daily_budget_brl' ||
+        key === 'conversions' ||
+        key === 'cpl_brl' ||
+        key === 'ctr' ||
+        key === 'favorite';
+      // CPL: asc default (menor é melhor)
+      setSortDir(key === 'cpl_brl' ? 'asc' : isNumeric ? 'desc' : 'asc');
+    }
+  }
 
   async function pauseOrResume(c: Campaign) {
     if (!canManage) return;
@@ -439,22 +524,72 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
         <table className="w-full text-sm min-w-[1100px]">
           <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="text-left px-3 py-3 w-8"></th>
-              <th className="text-left px-3 py-3">Campanha</th>
-              <th className="text-left px-3 py-3">Tipo</th>
-              <th className="text-left px-3 py-3">Status</th>
-              <th className="text-right px-3 py-3">Orçamento/dia</th>
-              <th className="text-right px-3 py-3" title="Conversões últimos 30 dias">
-                Conv (30d)
-              </th>
-              <th className="text-right px-3 py-3" title="Custo por lead últimos 30 dias">
-                CPL (30d)
-              </th>
-              <th className="text-right px-3 py-3" title="Click-through rate últimos 30 dias">
-                CTR (30d)
-              </th>
+              <SortableHeader
+                k="favorite"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+                align="left"
+                width="w-8"
+              />
+              <SortableHeader
+                label="Campanha"
+                k="name"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+              />
+              <SortableHeader
+                label="Tipo"
+                k="channel_type"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+              />
+              <SortableHeader
+                label="Status"
+                k="status"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+              />
+              <SortableHeader
+                label="Orçamento/dia"
+                k="daily_budget_brl"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+                align="right"
+              />
+              <SortableHeader
+                label="Conv (30d)"
+                k="conversions"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+                align="right"
+                title="Conversões últimos 30 dias"
+              />
+              <SortableHeader
+                label="CPL (30d)"
+                k="cpl_brl"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+                align="right"
+                title="Custo por lead últimos 30 dias"
+              />
+              <SortableHeader
+                label="CTR (30d)"
+                k="ctr"
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onToggle={toggleSort}
+                align="right"
+                title="Click-through rate últimos 30 dias"
+              />
               <th className="text-left px-3 py-3">Tags</th>
-              <th className="text-right px-3 py-3 w-24">Ações</th>
+              <th className="text-right px-3 py-3 w-32">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -480,7 +615,12 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                     </button>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="font-medium text-foreground">{c.name}</div>
+                    <Link
+                      href={`/atendimento/marketing/trafego/campanhas/${c.id}`}
+                      className="font-medium text-foreground hover:text-primary hover:underline transition-colors"
+                    >
+                      {c.name}
+                    </Link>
                     <div className="text-[11px] text-muted-foreground font-mono">
                       ID {c.google_campaign_id}
                     </div>
@@ -764,6 +904,56 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Header de tabela ordenável ──────────────────────────────────────────
+
+function SortableHeader({
+  label,
+  k,
+  sortKey,
+  sortDir,
+  onToggle,
+  align = 'left',
+  width,
+  title,
+}: {
+  label?: string;
+  k: SortKey;
+  sortKey: SortKey;
+  sortDir: 'asc' | 'desc';
+  onToggle: (k: SortKey) => void;
+  align?: 'left' | 'right';
+  width?: string;
+  title?: string;
+}) {
+  const active = sortKey === k;
+  const Icon = active
+    ? sortDir === 'asc'
+      ? ArrowUp
+      : ArrowDown
+    : ArrowUpDown;
+  return (
+    <th
+      className={`px-3 py-3 ${align === 'right' ? 'text-right' : 'text-left'} ${width ?? ''}`}
+      title={title}
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(k)}
+        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${
+          active ? 'text-foreground' : ''
+        }`}
+      >
+        {label && <span>{label}</span>}
+        <Icon
+          size={11}
+          strokeWidth={active ? 3 : 2}
+          className={active ? '' : 'opacity-50'}
+        />
+      </button>
+    </th>
   );
 }
 
