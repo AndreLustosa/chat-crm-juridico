@@ -2636,7 +2636,7 @@ export default function AdvogadoPage() {
                               {d.type === 'PERICIA' ? 'PERÍCIA' : 'AUDIÊNCIA'}
                             </span>
                             <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
-                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às {new Date(d.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                               {isOverdue && ' (passada)'}
                             </span>
                           </div>
@@ -2815,7 +2815,7 @@ export default function AdvogadoPage() {
                               TAREFA
                             </span>
                             <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
-                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às {new Date(d.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                               {isOverdue && ' (vencida)'}
                             </span>
                           </div>
@@ -3004,7 +3004,7 @@ export default function AdvogadoPage() {
                               {d.type}
                             </span>
                             <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
-                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às {new Date(d.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                               {isOverdue && ' (vencido)'}
                             </span>
                           </div>
