@@ -17,6 +17,7 @@ import {
   Lightbulb,
   Tv,
   MessageSquare,
+  Globe,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -34,6 +35,7 @@ import { IaOtimizadoraTab } from './components/IaOtimizadoraTab';
 import { RecomendacoesTab } from './components/RecomendacoesTab';
 import { BrandingTab } from './components/BrandingTab';
 import { ConversarTab } from './components/ConversarTab';
+import { LandingPagesTab } from './components/LandingPagesTab';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -41,6 +43,7 @@ const TABS = [
   { id: 'conversoes', label: 'Conversões', icon: Target },
   { id: 'recomendacoes', label: 'Recomendações', icon: Lightbulb },
   { id: 'branding', label: 'Branding (PMax/Reach)', icon: Tv },
+  { id: 'landing-pages', label: 'Landing Pages', icon: Globe },
   { id: 'leads', label: 'Leads', icon: Users },
   { id: 'relatorios', label: 'Relatórios', icon: FileText },
   { id: 'alertas', label: 'Alertas', icon: Bell },
@@ -273,6 +276,9 @@ function TrafegoPageInner() {
         )}
         {tab === 'branding' && account?.connected && (
           <BrandingTab canManage={perms.canManageTrafego} />
+        )}
+        {tab === 'landing-pages' && account?.connected && (
+          <LandingPagesTab canManage={perms.canManageTrafego} />
         )}
         {tab === 'leads' && account?.connected && (
           <PlaceholderTab

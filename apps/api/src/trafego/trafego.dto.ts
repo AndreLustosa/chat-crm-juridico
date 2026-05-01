@@ -663,6 +663,39 @@ export class CreateRsaDto {
   validate_only?: boolean;
 }
 
+// ─── Landing Pages (Fase 4f) ───────────────────────────────────────────────
+
+export class CreateLandingPageDto {
+  @IsString()
+  url!: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsString()
+  @IsOptional()
+  campaign_id?: string | null;
+}
+
+export class UpdateLandingPageDto {
+  @IsString()
+  @IsOptional()
+  title?: string | null;
+
+  @IsString()
+  @IsOptional()
+  description?: string | null;
+
+  @IsString()
+  @IsOptional()
+  campaign_id?: string | null;
+}
+
 export class GenerateRsaDto {
   /** Área do Direito (ex: "trabalhista", "criminal", "previdenciário"). */
   @IsString()

@@ -16,6 +16,8 @@ import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
 import { TrafegoChatService } from './trafego-chat.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
 import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
+import { TrafegoLandingPagesService } from './trafego-landing-pages.service';
+import { TrafegoOptimizationService } from './trafego-optimization.service';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -56,6 +58,8 @@ import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
     TrafegoChatService,
     TrafegoBackfillService,
     TrafegoMappingAiService,
+    TrafegoLandingPagesService,
+    TrafegoOptimizationService,
   ],
   exports: [
     TrafegoService,
@@ -72,6 +76,8 @@ import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
     TrafegoChatService,
     TrafegoBackfillService,
     TrafegoMappingAiService,
+    TrafegoLandingPagesService,
+    TrafegoOptimizationService,
   ],
 })
 export class TrafegoModule {}

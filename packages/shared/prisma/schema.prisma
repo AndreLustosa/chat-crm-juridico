@@ -72,6 +72,7 @@ model Tenant {
   traffic_chat_sessions      TrafficChatSession[]
   traffic_chat_messages      TrafficChatMessage[]
   traffic_search_terms       TrafficSearchTerm[]
+  traffic_landing_pages      LandingPage[]
 }
 
 model User {
@@ -2091,6 +2092,7 @@ model TrafficAccount {
   chat_sessions      TrafficChatSession[]
   chat_messages      TrafficChatMessage[]
   search_terms       TrafficSearchTerm[]
+  landing_pages      LandingPage[]
 
   @@index([status])
   @@index([last_sync_at])
@@ -2161,6 +2163,7 @@ model TrafficCampaign {
   ad_groups     TrafficAdGroup[]
   asset_groups  TrafficAssetGroup[]
   search_terms  TrafficSearchTerm[]
+  landing_pages LandingPage[]
 
   @@unique([account_id, google_campaign_id])
   @@index([tenant_id, status])
@@ -3467,4 +3470,69 @@ model TrafficSearchTerm {
   @@index([tenant_id, last_seen_at])
   @@index([campaign_id, conversions, cost_micros])
   @@index([tenant_id, conversions, cost_micros])
+}
+
+/// Sprint I (Fase 4f) — Landing Pages vinculadas a campanhas.
+/// Cache local de URLs usadas como final_url dos anúncios. Permite ao
+/// admin monitorar PageSpeed score, taxa de conversão e disparar análise
+/// IA pra sugestões de CRO/OAB.
+///
+/// `url` é unique por tenant — mesma LP usada em múltiplas campanhas
+/// (não duplicamos linha). `campaign_id?` é nullable (LP pode ser
+/// "guardada" pra usar depois).
+///
+/// PageSpeed: rodado on-demand ou via cron semanal. Score < 50 = lento.
+/// Análise IA: armazenada em `analysis` (JSON) com sugestões e issues
+/// classificadas por severidade.
+model LandingPage {
+  id          String  @id @default(uuid())
+  tenant_id   String
+  account_id  String?
+  campaign_id String?
+
+  /// URL completa (https://...). Normalizada — trailing slash removido.
+  url         String
+  /// Título manual (ou extraído via og:title)
+  title       String?
+  /// Descrição manual
+  description String? @db.Text
+
+  // ─── PageSpeed Insights (gratuito via Google Cloud) ─────────────────
+  /// Score mobile (0-100). Default 0 = nunca rodou.
+  pagespeed_mobile      Int     @default(0)
+  /// Score desktop (0-100)
+  pagespeed_desktop     Int     @default(0)
+  /// LCP em ms (Largest Contentful Paint)
+  lcp_ms                Int?
+  /// CLS x100 (Cumulative Layout Shift, valor original 0..1)
+  cls_x100              Int?
+  /// FID/INP em ms (First Input Delay / Interaction to Next Paint)
+  inp_ms                Int?
+  /// Última vez que rodou PageSpeed Insights
+  last_pagespeed_at     DateTime?
+  /// JSON crú do PageSpeed (audits relevantes pra evitar inflar)
+  pagespeed_data        Json?
+
+  // ─── Análise IA (Claude) ────────────────────────────────────────────
+  /// Última vez que IA analisou
+  last_analyzed_at DateTime?
+  /// JSON com sugestões: {summary, issues: [{severity, category, title, suggestion}]}
+  analysis         Json?
+
+  // ─── Métricas (cache — populado via job semanal) ────────────────────
+  /// Clicks que tiveram esse URL como final_url nos últimos 30d
+  clicks_30d       Int     @default(0)
+  /// Conversões dessas sessões
+  conversions_30d  Float   @default(0)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account  TrafficAccount?   @relation(fields: [account_id], references: [id], onDelete: SetNull)
+  campaign TrafficCampaign?  @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
+
+  @@unique([tenant_id, url])
+  @@index([tenant_id, last_pagespeed_at])
+  @@index([campaign_id])
 }

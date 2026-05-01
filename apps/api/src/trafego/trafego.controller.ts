@@ -31,6 +31,8 @@ import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
 import { TrafegoChatService } from './trafego-chat.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
 import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
+import { TrafegoLandingPagesService } from './trafego-landing-pages.service';
+import { TrafegoOptimizationService } from './trafego-optimization.service';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
@@ -39,6 +41,7 @@ import {
   AiTriggerLoopDto,
   ApplyRecommendationDto,
   CreateChatSessionDto,
+  CreateLandingPageDto,
   CreateRsaDto,
   CreateSearchCampaignDto,
   CreateUserListDto,
@@ -59,6 +62,7 @@ import {
   UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
+  UpdateLandingPageDto,
   UpdateLeadFormSettingsDto,
   UpdateSettingsDto,
 } from './trafego.dto';
@@ -79,6 +83,8 @@ export class TrafegoController {
     private readonly chat: TrafegoChatService,
     private readonly backfillSvc: TrafegoBackfillService,
     private readonly mappingAi: TrafegoMappingAiService,
+    private readonly landingPages: TrafegoLandingPagesService,
+    private readonly optimization: TrafegoOptimizationService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -1149,5 +1155,116 @@ export class TrafegoController {
       req.user.id,
       dto.note,
     );
+  }
+
+  // ─── Landing Pages (Fase 4f) ─────────────────────────────────────────────
+
+  /** Lista LPs do tenant com PageSpeed score + análise IA. */
+  @Get('landing-pages')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listLandingPages(@Req() req: any) {
+    return this.landingPages.list(req.user.tenant_id);
+  }
+
+  /** Detalhes da LP (inclui pagespeed_data e analysis completos). */
+  @Get('landing-pages/:id')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getLandingPage(@Req() req: any, @Param('id') id: string) {
+    return this.landingPages.get(req.user.tenant_id, id);
+  }
+
+  @Post('landing-pages')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createLandingPage(
+    @Req() req: any,
+    @Body() dto: CreateLandingPageDto,
+  ) {
+    return this.landingPages.create(req.user.tenant_id, {
+      url: dto.url,
+      title: dto.title,
+      description: dto.description,
+      campaign_id: dto.campaign_id,
+    });
+  }
+
+  @Patch('landing-pages/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateLandingPage(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateLandingPageDto,
+  ) {
+    return this.landingPages.update(req.user.tenant_id, id, dto);
+  }
+
+  @Delete('landing-pages/:id')
+  @Roles('ADMIN')
+  async deleteLandingPage(@Req() req: any, @Param('id') id: string) {
+    return this.landingPages.remove(req.user.tenant_id, id);
+  }
+
+  /**
+   * Roda PageSpeed Insights pro URL (mobile + desktop). Atualiza scores +
+   * Core Web Vitals. Pré-requisito: PAGESPEED_INSIGHTS_API_KEY em settings.
+   */
+  @Post('landing-pages/:id/pagespeed')
+  @Roles('ADMIN', 'ADVOGADO')
+  async refreshPageSpeed(@Req() req: any, @Param('id') id: string) {
+    return this.landingPages.refreshPageSpeed(req.user.tenant_id, id);
+  }
+
+  /**
+   * Análise IA: fetch HTML + Claude API com prompt OAB + CRO.
+   * Retorna sugestões classificadas por severidade.
+   */
+  @Post('landing-pages/:id/analyze')
+  @Roles('ADMIN', 'ADVOGADO')
+  async analyzeLandingPage(@Req() req: any, @Param('id') id: string) {
+    return this.landingPages.analyzeWithAi(req.user.tenant_id, id);
+  }
+
+  // ─── IA Otimiza (Fase 5) ─────────────────────────────────────────────────
+
+  /**
+   * Diagnóstico semanal automático — gera resumo em pt-BR comparando
+   * esta semana vs anterior. On-demand (admin clica "Gerar"). Cache não
+   * persistido — sempre gera fresh quando solicitado.
+   */
+  @Get('optimization/weekly-diagnosis')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async weeklyDiagnosis(@Req() req: any) {
+    return this.optimization.weeklyDiagnosis(req.user.tenant_id);
+  }
+
+  /**
+   * Lista termos de pesquisa caros (gasto >= R$30 default) com 0 conversões
+   * em 30d. Reusa TrafficSearchTerm como proxy. Admin pode negativar
+   * individualmente ou em batch via endpoint /trafego/ad-groups/:id/negatives
+   * existente.
+   */
+  @Get('optimization/keywords-to-pause')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async keywordsToPause(
+    @Req() req: any,
+    @Query('min_spend_brl') minSpendBrl?: string,
+    @Query('days') days?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.optimization.keywordsToPause(req.user.tenant_id, {
+      minSpendBrl: minSpendBrl ? Number(minSpendBrl) : undefined,
+      days: days ? parseInt(days, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  /**
+   * Sugere ajuste de budget por campanha baseado em CPL atual e meta
+   * declarada em TrafficSettings.target_cpl. Limite de mudança ±20%
+   * (no service) pra evitar shock changes.
+   */
+  @Get('optimization/budget-suggestions')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async budgetSuggestions(@Req() req: any) {
+    return this.optimization.budgetSuggestions(req.user.tenant_id);
   }
 }
