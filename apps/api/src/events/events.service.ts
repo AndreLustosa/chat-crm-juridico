@@ -248,10 +248,10 @@ export class EventsService {
 
     switch (target.type) {
       case 'CALENDAR':
-        // Atualiza a data + seta status ADIADO.
+        // Atualiza só a data — mantém AGENDADO para o evento continuar aparecendo no painel.
         await this.calendarService.update(target.id, {
           start_at: newDateISO,
-          status: 'ADIADO',
+          status: 'AGENDADO',
         });
         return { ok: true, type: 'CALENDAR', id: target.id, new_date: newDateISO };
       case 'TASK':

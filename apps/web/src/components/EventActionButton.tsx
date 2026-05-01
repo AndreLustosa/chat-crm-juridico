@@ -232,7 +232,7 @@ export function EventActionButton({
       await api.post('/events/postpone', {
         type,
         id,
-        new_date: new Date(postponeDate).toISOString(),
+        new_date: postponeDate + ':00.000Z',
         reason: postponeReason || 'Adiado pelo advogado',
       });
       showSuccess('Evento adiado');
