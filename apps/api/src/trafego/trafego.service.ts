@@ -837,6 +837,17 @@ export class TrafegoService {
       rangeTo = prevMonthEnd;
     }
 
+    // ─── Período comparativo (mesma duração imediatamente antes) ─────────
+    // Pra deltas vs período anterior. Ex: "7d" atual → 7d anteriores ao
+    // rangeFrom. "Mês atual" → mês anterior completo.
+    const rangeMs = rangeTo.getTime() - rangeFrom.getTime();
+    const compareTo = new Date(rangeFrom);
+    compareTo.setUTCMilliseconds(compareTo.getUTCMilliseconds() - 1);
+    const compareFrom = new Date(rangeFrom);
+    compareFrom.setUTCMilliseconds(
+      compareFrom.getUTCMilliseconds() - rangeMs - 1,
+    );
+
     if (account.last_sync_at === null) {
       return {
         connected: true,
@@ -853,6 +864,8 @@ export class TrafegoService {
       last7dAgg,
       last30dAgg,
       rangeAgg,
+      compareAgg,
+      cpcCplTimeseries,
       campaignsCount,
       timeseries,
       topCampaigns,
@@ -894,6 +907,35 @@ export class TrafegoService {
           impressions: true,
           conversions: true,
         },
+      }),
+      // Período comparativo (mesma duração imediatamente antes) — usado
+      // pra calcular deltas (▲/▼ %) em cada KPI no front
+      this.prisma.trafficMetricDaily.aggregate({
+        where: {
+          tenant_id: tenantId,
+          date: { gte: compareFrom, lt: rangeFrom },
+        },
+        _sum: {
+          cost_micros: true,
+          clicks: true,
+          impressions: true,
+          conversions: true,
+        },
+      }),
+      // Timeseries diária do período RANGE (não 30d fixo) — pra gráfico
+      // CPC×CPL ao longo do tempo. Usa o mesmo range dos KPIs.
+      this.prisma.trafficMetricDaily.groupBy({
+        by: ['date'],
+        where: {
+          tenant_id: tenantId,
+          date: { gte: rangeFrom, lte: rangeTo },
+        },
+        _sum: {
+          cost_micros: true,
+          conversions: true,
+          clicks: true,
+        },
+        orderBy: { date: 'asc' },
       }),
       // Campaign counts por status
       this.prisma.trafficCampaign.groupBy({
@@ -943,6 +985,24 @@ export class TrafegoService {
     const ctrRange = impressionsRange > 0 ? clicksRange / impressionsRange : 0;
     const avgCpcRange = clicksRange > 0 ? sumCostRange / clicksRange : 0;
     const roas30d = sumCost30d > 0 ? conversions30dValue / sumCost30d : 0;
+    // Tx conversão = conversions/clicks (não conversions/impressions)
+    const conversionRateRange =
+      clicksRange > 0 ? conversionsRange / clicksRange : 0;
+
+    // ─── Período comparativo ─────────────────────────────────────────────
+    const sumCostCompare = microsToBRL(compareAgg._sum.cost_micros);
+    const conversionsCompare = Number(compareAgg._sum.conversions ?? 0);
+    const clicksCompare = Number(compareAgg._sum.clicks ?? 0);
+    const impressionsCompare = Number(compareAgg._sum.impressions ?? 0);
+
+    const cplCompare =
+      conversionsCompare > 0 ? sumCostCompare / conversionsCompare : 0;
+    const ctrCompare =
+      impressionsCompare > 0 ? clicksCompare / impressionsCompare : 0;
+    const avgCpcCompare =
+      clicksCompare > 0 ? sumCostCompare / clicksCompare : 0;
+    const conversionRateCompare =
+      clicksCompare > 0 ? conversionsCompare / clicksCompare : 0;
 
     // Média de leads/dia nos últimos 7d (excluindo hoje pra comparativo limpo).
     // Divisor 7 (não 6) — manter consistente com a janela.
@@ -1027,6 +1087,9 @@ export class TrafegoService {
         leads_today: Number(todayAgg._sum.conversions ?? 0),
         leads_avg_7d: leadsAvg7d,
         leads_range: conversionsRange,
+        clicks_range: clicksRange,
+        impressions_range: impressionsRange,
+        conversion_rate: conversionRateRange,
         cpl_brl: cplRange,
         ctr: ctrRange,
         avg_cpc_brl: avgCpcRange,
@@ -1034,12 +1097,39 @@ export class TrafegoService {
         active_campaigns: activeCount,
         paused_campaigns: pausedCount,
       },
+      // Métricas do período COMPARATIVO (mesma duração antes do range).
+      // Front calcula delta % em cada KPI quando toggle "comparar" ON.
+      compare: {
+        spend_brl: sumCostCompare,
+        leads: conversionsCompare,
+        clicks: clicksCompare,
+        impressions: impressionsCompare,
+        cpl_brl: cplCompare,
+        ctr: ctrCompare,
+        avg_cpc_brl: avgCpcCompare,
+        conversion_rate: conversionRateCompare,
+        range_from: compareFrom.toISOString().slice(0, 10),
+        range_to: compareTo.toISOString().slice(0, 10),
+      },
       pacing,
       timeseries: timeseries.map((d) => ({
         date: d.date.toISOString().slice(0, 10),
         spend_brl: microsToBRL(d._sum.cost_micros),
         leads: Number(d._sum.conversions ?? 0),
       })),
+      // Timeseries CPC×CPL no range selecionado (gráfico 2x2 — tendência)
+      cpc_cpl_timeseries: cpcCplTimeseries.map((d) => {
+        const spend = microsToBRL(d._sum.cost_micros);
+        const conv = Number(d._sum.conversions ?? 0);
+        const clk = Number(d._sum.clicks ?? 0);
+        return {
+          date: d.date.toISOString().slice(0, 10),
+          cpc_brl: clk > 0 ? spend / clk : 0,
+          cpl_brl: conv > 0 ? spend / conv : 0,
+          spend_brl: spend,
+          clicks: clk,
+        };
+      }),
       top_campaigns: topCampaignsEnriched,
       at_risk_campaigns: [],
       ranges: {
@@ -1049,6 +1139,8 @@ export class TrafegoService {
         thirty_days_ago: thirtyDaysAgo.toISOString().slice(0, 10),
         range_from: rangeFrom.toISOString().slice(0, 10),
         range_to: rangeTo.toISOString().slice(0, 10),
+        compare_from: compareFrom.toISOString().slice(0, 10),
+        compare_to: compareTo.toISOString().slice(0, 10),
       },
     };
   }

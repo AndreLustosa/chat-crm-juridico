@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import {
   DollarSign,
   Users,
@@ -11,6 +13,15 @@ import {
   PlayCircle,
   Activity,
   Gauge,
+  Eye,
+  Percent,
+  PieChart,
+  GitCompare,
+  Bell,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  CheckCircle2,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { KpiCard } from './KpiCard';
@@ -42,6 +53,9 @@ interface DashboardData {
     leads_today: number;
     leads_avg_7d: number;
     leads_range: number;
+    clicks_range: number;
+    impressions_range: number;
+    conversion_rate: number;
     cpl_brl: number;
     ctr: number;
     avg_cpc_brl: number;
@@ -49,6 +63,25 @@ interface DashboardData {
     active_campaigns: number;
     paused_campaigns: number;
   };
+  compare?: {
+    spend_brl: number;
+    leads: number;
+    clicks: number;
+    impressions: number;
+    cpl_brl: number;
+    ctr: number;
+    avg_cpc_brl: number;
+    conversion_rate: number;
+    range_from: string;
+    range_to: string;
+  };
+  cpc_cpl_timeseries?: {
+    date: string;
+    cpc_brl: number;
+    cpl_brl: number;
+    spend_brl: number;
+    clicks: number;
+  }[];
   pacing?: {
     target_monthly_brl: number;
     target_to_date_brl: number;
@@ -83,6 +116,12 @@ const fmtPct = (v: number) =>
     maximumFractionDigits: 2,
   }).format(v || 0);
 
+const fmtNum = (v: number) =>
+  new Intl.NumberFormat('pt-BR', {
+    notation: v >= 10_000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1,
+  }).format(v || 0);
+
 /**
  * Cor do ROAS por faixa: vermelho (deficit), amarelo (perto do break-even),
  * verde (lucrativo), muted quando nao ha dados (sync sem conversions_value).
@@ -107,10 +146,81 @@ function roasHint(roas: number): string | undefined {
   return undefined;
 }
 
+/**
+ * Calcula delta fraccional entre period atual e comparativo.
+ * Retorna null quando comparativo for 0 (não dá pra dividir).
+ */
+function delta(current: number, previous: number): number | null {
+  if (!previous || previous === 0) return null;
+  return (current - previous) / previous;
+}
+
+interface RecentAlert {
+  id: string;
+  kind: string;
+  severity: 'INFO' | 'WARNING' | 'CRITICAL';
+  message: string;
+  status: string;
+  campaign_id: string | null;
+  created_at: string;
+}
+
+const VALID_PERIODS: Period[] = ['today', '7d', '30d', 'month', 'prev_month'];
+
 export function DashboardTab() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Período persistido via URL param (?period=...). Permite link
+  // compartilhável manter contexto. Compare também via ?compare=1.
+  const initialPeriod = (() => {
+    const p = searchParams.get('period');
+    return p && (VALID_PERIODS as string[]).includes(p) ? (p as Period) : '7d';
+  })();
+  const initialCompare = searchParams.get('compare') === '1';
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<Period>('7d');
+  const [period, setPeriodState] = useState<Period>(initialPeriod);
+  const [compareOn, setCompareOnState] = useState(initialCompare);
+  const [recentAlerts, setRecentAlerts] = useState<RecentAlert[]>([]);
+
+  function setPeriod(p: Period) {
+    setPeriodState(p);
+    const params = new URLSearchParams(searchParams.toString());
+    if (p === '7d') params.delete('period');
+    else params.set('period', p);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : '?', { scroll: false });
+  }
+
+  function setCompareOn(v: boolean) {
+    setCompareOnState(v);
+    const params = new URLSearchParams(searchParams.toString());
+    if (v) params.set('compare', '1');
+    else params.delete('compare');
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : '?', { scroll: false });
+  }
+
+  // Carrega 5 alertas mais recentes em paralelo com o dashboard
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get<RecentAlert[]>(
+          '/trafego/alerts?limit=5',
+        );
+        if (!cancelled)
+          setRecentAlerts(Array.isArray(data) ? data.slice(0, 5) : []);
+      } catch {
+        // alertas é nice-to-have — silencioso
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,30 +280,52 @@ export function DashboardTab() {
         ? k?.spend_month_brl ?? 0
         : k?.spend_range_brl ?? 0;
 
+  // Compute deltas (period vs compare)
+  const cmp = data?.compare;
+  const dSpend = compareOn && cmp ? delta(k?.spend_range_brl ?? 0, cmp.spend_brl) : null;
+  const dLeads = compareOn && cmp ? delta(k?.leads_range ?? 0, cmp.leads) : null;
+  const dCpl = compareOn && cmp ? delta(k?.cpl_brl ?? 0, cmp.cpl_brl) : null;
+  const dCpc = compareOn && cmp ? delta(k?.avg_cpc_brl ?? 0, cmp.avg_cpc_brl) : null;
+  const dCtr = compareOn && cmp ? delta(k?.ctr ?? 0, cmp.ctr) : null;
+  const dConvRate = compareOn && cmp ? delta(k?.conversion_rate ?? 0, cmp.conversion_rate) : null;
+  const dImp = compareOn && cmp ? delta(k?.impressions_range ?? 0, cmp.impressions) : null;
+  const dClicks = compareOn && cmp ? delta(k?.clicks_range ?? 0, cmp.clicks) : null;
+
   return (
     <div className="space-y-6">
-      {/* ─── Seletor de período ─────────────────────────────────────────── */}
-      <PeriodSelector value={period} onChange={setPeriod} disabled={loading} />
+      {/* ─── Seletor de período + toggle comparar ───────────────────────── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <PeriodSelector value={period} onChange={setPeriod} disabled={loading} />
+        <button
+          type="button"
+          onClick={() => setCompareOn(!compareOn)}
+          disabled={loading || !data?.compare}
+          title={
+            compareOn
+              ? 'Esconder comparação'
+              : 'Comparar com período anterior'
+          }
+          className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+            compareOn
+              ? 'bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300'
+              : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-accent'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+        >
+          <GitCompare size={13} />
+          {compareOn
+            ? `Comparar: ${cmp?.range_from ?? ''} → ${cmp?.range_to ?? ''}`
+            : 'Comparar com anterior'}
+        </button>
+      </div>
 
-      {/* ─── Linha 1: KPIs principais ──────────────────────────────────── */}
+      {/* ─── Linha 1: KPIs principais (4 cards) ─────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label={primarySpendLabel}
           value={fmtBRL(primarySpendValue)}
           icon={DollarSign}
           accent="primary"
-          loading={loading}
-        />
-        <KpiCard
-          label="Gasto no mês"
-          value={fmtBRL(k?.spend_month_brl ?? 0)}
-          icon={TrendingUp}
-          accent="primary"
-          hint={
-            data?.pacing
-              ? `meta R$ ${(data.pacing.target_monthly_brl ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-              : 'configure meta em Settings p/ pacing'
-          }
+          delta={dSpend}
           loading={loading}
         />
         <KpiCard
@@ -212,33 +344,54 @@ export function DashboardTab() {
               ? `média 7d: ${(k?.leads_avg_7d ?? 0).toFixed(1)}/dia`
               : undefined
           }
+          delta={isToday ? null : dLeads}
           loading={loading}
         />
         <KpiCard
-          label={`CPL médio · ${periodLabel.toLowerCase()}`}
+          label={`CPL · ${periodLabel.toLowerCase()}`}
           value={fmtBRL(k?.cpl_brl ?? 0)}
           icon={Target}
           accent="warning"
-          loading={loading}
-        />
-      </div>
-
-      {/* ─── Pacing card (só renderiza com meta configurada) ────────────── */}
-      {data?.pacing && <PacingCard pacing={data.pacing} loading={loading} />}
-
-      {/* ─── Linha 2: KPIs secundários ─────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <KpiCard
-          label={`CTR · ${periodLabel.toLowerCase()}`}
-          value={fmtPct(k?.ctr ?? 0)}
-          icon={MousePointerClick}
-          accent="muted"
+          delta={dCpl}
+          deltaInverted
           loading={loading}
         />
         <KpiCard
           label={`CPC · ${periodLabel.toLowerCase()}`}
           value={fmtBRL(k?.avg_cpc_brl ?? 0)}
           accent="muted"
+          delta={dCpc}
+          deltaInverted
+          loading={loading}
+        />
+      </div>
+
+      {/* ─── Linha 2: KPIs de eficiência (4 cards) ──────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard
+          label={`CTR · ${periodLabel.toLowerCase()}`}
+          value={fmtPct(k?.ctr ?? 0)}
+          icon={MousePointerClick}
+          accent="muted"
+          delta={dCtr}
+          loading={loading}
+        />
+        <KpiCard
+          label="Tx. conversão"
+          value={fmtPct(k?.conversion_rate ?? 0)}
+          icon={Percent}
+          accent="muted"
+          hint="conv / clicks"
+          delta={dConvRate}
+          loading={loading}
+        />
+        <KpiCard
+          label="Impressões"
+          value={fmtNum(k?.impressions_range ?? 0)}
+          icon={Eye}
+          accent="muted"
+          hint={`${fmtNum(k?.clicks_range ?? 0)} cliques`}
+          delta={dImp}
           loading={loading}
         />
         <KpiCard
@@ -246,6 +399,22 @@ export function DashboardTab() {
           value={`${(k?.roas_estimated ?? 0).toFixed(2)}x`}
           accent={roasAccent(k?.roas_estimated ?? 0)}
           hint={roasHint(k?.roas_estimated ?? 0)}
+          loading={loading}
+        />
+      </div>
+
+      {/* ─── Linha 3: status de campanhas + gasto mensal ────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <KpiCard
+          label="Gasto no mês"
+          value={fmtBRL(k?.spend_month_brl ?? 0)}
+          icon={TrendingUp}
+          accent="primary"
+          hint={
+            data?.pacing
+              ? `meta R$ ${(data.pacing.target_monthly_brl ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : 'configure meta em Settings p/ pacing'
+          }
           loading={loading}
         />
         <KpiCard
@@ -264,7 +433,10 @@ export function DashboardTab() {
         />
       </div>
 
-      {/* ─── Gráficos ────────────────────────────────────────────────── */}
+      {/* ─── Pacing card (só renderiza com meta configurada) ────────────── */}
+      {data?.pacing && <PacingCard pacing={data.pacing} loading={loading} />}
+
+      {/* ─── Gráficos (2x2 — Evolução, CPC×CPL, Top campanhas) ─────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-bold text-foreground mb-1">
@@ -278,6 +450,17 @@ export function DashboardTab() {
 
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-bold text-foreground mb-1">
+            CPC × CPL ao longo do tempo
+          </h3>
+          <p className="text-[11px] text-muted-foreground mb-4">
+            Custo por click vs custo por lead no período selecionado.
+            Tendência de queda = otimização funcionando.
+          </p>
+          <CpcCplChart data={data?.cpc_cpl_timeseries ?? []} />
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-5 lg:col-span-2">
+          <h3 className="text-sm font-bold text-foreground mb-1">
             Top campanhas
           </h3>
           <p className="text-[11px] text-muted-foreground mb-4">
@@ -287,6 +470,11 @@ export function DashboardTab() {
         </div>
       </div>
 
+      {/* ─── Alertas recentes (P1.E) ────────────────────────────────────── */}
+      {recentAlerts.length > 0 && (
+        <RecentAlerts alerts={recentAlerts} />
+      )}
+
       {/* Footer: ultimo sync */}
       {data?.account?.last_sync_at && (
         <p className="text-[11px] text-muted-foreground text-right">
@@ -294,6 +482,101 @@ export function DashboardTab() {
           {new Date(data.account.last_sync_at).toLocaleString('pt-BR')}
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Alertas recentes ────────────────────────────────────────────────────
+
+const ALERT_SEVERITY_STYLE: Record<
+  RecentAlert['severity'],
+  { color: string; icon: any; label: string }
+> = {
+  CRITICAL: {
+    color: 'text-red-500',
+    icon: AlertCircle,
+    label: 'Crítico',
+  },
+  WARNING: {
+    color: 'text-amber-500',
+    icon: AlertTriangle,
+    label: 'Aviso',
+  },
+  INFO: {
+    color: 'text-sky-500',
+    icon: Info,
+    label: 'Info',
+  },
+};
+
+function timeAgo(iso: string): string {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const diffMin = Math.floor((now - then) / 60_000);
+  if (diffMin < 60) return diffMin <= 1 ? 'agora' : `há ${diffMin}min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  return `há ${diffD}d`;
+}
+
+function RecentAlerts({ alerts }: { alerts: RecentAlert[] }) {
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Bell size={16} className="text-primary" />
+          <h3 className="text-sm font-bold text-foreground">
+            Alertas recentes
+          </h3>
+        </div>
+        <Link
+          href="?tab=alertas"
+          className="text-xs font-semibold text-primary hover:underline"
+        >
+          Ver todos →
+        </Link>
+      </div>
+      <ul className="divide-y divide-border">
+        {alerts.map((a) => {
+          const sty = ALERT_SEVERITY_STYLE[a.severity] ?? ALERT_SEVERITY_STYLE.INFO;
+          const Icon = a.status !== 'OPEN' ? CheckCircle2 : sty.icon;
+          const iconColor =
+            a.status !== 'OPEN' ? 'text-emerald-500' : sty.color;
+          return (
+            <li
+              key={a.id}
+              className="flex items-start gap-3 px-5 py-3 text-sm hover:bg-accent/30"
+            >
+              <Icon size={14} className={`shrink-0 mt-0.5 ${iconColor}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${sty.color}`}>
+                    {sty.label}
+                  </span>
+                  {a.status !== 'OPEN' && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">
+                      · Resolvido
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground ml-auto">
+                    {timeAgo(a.created_at)}
+                  </span>
+                </div>
+                <p className="text-sm text-foreground mt-0.5">{a.message}</p>
+                {a.campaign_id && (
+                  <Link
+                    href={`/atendimento/marketing/trafego/campanhas/${a.campaign_id}`}
+                    className="text-[11px] text-primary hover:underline mt-0.5 inline-block"
+                  >
+                    Ver campanha →
+                  </Link>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -434,6 +717,147 @@ function PacingCard({
 }
 
 // ─── Componentes auxiliares ────────────────────────────────────────────────
+
+/**
+ * Gráfico de linhas CPC × CPL ao longo do tempo. Sem dep externa —
+ * SVG inline com 2 polilines + grid horizontal. Detecta tendência:
+ * linhas descendentes = otimização funcionando.
+ */
+function CpcCplChart({
+  data,
+}: {
+  data: { date: string; cpc_brl: number; cpl_brl: number; clicks: number }[];
+}) {
+  // Filtra dias com 0 clicks (CPC=0 falso) — não dilui a linha
+  const points = data.filter((d) => d.clicks > 0);
+
+  if (points.length < 2) {
+    return (
+      <div className="h-48 rounded-lg bg-muted/30 flex items-center justify-center text-xs text-muted-foreground text-center px-4">
+        Sem dados suficientes no período. Selecione 7 dias ou mais.
+      </div>
+    );
+  }
+
+  // Escala: 0 → max(cpl + 10%) — CPL geralmente é maior que CPC
+  const maxY = Math.max(
+    ...points.map((p) => Math.max(p.cpc_brl, p.cpl_brl)),
+    1,
+  ) * 1.1;
+  const width = 100; // viewBox %
+  const height = 100;
+
+  function pointsToPath(values: number[]): string {
+    return values
+      .map((v, i) => {
+        const x = (i / (values.length - 1)) * width;
+        const y = height - (v / maxY) * height;
+        return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(' ');
+  }
+
+  const cpcPath = pointsToPath(points.map((p) => p.cpc_brl));
+  const cplPath = pointsToPath(points.map((p) => p.cpl_brl));
+
+  // Médias do período pra mostrar embaixo
+  const avgCpc = points.reduce((s, p) => s + p.cpc_brl, 0) / points.length;
+  const avgCpl = points.reduce((s, p) => s + p.cpl_brl, 0) / points.length;
+
+  // Tendência (slope simples — primeiro vs último)
+  const cpcTrend =
+    points.length >= 2 && points[0].cpc_brl > 0
+      ? (points[points.length - 1].cpc_brl - points[0].cpc_brl) /
+        points[0].cpc_brl
+      : 0;
+  const cplTrend =
+    points.length >= 2 && points[0].cpl_brl > 0
+      ? (points[points.length - 1].cpl_brl - points[0].cpl_brl) /
+        points[0].cpl_brl
+      : 0;
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        className="w-full h-48"
+        role="img"
+        aria-label="CPC e CPL ao longo do tempo"
+      >
+        {/* Grid */}
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={width}
+            y1={height * f}
+            y2={height * f}
+            stroke="currentColor"
+            strokeWidth={0.2}
+            className="text-border"
+          />
+        ))}
+        {/* CPC line (azul) */}
+        <path
+          d={cpcPath}
+          fill="none"
+          stroke="rgb(59 130 246)"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+        {/* CPL line (verde) */}
+        <path
+          d={cplPath}
+          fill="none"
+          stroke="rgb(16 185 129)"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+
+      <div className="flex justify-between mt-2 text-[10px] text-muted-foreground tabular-nums">
+        <span>{points[0]?.date.slice(8, 10)}/{points[0]?.date.slice(5, 7)}</span>
+        <span>
+          {points[points.length - 1]?.date.slice(8, 10)}/
+          {points[points.length - 1]?.date.slice(5, 7)}
+        </span>
+      </div>
+      <div className="flex justify-between mt-3 pt-3 border-t border-border text-[11px]">
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-blue-500" />
+          <span className="text-muted-foreground">
+            CPC: <strong className="text-foreground">{fmtBRL(avgCpc)}</strong>
+            {Math.abs(cpcTrend) > 0.01 && (
+              <span
+                className={`ml-1 ${cpcTrend < 0 ? 'text-emerald-500' : 'text-red-500'}`}
+                title="diminuir CPC é bom"
+              >
+                ({cpcTrend > 0 ? '+' : ''}
+                {(cpcTrend * 100).toFixed(0)}%)
+              </span>
+            )}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span className="text-muted-foreground">
+            CPL: <strong className="text-foreground">{fmtBRL(avgCpl)}</strong>
+            {Math.abs(cplTrend) > 0.01 && (
+              <span
+                className={`ml-1 ${cplTrend < 0 ? 'text-emerald-500' : 'text-red-500'}`}
+                title="diminuir CPL é bom"
+              >
+                ({cplTrend > 0 ? '+' : ''}
+                {(cplTrend * 100).toFixed(0)}%)
+              </span>
+            )}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Gráfico de barras simples (sem dependência de lib) — barras verticais

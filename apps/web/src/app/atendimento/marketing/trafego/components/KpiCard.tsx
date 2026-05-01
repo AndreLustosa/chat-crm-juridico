@@ -1,12 +1,22 @@
 'use client';
 
-import { LucideIcon } from 'lucide-react';
+import { LucideIcon, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface KpiCardProps {
   label: string;
   value: string;
   hint?: string;
   trend?: { delta: number; label?: string };
+  /**
+   * Delta automático calculado vs período anterior (em fração 0..1, ex
+   * 0.12 = +12%). Renderiza ▲/▼ + cor.
+   */
+  delta?: number | null;
+  /**
+   * Quando `true`, queda do KPI é boa (verde) e subida é ruim (vermelho).
+   * Use pra CPC, CPL, custo (quanto menor, melhor).
+   */
+  deltaInverted?: boolean;
   icon?: LucideIcon;
   accent?: 'primary' | 'success' | 'warning' | 'danger' | 'muted';
   loading?: boolean;
@@ -25,6 +35,8 @@ export function KpiCard({
   value,
   hint,
   trend,
+  delta,
+  deltaInverted = false,
   icon: Icon,
   accent = 'primary',
   loading = false,
@@ -46,8 +58,12 @@ export function KpiCard({
         </span>
       )}
 
-      {(hint || trend) && (
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      {(hint || trend || (delta !== undefined && delta !== null)) && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+          {/* Delta automatico (▲/▼ + %) calculado contra periodo comparativo */}
+          {delta !== undefined && delta !== null && (
+            <DeltaBadge delta={delta} inverted={deltaInverted} />
+          )}
           {trend && (
             <span
               className={`font-semibold ${
@@ -67,5 +83,41 @@ export function KpiCard({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Delta badge inline com seta + percentual + cor semantica.
+ * `inverted=true` para metricas onde menor é melhor (CPC, CPL).
+ */
+function DeltaBadge({
+  delta,
+  inverted,
+}: {
+  delta: number;
+  inverted: boolean;
+}) {
+  // delta vem como fração (0.12 = +12%)
+  const pct = delta * 100;
+  // "Melhorou" quando subida não é invertida E delta>0, OU quando é invertida E delta<0
+  const isImproving = inverted ? delta < 0 : delta > 0;
+  const isFlat = Math.abs(pct) < 0.1;
+
+  const Icon = isFlat ? Minus : delta > 0 ? TrendingUp : TrendingDown;
+  const color = isFlat
+    ? 'text-muted-foreground'
+    : isImproving
+      ? 'text-emerald-500'
+      : 'text-red-500';
+
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 font-bold ${color}`}
+      title={`Vs período anterior: ${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`}
+    >
+      <Icon size={10} strokeWidth={3} />
+      {pct > 0 ? '+' : ''}
+      {pct.toFixed(1)}%
+    </span>
   );
 }
