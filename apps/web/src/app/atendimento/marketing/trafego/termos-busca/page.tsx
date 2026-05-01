@@ -15,6 +15,7 @@ import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
 import { showError, showSuccess } from '@/lib/toast';
 import { AddNegativesModal } from '../components/AddNegativesModal';
+import { Pagination } from '../components/Pagination';
 
 interface SearchTerm {
   id: string;
@@ -63,6 +64,13 @@ export default function TermosBuscaPage() {
   const [statusFilter, setStatusFilter] = useState<
     'ALL' | 'WITH_CONV' | 'NO_CONV'
   >('ALL');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  // Reset paginação quando filtros mudam
+  useEffect(() => {
+    setPage(1);
+  }, [campaignFilter, statusFilter, search]);
 
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(
     new Set(),
@@ -349,9 +357,11 @@ export default function TermosBuscaPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t) => {
-                const offender = t.cost_brl > 5 && t.conversions === 0;
-                const winner = t.conversions > 0;
+              {filtered
+                .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+                .map((t) => {
+                  const offender = t.cost_brl > 5 && t.conversions === 0;
+                  const winner = t.conversions > 0;
                 return (
                   <tr
                     key={t.id}
@@ -427,9 +437,16 @@ export default function TermosBuscaPage() {
                     </td>
                   </tr>
                 );
-              })}
+                })}
             </tbody>
           </table>
+          <Pagination
+            total={filtered.length}
+            pageSize={PAGE_SIZE}
+            currentPage={page}
+            onPageChange={setPage}
+            itemLabel="termo"
+          />
         </div>
       )}
 

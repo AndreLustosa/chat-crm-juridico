@@ -37,6 +37,7 @@ import { AdStrengthBadge } from '../../components/AdStrengthBadge';
 import { MatchTypeBadge } from '../../components/MatchTypeBadge';
 import { AddNegativesModal } from '../../components/AddNegativesModal';
 import { EditBudgetModal } from '../../components/EditBudgetModal';
+import { Pagination } from '../../components/Pagination';
 
 interface CampaignFull {
   id: string;
@@ -1222,6 +1223,14 @@ function KeywordsTab({
     'spend' | 'clicks' | 'conv' | 'qs' | 'text'
   >('spend');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  // Reset paginação quando ordenação muda
+  useEffect(() => {
+    setPage(1);
+  }, [sortKey, sortDir]);
+
   function toggleSort(k: typeof sortKey) {
     if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else {
@@ -1316,12 +1325,14 @@ function KeywordsTab({
           </tr>
         </thead>
         <tbody>
-          {sorted.map((kw) => {
-            const mx = metricsByKw.get(kw.id);
-            const offender =
-              !!mx && mx.spend > 10 && mx.conversions === 0;
-            const cpl = mx && mx.conversions > 0 ? mx.spend / mx.conversions : 0;
-            return (
+          {sorted
+            .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+            .map((kw) => {
+              const mx = metricsByKw.get(kw.id);
+              const offender =
+                !!mx && mx.spend > 10 && mx.conversions === 0;
+              const cpl = mx && mx.conversions > 0 ? mx.spend / mx.conversions : 0;
+              return (
               <tr
                 key={kw.id}
                 className={`border-t border-border ${offender ? 'bg-red-500/5' : ''}`}
@@ -1380,10 +1391,17 @@ function KeywordsTab({
                   )}
                 </td>
               </tr>
-            );
-          })}
+              );
+            })}
         </tbody>
       </table>
+      <Pagination
+        total={sorted.length}
+        pageSize={PAGE_SIZE}
+        currentPage={page}
+        onPageChange={setPage}
+        itemLabel="keyword"
+      />
       <div className="px-3 py-2 border-t border-border text-[10px] text-muted-foreground">
         * Métricas por keyword são proxy via search_terms (Gasto/Conv reais
         agregados pelos termos disparados). Pra exatidão use o relatório
@@ -2213,6 +2231,14 @@ function NegativesTable({
   canManage: boolean;
   onRemove: (kw: Keyword) => void;
 }) {
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  // Reset paginação se rows mudarem (filtro ou refresh)
+  useEffect(() => {
+    setPage(1);
+  }, [rows.length]);
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-x-auto">
       <div className="px-4 py-2 border-b border-border bg-red-500/5 text-xs">
@@ -2230,31 +2256,40 @@ function NegativesTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((kw) => (
-            <tr key={kw.id} className="border-t border-border">
-              <td className="px-3 py-2 font-mono text-xs">{kw.text}</td>
-              <td className="px-3 py-2">
-                <MatchTypeBadge type={kw.match_type} />
-              </td>
-              <td className="px-3 py-2 text-xs">
-                {adGroupMap.get(kw.ad_group_id) ?? '—'}
-              </td>
-              <td className="px-3 py-2 text-right">
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(kw)}
-                    title="Remover negativa"
-                    className="p-1 text-muted-foreground hover:text-red-500"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+          {rows
+            .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+            .map((kw) => (
+              <tr key={kw.id} className="border-t border-border">
+                <td className="px-3 py-2 font-mono text-xs">{kw.text}</td>
+                <td className="px-3 py-2">
+                  <MatchTypeBadge type={kw.match_type} />
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {adGroupMap.get(kw.ad_group_id) ?? '—'}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={() => onRemove(kw)}
+                      title="Remover negativa"
+                      className="p-1 text-muted-foreground hover:text-red-500"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
         </tbody>
       </table>
+      <Pagination
+        total={rows.length}
+        pageSize={PAGE_SIZE}
+        currentPage={page}
+        onPageChange={setPage}
+        itemLabel="negativa"
+      />
     </div>
   );
 }

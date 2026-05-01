@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { Pagination } from './Pagination';
 
 interface SearchTerm {
   id: string;
@@ -60,6 +61,13 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
     'OFFENDERS',
   );
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  // Reset paginação quando filtro/busca mudam
+  useEffect(() => {
+    setPage(1);
+  }, [filter, search]);
 
   async function load() {
     setLoading(true);
@@ -237,7 +245,9 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {terms.map((t) => {
+              {terms
+                .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+                .map((t) => {
                 const offender = t.cost_brl >= 5 && t.conversions === 0;
                 return (
                   <tr
@@ -319,6 +329,13 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
               })}
             </tbody>
           </table>
+          <Pagination
+            total={terms.length}
+            pageSize={PAGE_SIZE}
+            currentPage={page}
+            onPageChange={setPage}
+            itemLabel="termo"
+          />
         </div>
       )}
     </div>
