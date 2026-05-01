@@ -80,12 +80,21 @@ const KIND_LABEL: Record<string, string> = {
   PAUSE_AD_REPROVED: 'Pausar anúncio reprovado',
   CAMPAIGN_DEAD_ALERT: 'Campanha sem retorno',
   HIGH_CPL_WARNING: 'CPL acima do alvo',
+  HIGH_CPL: 'CPL acima do alvo',
   LOW_CTR_WARNING: 'CTR abaixo do alvo',
-  ZERO_CONVERSIONS: 'Zero conversões',
+  LOW_CTR: 'CTR abaixo do alvo',
+  ZERO_CONVERSIONS: 'Zero conversões (7d)',
   OVERSPEND: 'Gasto acima do orçamento',
   ADD_NEGATIVE_KEYWORD: 'Adicionar palavra negativa',
   BUDGET_INCREASE_SUGGESTION: 'Aumentar orçamento',
   AI_DECISIONS_AVAILABLE: 'Decisões disponíveis',
+  PAUSED_BUT_SPENDING: 'Campanha pausada com gasto',
+  NO_DATA: 'Sem dados sincronizados',
+  NO_LEADS_2D: 'Sem leads há 2 dias',
+  DAILY_HIGH_SPEND_NO_CONV: 'Gasto alto hoje sem conversão',
+  CTR_DROP: 'Queda de CTR vs semana anterior',
+  BUDGET_DEPLETED_EARLY: 'Orçamento esgotou antes das 14h',
+  LOW_QUALITY_SCORE: 'Quality Score baixo (<5)',
 };
 
 const ACTION_STYLE: Record<Action, { color: string; bg: string; label: string }> = {
