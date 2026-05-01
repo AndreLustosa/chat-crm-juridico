@@ -50,6 +50,9 @@ interface Props {
   /** Fase atual do processo (tracking_stage) — usada pra pre-selecionar
    *  o select de nova fase. */
   currentTrackingStage?: string | null;
+  /** Subtipo do CalendarEvent (AUDIENCIA, PERICIA, CONSULTA, etc.) —
+   *  quando AUDIENCIA ou PERICIA, mostra formulário de resultado pós-evento. */
+  calendarEventType?: string | null;
 }
 
 function formatCompletionDate(d: string | Date | null | undefined): string {
@@ -79,6 +82,7 @@ export function EventActionButton({
   completedAt,
   legalCaseId,
   currentTrackingStage,
+  calendarEventType,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<'complete' | 'cancel' | 'postpone' | null>(null);
@@ -92,6 +96,11 @@ export function EventActionButton({
   const [postponeDate, setPostponeDate] = useState('');
   const [postponeReason, setPostponeReason] = useState('');
   const [notePopoverOpen, setNotePopoverOpen] = useState(false);
+  const isHearing = calendarEventType === 'AUDIENCIA' || calendarEventType === 'PERICIA';
+  const [showHearingForm, setShowHearingForm] = useState(false);
+  const [hearingResult, setHearingResult] = useState('');
+  const [hearingDeadlineDate, setHearingDeadlineDate] = useState('');
+  const [hearingDeadlineTitle, setHearingDeadlineTitle] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -162,6 +171,7 @@ export function EventActionButton({
         setOpen(false);
         setShowNoteInput(null);
         setShowPostpone(false);
+        setShowHearingForm(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -217,6 +227,42 @@ export function EventActionButton({
       onActionComplete?.();
     } catch (e: any) {
       showError(e?.response?.data?.message || 'Erro ao executar ação');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const doCompleteHearing = async () => {
+    if (!hearingResult) { showError('Selecione o resultado'); return; }
+    if (hearingResult === 'INSTRUCAO_ENCERRADA' && !hearingDeadlineDate) {
+      showError('Informe o prazo de Alegações Finais');
+      return;
+    }
+    setLoading('complete');
+    try {
+      await api.post('/events/complete-hearing', {
+        id,
+        result: hearingResult,
+        note: note.trim() || undefined,
+        deadline_date: hearingDeadlineDate ? hearingDeadlineDate + ':00.000Z' : undefined,
+        deadline_title: hearingDeadlineTitle.trim() || undefined,
+      });
+      const msgs: Record<string, string> = {
+        INSTRUCAO_ENCERRADA: 'Audiência concluída — prazo de Alegações Finais criado',
+        ACORDO_CELEBRADO: 'Audiência concluída — processo avançado para Execução',
+        SENTENCA_PROFERIDA: 'Audiência concluída — processo avançado para Julgamento',
+        REDESIGNADA: 'Audiência redesignada',
+      };
+      showSuccess(msgs[hearingResult] || 'Audiência concluída');
+      setOpen(false);
+      setShowHearingForm(false);
+      setHearingResult('');
+      setHearingDeadlineDate('');
+      setHearingDeadlineTitle('');
+      setNote('');
+      onActionComplete?.();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao concluir audiência');
     } finally {
       setLoading(null);
     }
@@ -355,10 +401,10 @@ export function EventActionButton({
           style={{ position: 'fixed', top: popoverStyle.top, left: popoverStyle.left, width: 260 }}
           className="z-[100] bg-card border border-border rounded-xl shadow-xl overflow-hidden"
         >
-          {!showNoteInput && !showPostpone && (
+          {!showNoteInput && !showPostpone && !showHearingForm && (
             <div className="py-1">
               <button
-                onClick={() => setShowNoteInput('complete')}
+                onClick={() => isHearing ? setShowHearingForm(true) : setShowNoteInput('complete')}
                 className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-foreground hover:bg-emerald-500/10 text-left transition-colors"
               >
                 <CheckCircle2 size={13} className="text-emerald-400" />
@@ -478,6 +524,98 @@ export function EventActionButton({
                   className="flex-1 py-1.5 rounded-md text-[11px] font-medium text-white bg-amber-600 hover:bg-amber-500 transition-colors disabled:opacity-50"
                 >
                   {loading ? <Loader2 size={11} className="animate-spin inline" /> : 'Adiar'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showHearingForm && (
+            <div className="p-3 space-y-2">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                Resultado da {calendarEventType === 'PERICIA' ? 'perícia' : 'audiência'} *
+              </label>
+              <select
+                value={hearingResult}
+                onChange={e => {
+                  setHearingResult(e.target.value);
+                  if (e.target.value !== 'INSTRUCAO_ENCERRADA') {
+                    setHearingDeadlineDate('');
+                    setHearingDeadlineTitle('');
+                  }
+                }}
+                className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                autoFocus
+              >
+                <option value="">Selecione...</option>
+                <option value="INSTRUCAO_ENCERRADA">Instrução encerrada</option>
+                <option value="ACORDO_CELEBRADO">Acordo celebrado</option>
+                <option value="SENTENCA_PROFERIDA">Sentença proferida</option>
+                <option value="REDESIGNADA">Redesignada (nova data)</option>
+                <option value="OUTRA">Outra</option>
+              </select>
+
+              {hearingResult === 'INSTRUCAO_ENCERRADA' && (
+                <>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Prazo p/ Alegações Finais *
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={hearingDeadlineDate}
+                    onChange={e => setHearingDeadlineDate(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Título do prazo (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={hearingDeadlineTitle}
+                    onChange={e => setHearingDeadlineTitle(e.target.value)}
+                    placeholder="Alegações Finais"
+                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </>
+              )}
+
+              {hearingResult === 'REDESIGNADA' && (
+                <>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Nova data *
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={hearingDeadlineDate}
+                    onChange={e => setHearingDeadlineDate(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </>
+              )}
+
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                Observação (opcional)
+              </label>
+              <textarea
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                placeholder="Ex: Acordo parcial celebrado, aguardando homologação"
+                rows={2}
+                className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              />
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowHearingForm(false); setHearingResult(''); setHearingDeadlineDate(''); setHearingDeadlineTitle(''); setNote(''); }}
+                  className="flex-1 py-1.5 rounded-md text-[11px] text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  Voltar
+                </button>
+                <button
+                  onClick={doCompleteHearing}
+                  disabled={loading !== null || !hearingResult || (hearingResult === 'INSTRUCAO_ENCERRADA' && !hearingDeadlineDate) || (hearingResult === 'REDESIGNADA' && !hearingDeadlineDate)}
+                  className="flex-1 py-1.5 rounded-md text-[11px] font-medium text-white bg-emerald-600 hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                >
+                  {loading ? <Loader2 size={11} className="animate-spin inline" /> : 'Confirmar'}
                 </button>
               </div>
             </div>

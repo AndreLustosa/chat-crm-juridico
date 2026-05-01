@@ -270,6 +270,88 @@ export class EventsService {
   }
 
   /**
+   * Conclui audiência/perícia com ações pós-evento:
+   * - Cria prazo de alegações finais se resultado = INSTRUCAO_ENCERRADA
+   * - Avança tracking_stage do processo
+   */
+  async completeHearing(
+    eventId: string,
+    data: {
+      note?: string;
+      result: string;
+      deadline_date?: string;
+      deadline_title?: string;
+    },
+    userId: string,
+    tenantId?: string,
+  ) {
+    this.logger.log(`[CompleteHearing] event:${eventId} result:${data.result} por ${userId}`);
+
+    const event = await this.prisma.calendarEvent.findUnique({
+      where: { id: eventId },
+      select: { id: true, type: true, legal_case_id: true },
+    });
+    if (!event) throw new BadRequestException('Evento não encontrado');
+
+    const notePrefix = {
+      INSTRUCAO_ENCERRADA: 'Instrução encerrada',
+      ACORDO_CELEBRADO: 'Acordo celebrado',
+      SENTENCA_PROFERIDA: 'Sentença proferida',
+      REDESIGNADA: 'Audiência redesignada',
+      OUTRA: '',
+    }[data.result] || '';
+
+    const fullNote = [notePrefix, data.note].filter(Boolean).join(' — ');
+
+    if (data.result === 'REDESIGNADA' && data.deadline_date) {
+      return this.postpone(
+        { type: 'CALENDAR', id: eventId },
+        data.deadline_date,
+        fullNote || 'Redesignada',
+        userId,
+        tenantId,
+      );
+    }
+
+    await this.calendarService.updateStatus(eventId, 'CONCLUIDO', fullNote || undefined, userId);
+
+    const results: { completed: true; deadline_created?: boolean; stage_advanced?: string } = { completed: true };
+
+    if (data.result === 'INSTRUCAO_ENCERRADA' && data.deadline_date && event.legal_case_id) {
+      await this.caseDeadlinesService.create(
+        event.legal_case_id,
+        {
+          type: 'MANIFESTACAO',
+          title: data.deadline_title || 'Alegações Finais',
+          due_at: data.deadline_date,
+          alert_days: 3,
+        },
+        userId,
+        tenantId,
+      );
+      results.deadline_created = true;
+    }
+
+    if (event.legal_case_id && data.result !== 'OUTRA') {
+      const stageMap: Record<string, string> = {
+        INSTRUCAO_ENCERRADA: 'ALEGACOES_FINAIS',
+        SENTENCA_PROFERIDA: 'JULGAMENTO',
+        ACORDO_CELEBRADO: 'EXECUCAO',
+      };
+      const newStage = stageMap[data.result];
+      if (newStage) {
+        await this.prisma.legalCase.update({
+          where: { id: event.legal_case_id },
+          data: { tracking_stage: newStage, stage_changed_at: new Date() },
+        });
+        results.stage_advanced = newStage;
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Reabre evento concluido/cancelado (volta pra pendente).
    * Util se o advogado marcou errado.
    */

@@ -2753,6 +2753,7 @@ export default function AdvogadoPage() {
                               completedAt={d.completed_at}
                               legalCaseId={d.legal_case?.id ?? d.legal_case_id ?? null}
                               currentTrackingStage={d.legal_case?.tracking_stage ?? null}
+                              calendarEventType={d.type}
                               onActionComplete={() => {
                                 setPendingHearings(prev => prev.filter(item => item.id !== d.id));
                               }}

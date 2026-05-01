@@ -73,6 +73,26 @@ export class EventsController {
     );
   }
 
+  @Post('complete-hearing')
+  @HttpCode(HttpStatus.OK)
+  completeHearing(
+    @Body() body: {
+      id: string;
+      result: string;
+      note?: string;
+      deadline_date?: string;
+      deadline_title?: string;
+    },
+    @Request() req: any,
+  ) {
+    return this.eventsService.completeHearing(
+      body.id,
+      { note: body.note, result: body.result, deadline_date: body.deadline_date, deadline_title: body.deadline_title },
+      req.user?.id,
+      req.user?.tenant_id,
+    );
+  }
+
   @Post('reopen')
   @HttpCode(HttpStatus.OK)
   reopen(
