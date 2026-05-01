@@ -2007,10 +2007,9 @@ export default function AdvogadoPage() {
   //   - '<userId especifico>' → userId=X
   // Pra nao-admin, qualquer valor eh ignorado (backend sempre forca req.user.id).
   useEffect(() => {
-    const in7d = new Date(Date.now() + 7 * 86400000).toISOString();
     const params: Record<string, string> = {
       start: new Date(Date.now() - 30 * 86400000).toISOString(),
-      end: in7d,
+      end: new Date(Date.now() + 30 * 86400000).toISOString(),
     };
 
     if (isAdmin) {
