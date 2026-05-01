@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -234,13 +235,51 @@ export class TrafegoService {
    */
   async getAuctionInsights(
     tenantId: string,
-    opts: { days?: number; campaignId?: string } = {},
+    opts: {
+      days?: number;
+      startDate?: string;
+      endDate?: string;
+      campaignId?: string;
+    } = {},
   ) {
-    const windowDays = Math.min(90, Math.max(1, opts.days ?? 30));
+    const parseDateOnly = (value?: string) => {
+      if (!value) return null;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw new BadRequestException('Data invalida. Use YYYY-MM-DD.');
+      }
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (Number.isNaN(date.getTime())) {
+        throw new BadRequestException('Data invalida. Use YYYY-MM-DD.');
+      }
+      return date;
+    };
+
+    const formatDateOnly = (date: Date | null | undefined) =>
+      date ? date.toISOString().slice(0, 10) : null;
+
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
-    const windowStart = new Date(today);
-    windowStart.setUTCDate(windowStart.getUTCDate() - windowDays);
+    const yesterday = new Date(today);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+
+    const explicitStart = parseDateOnly(opts.startDate);
+    const explicitEnd = parseDateOnly(opts.endDate);
+    const rangeEnd = explicitEnd ?? yesterday;
+    const requestedDays = Math.min(365, Math.max(1, opts.days ?? 30));
+    const rangeStart = explicitStart ?? new Date(rangeEnd);
+    if (!explicitStart) {
+      rangeStart.setUTCDate(rangeStart.getUTCDate() - requestedDays + 1);
+    }
+
+    if (rangeStart > rangeEnd) {
+      throw new BadRequestException('A data inicial nao pode ser maior que a final.');
+    }
+
+    const windowDays =
+      Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000) + 1;
+    if (windowDays > 365) {
+      throw new BadRequestException('O periodo maximo para leilao e de 365 dias.');
+    }
 
     if (opts.campaignId) {
       const campaign = await this.prisma.trafficCampaign.findFirst({
@@ -252,11 +291,12 @@ export class TrafegoService {
 
     const where = {
       tenant_id: tenantId,
-      date: { gte: windowStart },
+      date: { gte: rangeStart, lte: rangeEnd },
       ...(opts.campaignId ? { campaign_id: opts.campaignId } : {}),
     };
 
-    const [domains, self, lastAuctionSyncError] = await Promise.all([
+    const [domains, self, auctionCoverage, lastAuctionSyncError, latestSync] =
+      await Promise.all([
       this.prisma.trafficAuctionInsightDaily.groupBy({
         by: ['domain'],
         where,
@@ -278,6 +318,12 @@ export class TrafegoService {
           search_abs_top_impression_share: true,
         },
       }),
+      this.prisma.trafficAuctionInsightDaily.aggregate({
+        where,
+        _count: { _all: true },
+        _min: { date: true },
+        _max: { date: true },
+      }),
       this.prisma.trafficSyncLog.findFirst({
         where: {
           tenant_id: tenantId,
@@ -285,6 +331,17 @@ export class TrafegoService {
         },
         orderBy: { started_at: 'desc' },
         select: { error_message: true, started_at: true },
+      }),
+      this.prisma.trafficSyncLog.findFirst({
+        where: { tenant_id: tenantId },
+        orderBy: { started_at: 'desc' },
+        select: {
+          status: true,
+          date_from: true,
+          date_to: true,
+          started_at: true,
+          error_message: true,
+        },
       }),
     ]);
 
@@ -323,6 +380,8 @@ export class TrafegoService {
 
     return {
       days: windowDays,
+      date_from: formatDateOnly(rangeStart),
+      date_to: formatDateOnly(rangeEnd),
       self: {
         impression_share:
           self._avg.search_impression_share === null
@@ -338,6 +397,20 @@ export class TrafegoService {
             : Number(self._avg.search_abs_top_impression_share),
       },
       rows,
+      coverage: {
+        auction_rows: auctionCoverage._count._all,
+        date_from: formatDateOnly(auctionCoverage._min.date),
+        date_to: formatDateOnly(auctionCoverage._max.date),
+      },
+      latest_sync: latestSync
+        ? {
+            status: latestSync.status,
+            date_from: formatDateOnly(latestSync.date_from),
+            date_to: formatDateOnly(latestSync.date_to),
+            started_at: latestSync.started_at,
+            error_message: latestSync.error_message,
+          }
+        : null,
       unavailable_reason:
         rows.length === 0 && lastAuctionSyncError?.error_message
           ? lastAuctionSyncError.error_message

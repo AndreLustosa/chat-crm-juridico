@@ -232,11 +232,15 @@ export class TrafegoController {
   async auctionInsights(
     @Req() req: any,
     @Query('days') days: string,
+    @Query('start_date') startDate?: string,
+    @Query('end_date') endDate?: string,
     @Query('campaign_id') campaignId?: string,
   ) {
     const daysNum = days ? parseInt(days, 10) : undefined;
     return this.service.getAuctionInsights(req.user.tenant_id, {
       days: Number.isFinite(daysNum) ? daysNum : undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
       campaignId: campaignId || undefined,
     });
   }
