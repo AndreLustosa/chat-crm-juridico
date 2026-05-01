@@ -342,6 +342,21 @@ export class EventsService {
       results.deadline_created = true;
     }
 
+    if (data.result === 'SENTENCA_PROFERIDA' && data.deadline_date && event.legal_case_id) {
+      await this.caseDeadlinesService.create(
+        event.legal_case_id,
+        {
+          type: 'RECURSO',
+          title: data.deadline_title || 'Recurso',
+          due_at: data.deadline_date,
+          alert_days: 3,
+        },
+        userId,
+        tenantId,
+      );
+      results.deadline_created = true;
+    }
+
     if (data.result === 'ACORDO_CELEBRADO' && data.acordo_value && event.legal_case_id) {
       const feeValue = data.fee_percentage
         ? Math.round(data.acordo_value * data.fee_percentage) / 100

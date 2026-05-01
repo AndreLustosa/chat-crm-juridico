@@ -241,6 +241,10 @@ export function EventActionButton({
       showError('Informe o prazo de Alegações Finais');
       return;
     }
+    if (hearingResult === 'SENTENCA_PROFERIDA' && !hearingDeadlineDate) {
+      showError('Informe o prazo para Recurso');
+      return;
+    }
     if (hearingResult === 'ACORDO_CELEBRADO' && acordoValue && !parseFloat(acordoValue)) {
       showError('Informe um valor de acordo válido');
       return;
@@ -263,7 +267,7 @@ export function EventActionButton({
       const msgs: Record<string, string> = {
         INSTRUCAO_ENCERRADA: 'Audiência concluída — prazo de Alegações Finais criado',
         ACORDO_CELEBRADO: acordoValue ? 'Audiência concluída — honorários de acordo cadastrados' : 'Audiência concluída — processo avançado para Execução',
-        SENTENCA_PROFERIDA: 'Audiência concluída — processo avançado para Julgamento',
+        SENTENCA_PROFERIDA: 'Audiência concluída — prazo de Recurso criado',
         REDESIGNADA: 'Audiência redesignada',
       };
       showSuccess(msgs[hearingResult] || 'Audiência concluída');
@@ -553,12 +557,13 @@ export function EventActionButton({
               <select
                 value={hearingResult}
                 onChange={e => {
-                  setHearingResult(e.target.value);
-                  if (e.target.value !== 'INSTRUCAO_ENCERRADA') {
+                  const v = e.target.value;
+                  setHearingResult(v);
+                  if (!['INSTRUCAO_ENCERRADA', 'SENTENCA_PROFERIDA', 'REDESIGNADA'].includes(v)) {
                     setHearingDeadlineDate('');
                     setHearingDeadlineTitle('');
                   }
-                  if (e.target.value !== 'ACORDO_CELEBRADO') {
+                  if (v !== 'ACORDO_CELEBRADO') {
                     setAcordoValue('');
                     setFeePercentage('20');
                     setInstallmentCount('1');
@@ -594,6 +599,30 @@ export function EventActionButton({
                     value={hearingDeadlineTitle}
                     onChange={e => setHearingDeadlineTitle(e.target.value)}
                     placeholder="Alegações Finais"
+                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </>
+              )}
+
+              {hearingResult === 'SENTENCA_PROFERIDA' && (
+                <>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Prazo p/ Recurso *
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={hearingDeadlineDate}
+                    onChange={e => setHearingDeadlineDate(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Tipo do recurso (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={hearingDeadlineTitle}
+                    onChange={e => setHearingDeadlineTitle(e.target.value)}
+                    placeholder="Recurso Ordinário"
                     className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </>
@@ -686,7 +715,7 @@ export function EventActionButton({
                 </button>
                 <button
                   onClick={doCompleteHearing}
-                  disabled={loading !== null || !hearingResult || (hearingResult === 'INSTRUCAO_ENCERRADA' && !hearingDeadlineDate) || (hearingResult === 'REDESIGNADA' && !hearingDeadlineDate)}
+                  disabled={loading !== null || !hearingResult || (hearingResult === 'INSTRUCAO_ENCERRADA' && !hearingDeadlineDate) || (hearingResult === 'SENTENCA_PROFERIDA' && !hearingDeadlineDate) || (hearingResult === 'REDESIGNADA' && !hearingDeadlineDate)}
                   className="flex-1 py-1.5 rounded-md text-[11px] font-medium text-white bg-emerald-600 hover:bg-emerald-500 transition-colors disabled:opacity-50"
                 >
                   {loading ? <Loader2 size={11} className="animate-spin inline" /> : 'Confirmar'}
