@@ -82,9 +82,10 @@ export class EventsController {
       note?: string;
       deadline_date?: string;
       deadline_title?: string;
-      acordo_value?: number;
-      fee_percentage?: number;
-      installment_count?: number;
+      acordo_honorario_value?: number;
+      acordo_honorario_parcelas?: number;
+      contratual_honorario_value?: number;
+      contratual_honorario_parcelas?: number;
     },
     @Request() req: any,
   ) {
@@ -95,9 +96,10 @@ export class EventsController {
         result: body.result,
         deadline_date: body.deadline_date,
         deadline_title: body.deadline_title,
-        acordo_value: body.acordo_value,
-        fee_percentage: body.fee_percentage,
-        installment_count: body.installment_count,
+        acordo_honorario_value: body.acordo_honorario_value,
+        acordo_honorario_parcelas: body.acordo_honorario_parcelas,
+        contratual_honorario_value: body.contratual_honorario_value,
+        contratual_honorario_parcelas: body.contratual_honorario_parcelas,
       },
       req.user?.id,
       req.user?.tenant_id,

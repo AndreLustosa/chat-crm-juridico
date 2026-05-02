@@ -283,9 +283,10 @@ export class EventsService {
       result: string;
       deadline_date?: string;
       deadline_title?: string;
-      acordo_value?: number;
-      fee_percentage?: number;
-      installment_count?: number;
+      acordo_honorario_value?: number;
+      acordo_honorario_parcelas?: number;
+      contratual_honorario_value?: number;
+      contratual_honorario_parcelas?: number;
     },
     userId: string,
     tenantId?: string,
@@ -357,25 +358,42 @@ export class EventsService {
       results.deadline_created = true;
     }
 
-    if (data.result === 'ACORDO_CELEBRADO' && data.acordo_value && event.legal_case_id) {
-      const feeValue = data.fee_percentage
-        ? Math.round(data.acordo_value * data.fee_percentage) / 100
-        : data.acordo_value;
-      try {
-        await this.honorariosService.create(
-          event.legal_case_id,
-          {
-            type: 'ACORDO',
-            total_value: feeValue,
-            installment_count: data.installment_count || 1,
-            notes: `Acordo celebrado em audiência — valor total R$ ${data.acordo_value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${data.fee_percentage ? ` (${data.fee_percentage}% honorários)` : ''}`,
-          },
-          tenantId,
-          userId,
-        );
-        results.honorario_created = true;
-      } catch (err: any) {
-        this.logger.warn(`[CompleteHearing] Falha ao criar honorário: ${err.message}`);
+    if (data.result === 'ACORDO_CELEBRADO' && event.legal_case_id) {
+      if (data.acordo_honorario_value && data.acordo_honorario_value > 0) {
+        try {
+          await this.honorariosService.create(
+            event.legal_case_id,
+            {
+              type: 'ACORDO',
+              total_value: data.acordo_honorario_value,
+              installment_count: data.acordo_honorario_parcelas || 1,
+              notes: 'Honorários de acordo — pago pelo Reclamado',
+            },
+            tenantId,
+            userId,
+          );
+          results.honorario_created = true;
+        } catch (err: any) {
+          this.logger.warn(`[CompleteHearing] Falha ao criar honorário de acordo: ${err.message}`);
+        }
+      }
+      if (data.contratual_honorario_value && data.contratual_honorario_value > 0) {
+        try {
+          await this.honorariosService.create(
+            event.legal_case_id,
+            {
+              type: 'CONTRATUAL',
+              total_value: data.contratual_honorario_value,
+              installment_count: data.contratual_honorario_parcelas || 1,
+              notes: 'Honorários contratuais — pago pelo Reclamante',
+            },
+            tenantId,
+            userId,
+          );
+          results.honorario_created = true;
+        } catch (err: any) {
+          this.logger.warn(`[CompleteHearing] Falha ao criar honorário contratual: ${err.message}`);
+        }
       }
     }
 

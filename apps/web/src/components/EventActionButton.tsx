@@ -101,9 +101,10 @@ export function EventActionButton({
   const [hearingResult, setHearingResult] = useState('');
   const [hearingDeadlineDate, setHearingDeadlineDate] = useState('');
   const [hearingDeadlineTitle, setHearingDeadlineTitle] = useState('');
-  const [acordoValue, setAcordoValue] = useState('');
-  const [feePercentage, setFeePercentage] = useState('20');
-  const [installmentCount, setInstallmentCount] = useState('1');
+  const [acordoHonValue, setAcordoHonValue] = useState('');
+  const [acordoHonParcelas, setAcordoHonParcelas] = useState('1');
+  const [contratualHonValue, setContratualHonValue] = useState('');
+  const [contratualHonParcelas, setContratualHonParcelas] = useState('1');
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -245,10 +246,6 @@ export function EventActionButton({
       showError('Informe o prazo para Recurso');
       return;
     }
-    if (hearingResult === 'ACORDO_CELEBRADO' && acordoValue && !parseFloat(acordoValue)) {
-      showError('Informe um valor de acordo válido');
-      return;
-    }
     setLoading('complete');
     try {
       const payload: any = {
@@ -258,15 +255,23 @@ export function EventActionButton({
         deadline_date: hearingDeadlineDate ? hearingDeadlineDate + ':00.000Z' : undefined,
         deadline_title: hearingDeadlineTitle.trim() || undefined,
       };
-      if (hearingResult === 'ACORDO_CELEBRADO' && acordoValue) {
-        payload.acordo_value = parseFloat(acordoValue);
-        payload.fee_percentage = parseFloat(feePercentage) || 20;
-        payload.installment_count = parseInt(installmentCount, 10) || 1;
+      if (hearingResult === 'ACORDO_CELEBRADO') {
+        const av = parseFloat(acordoHonValue);
+        const cv = parseFloat(contratualHonValue);
+        if (av > 0) {
+          payload.acordo_honorario_value = av;
+          payload.acordo_honorario_parcelas = parseInt(acordoHonParcelas, 10) || 1;
+        }
+        if (cv > 0) {
+          payload.contratual_honorario_value = cv;
+          payload.contratual_honorario_parcelas = parseInt(contratualHonParcelas, 10) || 1;
+        }
       }
       await api.post('/events/complete-hearing', payload);
+      const hasHon = parseFloat(acordoHonValue) > 0 || parseFloat(contratualHonValue) > 0;
       const msgs: Record<string, string> = {
         INSTRUCAO_ENCERRADA: 'Audiência concluída — prazo de Alegações Finais criado',
-        ACORDO_CELEBRADO: acordoValue ? 'Audiência concluída — honorários de acordo cadastrados' : 'Audiência concluída — processo avançado para Execução',
+        ACORDO_CELEBRADO: hasHon ? 'Audiência concluída — honorários cadastrados' : 'Audiência concluída — processo avançado para Execução',
         SENTENCA_PROFERIDA: 'Audiência concluída — prazo de Recurso criado',
         REDESIGNADA: 'Audiência redesignada',
       };
@@ -276,9 +281,10 @@ export function EventActionButton({
       setHearingResult('');
       setHearingDeadlineDate('');
       setHearingDeadlineTitle('');
-      setAcordoValue('');
-      setFeePercentage('20');
-      setInstallmentCount('1');
+      setAcordoHonValue('');
+      setAcordoHonParcelas('1');
+      setContratualHonValue('');
+      setContratualHonParcelas('1');
       setNote('');
       onActionComplete?.();
     } catch (e: any) {
@@ -564,9 +570,10 @@ export function EventActionButton({
                     setHearingDeadlineTitle('');
                   }
                   if (v !== 'ACORDO_CELEBRADO') {
-                    setAcordoValue('');
-                    setFeePercentage('20');
-                    setInstallmentCount('1');
+                    setAcordoHonValue('');
+                    setAcordoHonParcelas('1');
+                    setContratualHonValue('');
+                    setContratualHonParcelas('1');
                   }
                 }}
                 className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -630,54 +637,65 @@ export function EventActionButton({
 
               {hearingResult === 'ACORDO_CELEBRADO' && (
                 <>
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                    Valor total do acordo (R$)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={acordoValue}
-                    onChange={e => setAcordoValue(e.target.value)}
-                    placeholder="Ex: 50000.00"
-                    className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                        Honorários (%)
-                      </label>
+                  <div className="border-t border-border/50 pt-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Honorários de Acordo — R$ (pago pelo Reclamado)
+                    </label>
+                    <div className="flex gap-2 mt-1">
                       <input
                         type="number"
-                        step="1"
+                        step="0.01"
                         min="0"
-                        max="100"
-                        value={feePercentage}
-                        onChange={e => setFeePercentage(e.target.value)}
-                        className="w-full mt-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        value={acordoHonValue}
+                        onChange={e => setAcordoHonValue(e.target.value)}
+                        placeholder="Valor R$"
+                        className="flex-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                       />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                        Parcelas
-                      </label>
-                      <input
-                        type="number"
-                        step="1"
-                        min="1"
-                        max="120"
-                        value={installmentCount}
-                        onChange={e => setInstallmentCount(e.target.value)}
-                        className="w-full mt-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
+                      <div className="w-20">
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          max="120"
+                          value={acordoHonParcelas}
+                          onChange={e => setAcordoHonParcelas(e.target.value)}
+                          className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          title="Parcelas"
+                        />
+                        <span className="text-[9px] text-muted-foreground">parcelas</span>
+                      </div>
                     </div>
                   </div>
-                  {acordoValue && parseFloat(acordoValue) > 0 && (
-                    <p className="text-[11px] text-emerald-400">
-                      Honorários: R$ {(parseFloat(acordoValue) * (parseFloat(feePercentage) || 20) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      {parseInt(installmentCount) > 1 && ` (${installmentCount}x de R$ ${(parseFloat(acordoValue) * (parseFloat(feePercentage) || 20) / 100 / parseInt(installmentCount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`}
-                    </p>
-                  )}
+
+                  <div className="border-t border-border/50 pt-2">
+                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Honorários Contratuais — R$ (pago pelo Reclamante)
+                    </label>
+                    <div className="flex gap-2 mt-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={contratualHonValue}
+                        onChange={e => setContratualHonValue(e.target.value)}
+                        placeholder="Valor R$"
+                        className="flex-1 bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <div className="w-20">
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          max="120"
+                          value={contratualHonParcelas}
+                          onChange={e => setContratualHonParcelas(e.target.value)}
+                          className="w-full bg-background border border-border rounded-lg px-2 py-1.5 text-[12px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          title="Parcelas"
+                        />
+                        <span className="text-[9px] text-muted-foreground">parcelas</span>
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
 
@@ -708,7 +726,7 @@ export function EventActionButton({
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => { setShowHearingForm(false); setHearingResult(''); setHearingDeadlineDate(''); setHearingDeadlineTitle(''); setAcordoValue(''); setFeePercentage('20'); setInstallmentCount('1'); setNote(''); }}
+                  onClick={() => { setShowHearingForm(false); setHearingResult(''); setHearingDeadlineDate(''); setHearingDeadlineTitle(''); setAcordoHonValue(''); setAcordoHonParcelas('1'); setContratualHonValue(''); setContratualHonParcelas('1'); setNote(''); }}
                   className="flex-1 py-1.5 rounded-md text-[11px] text-muted-foreground hover:bg-accent transition-colors"
                 >
                   Voltar
