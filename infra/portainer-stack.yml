@@ -263,6 +263,9 @@ services:
     environment:
       - MCP_PORT=3100
       - MCP_AUTH_TOKEN=${TRAFFIC_MCP_AUTH_TOKEN:?TRAFFIC_MCP_AUTH_TOKEN nao definido}
+      - MCP_PUBLIC_BASE_URL=${TRAFFIC_MCP_PUBLIC_BASE_URL:-https://andrelustosaadvogados.com.br/traffic-mcp}
+      - MCP_PUBLIC_URL=${TRAFFIC_MCP_PUBLIC_URL:-https://andrelustosaadvogados.com.br/traffic-mcp/mcp}
+      - MCP_OAUTH_AUTHORIZATION_TOKEN=${TRAFFIC_MCP_OAUTH_AUTHORIZATION_TOKEN:-}
       - TRAFFIC_MCP_MODE=crm
       - CRM_API_URL=${TRAFFIC_MCP_CRM_API_URL:-http://crm-api:3001}
       - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY:?TRAFFIC_MCP_CRM_API_KEY nao definido}
@@ -283,6 +286,11 @@ services:
         - "traefik.http.services.traffic-mcp.loadbalancer.server.port=3100"
         - "traefik.http.routers.traffic-mcp.entrypoints=websecure"
         - "traefik.http.routers.traffic-mcp.tls.certresolver=letsencryptresolver"
+        - "traefik.http.routers.traffic-mcp-oauth-meta.rule=Host(`andrelustosaadvogados.com.br`) && (PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/oauth-protected-resource`))"
+        - "traefik.http.routers.traffic-mcp-oauth-meta.service=traffic-mcp"
+        - "traefik.http.routers.traffic-mcp-oauth-meta.priority=120"
+        - "traefik.http.routers.traffic-mcp-oauth-meta.entrypoints=websecure"
+        - "traefik.http.routers.traffic-mcp-oauth-meta.tls.certresolver=letsencryptresolver"
         - "traefik.docker.network=OrionNet"
 
 networks:

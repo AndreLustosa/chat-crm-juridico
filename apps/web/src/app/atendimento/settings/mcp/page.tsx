@@ -68,7 +68,8 @@ export default function McpSettingsPage() {
         <div className="bg-card border border-border rounded-xl p-5">
           <p className="text-sm text-muted-foreground mb-3">
             Use esta URL ao criar o aplicativo/conector no ChatGPT. Ela aponta para o MCP separado
-            do Gestor de Trafego, que chama a API interna do CRM.
+            do Gestor de Trafego, que chama a API interna do CRM. No campo de autenticacao do
+            ChatGPT, escolha OAuth e autorize usando o token de trafego configurado na VPS.
           </p>
           <div className="flex items-center gap-2">
             <code className="flex-1 bg-muted/50 border border-border rounded-lg px-3 py-2 text-xs font-mono break-all select-all">
@@ -85,6 +86,16 @@ export default function McpSettingsPage() {
                 <Copy className="w-4 h-4 text-muted-foreground" />
               )}
             </button>
+          </div>
+          <div className="mt-3 text-xs text-muted-foreground space-y-1">
+            <p>
+              ChatGPT: selecione <strong>OAuth</strong> ou <strong>Mista</strong>. Quando abrir a
+              tela de autorizacao, cole o valor de <code>TRAFFIC_MCP_AUTH_TOKEN</code>.
+            </p>
+            <p>
+              Claude Desktop: continue usando header <code>Authorization: Bearer</code> no JSON de
+              configuracao.
+            </p>
           </div>
         </div>
       </section>

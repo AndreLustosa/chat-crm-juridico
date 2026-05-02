@@ -21,6 +21,8 @@ Endpoint:
 - Health: `GET /health`
 - MCP: `POST /mcp`
 - Auth: `Authorization: Bearer <MCP_AUTH_TOKEN>`
+- OAuth metadata: `GET /.well-known/oauth-authorization-server`
+- Protected resource metadata: `GET /.well-known/oauth-protected-resource/traffic-mcp/mcp`
 
 ## Variaveis
 
@@ -29,6 +31,8 @@ Preencha no `.env` usando o modo CRM:
 ```env
 MCP_PORT=3100
 MCP_AUTH_TOKEN=troque-este-token
+MCP_PUBLIC_BASE_URL=https://andrelustosaadvogados.com.br/traffic-mcp
+MCP_PUBLIC_URL=https://andrelustosaadvogados.com.br/traffic-mcp/mcp
 TRAFFIC_MCP_MODE=crm
 CRM_API_URL=https://andrelustosaadvogados.com.br/api
 CRM_API_KEY=token-do-crm-com-acesso-ao-trafego
@@ -36,6 +40,24 @@ CRM_API_KEY=token-do-crm-com-acesso-ao-trafego
 
 `MCP_AUTH_TOKEN` e o token que o Claude/Codex usara para acessar este novo MCP.
 `CRM_API_KEY` e o token usado por este MCP para chamar a API do CRM.
+`MCP_PUBLIC_BASE_URL` e `MCP_PUBLIC_URL` sao usados nos metadados OAuth que o
+ChatGPT descobre automaticamente ao criar o aplicativo.
+
+### ChatGPT com OAuth
+
+No ChatGPT, crie o aplicativo com:
+
+- URL do servidor MCP: `https://andrelustosaadvogados.com.br/traffic-mcp/mcp`
+- Autenticacao: `OAuth` ou `Mista`
+
+Durante a autorizacao, o ChatGPT abrira uma pagina do proprio MCP. Cole o valor
+de `TRAFFIC_MCP_AUTH_TOKEN` no campo "Token MCP de trafego". Se quiser separar
+o token de configuracao do token OAuth, defina `MCP_OAUTH_AUTHORIZATION_TOKEN`
+no container.
+
+O endpoint `/mcp` continua aceitando `Authorization: Bearer <MCP_AUTH_TOKEN>`
+para clientes como Claude Desktop, e tambem passa a aceitar tokens OAuth
+emitidos em `/oauth/token`.
 
 Modo alternativo, com acesso direto ao Google Ads:
 

@@ -177,6 +177,9 @@ services:
     environment:
       - MCP_PORT=3100
       - MCP_AUTH_TOKEN=${TRAFFIC_MCP_AUTH_TOKEN:?TRAFFIC_MCP_AUTH_TOKEN nao definido}
+      - MCP_PUBLIC_BASE_URL=${TRAFFIC_MCP_PUBLIC_BASE_URL:-https://andrelustosaadvogados.com.br/traffic-mcp}
+      - MCP_PUBLIC_URL=${TRAFFIC_MCP_PUBLIC_URL:-https://andrelustosaadvogados.com.br/traffic-mcp/mcp}
+      - MCP_OAUTH_AUTHORIZATION_TOKEN=${TRAFFIC_MCP_OAUTH_AUTHORIZATION_TOKEN:-}
       - TRAFFIC_MCP_MODE=crm
       - CRM_API_URL=${TRAFFIC_MCP_CRM_API_URL:-http://crm-api:3001}
       - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY:?TRAFFIC_MCP_CRM_API_KEY nao definido}

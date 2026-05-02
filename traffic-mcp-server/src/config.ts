@@ -29,10 +29,20 @@ function optional(name: string, aliases: string[] = []): string | undefined {
 const crmApiUrl = optional('CRM_API_URL');
 const crmApiKey = optional('CRM_API_KEY', ['CRM_AUTH_TOKEN']);
 const runtimeMode = optional('TRAFFIC_MCP_MODE') ?? (crmApiUrl && crmApiKey ? 'crm' : 'google_ads');
+const publicBaseUrl = optional('MCP_PUBLIC_BASE_URL') ?? 'https://andrelustosaadvogados.com.br/traffic-mcp';
+const normalizedPublicBaseUrl = publicBaseUrl.replace(/\/+$/, '');
 
 export const config = {
   port: Number(process.env.MCP_PORT ?? 3100),
   authToken: required('MCP_AUTH_TOKEN'),
+  publicBaseUrl: normalizedPublicBaseUrl,
+  publicMcpUrl: optional('MCP_PUBLIC_URL') ?? `${normalizedPublicBaseUrl}/mcp`,
+  oauth: {
+    authorizationToken: optional('MCP_OAUTH_AUTHORIZATION_TOKEN') ?? required('MCP_AUTH_TOKEN'),
+    accessTokenTtlSeconds: Number(process.env.MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS ?? 3600),
+    refreshTokenTtlSeconds: Number(process.env.MCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS ?? 60 * 60 * 24 * 30),
+    scopes: ['mcp:tools'],
+  },
   runtimeMode,
   cacheTtlMs: Number(process.env.CACHE_TTL_MS ?? DEFAULT_CACHE_TTL_MS),
   reportDailyLimit: Number(process.env.REPORT_DAILY_LIMIT ?? DEFAULT_REPORT_DAILY_LIMIT),
