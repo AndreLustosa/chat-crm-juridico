@@ -158,6 +158,7 @@ function metadata() {
     token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
     revocation_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
     scopes_supported: config.oauth.scopes,
+    client_id_metadata_document_supported: false,
     service_documentation: `${base}/health`,
   };
 }
@@ -255,6 +256,39 @@ class TrafficOAuthProvider {
 
   getClient(clientId: unknown) {
     return typeof clientId === 'string' ? this.clients.get(clientId) : undefined;
+  }
+
+  getOrCreateStaticClient(clientId: unknown, redirectUri: string | undefined) {
+    if (
+      typeof clientId !== 'string' ||
+      clientId !== config.oauth.staticClientId ||
+      !redirectUri?.startsWith(config.oauth.staticClientRedirectPrefix)
+    ) {
+      return undefined;
+    }
+
+    const existing = this.clients.get(clientId);
+    if (existing) {
+      if (!existing.redirect_uris.includes(redirectUri)) {
+        existing.redirect_uris.push(redirectUri);
+      }
+      return existing;
+    }
+
+    const client: RegisteredClient = {
+      client_id: clientId,
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_secret_expires_at: 0,
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      client_name: 'ChatGPT',
+      scope: config.oauth.scopes.join(' '),
+    };
+
+    this.clients.set(client.client_id, client);
+    return client;
   }
 
   createAuthorizationCode(params: {
@@ -369,8 +403,10 @@ export function registerClientHandler(req: Request, res: Response) {
 
 export async function authorizeHandler(req: Request, res: Response) {
   const input = req.method === 'POST' ? req.body : req.query;
-  const client = trafficOAuthProvider.getClient(input.client_id);
   const redirectUri = typeof input.redirect_uri === 'string' ? input.redirect_uri : undefined;
+  const client =
+    trafficOAuthProvider.getClient(input.client_id) ||
+    trafficOAuthProvider.getOrCreateStaticClient(input.client_id, redirectUri);
   const state = typeof input.state === 'string' ? input.state : undefined;
 
   if (!client) {

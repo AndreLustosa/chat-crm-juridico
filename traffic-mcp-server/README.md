@@ -49,11 +49,24 @@ No ChatGPT, crie o aplicativo com:
 
 - URL do servidor MCP: `https://andrelustosaadvogados.com.br/traffic-mcp/mcp`
 - Autenticacao: `OAuth` ou `Mista`
+- Registro de cliente recomendado: `Registro Dinamico de Cliente (DCR)`
+- Escopos padrao: `mcp:tools`
 
 Durante a autorizacao, o ChatGPT abrira uma pagina do proprio MCP. Cole o token
 gerado no menu **Configuracoes > Integracao MCP** do CRM. O segredo interno
 `TRAFFIC_MCP_AUTH_TOKEN` continua aceito para administracao, mas nao e
 necessario para conectar o ChatGPT.
+
+Se o ChatGPT nao detectar DCR, use o modo "Cliente OAuth definido pelo usuario":
+
+- ID do cliente OAuth: `traffic-chatgpt`
+- Segredo do cliente OAuth: deixe em branco
+- Metodo de autenticacao do token endpoint: `none`
+- URL de autenticacao: `https://andrelustosaadvogados.com.br/traffic-mcp/oauth/authorize`
+- Token URL: `https://andrelustosaadvogados.com.br/traffic-mcp/oauth/token`
+- URL de registro: `https://andrelustosaadvogados.com.br/traffic-mcp/oauth/register`
+- Endereco base do servidor de autorizacao: `https://andrelustosaadvogados.com.br/traffic-mcp`
+- Recurso: `https://andrelustosaadvogados.com.br/traffic-mcp/mcp`
 
 O endpoint `/mcp` continua aceitando `Authorization: Bearer <MCP_AUTH_TOKEN>`
 para administracao, e tambem aceita o token MCP gerado pelo CRM ou tokens OAuth

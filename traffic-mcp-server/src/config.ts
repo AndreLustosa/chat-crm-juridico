@@ -41,6 +41,9 @@ export const config = {
     authorizationToken: optional('MCP_OAUTH_AUTHORIZATION_TOKEN') ?? required('MCP_AUTH_TOKEN'),
     accessTokenTtlSeconds: Number(process.env.MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS ?? 3600),
     refreshTokenTtlSeconds: Number(process.env.MCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS ?? 60 * 60 * 24 * 30),
+    staticClientId: optional('MCP_OAUTH_STATIC_CLIENT_ID') ?? 'traffic-chatgpt',
+    staticClientRedirectPrefix:
+      optional('MCP_OAUTH_STATIC_CLIENT_REDIRECT_PREFIX') ?? 'https://chatgpt.com/connector/oauth/',
     scopes: ['mcp:tools'],
   },
   runtimeMode,
