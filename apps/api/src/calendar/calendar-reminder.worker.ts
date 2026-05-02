@@ -624,12 +624,13 @@ export class CalendarReminderWorker extends WorkerHost {
   private templateHearingRescheduled(event: any, firstName: string): string {
     const dateStr = formatDateTime(event.start_at);
     const isPericia = event.type === 'PERICIA';
+    const local = event.location || event.legal_case?.court || null;
     return (
       `${isPericia ? '🔬' : '📅'} *${isPericia ? 'Perícia' : 'Audiência'} Remarcada*\n\n` +
       `Olá, ${firstName}!\n\n` +
       `Informamos que sua ${isPericia ? 'perícia' : 'audiência'} foi *remarcada* para uma nova data:\n\n` +
       `📅 *Nova Data/Hora:* ${dateStr}\n` +
-      (event.location ? `📍 *Local:* ${event.location}\n` : '') +
+      (local ? `📍 *Local:* ${local}\n` : '') +
       `\nPor favor, anote a nova data.${isPericia ? ' Lembre-se de levar documentos pessoais e laudos médicos, se houver.' : ' Chegue com *30 minutos de antecedência*.'}\n` +
       `Qualquer dúvida, é só responder esta mensagem.\n\n` +
       `_André Lustosa Advogados_`
@@ -639,12 +640,13 @@ export class CalendarReminderWorker extends WorkerHost {
   private templateHearingScheduled(event: any, firstName: string): string {
     const dateStr = formatDateTime(event.start_at);
     const isPericia = event.type === 'PERICIA';
+    const local = event.location || event.legal_case?.court || null;
     return (
       `${isPericia ? '🔬' : '⚖️'} *${isPericia ? 'Perícia Agendada' : 'Audiência Agendada'}*\n\n` +
       `Olá, ${firstName}!\n\n` +
       `Gostaríamos de informar que sua ${isPericia ? 'perícia' : 'audiência'} foi agendada:\n\n` +
       `📅 *Data/Hora:* ${dateStr}\n` +
-      (event.location ? `📍 *Local:* ${event.location}\n` : '') +
+      (local ? `📍 *Local:* ${local}\n` : '') +
       (isPericia
         ? `\nLembre-se de levar documentos pessoais e laudos médicos, se houver. Chegue com *15 minutos de antecedência* e coopere plenamente com o perito.\n`
         : `\nRecomendamos chegar com *30 minutos de antecedência*.\n`) +
@@ -660,6 +662,8 @@ export class CalendarReminderWorker extends WorkerHost {
     const dateStr = formatDateTime(event.start_at);
     const isPericia = event.type === 'PERICIA';
     const tipoEvento = isPericia ? 'perícia' : 'audiência';
+
+    const localResolved = event.location || event.legal_case?.court || null;
 
     const systemPrompt = `Você é o assistente do escritório de advocacia André Lustosa Advogados.
 Sua tarefa é enviar uma mensagem via WhatsApp informando ao cliente que sua ${tipoEvento} foi ${isRescheduled ? 'remarcada' : 'agendada'}.
@@ -683,7 +687,7 @@ Deixe claro que é uma remarcação (não um novo agendamento).
 
 DADOS DA NOVA ${tipoEvento.toUpperCase()}:
 Data/Hora: ${dateStr}
-${event.location ? `Local: ${event.location}` : 'Local: a confirmar'}
+${localResolved ? `Local: ${localResolved}` : 'Local: não informado no sistema'}
 
 CONTEXTO DO CASO:
 ${context}
@@ -695,7 +699,7 @@ Gere APENAS a mensagem final para WhatsApp, sem explicações.`
 
 DADOS DA ${tipoEvento.toUpperCase()}:
 Data/Hora: ${dateStr}
-${event.location ? `Local: ${event.location}` : 'Local: a confirmar'}
+${localResolved ? `Local: ${localResolved}` : 'Local: não informado no sistema'}
 ${event.title ? `Título: ${event.title}` : ''}
 
 CONTEXTO DO CASO:
