@@ -577,7 +577,7 @@ export function EventActionButton({
                 <option value="ACORDO_CELEBRADO">Acordo celebrado</option>
                 <option value="SENTENCA_PROFERIDA">Sentença proferida</option>
                 <option value="REDESIGNADA">Redesignada (nova data)</option>
-                <option value="OUTRA">Outra</option>
+                <option value="OUTRA">Concluída</option>
               </select>
 
               {hearingResult === 'INSTRUCAO_ENCERRADA' && (
