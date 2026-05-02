@@ -202,7 +202,8 @@ export function Sidebar() {
         const now = new Date();
         const start = new Date(now.getTime() - 30 * 86400000).toISOString();
         const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
-        const res = await fetch(`${API_BASE_URL}/calendar/events?start=${start}&end=${endOfDay}`, {
+        const showAll = perms.isAdmin ? '&showAll=true' : '';
+        const res = await fetch(`${API_BASE_URL}/calendar/events?start=${start}&end=${endOfDay}${showAll}`, {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         });
