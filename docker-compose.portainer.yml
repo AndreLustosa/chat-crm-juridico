@@ -179,6 +179,34 @@ services:
         - "traefik.http.routers.crm-web-old.middlewares=redirect-atendimento"
         - "traefik.docker.network=OrionNet"
 
+  # ------ MCP Gestor de Trafego ------
+  traffic-mcp-server:
+    image: andreflustosa/chat-crm-juridico-traffic-mcp:latest
+    environment:
+      - MCP_PORT=3100
+      - MCP_AUTH_TOKEN=${TRAFFIC_MCP_AUTH_TOKEN}
+      - TRAFFIC_MCP_MODE=crm
+      - CRM_API_URL=${TRAFFIC_MCP_CRM_API_URL:-http://crm-api:3001}
+      - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY}
+      - CACHE_TTL_MS=${TRAFFIC_MCP_CACHE_TTL_MS:-300000}
+    networks:
+      - default
+      - OrionNet
+    deploy:
+      restart_policy:
+        condition: any
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.traffic-mcp.rule=Host(`andrelustosaadvogados.com.br`) && PathPrefix(`/traffic-mcp`)"
+        - "traefik.http.routers.traffic-mcp.service=traffic-mcp"
+        - "traefik.http.routers.traffic-mcp.priority=110"
+        - "traefik.http.middlewares.strip-traffic-mcp.stripprefix.prefixes=/traffic-mcp"
+        - "traefik.http.routers.traffic-mcp.middlewares=strip-traffic-mcp"
+        - "traefik.http.services.traffic-mcp.loadbalancer.server.port=3100"
+        - "traefik.http.routers.traffic-mcp.entrypoints=websecure"
+        - "traefik.http.routers.traffic-mcp.tls.certresolver=letsencrypt"
+        - "traefik.docker.network=OrionNet"
+
 networks:
   OrionNet:
     external: true

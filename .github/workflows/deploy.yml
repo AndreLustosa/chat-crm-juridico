@@ -13,20 +13,28 @@ jobs:
       matrix:
         include:
           - name: api
+            context: .
             dockerfile: infra/Dockerfile.backend
             suffix: api
             build-args: APP=api
           - name: worker
+            context: .
             dockerfile: infra/Dockerfile.backend
             suffix: worker
             build-args: APP=worker
           - name: web
+            context: .
             dockerfile: infra/Dockerfile.web
             suffix: web
             build-args: |
               NEXT_PUBLIC_API_URL=https://andrelustosaadvogados.com.br/api
               NEXT_PUBLIC_WS_URL=wss://andrelustosaadvogados.com.br
               NEXT_PUBLIC_GTM_ID=${{ vars.NEXT_PUBLIC_GTM_ID }}
+          - name: traffic-mcp
+            context: ./traffic-mcp-server
+            dockerfile: Dockerfile
+            suffix: traffic-mcp
+            build-args: ""
 
     steps:
       - name: Checkout repository
@@ -44,7 +52,7 @@ jobs:
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build-args }}
           push: true
@@ -84,6 +92,7 @@ jobs:
             docker pull andreflustosa/chat-crm-juridico-api:latest
             docker pull andreflustosa/chat-crm-juridico-web:latest
             docker pull andreflustosa/chat-crm-juridico-worker:latest
+            docker pull andreflustosa/chat-crm-juridico-traffic-mcp:latest
 
             # Limpa imagens antigas para liberar espaço em disco antes do deploy
             echo "🧹 Limpando imagens Docker não utilizadas..."
@@ -119,6 +128,19 @@ jobs:
                 --detach=false \
                 ${STACK}_worker
 
+              TRAFFIC_MCP_SERVICE="${STACK}_traffic-mcp-server"
+              if docker service ls --format '{{.Name}}' | grep -qx "$TRAFFIC_MCP_SERVICE"; then
+                docker service update \
+                  --image andreflustosa/chat-crm-juridico-traffic-mcp:latest \
+                  --with-registry-auth --force \
+                  --update-parallelism 1 \
+                  --update-delay 5s \
+                  --detach=false \
+                  "$TRAFFIC_MCP_SERVICE"
+              else
+                echo "::warning::Serviço $TRAFFIC_MCP_SERVICE ainda não existe. Reimplante o stack no Portainer para criar o MCP de tráfego."
+              fi
+
               # Limpeza pós-deploy: remove imagens antigas que não são mais usadas
               docker image prune -f
 
@@ -131,8 +153,8 @@ jobs:
               STACK_DIR="/opt/stacks/${STACK}"
               if [ -d "$STACK_DIR" ]; then
                 cd "$STACK_DIR"
-                docker compose pull api worker web
-                docker compose up -d --no-deps --force-recreate api worker web
+                docker compose pull api worker web traffic-mcp-server
+                docker compose up -d --no-deps --force-recreate api worker web traffic-mcp-server
               else
                 # Fallback: recria via container_name definidos no portainer-stack.yml
                 docker restart crm-api crm-worker crm-web 2>/dev/null || true

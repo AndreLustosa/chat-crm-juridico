@@ -123,6 +123,25 @@ services:
     depends_on:
       - crm-api
 
+  # ------ MCP Gestor de Trafego ------
+  traffic-mcp-server:
+    image: andreflustosa/chat-crm-juridico-traffic-mcp:latest
+    build:
+      context: ./traffic-mcp-server
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "${TRAFFIC_MCP_PORT:-43100}:3100"
+    environment:
+      - MCP_PORT=3100
+      - MCP_AUTH_TOKEN=${TRAFFIC_MCP_AUTH_TOKEN}
+      - TRAFFIC_MCP_MODE=crm
+      - CRM_API_URL=${TRAFFIC_MCP_CRM_API_URL:-http://crm-api:3001}
+      - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY}
+      - CACHE_TTL_MS=${TRAFFIC_MCP_CACHE_TTL_MS:-300000}
+    depends_on:
+      - crm-api
+
 volumes:
   pgdata:
   redisdata:

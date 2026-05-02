@@ -1,0 +1,17 @@
+services:
+  traffic-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: traffic-mcp-server
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    env_file:
+      - .env
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    external: true

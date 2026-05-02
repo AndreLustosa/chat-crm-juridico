@@ -8,7 +8,8 @@ export default function McpSettingsPage() {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<'token' | 'config' | null>(null);
+  const [copied, setCopied] = useState<'token' | 'config' | 'trafficUrl' | null>(null);
+  const trafficMcpUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/mcp';
 
   async function generateToken() {
     setLoading(true);
@@ -23,7 +24,7 @@ export default function McpSettingsPage() {
     }
   }
 
-  function copy(text: string, type: 'token' | 'config') {
+  function copy(text: string, type: 'token' | 'config' | 'trafficUrl') {
     navigator.clipboard.writeText(text);
     setCopied(type);
     setTimeout(() => setCopied(null), 2000);
@@ -36,6 +37,10 @@ export default function McpSettingsPage() {
             'crm-juridico': {
               url: 'https://andrelustosaadvogados.com.br/api/mcp',
               headers: { Authorization: `Bearer ${token}` },
+            },
+            'trafego-google-ads': {
+              url: trafficMcpUrl,
+              headers: { Authorization: 'Bearer COLE_AQUI_O_TRAFFIC_MCP_AUTH_TOKEN' },
             },
           },
         },
@@ -56,6 +61,34 @@ export default function McpSettingsPage() {
       </p>
 
       {/* Passo 1 — Gerar token */}
+      <section className="mb-6">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+          URL do MCP de Trafego
+        </h2>
+        <div className="bg-card border border-border rounded-xl p-5">
+          <p className="text-sm text-muted-foreground mb-3">
+            Use esta URL ao criar o aplicativo/conector no ChatGPT. Ela aponta para o MCP separado
+            do Gestor de Trafego, que chama a API interna do CRM.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 bg-muted/50 border border-border rounded-lg px-3 py-2 text-xs font-mono break-all select-all">
+              {trafficMcpUrl}
+            </code>
+            <button
+              onClick={() => copy(trafficMcpUrl, 'trafficUrl')}
+              className="shrink-0 p-2 rounded-lg border border-border hover:bg-muted/50 transition"
+              title="Copiar URL"
+            >
+              {copied === 'trafficUrl' ? (
+                <CheckCircle2 className="w-4 h-4 text-green-500" />
+              ) : (
+                <Copy className="w-4 h-4 text-muted-foreground" />
+              )}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section className="mb-6">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">
           Passo 1 — Gerar token de acesso
