@@ -32,7 +32,7 @@ jobs:
               NEXT_PUBLIC_GTM_ID=${{ vars.NEXT_PUBLIC_GTM_ID }}
           - name: traffic-mcp
             context: ./traffic-mcp-server
-            dockerfile: Dockerfile
+            dockerfile: traffic-mcp-server/Dockerfile
             suffix: traffic-mcp
             build-args: ""
 
