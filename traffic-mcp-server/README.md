@@ -50,13 +50,13 @@ No ChatGPT, crie o aplicativo com:
 - URL do servidor MCP: `https://andrelustosaadvogados.com.br/traffic-mcp/mcp`
 - Autenticacao: `OAuth` ou `Mista`
 
-Durante a autorizacao, o ChatGPT abrira uma pagina do proprio MCP. Cole o valor
-de `TRAFFIC_MCP_AUTH_TOKEN` no campo "Token MCP de trafego". Se quiser separar
-o token de configuracao do token OAuth, defina `MCP_OAUTH_AUTHORIZATION_TOKEN`
-no container.
+Durante a autorizacao, o ChatGPT abrira uma pagina do proprio MCP. Cole o token
+gerado no menu **Configuracoes > Integracao MCP** do CRM. O segredo interno
+`TRAFFIC_MCP_AUTH_TOKEN` continua aceito para administracao, mas nao e
+necessario para conectar o ChatGPT.
 
 O endpoint `/mcp` continua aceitando `Authorization: Bearer <MCP_AUTH_TOKEN>`
-para clientes como Claude Desktop, e tambem passa a aceitar tokens OAuth
+para administracao, e tambem aceita o token MCP gerado pelo CRM ou tokens OAuth
 emitidos em `/oauth/token`.
 
 Modo alternativo, com acesso direto ao Google Ads:

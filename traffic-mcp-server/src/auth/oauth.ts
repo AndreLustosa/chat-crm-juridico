@@ -31,6 +31,8 @@ type StoredToken = {
   expiresAt: number;
 };
 
+const crmTokenVerificationCache = new Map<string, number>();
+
 function randomToken(bytes = 32) {
   return randomBytes(bytes).toString('base64url');
 }
@@ -54,6 +56,55 @@ function requestedScopes(scope: unknown) {
 
 function oauthError(res: Response, status: number, error: string, description: string) {
   return res.status(status).json({ error, error_description: description });
+}
+
+function crmUrl(path: string) {
+  const base = config.crm.apiUrl?.replace(/\/+$/, '');
+  if (!base) {
+    return undefined;
+  }
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
+
+async function verifyCrmMcpToken(token: string) {
+  if (config.runtimeMode !== 'crm' || !config.crm.apiUrl) {
+    return false;
+  }
+
+  const cachedUntil = crmTokenVerificationCache.get(token);
+  if (cachedUntil && cachedUntil > Date.now()) {
+    return true;
+  }
+
+  const url = crmUrl('/auth/mcp-token/verify');
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const data = await response.json().catch(() => null);
+    if (data && typeof data === 'object' && (data as { active?: unknown }).active === true) {
+      crmTokenVerificationCache.set(token, Date.now() + 5 * 60 * 1000);
+      return true;
+    }
+  } catch (error) {
+    console.error('[traffic-mcp-server] falha ao validar token MCP no CRM', error);
+  }
+
+  return false;
 }
 
 function clientCredentials(req: Request) {
@@ -156,14 +207,14 @@ function renderAuthorizePage(params: Record<string, string>) {
   <body>
     <main>
       <h1>Autorizar Gestor de Trafego</h1>
-      <p>O ChatGPT esta solicitando acesso as ferramentas MCP do Gestor de Trafego. Cole o token MCP de trafego para autorizar esta conexao.</p>
+      <p>O ChatGPT esta solicitando acesso as ferramentas MCP do Gestor de Trafego. Cole o token MCP gerado na tela de Integracao MCP do CRM para autorizar esta conexao.</p>
       <form method="post" action="${htmlEscape(config.publicBaseUrl)}/oauth/authorize">
         ${hiddenInputs}
-        <label for="authorization_token">Token MCP de trafego</label>
+        <label for="authorization_token">Token MCP gerado no CRM</label>
         <input id="authorization_token" name="authorization_token" type="password" autocomplete="one-time-code" required autofocus />
         <button type="submit">Autorizar ChatGPT</button>
       </form>
-      <small>Use o valor de TRAFFIC_MCP_AUTH_TOKEN. O token nao sera exibido nem salvo no navegador por este formulario.</small>
+      <small>Use o token gerado no menu Configuracoes > Integracao MCP. O segredo interno TRAFFIC_MCP_AUTH_TOKEN continua aceito, mas nao e mais necessario para conectar o ChatGPT.</small>
     </main>
   </body>
 </html>`;
@@ -316,7 +367,7 @@ export function registerClientHandler(req: Request, res: Response) {
   }
 }
 
-export function authorizeHandler(req: Request, res: Response) {
+export async function authorizeHandler(req: Request, res: Response) {
   const input = req.method === 'POST' ? req.body : req.query;
   const client = trafficOAuthProvider.getClient(input.client_id);
   const redirectUri = typeof input.redirect_uri === 'string' ? input.redirect_uri : undefined;
@@ -346,7 +397,9 @@ export function authorizeHandler(req: Request, res: Response) {
   }
 
   const providedToken = typeof input.authorization_token === 'string' ? input.authorization_token : '';
-  if (!safeEqual(providedToken, config.oauth.authorizationToken)) {
+  const tokenIsValid =
+    safeEqual(providedToken, config.oauth.authorizationToken) || await verifyCrmMcpToken(providedToken);
+  if (!tokenIsValid) {
     return res.status(401).send('Token MCP invalido.');
   }
 
@@ -412,11 +465,14 @@ export function revokeHandler(req: Request, res: Response) {
   res.status(200).send('');
 }
 
-export function verifyMcpBearerToken(token: string) {
+export async function verifyMcpBearerToken(token: string) {
   if (safeEqual(token, config.authToken)) {
     return true;
   }
-  return trafficOAuthProvider.verifyAccessToken(token) !== undefined;
+  if (trafficOAuthProvider.verifyAccessToken(token) !== undefined) {
+    return true;
+  }
+  return verifyCrmMcpToken(token);
 }
 
 export function protectedResourceMetadataUrl() {

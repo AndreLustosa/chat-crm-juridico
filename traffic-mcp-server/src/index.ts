@@ -76,9 +76,9 @@ app.post('/oauth/register', registerClientHandler);
 app.post('/oauth/token', tokenHandler);
 app.post('/oauth/revoke', revokeHandler);
 
-app.use('/mcp', (req, res, next) => {
+app.use('/mcp', async (req, res, next) => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
-  if (!token || !verifyMcpBearerToken(token)) {
+  if (!token || !(await verifyMcpBearerToken(token))) {
     res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${protectedResourceMetadataUrl()}"`);
     return res.status(401).json({ error: 'Unauthorized' });
   }

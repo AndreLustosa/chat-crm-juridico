@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UnauthorizedException, HttpCode, HttpStatus, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, UnauthorizedException, HttpCode, HttpStatus, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/sign-in.dto';
 import { Public } from './decorators/public.decorator';
@@ -23,5 +23,19 @@ export class AuthController {
   @Post('mcp-token')
   async mcpToken(@Request() req: any) {
     return this.authService.generateMcpToken(req.user);
+  }
+
+  /** Valida o token MCP/JWT atual para servidores MCP externos. */
+  @Get('mcp-token/verify')
+  async verifyMcpToken(@Request() req: any) {
+    return {
+      active: true,
+      user: {
+        email: req.user?.email,
+        sub: req.user?.sub,
+        roles: req.user?.roles,
+        tenant_id: req.user?.tenant_id,
+      },
+    };
   }
 }
