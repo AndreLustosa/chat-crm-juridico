@@ -25,7 +25,7 @@ services:
     image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nao definido}
       POSTGRES_DB: ${POSTGRES_DB:-lustosa}
     networks:
       - default
@@ -116,10 +116,10 @@ services:
       - TZ=America/Sao_Paulo
       - PORT=3001
       - RUN_MIGRATIONS=true
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@postgres:5432/${POSTGRES_DB:-lustosa}?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nao definido}@postgres:5432/${POSTGRES_DB:-lustosa}?schema=public
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - JWT_SECRET=${JWT_SECRET:-troque_esta_secret}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET nao definido}
       - JWT_EXPIRES_IN=365d
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_GLOBAL_APIKEY=${EVOLUTION_GLOBAL_APIKEY}
@@ -188,7 +188,7 @@ services:
       - NODE_ENV=production
       - TZ=America/Sao_Paulo
       - PORT=3002
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@postgres:5432/${POSTGRES_DB:-lustosa}?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nao definido}@postgres:5432/${POSTGRES_DB:-lustosa}?schema=public
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -262,10 +262,10 @@ services:
     image: andreflustosa/chat-crm-juridico-traffic-mcp:latest
     environment:
       - MCP_PORT=3100
-      - MCP_AUTH_TOKEN=${TRAFFIC_MCP_AUTH_TOKEN}
+      - MCP_AUTH_TOKEN=${TRAFFIC_MCP_AUTH_TOKEN:?TRAFFIC_MCP_AUTH_TOKEN nao definido}
       - TRAFFIC_MCP_MODE=crm
       - CRM_API_URL=${TRAFFIC_MCP_CRM_API_URL:-http://crm-api:3001}
-      - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY}
+      - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY:?TRAFFIC_MCP_CRM_API_KEY nao definido}
       - CACHE_TTL_MS=${TRAFFIC_MCP_CACHE_TTL_MS:-300000}
     networks:
       - default
