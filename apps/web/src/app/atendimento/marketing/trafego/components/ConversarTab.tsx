@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
+import { AiKnowledgePanel } from './AiKnowledgePanel';
 
 interface ChatSession {
   id: string;
@@ -31,14 +32,37 @@ interface ChatSession {
   total_cost_brl: string | number;
 }
 
+type ApiError = {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+};
+
+type ToolCall = {
+  id: string;
+  name: string;
+};
+
+type ProposedAction = {
+  action_kind?: string;
+  reason?: string;
+  campaign_id?: string;
+  ad_group_id?: string;
+  new_amount_brl?: number;
+  negative_keyword?: string;
+  match_type?: string;
+};
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
-  tool_calls?: any;
+  tool_calls?: ToolCall[] | null;
   tool_result_for?: string | null;
-  tool_result?: any;
-  proposed_action?: any;
+  tool_result?: unknown;
+  proposed_action?: ProposedAction | null;
   proposed_action_status?: string | null;
   proposed_action_resolved_at?: string | null;
   error_message?: string | null;
@@ -55,6 +79,11 @@ const ACTION_LABEL: Record<string, string> = {
   ADD_NEGATIVE_KEYWORD_CAMPAIGN: 'Adicionar palavra negativa (campanha)',
   ADD_NEGATIVE_KEYWORD_AD_GROUP: 'Adicionar palavra negativa (ad group)',
 };
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  const message = (err as ApiError)?.response?.data?.message;
+  return typeof message === 'string' && message.length > 0 ? message : fallback;
+}
 
 export function ConversarTab({ canManage }: { canManage: boolean }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -149,8 +178,8 @@ export function ConversarTab({ canManage }: { canManage: boolean }) {
       await loadSessions();
       setActiveId(data.id);
       setMessages([]);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Erro ao criar conversa.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao criar conversa.'));
     }
   }
 
@@ -162,9 +191,9 @@ export function ConversarTab({ canManage }: { canManage: boolean }) {
     try {
       await api.post(`/trafego/chat/sessions/${activeId}/messages`, { text });
       // O polling pega a resposta
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSending(false);
-      showError(err?.response?.data?.message ?? 'Erro ao enviar mensagem.');
+      showError(getApiErrorMessage(err, 'Erro ao enviar mensagem.'));
     }
   }
 
@@ -182,8 +211,8 @@ export function ConversarTab({ canManage }: { canManage: boolean }) {
       await api.post(`/trafego/chat/messages/${msgId}/apply`);
       showSuccess('Aplicação enfileirada — atualizando em segundos...');
       // Polling de mensagens pega o status
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Erro ao aplicar.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao aplicar.'));
     } finally {
       setActionInflightId(null);
     }
@@ -195,8 +224,8 @@ export function ConversarTab({ canManage }: { canManage: boolean }) {
     try {
       await api.post(`/trafego/chat/messages/${msgId}/reject`);
       showSuccess('Ação rejeitada.');
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Erro ao rejeitar.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao rejeitar.'));
     } finally {
       setActionInflightId(null);
     }
@@ -212,13 +241,15 @@ export function ConversarTab({ canManage }: { canManage: boolean }) {
         setMessages([]);
       }
       await loadSessions();
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Erro ao arquivar.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao arquivar.'));
     }
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4 h-[calc(100vh-220px)] min-h-[500px]">
+    <div>
+      <AiKnowledgePanel defaultOpen />
+      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4 h-[calc(100vh-320px)] min-h-[500px]">
       {/* Sidebar de sessions */}
       <aside className="bg-card border border-border rounded-xl flex flex-col overflow-hidden">
         <div className="p-3 border-b border-border flex items-center justify-between gap-2">
@@ -342,6 +373,7 @@ export function ConversarTab({ canManage }: { canManage: boolean }) {
           </>
         )}
       </main>
+      </div>
     </div>
   );
 }
@@ -394,7 +426,7 @@ function EmptyChat() {
 function Suggestion({ text }: { text: string }) {
   return (
     <div className="px-3 py-2 rounded-md border border-border bg-muted/20 italic">
-      "{text}"
+      &quot;{text}&quot;
     </div>
   );
 }
@@ -442,7 +474,7 @@ function MessageBubble({
               {message.content}
             </div>
           )}
-          {calls.map((c: any) => (
+          {calls.map((c) => (
             <div
               key={c.id}
               className="text-[11px] text-muted-foreground italic flex items-center gap-1"
@@ -514,6 +546,7 @@ function ProposedActionCard({
   onReject: () => void;
 }) {
   const action = message.proposed_action ?? {};
+  const actionKind = action.action_kind ?? 'ACTION';
   const status = message.proposed_action_status ?? 'PENDING_APPROVAL';
   const isPending = status === 'PENDING_APPROVAL';
   const isApplied = status === 'APPLIED';
@@ -536,11 +569,13 @@ function ProposedActionCard({
             Proposta de ação
           </span>
           <span className="text-sm font-bold">
-            {ACTION_LABEL[action.action_kind] ?? action.action_kind}
+            {ACTION_LABEL[actionKind] ?? actionKind}
           </span>
         </div>
         {action.reason && (
-          <p className="text-xs text-foreground mb-2 italic">"{action.reason}"</p>
+          <p className="text-xs text-foreground mb-2 italic">
+            &quot;{action.reason}&quot;
+          </p>
         )}
         <div className="text-[11px] text-muted-foreground space-y-0.5 mb-2">
           {action.campaign_id && <p>Campanha: <code>{action.campaign_id.slice(0, 8)}…</code></p>}
@@ -549,7 +584,11 @@ function ProposedActionCard({
             <p>Novo budget: <strong>R$ {Number(action.new_amount_brl).toFixed(2)}/dia</strong></p>
           )}
           {action.negative_keyword && (
-            <p>Termo negativo: <strong>"{action.negative_keyword}"</strong> ({action.match_type ?? 'PHRASE'})</p>
+            <p>
+              Termo negativo:{' '}
+              <strong>&quot;{action.negative_keyword}&quot;</strong> (
+              {action.match_type ?? 'PHRASE'})
+            </p>
           )}
         </div>
 

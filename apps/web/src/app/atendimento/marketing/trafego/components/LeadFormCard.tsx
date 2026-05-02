@@ -11,6 +11,7 @@ import {
   RefreshCw,
   EyeOff,
   Eye,
+  type LucideIcon,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -36,13 +37,43 @@ interface LeadFormSettings {
   lead_form_default_stage: string;
 }
 
-const STATUS_BADGE: Record<string, { color: string; icon: any; label: string }> = {
+const STATUS_BADGE: Record<string, { color: string; icon: LucideIcon; label: string }> = {
   PENDING: { color: 'bg-amber-500/15 text-amber-600', icon: Clock, label: 'Pendente' },
   PROCESSED: { color: 'bg-emerald-500/15 text-emerald-600', icon: CheckCircle2, label: 'Lead criado' },
   DUPLICATE: { color: 'bg-sky-500/15 text-sky-600', icon: CheckCircle2, label: 'Duplicado' },
   REJECTED: { color: 'bg-zinc-500/15 text-zinc-600', icon: AlertCircle, label: 'Rejeitado' },
   ERROR: { color: 'bg-red-500/15 text-red-600', icon: AlertCircle, label: 'Erro' },
 };
+
+function getApiErrorMessage(err: unknown, fallback: string) {
+  if (typeof err !== 'object' || err === null) return fallback;
+  const maybe = err as {
+    response?: { data?: { message?: unknown } };
+    message?: unknown;
+  };
+  if (typeof maybe.response?.data?.message === 'string') {
+    return maybe.response.data.message;
+  }
+  return typeof maybe.message === 'string' ? maybe.message : fallback;
+}
+
+function normalizeSettings(data: Partial<LeadFormSettings>): LeadFormSettings {
+  return {
+    lead_form_webhook_secret:
+      typeof data.lead_form_webhook_secret === 'string'
+        ? data.lead_form_webhook_secret
+        : null,
+    lead_form_auto_create_lead:
+      typeof data.lead_form_auto_create_lead === 'boolean'
+        ? data.lead_form_auto_create_lead
+        : true,
+    lead_form_default_stage:
+      typeof data.lead_form_default_stage === 'string' &&
+      data.lead_form_default_stage.length > 0
+        ? data.lead_form_default_stage
+        : 'INTERESSADO',
+  };
+}
 
 export function LeadFormCard({ canManage }: { canManage: boolean }) {
   const [subs, setSubs] = useState<Submission[]>([]);
@@ -57,45 +88,24 @@ export function LeadFormCard({ canManage }: { canManage: boolean }) {
     // Carregamentos isolados — uma falha não derruba a outra. Se settings
     // falhar, ainda dá pra ver as submissions (e vice-versa).
     const [subsRes, settingsRes] = await Promise.allSettled([
-      api.get<Submission[]>('/trafego/lead-form-submissions', {
-        params: { limit: 20 },
-      }),
+      api.get<Submission[]>('/trafego/lead-form-submissions'),
       api.get<LeadFormSettings>('/trafego/settings'),
     ]);
 
     if (subsRes.status === 'fulfilled') {
       setSubs(Array.isArray(subsRes.value.data) ? subsRes.value.data : []);
     } else {
-      const msg =
-        (subsRes.reason as any)?.response?.data?.message ??
-        (subsRes.reason as any)?.message ??
-        'desconhecido';
-      showError(`Erro ao listar submissions: ${msg}`);
+      showError(
+        `Erro ao listar submissions: ${getApiErrorMessage(subsRes.reason, 'desconhecido')}`,
+      );
     }
 
     if (settingsRes.status === 'fulfilled') {
-      const data = settingsRes.value.data as any;
-      setSettings({
-        lead_form_webhook_secret:
-          typeof data?.lead_form_webhook_secret === 'string'
-            ? data.lead_form_webhook_secret
-            : null,
-        lead_form_auto_create_lead:
-          typeof data?.lead_form_auto_create_lead === 'boolean'
-            ? data.lead_form_auto_create_lead
-            : true,
-        lead_form_default_stage:
-          typeof data?.lead_form_default_stage === 'string' &&
-          data.lead_form_default_stage.length > 0
-            ? data.lead_form_default_stage
-            : 'INTERESSADO',
-      });
+      setSettings(normalizeSettings(settingsRes.value.data));
     } else {
-      const msg =
-        (settingsRes.reason as any)?.response?.data?.message ??
-        (settingsRes.reason as any)?.message ??
-        'desconhecido';
-      showError(`Erro ao carregar settings de Lead Form: ${msg}`);
+      showError(
+        `Erro ao carregar settings de Lead Form: ${getApiErrorMessage(settingsRes.reason, 'desconhecido')}`,
+      );
     }
 
     setLoading(false);
@@ -109,15 +119,11 @@ export function LeadFormCard({ canManage }: { canManage: boolean }) {
     if (!canManage) return;
     setSaving(true);
     try {
-      const { data } = await api.patch<any>('/trafego/lead-form-settings', patchData);
-      setSettings({
-        lead_form_webhook_secret: data.lead_form_webhook_secret ?? null,
-        lead_form_auto_create_lead: data.lead_form_auto_create_lead ?? true,
-        lead_form_default_stage: data.lead_form_default_stage ?? 'INTERESSADO',
-      });
+      const { data } = await api.patch<LeadFormSettings>('/trafego/lead-form-settings', patchData);
+      setSettings(normalizeSettings(data));
       showSuccess('Configuração salva.');
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Erro salvando configuração.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro salvando configuracao.'));
     } finally {
       setSaving(false);
     }
@@ -231,7 +237,7 @@ export function LeadFormCard({ canManage }: { canManage: boolean }) {
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
               Esse secret valida cada submission. Cole exatamente no campo
-              "Webhook key" do Lead Form Asset no Google Ads.
+              &quot;Webhook key&quot; do Lead Form Asset no Google Ads.
             </p>
           </div>
 

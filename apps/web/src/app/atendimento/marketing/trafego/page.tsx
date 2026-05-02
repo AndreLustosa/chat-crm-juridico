@@ -106,6 +106,21 @@ function TrafegoPageInner() {
   const [, setDefaultTabSet] = useState(false);
   const [openAlertsCount, setOpenAlertsCount] = useState(0);
 
+  const setActiveTab = useCallback(
+    (next: TabId) => {
+      setTab(next);
+      router.replace(`/atendimento/marketing/trafego?tab=${next}`);
+    },
+    [router],
+  );
+
+  useEffect(() => {
+    const tabParam = search.get("tab");
+    if (tabParam && TABS.some((t) => t.id === tabParam)) {
+      setTab(tabParam as TabId);
+    }
+  }, [search]);
+
   // ─── Trata callback OAuth ────────────────────────────────────────────────
   useEffect(() => {
     const oauthStatus = search.get("oauth");
@@ -131,20 +146,20 @@ function TrafegoPageInner() {
       // (onde o admin precisa preencher credenciais antes de poder conectar).
       setDefaultTabSet((prev) => {
         if (prev) return prev;
-        if (!data.connected) setTab("configuracoes");
+        if (!data.connected) setActiveTab("configuracoes");
         return true;
       });
     } catch {
       setAccount({ connected: false, account: null });
       setDefaultTabSet((prev) => {
         if (prev) return prev;
-        setTab("configuracoes");
+        setActiveTab("configuracoes");
         return true;
       });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setActiveTab]);
 
   useEffect(() => {
     loadAccount();
@@ -231,12 +246,13 @@ function TrafegoPageInner() {
     <div className="h-full overflow-y-auto p-6 lg:p-8">
       <Header
         onSyncNow={perms.canManageTrafego ? syncNow : null}
+        onOpenChat={account?.connected ? () => setActiveTab("conversar") : null}
         syncing={syncing}
         account={account}
       />
 
       {/* Tabs */}
-      <div className="mt-6 mb-6 flex gap-1 border-b border-border overflow-x-auto no-scrollbar">
+      <div className="mt-6 mb-6 flex flex-wrap gap-1 border-b border-border pb-1">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -244,7 +260,7 @@ function TrafegoPageInner() {
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => setActiveTab(t.id)}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 active
                   ? "border-primary text-primary"
@@ -326,10 +342,12 @@ function TrafegoPageInner() {
 
 function Header({
   onSyncNow,
+  onOpenChat,
   syncing,
   account,
 }: {
   onSyncNow: (() => void) | null;
+  onOpenChat: (() => void) | null;
   syncing: boolean;
   account: AccountState | null;
 }) {
@@ -358,6 +376,15 @@ function Header({
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
+        {onOpenChat && (
+          <button
+            onClick={onOpenChat}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/15"
+          >
+            <MessageSquare size={15} />
+            Conversar com IA
+          </button>
+        )}
         <a
           href="/atendimento/marketing/trafego/termos-busca"
           className="text-xs font-semibold px-3 py-2 rounded-lg border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground"

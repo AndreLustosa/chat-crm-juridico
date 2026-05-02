@@ -9,6 +9,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 // ─── OAuth ──────────────────────────────────────────────────────────────────
 
@@ -518,6 +519,7 @@ export class ListLeadFormSubmissionsDto {
   @IsOptional()
   @Min(1)
   @Max(200)
+  @Type(() => Number)
   limit?: number;
 }
 

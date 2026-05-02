@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Loader2,
   Target,
@@ -10,6 +10,7 @@ import {
   Clock,
   Sparkles,
   X,
+  type LucideIcon,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -23,6 +24,7 @@ interface ConversionAction {
   category: string;
   status: string;
   type: string | null;
+  include_in_conversions: boolean;
   crm_event_kind: string | null;
   default_value_brl: number | null;
 }
@@ -54,12 +56,14 @@ const STATUS_BADGE: Record<string, string> = {
   DUPLICATE_REJECTED: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400',
 };
 
-const STATUS_ICON: Record<string, any> = {
+const STATUS_ICON: Record<string, LucideIcon> = {
   PENDING: Clock,
   UPLOADED: CheckCircle2,
   FAILED: AlertCircle,
   DUPLICATE_REJECTED: AlertCircle,
 };
+
+type ActionFilter = 'CRM_ACTIVE' | 'GOOGLE_ACTIVE' | 'ALL';
 
 const fmtBRL = (v: number | null) =>
   v === null
@@ -69,6 +73,8 @@ const fmtBRL = (v: number | null) =>
         currency: 'BRL',
       }).format(v);
 
+void fmtBRL;
+
 interface AiSuggestion {
   conversion_action_id: string;
   name: string;
@@ -77,6 +83,18 @@ interface AiSuggestion {
   suggested_event: string | null;
   confidence: number;
   reasoning: string;
+}
+
+function apiErrorMessage(err: unknown, fallback: string) {
+  if (typeof err !== 'object' || err === null) return fallback;
+  const maybe = err as {
+    response?: { data?: { message?: unknown } };
+    message?: unknown;
+  };
+  if (typeof maybe.response?.data?.message === 'string') {
+    return maybe.response.data.message;
+  }
+  return typeof maybe.message === 'string' ? maybe.message : fallback;
 }
 
 export function ConversoesTab({ canManage }: { canManage: boolean }) {
@@ -91,8 +109,32 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
   );
   const [aiAcceptedIds, setAiAcceptedIds] = useState<Set<string>>(new Set());
   const [aiApplying, setAiApplying] = useState(false);
+  const [actionFilter, setActionFilter] = useState<ActionFilter>('CRM_ACTIVE');
 
-  async function load() {
+  const actionCounts = useMemo(
+    () => ({
+      crmActive: actions.filter((a) => !!a.crm_event_kind).length,
+      googleActive: actions.filter(
+        (a) => a.status === 'ENABLED' && a.include_in_conversions,
+      ).length,
+      all: actions.length,
+    }),
+    [actions],
+  );
+
+  const visibleActions = useMemo(() => {
+    if (actionFilter === 'CRM_ACTIVE') {
+      return actions.filter((a) => !!a.crm_event_kind);
+    }
+    if (actionFilter === 'GOOGLE_ACTIVE') {
+      return actions.filter(
+        (a) => a.status === 'ENABLED' && a.include_in_conversions,
+      );
+    }
+    return actions;
+  }, [actions, actionFilter]);
+
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -100,21 +142,21 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
       setActions(Array.isArray(a.data) ? a.data : []);
       // Endpoint /trafego/oci-uploads ainda nao existe — placeholder ate Sprint OCI.
       setUploads([]);
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ??
-        err?.message ??
-        'Falha desconhecida ao listar ConversionActions';
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(
+        err,
+        'Falha desconhecida ao listar ConversionActions',
+      );
       setLoadError(msg);
       showError(`Erro ao carregar ConversionActions: ${msg}`);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   async function fetchAiSuggestions() {
     if (!canManage) return;
@@ -141,8 +183,8 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
       showSuccess(
         `IA gerou ${data.suggestions.length} sugestões com modelo ${data.model}`,
       );
-    } catch (err: any) {
-      const msg = err?.response?.data?.message ?? err?.message ?? 'Falha ao chamar IA';
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, 'Falha ao chamar IA');
       showError(`IA: ${msg}`);
     } finally {
       setAiLoading(false);
@@ -204,8 +246,8 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
       });
       showSuccess('Mapeamento atualizado.');
       await load();
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao mapear conversao.');
+    } catch (err: unknown) {
+      showError(apiErrorMessage(err, 'Falha ao mapear conversao.'));
     } finally {
       setSavingId(null);
     }
@@ -280,13 +322,44 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
               Nenhuma ConversionAction sincronizada
             </h3>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Crie ConversionActions no Google Ads (tipo "Lead" ou
-              "Upload"), aguarde o proximo sync e elas aparecerao aqui. Se ja
+              Crie ConversionActions no Google Ads (tipo &quot;Lead&quot; ou
+              &quot;Upload&quot;), aguarde o proximo sync e elas aparecerao aqui. Se ja
               criou no Google, abra <strong>Sync logs</strong> em Configurações
               pra ver se houve falha no sub-sync.
             </p>
           </div>
         ) : (
+          <>
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+            <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border">
+              <ActionFilterButton
+                active={actionFilter === 'CRM_ACTIVE'}
+                onClick={() => setActionFilter('CRM_ACTIVE')}
+                label={`Em uso no CRM (${actionCounts.crmActive})`}
+                title="Mostra apenas conversoes mapeadas para um evento do CRM. Sao as que o sistema usa para OCI."
+              />
+              <ActionFilterButton
+                active={actionFilter === 'GOOGLE_ACTIVE'}
+                onClick={() => setActionFilter('GOOGLE_ACTIVE')}
+                label={`Usadas pelo Google (${actionCounts.googleActive})`}
+                title="Mostra conversoes ativas e incluidas na metrica de conversoes do Google Ads."
+              />
+              <ActionFilterButton
+                active={actionFilter === 'ALL'}
+                onClick={() => setActionFilter('ALL')}
+                label={`Todas (${actionCounts.all})`}
+                title="Mostra tudo que foi sincronizado do Google Ads."
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Para tirar uma conversao do uso do CRM, selecione &quot;Nao mapeado&quot;.
+            </p>
+          </div>
+          {visibleActions.length === 0 ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">
+              Nenhuma ConversionAction neste filtro.
+            </div>
+          ) : (
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr>
@@ -298,7 +371,7 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
               </tr>
             </thead>
             <tbody>
-              {actions.map((a) => (
+              {visibleActions.map((a) => (
                 <tr
                   key={a.id}
                   className="border-t border-border hover:bg-accent/30 transition-colors"
@@ -361,6 +434,8 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
               ))}
             </tbody>
           </table>
+          )}
+          </>
         )}
       </div>
 
@@ -450,6 +525,33 @@ export function ConversoesTab({ canManage }: { canManage: boolean }) {
 }
 
 // ─── Modal de sugestões da IA ────────────────────────────────────────────────
+
+function ActionFilterButton({
+  active,
+  onClick,
+  label,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+        active
+          ? 'bg-card text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
 const EVENT_LABEL: Record<string, string> = {
   'lead.created': 'Lead criado',

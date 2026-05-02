@@ -136,6 +136,119 @@ export const CHAT_TOOL_DEFS: LLMToolDef[] = [
   {
     type: 'function',
     function: {
+      name: 'list_search_terms',
+      description:
+        'Lista termos de busca sincronizados com metricas de gasto, cliques, impressoes e conversoes. Use pra achar termos ruins, termos caros sem conversao e oportunidades de negativa.',
+      parameters: {
+        type: 'object',
+        properties: {
+          campaign_id: { type: 'string', description: 'ID local da campanha (opcional)' },
+          ad_group_id: { type: 'string', description: 'ID local do ad_group (opcional)' },
+          min_spend_brl: { type: 'number', description: 'Gasto minimo em R$ para filtrar.' },
+          only_zero_conversions: { type: 'boolean', description: 'Se true, traz apenas termos com zero conversoes.' },
+          limit: { type: 'integer', description: 'Default 30, max 100.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_auction_insights',
+      description:
+        'Consulta informacoes do leilao por dominio concorrente: parcela de impressoes, taxa de sobreposicao, posicao superior, parte superior, primeira posicao e superacao.',
+      parameters: {
+        type: 'object',
+        properties: {
+          campaign_id: { type: 'string', description: 'ID local da campanha (opcional)' },
+          date_from: { type: 'string', description: 'YYYY-MM-DD. Default 30d atras.' },
+          date_to: { type: 'string', description: 'YYYY-MM-DD. Default hoje.' },
+          limit: { type: 'integer', description: 'Default 20, max 100.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_landing_pages',
+      description:
+        'Lista landing pages vinculadas ao trafego com PageSpeed, Core Web Vitals, clicks/conversoes 30d e analise IA salva.',
+      parameters: {
+        type: 'object',
+        properties: {
+          campaign_id: { type: 'string', description: 'ID local da campanha (opcional)' },
+          limit: { type: 'integer', description: 'Default 30, max 100.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_conversion_actions',
+      description:
+        'Lista conversion actions do Google Ads com status, categoria, include_in_conversions, evento CRM mapeado e valor padrao.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['ENABLED', 'REMOVED', 'HIDDEN', 'ALL'] },
+          only_mapped: { type: 'boolean', description: 'Se true, traz apenas conversoes ligadas a evento CRM.' },
+          limit: { type: 'integer', description: 'Default 50, max 100.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_lead_form_submissions',
+      description:
+        'Lista submissions recebidas por Lead Form Asset, com status, lead criado, campanha, telefone/e-mail e data de envio.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['PENDING', 'PROCESSED', 'DUPLICATE', 'REJECTED', 'ERROR', 'ALL'] },
+          limit: { type: 'integer', description: 'Default 20, max 100.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_asset_groups',
+      description:
+        'Lista asset groups de PMax/Demand Gen/branding, com status, ad_strength e assets principais quando disponiveis.',
+      parameters: {
+        type: 'object',
+        properties: {
+          campaign_id: { type: 'string', description: 'ID local da campanha (opcional)' },
+          status: { type: 'string', enum: ['ENABLED', 'PAUSED', 'REMOVED', 'ALL'] },
+          limit: { type: 'integer', description: 'Default 30, max 100.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_metric_breakdowns',
+      description:
+        'Consulta quebras por dispositivo, horario e agenda de anuncios em um periodo. Use para perguntas como "qual melhor horario?" ou "mobile converte melhor?".',
+      parameters: {
+        type: 'object',
+        properties: {
+          campaign_id: { type: 'string', description: 'ID local da campanha (opcional)' },
+          date_from: { type: 'string', description: 'YYYY-MM-DD. Default 30d atras.' },
+          date_to: { type: 'string', description: 'YYYY-MM-DD. Default hoje.' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_recent_alerts',
       description:
         'Alertas operacionais abertos (HIGH_CPL, OVERSPEND, ZERO_CONVERSIONS, etc). Use pra "tem algum problema?", "alertas de hoje?".',

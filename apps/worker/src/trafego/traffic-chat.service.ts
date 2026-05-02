@@ -373,6 +373,20 @@ export class TrafficChatService {
         return this.toolListKeywords(ctx, args);
       case 'list_ads':
         return this.toolListAds(ctx, args);
+      case 'list_search_terms':
+        return this.toolListSearchTerms(ctx, args);
+      case 'list_auction_insights':
+        return this.toolListAuctionInsights(ctx, args);
+      case 'list_landing_pages':
+        return this.toolListLandingPages(ctx, args);
+      case 'list_conversion_actions':
+        return this.toolListConversionActions(ctx, args);
+      case 'list_lead_form_submissions':
+        return this.toolListLeadFormSubmissions(ctx, args);
+      case 'list_asset_groups':
+        return this.toolListAssetGroups(ctx, args);
+      case 'get_metric_breakdowns':
+        return this.toolMetricBreakdowns(ctx, args);
       case 'list_recent_alerts':
         return this.toolListAlerts(ctx, args);
       case 'list_recent_decisions':
@@ -600,6 +614,295 @@ export class TrafficChatService {
     return { count: items.length, ads: items };
   }
 
+  private async toolListSearchTerms(ctx: any, args: any) {
+    const where: any = { account_id: ctx.accountId };
+    if (args.campaign_id) where.campaign_id = args.campaign_id;
+    if (args.ad_group_id) where.ad_group_id = args.ad_group_id;
+    if (args.only_zero_conversions) where.conversions = 0;
+    if (args.min_spend_brl !== undefined) {
+      where.cost_micros = {
+        gte: BigInt(Math.max(0, Math.round(Number(args.min_spend_brl) * 1_000_000))),
+      };
+    }
+    const items = await this.prisma.trafficSearchTerm.findMany({
+      where,
+      orderBy: [{ cost_micros: 'desc' }, { clicks: 'desc' }],
+      take: Math.min(Math.max(args.limit ?? 30, 1), 100),
+      select: {
+        id: true,
+        search_term: true,
+        match_type: true,
+        status: true,
+        campaign_id: true,
+        ad_group_id: true,
+        impressions: true,
+        clicks: true,
+        cost_micros: true,
+        conversions: true,
+        conversions_value: true,
+        last_seen_at: true,
+      },
+    });
+    return {
+      count: items.length,
+      search_terms: items.map((item) => ({
+        id: item.id,
+        search_term: item.search_term,
+        match_type: item.match_type,
+        status: item.status,
+        campaign_id: item.campaign_id,
+        ad_group_id: item.ad_group_id,
+        impressions: item.impressions,
+        clicks: item.clicks,
+        conversions: item.conversions,
+        conversions_value: item.conversions_value,
+        last_seen_at: item.last_seen_at,
+        cost_brl: microsToBrl(item.cost_micros),
+        cpl_brl:
+          item.conversions > 0
+            ? microsToBrl(item.cost_micros) / item.conversions
+            : null,
+      })),
+    };
+  }
+
+  private async toolListAuctionInsights(ctx: any, args: any) {
+    const dateFrom = args.date_from ? new Date(args.date_from) : daysAgo(30);
+    const dateTo = args.date_to ? new Date(args.date_to) : new Date();
+    const where: any = {
+      account_id: ctx.accountId,
+      date: { gte: dateFrom, lte: dateTo },
+    };
+    if (args.campaign_id) where.campaign_id = args.campaign_id;
+    const rows = await this.prisma.trafficAuctionInsightDaily.groupBy({
+      by: ['domain'],
+      where,
+      _avg: {
+        impression_share: true,
+        overlap_rate: true,
+        position_above_rate: true,
+        top_impression_rate: true,
+        abs_top_impression_rate: true,
+        outranking_share: true,
+      },
+      _count: { _all: true },
+      orderBy: { _avg: { impression_share: 'desc' } },
+      take: Math.min(Math.max(args.limit ?? 20, 1), 100),
+    });
+    return {
+      period: {
+        from: dateFrom.toISOString().slice(0, 10),
+        to: dateTo.toISOString().slice(0, 10),
+      },
+      count: rows.length,
+      participants: rows.map((row) => ({
+        domain: row.domain,
+        days_with_data: row._count._all,
+        impression_share: decimalToNumber(row._avg.impression_share),
+        overlap_rate: decimalToNumber(row._avg.overlap_rate),
+        position_above_rate: decimalToNumber(row._avg.position_above_rate),
+        top_impression_rate: decimalToNumber(row._avg.top_impression_rate),
+        abs_top_impression_rate: decimalToNumber(row._avg.abs_top_impression_rate),
+        outranking_share: decimalToNumber(row._avg.outranking_share),
+      })),
+    };
+  }
+
+  private async toolListLandingPages(ctx: any, args: any) {
+    const where: any = { tenant_id: ctx.tenantId };
+    if (args.campaign_id) where.campaign_id = args.campaign_id;
+    const items = await this.prisma.landingPage.findMany({
+      where,
+      orderBy: [{ conversions_30d: 'desc' }, { clicks_30d: 'desc' }],
+      take: Math.min(Math.max(args.limit ?? 30, 1), 100),
+      select: {
+        id: true,
+        campaign_id: true,
+        url: true,
+        title: true,
+        pagespeed_mobile: true,
+        pagespeed_desktop: true,
+        lcp_ms: true,
+        cls_x100: true,
+        inp_ms: true,
+        last_pagespeed_at: true,
+        last_analyzed_at: true,
+        analysis: true,
+        clicks_30d: true,
+        conversions_30d: true,
+      },
+    });
+    return { count: items.length, landing_pages: items };
+  }
+
+  private async toolListConversionActions(ctx: any, args: any) {
+    const where: any = { account_id: ctx.accountId };
+    if (args.status && args.status !== 'ALL') where.status = args.status;
+    if (args.only_mapped) where.crm_event_kind = { not: null };
+    const items = await this.prisma.trafficConversionAction.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { name: 'asc' }],
+      take: Math.min(Math.max(args.limit ?? 50, 1), 100),
+      select: {
+        id: true,
+        google_conversion_id: true,
+        name: true,
+        category: true,
+        status: true,
+        type: true,
+        counting_type: true,
+        click_through_lookback: true,
+        include_in_conversions: true,
+        crm_event_kind: true,
+        default_value_micros: true,
+        last_seen_at: true,
+      },
+    });
+    return {
+      count: items.length,
+      conversion_actions: items.map((item) => ({
+        id: item.id,
+        google_conversion_id: item.google_conversion_id,
+        name: item.name,
+        category: item.category,
+        status: item.status,
+        type: item.type,
+        counting_type: item.counting_type,
+        click_through_lookback: item.click_through_lookback,
+        include_in_conversions: item.include_in_conversions,
+        crm_event_kind: item.crm_event_kind,
+        last_seen_at: item.last_seen_at,
+        default_value_brl:
+          item.default_value_micros !== null
+            ? microsToBrl(item.default_value_micros)
+            : null,
+      })),
+    };
+  }
+
+  private async toolListLeadFormSubmissions(ctx: any, args: any) {
+    const where: any = { account_id: ctx.accountId };
+    if (args.status && args.status !== 'ALL') where.status = args.status;
+    const items = await this.prisma.trafficLeadFormSubmission.findMany({
+      where,
+      orderBy: { submitted_at: 'desc' },
+      take: Math.min(Math.max(args.limit ?? 20, 1), 100),
+      select: {
+        id: true,
+        google_asset_id: true,
+        campaign_id: true,
+        gclid: true,
+        full_name: true,
+        email: true,
+        phone: true,
+        lead_id: true,
+        status: true,
+        error_message: true,
+        submitted_at: true,
+        processed_at: true,
+      },
+    });
+    return { count: items.length, submissions: items };
+  }
+
+  private async toolListAssetGroups(ctx: any, args: any) {
+    const where: any = { account_id: ctx.accountId };
+    if (args.campaign_id) where.campaign_id = args.campaign_id;
+    if (args.status && args.status !== 'ALL') where.status = args.status;
+    const items = await this.prisma.trafficAssetGroup.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { name: 'asc' }],
+      take: Math.min(Math.max(args.limit ?? 30, 1), 100),
+      select: {
+        id: true,
+        campaign_id: true,
+        google_asset_group_id: true,
+        name: true,
+        status: true,
+        ad_strength: true,
+        primary_status: true,
+        group_assets: {
+          take: 12,
+          select: {
+            asset_type: true,
+            asset_text: true,
+            asset_url: true,
+            field_type: true,
+            performance_label: true,
+            status: true,
+          },
+        },
+      },
+    });
+    return { count: items.length, asset_groups: items };
+  }
+
+  private async toolMetricBreakdowns(ctx: any, args: any) {
+    const dateFrom = args.date_from ? new Date(args.date_from) : daysAgo(30);
+    const dateTo = args.date_to ? new Date(args.date_to) : new Date();
+    const metricWhere: any = {
+      account_id: ctx.accountId,
+      date: { gte: dateFrom, lte: dateTo },
+    };
+    if (args.campaign_id) metricWhere.campaign_id = args.campaign_id;
+
+    const [devices, hours, schedules] = await Promise.all([
+      this.prisma.trafficMetricDevice.groupBy({
+        by: ['device'],
+        where: metricWhere,
+        _sum: {
+          impressions: true,
+          clicks: true,
+          cost_micros: true,
+          conversions: true,
+          conversions_value: true,
+        },
+      }),
+      this.prisma.trafficMetricHourly.groupBy({
+        by: ['hour'],
+        where: metricWhere,
+        _sum: {
+          impressions: true,
+          clicks: true,
+          cost_micros: true,
+          conversions: true,
+          conversions_value: true,
+        },
+        orderBy: { hour: 'asc' },
+      }),
+      this.prisma.trafficAdSchedule.findMany({
+        where: {
+          account_id: ctx.accountId,
+          ...(args.campaign_id ? { campaign_id: args.campaign_id } : {}),
+        },
+        orderBy: [{ day_of_week: 'asc' }, { start_hour: 'asc' }],
+        take: 200,
+        select: {
+          campaign_id: true,
+          day_of_week: true,
+          start_hour: true,
+          start_minute: true,
+          end_hour: true,
+          end_minute: true,
+          bid_modifier: true,
+        },
+      }),
+    ]);
+
+    return {
+      period: {
+        from: dateFrom.toISOString().slice(0, 10),
+        to: dateTo.toISOString().slice(0, 10),
+      },
+      by_device: devices.map((row) => summarizeMetricGroup(row.device, row._sum)),
+      by_hour: hours.map((row) => summarizeMetricGroup(String(row.hour), row._sum)),
+      ad_schedules: schedules.map((schedule) => ({
+        ...schedule,
+        bid_modifier: decimalToNumber(schedule.bid_modifier),
+      })),
+    };
+  }
+
   private async toolListAlerts(ctx: any, args: any) {
     const where: any = { account_id: ctx.accountId, status: 'OPEN' };
     if (args.severity && args.severity !== 'ALL') where.severity = args.severity;
@@ -775,9 +1078,13 @@ const SYSTEM_PROMPT = `Você é a assistente de IA da gestão de tráfego do esc
 
 CAPACIDADES
 - Você tem ferramentas (tools) pra consultar dados em tempo real do CRM e do Google Ads:
-  campanhas, métricas, keywords, ads, alertas, decisões da IA, recomendações Google.
+  campanhas, métricas, leilão/concorrentes, termos de busca, keywords, ads,
+  landing pages, lead forms, conversion actions, asset groups, device/hora/agenda,
+  alertas, decisões da IA e recomendações Google.
 - Você pode propor ações via tool 'propose_action' (pausar campanha, ajustar budget, adicionar negative keyword). NÃO executa direto — vira card "Aplicar/Rejeitar" pro admin confirmar.
 - Sempre que precisar de dados, USE A TOOL. Não invente números.
+- A conversa usa o banco/cache local sincronizado. Se o Google Ads mudou agora,
+  avise que o usuário deve rodar "Sincronizar agora" antes de confiar no número.
 
 TOM E ESTILO
 - Português brasileiro, profissional mas natural.
@@ -818,6 +1125,45 @@ function daysAgo(n: number): Date {
   d.setUTCDate(d.getUTCDate() - n);
   d.setUTCHours(0, 0, 0, 0);
   return d;
+}
+
+function microsToBrl(value: bigint | number | null | undefined): number {
+  return Number(value ?? 0) / 1_000_000;
+}
+
+function decimalToNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number(value);
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toNumber' in value &&
+    typeof (value as { toNumber: () => number }).toNumber === 'function'
+  ) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function summarizeMetricGroup(label: string, sum: any) {
+  const cost = microsToBrl(sum.cost_micros);
+  const clicks = Number(sum.clicks ?? 0);
+  const impressions = Number(sum.impressions ?? 0);
+  const conversions = decimalToNumber(sum.conversions) ?? 0;
+  const conversionValue = decimalToNumber(sum.conversions_value) ?? 0;
+  return {
+    label,
+    cost_brl: cost,
+    clicks,
+    impressions,
+    conversions,
+    conversion_value: conversionValue,
+    ctr: impressions > 0 ? clicks / impressions : 0,
+    cpl_brl: conversions > 0 ? cost / conversions : null,
+    avg_cpc_brl: clicks > 0 ? cost / clicks : null,
+  };
 }
 
 export type SendMessageResult = {

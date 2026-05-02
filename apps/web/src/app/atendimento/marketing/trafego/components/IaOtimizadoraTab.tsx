@@ -15,6 +15,7 @@ import {
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { IaOtimizaPanel } from './IaOtimizaPanel';
+import { AiKnowledgePanel } from './AiKnowledgePanel';
 
 type LoopKind = 'HOURLY' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'TRIGGERED';
 type Action = 'EXECUTE' | 'SUGGEST' | 'BLOCK' | 'NOTIFY_ONLY' | 'FAILED';
@@ -75,6 +76,19 @@ interface Policy {
   ignored_cooldown_days: number;
   reverted_penalty_days: number;
   max_resuggestion_strikes: number;
+}
+
+type ApiError = {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+};
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  const message = (err as ApiError)?.response?.data?.message;
+  return typeof message === 'string' && message.length > 0 ? message : fallback;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -148,9 +162,8 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
       await api.post('/trafego/ai/trigger', { loop_kind: loopKind });
       showSuccess(`Loop ${loopKind} enfileirado. Recarregando em 30s...`);
       setTimeout(() => loadAll(), 30_000);
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Erro ao acionar IA';
-      showError(msg);
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao acionar IA'));
     } finally {
       setRunning(false);
     }
@@ -180,9 +193,8 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
       showSuccess(
         permanent ? 'Veto permanente registrado.' : 'Feedback registrado.',
       );
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Erro ao registrar feedback';
-      showError(msg);
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao registrar feedback'));
     }
   }
 
@@ -198,9 +210,8 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
       const { data } = await api.patch<Policy>('/trafego/ai/policy', payload);
       setPolicy(data);
       showSuccess('Política da IA atualizada.');
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Erro ao salvar política';
-      showError(msg);
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao salvar política'));
     }
   }
 
@@ -222,6 +233,8 @@ export function IaOtimizadoraTab({ canManage }: { canManage: boolean }) {
           onChange={patchPolicy}
         />
       )}
+
+      <AiKnowledgePanel />
 
       <FilterTabs filter={filter} setFilter={setFilter} pending={pendingCount} />
 
@@ -439,7 +452,9 @@ function DecisionCard({
   // Sprint G.5 — Quantas vezes a IA tentou sugerir isso (vem em inputs.suggestion_strikes)
   const strikes =
     decision.inputs && typeof decision.inputs === 'object'
-      ? Number((decision.inputs as any).suggestion_strikes ?? 0)
+      ? Number(
+          (decision.inputs as Record<string, unknown>).suggestion_strikes ?? 0,
+        )
       : 0;
 
   return (
