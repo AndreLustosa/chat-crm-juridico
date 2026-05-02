@@ -4,17 +4,15 @@ import { useEffect, useState } from 'react';
 import {
   Globe,
   Loader2,
-  Inbox,
-  Plus,
   Sparkles,
   Gauge,
   X,
-  Trash2,
   ExternalLink,
   AlertTriangle,
   AlertCircle,
   CheckCircle2,
   Info,
+  type LucideIcon,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -56,7 +54,7 @@ interface AnalysisResult {
 
 const SEVERITY_STYLE: Record<
   AnalysisIssue['severity'],
-  { color: string; icon: any; label: string }
+  { color: string; icon: LucideIcon; label: string }
 > = {
   CRITICAL: {
     color: 'bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30',
@@ -90,6 +88,19 @@ const CATEGORY_LABEL: Record<AnalysisIssue['category'], string> = {
   UX: 'UX',
 };
 
+type ApiError = {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+};
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  const message = (err as ApiError)?.response?.data?.message;
+  return typeof message === 'string' && message.trim() ? message : fallback;
+}
+
 function pageSpeedColor(score: number): string {
   if (score === 0) return 'text-muted-foreground';
   if (score < 50) return 'text-red-500';
@@ -108,7 +119,6 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
   const [pages, setPages] = useState<LandingPage[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState<{
     page: LandingPage;
     result: AnalysisResult;
@@ -119,8 +129,8 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
     try {
       const { data } = await api.get<LandingPage[]>('/trafego/landing-pages');
       setPages(data);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Erro ao listar Landing Pages.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Erro ao listar Landing Pages.'));
     } finally {
       setLoading(false);
     }
@@ -137,10 +147,8 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
       await api.post(`/trafego/landing-pages/${p.id}/pagespeed`);
       showSuccess('PageSpeed atualizado.');
       await load();
-    } catch (err: any) {
-      showError(
-        err?.response?.data?.message ?? 'Falha ao rodar PageSpeed Insights.',
-      );
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Falha ao rodar PageSpeed Insights.'));
     } finally {
       setActingId(null);
     }
@@ -159,8 +167,8 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
       );
       setAnalysisOpen({ page: p, result: data.analysis });
       await load();
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha na análise IA.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Falha na análise IA.'));
     } finally {
       setActingId(null);
     }
@@ -177,22 +185,10 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
         return;
       }
       setAnalysisOpen({ page: p, result: data.analysis as AnalysisResult });
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao buscar análise.');
+    } catch (err: unknown) {
+      showError(getApiErrorMessage(err, 'Falha ao buscar análise.'));
     } finally {
       setActingId(null);
-    }
-  }
-
-  async function remove(p: LandingPage) {
-    if (!canManage) return;
-    if (!confirm(`Remover a LP "${p.url}" do cache?`)) return;
-    try {
-      await api.delete(`/trafego/landing-pages/${p.id}`);
-      showSuccess('Landing Page removida.');
-      await load();
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao remover.');
     }
   }
 
@@ -205,19 +201,9 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
             Landing Pages
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Monitore PageSpeed e peça análise da IA pra otimizar suas LPs.
+            Detectadas automaticamente pelas URLs finais dos anúncios sincronizados.
           </p>
         </div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
-          >
-            <Plus size={13} />
-            Adicionar LP
-          </button>
-        )}
       </div>
 
       {loading ? (
@@ -229,11 +215,11 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
         <div className="bg-card border border-border rounded-xl p-12 text-center">
           <Globe size={40} className="mx-auto text-muted-foreground mb-3" />
           <h3 className="text-base font-bold text-foreground mb-1">
-            Nenhuma LP cadastrada
+            Nenhuma landing page detectada
           </h3>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
-            Adicione URLs das landing pages das suas campanhas pra monitorar
-            PageSpeed e pedir análise CRO/OAB com IA.
+            Rode uma sincronização do Google Ads para importar os anúncios. As
+            URLs finais aparecerão aqui automaticamente.
           </p>
         </div>
       ) : (
@@ -247,20 +233,10 @@ export function LandingPagesTab({ canManage }: { canManage: boolean }) {
               onRefreshPageSpeed={() => refreshPageSpeed(p)}
               onAnalyze={() => analyze(p)}
               onViewAnalysis={() => viewLastAnalysis(p)}
-              onRemove={() => remove(p)}
             />
           ))}
         </div>
       )}
-
-      <CreateLandingPageModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setCreateOpen(false);
-          load();
-        }}
-      />
 
       {analysisOpen && (
         <AnalysisModal
@@ -280,7 +256,6 @@ function LandingPageCard({
   onRefreshPageSpeed,
   onAnalyze,
   onViewAnalysis,
-  onRemove,
 }: {
   page: LandingPage;
   canManage: boolean;
@@ -288,7 +263,6 @@ function LandingPageCard({
   onRefreshPageSpeed: () => void;
   onAnalyze: () => void;
   onViewAnalysis: () => void;
-  onRemove: () => void;
 }) {
   const acting = actingId === page.id;
   const lcpDisplay = page.lcp_ms ? `${(page.lcp_ms / 1000).toFixed(1)}s` : '—';
@@ -324,17 +298,6 @@ function LandingPageCard({
               </p>
             )}
           </div>
-          {canManage && (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={acting}
-              title="Remover do cache"
-              className="p-1.5 text-muted-foreground hover:text-red-500"
-            >
-              <Trash2 size={13} />
-            </button>
-          )}
         </div>
       </div>
 
@@ -472,116 +435,6 @@ function PageSpeedScore({ label, score }: { label: string; score: number }) {
             className={`h-full transition-all ${pageSpeedBg(score)}`}
             style={{ width: `${score}%` }}
           />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CreateLandingPageModal({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [url, setUrl] = useState('');
-  const [title, setTitle] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  if (!open) return null;
-
-  async function submit() {
-    if (!url.trim()) {
-      showError('URL é obrigatória.');
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await api.post('/trafego/landing-pages', {
-        url: url.trim(),
-        title: title.trim() || undefined,
-      });
-      showSuccess('Landing Page adicionada.');
-      setUrl('');
-      setTitle('');
-      onCreated();
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao adicionar LP.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !submitting) onClose();
-      }}
-    >
-      <div className="bg-card border border-border rounded-xl w-full max-w-md p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-bold text-foreground">
-            Adicionar Landing Page
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="p-1 rounded hover:bg-accent text-muted-foreground"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-foreground mb-1">
-              URL *
-            </label>
-            <input
-              autoFocus
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://andrelustosa.adv.br/trabalhista"
-              className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-foreground mb-1">
-              Título (opcional)
-            </label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: LP Trabalhista — Maceió"
-              className="w-full px-3 py-2 bg-background border border-border rounded-md text-sm"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 mt-5">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="px-4 py-2 text-sm rounded-md border border-border hover:bg-accent disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-violet-600 hover:bg-violet-700 text-white font-semibold disabled:opacity-50"
-          >
-            {submitting && <Loader2 size={14} className="animate-spin" />}
-            Adicionar
-          </button>
         </div>
       </div>
     </div>

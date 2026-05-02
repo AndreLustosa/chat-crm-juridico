@@ -38,6 +38,8 @@ export class TrafegoLandingPagesService {
   // ─── CRUD ───────────────────────────────────────────────────────────────
 
   async list(tenantId: string) {
+    await this.syncFromAdFinalUrls(tenantId);
+
     const items = await this.prisma.landingPage.findMany({
       where: { tenant_id: tenantId },
       orderBy: [{ updated_at: 'desc' }],
@@ -64,6 +66,66 @@ export class TrafegoLandingPagesService {
       conversions_30d: i.conversions_30d,
       created_at: i.created_at,
     }));
+  }
+
+  /**
+   * Landing pages sao derivadas dos final_urls dos anuncios sincronizados.
+   * O cadastro manual continua existindo como fallback, mas a fonte principal
+   * da lista deve ser o cache de TrafficAd vindo da Google Ads API.
+   */
+  private async syncFromAdFinalUrls(tenantId: string): Promise<number> {
+    const ads = await this.prisma.trafficAd.findMany({
+      where: {
+        tenant_id: tenantId,
+        status: { not: 'REMOVED' },
+      },
+      select: {
+        account_id: true,
+        final_urls: true,
+        ad_group: {
+          select: {
+            campaign_id: true,
+            campaign: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    const seen = new Set<string>();
+    let createdOrUpdated = 0;
+
+    for (const ad of ads) {
+      for (const rawUrl of this.extractFinalUrls(ad.final_urls)) {
+        const url = this.normalizeUrl(rawUrl);
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+
+        await this.prisma.landingPage.upsert({
+          where: {
+            tenant_id_url: {
+              tenant_id: tenantId,
+              url,
+            },
+          },
+          create: {
+            tenant_id: tenantId,
+            account_id: ad.account_id,
+            campaign_id: ad.ad_group?.campaign_id ?? null,
+            url,
+            title: ad.ad_group?.campaign?.name
+              ? `LP - ${ad.ad_group.campaign.name}`
+              : null,
+          },
+          update: {
+            account_id: ad.account_id,
+            campaign_id: ad.ad_group?.campaign_id ?? undefined,
+          },
+        });
+        createdOrUpdated++;
+      }
+    }
+
+    return createdOrUpdated;
   }
 
   async get(tenantId: string, id: string) {
@@ -499,11 +561,26 @@ ${stripped}`;
     }
     try {
       const u = new URL(s);
+      u.hash = '';
+      for (const key of [...u.searchParams.keys()]) {
+        const k = key.toLowerCase();
+        if (
+          k.startsWith('utm_') ||
+          ['gclid', 'gbraid', 'wbraid', 'fbclid', 'msclkid'].includes(k)
+        ) {
+          u.searchParams.delete(key);
+        }
+      }
       let str = u.toString();
       if (str.endsWith('/') && u.pathname === '/') str = str.slice(0, -1);
       return str;
     } catch {
       return null;
     }
+  }
+
+  private extractFinalUrls(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is string => typeof item === 'string');
   }
 }
