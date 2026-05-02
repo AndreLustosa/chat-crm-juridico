@@ -48,6 +48,7 @@ export function Sidebar() {
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   const [overdueCount, setOverdueCount] = useState<number>(0);
   const [djenUnread, setDjenUnread] = useState<number>(0);
+  const [advogadoBadge, setAdvogadoBadge] = useState<number>(0);
   const [mounted, setMounted] = useState(false);
 
   // Fixed-position tooltip state
@@ -189,6 +190,37 @@ export function Sidebar() {
     return () => clearInterval(interval);
   }, []);
 
+  // Badge advogado: eventos atrasados + do dia (a cada 5 min)
+  useEffect(() => {
+    if (!perms.canViewAdvogado) return;
+    const fetchAdvBadge = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        const now = new Date();
+        const start = new Date(now.getTime() - 30 * 86400000).toISOString();
+        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
+        const res = await fetch(`${API_BASE_URL}/calendar/events?start=${start}&end=${endOfDay}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!res.ok) return;
+        const events: any[] = await res.json();
+        const count = events.filter((e: any) =>
+          ['AGENDADO', 'CONFIRMADO'].includes(e.status) &&
+          new Date(e.start_at) <= now
+        ).length;
+        setAdvogadoBadge(count);
+      } catch { /* silencioso */ }
+    };
+    fetchAdvBadge();
+    const interval = setInterval(fetchAdvBadge, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [perms.canViewAdvogado]);
+
   // Badge para petições devolvidas (estagiário)
   const [internBadge, setInternBadge] = useState(0);
   useEffect(() => {
@@ -260,6 +292,7 @@ export function Sidebar() {
       href: '/atendimento/advogado',
       icon: <Scale size={20} strokeWidth={2} />,
       match: (p) => p.startsWith('/atendimento/advogado'),
+      badge: advogadoBadge,
       show: perms.canViewAdvogado,
     },
     processos: {
