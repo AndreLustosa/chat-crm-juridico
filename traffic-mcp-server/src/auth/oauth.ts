@@ -404,8 +404,8 @@ export async function authorizeHandler(req: Request, res: Response) {
   const input = req.method === 'POST' ? req.body : req.query;
   const redirectUri = typeof input.redirect_uri === 'string' ? input.redirect_uri : undefined;
   const client =
-    trafficOAuthProvider.getClient(input.client_id) ||
-    trafficOAuthProvider.getOrCreateStaticClient(input.client_id, redirectUri);
+    trafficOAuthProvider.getOrCreateStaticClient(input.client_id, redirectUri) ||
+    trafficOAuthProvider.getClient(input.client_id);
   const state = typeof input.state === 'string' ? input.state : undefined;
 
   if (!client) {
