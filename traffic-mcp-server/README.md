@@ -21,7 +21,7 @@ Endpoint:
 - Health: `GET /health`
 - MCP: `POST /mcp`
 - Auth: `Authorization: Bearer <MCP_AUTH_TOKEN>`
-- OAuth metadata: `GET /.well-known/oauth-authorization-server`
+- OAuth metadata: `GET /traffic-mcp/.well-known/oauth-authorization-server`
 - Protected resource metadata: `GET /traffic-mcp/.well-known/oauth-protected-resource`
 
 ## Variaveis
