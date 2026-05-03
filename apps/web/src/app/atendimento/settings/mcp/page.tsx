@@ -26,8 +26,7 @@ const oauthIssuer = 'https://andrelustosaadvogados.com.br/traffic-mcp';
 const oauthAuthorizationUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/oauth/authorize';
 const oauthTokenUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/oauth/token';
 const oauthMetadataUrl = 'https://andrelustosaadvogados.com.br/.well-known/oauth-authorization-server';
-const resourceMetadataUrl =
-  'https://andrelustosaadvogados.com.br/.well-known/oauth-protected-resource/traffic-mcp/mcp';
+const resourceMetadataUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/.well-known/oauth-protected-resource';
 const oauthStaticClientId = 'traffic-chatgpt';
 const oauthDefaultScopes = 'mcp:tools';
 const oauthBaseScopes = '';
@@ -146,12 +145,12 @@ export default function McpSettingsPage() {
           <InstructionLine label="Descricao" value="Analisa metricas e gerencia campanhas do Google Ads usando o CRM." />
           <InstructionLine label="URL do servidor MCP" value={trafficMcpUrl} />
           <InstructionLine label="Autenticacao" value="OAuth ou Mista" />
-          <InstructionLine label="Tela de autorizacao" value="Cole o token gerado no Passo 1." />
+          <InstructionLine label="Tela de autorizacao" value="O ChatGPT nao deve pedir token em popup." />
           <div className="flex items-start gap-2 text-sm text-muted-foreground bg-muted/40 rounded-lg px-3 py-2.5">
             <Info className="w-4 h-4 mt-0.5 shrink-0" />
             <span>
-              Depois de autorizado, o ChatGPT guarda a conexao. Voce so gera outro token se quiser
-              trocar a credencial ou criar um novo aplicativo.
+              Use o token do Passo 1 como segredo OAuth nas configuracoes avancadas. Depois de
+              conectado, o ChatGPT guarda a conexao.
             </span>
           </div>
         </div>
@@ -167,13 +166,13 @@ export default function McpSettingsPage() {
             <InstructionLine label="Metodo recomendado" value="Cliente OAuth definido pelo usuario" />
             <InstructionLine label="Registro Dinamico de Cliente (DCR)" value="Nao usar nesta conexao" />
             <UrlRow
-              label="ID do cliente OAuth alternativo"
+              label="ID do cliente OAuth"
               value={oauthStaticClientId}
               copied={copied === 'oauthClientId'}
               onCopy={() => copy(oauthStaticClientId, 'oauthClientId')}
             />
-            <InstructionLine label="Segredo do cliente OAuth" value="Deixe em branco" />
-            <InstructionLine label="Metodo do token endpoint" value="none" />
+            <InstructionLine label="Segredo do cliente OAuth" value="Cole o token MCP gerado no Passo 1" />
+            <InstructionLine label="Metodo do token endpoint" value="client_secret_post" />
           </div>
 
           <div className="space-y-3">
@@ -238,8 +237,8 @@ export default function McpSettingsPage() {
             <Info className="w-4 h-4 mt-0.5 shrink-0" />
             <span>
               Se aparecer o erro de RFC 7591 Dynamic Client Registration, volte nesta tela do
-              ChatGPT e escolha Cliente OAuth definido pelo usuario. Use o ID acima e deixe segredo
-              e URL de registro em branco.
+              ChatGPT e escolha Cliente OAuth definido pelo usuario. Use o ID acima, cole o token
+              do Passo 1 no segredo do cliente OAuth e deixe a URL de registro em branco.
             </span>
           </div>
         </div>

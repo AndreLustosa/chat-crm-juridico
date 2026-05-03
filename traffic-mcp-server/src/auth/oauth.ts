@@ -133,6 +133,26 @@ function clientCredentials(req: Request) {
   };
 }
 
+async function validateClientCredentials(client: RegisteredClient, clientSecret: string | undefined) {
+  if (client.client_id === config.oauth.staticClientId) {
+    if (!clientSecret) {
+      return false;
+    }
+
+    return (
+      safeEqual(clientSecret, config.oauth.authorizationToken) ||
+      safeEqual(clientSecret, config.authToken) ||
+      (await verifyCrmMcpToken(clientSecret))
+    );
+  }
+
+  if (clientSecret && client.client_secret) {
+    return clientSecret === client.client_secret;
+  }
+
+  return true;
+}
+
 function redirectWithError(redirectUri: string, error: string, description: string, state?: string) {
   const target = new URL(redirectUri);
   target.searchParams.set('error', error);
@@ -154,8 +174,8 @@ function metadata() {
     response_modes_supported: ['query'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'],
-    token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
-    revocation_endpoint_auth_methods_supported: ['client_secret_post', 'none'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
+    revocation_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
     scopes_supported: config.oauth.scopes,
     client_id_metadata_document_supported: false,
     service_documentation: `${base}/health`,
@@ -287,7 +307,7 @@ class TrafficOAuthProvider {
       client_id_issued_at: Math.floor(Date.now() / 1000),
       client_secret_expires_at: 0,
       redirect_uris: [redirectUri],
-      token_endpoint_auth_method: 'none',
+      token_endpoint_auth_method: 'client_secret_post',
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
       client_name: 'ChatGPT',
@@ -391,6 +411,27 @@ class TrafficOAuthProvider {
 
 export const trafficOAuthProvider = new TrafficOAuthProvider();
 
+function issueAuthorizationRedirect(
+  client: RegisteredClient,
+  redirectUri: string,
+  input: Record<string, unknown>,
+  state: string | undefined,
+) {
+  const code = trafficOAuthProvider.createAuthorizationCode({
+    clientId: client.client_id,
+    redirectUri,
+    codeChallenge: input.code_challenge as string,
+    scopes: requestedScopes(input.scope),
+    resource: typeof input.resource === 'string' ? input.resource : config.publicMcpUrl,
+  });
+  const target = new URL(redirectUri);
+  target.searchParams.set('code', code);
+  if (state) {
+    target.searchParams.set('state', state);
+  }
+  return target.toString();
+}
+
 export function oauthMetadataHandler(_req: Request, res: Response) {
   res.json(metadata());
 }
@@ -430,13 +471,7 @@ export async function authorizeHandler(req: Request, res: Response) {
   }
 
   if (req.method === 'GET') {
-    const formParams = Object.fromEntries(
-      Object.entries(input)
-        .filter(([, value]) => typeof value === 'string')
-        .map(([key, value]) => [key, value as string]),
-    );
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.send(renderAuthorizePage(formParams));
+    return res.redirect(302, issueAuthorizationRedirect(client, redirectUri, input, state));
   }
 
   const providedToken = typeof input.authorization_token === 'string' ? input.authorization_token : '';
@@ -446,37 +481,26 @@ export async function authorizeHandler(req: Request, res: Response) {
     return res.status(401).send('Token MCP invalido.');
   }
 
-  const code = trafficOAuthProvider.createAuthorizationCode({
-    clientId: client.client_id,
-    redirectUri,
-    codeChallenge: input.code_challenge,
-    scopes: requestedScopes(input.scope),
-    resource: typeof input.resource === 'string' ? input.resource : config.publicMcpUrl,
-  });
-  const target = new URL(redirectUri);
-  target.searchParams.set('code', code);
-  if (state) {
-    target.searchParams.set('state', state);
-  }
-  return res.redirect(302, target.toString());
+  return res.redirect(302, issueAuthorizationRedirect(client, redirectUri, input, state));
 }
 
 export async function tokenHandler(req: Request, res: Response) {
   try {
     const body = req.body ?? {};
+    const postedClientSecret = typeof body.client_secret === 'string' ? body.client_secret : undefined;
     const credentials =
       clientCredentials(req) ||
       (body.grant_type === 'authorization_code'
-        ? { clientId: trafficOAuthProvider.getAuthorizationCodeClientId(body.code), clientSecret: undefined }
+        ? { clientId: trafficOAuthProvider.getAuthorizationCodeClientId(body.code), clientSecret: postedClientSecret }
         : undefined) ||
       (body.grant_type === 'refresh_token'
-        ? { clientId: trafficOAuthProvider.getRefreshTokenClientId(body.refresh_token), clientSecret: undefined }
+        ? { clientId: trafficOAuthProvider.getRefreshTokenClientId(body.refresh_token), clientSecret: postedClientSecret }
         : undefined);
     const client = credentials ? trafficOAuthProvider.getClient(credentials.clientId) : undefined;
     if (!credentials || !client) {
       return oauthError(res, 401, 'invalid_client', 'client_id invalido');
     }
-    if (credentials.clientSecret && client.client_secret && credentials.clientSecret !== client.client_secret) {
+    if (!(await validateClientCredentials(client, credentials.clientSecret))) {
       return oauthError(res, 401, 'invalid_client', 'client_secret invalido');
     }
 

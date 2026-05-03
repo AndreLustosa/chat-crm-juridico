@@ -22,7 +22,7 @@ Endpoint:
 - MCP: `POST /mcp`
 - Auth: `Authorization: Bearer <MCP_AUTH_TOKEN>`
 - OAuth metadata: `GET /.well-known/oauth-authorization-server`
-- Protected resource metadata: `GET /.well-known/oauth-protected-resource/traffic-mcp/mcp`
+- Protected resource metadata: `GET /traffic-mcp/.well-known/oauth-protected-resource`
 
 ## Variaveis
 
@@ -51,22 +51,23 @@ No ChatGPT, crie o aplicativo com:
 - Autenticacao: `OAuth` ou `Mista`
 - Registro de cliente recomendado: `Cliente OAuth definido pelo usuario`
 - ID do cliente OAuth: `traffic-chatgpt`
-- Segredo do cliente OAuth: deixe em branco
-- Metodo de autenticacao do token endpoint: `none`
+- Segredo do cliente OAuth: cole o token gerado em **Configuracoes > Integracao MCP**
+- Metodo de autenticacao do token endpoint: `client_secret_post`
 - Escopos padrao: `mcp:tools`
 
-Durante a autorizacao, o ChatGPT abrira uma pagina do proprio MCP. Cole o token
-gerado no menu **Configuracoes > Integracao MCP** do CRM. O segredo interno
-`TRAFFIC_MCP_AUTH_TOKEN` continua aceito para administracao, mas nao e
-necessario para conectar o ChatGPT.
+O ChatGPT nao precisa abrir uma pagina propria do MCP para pedir token. O
+endpoint `/oauth/authorize` redireciona automaticamente com um codigo OAuth, e o
+token gerado no CRM e validado como `client_secret` no `/oauth/token`. O segredo
+interno `TRAFFIC_MCP_AUTH_TOKEN` continua aceito para administracao, mas o fluxo
+recomendado do ChatGPT usa o token do CRM como segredo OAuth.
 
 O servidor tambem possui um endpoint interno de registro, mas o ChatGPT pode
 rejeitar DCR com erro de RFC 7591. Por isso, use o modo "Cliente OAuth definido
 pelo usuario":
 
 - ID do cliente OAuth: `traffic-chatgpt`
-- Segredo do cliente OAuth: deixe em branco
-- Metodo de autenticacao do token endpoint: `none`
+- Segredo do cliente OAuth: token gerado em **Configuracoes > Integracao MCP**
+- Metodo de autenticacao do token endpoint: `client_secret_post`
 - URL de autenticacao: `https://andrelustosaadvogados.com.br/traffic-mcp/oauth/authorize`
 - Token URL: `https://andrelustosaadvogados.com.br/traffic-mcp/oauth/token`
 - URL de registro: deixe em branco
