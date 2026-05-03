@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-  workflow_dispatch:  # permite acionar manualmente pelo GitHub UI
+  workflow_dispatch:
 
 jobs:
   build-and-push:
@@ -59,26 +59,24 @@ jobs:
           tags: andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:latest
           no-cache: true
 
-  # ─── Deploy automático na VPS após todos os builds ───────────────────────
   deploy:
     name: Deploy na VPS
     runs-on: ubuntu-latest
-    needs: build-and-push   # só roda após TODOS os builds da matrix concluírem
+    needs: build-and-push
 
     steps:
-      - name: ⚠️ Verificar secrets SSH
+      - name: Verificar secrets SSH
         id: check
         run: |
           if [ -z "${{ secrets.VPS_HOST }}" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "::warning::Secret VPS_HOST não configurado — deploy na VPS ignorado. Configure em Settings > Secrets > Actions."
+            echo "::warning::Secret VPS_HOST nao configurado - deploy na VPS ignorado. Configure em Settings > Secrets > Actions."
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 🚀 SSH → Pull e atualizar serviços
+      - name: SSH - Pull e atualizar servicos
         if: steps.check.outputs.skip == 'false'
-        continue-on-error: true   # não quebra o workflow se SSH falhar (ex: chave pública ainda não adicionada à VPS)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -88,78 +86,77 @@ jobs:
             set -e
             STACK="lustosaadvogados"
 
-            echo "📦 Pulling novas imagens do Docker Hub..."
+            echo "Pulling novas imagens do Docker Hub..."
             docker pull andreflustosa/chat-crm-juridico-api:latest
             docker pull andreflustosa/chat-crm-juridico-web:latest
             docker pull andreflustosa/chat-crm-juridico-worker:latest
             docker pull andreflustosa/chat-crm-juridico-traffic-mcp:latest
 
-            # Limpa imagens antigas para liberar espaço em disco antes do deploy
-            echo "🧹 Limpando imagens Docker não utilizadas..."
+            echo "Limpando imagens Docker nao utilizadas..."
             docker image prune -f
 
-            # Detecta modo: Swarm ou Compose
             if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
-              echo "🔄 Modo Swarm — atualizando services sequencialmente..."
+              echo "Modo Swarm - atualizando services sequencialmente..."
 
-              # Atualiza um serviço por vez (--detach=false aguarda conclusão antes do próximo)
-              # --update-parallelism 1 garante rolling update de 1 container por vez
-              docker service update \
-                --image andreflustosa/chat-crm-juridico-api:latest \
-                --with-registry-auth --force \
-                --update-parallelism 1 \
-                --update-delay 5s \
-                --detach=false \
-                ${STACK}_api
+              update_service() {
+                local image="$1"
+                shift
+                local service_name=""
 
-              docker service update \
-                --image andreflustosa/chat-crm-juridico-web:latest \
-                --with-registry-auth --force \
-                --update-parallelism 1 \
-                --update-delay 5s \
-                --detach=false \
-                ${STACK}_web
+                for candidate in "$@"; do
+                  if docker service ls --format '{{.Name}}' | grep -qx "$candidate"; then
+                    service_name="$candidate"
+                    break
+                  fi
+                done
 
-              docker service update \
-                --image andreflustosa/chat-crm-juridico-worker:latest \
-                --with-registry-auth --force \
-                --update-parallelism 1 \
-                --update-delay 5s \
-                --detach=false \
-                ${STACK}_worker
+                if [ -z "$service_name" ]; then
+                  echo "::warning::Nenhum servico encontrado para $image. Candidatos: $*"
+                  return 0
+                fi
 
-              TRAFFIC_MCP_SERVICE="${STACK}_traffic-mcp-server"
-              if docker service ls --format '{{.Name}}' | grep -qx "$TRAFFIC_MCP_SERVICE"; then
+                echo "Atualizando $service_name -> $image"
                 docker service update \
-                  --image andreflustosa/chat-crm-juridico-traffic-mcp:latest \
+                  --image "$image" \
                   --with-registry-auth --force \
                   --update-parallelism 1 \
                   --update-delay 5s \
                   --detach=false \
-                  "$TRAFFIC_MCP_SERVICE"
-              else
-                echo "::warning::Serviço $TRAFFIC_MCP_SERVICE ainda não existe. Reimplante o stack no Portainer para criar o MCP de tráfego."
-              fi
+                  "$service_name"
+              }
 
-              # Limpeza pós-deploy: remove imagens antigas que não são mais usadas
+              update_service \
+                andreflustosa/chat-crm-juridico-api:latest \
+                "${STACK}_api" "${STACK}_crm-api" "crm-api"
+
+              update_service \
+                andreflustosa/chat-crm-juridico-web:latest \
+                "${STACK}_web" "${STACK}_crm-web" "crm-web"
+
+              update_service \
+                andreflustosa/chat-crm-juridico-worker:latest \
+                "${STACK}_worker" "${STACK}_crm-worker" "crm-worker"
+
+              update_service \
+                andreflustosa/chat-crm-juridico-traffic-mcp:latest \
+                "${STACK}_traffic-mcp-server" "traffic-mcp-server"
+
               docker image prune -f
 
-              echo "✅ Swarm atualizado!"
+              echo "Swarm atualizado!"
               docker service ls --format "table {{.Name}}\t{{.Image}}\t{{.Replicas}}" \
-                | grep -E "${STACK}|NAME"
+                | grep -E "${STACK}|crm-|traffic-mcp|NAME"
             else
-              echo "🔄 Modo Compose — reiniciando containers..."
-              # Portainer armazena stacks em /opt/stacks/<stack-name>/
+              echo "Modo Compose - reiniciando containers..."
               STACK_DIR="/opt/stacks/${STACK}"
               if [ -d "$STACK_DIR" ]; then
                 cd "$STACK_DIR"
                 docker compose pull api worker web traffic-mcp-server
                 docker compose up -d --no-deps --force-recreate api worker web traffic-mcp-server
               else
-                # Fallback: recria via container_name definidos no portainer-stack.yml
-                docker restart crm-api crm-worker crm-web 2>/dev/null || true
+                docker restart crm-api crm-worker crm-web traffic-mcp-server 2>/dev/null || true
               fi
-              echo "✅ Containers atualizados!"
+              echo "Containers atualizados!"
               docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" \
-                | grep -E "crm-|NAMES"
+                | grep -E "crm-|traffic-mcp|NAMES"
             fi
