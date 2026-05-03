@@ -25,7 +25,6 @@ const trafficMcpUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/mcp';
 const oauthIssuer = 'https://andrelustosaadvogados.com.br/traffic-mcp';
 const oauthAuthorizationUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/oauth/authorize';
 const oauthTokenUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/oauth/token';
-const oauthRegisterUrl = 'https://andrelustosaadvogados.com.br/traffic-mcp/oauth/register';
 const oauthMetadataUrl = 'https://andrelustosaadvogados.com.br/.well-known/oauth-authorization-server';
 const resourceMetadataUrl =
   'https://andrelustosaadvogados.com.br/.well-known/oauth-protected-resource/traffic-mcp/mcp';
@@ -165,8 +164,8 @@ export default function McpSettingsPage() {
         <div className="bg-card border border-border rounded-xl p-5 space-y-5">
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">Registro de cliente</h3>
-            <InstructionLine label="Metodo recomendado" value="Registro Dinamico de Cliente (DCR)" />
-            <InstructionLine label="Metodo alternativo" value="Cliente OAuth definido pelo usuario" />
+            <InstructionLine label="Metodo recomendado" value="Cliente OAuth definido pelo usuario" />
+            <InstructionLine label="Registro Dinamico de Cliente (DCR)" value="Nao usar nesta conexao" />
             <UrlRow
               label="ID do cliente OAuth alternativo"
               value={oauthStaticClientId}
@@ -209,9 +208,9 @@ export default function McpSettingsPage() {
             />
             <UrlRow
               label="URL de registro"
-              value={oauthRegisterUrl}
+              value="(deixe em branco)"
               copied={copied === 'oauthRegisterUrl'}
-              onCopy={() => copy(oauthRegisterUrl, 'oauthRegisterUrl')}
+              onCopy={() => copy('', 'oauthRegisterUrl')}
             />
             <UrlRow
               label="Endereco base do servidor de autorizacao"
@@ -238,9 +237,9 @@ export default function McpSettingsPage() {
           <div className="flex items-start gap-2 text-sm text-muted-foreground bg-muted/40 rounded-lg px-3 py-2.5">
             <Info className="w-4 h-4 mt-0.5 shrink-0" />
             <span>
-              Se o ChatGPT detectar a URL de registro automaticamente, use DCR e nao preencha ID ou
-              segredo. Se a tela continuar mostrando DCR indisponivel, use o cliente alternativo
-              acima com segredo em branco.
+              Se aparecer o erro de RFC 7591 Dynamic Client Registration, volte nesta tela do
+              ChatGPT e escolha Cliente OAuth definido pelo usuario. Use o ID acima e deixe segredo
+              e URL de registro em branco.
             </span>
           </div>
         </div>

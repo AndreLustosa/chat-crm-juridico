@@ -149,7 +149,6 @@ function metadata() {
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
-    registration_endpoint: `${base}/oauth/register`,
     revocation_endpoint: `${base}/oauth/revoke`,
     response_types_supported: ['code'],
     response_modes_supported: ['query'],
