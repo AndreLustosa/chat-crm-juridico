@@ -161,11 +161,18 @@ export class PaymentAlertsCronService {
         const count = payments.length;
         const oldestDays = payments[0].due_date ? Math.ceil((Date.now() - new Date(payments[0].due_date).getTime()) / 86400000) : 0;
 
+        const parcelaLines = payments.map(p => {
+          const val = Number(p.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+          const due = p.due_date ? new Date(p.due_date).toLocaleDateString('pt-BR') : '—';
+          return `▸ ${val} — venc. ${due}`;
+        }).join('\n');
+
         const msg =
           `⚠️ *Aviso de Pagamento em Atraso*\n\n` +
           `Olá, ${firstName}!\n\n` +
-          `Identificamos *${count} parcela(s)* em atraso no valor total de *${totalStr}*` +
-          (oldestDays > 1 ? ` (há ${oldestDays} dias)` : '') + `.\n\n` +
+          `Identificamos *${count} parcela(s)* em atraso:\n\n` +
+          `${parcelaLines}\n\n` +
+          (count > 1 ? `*Total:* ${totalStr}\n\n` : '') +
           `Pedimos gentilmente a regularização o quanto antes para evitar encargos.\n` +
           `Responda esta mensagem para combinarmos a melhor forma de pagamento.\n\n` +
           `_André Lustosa Advogados_`;

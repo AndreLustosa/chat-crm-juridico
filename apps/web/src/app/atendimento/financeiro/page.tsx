@@ -2419,6 +2419,28 @@ function ReceitasTab({ receitas, onRefresh, lawyerId }: { receitas: Transaction[
                               }
                               return null;
                             })()}
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!confirm(`Excluir honorário de ${g.clientName} (${fmt(total)}) e todas as parcelas?`)) return;
+                                try {
+                                  if (g.isLead) {
+                                    const honId = g.payments[0]?.lead_honorario_id;
+                                    const leadId = g.payments[0]?.lead_honorario?.lead_id;
+                                    if (honId && leadId) await api.delete(`/leads/${leadId}/honorarios-negociados/${honId}`);
+                                  } else {
+                                    const honId = g.payments[0]?.honorario_id;
+                                    if (honId) await api.delete(`/honorarios/${honId}`);
+                                  }
+                                  showSuccess('Honorário excluído');
+                                  fetchPending();
+                                } catch { showError('Erro ao excluir'); }
+                              }}
+                              className="p-1.5 rounded-lg hover:bg-red-500/15 transition-colors text-muted-foreground hover:text-red-400"
+                              title="Excluir honorário"
+                            >
+                              <Trash2 size={13} />
+                            </button>
                             <span className="text-[10px] text-muted-foreground">{g.payments.length} parcela(s)</span>
                             <span className="text-sm font-bold text-amber-400">{fmt(total)}</span>
                           </div>
