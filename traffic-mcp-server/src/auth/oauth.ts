@@ -526,6 +526,5 @@ export async function verifyMcpBearerToken(token: string) {
 }
 
 export function protectedResourceMetadataUrl() {
-  const url = new URL(config.publicMcpUrl);
-  return `${url.origin}/.well-known/oauth-protected-resource${url.pathname}`;
+  return `${config.publicBaseUrl}/.well-known/oauth-protected-resource`;
 }
