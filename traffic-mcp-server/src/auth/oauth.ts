@@ -257,6 +257,14 @@ class TrafficOAuthProvider {
     return typeof clientId === 'string' ? this.clients.get(clientId) : undefined;
   }
 
+  getAuthorizationCodeClientId(code: unknown) {
+    return typeof code === 'string' ? this.codes.get(code)?.clientId : undefined;
+  }
+
+  getRefreshTokenClientId(refreshToken: unknown) {
+    return typeof refreshToken === 'string' ? this.refreshTokens.get(refreshToken)?.clientId : undefined;
+  }
+
   getOrCreateStaticClient(clientId: unknown, redirectUri: string | undefined) {
     if (
       typeof clientId !== 'string' ||
@@ -456,7 +464,14 @@ export async function authorizeHandler(req: Request, res: Response) {
 export async function tokenHandler(req: Request, res: Response) {
   try {
     const body = req.body ?? {};
-    const credentials = clientCredentials(req);
+    const credentials =
+      clientCredentials(req) ||
+      (body.grant_type === 'authorization_code'
+        ? { clientId: trafficOAuthProvider.getAuthorizationCodeClientId(body.code), clientSecret: undefined }
+        : undefined) ||
+      (body.grant_type === 'refresh_token'
+        ? { clientId: trafficOAuthProvider.getRefreshTokenClientId(body.refresh_token), clientSecret: undefined }
+        : undefined);
     const client = credentials ? trafficOAuthProvider.getClient(credentials.clientId) : undefined;
     if (!credentials || !client) {
       return oauthError(res, 401, 'invalid_client', 'client_id invalido');
