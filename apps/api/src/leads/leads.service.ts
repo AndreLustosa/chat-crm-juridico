@@ -282,10 +282,16 @@ export class LeadsService {
 
     this.logger.debug(`Upsert lead: raw=${data.phone} → stored=${phone} (tenant=${tenantId ?? 'null'})`);
 
+    // Busca robusta por TODAS as variantes (10/11/12/13 digitos): leads legados
+    // podem ter sido salvos em formato antigo (ex: 13 dig com nono digito) e o
+    // match exato falharia, criando duplicata. Espelha a logica de findByPhone.
+    // Bug 2026-05-04: webhook duplicou leads ao buscar so phone canonico.
+    const variants = phoneVariants(data.phone);
+
     // Tenta atualizar o nome apenas se o lead existente não tiver nome
     if (incomingName) {
       await this.prisma.lead.updateMany({
-        where: { phone, tenant_id: tenantId, name: null },
+        where: { phone: { in: variants }, tenant_id: tenantId, name: null },
         data: { name: incomingName },
       });
     }
@@ -302,15 +308,18 @@ export class LeadsService {
     // quando um dos campos pode ser null. A semantica final eh equivalente
     // (lookup tenant-isolado, depois cria ou atualiza).
     const existing = await this.prisma.lead.findFirst({
-      where: { phone, tenant_id: tenantId },
-      select: { id: true },
+      where: { phone: { in: variants }, tenant_id: tenantId },
+      select: { id: true, phone: true },
     });
 
     let lead: Lead;
     if (existing) {
+      // Self-heal: se o lead existente esta em formato legado, normaliza pro
+      // canonico no update. Ao longo do tempo, todos convergem pro 12-dig.
+      const dataToUpdate = existing.phone !== phone ? { ...updateData, phone } : updateData;
       lead = await this.prisma.lead.update({
         where: { id: existing.id },
-        data: updateData,
+        data: dataToUpdate,
       });
     } else {
       lead = await this.prisma.lead.create({
