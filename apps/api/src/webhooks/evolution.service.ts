@@ -240,18 +240,37 @@ export class EvolutionService implements OnApplicationBootstrap {
       }
 
       // 2. Find or Create Conversation
+      // Busca em 2 etapas: primeiro com instance_name exato, depois sem — evita
+      // criar duplicatas quando instance_name era null ou mudou.
       let conv = await this.prisma.conversation.findFirst({
         where: {
           lead_id: lead.id,
           channel: 'whatsapp',
           status: 'ABERTO',
-          instance_name: instanceName // Prioriza pelo nome da instância
+          instance_name: instanceName,
         },
       });
       if (!conv) {
-        // 1) Tentar reabrir conversa FECHADO
+        // Fallback: qualquer ABERTO deste lead+channel (instance_name null ou antigo)
+        conv = await this.prisma.conversation.findFirst({
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'ABERTO' },
+          orderBy: { last_message_at: 'desc' },
+        });
+        if (conv) {
+          conv = await this.prisma.conversation.update({
+            where: { id: conv.id },
+            data: {
+              instance_name: instanceName,
+              ...(inboxId && !conv.inbox_id ? { inbox_id: inboxId } : {}),
+            },
+          });
+          this.logger.log(`[ADOPT] Conversa ${conv.id} adotada pela instância ${instanceName} (era ${conv.instance_name ?? 'null'})`);
+        }
+      }
+      if (!conv) {
+        // 1) Tentar reabrir conversa FECHADO (qualquer instance)
         const closedConv = await this.prisma.conversation.findFirst({
-          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO', instance_name: instanceName },
+          where: { lead_id: lead.id, channel: 'whatsapp', status: 'FECHADO' },
           orderBy: { last_message_at: 'desc' },
         });
         if (closedConv) {
@@ -260,7 +279,8 @@ export class EvolutionService implements OnApplicationBootstrap {
             data: {
               status: 'ABERTO',
               last_message_at: new Date(),
-              assigned_user_id: null, // Reset para reatribuição via round-robin
+              assigned_user_id: null,
+              instance_name: instanceName,
               ...(inboxId && !closedConv.inbox_id ? { inbox_id: inboxId } : {}),
             },
           });
@@ -269,18 +289,18 @@ export class EvolutionService implements OnApplicationBootstrap {
         // 2) Se não achou FECHADO, checar ADIADO — mantém status, só atualiza timestamp
         if (!conv) {
           const adiadoConv = await this.prisma.conversation.findFirst({
-            where: { lead_id: lead.id, channel: 'whatsapp', status: 'ADIADO', instance_name: instanceName },
+            where: { lead_id: lead.id, channel: 'whatsapp', status: 'ADIADO' },
             orderBy: { last_message_at: 'desc' },
           });
           if (adiadoConv) {
             conv = await this.prisma.conversation.update({
               where: { id: adiadoConv.id },
-              data: { last_message_at: new Date() },
+              data: { last_message_at: new Date(), instance_name: instanceName },
             });
             this.logger.log(`[ADIADO] Conversa ${conv.id} recebeu msg mas permanece ADIADO`);
           }
         }
-        // 3) Se não encontrou nenhuma, criar nova
+        // 3) Criar nova apenas se não encontrou NENHUMA conversa existente
         if (!conv) {
           conv = await this.prisma.conversation.create({
             data: {
@@ -295,7 +315,6 @@ export class EvolutionService implements OnApplicationBootstrap {
           });
         }
       } else if (!conv.inbox_id && inboxId) {
-        // Se a conversa existe mas não tem setor, vincula ao setor da instância
         conv = await this.prisma.conversation.update({
           where: { id: conv.id },
           data: { inbox_id: inboxId, instance_name: instanceName }
