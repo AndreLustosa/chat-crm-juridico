@@ -142,7 +142,7 @@ model User {
 
 model Lead {
   id                  String   @id @default(uuid())
-  tenant_id           String?
+  tenant_id           String
   name                String?
   // Unicidade ISOLADA por tenant — vide @@unique([tenant_id, phone]).
   // Antes era @unique global, mas isso impedia dois tenants distintos de
@@ -194,7 +194,7 @@ model Lead {
 
   profile                   LeadProfile?
   conversations             Conversation[]
-  tenant                    Tenant?                     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tenant                    Tenant                      @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   tasks                     Task[]
   legal_cases               LegalCase[]
   ficha_trabalhista         FichaTrabalhista?

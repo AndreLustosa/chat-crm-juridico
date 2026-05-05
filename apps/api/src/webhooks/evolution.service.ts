@@ -108,6 +108,11 @@ export class EvolutionService implements OnApplicationBootstrap {
       return;
     }
 
+    if (!inbox.tenant_id) {
+      this.logger.warn(`[WEBHOOK-REJECT] Inbox da instância "${instanceName}" existe mas tenant_id é null — payload descartado para evitar lead órfão`);
+      return;
+    }
+
     const inboxId = inbox?.inbox_id || null;
 
     const messages = Array.isArray(dataPayload?.messages)
