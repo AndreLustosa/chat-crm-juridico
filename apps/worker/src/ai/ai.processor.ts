@@ -1950,7 +1950,7 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       const visionImages: { type: 'image_url'; image_url: { url: string } }[] = [];
 
       // Instrução final para a IA (não aparece no chat do cliente)
-      const instruction = `[INSTRUÇÃO INTERNA — não exiba ao cliente]\nResponda à última mensagem do cliente. Consulte o histórico completo acima e a MEMÓRIA DO LEAD no system prompt: NÃO repita perguntas já respondidas. Avance o roteiro para o próximo ponto que ainda não foi coberto. Atualize o status do funil conforme as regras de PROGRESSÃO DE ETAPAS.`;
+      const instruction = `[INSTRUÇÃO INTERNA — não exiba ao cliente]\nResponda à última mensagem do cliente. Consulte o histórico completo acima e a MEMÓRIA DO LEAD no system prompt: NÃO repita perguntas já respondidas. Avance o roteiro para o próximo ponto que ainda não foi coberto. Atualize o status do funil conforme as regras de PROGRESSÃO DE ETAPAS. NUNCA inclua o prefixo "[Operador Humano]:" em sua resposta — esse rótulo aparece no histórico apenas para você distinguir quem falou cada mensagem; sua resposta vai direto pro cliente sem prefixo nenhum.`;
 
       // Montar array final de mensagens para a OpenAI (multi-turn real)
       const openAiMessages: any[] = [
@@ -2177,6 +2177,25 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           if (!updates.lead_summary && sanitized.updates?.lead_summary) updates.lead_summary = sanitized.updates.lead_summary;
           if (!updates.next_step && sanitized.updates?.next_step) updates.next_step = sanitized.updates.next_step;
           if (!updates.notes && sanitized.updates?.notes) updates.notes = sanitized.updates.notes;
+        }
+      }
+
+      // 13c. Sanitização: remover prefixos internos de role que a IA pode
+      // ter copiado por mimetismo do histórico. Construímos o histórico
+      // marcando mensagens de operador humano com `[Operador Humano]: ...`
+      // para a IA distinguir quem disse o quê — mas a IA frequentemente
+      // copia esse padrão na própria resposta, vazando label interno
+      // pro cliente. Stripamos defensivamente:
+      //   - Prefixo no início absoluto da resposta
+      //   - Prefixo no início de qualquer linha (multi-linha)
+      // Mantém o resto da mensagem intacto.
+      if (aiText) {
+        const before = aiText;
+        aiText = aiText
+          .replace(/^\s*\[Operador\s+Humano\]\s*:\s*/i, '')
+          .replace(/(\n)\s*\[Operador\s+Humano\]\s*:\s*/gi, '$1');
+        if (aiText !== before) {
+          this.logger.warn(`[AI] Prefixo "[Operador Humano]:" removido da resposta (IA copiou label interno do histórico)`);
         }
       }
 
