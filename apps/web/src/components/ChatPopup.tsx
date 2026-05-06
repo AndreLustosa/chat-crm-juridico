@@ -238,7 +238,7 @@ export function ChatPopup({ leadId, leadName, conversationId: initialConvId, cas
           return [...prev, msg];
         });
         // Áudio com mídia pronta: pré-busca o blob para exibir já reproduzível
-        if ((msg as any).type === 'audio' && (msg as any).media?.s3_key) {
+        if ((msg as any).type === 'audio' && ((msg as any).media?.file_path || (msg as any).media?.s3_key)) {
           import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
             const timeout = setTimeout(addMsg, 8000);
             preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });

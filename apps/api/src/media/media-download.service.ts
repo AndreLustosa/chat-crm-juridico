@@ -104,8 +104,19 @@ export class MediaDownloadService {
 
     if (!message) return { ok: false, reason: 'not_found' };
 
-    // Se já tem mídia salva, só emite e retorna ok
-    if (message.media?.file_path || message.media?.s3_key) {
+    // Short-circuit so se o ARQUIVO realmente existe. Antes da migracao FS
+    // (commit d9a0984) bastava checar o record no banco — MinIO era fonte de
+    // verdade consistente. Com filesystem, o file_path pode ficar orfao se o
+    // volume crm_media nao foi persistido (deploy errado, restart sem mount).
+    // Sem checar exists(), retry virava no-op infinito: AudioPlayer mostra
+    // "Audio indisponivel", usuario clica "Tentar novamente", backend retorna
+    // ok=true sem rebaixar, fetch falha de novo, loop.
+    const hasFileOnDisk = message.media?.file_path
+      ? await this.fileStorage.exists(message.media.file_path)
+      : false;
+    const hasS3 = !!message.media?.s3_key;
+
+    if (hasFileOnDisk || hasS3) {
       await this.emitMessageUpdate(messageId);
       return { ok: true };
     }

@@ -103,7 +103,7 @@ export function useChatSocket(leadId: string): UseChatSocketResult {
               if (msg.direction === 'in') {
                 api.post(`/conversations/${convo.id}/mark-read`).catch(() => {});
               }
-              if (msg.type === 'audio' && msg.media?.s3_key) {
+              if (msg.type === 'audio' && (msg.media?.file_path || msg.media?.s3_key)) {
                 import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
                   const timeout = setTimeout(addMsg, 8000);
                   preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });

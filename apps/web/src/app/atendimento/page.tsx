@@ -1121,7 +1121,7 @@ export default function Dashboard() {
             // Som NÃO toca aqui — o SocketProvider já tocou via incoming_message_notification
             // (corrige bug de som duplo: antes tocava aqui E no handler de notification)
             // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
-            if ((msg as any).type === 'audio' && (msg as any).media?.s3_key) {
+            if ((msg as any).type === 'audio' && ((msg as any).media?.file_path || (msg as any).media?.s3_key)) {
               import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
                 const timeout = setTimeout(addMsg, 8000);
                 preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });

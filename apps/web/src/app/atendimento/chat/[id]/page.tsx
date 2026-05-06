@@ -509,7 +509,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         }).catch(() => {});
       }, memDelay);
       // Áudio com mídia pronta: pré-busca blob antes de exibir (aparece já reproduzível)
-      if (msg.type === 'audio' && msg.media?.s3_key) {
+      if (msg.type === 'audio' && (msg.media?.file_path || msg.media?.s3_key)) {
         import('@/components/AudioPlayer').then(({ preFetchAudio }) => {
           const timeout = setTimeout(addMsg, 8000);
           preFetchAudio(msg.id).finally(() => { clearTimeout(timeout); addMsg(); });

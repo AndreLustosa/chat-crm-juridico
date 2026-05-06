@@ -324,7 +324,7 @@ export function ClientPanel({
         conv.messages?.forEach((msg: any) => {
           if (msg.direction === 'in' && msg.media) {
             const mime = msg.media.mime_type || '';
-            const ext = (msg.media.s3_key?.split('.').pop() || 'bin').split(';')[0].trim();
+            const ext = ((msg.media.file_path || msg.media.s3_key)?.split('.').pop() || 'bin').split(';')[0].trim();
             let defaultName = `arquivo.${ext}`;
             if (mime.startsWith('image/')) defaultName = `imagem.${ext}`;
             else if (mime.startsWith('audio/')) defaultName = `audio.${ext}`;
