@@ -1253,10 +1253,10 @@ export class PaymentGatewayService {
       clientPhone = clientPhone.slice(0, 4) + clientPhone.slice(5);
     }
 
-    // Filtra por instancia REGISTRADA — vide incidente 2026-04-29 (defesa
-    // contra mensagens saindo pelo numero errado de Evolution compartilhado).
+    // Filtra por instancia REGISTRADA DESTE tenant — defesa multi-tenant
+    // pos-incidente 2026-04-29 + hardening 2026-05-06.
     const knownInstances = (await this.prisma.instance.findMany({
-      where: { type: 'whatsapp' },
+      where: { type: 'whatsapp', tenant_id: lead.tenant_id ?? undefined },
       select: { name: true },
     })).map(i => i.name);
 
@@ -1342,9 +1342,9 @@ export class PaymentGatewayService {
     }
 
     // Buscar ou criar conversa para o lead — filtra por instancia
-    // registrada (defesa contra Evolution compartilhado, vide 2026-04-29).
+    // registrada DESTE tenant (defesa multi-tenant 2026-04-29 + 2026-05-06).
     const knownInstances = (await this.prisma.instance.findMany({
-      where: { type: 'whatsapp' },
+      where: { type: 'whatsapp', tenant_id: lead.tenant_id ?? undefined },
       select: { name: true },
     })).map(i => i.name);
 

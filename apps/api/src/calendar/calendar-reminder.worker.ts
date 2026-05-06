@@ -317,6 +317,10 @@ export class CalendarReminderWorker extends WorkerHost {
       return;
     }
 
+    // tenant_id do evento — usado nos filtros knownInstances pra garantir
+    // que so escolhemos instancias DESTE escritorio (defesa multi-tenant).
+    const eventTenantId = (event as any).tenant_id ?? undefined;
+
     // Envia pelo canal apropriado. Dedup defensivo: so marca sent_at se o
     // envio foi bem-sucedido (evita perder o job quando ha falha transitoria).
     let sent = false;
@@ -404,10 +408,11 @@ export class CalendarReminderWorker extends WorkerHost {
       }
 
       // Busca a conversa ativa para salvar a mensagem.
-      // Filtra por instancia registrada — evita salvar outbound em conversa
-      // de instancia orfa (Evolution compartilhado, vide 2026-04-29).
+      // Filtra por instancia registrada DESTE tenant — evita salvar outbound
+      // em conversa de instancia orfa ou de outro escritorio (Evolution
+      // compartilhada, vide 2026-04-29 + hardening 2026-05-06).
       const knownInstances = (await this.prisma.instance.findMany({
-        where: { type: 'whatsapp' },
+        where: { type: 'whatsapp', tenant_id: eventTenantId },
         select: { name: true },
       })).map(i => i.name);
 
@@ -423,7 +428,7 @@ export class CalendarReminderWorker extends WorkerHost {
 
       // Resolve instância WhatsApp em 4 níveis: conversa ativa → encerrada → banco → env
       // Cobre clientes sem histórico no chat (cadastrados via processos/DJEN)
-      const reminderInstanceName = await this.resolveInstanceName(event.lead.id);
+      const reminderInstanceName = await this.resolveInstanceName(event.lead.id, eventTenantId);
 
       let reminderSendResult: any;
       try {
@@ -545,9 +550,10 @@ export class CalendarReminderWorker extends WorkerHost {
     }
 
     // Busca a conversa ativa para salvar a mensagem (visível ao operador).
-    // Filtra por instancia registrada (defesa pos-incidente 2026-04-29).
+    // Filtra por instancia registrada DESTE tenant (defesa multi-tenant
+    // pos-incidente 2026-04-29 + hardening 2026-05-06).
     const knownInstancesForSave = (await this.prisma.instance.findMany({
-      where: { type: 'whatsapp' },
+      where: { type: 'whatsapp', tenant_id: (event as any).tenant_id ?? undefined },
       select: { name: true },
     })).map(i => i.name);
 
@@ -563,7 +569,7 @@ export class CalendarReminderWorker extends WorkerHost {
 
     // Resolve instância WhatsApp em 4 níveis: conversa ativa → encerrada → banco → env
     // Cobre clientes sem histórico no chat (cadastrados via processos/DJEN)
-    const instanceName = await this.resolveInstanceName(leadId);
+    const instanceName = await this.resolveInstanceName(leadId, (event as any).tenant_id ?? undefined);
 
     let sendResult: any;
     try {
@@ -816,12 +822,12 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
   // Ao retornar undefined o sendText() usará a instância padrão configurada
   // no WhatsappService — envio ainda pode funcionar em instâncias single-tenant.
 
-  private async resolveInstanceName(leadId: string): Promise<string | undefined> {
-    // Filtra niveis 1 e 2 por instancia REGISTRADA — defesa contra
-    // conversas presas em instancias orfas (Evolution compartilhado de
-    // outro escritorio, vide incidente 2026-04-29).
+  private async resolveInstanceName(leadId: string, tenantId?: string | null): Promise<string | undefined> {
+    // Filtra niveis 1 e 2 por instancia REGISTRADA DESTE tenant — defesa
+    // contra conversas presas em instancias orfas ou de outro escritorio
+    // (Evolution compartilhada, vide 2026-04-29 + hardening 2026-05-06).
     const knownInstances = (await this.prisma.instance.findMany({
-      where: { type: 'whatsapp' },
+      where: { type: 'whatsapp', tenant_id: tenantId ?? undefined },
       select: { name: true },
     })).map(i => i.name);
     const instanceFilter = knownInstances.length > 0

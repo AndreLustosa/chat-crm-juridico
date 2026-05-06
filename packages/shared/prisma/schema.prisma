@@ -603,18 +603,23 @@ model Inbox {
 
 model Instance {
   id         String   @id @default(uuid())
-  tenant_id  String?
+  /// NOT NULL desde 2026-05-06 (manual-sql/2026-05-06-instance-tenant-id-
+  /// not-null.sql). Defesa contra Evolution compartilhada entre tenants
+  /// — instance orfa permitia cron escolher numero de outro escritorio
+  /// (vide incidente 29/04 e commit f3ad69b).
+  tenant_id  String
   inbox_id   String?
   name       String   @unique
   type       String   @default("whatsapp")
   connection String   @default("evolution")
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  tenant     Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   inbox      Inbox?   @relation(fields: [inbox_id], references: [id], onDelete: SetNull)
 
   @@index([tenant_id])
   @@index([inbox_id])
+  @@index([type, tenant_id])
 }
 
 model TransferAudio {

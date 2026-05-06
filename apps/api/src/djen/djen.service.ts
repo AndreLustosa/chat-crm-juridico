@@ -1643,11 +1643,12 @@ ${pub.conteudo.slice(0, 6000)}`;
       return;
     }
 
-    // Buscar instância WhatsApp do lead (da última conversa).
+    // Buscar instância WhatsApp do tenant (da última conversa).
     // Filtra por instancia REGISTRADA pra evitar escolher orfas/residuais
     // que sairiam pelo numero errado (incidente 2026-04-29).
+    // 2026-05-06: filtra tambem por tenant_id (defesa multi-tenant).
     const knownInstances = (await this.prisma.instance.findMany({
-      where: { type: 'whatsapp' },
+      where: { type: 'whatsapp', tenant_id: legalCase.tenant_id ?? undefined },
       select: { name: true },
     })).map(i => i.name);
 

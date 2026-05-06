@@ -522,10 +522,14 @@ export class PaymentReminderService {
     }
 
     // Pega ultima conversa do lead pra usar mesma instance Evolution.
-    // Filtra por instancia REGISTRADA (Evolution compartilhado pode ter
-    // residuo de outro escritorio — vide 2026-04-29).
+    // Filtra por instancia REGISTRADA DESTE tenant (defesa multi-tenant
+    // pos-incidente 2026-04-29 + hardening 2026-05-06).
+    const leadTenant = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { tenant_id: true },
+    });
     const knownInstances = (await this.prisma.instance.findMany({
-      where: { type: 'whatsapp' },
+      where: { type: 'whatsapp', tenant_id: leadTenant?.tenant_id ?? undefined },
       select: { name: true },
     })).map(i => i.name);
 
