@@ -317,10 +317,6 @@ export class CalendarReminderWorker extends WorkerHost {
       return;
     }
 
-    // tenant_id do evento — usado nos filtros knownInstances pra garantir
-    // que so escolhemos instancias DESTE escritorio (defesa multi-tenant).
-    const eventTenantId = (event as any).tenant_id ?? undefined;
-
     // Envia pelo canal apropriado. Dedup defensivo: so marca sent_at se o
     // envio foi bem-sucedido (evita perder o job quando ha falha transitoria).
     let sent = false;
@@ -346,6 +342,10 @@ export class CalendarReminderWorker extends WorkerHost {
 
   private async sendWhatsAppReminders(event: any, minutesBefore: number) {
     const isAudiencia = event.type === 'AUDIENCIA' || event.type === 'PERICIA';
+    // tenant_id do evento — usado nos filtros knownInstances pra garantir
+    // que so escolhemos instancias DESTE escritorio (defesa multi-tenant
+    // 2026-05-06, hardening do incidente 2026-04-29).
+    const eventTenantId = (event as any).tenant_id ?? undefined;
 
     // Carrega contexto adicional do cliente (perfil + ficha + publicações DJEN).
     // Atualizado em 2026-04-20 (fase 2d-1): le LeadProfile em vez de AiMemory.

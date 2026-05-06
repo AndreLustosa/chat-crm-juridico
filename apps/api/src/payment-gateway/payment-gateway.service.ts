@@ -1230,7 +1230,7 @@ export class PaymentGatewayService {
 
     const gatewayCustomer = await this.prisma.paymentGatewayCustomer.findFirst({
       where: { external_id: customerId, gateway: 'ASAAS' },
-      include: { lead: { select: { id: true, name: true, phone: true } } },
+      include: { lead: { select: { id: true, name: true, phone: true, tenant_id: true } } },
     });
 
     if (!gatewayCustomer?.lead?.phone) return;
@@ -1297,7 +1297,7 @@ export class PaymentGatewayService {
 
     const gatewayCustomer = await this.prisma.paymentGatewayCustomer.findFirst({
       where: { external_id: customerId, gateway: 'ASAAS' },
-      include: { lead: { select: { id: true, name: true, phone: true } } },
+      include: { lead: { select: { id: true, name: true, phone: true, tenant_id: true } } },
     });
 
     if (!gatewayCustomer?.lead?.phone) {
