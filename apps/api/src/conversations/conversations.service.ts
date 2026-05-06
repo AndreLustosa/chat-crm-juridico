@@ -866,8 +866,16 @@ export class ConversationsService {
 
     try {
       await this.whatsappService.markAsRead(convo.instance_name, readPayload);
-    } catch (e) {
-      this.logger.warn(`Falha ao enviar markAsRead via Evolution: ${e?.message}`);
+    } catch (e: any) {
+      // Read receipt (visto azul) NAO chega no celular do cliente quando essa
+      // chamada falha. O badge da sidebar zera localmente porque atualizamos
+      // o status no banco mesmo assim — mas o cliente pensa que nao foi visto.
+      // Logamos com mais contexto pra investigar instabilidade na Evolution.
+      this.logger.warn(
+        `[markAsRead] Evolution falhou conv=${conversationId} instance=${convo.instance_name} ` +
+        `msgs=${readPayload.length} status=${e?.response?.status ?? 'n/a'} ` +
+        `reason=${e?.code ?? e?.message ?? 'unknown'} — read receipt NAO enviado ao cliente`,
+      );
     }
 
     await this.prisma.message.updateMany({

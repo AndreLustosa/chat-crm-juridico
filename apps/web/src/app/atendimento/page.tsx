@@ -210,7 +210,12 @@ export default function Dashboard() {
   const [forwardMsg, setForwardMsg] = useState<{ id: string; text: string } | null>(null);
   const [forwardSearch, setForwardSearch] = useState('');
   // Typing indicators
-  const [typingUsers, setTypingUsers] = useState<Record<string, { userName: string; timeout: ReturnType<typeof setTimeout> }>>({});
+  const [typingUsers, setTypingUsers] = useState<Record<string, { userName: string }>>({});
+  // Timeouts ficam em ref (nao sao state visual). Antes vivia dentro do
+  // typingUsers e ao desmontar a pagina ou trocar tenant ficavam orfaos —
+  // 4s cada timeout vazando, alem de warnings de setState em componente
+  // desmontado quando disparavam.
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // WhatsApp instance connection statuses (ephemeral — no DB persistence)
   const [instanceStatuses, setInstanceStatuses] = useState<Record<string, string>>({});
@@ -732,20 +737,20 @@ export default function Dashboard() {
     const onTypingIndicator = (data: { userId: string; userName: string; isTyping: boolean }) => {
       const myId = currentUserIdRef.current;
       if (data.userId === myId) return;
-      setTypingUsers(prev => {
-        const next = { ...prev };
-        if (data.isTyping) {
-          if (next[data.userId]) clearTimeout(next[data.userId].timeout);
-          const timeout = setTimeout(() => {
-            setTypingUsers(p => { const n = { ...p }; delete n[data.userId]; return n; });
-          }, 4000);
-          next[data.userId] = { userName: data.userName, timeout };
-        } else {
-          if (next[data.userId]) clearTimeout(next[data.userId].timeout);
-          delete next[data.userId];
-        }
-        return next;
-      });
+      // Cancela timeout anterior do mesmo user (refresh do "ainda digitando")
+      const existing = typingTimeoutsRef.current[data.userId];
+      if (existing) clearTimeout(existing);
+      delete typingTimeoutsRef.current[data.userId];
+
+      if (data.isTyping) {
+        typingTimeoutsRef.current[data.userId] = setTimeout(() => {
+          delete typingTimeoutsRef.current[data.userId];
+          setTypingUsers(p => { const n = { ...p }; delete n[data.userId]; return n; });
+        }, 4000);
+        setTypingUsers(prev => ({ ...prev, [data.userId]: { userName: data.userName } }));
+      } else {
+        setTypingUsers(prev => { const n = { ...prev }; delete n[data.userId]; return n; });
+      }
     };
 
     // incoming_message_notification: SOM + DESKTOP agora centralizados no SocketProvider.
@@ -874,6 +879,9 @@ export default function Dashboard() {
 
     return () => {
       if (inboxUpdateTimer) clearTimeout(inboxUpdateTimer);
+      // Limpa timeouts pendentes do typing indicator (4s cada vazaria sem isso)
+      for (const t of Object.values(typingTimeoutsRef.current)) clearTimeout(t);
+      typingTimeoutsRef.current = {};
       sharedSocket.off('inboxUpdate', onInboxUpdate);
       sharedSocket.off('newNote', onNewNote);
       sharedSocket.off('typing_indicator', onTypingIndicator);
