@@ -44,6 +44,26 @@ export class LeadsService {
     private trafegoEvents: TrafegoEventsService,
   ) {}
 
+  private async findReusableLeadByPhone(phone: string, tenantId: string | null): Promise<Pick<Lead, 'id' | 'tenant_id' | 'phone'> | null> {
+    const variants = phoneVariants(phone);
+    if (variants.length === 0) return null;
+
+    if (tenantId) {
+      const tenantLead = await this.prisma.lead.findFirst({
+        where: { phone: { in: variants }, tenant_id: tenantId },
+        orderBy: { created_at: 'asc' },
+        select: { id: true, tenant_id: true, phone: true },
+      });
+      if (tenantLead) return tenantLead;
+    }
+
+    return this.prisma.lead.findFirst({
+      where: { phone: { in: variants }, tenant_id: null },
+      orderBy: { created_at: 'asc' },
+      select: { id: true, tenant_id: true, phone: true },
+    });
+  }
+
   async create(data: Prisma.LeadCreateInput, inboxId?: string | null): Promise<Lead> {
     if (data.phone) data = { ...data, phone: to12Digits(data.phone) };
     const lead = await this.prisma.lead.create({ data });
@@ -288,10 +308,16 @@ export class LeadsService {
     // Bug 2026-05-04: webhook duplicou leads ao buscar so phone canonico.
     const variants = phoneVariants(data.phone);
 
-    // Tenta atualizar o nome apenas se o lead existente não tiver nome
+    // Tenta atualizar o nome apenas se o lead existente não tiver nome.
+    // Inclui leads legados sem tenant_id pra que sejam adotados pelo tenant
+    // atual em vez de ficarem orfaos quando o webhook chega com tenant_id.
     if (incomingName) {
       await this.prisma.lead.updateMany({
-        where: { phone: { in: variants }, tenant_id: tenantId, name: null },
+        where: {
+          phone: { in: variants.length ? variants : [phone] },
+          name: null,
+          ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : { tenant_id: null }),
+        },
         data: { name: incomingName },
       });
     }
@@ -304,28 +330,49 @@ export class LeadsService {
     }
 
     // findFirst+create/update em vez de Prisma.upsert porque tenant_id eh
-    // nullable: o composite key `tenant_id_phone` nao funciona em Prisma
-    // quando um dos campos pode ser null. A semantica final eh equivalente
-    // (lookup tenant-isolado, depois cria ou atualiza).
-    const existing = await this.prisma.lead.findFirst({
-      where: { phone: { in: variants }, tenant_id: tenantId },
-      select: { id: true, phone: true },
-    });
+    // nullable: o composite key `tenant_id_phone` nao funciona bem para
+    // registros legados tenant_id=null. Preferimos lead do tenant atual, mas
+    // reutilizamos lead legado sem tenant para nao duplicar o contato quando
+    // o webhook novo chega com tenant_id do inbox.
+    const existing = await this.findReusableLeadByPhone(phone, tenantId);
 
     let lead: Lead;
     if (existing) {
       // Self-heal: se o lead existente esta em formato legado, normaliza pro
       // canonico no update. Ao longo do tempo, todos convergem pro 12-dig.
-      const dataToUpdate = existing.phone !== phone ? { ...updateData, phone } : updateData;
+      // Adicional: se o lead legado nao tem tenant_id e o webhook chegou com
+      // um, adota o lead pro tenant atual em vez de criar duplicata.
+      const dataToUpdate: any = existing.phone !== phone ? { ...updateData, phone } : { ...updateData };
+      if (tenantId && !existing.tenant_id) dataToUpdate.tenant_id = tenantId;
       lead = await this.prisma.lead.update({
         where: { id: existing.id },
         data: dataToUpdate,
       });
     } else {
-      lead = await this.prisma.lead.create({
-        data: { ...data, phone },
-      });
-      this.notifyNewLead(lead, inboxId);
+      let createdLead = false;
+      try {
+        lead = await this.prisma.lead.create({
+          data: { ...data, phone },
+        });
+        createdLead = true;
+      } catch (err: any) {
+        // Webhooks podem chegar em paralelo. Se outro request criou o lead
+        // entre nosso lookup e create, reutiliza o registro vencedor.
+        if (err?.code !== 'P2002') throw err;
+        const winner = await this.findReusableLeadByPhone(phone, tenantId);
+        if (!winner) throw err;
+        lead = await this.prisma.lead.update({
+          where: { id: winner.id },
+          data: {
+            ...updateData,
+            ...(winner.phone !== phone ? { phone } : {}),
+            ...(tenantId && !winner.tenant_id ? { tenant_id: tenantId } : {}),
+          } as any,
+        });
+      }
+      if (createdLead) {
+        this.notifyNewLead(lead, inboxId);
+      }
     }
 
     return lead;
@@ -345,11 +392,24 @@ export class LeadsService {
     // vazamento entre escritorios (bug 2026-04-29).
     const variants = phoneVariants(phone);
     if (variants.length === 0) return null;
+    if (tenantId) {
+      const tenantLead = await this.prisma.lead.findFirst({
+        where: { phone: { in: variants }, tenant_id: tenantId },
+        orderBy: { created_at: 'asc' },
+      });
+      if (tenantLead) return tenantLead;
+
+      return this.prisma.lead.findFirst({
+        where: { phone: { in: variants }, tenant_id: null },
+        orderBy: { created_at: 'asc' },
+      });
+    }
+
     return this.prisma.lead.findFirst({
       where: {
         phone: { in: variants },
-        ...(tenantId ? { tenant_id: tenantId } : {}),
       },
+      orderBy: { created_at: 'asc' },
     });
   }
 

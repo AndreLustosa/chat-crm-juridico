@@ -254,6 +254,7 @@ export class EvolutionService implements OnApplicationBootstrap {
           status: 'ABERTO',
           instance_name: instanceName,
         },
+        orderBy: { last_message_at: 'desc' },
       });
       if (!conv) {
         // Fallback: qualquer ABERTO deste lead+channel (instance_name null ou antigo)
@@ -287,6 +288,8 @@ export class EvolutionService implements OnApplicationBootstrap {
               assigned_user_id: null,
               instance_name: instanceName,
               ...(inboxId && !closedConv.inbox_id ? { inbox_id: inboxId } : {}),
+              ...(instanceName && !closedConv.instance_name ? { instance_name: instanceName } : {}),
+              ...(!closedConv.tenant_id ? { tenant_id: inbox?.tenant_id || lead.tenant_id } : {}),
             },
           });
           this.logger.log(`[REOPEN] Conversa ${conv.id} reaberta para lead ${lead.id} (operador resetado)`);
@@ -300,7 +303,14 @@ export class EvolutionService implements OnApplicationBootstrap {
           if (adiadoConv) {
             conv = await this.prisma.conversation.update({
               where: { id: adiadoConv.id },
-              data: { last_message_at: new Date(), instance_name: instanceName },
+              // Self-heal de legados: se inbox_id/instance_name/tenant_id estavam
+              // null no registro antigo, preenche agora pra normalizar.
+              data: {
+                last_message_at: new Date(),
+                instance_name: instanceName,
+                ...(inboxId && !adiadoConv.inbox_id ? { inbox_id: inboxId } : {}),
+                ...(!adiadoConv.tenant_id ? { tenant_id: inbox?.tenant_id || lead.tenant_id } : {}),
+              },
             });
             this.logger.log(`[ADIADO] Conversa ${conv.id} recebeu msg mas permanece ADIADO`);
           }
@@ -319,11 +329,20 @@ export class EvolutionService implements OnApplicationBootstrap {
             },
           });
         }
-      } else if (!conv.inbox_id && inboxId) {
-        conv = await this.prisma.conversation.update({
-          where: { id: conv.id },
-          data: { inbox_id: inboxId, instance_name: instanceName }
-        });
+      } else {
+        // Self-heal de conversas existentes: preenche inbox_id, instance_name
+        // e tenant_id quando estiverem null no registro antigo. Idempotente —
+        // só faz update se houver algo de fato pra patchar.
+        const convPatch: any = {};
+        if (!conv.inbox_id && inboxId) convPatch.inbox_id = inboxId;
+        if (!conv.instance_name && instanceName) convPatch.instance_name = instanceName;
+        if (!conv.tenant_id) convPatch.tenant_id = inbox?.tenant_id || lead.tenant_id;
+        if (Object.keys(convPatch).length > 0) {
+          conv = await this.prisma.conversation.update({
+            where: { id: conv.id },
+            data: convPatch,
+          });
+        }
       }
 
       // ── Auto-merge de conversa LID ─────────────────────────────────────────

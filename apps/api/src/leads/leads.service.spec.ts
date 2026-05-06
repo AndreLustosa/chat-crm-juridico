@@ -7,6 +7,7 @@ import { LegalCasesService } from '../legal-cases/legal-cases.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { AutomationsService } from '../automations/automations.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
+import { TrafegoEventsService } from '../trafego/trafego-events.service';
 
 
 describe('LeadsService', () => {
@@ -21,6 +22,7 @@ describe('LeadsService', () => {
       findUniqueOrThrow: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       delete: jest.fn(),
       count: jest.fn(),
     },
@@ -47,6 +49,9 @@ describe('LeadsService', () => {
   };
 
   const mockGoogleDriveService = {};
+  const mockTrafegoEventsService = {
+    onLeadCreated: jest.fn().mockResolvedValue(undefined),
+  };
   const mockModuleRef = { get: jest.fn() };
 
   beforeEach(async () => {
@@ -58,6 +63,7 @@ describe('LeadsService', () => {
         { provide: ChatGateway, useValue: mockChatGateway },
         { provide: AutomationsService, useValue: mockAutomationsService },
         { provide: GoogleDriveService, useValue: mockGoogleDriveService },
+        { provide: TrafegoEventsService, useValue: mockTrafegoEventsService },
         { provide: ModuleRef, useValue: mockModuleRef },
       ],
     }).compile();
@@ -134,6 +140,65 @@ describe('LeadsService', () => {
       const result = await service.findAll(undefined, undefined, 1, 5);
       expect(result).toHaveProperty('data');
       expect(result).toHaveProperty('total');
+    });
+  });
+
+  describe('upsert', () => {
+    it('reuses a legacy tenantless lead when webhook arrives with tenant', async () => {
+      const legacyLead = {
+        id: 'lead-legacy',
+        tenant_id: null,
+        phone: '558291405383',
+        name: 'Angelica',
+        origin: 'whatsapp',
+      };
+      mockPrisma.lead.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.lead.findFirst
+        .mockResolvedValueOnce(null) // tenant exact lookup
+        .mockResolvedValueOnce({ id: legacyLead.id, tenant_id: null, phone: legacyLead.phone });
+      mockPrisma.lead.update.mockResolvedValue({ ...legacyLead, tenant_id: 'tenant-1' });
+
+      const result = await service.upsert({
+        phone: '558291405383',
+        name: 'Angelica',
+        origin: 'whatsapp',
+        tenant: { connect: { id: 'tenant-1' } },
+      } as any);
+
+      expect(mockPrisma.lead.create).not.toHaveBeenCalled();
+      expect(mockPrisma.lead.update).toHaveBeenCalledWith({
+        where: { id: legacyLead.id },
+        data: expect.objectContaining({ tenant_id: 'tenant-1' }),
+      });
+      expect(mockChatGateway.emitNewLeadNotification).not.toHaveBeenCalled();
+      expect(result.id).toBe(legacyLead.id);
+    });
+
+    it('prefers an existing tenant lead over a legacy tenantless lead', async () => {
+      mockPrisma.lead.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.lead.findFirst.mockResolvedValueOnce({
+        id: 'lead-tenant',
+        tenant_id: 'tenant-1',
+        phone: '558291405383',
+      });
+      mockPrisma.lead.update.mockResolvedValue({
+        id: 'lead-tenant',
+        tenant_id: 'tenant-1',
+        phone: '558291405383',
+      });
+
+      await service.upsert({
+        phone: '8291405383',
+        origin: 'whatsapp',
+        tenant: { connect: { id: 'tenant-1' } },
+      } as any);
+
+      expect(mockPrisma.lead.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.lead.create).not.toHaveBeenCalled();
+      expect(mockPrisma.lead.update).toHaveBeenCalledWith({
+        where: { id: 'lead-tenant' },
+        data: expect.any(Object),
+      });
     });
   });
 
