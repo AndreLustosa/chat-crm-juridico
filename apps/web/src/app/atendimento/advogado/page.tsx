@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Gavel, Clock, Archive, ArchiveRestore, Send,
@@ -1819,6 +1819,7 @@ function CaseDetailPanel({
 
 export default function AdvogadoPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { socket } = useSocket();
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [incoming, setIncoming] = useState<IncomingLead[]>([]);
@@ -1892,12 +1893,55 @@ export default function AdvogadoPage() {
       fetchDelegatedTasks();
     }
   }, [fetchDelegatedTasks]);
+
+  // Marca todas as concluidas aguardando OK como vistas em batch.
+  const acknowledgeAllPending = useCallback(async () => {
+    const ids = delegatedTasks
+      .filter((t: any) => t.status === 'CONCLUIDA' && !t.acknowledged_at)
+      .map((t: any) => t.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Marcar ${ids.length} diligência${ids.length === 1 ? '' : 's'} como vista${ids.length === 1 ? '' : 's'}?`)) return;
+    try {
+      await api.post('/tasks/acknowledge-many', { taskIds: ids });
+      setDelegatedTasks(prev => prev.filter((t: any) => !ids.includes(t.id)));
+      setDelegatedStats((prev: any) => ({ ...prev, awaitingAcknowledge: 0 }));
+    } catch {
+      fetchDelegatedTasks();
+    }
+  }, [delegatedTasks, fetchDelegatedTasks]);
+
+  // Reabre uma diligencia concluida pedindo correcao. Estagiaria recebe push.
+  const reopenDelegatedTask = useCallback(async (taskId: string) => {
+    const note = window.prompt('O que precisa ser corrigido? (este texto vai pra estagiária)');
+    if (!note?.trim()) return;
+    try {
+      await api.post(`/tasks/${taskId}/reopen-with-note`, { note: note.trim() });
+      // Refetch — task volta pra A_FAZER e aparece no estado correto
+      fetchDelegatedTasks();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || 'Erro ao reabrir diligência.';
+      window.alert(msg);
+    }
+  }, [fetchDelegatedTasks]);
   useEffect(() => { fetchDelegatedTasks(); }, [fetchDelegatedTasks]);
   // Refresh a cada 30s pra ver status atualizado (estagiario viu/iniciou/concluiu)
   useEffect(() => {
     const i = setInterval(() => fetchDelegatedTasks(), 30_000);
     return () => clearInterval(i);
   }, [fetchDelegatedTasks]);
+
+  // Abre drawer da Task quando vem de notificacao com ?openTask=ID.
+  // Limpa o param da URL pra nao reabrir em refresh acidental.
+  useEffect(() => {
+    const taskParam = searchParams?.get('openTask');
+    if (taskParam) {
+      setOpenTaskId(taskParam);
+      // Remove query param sem recarregar a pagina
+      const url = new URL(window.location.href);
+      url.searchParams.delete('openTask');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [searchParams]);
 
   // Filtro de advogado pra admin visualizar prazos (todos / apenas os meus /
   // advogado especifico). Feature 2026-04-24. Nao-admin nao ve esse dropdown
@@ -2482,15 +2526,25 @@ export default function AdvogadoPage() {
                       </span>
                     )}
                   </button>
-                  {/* Toggle "ocultar concluidas" — visivel so se houver alguma */}
+                  {/* Acoes de batch + toggle — so aparecem se houver
+                      concluidas aguardando OK. */}
                   {awaitingAck.length > 0 && (
-                    <button
-                      onClick={() => setHideAcknowledgePending(!hideAcknowledgePending)}
-                      className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                    >
-                      <CheckCircle2 size={10} className="text-emerald-500/60" />
-                      {hideAcknowledgePending ? `Mostrar ${awaitingAck.length} concluída${awaitingAck.length === 1 ? '' : 's'}` : 'Focar só em pendentes'}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={acknowledgeAllPending}
+                        className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+                        title="Marca todas as diligências concluídas como vistas"
+                      >
+                        <CheckCircle2 size={11} />
+                        Visto em todas ({awaitingAck.length})
+                      </button>
+                      <button
+                        onClick={() => setHideAcknowledgePending(!hideAcknowledgePending)}
+                        className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                      >
+                        {hideAcknowledgePending ? `Mostrar ${awaitingAck.length}` : 'Focar pendentes'}
+                      </button>
+                    </div>
                   )}
                 </div>
                 {showDelegated && (
@@ -2590,22 +2644,43 @@ export default function AdvogadoPage() {
                             </p>
                           )}
 
-                          {/* Responsavel + indicadores de progresso */}
+                          {/* Mini-timeline horizontal: Delegada → Vista
+                              → Iniciada → Cumprida. Cada bolinha "preenche"
+                              quando o evento ocorreu. Mais escaneavel
+                              que badges separadas e mostra o estado
+                              completo da diligencia em uma olhada. */}
+                          {(() => {
+                            const steps = [
+                              { label: 'Delegada', ts: t.created_at, done: true },
+                              { label: 'Vista', ts: t.viewed_at, done: !!t.viewed_at },
+                              { label: 'Iniciada', ts: t.started_at, done: !!t.started_at },
+                              { label: 'Cumprida', ts: t.completed_at, done: !!t.completed_at },
+                            ];
+                            return (
+                              <div className="flex items-center justify-between gap-1 mt-2 pt-2 border-t border-border/40">
+                                {steps.map((s, idx) => (
+                                  <div key={idx} className="flex flex-col items-center flex-1 min-w-0">
+                                    <div className={`w-2.5 h-2.5 rounded-full ${
+                                      s.done
+                                        ? (idx === 3 ? 'bg-emerald-500' : 'bg-blue-500')
+                                        : 'bg-muted border border-border'
+                                    }`} title={s.ts ? formatTs(s.ts) || s.label : 'Pendente'} />
+                                    <span className={`text-[8px] mt-0.5 ${s.done ? 'text-foreground/70' : 'text-muted-foreground/60'} truncate w-full text-center`}>
+                                      {s.label}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Responsavel + indicadores de comments/anexos */}
                           <div className="flex items-center justify-between text-[10px] mt-2 pt-2 border-t border-border/40">
                             <span className="text-muted-foreground truncate flex items-center gap-1">
                               <UserCheck size={10} className="text-blue-400" />
                               {t.assigned_user?.name || '—'}
                             </span>
                             <div className="flex items-center gap-2 shrink-0 ml-2">
-                              {!isCompleted && (t.viewed_at ? (
-                                <span title={`Vista em ${formatTs(t.viewed_at)}`} className="text-violet-400 flex items-center gap-0.5">
-                                  👁 {formatTs(t.viewed_at)?.split(' ')[1]}
-                                </span>
-                              ) : (
-                                <span title="Ainda não visualizada" className="text-red-400/70">
-                                  👁 não viu
-                                </span>
-                              ))}
                               {t._count?.comments > 0 && (
                                 <span title={`${t._count.comments} comentário(s)`} className="text-muted-foreground flex items-center gap-0.5">
                                   <MessageSquare size={9} /> {t._count.comments}
@@ -2619,23 +2694,34 @@ export default function AdvogadoPage() {
                             </div>
                           </div>
 
-                          {/* Botao "Visto / Arquivar" — so em concluidas
-                              aguardando OK. stopPropagation pra nao
-                              triggar o handleCardClick (que navega pro
-                              workspace). Otimista: remove da lista no
-                              click pra UX rapida. */}
+                          {/* Botoes "Visto / Arquivar" + "Pedir correcao"
+                              — so em concluidas aguardando OK.
+                              stopPropagation pra nao triggar o
+                              handleCardClick (que navega pro workspace). */}
                           {isCompleted && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                acknowledgeDelegatedTask(t.id);
-                              }}
-                              className="mt-2 w-full text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 hover:border-emerald-500/60 transition-all flex items-center justify-center gap-1"
-                              title="Marca a entrega como vista — sai do painel"
-                            >
-                              <CheckCircle2 size={11} />
-                              Visto / Arquivar
-                            </button>
+                            <div className="mt-2 grid grid-cols-2 gap-1.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  acknowledgeDelegatedTask(t.id);
+                                }}
+                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 hover:border-emerald-500/60 transition-all flex items-center justify-center gap-1"
+                                title="Marca a entrega como vista — sai do painel"
+                              >
+                                <CheckCircle2 size={11} />
+                                Visto
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  reopenDelegatedTask(t.id);
+                                }}
+                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 transition-all flex items-center justify-center gap-1"
+                                title="Reabre a diligência pedindo correção — estagiária recebe notificação"
+                              >
+                                ↩️ Pedir correção
+                              </button>
+                            </div>
                           )}
                         </div>
                       );

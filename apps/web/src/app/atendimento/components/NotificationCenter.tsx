@@ -148,6 +148,21 @@ export function NotificationCenter() {
       // Navega para a conversa — dispara select no page.tsx
       window.dispatchEvent(new CustomEvent('select_conversation', { detail: { conversationId: item.data.conversationId } }));
       setOpen(false);
+    } else if (item.notification_type === 'task_completed' || item.notification_type === 'task_reopened') {
+      // Estagiaria concluiu/foi pedida correcao. Roteamos pro contexto:
+      //   - tem processo: workspace com drawer da task aberto
+      //   - sem processo: painel do advogado (que tem a secao
+      //     "Diligencias Delegadas" + drawer overlay)
+      const taskId = item.data?.taskId;
+      const legalCaseId = item.data?.legalCaseId;
+      if (legalCaseId && taskId) {
+        router.push(`/atendimento/workspace/${legalCaseId}?openTask=${taskId}`);
+      } else if (taskId) {
+        router.push(`/atendimento/advogado?openTask=${taskId}`);
+      } else {
+        router.push('/atendimento/advogado');
+      }
+      setOpen(false);
     } else if (item.notification_type === 'task_overdue' || item.notification_type === 'calendar_reminder') {
       router.push('/atendimento/agenda');
       setOpen(false);

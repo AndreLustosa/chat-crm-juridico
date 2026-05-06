@@ -64,9 +64,41 @@ function tomorrowSixPMLocal(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   d.setHours(18, 0, 0, 0);
+  return toLocalInputValue(d);
+}
+
+/** Converte Date pra valor que <input type="datetime-local"> aceita. */
+function toLocalInputValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+
+/**
+ * Templates de diligencias mais comuns do escritorio. Click preenche o
+ * titulo e ajusta o prazo sugerido. Reduz friccao pra criar diligencias
+ * recorrentes (ex: "Pegar comprovante" eh quase diario).
+ *
+ * dueOffsetMinutes: minutos do agora pro prazo. Sera ajustado pra horario
+ * util (09-18h) automaticamente.
+ *
+ * Categorias batem com a `inferFolder()` no backend (tasks.service.ts:44),
+ * entao ao subir anexos a pasta certa eh sugerida sem usuario pensar.
+ */
+const DELEGATION_TEMPLATES: Array<{
+  label: string;
+  title: string;
+  icon: string;
+  hint: string;
+  dueOffsetMinutes?: number; // undefined = mantem default (amanha 18h)
+}> = [
+  { label: 'Comprovante', icon: '📄', title: 'Pegar comprovante de residência do cliente', hint: 'Estagiária liga e solicita por WhatsApp', dueOffsetMinutes: 60 * 24 * 2 }, // 2 dias
+  { label: 'RG/CPF', icon: '🪪', title: 'Pegar RG e CPF do cliente', hint: 'Estagiária liga e solicita por WhatsApp', dueOffsetMinutes: 60 * 24 * 2 },
+  { label: 'Procuração', icon: '✍️', title: 'Imprimir procuração e contrato para assinatura', hint: 'Imprimir e deixar pra cliente assinar', dueOffsetMinutes: 60 * 4 }, // 4h
+  { label: 'Decisão TJ', icon: '⚖️', title: 'Baixar decisão / sentença do TJ e anexar ao processo', hint: 'Baixar PDF do tribunal e subir', dueOffsetMinutes: 60 * 24 }, // 1 dia
+  { label: 'Ligar cliente', icon: '📞', title: 'Ligar para o cliente', hint: 'Contato telefônico — anotar resultado', dueOffsetMinutes: 60 * 6 }, // 6h
+  { label: 'Petição', icon: '📑', title: 'Elaborar petição / minuta', hint: 'Estagiário redige primeira versão', dueOffsetMinutes: 60 * 24 * 3 }, // 3 dias
+  { label: 'Audiência', icon: '🎙️', title: 'Confirmar audiência com cliente e cartório', hint: 'Ligar pro fórum e cliente', dueOffsetMinutes: 60 * 24 },
+];
 
 export function NewDelegationModal({
   open,
@@ -285,6 +317,39 @@ export function NewDelegationModal({
             <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
               Diligência <span className="text-red-400">*</span>
             </label>
+
+            {/* Templates rapidos — chips com diligencias mais comuns
+                do escritorio. Click preenche titulo + ajusta prazo
+                sugerido. Acelera 10x a criacao das diligencias do
+                dia-a-dia. */}
+            {!title.trim() && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {DELEGATION_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.title}
+                    type="button"
+                    onClick={() => {
+                      setTitle(tpl.title);
+                      if (tpl.dueOffsetMinutes !== undefined) {
+                        const d = new Date();
+                        d.setMinutes(d.getMinutes() + tpl.dueOffsetMinutes);
+                        // Mantem horario util: 09-18h. Se cair fora, joga
+                        // pra 18h do dia
+                        if (d.getHours() < 9) d.setHours(9, 0, 0, 0);
+                        if (d.getHours() >= 18) d.setHours(18, 0, 0, 0);
+                        setDueAt(toLocalInputValue(d));
+                      }
+                      setTimeout(() => titleRef.current?.focus(), 0);
+                    }}
+                    className="text-[10px] px-2 py-1 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 hover:border-blue-500/50 transition-all"
+                    title={tpl.hint}
+                  >
+                    {tpl.icon} {tpl.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <input
               ref={titleRef}
               type="text"

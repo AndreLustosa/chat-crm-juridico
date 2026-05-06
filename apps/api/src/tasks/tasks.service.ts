@@ -337,6 +337,22 @@ export class TasksService {
     if (data.due_at !== undefined) updateData.due_at = data.due_at ? new Date(data.due_at) : null;
     if (data.assigned_user_id !== undefined) updateData.assigned_user_id = data.assigned_user_id;
 
+    // Re-delegacao: se o responsavel mudou (e nao eh o mesmo do antes),
+    // resetamos viewed_at e started_at — o painel da PESSOA NOVA deve
+    // mostrar a Task como nao-vista, nao-iniciada. Sem isso, painel
+    // exibia "vista em X" e "iniciada em Y" baseado no responsavel
+    // anterior, confundindo a nova atribuicao.
+    if (data.assigned_user_id !== undefined) {
+      const current = await this.prisma.task.findUnique({
+        where: { id },
+        select: { assigned_user_id: true },
+      });
+      if (current && current.assigned_user_id !== data.assigned_user_id) {
+        updateData.viewed_at = null;
+        updateData.started_at = null;
+      }
+    }
+
     const task = await this.prisma.task.update({
       where: { id },
       data: updateData,
@@ -719,6 +735,123 @@ export class TasksService {
       data: { acknowledged_at: now, acknowledged_by_id: userId },
     });
     return { ok: true, acknowledgedAt: now.toISOString() };
+  }
+
+  /**
+   * Batch: marca varias diligencias concluidas como vistas de uma vez.
+   * Usado pelo botao "Visto em todas" no header do painel.
+   *
+   * Filtra silenciosamente IDs invalidos (nao sao do delegante, nao
+   * estao concluidas, ja ack'd) — retorna so a contagem do que foi
+   * efetivamente marcado.
+   */
+  async acknowledgeMany(taskIds: string[], userId: string, tenantId?: string) {
+    if (!taskIds?.length) return { acknowledged: 0 };
+
+    const now = new Date();
+    const result = await this.prisma.task.updateMany({
+      where: {
+        id: { in: taskIds },
+        created_by_id: userId,
+        status: 'CONCLUIDA',
+        acknowledged_at: null,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      data: { acknowledged_at: now, acknowledged_by_id: userId },
+    });
+    return { acknowledged: result.count };
+  }
+
+  /**
+   * Reabre uma diligencia concluida com pedido de correcao. Estagiaria
+   * recebe push + WhatsApp explicando o que precisa refazer. Status volta
+   * pra A_FAZER, completed_at limpa, comment registra a justificativa
+   * pra historico (igual fluxo de petitions reopen).
+   *
+   * Permitido apenas pro created_by_id (advogado que delegou).
+   */
+  async reopenWithNote(taskId: string, note: string, userId: string, tenantId?: string) {
+    if (!note?.trim()) {
+      throw new BadRequestException('Informe o motivo da correção.');
+    }
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        legal_case: { select: { id: true, case_number: true } },
+        lead: { select: { id: true, name: true } },
+      },
+    });
+    if (!task) throw new NotFoundException('Tarefa não encontrada');
+    if (task.created_by_id && task.created_by_id !== userId) {
+      throw new ForbiddenException('Apenas o delegante pode pedir correção.');
+    }
+    if (task.status !== 'CONCLUIDA') {
+      throw new BadRequestException('Só é possível reabrir tarefas concluídas.');
+    }
+
+    const trimmedNote = note.trim();
+
+    const ops: any[] = [
+      this.prisma.task.update({
+        where: { id: taskId },
+        data: {
+          status: 'A_FAZER',
+          completed_at: null,
+          completed_by_id: null,
+          completion_note: null,
+          // Mantemos viewed_at/started_at: estagiaria ja tinha visto e
+          // iniciado da primeira vez, nao precisa refazer esse passo.
+          // Mas zeramos acknowledged_at por seguranca.
+          acknowledged_at: null,
+          acknowledged_by_id: null,
+        },
+      }),
+      this.prisma.taskComment.create({
+        data: {
+          task_id: taskId,
+          user_id: userId,
+          text: `↩️ Reaberta para correção: ${trimmedNote}`,
+        },
+      }),
+    ];
+    await this.prisma.$transaction(ops);
+
+    // Sync calendar event status back to AGENDADO se houver
+    if (task.calendar_event_id) {
+      try {
+        await this.calendarService.updateStatus(task.calendar_event_id, 'AGENDADO');
+      } catch {}
+    }
+
+    // Notificacao push pra estagiaria (so se assigned_user_id != userId)
+    if (task.assigned_user_id && task.assigned_user_id !== userId) {
+      try {
+        const lawyer = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { name: true },
+        });
+        const lawyerName = lawyer?.name || 'Advogado';
+        const trimmed = trimmedNote.length > 200 ? trimmedNote.slice(0, 197) + '…' : trimmedNote;
+        this.notifications.create({
+          userId: task.assigned_user_id,
+          tenantId: task.tenant_id || null,
+          type: 'task_reopened',
+          title: `${lawyerName} pediu correção: ${task.title}`,
+          body: `"${trimmed}"`,
+          data: {
+            taskId,
+            reopenedBy: userId,
+            legalCaseId: task.legal_case_id,
+            leadId: task.lead_id,
+          },
+        }).catch(() => { /* fire and forget */ });
+      } catch (e: any) {
+        this.logger.warn(`[Task reopen] notif falhou: ${e.message}`);
+      }
+    }
+
+    return { ok: true, taskId, status: 'A_FAZER' };
   }
 
   // ─── Tracking de visualizacao ─────────────────────────────────

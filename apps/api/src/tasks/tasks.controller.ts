@@ -26,6 +26,17 @@ export class TasksController {
     return this.tasksService.findDelegatedByMe(req.user?.id, req.user?.tenant_id);
   }
 
+  /**
+   * Batch acknowledge — botao "Visto em todas" no header das Diligencias
+   * Delegadas. Filtra silenciosamente IDs que nao sao do delegante / nao
+   * estao concluidas / ja foram ack'd.
+   */
+  @Post('acknowledge-many')
+  @HttpCode(HttpStatus.OK)
+  acknowledgeMany(@Body() body: { taskIds: string[] }, @Request() req: any) {
+    return this.tasksService.acknowledgeMany(body?.taskIds || [], req.user?.id, req.user?.tenant_id);
+  }
+
   // Sprint 4: Sugestão de próxima ação por IA
   @Post('next-action')
   @HttpCode(HttpStatus.OK)
@@ -123,6 +134,20 @@ export class TasksController {
   @HttpCode(HttpStatus.OK)
   acknowledge(@Param('id') id: string, @Request() req: any) {
     return this.tasksService.acknowledge(id, req.user?.id, req.user?.tenant_id);
+  }
+
+  /**
+   * Reabre uma diligencia concluida pedindo correcao. Volta status
+   * pra A_FAZER, registra comment com motivo, dispara push pra estagiaria.
+   */
+  @Post(':id/reopen-with-note')
+  @HttpCode(HttpStatus.OK)
+  reopenWithNote(
+    @Param('id') id: string,
+    @Body() body: { note: string },
+    @Request() req: any,
+  ) {
+    return this.tasksService.reopenWithNote(id, body?.note || '', req.user?.id, req.user?.tenant_id);
   }
 
   @Post(':id/complete')
