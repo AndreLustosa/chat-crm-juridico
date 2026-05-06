@@ -1189,11 +1189,10 @@ export default function Dashboard() {
           });
         }
 
-        // Clear typing users on conversation switch
-        setTypingUsers(prev => {
-          Object.values(prev).forEach(u => clearTimeout(u.timeout));
-          return {};
-        });
+        // Clear typing users on conversation switch (timeouts agora em ref)
+        for (const t of Object.values(typingTimeoutsRef.current)) clearTimeout(t);
+        typingTimeoutsRef.current = {};
+        setTypingUsers({});
 
         // ── 2. Buscar mensagens via API ─────────────────────────────────────
         // O listener já está ativo, então mensagens que chegarem durante o fetch
