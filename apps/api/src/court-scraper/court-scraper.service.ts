@@ -470,10 +470,26 @@ export class CourtScraperService {
           continue;
         }
 
-        // Verificar se já existe
+        // Verificar se já existe.
+        // BUG anterior: usar `contains: digits.slice(0,13)` falha em strings
+        // mascaradas, pois os 13 dígitos não aparecem contíguos em
+        // "0707175-85.2026...". Comparamos por dígitos contra todas as
+        // variantes (digits-only, mascarado, original).
         const digits = data.case_number.replace(/\D/g, '');
+        const orConds: any[] = [
+          { case_number: data.case_number },
+          { case_number: digits },
+        ];
+        if (digits.length === 20) {
+          const formatted = `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+          orConds.push({ case_number: formatted });
+        }
         const existing = await this.prisma.legalCase.findFirst({
-          where: { case_number: { contains: digits.slice(0, 13) } },
+          where: {
+            OR: orConds,
+            ...(tenantId ? { tenant_id: tenantId } : {}),
+          },
+          select: { id: true },
         });
         if (existing) {
           errors.push(`${data.case_number}: já cadastrado`);
@@ -561,6 +577,10 @@ export class CourtScraperService {
             claim_value: data.claim_value || null,
             tracking_stage: data.tracking_stage || 'DISTRIBUIDO',
             stage: 'ACOMPANHAMENTO',
+            // Sem in_tracking=true a reconciliação automática do DJEN ignora
+            // o processo (filtro `in_tracking: true` no sync e no reconcile).
+            in_tracking: true,
+            stage_changed_at: new Date(),
             priority: 'NORMAL',
             notes: notesLines.join('\n'),
             filed_at: data.filed_at ? new Date(data.filed_at) : null,
@@ -613,6 +633,11 @@ export class CourtScraperService {
           );
         }
 
+        // Vincular publicações DJEN existentes (mesmo número de processo)
+        // — fluxo OAB anteriormente NÃO fazia isso, então as publicações
+        // ficavam órfãs e o processo aparecia como "não cadastrado" no DJEN.
+        await this.linkDjenPublications(legalCase.id, data.case_number);
+
         imported.push(data.case_number);
         this.logger.log(`[IMPORT] Processo ${data.case_number} importado com sucesso`);
       } catch (error: any) {
@@ -622,6 +647,30 @@ export class CourtScraperService {
     }
 
     return { imported: imported.length, errors };
+  }
+
+  // ─── Vincular publicações DJEN órfãs ao processo recém-importado ─
+
+  private async linkDjenPublications(caseId: string, caseNumber: string) {
+    if (!caseNumber) return;
+    try {
+      const digits = caseNumber.replace(/\D/g, '');
+      const orConds: any[] = [{ numero_processo: caseNumber }];
+      if (digits && digits !== caseNumber) orConds.push({ numero_processo: digits });
+      if (digits.length === 20) {
+        const formatted = `${digits.slice(0,7)}-${digits.slice(7,9)}.${digits.slice(9,13)}.${digits.slice(13,14)}.${digits.slice(14,16)}.${digits.slice(16,20)}`;
+        if (formatted !== caseNumber) orConds.push({ numero_processo: formatted });
+      }
+      const result = await this.prisma.djenPublication.updateMany({
+        where: { legal_case_id: null, OR: orConds },
+        data: { legal_case_id: caseId },
+      });
+      if (result.count > 0) {
+        this.logger.log(`[IMPORT] ${result.count} publicação(ões) DJEN vinculadas ao processo ${caseId}`);
+      }
+    } catch (e: any) {
+      this.logger.warn(`[IMPORT] Falha ao vincular publicações DJEN: ${e.message}`);
+    }
   }
 
   // ─── Listar advogados com OAB ────────────────────────────

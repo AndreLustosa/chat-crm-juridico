@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException, Inject, forwardRef, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { createHash } from 'crypto';
@@ -15,6 +15,13 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
 const CASE_WELCOME_DELAY_MS = 5 * 60 * 1000; // 5 minutos
+
+/** Formata 20 dígitos no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
+function formatCnj(digits: string): string {
+  const d = (digits || '').replace(/\D/g, '');
+  if (d.length !== 20) return digits;
+  return `${d.slice(0, 7)}-${d.slice(7, 9)}.${d.slice(9, 13)}.${d.slice(13, 14)}.${d.slice(14, 16)}.${d.slice(16, 20)}`;
+}
 
 @Injectable()
 export class LegalCasesService {
@@ -941,6 +948,32 @@ export class LegalCasesService {
         : 'DISTRIBUIDO'
     ) as string;
 
+    // ─── Checagem de duplicidade por número de processo ─────────────
+    // O cadastro em lote via OAB estava criando duplicatas porque não havia
+    // verificação prévia. Comparamos por dígitos para tolerar mistura de
+    // formatos no banco (mascarado "0707175-85..." vs digits-only).
+    const inputDigits = (data.case_number || '').replace(/\D/g, '');
+    if (inputDigits.length >= 15) {
+      const inputFormatted = formatCnj(inputDigits);
+      const existingByCnj = await this.prisma.legalCase.findFirst({
+        where: {
+          OR: [
+            { case_number: data.case_number },
+            { case_number: inputDigits },
+            { case_number: inputFormatted },
+          ],
+          ...(data.tenant_id ? { tenant_id: data.tenant_id } : {}),
+        },
+        select: { id: true, case_number: true, lead: { select: { name: true } } },
+      });
+      if (existingByCnj) {
+        const leadLabel = existingByCnj.lead?.name ? ` (cliente: ${existingByCnj.lead.name})` : '';
+        throw new ConflictException(
+          `Processo ${existingByCnj.case_number} já está cadastrado${leadLabel}.`,
+        );
+      }
+    }
+
     const VALID_PRIORITIES = ['URGENTE', 'NORMAL', 'BAIXA'];
     const priority = (
       data.priority && VALID_PRIORITIES.includes(data.priority)
@@ -1275,27 +1308,27 @@ export class LegalCasesService {
   private async reconcileDjenPublications(caseId: string, caseNumber?: string) {
     if (!caseNumber) return;
     try {
+      const digits = caseNumber.replace(/\D/g, '');
+      // O banco de djenPublication tem mistura de formatos (alguns DJENs
+      // retornam mascarado, outros digits-only). Casamos AMBOS no mesmo
+      // updateMany para garantir vinculação independente do formato.
+      const orConditions: any[] = [
+        { numero_processo: caseNumber },
+      ];
+      if (digits && digits !== caseNumber) {
+        orConditions.push({ numero_processo: digits });
+      }
+      if (digits.length === 20) {
+        const formatted = formatCnj(digits);
+        if (formatted !== caseNumber) orConditions.push({ numero_processo: formatted });
+      }
+
       const result = await this.prisma.djenPublication.updateMany({
-        where: {
-          legal_case_id: null,
-          numero_processo: caseNumber.replace(/[.\-]/g, ''), // normalizar para comparação
-        },
+        where: { legal_case_id: null, OR: orConditions },
         data: { legal_case_id: caseId },
       });
 
-      // Tentar também com o número formatado (com pontos e traços)
-      if (result.count === 0) {
-        const result2 = await this.prisma.djenPublication.updateMany({
-          where: {
-            legal_case_id: null,
-            numero_processo: caseNumber,
-          },
-          data: { legal_case_id: caseId },
-        });
-        if (result2.count > 0) {
-          this.logger.log(`[LEGAL] ${result2.count} publicação(ões) DJEN vinculadas ao processo ${caseId}`);
-        }
-      } else {
+      if (result.count > 0) {
         this.logger.log(`[LEGAL] ${result.count} publicação(ões) DJEN vinculadas ao processo ${caseId}`);
       }
     } catch (e: any) {

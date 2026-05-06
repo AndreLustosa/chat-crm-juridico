@@ -24,6 +24,23 @@ function toDateStr(date: Date): string {
   return date.toISOString().slice(0, 10); // yyyy-MM-dd
 }
 
+/** Formata 20 dígitos no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
+function formatCnj(digits: string): string {
+  const d = (digits || '').replace(/\D/g, '');
+  if (d.length !== 20) return digits;
+  return `${d.slice(0, 7)}-${d.slice(7, 9)}.${d.slice(9, 13)}.${d.slice(13, 14)}.${d.slice(14, 16)}.${d.slice(16, 20)}`;
+}
+
+/** Variantes do CNJ para busca tolerante a formato (mascarado vs digits-only) */
+function cnjVariants(numero: string): string[] {
+  const digits = (numero || '').replace(/\D/g, '');
+  const out = new Set<string>();
+  if (numero) out.add(numero);
+  if (digits) out.add(digits);
+  if (digits.length === 20) out.add(formatCnj(digits));
+  return Array.from(out);
+}
+
 function subtractDays(date: Date, days: number): Date {
   const d = new Date(date);
   d.setDate(d.getDate() - days);
@@ -391,8 +408,10 @@ export class DjenService {
         let legalCase: { id: string; lawyer_id: string; tenant_id: string | null; renounced: boolean; lead?: { id: string; name: string | null; phone: string } | null } | null = null;
 
         if (numeroProcesso) {
+          // Busca tolerante a formato: o banco mistura mascarado e digits-only.
+          const variants = cnjVariants(numeroProcesso);
           legalCase = await this.prisma.legalCase.findFirst({
-            where: { case_number: numeroProcesso, in_tracking: true },
+            where: { case_number: { in: variants }, in_tracking: true },
             select: {
               id: true, lawyer_id: true, tenant_id: true, renounced: true,
               lead: { select: { id: true, name: true, phone: true } },
@@ -698,8 +717,12 @@ export class DjenService {
     let notified = 0;
     for (const pub of unlinked) {
       if (!pub.numero_processo) continue;
+      // Tolerância a formato: o numero_processo da publicação pode ter sido
+      // gravado em formato diferente do case_number do legalCase
+      // (ex: DJEN mascarado "0707175-85.2026..." vs OAB-import digits-only).
+      const variants = cnjVariants(pub.numero_processo);
       const legalCase = await this.prisma.legalCase.findFirst({
-        where: { case_number: pub.numero_processo, in_tracking: true },
+        where: { case_number: { in: variants }, in_tracking: true },
         // Select expandido — notify precisa de lead{id,name,phone}+tenant_id.
         select: {
           id: true,
