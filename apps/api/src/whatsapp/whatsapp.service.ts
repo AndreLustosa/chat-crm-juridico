@@ -250,9 +250,25 @@ export class WhatsappService {
     const data = await this.request('GET', 'instance/fetchInstances');
     // Na v2, a Evolution retorna [{ instance: { ... } }] ou um objeto com { data: [...] }
     let instancesArray = (data as any)?.instances || (data as any)?.data || data;
-    
+
+    // Marca quais instancias sao REGISTRADAS no nosso banco (Instance table).
+    // A Evolution eh compartilhada com outros escritorios (Lexcon) e
+    // listInstances() retorna TODAS as instancias do servidor — incluindo as
+    // que nao sao nossas. Sem o flag, o painel "Integracao WhatsApp" dava
+    // impressao de que processavamos mensagens das instancias do Lexcon,
+    // quando o webhook (commit f3ad69b) ja descarta payloads orfaos.
+    //
+    // O frontend de "Integracao WhatsApp" filtra isRegistered=true (so as
+    // nossas). A pagina de "Inboxes/Setores" precisa ver todas pra permitir
+    // vincular instancias novas — por isso so MARCAMOS, nao filtramos aqui.
+    const registered = await this.prisma.instance.findMany({
+      where: { type: 'whatsapp' },
+      select: { name: true },
+    });
+    const registeredNames = new Set(registered.map((i) => i.name));
+
     if (Array.isArray(instancesArray)) {
-      return instancesArray.map(item => {
+      return instancesArray.map((item) => {
         const inst = item.instance || item;
 
         // Tenta encontrar o status em vários lugares comuns na v2 e v1
@@ -268,14 +284,17 @@ export class WhatsappService {
         const isOnline = ['open', 'connected', 'online', 'authenticated'].includes(rawStatus);
         const finalStatus = isOnline ? 'open' : rawStatus;
 
+        const instanceName = inst.instanceName || inst.name || inst.id || 'Instância sem Nome';
+
         return {
           ...inst,
-          instanceName: inst.instanceName || inst.name || inst.id || 'Instância sem Nome',
-          status: finalStatus
+          instanceName,
+          status: finalStatus,
+          isRegistered: registeredNames.has(instanceName),
         };
       });
     }
-    
+
     return data;
   }
 

@@ -23,6 +23,12 @@ interface Instance {
   owner?: string;
   profileName?: string;
   profilePictureUrl?: string;
+  /** True se a instancia esta cadastrada na Instance table do nosso banco.
+   *  Quando false, eh instancia da Evolution compartilhada que pertence a
+   *  outro escritorio (p.ex. Lexcon) — webhook ja descarta payloads dela
+   *  via commit f3ad69b, mas o painel mostrava como se fosse nossa.
+   *  Filtramos pra UI honesta. */
+  isRegistered?: boolean;
   _count?: {
     contacts?: number;
     messages?: number;
@@ -83,7 +89,12 @@ export default function WhatsappIntegrationPage() {
       // 2. Tenta buscar instâncias (Pode falhar se a URL for inválida)
       try {
         const res = await api.get('/whatsapp/instances');
-        setInstances(Array.isArray(res.data) ? res.data : (res.data?.data || []));
+        const all = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+        // Filtra so as cadastradas no nosso banco. As outras existem na
+        // Evolution compartilhada mas nao sao nossas — webhook descarta.
+        // Ver comentario na interface Instance acima.
+        const ours = all.filter((i: Instance) => i.isRegistered !== false);
+        setInstances(ours);
       } catch (err) {
         console.error('Erro ao carregar instâncias (URL possivelmente inválida):', err);
         setInstances([]);
