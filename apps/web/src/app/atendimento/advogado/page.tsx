@@ -2722,7 +2722,7 @@ export default function AdvogadoPage() {
                                   e.stopPropagation();
                                   reopenDelegatedTask(t.id);
                                 }}
-                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 transition-all flex items-center justify-center gap-1"
+                                className="text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-700 dark:text-orange-300 border border-orange-500/40 hover:border-orange-500/60 transition-all flex items-center justify-center gap-1"
                                 title="Reabre a diligência pedindo correção — estagiária recebe notificação"
                               >
                                 ↩️ Pedir correção
