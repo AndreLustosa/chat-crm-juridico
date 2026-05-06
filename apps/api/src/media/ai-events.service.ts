@@ -47,10 +47,14 @@ export class AiEventsService implements OnModuleInit, OnModuleDestroy {
         const { conversationId, messageId } = result ?? {};
         if (!conversationId || !messageId) return;
 
-        // Busca a mensagem salva com dados completos
+        // Busca a mensagem salva com dados completos + tenantId via conversation
         const message = await this.prisma.message.findUnique({
           where: { id: messageId },
-          include: { media: true, skill: { select: { id: true, name: true, area: true } } },
+          include: {
+            media: true,
+            skill: { select: { id: true, name: true, area: true } },
+            conversation: { select: { tenant_id: true } },
+          },
         });
 
         if (!message) {
@@ -64,7 +68,7 @@ export class AiEventsService implements OnModuleInit, OnModuleDestroy {
         //   tenha adicionado sem skill (race condition), garantindo que o badge apareça.
         this.chatGateway.emitNewMessage(conversationId, message);
         this.chatGateway.emitMessageUpdate(conversationId, message);
-        this.chatGateway.emitConversationsUpdate(null);
+        this.chatGateway.emitConversationsUpdate((message as any).conversation?.tenant_id ?? null);
         this.logger.log(
           `[WS-AI] newMessage+messageUpdate emitidos: msg=${messageId} conv=${conversationId} skill=${(message as any).skill?.name || 'null'}`,
         );

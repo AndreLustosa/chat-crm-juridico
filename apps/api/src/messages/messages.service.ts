@@ -182,7 +182,7 @@ export class MessagesService {
       // Notifica apenas o room da conversa para recarregar o histórico.
       // O frontend escuta 'messages_synced' e recarrega as mensagens silenciosamente.
       this.chatGateway.emitMessagesSynced(conversationId, imported);
-      this.chatGateway.emitConversationsUpdate(null);
+      this.chatGateway.emitConversationsUpdate((convo as any).tenant_id ?? null);
     }
 
     return { imported, total: rawMessages.length };
@@ -199,7 +199,7 @@ export class MessagesService {
     this.logger.log(
       `[AutoReassign] Conversa ${convo.id}: ${convo.assigned_user_id ?? 'sem operador'} → ${senderId}`,
     );
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
   }
 
   /** Enfileira job para atualizar a Long Memory após mensagem do operador.
@@ -361,7 +361,7 @@ export class MessagesService {
 
     // 5. Emit real-time events via WebSocket
     this.chatGateway.emitNewMessage(convo.id, msg);
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
 
     return msg;
   }
@@ -477,7 +477,7 @@ export class MessagesService {
     });
 
     this.chatGateway.emitNewMessage(convo.id, msgWithMedia);
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
 
     return msgWithMedia;
   }
@@ -579,7 +579,7 @@ export class MessagesService {
     });
 
     this.chatGateway.emitNewMessage(convo.id, msgWithMedia);
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
 
     return msgWithMedia;
   }

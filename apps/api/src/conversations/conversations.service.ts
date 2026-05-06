@@ -769,10 +769,14 @@ export class ConversationsService {
       conversationIds = convs.map(c => c.id);
     }
 
-    // Etapa 2: conta mensagens não lidas apenas nessas conversas
+    // Etapa 2: conta mensagens não lidas apenas nessas conversas.
+    // Fonte de verdade: read_at IS NULL. Antes era status NOT IN ('recebido',
+    // 'entregue'), fragil porque algumas msgs nao recebiam updateMany de
+    // status (ex: msgs sem external_message_id eram filtradas no markAsRead
+    // e ficavam para sempre como 'recebido', inflando o badge).
     const where: any = {
       direction: 'in',
-      status: { in: ['recebido', 'entregue'] },
+      read_at: null,
     };
 
     if (conversationIds !== undefined) {
@@ -837,19 +841,22 @@ export class ConversationsService {
       return { marked: 0 };
     }
 
+    // Pega TODAS as nao lidas — inclusive as sem external_message_id (msgs
+    // criadas pelo CRM, sync_history sem ID real, etc). Antes filtravamos
+    // external_message_id NOT NULL e elas ficavam com read_at=null pra
+    // sempre, inflando o badge da sidebar mesmo apos abrir a conversa.
     const unreadMessages = await this.prisma.message.findMany({
       where: {
         conversation_id: conversationId,
         direction: 'in',
-        status: { in: ['recebido', 'entregue'] },
-        external_message_id: { not: null },
+        read_at: null,
       },
       select: { id: true, external_message_id: true },
     });
 
     // Marca notificacoes do sino relacionadas a esta conversa como lidas —
     // sincroniza com o desaparecimento do badge da sidebar. Mesmo que nao
-    // haja mensagens "recebido/entregue" (user ja havia aberto), pode haver
+    // haja mensagens nao lidas (user ja havia aberto), pode haver
     // notificacoes persistidas pendentes do NotificationCenter.
     if (userId) {
       await this.notificationsService.markByConversation(userId, conversationId).catch(() => {});
@@ -857,30 +864,34 @@ export class ConversationsService {
 
     if (unreadMessages.length === 0) return { marked: 0 };
 
-    const remoteJid = convo.external_id || `${convo.lead.phone}@s.whatsapp.net`;
-    const readPayload = unreadMessages.map((m) => ({
-      remoteJid,
-      fromMe: false as const,
-      id: m.external_message_id!,
-    }));
+    // Read receipt (visto azul) so envia pra Evolution as msgs com ID real
+    // do WhatsApp — as outras nao existem no celular do cliente.
+    const evolutionPayload = unreadMessages
+      .filter((m) => m.external_message_id)
+      .map((m) => ({
+        remoteJid: convo.external_id || `${convo.lead.phone}@s.whatsapp.net`,
+        fromMe: false as const,
+        id: m.external_message_id!,
+      }));
 
-    try {
-      await this.whatsappService.markAsRead(convo.instance_name, readPayload);
-    } catch (e: any) {
-      // Read receipt (visto azul) NAO chega no celular do cliente quando essa
-      // chamada falha. O badge da sidebar zera localmente porque atualizamos
-      // o status no banco mesmo assim — mas o cliente pensa que nao foi visto.
-      // Logamos com mais contexto pra investigar instabilidade na Evolution.
-      this.logger.warn(
-        `[markAsRead] Evolution falhou conv=${conversationId} instance=${convo.instance_name} ` +
-        `msgs=${readPayload.length} status=${e?.response?.status ?? 'n/a'} ` +
-        `reason=${e?.code ?? e?.message ?? 'unknown'} — read receipt NAO enviado ao cliente`,
-      );
+    if (evolutionPayload.length > 0) {
+      try {
+        await this.whatsappService.markAsRead(convo.instance_name, evolutionPayload);
+      } catch (e: any) {
+        // Cliente nao recebe o "visto azul" mas o badge zera local porque
+        // atualizamos read_at no banco mesmo assim. Log com contexto pra
+        // investigar instabilidade da Evolution quando reclamarem.
+        this.logger.warn(
+          `[markAsRead] Evolution falhou conv=${conversationId} instance=${convo.instance_name} ` +
+          `msgs=${evolutionPayload.length} status=${e?.response?.status ?? 'n/a'} ` +
+          `reason=${e?.code ?? e?.message ?? 'unknown'} — read receipt NAO enviado ao cliente`,
+        );
+      }
     }
 
     await this.prisma.message.updateMany({
       where: { id: { in: unreadMessages.map((m) => m.id) } },
-      data: { status: 'lido' },
+      data: { status: 'lido', read_at: new Date() },
     });
 
     // Sinaliza ao proprio user (todas as abas/dispositivos) que esta conversa

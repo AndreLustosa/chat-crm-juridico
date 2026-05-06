@@ -308,6 +308,11 @@ model Message {
   text                String?
   external_message_id String?           @unique
   status              String
+  /// Timestamp em que a mensagem foi marcada como lida pelo operador.
+  /// Fonte unica de verdade pra unread counts (antes era inferido de
+  /// `status NOT IN ('recebido','entregue')` — fragil, varios paths
+  /// nao atualizavam status corretamente).
+  read_at             DateTime?
   created_at          DateTime          @default(now())
   reply_to_id         String?
   reply_to_text       String?
@@ -322,6 +327,8 @@ model Message {
 
   @@index([conversation_id, created_at])
   @@index([external_message_id])
+  /// Otimiza getUnreadCounts: WHERE conversation_id IN (...) AND read_at IS NULL AND direction = 'in'
+  @@index([conversation_id, read_at])
 }
 
 model MessageReaction {

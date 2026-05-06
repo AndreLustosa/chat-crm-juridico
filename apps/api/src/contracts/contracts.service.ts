@@ -506,7 +506,7 @@ export class ContractsService {
       data: { last_message_at: new Date() },
     });
     this.chatGateway.emitNewMessage(convo.id, { ...msg, status: sendStatus, external_message_id: externalId });
-    this.chatGateway.emitConversationsUpdate(null);
+    this.chatGateway.emitConversationsUpdate((convo as any).tenant_id ?? null);
 
     this.logger.log(`[CONTRATO] Contrato enviado para ${convo.lead.phone} — msg ${msg.id}`);
     return { messageId: msg.id, s3Key };

@@ -218,7 +218,7 @@ export class FichaTrabalhistaService {
     });
 
     // 6. Emitir inboxUpdate para atualizar o CRM/Kanban
-    this.gateway.emitConversationsUpdate(null);
+    this.gateway.emitConversationsUpdate((lead as any).tenant_id ?? null);
 
     // syncFichaStatusToMemory() REMOVIDO em 2026-04-20 (fase 2d-1). Status da
     // ficha esta disponivel via findByLeadId().finalizado.

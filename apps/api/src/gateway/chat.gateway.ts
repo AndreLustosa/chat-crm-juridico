@@ -351,13 +351,18 @@ export class ChatGateway {
 
     if (tenantId) {
       resolveAndEmit(tenantId);
-    } else {
-      // SEGURANCA: sem tenantId, busca o tenant padrao em vez de broadcast global.
-      this.logger.warn(`[SOCKET] inboxUpdate sem tenantId — resolvendo tenant padrao`);
-      this.prisma.tenant.findFirst().then((t) => {
-        if (t) resolveAndEmit(t.id);
-      }).catch(() => {});
+      return;
     }
+
+    // Em multi-tenant, "primeiro tenant" do banco eh aleatorio — usar isso
+    // como fallback faz inboxUpdate de tenant A vazar pra tenant B (operadores
+    // de B veem refetch causado por evento de A).
+    // O caller correto sempre tem contexto pra resolver tenant_id (lead, conv).
+    // Se chegou aqui sem tenantId, eh bug do caller — log e nao emite.
+    const trace = new Error().stack?.split('\n').slice(2, 5).join(' | ') ?? '?';
+    this.logger.warn(
+      `[SOCKET] inboxUpdate sem tenantId — IGNORADO (caller deve resolver tenant_id). Trace: ${trace}`,
+    );
   }
 
   /**
