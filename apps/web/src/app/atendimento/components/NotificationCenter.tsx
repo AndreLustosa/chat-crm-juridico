@@ -148,7 +148,11 @@ export function NotificationCenter() {
       // Navega para a conversa — dispara select no page.tsx
       window.dispatchEvent(new CustomEvent('select_conversation', { detail: { conversationId: item.data.conversationId } }));
       setOpen(false);
-    } else if (item.notification_type === 'task_completed' || item.notification_type === 'task_reopened') {
+    } else if (
+      item.notification_type === 'task_completed' ||
+      item.notification_type === 'task_reopened' ||
+      item.notification_type === 'task_overdue_delegate'
+    ) {
       // Estagiaria concluiu/foi pedida correcao. Roteamos pro contexto:
       //   - tem processo: workspace com drawer da task aberto
       //   - sem processo: painel do advogado (que tem a secao

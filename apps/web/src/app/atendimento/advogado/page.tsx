@@ -16,7 +16,7 @@ import { showError, showSuccess } from '@/lib/toast';
 import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
-import { useSocket } from '@/lib/SocketProvider';
+import { useSocket, useSocketEvent } from '@/lib/SocketProvider';
 import dynamic from 'next/dynamic';
 
 const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
@@ -1863,6 +1863,10 @@ export default function AdvogadoPage() {
   // do advogado depois de criadas.
   const [delegatedTasks, setDelegatedTasks] = useState<any[]>([]);
   const [delegatedStats, setDelegatedStats] = useState<any>({ pending: 0, inProgress: 0, awaitingAcknowledge: 0, notViewed: 0 });
+  // Métricas dos últimos 30 dias — exibidas em pílulas no header da
+  // seção. Refetched só ao abrir o painel + a cada 5min.
+  const [delegationMetrics, setDelegationMetrics] = useState<any>(null);
+  const [showMetrics, setShowMetrics] = useState(false);
   const [showDelegated, setShowDelegated] = useState(true);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   // Concluidas aguardando OK aparecem por DEFAULT no painel — antes
@@ -1877,6 +1881,18 @@ export default function AdvogadoPage() {
       setDelegatedStats(res.data?.stats || { pending: 0, inProgress: 0, awaitingAcknowledge: 0, notViewed: 0 });
     } catch {}
   }, []);
+  const fetchDelegationMetrics = useCallback(async () => {
+    try {
+      const res = await api.get('/tasks/delegation-metrics');
+      setDelegationMetrics(res.data || null);
+    } catch {}
+  }, []);
+  // Carrega métricas ao abrir + refresh leve a cada 5min (não é dado real-time)
+  useEffect(() => { fetchDelegationMetrics(); }, [fetchDelegationMetrics]);
+  useEffect(() => {
+    const i = setInterval(() => fetchDelegationMetrics(), 5 * 60_000);
+    return () => clearInterval(i);
+  }, [fetchDelegationMetrics]);
   // Marca diligencia concluida como vista — sai do painel apos refresh.
   const acknowledgeDelegatedTask = useCallback(async (taskId: string) => {
     try {
@@ -1923,9 +1939,15 @@ export default function AdvogadoPage() {
     }
   }, [fetchDelegatedTasks]);
   useEffect(() => { fetchDelegatedTasks(); }, [fetchDelegatedTasks]);
-  // Refresh a cada 30s pra ver status atualizado (estagiario viu/iniciou/concluiu)
+  // Real-time via WebSocket: backend emite task:status-changed quando
+  // estagiária vê/inicia/conclui uma diligência delegada por mim.
+  // Substituiu o polling de 30s — antes 2880 queries/dia/usuário.
+  // Refresh leve a cada 2min mantido como fallback caso socket caia.
+  useSocketEvent('task:status-changed', () => {
+    fetchDelegatedTasks();
+  });
   useEffect(() => {
-    const i = setInterval(() => fetchDelegatedTasks(), 30_000);
+    const i = setInterval(() => fetchDelegatedTasks(), 2 * 60_000);
     return () => clearInterval(i);
   }, [fetchDelegatedTasks]);
 
@@ -2532,10 +2554,19 @@ export default function AdvogadoPage() {
                       </span>
                     )}
                   </button>
-                  {/* Acoes de batch + toggle — so aparecem se houver
-                      concluidas aguardando OK. */}
+                  {/* Toggle métricas + ações de batch */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {delegationMetrics && (
+                      <button
+                        onClick={() => setShowMetrics(!showMetrics)}
+                        className="text-[10px] font-semibold text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                        title="Métricas de delegação dos últimos 30 dias"
+                      >
+                        📊 {showMetrics ? 'Ocultar métricas' : 'Ver métricas'}
+                      </button>
+                    )}
                   {awaitingAck.length > 0 && (
-                    <div className="flex items-center gap-3">
+                    <>
                       <button
                         onClick={acknowledgeAllPending}
                         className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
@@ -2550,9 +2581,56 @@ export default function AdvogadoPage() {
                       >
                         {hideAcknowledgePending ? `Mostrar ${awaitingAck.length}` : 'Focar pendentes'}
                       </button>
-                    </div>
+                    </>
                   )}
+                  </div>
                 </div>
+
+                {/* Painel de métricas (toggle "Ver métricas" no header) */}
+                {showMetrics && delegationMetrics && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3 p-3 rounded-xl border border-border bg-accent/20">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Cumpridas (semana)</span>
+                      <span className="text-lg font-bold text-foreground">{delegationMetrics.completedThisWeek}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Tempo médio</span>
+                      <span className="text-lg font-bold text-foreground">
+                        {delegationMetrics.avgCompletionHours != null
+                          ? `${delegationMetrics.avgCompletionHours}h`
+                          : '—'}
+                      </span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Taxa de aprovação</span>
+                      <span className={`text-lg font-bold ${
+                        delegationMetrics.approvalRate == null ? 'text-foreground'
+                        : delegationMetrics.approvalRate >= 90 ? 'text-emerald-400'
+                        : delegationMetrics.approvalRate >= 70 ? 'text-amber-400'
+                        : 'text-orange-500'
+                      }`}>
+                        {delegationMetrics.approvalRate != null ? `${delegationMetrics.approvalRate}%` : '—'}
+                      </span>
+                      {delegationMetrics.reopenedCount > 0 && (
+                        <span className="text-[9px] text-muted-foreground">
+                          ({delegationMetrics.reopenedCount} reaberta{delegationMetrics.reopenedCount === 1 ? '' : 's'})
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col col-span-2 md:col-span-1">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Top tipos (30d)</span>
+                      <div className="flex flex-col gap-0.5">
+                        {delegationMetrics.topTypes?.length > 0 ? delegationMetrics.topTypes.map((t: any) => (
+                          <span key={t.type} className="text-[10px] text-foreground/80 truncate" title={`${t.count}x`}>
+                            <span className="text-muted-foreground mr-1">{t.count}×</span>
+                            {t.type}
+                          </span>
+                        )) : <span className="text-[10px] text-muted-foreground italic">sem dados</span>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {showDelegated && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {/* Pendentes primeiro, depois concluidas aguardando OK

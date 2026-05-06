@@ -113,6 +113,7 @@ export function NewDelegationModal({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [assignedUserId, setAssignedUserId] = useState<string>(defaultAssignedUserId || '');
+  const [autoPicking, setAutoPicking] = useState(false);
   const [dueAt, setDueAt] = useState<string>(tomorrowSixPMLocal());
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -215,6 +216,54 @@ export function NewDelegationModal({
     }, 250);
     return () => clearTimeout(t);
   }, [bindQuery]);
+
+  /**
+   * Auto-atribuir: chama /tasks/workload e seleciona a estagiária com
+   * MENOR carga (total ativo, desempate: menos atrasadas/urgentes).
+   * Se nenhuma estagiária tem nada, pega a primeira da lista.
+   * Se a lista de workload vier vazia (ninguém com tasks), pega a
+   * primeira estagiária no array `users` direto.
+   */
+  async function pickAutoAssign() {
+    setAutoPicking(true);
+    try {
+      const res = await api.get('/tasks/workload');
+      const workload: Array<{ id: string; name: string; total: number; overdue: number; urgent: number }> =
+        Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      // Considera só estagiários (delegação típica)
+      const internUsers = users.filter(u => u.roles?.includes('ESTAGIARIO'));
+      if (internUsers.length === 0) {
+        showError('Nenhum estagiário cadastrado pra delegar');
+        return;
+      }
+      const internIds = new Set(internUsers.map(u => u.id));
+      // Workload tem só quem tem ao menos 1 task; estagiários sem tasks
+      // não aparecem — eles têm prioridade máxima (carga zero).
+      const internsWithLoad = workload.filter(w => internIds.has(w.id));
+      const loadedIds = new Set(internsWithLoad.map(w => w.id));
+      const internsWithoutLoad = internUsers.filter(u => !loadedIds.has(u.id));
+
+      let pick: { id: string; name: string };
+      if (internsWithoutLoad.length > 0) {
+        pick = internsWithoutLoad[0];
+      } else {
+        // Todos têm carga — pega o de menor total (desempate: menos
+        // atrasadas, depois menos urgentes)
+        const sorted = [...internsWithLoad].sort((a, b) => {
+          if (a.total !== b.total) return a.total - b.total;
+          if (a.overdue !== b.overdue) return a.overdue - b.overdue;
+          return a.urgent - b.urgent;
+        });
+        pick = sorted[0];
+      }
+      setAssignedUserId(pick.id);
+      showSuccess(`Auto-atribuído pra ${pick.name}`);
+    } catch (e: any) {
+      showError('Falha ao consultar carga de trabalho');
+    } finally {
+      setAutoPicking(false);
+    }
+  }
 
   // Submit com Cmd/Ctrl+Enter pra produtividade
   function handleKey(e: React.KeyboardEvent) {
@@ -379,9 +428,21 @@ export function NewDelegationModal({
           {/* Responsável + Prazo (lado a lado) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
-                Responsável <span className="text-red-400">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Responsável <span className="text-red-400">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={pickAutoAssign}
+                  disabled={loadingUsers || autoPicking}
+                  className="text-[10px] font-bold text-blue-400 hover:text-blue-300 disabled:opacity-50 transition-colors flex items-center gap-1"
+                  title="Atribui à pessoa com menor carga de trabalho"
+                >
+                  {autoPicking ? <Loader2 size={10} className="animate-spin" /> : '🎯'}
+                  Auto
+                </button>
+              </div>
               <select
                 value={assignedUserId}
                 onChange={e => setAssignedUserId(e.target.value)}

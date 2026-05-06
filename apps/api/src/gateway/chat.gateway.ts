@@ -461,6 +461,20 @@ export class ChatGateway {
   }
 
   /**
+   * Notifica o delegante quando uma Task que ele criou muda de status
+   * (estagiária viu/iniciou/concluiu/foi reaberta). Permite refresh do
+   * painel "Diligências Delegadas" em tempo real, sem polling.
+   *
+   * Eventos: 'task:status-changed' com { taskId, status, delegateUserId }.
+   * Frontend escuta e re-fetcha o painel quando recebe.
+   */
+  emitTaskStatusChanged(delegateUserId: string, data: { taskId: string; status: string; assignedUserId?: string | null }) {
+    if (!delegateUserId) return;
+    this.logger.log(`[SOCKET] Emitting task:status-changed to user:${delegateUserId} (status=${data.status})`);
+    this.server.to(`user:${delegateUserId}`).emit('task:status-changed', data);
+  }
+
+  /**
    * Emit new lead notification.
    *
    * Regra de negócio:

@@ -27,6 +27,15 @@ export class TasksController {
   }
 
   /**
+   * Metricas de delegacao (ultimos 30 dias) do advogado logado.
+   * Usado pelo widget de stats no header das Diligencias Delegadas.
+   */
+  @Get('delegation-metrics')
+  getDelegationMetrics(@Request() req: any) {
+    return this.tasksService.getDelegationMetrics(req.user?.id, req.user?.tenant_id);
+  }
+
+  /**
    * Batch acknowledge — botao "Visto em todas" no header das Diligencias
    * Delegadas. Filtra silenciosamente IDs que nao sao do delegante / nao
    * estao concluidas / ja foram ack'd.

@@ -319,6 +319,15 @@ export class TasksService {
       }
     }
 
+    // Sinal real-time pro delegante — painel atualiza sem polling.
+    if (task.created_by_id && task.created_by_id !== task.assigned_user_id) {
+      this.chatGateway.emitTaskStatusChanged(task.created_by_id, {
+        taskId: id,
+        status,
+        assignedUserId: task.assigned_user_id,
+      });
+    }
+
     return task;
   }
 
@@ -454,6 +463,15 @@ export class TasksService {
     }
 
     this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
+
+    // Sinal real-time pro painel "Diligencias Delegadas" do advogado
+    if (task.created_by_id && task.created_by_id !== userId) {
+      this.chatGateway.emitTaskStatusChanged(task.created_by_id, {
+        taskId,
+        status: 'CONCLUIDA',
+        assignedUserId: task.assigned_user_id,
+      });
+    }
 
     // ─── Notificacao enriquecida ao criador (advogado) ──────────
     //
@@ -698,6 +716,99 @@ export class TasksService {
     return { tasks, stats };
   }
 
+  /**
+   * Metricas de delegacao do advogado: tempo medio de cumprimento, taxa
+   * de aprovacao (vs reabertas), volume da semana e top tipos delegados.
+   * Usado pelo widget no header da secao "Diligencias Delegadas".
+   *
+   * Janela: ultimos 30 dias por default. Tasks reabertas aparecem como
+   * TaskComment com prefixo "↩️ Reaberta para correção" — usamos isso
+   * pra contar a taxa.
+   */
+  async getDelegationMetrics(userId: string, tenantId?: string) {
+    const SINCE_DAYS = 30;
+    const since = new Date(Date.now() - SINCE_DAYS * 24 * 60 * 60 * 1000);
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // Todas as tasks delegadas no periodo (status final + datas)
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        created_by_id: userId,
+        assigned_user_id: { not: userId },
+        created_at: { gte: since },
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      select: {
+        id: true, title: true, status: true,
+        created_at: true, completed_at: true,
+      },
+    });
+
+    // Contagem de reaberturas — taskComment com texto começando em "↩️ Reaberta"
+    const reopenedCommentsRaw = await this.prisma.taskComment.findMany({
+      where: {
+        user_id: userId,
+        text: { startsWith: '↩️ Reaberta para correção' },
+        task: {
+          created_by_id: userId,
+          created_at: { gte: since },
+        },
+      },
+      select: { task_id: true },
+    });
+    const reopenedTaskIds = new Set(reopenedCommentsRaw.map(c => c.task_id));
+
+    const completed = tasks.filter(t => t.status === 'CONCLUIDA' && t.completed_at);
+    const completedThisWeek = completed.filter(t =>
+      t.completed_at && new Date(t.completed_at) >= weekAgo,
+    ).length;
+
+    // Tempo medio de cumprimento — millis entre created_at e completed_at
+    let avgCompletionHours: number | null = null;
+    if (completed.length > 0) {
+      const sumMs = completed.reduce((acc, t) => {
+        const ms = new Date(t.completed_at!).getTime() - new Date(t.created_at).getTime();
+        return acc + Math.max(0, ms);
+      }, 0);
+      avgCompletionHours = Math.round((sumMs / completed.length) / (60 * 60 * 1000) * 10) / 10;
+    }
+
+    // Taxa de aprovacao — concluidas que NAO foram reabertas / total concluidas
+    const approvalRate = completed.length > 0
+      ? Math.round((completed.filter(t => !reopenedTaskIds.has(t.id)).length / completed.length) * 100)
+      : null;
+
+    // Top 3 tipos: pega primeiras 3 palavras do title como "tipo".
+    // Heuristica simples mas eficaz — diligencias do escritorio sao
+    // bem padronizadas ("Pegar comprovante", "Ligar para o cliente",
+    // "Imprimir contrato", etc.).
+    const typeCount = new Map<string, number>();
+    for (const t of tasks) {
+      const key = (t.title || '')
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .slice(0, 3)
+        .join(' ');
+      if (!key) continue;
+      typeCount.set(key, (typeCount.get(key) || 0) + 1);
+    }
+    const topTypes = Array.from(typeCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([type, count]) => ({ type, count }));
+
+    return {
+      totalIn30Days: tasks.length,
+      completedIn30Days: completed.length,
+      completedThisWeek,
+      avgCompletionHours,
+      approvalRate,
+      reopenedCount: reopenedTaskIds.size,
+      topTypes,
+    };
+  }
+
   // ─── Acknowledge: advogado marca diligencia concluida como vista ──
 
   /**
@@ -869,7 +980,7 @@ export class TasksService {
     await this.verifyTenantOwnership(taskId, tenantId);
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      select: { id: true, viewed_at: true, assigned_user_id: true },
+      select: { id: true, viewed_at: true, assigned_user_id: true, created_by_id: true, status: true },
     });
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
@@ -887,6 +998,18 @@ export class TasksService {
       where: { id: taskId },
       data: { viewed_at: new Date() },
     });
+
+    // Sinal real-time pro painel do delegante — timeline da Task no
+    // card pula de "Delegada" pra "Vista" sem o advogado precisar
+    // refrescar a página.
+    if (task.created_by_id && task.created_by_id !== userId) {
+      this.chatGateway.emitTaskStatusChanged(task.created_by_id, {
+        taskId,
+        status: task.status,
+        assignedUserId: task.assigned_user_id,
+      });
+    }
+
     return { ok: true, viewedAt: new Date().toISOString() };
   }
 
@@ -1200,7 +1323,11 @@ export class TasksService {
           id: true,
           title: true,
           due_at: true,
+          started_at: true,
+          tenant_id: true,
           assigned_user_id: true,
+          created_by_id: true,
+          legal_case_id: true,
           assigned_user: { select: { id: true, name: true } },
         },
       });
@@ -1209,16 +1336,18 @@ export class TasksService {
         if (!task.assigned_user_id || !task.due_at) continue;
         const hoursOverdue = (now.getTime() - new Date(task.due_at).getTime()) / 3_600_000;
 
-        // Escalonamento: apenas notifica em intervalos específicos para evitar spam
+        // SLA escalonado de 3 níveis pro responsável (estagiário):
+        //   warning  : vencida AGORA (1ª notificação ao passar do prazo)
+        //   urgent   : +24h sem cumprir
+        //   critical : +72h sem cumprir
         const level = hoursOverdue >= 72 ? 'critical' : hoursOverdue >= 24 ? 'urgent' : 'warning';
-        // Emitir apenas 1x por intervalo (na primeira hora de cada nível)
-        const shouldNotify = (
+        const notifyAssignee = (
           (level === 'warning'  && hoursOverdue < 2) ||
           (level === 'urgent'   && hoursOverdue >= 24 && hoursOverdue < 25) ||
           (level === 'critical' && hoursOverdue >= 72 && hoursOverdue < 73)
         );
 
-        if (shouldNotify) {
+        if (notifyAssignee) {
           this.chatGateway.server?.to(`user:${task.assigned_user_id}`).emit('task_overdue_alert', {
             taskId: task.id,
             title: task.title,
@@ -1226,6 +1355,46 @@ export class TasksService {
             hoursOverdue: Math.round(hoursOverdue),
             level,
           });
+        }
+
+        // Escalada pro DELEGANTE (advogado que criou a Task) se o
+        // estagiário ainda não iniciou OU passou de 4h sem cumprir.
+        // Notificação persistida (push + WhatsApp) — não só socket
+        // efêmero — pra advogado VER mesmo offline. Idempotência por
+        // janela única no nível.
+        const notifyDelegate = (
+          task.created_by_id &&
+          task.created_by_id !== task.assigned_user_id &&
+          (
+            // 4h vencida sem ter sido iniciada (estagiária ignorou)
+            (!task.started_at && hoursOverdue >= 4 && hoursOverdue < 5) ||
+            // 24h vencida (mesmo iniciada — algo travou)
+            (hoursOverdue >= 24 && hoursOverdue < 25) ||
+            // 72h vencida (escalada crítica)
+            (hoursOverdue >= 72 && hoursOverdue < 73)
+          )
+        );
+
+        if (notifyDelegate && task.created_by_id) {
+          const assigneeName = task.assigned_user?.name || 'responsável';
+          const titleByLevel: Record<string, string> = {
+            warning: `⏰ ${assigneeName} ainda não iniciou: ${task.title}`,
+            urgent: `🟠 24h vencida: ${task.title}`,
+            critical: `🚨 72h sem cumprimento: ${task.title}`,
+          };
+          this.notifications.create({
+            userId: task.created_by_id,
+            tenantId: task.tenant_id || null,
+            type: 'task_overdue_delegate',
+            title: titleByLevel[level] || titleByLevel.warning,
+            body: `Atribuída a ${assigneeName} • venceu há ${Math.round(hoursOverdue)}h`,
+            data: {
+              taskId: task.id,
+              legalCaseId: task.legal_case_id,
+              level,
+              hoursOverdue: Math.round(hoursOverdue),
+            },
+          }).catch(() => { /* fire-and-forget */ });
         }
       }
 
