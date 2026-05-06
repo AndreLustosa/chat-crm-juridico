@@ -3194,11 +3194,27 @@ function CadastrarProcessoModal({
                           <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center text-primary text-[10px] font-bold">
                             {phoneCheckResult.lead.name?.[0]?.toUpperCase() || '?'}
                           </div>
-                          <div>
-                            <p className="text-xs font-medium text-foreground">{phoneCheckResult.lead.name || 'Sem nome'}</p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-foreground truncate">{phoneCheckResult.lead.name || 'Sem nome'}</p>
                             <p className="text-[10px] text-muted-foreground">{phoneCheckResult.lead.phone}</p>
                           </div>
+                          {phoneCheckResult.lead.stage && (
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                              phoneCheckResult.inactive
+                                ? 'bg-orange-500/15 text-orange-400 border border-orange-500/30'
+                                : phoneCheckResult.lead.is_client
+                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
+                            }`}>
+                              {phoneCheckResult.lead.stage}
+                            </span>
+                          )}
                         </div>
+                        {phoneCheckResult.inactive && (
+                          <p className="text-[10px] text-orange-400 leading-relaxed">
+                            💡 Contato estava como <strong>{phoneCheckResult.inactiveReason}</strong>. Ao vincular ao processo, ele será <strong>reativado e promovido a cliente</strong> automaticamente.
+                          </p>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
