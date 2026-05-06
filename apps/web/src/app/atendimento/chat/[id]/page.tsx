@@ -39,6 +39,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const [convoStatus, setConvoStatus] = useState<string>('ABERTO');
   const [aiMode, setAiMode] = useState(false);
   const [sending, setSending] = useState(false);
+  // Guard sincrono contra double-submit. State eh assincrono em React.
+  const sendingRef = useRef(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any>(null);
@@ -340,10 +342,13 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     if (node) node.focus();
   }, []);
 
-  // Clicar na área de mensagens foca o textarea
+  // Clicar na área de mensagens foca o textarea — exceto quando o usuário
+  // está selecionando texto pra copiar (focar o input limpa a seleção).
   const handleChatAreaClick = useCallback((e: React.MouseEvent) => {
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     const tag = (e.target as HTMLElement).tagName;
-    if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'AUDIO'].includes(tag)) return;
+    if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'AUDIO', 'P', 'SPAN'].includes(tag)) return;
     if ((e.target as HTMLElement).closest('button, a, input, textarea')) return;
     inputRef.current?.focus();
   }, []);
@@ -381,7 +386,8 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   }, [convoStatus]);
 
   const handleSend = async () => {
-    if (!text.trim() || !convoId || sending) return;
+    if (!text.trim() || !convoId || sendingRef.current) return;
+    sendingRef.current = true;
     const msgText = text;
     const replyId = replyingTo?.id;
     setSending(true);
@@ -391,6 +397,22 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     if (inputRef.current) { inputRef.current.style.height = '56px'; }
     // Foco síncrono — dentro da call-stack do gesto do usuário (Enter / click)
     inputRef.current?.focus();
+
+    // Optimistic UI: msg aparece na hora, reconciliada quando o servidor responde
+    const optimisticId = `optimistic_${Date.now()}`;
+    const optimisticMsg: any = {
+      id: optimisticId,
+      conversation_id: convoId,
+      direction: 'out',
+      type: 'text',
+      text: msgText,
+      created_at: new Date().toISOString(),
+      status: 'enviando',
+      reply_to_id: replyId || null,
+      media: null,
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+
     try {
       const res = await api.post('/messages/send', {
         conversationId: convoId,
@@ -399,15 +421,24 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       });
       if (res.data?.id) {
         setMessages(prev => {
-          if (prev.some((m: any) => m.id === res.data.id)) return prev;
-          return [...prev, res.data];
+          const hasOptimistic = prev.some((m: any) => m.id === optimisticId);
+          const hasReal = prev.some((m: any) =>
+            m.id === res.data.id ||
+            (res.data.external_message_id && m.external_message_id === res.data.external_message_id)
+          );
+          if (hasReal) return hasOptimistic ? prev.filter((m: any) => m.id !== optimisticId) : prev;
+          return hasOptimistic
+            ? prev.map((m: any) => m.id === optimisticId ? res.data : m)
+            : [...prev, res.data];
         });
       }
     } catch (e) {
       console.error('Falha ao enviar mensagem', e);
       showError('Falha ao enviar mensagem. Tente novamente.');
+      setMessages(prev => prev.filter((m: any) => m.id !== optimisticId));
       setText(msgText);
     } finally {
+      sendingRef.current = false;
       setSending(false);
       // Foco após re-render completo
       requestAnimationFrame(() => inputRef.current?.focus());
@@ -1133,7 +1164,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
               <button
                 onClick={handleSend}
-                disabled={!text.trim() || sending}
+                disabled={!text.trim()}
                 className="bg-gradient-to-r from-primary to-ring p-4 rounded-xl shadow-lg disabled:opacity-50 hover:-translate-y-1 transition-transform shrink-0"
               >
                 <Send size={20} className="text-primary-foreground" />

@@ -155,6 +155,8 @@ export function ChatPopup({ leadId, leadName, conversationId: initialConvId, cas
   // ── Input ─────────────────────────────────────────────────────────────────
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Guard sincrono contra double-submit (state do React eh assincrono).
+  const sendingRef = useRef(false);
   const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
 
   // ── Edição / transcrição ──────────────────────────────────────────────────
@@ -297,19 +299,56 @@ export function ChatPopup({ leadId, leadName, conversationId: initialConvId, cas
 
   // ── Enviar mensagem ───────────────────────────────────────────────────────
   const handleSend = async () => {
-    if (!text.trim() || !resolvedConvId || sending) return;
+    if (!text.trim() || !resolvedConvId || sendingRef.current) return;
+    sendingRef.current = true;
     const msgText = text.trim();
+    const replyToId = replyTo?.id;
     setText('');
     setReplyTo(null);
     setSending(true);
+
+    // Optimistic UI: msg aparece na hora; reconciliada via socket newMessage
+    const optimisticId = `optimistic_${Date.now()}`;
+    const optimisticMsg: any = {
+      id: optimisticId,
+      conversation_id: resolvedConvId,
+      direction: 'out',
+      type: 'text',
+      text: msgText,
+      created_at: new Date().toISOString(),
+      status: 'enviando',
+      reply_to_id: replyToId || null,
+      media: null,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+
     try {
-      await api.post('/messages/send', {
+      const res = await api.post('/messages/send', {
         conversationId: resolvedConvId,
         text: msgText,
-        ...(replyTo ? { replyToId: replyTo.id } : {}),
+        ...(replyToId ? { replyToId } : {}),
       });
-    } catch { setText(msgText); }
-    finally { setSending(false); textareaRef.current?.focus(); }
+      if (res.data?.id) {
+        setMessages((prev) => {
+          const hasOptimistic = prev.some((m) => m.id === optimisticId);
+          const hasReal = prev.some((m) =>
+            m.id === res.data.id ||
+            (res.data.external_message_id && m.external_message_id === res.data.external_message_id)
+          );
+          if (hasReal) return hasOptimistic ? prev.filter((m) => m.id !== optimisticId) : prev;
+          return hasOptimistic
+            ? prev.map((m) => m.id === optimisticId ? res.data : m)
+            : [...prev, res.data];
+        });
+      }
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      setText(msgText);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+      textareaRef.current?.focus();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -572,7 +611,7 @@ export function ChatPopup({ leadId, leadName, conversationId: initialConvId, cas
                 />
                 <button
                   onClick={handleSend}
-                  disabled={!text.trim() || sending}
+                  disabled={!text.trim()}
                   title="Enviar (Enter)"
                   className="p-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:pointer-events-none shrink-0"
                 >

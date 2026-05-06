@@ -117,6 +117,9 @@ export default function Dashboard() {
   const [isOnline, setIsOnline] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Guard sincrono contra double-submit: state do React eh assincrono e
+  // pode ler valor antigo se usuario disparar 2 envios em microsegundos.
+  const sendingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [docPreview, setDocPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
@@ -1388,7 +1391,8 @@ export default function Dashboard() {
   // ──────────────────────────────────────────────────────────────────────────
 
   const handleSend = async () => {
-    if (!text.trim() || !selectedId || selectedId.startsWith('demo-') || sending || text.length > 5000) return;
+    if (!text.trim() || !selectedId || selectedId.startsWith('demo-') || sendingRef.current || text.length > 5000) return;
+    sendingRef.current = true;
 
     // ── Slash command selecionado pelo menu ─────────────────────────────────
     if (slashQuery !== null && filteredSlashCommands.length > 0) {
@@ -1460,6 +1464,7 @@ export default function Dashboard() {
       setMessages(prev => prev.filter(m => m.id !== optimisticId));
       setText(msgText);
     } finally {
+      sendingRef.current = false;
       setSending(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -2095,10 +2100,13 @@ export default function Dashboard() {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  // Clicar na área de mensagens foca o textarea
+  // Clicar na área de mensagens foca o textarea — exceto quando o usuário
+  // está selecionando texto pra copiar (focar o input limpa a seleção).
   const handleChatAreaClick = useCallback((e: React.MouseEvent) => {
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
     const tag = (e.target as HTMLElement).tagName;
-    if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'AUDIO'].includes(tag)) return;
+    if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'IMG', 'VIDEO', 'AUDIO', 'P', 'SPAN'].includes(tag)) return;
     if ((e.target as HTMLElement).closest('button, a, input, textarea')) return;
     inputRef.current?.focus();
   }, []);
@@ -3185,7 +3193,7 @@ export default function Dashboard() {
                         }
                       }}
                       placeholder={isRealConvo ? "Digite sua mensagem..." : "Selecione uma conversa..."}
-                      disabled={!isRealConvo || sending}
+                      disabled={!isRealConvo}
                       className={`w-full border rounded-2xl py-3 md:py-4 focus:outline-none focus:ring-2 shadow-sm disabled:opacity-50 text-sm md:text-base resize-none leading-normal overflow-hidden pl-4 ${
                         isRealConvo ? (isMobile ? 'pr-[7rem]' : 'pr-24') : 'pr-4'
                       } bg-card border-border focus:ring-primary text-foreground`}
@@ -3258,7 +3266,7 @@ export default function Dashboard() {
                   {/* Botão Enviar */}
                   <button
                     onClick={handleSend}
-                    disabled={!isRealConvo || !text.trim() || sending || text.length > 5000}
+                    disabled={!isRealConvo || !text.trim() || text.length > 5000}
                     aria-label="Enviar mensagem"
                     className="bg-gradient-to-r from-primary to-ring p-3 md:p-4 rounded-xl shadow-lg disabled:opacity-50 hover:-translate-y-1 transition-transform shrink-0 mb-0.5"
                   >
