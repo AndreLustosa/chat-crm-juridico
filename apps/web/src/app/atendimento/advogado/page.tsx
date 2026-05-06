@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
   User, Search, RefreshCw, MessageSquare, MoreVertical, ChevronDown, ChevronRight,
   Plus, X, Calendar, FileText, Gavel, Clock, Archive, ArchiveRestore, Send,
@@ -1819,7 +1819,6 @@ function CaseDetailPanel({
 
 export default function AdvogadoPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { socket } = useSocket();
   const [cases, setCases] = useState<LegalCase[]>([]);
   const [incoming, setIncoming] = useState<IncomingLead[]>([]);
@@ -1932,8 +1931,15 @@ export default function AdvogadoPage() {
 
   // Abre drawer da Task quando vem de notificacao com ?openTask=ID.
   // Limpa o param da URL pra nao reabrir em refresh acidental.
+  //
+  // Lemos via window.location em vez de useSearchParams() porque o
+  // useSearchParams exige Suspense boundary durante prerender, o que
+  // quebrava o build do Next 14 ("missing-suspense-with-csr-bailout").
+  // useEffect sem deps so roda no cliente, entao window eh seguro.
   useEffect(() => {
-    const taskParam = searchParams?.get('openTask');
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const taskParam = params.get('openTask');
     if (taskParam) {
       setOpenTaskId(taskParam);
       // Remove query param sem recarregar a pagina
@@ -1941,7 +1947,7 @@ export default function AdvogadoPage() {
       url.searchParams.delete('openTask');
       window.history.replaceState({}, '', url.toString());
     }
-  }, [searchParams]);
+  }, []);
 
   // Filtro de advogado pra admin visualizar prazos (todos / apenas os meus /
   // advogado especifico). Feature 2026-04-24. Nao-admin nao ve esse dropdown
