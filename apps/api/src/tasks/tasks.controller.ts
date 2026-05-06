@@ -114,6 +114,17 @@ export class TasksController {
     return this.tasksService.markViewed(id, req.user?.id, req.user?.tenant_id);
   }
 
+  /**
+   * Advogado que delegou marca diligencia concluida como "vista" — sai
+   * do painel "Diligencias delegadas" dele. Sem isso, concluidas ficavam
+   * sumindo em 24h sem o delegante ter chance de revisar.
+   */
+  @Post(':id/acknowledge')
+  @HttpCode(HttpStatus.OK)
+  acknowledge(@Param('id') id: string, @Request() req: any) {
+    return this.tasksService.acknowledge(id, req.user?.id, req.user?.tenant_id);
+  }
+
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
   complete(@Param('id') id: string, @Body() body: { note?: string }, @Request() req: any) {

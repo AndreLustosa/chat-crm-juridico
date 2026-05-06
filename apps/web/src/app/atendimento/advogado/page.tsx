@@ -1862,20 +1862,36 @@ export default function AdvogadoPage() {
   // criou. Antes essas diligencias nao apareciam em lugar nenhum no painel
   // do advogado depois de criadas.
   const [delegatedTasks, setDelegatedTasks] = useState<any[]>([]);
-  const [delegatedStats, setDelegatedStats] = useState<any>({ pending: 0, inProgress: 0, completedRecent: 0, notViewed: 0 });
+  const [delegatedStats, setDelegatedStats] = useState<any>({ pending: 0, inProgress: 0, awaitingAcknowledge: 0, notViewed: 0 });
   const [showDelegated, setShowDelegated] = useState(true);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  // Toggle "Ver concluidas hoje" — concluidas saem da listagem por default
-  // pra nao confundir com pendentes (badge verde grande chamava atencao
-  // demais). Reaparecem so quando advogado decide revisar.
-  const [showCompletedToday, setShowCompletedToday] = useState(false);
+  // Concluidas aguardando OK aparecem por DEFAULT no painel — antes
+  // sumiam em 24h e o advogado nem sabia que a estagiaria entregou.
+  // Toggle vira "Ocultar concluidas" pra quem nao quer ver enquanto
+  // trabalha em pendentes.
+  const [hideAcknowledgePending, setHideAcknowledgePending] = useState(false);
   const fetchDelegatedTasks = useCallback(async () => {
     try {
       const res = await api.get('/tasks/delegated-by-me');
       setDelegatedTasks(res.data?.tasks || []);
-      setDelegatedStats(res.data?.stats || { pending: 0, inProgress: 0, completedRecent: 0, notViewed: 0 });
+      setDelegatedStats(res.data?.stats || { pending: 0, inProgress: 0, awaitingAcknowledge: 0, notViewed: 0 });
     } catch {}
   }, []);
+  // Marca diligencia concluida como vista — sai do painel apos refresh.
+  const acknowledgeDelegatedTask = useCallback(async (taskId: string) => {
+    try {
+      await api.post(`/tasks/${taskId}/acknowledge`);
+      // Otimista: remove imediatamente do estado pra UX rapida.
+      setDelegatedTasks(prev => prev.filter(t => t.id !== taskId));
+      setDelegatedStats((prev: any) => ({
+        ...prev,
+        awaitingAcknowledge: Math.max(0, (prev?.awaitingAcknowledge || 0) - 1),
+      }));
+    } catch (e: any) {
+      // Em caso de erro, recarrega o estado real do backend.
+      fetchDelegatedTasks();
+    }
+  }, [fetchDelegatedTasks]);
   useEffect(() => { fetchDelegatedTasks(); }, [fetchDelegatedTasks]);
   // Refresh a cada 30s pra ver status atualizado (estagiario viu/iniciou/concluiu)
   useEffect(() => {
@@ -2426,18 +2442,20 @@ export default function AdvogadoPage() {
             )}
 
             {/* Diligências delegadas — diligencias rapidas (Tasks orfas)
-                que o advogado delegou pra estagiario. Antes essas diligencias
-                sumiam apos criadas — nao apareciam aqui nem no painel do
-                estagiario sem refresh. Agora cada card mostra timeline do
-                progresso (vista/iniciada) + indicadores de comments/anexos.
+                que o advogado delegou pra estagiario. Cada card mostra
+                timeline do progresso (vista/iniciada) + indicadores de
+                comments/anexos.
 
-                Comportamento: concluidas SOMEM por default — toggle
-                "Ver concluidas hoje" exibe sob demanda (com estilo
-                discreto cinza pra nao confundir com pendentes). */}
+                Comportamento (atualizado 2026-05-06): concluidas pelas
+                estagiarias APARECEM por default — em verde, com badge
+                "Aguardando seu OK" e botao "Visto / Arquivar". Antes
+                sumiam em 24h e o advogado nem sabia que entregaram.
+                Toggle vira "Ocultar concluidas" pra quem quer focar em
+                pendentes. */}
             {view === 'active' && delegatedTasks.length > 0 && (() => {
               const activeTasks = delegatedTasks.filter((t: any) => t.status !== 'CONCLUIDA');
-              const completedToday = delegatedTasks.filter((t: any) => t.status === 'CONCLUIDA');
-              if (activeTasks.length === 0 && completedToday.length === 0) return null;
+              const awaitingAck = delegatedTasks.filter((t: any) => t.status === 'CONCLUIDA' && !t.acknowledged_at);
+              if (activeTasks.length === 0 && awaitingAck.length === 0) return null;
               return (
               <div className="mx-6 mt-4 shrink-0">
                 <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
@@ -2446,7 +2464,7 @@ export default function AdvogadoPage() {
                     className="flex items-center gap-2 text-[12px] font-bold text-blue-400 uppercase tracking-wider hover:opacity-80 transition-opacity"
                   >
                     <ChevronRight size={14} className={`transition-transform ${showDelegated ? 'rotate-90' : ''}`} />
-                    ✋ Diligências Delegadas ({activeTasks.length})
+                    ✋ Diligências Delegadas ({activeTasks.length}{awaitingAck.length > 0 ? ` + ${awaitingAck.length}` : ''})
                     {delegatedStats.notViewed > 0 && (
                       <span
                         className="text-[10px] font-bold text-red-400 bg-red-500/15 border border-red-500/30 px-2 py-0.5 rounded-full normal-case tracking-normal"
@@ -2455,34 +2473,43 @@ export default function AdvogadoPage() {
                         {delegatedStats.notViewed} sem ler
                       </span>
                     )}
+                    {awaitingAck.length > 0 && (
+                      <span
+                        className="text-[10px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full normal-case tracking-normal"
+                        title="Diligências concluídas aguardando seu OK"
+                      >
+                        {awaitingAck.length} aguardando OK
+                      </span>
+                    )}
                   </button>
-                  {/* Toggle "ver concluidas hoje" — visivel so se houver alguma */}
-                  {completedToday.length > 0 && (
+                  {/* Toggle "ocultar concluidas" — visivel so se houver alguma */}
+                  {awaitingAck.length > 0 && (
                     <button
-                      onClick={() => setShowCompletedToday(!showCompletedToday)}
+                      onClick={() => setHideAcknowledgePending(!hideAcknowledgePending)}
                       className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
                     >
                       <CheckCircle2 size={10} className="text-emerald-500/60" />
-                      {showCompletedToday ? 'Ocultar' : 'Ver'} {completedToday.length} concluída{completedToday.length === 1 ? '' : 's'} hoje
+                      {hideAcknowledgePending ? `Mostrar ${awaitingAck.length} concluída${awaitingAck.length === 1 ? '' : 's'}` : 'Focar só em pendentes'}
                     </button>
                   )}
                 </div>
                 {showDelegated && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {/* Render concluidas DEPOIS das ativas, e so se toggle
-                        estiver ligado. Ordem garante que pendentes ficam
-                        sempre no topo independente da listagem. */}
+                    {/* Pendentes primeiro, depois concluidas aguardando OK
+                        (a menos que advogado tenha clicado em "Focar so em
+                        pendentes"). */}
                     {[
                       ...activeTasks,
-                      ...(showCompletedToday ? completedToday : []),
+                      ...(hideAcknowledgePending ? [] : awaitingAck),
                     ].map((t: any) => {
                       const isCompleted = t.status === 'CONCLUIDA';
                       const isInProgress = t.status === 'EM_PROGRESSO';
                       const isOverdue = t.due_at && !isCompleted && new Date(t.due_at) < new Date();
-                      // Estilo discreto pra concluidas — cinza com 60% opacity
-                      // pra nao competir visualmente com pendentes
+                      // Concluidas aguardando OK em VERDE destacado (nao
+                      // mais cinza opaco) — a entrega da estagiaria
+                      // merece atencao do advogado, nao escondida.
                       const cardClass = isCompleted
-                        ? 'border-border/40 bg-muted/30 opacity-60 hover:opacity-80'
+                        ? 'border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10'
                         : isOverdue
                         ? 'border-red-500/40 bg-red-500/5'
                         : isInProgress
@@ -2514,15 +2541,20 @@ export default function AdvogadoPage() {
                           {/* Status badge + prazo */}
                           <div className="flex items-center justify-between gap-2 mb-1.5">
                             <span className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${
-                              isCompleted ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              isCompleted ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                               : isInProgress ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                               : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                             }`}>
-                              {isCompleted ? '✓ Concluída' : isInProgress ? '▶ Em andamento' : 'A fazer'}
+                              {isCompleted ? '✓ Aguardando seu OK' : isInProgress ? '▶ Em andamento' : 'A fazer'}
                             </span>
                             {t.due_at && !isCompleted && (
                               <span className={`text-[9px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
                                 {isOverdue ? 'Atrasado' : formatTs(t.due_at)}
+                              </span>
+                            )}
+                            {isCompleted && t.completed_at && (
+                              <span className="text-[9px] font-semibold text-emerald-400/80">
+                                {formatTs(t.completed_at)}
                               </span>
                             )}
                           </div>
@@ -2549,6 +2581,15 @@ export default function AdvogadoPage() {
                             </p>
                           )}
 
+                          {/* Nota de conclusao — so mostrada em concluidas, pra
+                              advogado ler resumo do que estagiaria fez sem
+                              ter que abrir o drawer. */}
+                          {isCompleted && t.completion_note && (
+                            <p className="text-[10px] text-emerald-300/90 italic line-clamp-2 mb-1.5 px-2 py-1 rounded bg-emerald-500/5 border-l-2 border-emerald-500/40">
+                              "{t.completion_note}"
+                            </p>
+                          )}
+
                           {/* Responsavel + indicadores de progresso */}
                           <div className="flex items-center justify-between text-[10px] mt-2 pt-2 border-t border-border/40">
                             <span className="text-muted-foreground truncate flex items-center gap-1">
@@ -2556,7 +2597,7 @@ export default function AdvogadoPage() {
                               {t.assigned_user?.name || '—'}
                             </span>
                             <div className="flex items-center gap-2 shrink-0 ml-2">
-                              {t.viewed_at ? (
+                              {!isCompleted && (t.viewed_at ? (
                                 <span title={`Vista em ${formatTs(t.viewed_at)}`} className="text-violet-400 flex items-center gap-0.5">
                                   👁 {formatTs(t.viewed_at)?.split(' ')[1]}
                                 </span>
@@ -2564,7 +2605,7 @@ export default function AdvogadoPage() {
                                 <span title="Ainda não visualizada" className="text-red-400/70">
                                   👁 não viu
                                 </span>
-                              )}
+                              ))}
                               {t._count?.comments > 0 && (
                                 <span title={`${t._count.comments} comentário(s)`} className="text-muted-foreground flex items-center gap-0.5">
                                   <MessageSquare size={9} /> {t._count.comments}
@@ -2577,6 +2618,25 @@ export default function AdvogadoPage() {
                               )}
                             </div>
                           </div>
+
+                          {/* Botao "Visto / Arquivar" — so em concluidas
+                              aguardando OK. stopPropagation pra nao
+                              triggar o handleCardClick (que navega pro
+                              workspace). Otimista: remove da lista no
+                              click pra UX rapida. */}
+                          {isCompleted && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                acknowledgeDelegatedTask(t.id);
+                              }}
+                              className="mt-2 w-full text-[10px] font-bold uppercase tracking-wider px-2 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 hover:border-emerald-500/60 transition-all flex items-center justify-center gap-1"
+                              title="Marca a entrega como vista — sai do painel"
+                            >
+                              <CheckCircle2 size={11} />
+                              Visto / Arquivar
+                            </button>
+                          )}
                         </div>
                       );
                     })}

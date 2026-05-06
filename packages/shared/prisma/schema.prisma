@@ -112,6 +112,7 @@ model User {
   calendar_events_created        CalendarEvent[]                  @relation("EventCreator")
   calendar_events_completed      CalendarEvent[]                  @relation("EventCompleter")
   tasks_completed                Task[]                           @relation("TaskCompleter")
+  tasks_acknowledged             Task[]                           @relation("TaskAcknowledger")
   deadlines_completed            CaseDeadline[]                   @relation("DeadlineCompleter")
   schedules                      UserSchedule[]
   calendar_event_comments        CalendarEventComment[]
@@ -375,10 +376,19 @@ model Task {
   completion_note   String?
   completed_at      DateTime?
   completed_by_id   String?
+  // Acknowledge do delegante: quando o advogado que delegou clica
+  // "Visto / Arquivar" no card concluido. Enquanto for null, o card
+  // continua aparecendo no painel "Diligencias delegadas" do advogado
+  // mesmo concluido — pra ele revisar antes de tirar de vista. Sem isso,
+  // estagiario marca CONCLUIDA e o card sumia em 24h, advogado sem
+  // chance de ver o resultado.
+  acknowledged_at        DateTime?
+  acknowledged_by_id     String?
   // Adiamentos
   postpone_count    Int                 @default(0)
   created_by_id     String?
   assigned_user     User?               @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
+  acknowledged_by   User?               @relation("TaskAcknowledger", fields: [acknowledged_by_id], references: [id], onDelete: SetNull)
   completed_by      User?               @relation("TaskCompleter", fields: [completed_by_id], references: [id], onDelete: SetNull)
   conversation      Conversation?       @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
   lead              Lead?               @relation(fields: [lead_id], references: [id], onDelete: SetNull)

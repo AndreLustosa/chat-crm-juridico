@@ -601,17 +601,25 @@ export class TasksService {
     // Tasks criadas ANTES do commit f15156b (que persistia created_by_id)
     // ficam com created_by_id NULL e nao aparecem aqui — limitacao
     // retroativa, sem backfill seguro. Novas diligencias aparecem normais.
+    // Concluidas continuam aparecendo enquanto o advogado nao deu
+    // "Visto / Arquivar" (acknowledged_at IS NULL). Janela hard de 30 dias
+    // como teto de seguranca pro caso de tasks orfas que nunca foram
+    // arquivadas (ex: advogado ficou de ferias). Antes filtro era 24h
+    // hardcoded — diligencia concluida sumia em 1 dia mesmo sem o
+    // advogado ter visto.
+    const ACKNOWLEDGE_HARD_LIMIT_DAYS = 30;
+    const ackHardLimit = new Date(Date.now() - ACKNOWLEDGE_HARD_LIMIT_DAYS * 24 * 60 * 60 * 1000);
+
     const tasks = await this.prisma.task.findMany({
       where: {
         created_by_id: userId,
         assigned_user_id: { not: userId }, // auto-tarefa nao conta
-        // Mostra A_FAZER, EM_PROGRESSO E concluidas das ultimas 24h
-        // (concluidas antigas escondem pra nao poluir)
         OR: [
           { status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
           {
             status: 'CONCLUIDA',
-            completed_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            acknowledged_at: null,
+            completed_at: { gte: ackHardLimit },
           },
         ],
         ...(tenantId ? { tenant_id: tenantId } : {}),
@@ -633,18 +641,37 @@ export class TasksService {
         },
       },
       orderBy: [
-        { status: 'asc' }, // A_FAZER vem antes de EM_PROGRESSO
-        { due_at: 'asc' }, // mais urgente primeiro
+        // Pendentes primeiro (A_FAZER, EM_PROGRESSO), depois CONCLUIDA
+        // aguardando OK. asc serve: A_FAZER < CONCLUIDA < EM_PROGRESSO
+        // alfabeticamente, o que nao da a ordem certa. Fazemos ordering
+        // composto manualmente por status na query, mas Prisma nao tem
+        // CASE — entao ordenamos em JS depois.
+        { due_at: 'asc' },
         { created_at: 'desc' },
       ],
-      take: 50,
+      take: 100,
+    });
+
+    // Re-ordenacao em JS: pendentes primeiro, concluidas-aguardando depois.
+    const STATUS_ORDER: Record<string, number> = {
+      A_FAZER: 0,
+      EM_PROGRESSO: 1,
+      CONCLUIDA: 2,
+    };
+    tasks.sort((a, b) => {
+      const sa = STATUS_ORDER[a.status] ?? 9;
+      const sb = STATUS_ORDER[b.status] ?? 9;
+      if (sa !== sb) return sa - sb;
+      return 0;
     });
 
     // Stats agregadas pro UI mostrar contadores
     const stats = {
       pending: tasks.filter(t => t.status === 'A_FAZER').length,
       inProgress: tasks.filter(t => t.status === 'EM_PROGRESSO').length,
-      completedRecent: tasks.filter(t => t.status === 'CONCLUIDA').length,
+      // Concluidas aguardando OK — ANTES era "completedRecent" baseado em
+      // janela 24h. Renomeado pra refletir o novo modelo (acknowledged).
+      awaitingAcknowledge: tasks.filter(t => t.status === 'CONCLUIDA').length,
       // Quantas pendentes/em-progresso ainda nao foram VISTAS pelo
       // responsavel — vermelho de alerta no UI
       notViewed: tasks.filter(t =>
@@ -653,6 +680,45 @@ export class TasksService {
     };
 
     return { tasks, stats };
+  }
+
+  // ─── Acknowledge: advogado marca diligencia concluida como vista ──
+
+  /**
+   * Marca a Task concluida como "vista pelo delegante" (advogado que criou).
+   * Apos isso, o card sai do painel "Diligencias delegadas" do advogado.
+   *
+   * Idempotente — primeiro acknowledge ganha o timestamp, subsequentes
+   * sao no-op. Permitido apenas pro created_by_id (advogado dono da
+   * delegacao). Ack so faz sentido pra status=CONCLUIDA.
+   */
+  async acknowledge(taskId: string, userId: string, tenantId?: string) {
+    await this.verifyTenantOwnership(taskId, tenantId);
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: {
+        id: true, status: true, created_by_id: true,
+        acknowledged_at: true,
+      },
+    });
+    if (!task) throw new NotFoundException('Tarefa não encontrada');
+
+    if (task.created_by_id && task.created_by_id !== userId) {
+      throw new ForbiddenException('Apenas o delegante pode marcar como visto.');
+    }
+    if (task.status !== 'CONCLUIDA') {
+      throw new BadRequestException('Só é possível marcar como visto tarefas concluídas.');
+    }
+    if (task.acknowledged_at) {
+      return { ok: true, alreadyAcknowledged: true };
+    }
+
+    const now = new Date();
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { acknowledged_at: now, acknowledged_by_id: userId },
+    });
+    return { ok: true, acknowledgedAt: now.toISOString() };
   }
 
   // ─── Tracking de visualizacao ─────────────────────────────────
