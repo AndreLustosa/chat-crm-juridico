@@ -16,11 +16,18 @@ export class PortalPaymentsService {
 
   constructor(private prisma: PrismaService) {}
 
-  async list(leadId: string) {
+  async list(leadId: string, tenantId: string | null) {
+    // Defense in depth: filtrar por tenant_id via relacionamento (lead /
+    // legal_case). O ClientJwtAuthGuard ja garante que `leadId` veio do JWT
+    // do cliente autenticado, mas se um dia o guard quebrar / token vazar,
+    // o filtro tenant_id eh a ultima barreira contra exposicao cross-tenant.
+    const tenantFilter = tenantId ? { tenant_id: tenantId } : {};
+
     // 1. LeadHonorarios (negociacao) com seus pagamentos
     const leadHonorarios = await this.prisma.leadHonorario.findMany({
       where: {
         lead_id: leadId,
+        lead: tenantFilter,
         status: { in: ['ACEITO', 'CONVERTIDO', 'NEGOCIANDO'] },
       },
       include: {
@@ -49,6 +56,7 @@ export class PortalPaymentsService {
       where: {
         legal_case: {
           lead_id: leadId,
+          ...tenantFilter,
           archived: false,
           renounced: false,
         },

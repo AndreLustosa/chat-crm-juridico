@@ -16,6 +16,26 @@ export class SaveFormFieldHandler implements ToolHandler {
       return { success: false, message: 'Nenhum campo fornecido' };
     }
 
+    // Defense in depth: valida que o lead pertence ao tenant do contexto.
+    // O leadId vem do processor (job BullMQ), nao da IA — mas se um dia o
+    // pipeline for alterado pra aceitar leadId via param, esse check
+    // impede a IA do tenant A de gravar em ficha de outro tenant.
+    if (context.tenantId) {
+      const lead = await context.prisma.lead.findUnique({
+        where: { id: context.leadId },
+        select: { tenant_id: true },
+      });
+      if (!lead) {
+        return { success: false, message: 'Lead nao encontrado' };
+      }
+      if (lead.tenant_id && lead.tenant_id !== context.tenantId) {
+        return {
+          success: false,
+          message: 'Lead nao pertence ao tenant atual — operacao bloqueada',
+        };
+      }
+    }
+
     // Find or create ficha
     const existing = await context.prisma.fichaTrabalhista.upsert({
       where: { lead_id: context.leadId },

@@ -26,6 +26,15 @@ interface DossieCompleto {
     mensagens_anteriores: string[];
   };
   financeiro?: { inadimplente: boolean; valor_devido?: number };
+  /**
+   * Identidade do escritorio + advogado responsavel — usado pra assinar a
+   * mensagem com o nome correto do tenant (multi-tenant safe). Fallback
+   * pra valores genericos se OrganizationProfile/Tenant.name nao tiverem.
+   */
+  escritorio?: {
+    nome: string;
+    advogado_nome: string;
+  };
   data_hora_atual: string; dia_semana: string;
 }
 
@@ -512,6 +521,37 @@ export class FollowupService {
   // ─── Context Assembler ───────────────────────────────────────────────────
 
   async buildDossie(enrollment: any, step: any, lead: any): Promise<DossieCompleto> {
+    // Identidade do escritorio + advogado responsavel — multi-tenant safe.
+    // Estrategia em ordem de prioridade:
+    //   1. OrganizationProfile.facts.office_info.name (se admin populou)
+    //   2. Tenant.name (sempre existe pra tenant valido)
+    //   3. fallback generico
+    // Pro advogado: lead.cs_user (gerente do lead) → lead.assigned_lawyer →
+    //   primeiro user ADMIN do tenant → fallback generico.
+    let escritorioNome: string | null = null;
+    let advogadoNome: string | null = null;
+    if (lead.tenant_id) {
+      const [tenant, orgProfile, csUser] = await Promise.all([
+        this.prisma.tenant.findUnique({
+          where: { id: lead.tenant_id },
+          select: { name: true },
+        }),
+        this.prisma.organizationProfile.findUnique({
+          where: { tenant_id: lead.tenant_id },
+          select: { facts: true },
+        }),
+        lead.cs_user_id
+          ? this.prisma.user.findUnique({
+              where: { id: lead.cs_user_id },
+              select: { name: true },
+            })
+          : null,
+      ]);
+      const facts = (orgProfile?.facts as any) || {};
+      escritorioNome = facts?.office_info?.name || tenant?.name || null;
+      advogadoNome = csUser?.name || facts?.office_info?.lawyer_name || null;
+    }
+
     // Conversa ativa
     const convo = await this.prisma.conversation.findFirst({
       where: { lead_id: lead.id, status: 'ABERTO' },
@@ -577,14 +617,22 @@ export class FollowupService {
       },
       data_hora_atual: hoje.toLocaleString('pt-BR', { timeZone: 'America/Maceio' }),
       dia_semana: diasSemana[hoje.getDay()],
+      escritorio: (escritorioNome || advogadoNome) ? {
+        nome: escritorioNome || 'o escritório',
+        advogado_nome: advogadoNome || 'sua equipe juridica',
+      } : undefined,
     };
   }
 
   // ─── Message Generator ───────────────────────────────────────────────────
 
   async generateMessage(dossie: DossieCompleto, customPrompt?: string | null): Promise<string> {
-    const escritorioNome = 'Lustosa Advogados';
-    const advogadoNome = 'André Lustosa';
+    // Multi-tenant safe: usa identidade do escritorio do tenant do lead.
+    // Fallback pra valor generico ("o escritorio" / "sua equipe") se nao
+    // houver OrganizationProfile/Tenant.name. Antes era hardcoded "Lustosa
+    // Advogados" / "Andre Lustosa" — quebrava em deploys multi-tenant.
+    const escritorioNome = dossie.escritorio?.nome || 'o escritório';
+    const advogadoNome = dossie.escritorio?.advogado_nome || 'sua equipe jurídica';
 
     const systemPrompt = `Você é ${advogadoNome}, advogado do escritório ${escritorioNome}.
 Está escrevendo uma mensagem de follow-up via ${dossie.tarefa.canal} para ${dossie.pessoa.nome}.

@@ -13,6 +13,6 @@ export class PortalPaymentsController {
   @UseGuards(ClientJwtAuthGuard)
   @Get()
   async list(@CurrentClient() client: ClientUser) {
-    return this.service.list(client.id);
+    return this.service.list(client.id, client.tenant_id);
   }
 }
