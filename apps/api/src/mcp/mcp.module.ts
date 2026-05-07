@@ -6,10 +6,11 @@ import { LeadsModule } from '../leads/leads.module';
 import { LegalCasesModule } from '../legal-cases/legal-cases.module';
 import { CaseDocumentsModule } from '../case-documents/case-documents.module';
 import { HonorariosModule } from '../honorarios/honorarios.module';
+import { getJwtSecret } from '../common/utils/jwt-secret.util';
 
 @Module({
   imports: [
-    JwtModule.register({ secret: process.env.JWT_SECRET || 'fallback-secret' }),
+    JwtModule.registerAsync({ useFactory: () => ({ secret: getJwtSecret() }) }),
     LeadsModule,
     LegalCasesModule,
     CaseDocumentsModule,

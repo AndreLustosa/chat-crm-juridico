@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { verifyShareToken, signShareToken } from '@crm/shared';
+import { getJwtSecret } from '../common/utils/jwt-secret.util';
 
 /**
  * MIME types que o cliente pode subir pelo portal.
@@ -165,7 +166,7 @@ export class PortalDocumentsService {
    * Token assinado com JWT_SECRET, TTL 7 dias (cliente pode demorar pra abrir).
    */
   buildPublicShareUrl(docId: string, leadId: string): string {
-    const secret = process.env.JWT_SECRET || '__INSECURE_DEV_FALLBACK_CHANGE_ME__';
+    const secret = getJwtSecret();
     const apiBase = process.env.API_PUBLIC_URL || process.env.NEXT_PUBLIC_API_URL || '';
     const token = signShareToken(
       { sub: docId, lead_id: leadId, aud: 'doc-share' },
@@ -187,7 +188,7 @@ export class PortalDocumentsService {
    *   - Caso arquivado → 404
    */
   async downloadByShareToken(docId: string, token: string) {
-    const secret = process.env.JWT_SECRET || '__INSECURE_DEV_FALLBACK_CHANGE_ME__';
+    const secret = getJwtSecret();
     const payload = verifyShareToken(token, secret);
     if (!payload || payload.aud !== 'doc-share' || payload.sub !== docId) {
       throw new UnauthorizedException('Link expirado ou inválido');

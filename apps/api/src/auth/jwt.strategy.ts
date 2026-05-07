@@ -1,18 +1,11 @@
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { getJwtSecret } from '../common/utils/jwt-secret.util';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
-    const secret = process.env.JWT_SECRET;
-    if (!secret && process.env.NODE_ENV === 'production') {
-      new Logger('JwtStrategy').error('FATAL: JWT_SECRET não definido em produção!');
-      process.exit(1);
-    }
-    if (!secret) {
-      new Logger('JwtStrategy').warn('⚠️  JWT_SECRET não definido! Usando fallback INSEGURO.');
-    }
     super({
       // Aceita JWT em 2 lugares:
       //   1. Header Authorization: Bearer ... (padrão pra chamadas API normais)
@@ -23,7 +16,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ExtractJwt.fromUrlQueryParameter('token'),
       ]),
       ignoreExpiration: false,
-      secretOrKey: secret || '__INSECURE_DEV_FALLBACK_CHANGE_ME__',
+      secretOrKey: getJwtSecret(),
     });
   }
 
