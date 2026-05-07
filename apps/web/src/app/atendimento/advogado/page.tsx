@@ -1942,12 +1942,16 @@ export default function AdvogadoPage() {
   // Real-time via WebSocket: backend emite task:status-changed quando
   // estagiária vê/inicia/conclui uma diligência delegada por mim.
   // Substituiu o polling de 30s — antes 2880 queries/dia/usuário.
-  // Refresh leve a cada 2min mantido como fallback caso socket caia.
+  // Refresh leve a cada 5min mantido como safety net caso socket caia.
   useSocketEvent('task:status-changed', () => {
     fetchDelegatedTasks();
   });
+  // task_comment: estagiária comentou (pode trazer info que muda visualizacao).
+  useSocketEvent('task_comment', () => {
+    fetchDelegatedTasks();
+  });
   useEffect(() => {
-    const i = setInterval(() => fetchDelegatedTasks(), 2 * 60_000);
+    const i = setInterval(() => fetchDelegatedTasks(), 5 * 60_000);
     return () => clearInterval(i);
   }, [fetchDelegatedTasks]);
 
@@ -2084,7 +2088,11 @@ export default function AdvogadoPage() {
       }
     } catch {}
 
-    const interval = setInterval(() => fetchCases(true), 30_000);
+    // Safety net 5min — eventos socket cobrem o caso comum (mudancas
+    // disparam legal_case_update / petition_* / notification_created).
+    // 5min pega cron ESAJ/DJEN que escreve direto no DB sem emit ou
+    // qualquer fluxo que escape dos eventos.
+    const interval = setInterval(() => fetchCases(true), 5 * 60_000);
     return () => clearInterval(interval);
   }, [router, fetchCases, fetchArchivedTotal, view]);
 
@@ -2125,19 +2133,39 @@ export default function AdvogadoPage() {
       .catch(() => {});
   }, [isAdmin, lawyerFilter]);
 
-  // WebSocket: atualização em tempo real quando petição muda de status
+  // WebSocket: atualização em tempo real para mudancas de processo / petição.
+  // Listeners cobrem:
+  //   - petition_status_change / petition_created → mudancas em peticoes
+  //   - legal_case_update → criacao/atualizacao de caso (chat.gateway.ts:460,
+  //     emitido por court-scraper-monitor, esaj-sync, djen, etc)
+  //   - notification_created (tipo legal_case_update) → notificacao criada
+  //     por crons (cobre eventos disparados por NotificationsService.create
+  //     que ja sao filtrados por user no backend)
+  //   - connect → re-sync apos reconexao de socket (cobre eventos perdidos)
   useEffect(() => {
     if (!socket) return;
 
-    const onPetitionStatusChange = () => { fetchCases(true); };
-    const onPetitionCreated = () => { fetchCases(true); };
+    const onCasesChanged = () => { fetchCases(true); };
+    const onNotificationCreated = (data: { notification_type?: string }) => {
+      if (data?.notification_type === 'legal_case_update' || data?.notification_type === 'petition_status') {
+        fetchCases(true);
+      }
+    };
 
-    socket.on('petition_status_change', onPetitionStatusChange);
-    socket.on('petition_created', onPetitionCreated);
+    socket.on('petition_status_change', onCasesChanged);
+    socket.on('petition_created', onCasesChanged);
+    socket.on('legal_case_update', onCasesChanged);
+    socket.on('new_legal_case', onCasesChanged);
+    socket.on('notification_created', onNotificationCreated);
+    socket.on('connect', onCasesChanged);
 
     return () => {
-      socket.off('petition_status_change', onPetitionStatusChange);
-      socket.off('petition_created', onPetitionCreated);
+      socket.off('petition_status_change', onCasesChanged);
+      socket.off('petition_created', onCasesChanged);
+      socket.off('legal_case_update', onCasesChanged);
+      socket.off('new_legal_case', onCasesChanged);
+      socket.off('notification_created', onNotificationCreated);
+      socket.off('connect', onCasesChanged);
     };
   }, [socket, fetchCases]);
 
