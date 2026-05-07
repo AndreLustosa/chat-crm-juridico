@@ -264,7 +264,7 @@ export class DjenService {
         take: 50, // limite pra nao sobrecarregar IA/WhatsApp em uma execucao
       });
 
-      if (pendings.length === 0) return 0;
+      if (pendings.length === 0) return;
 
       this.logger.log(`[DJEN-RETRY] ${pendings.length} pub(s) pendentes de notificacao`);
 

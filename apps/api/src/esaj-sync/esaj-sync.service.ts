@@ -129,7 +129,7 @@ export class EsajSyncService {
         take: 100,
       });
 
-      if (pending.length === 0) return 0;
+      if (pending.length === 0) return;
 
       // Agrupa por case_id (1 mensagem por processo, nao por movimento).
       const byCase = new Map<string, typeof pending>();
