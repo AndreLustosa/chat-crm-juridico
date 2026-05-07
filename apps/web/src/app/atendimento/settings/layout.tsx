@@ -5,7 +5,7 @@ import {
   UserCog, Bot, Shield, ChevronLeft, MessageSquare, Layout, Briefcase,
   Bell, DollarSign, Calendar, FileSignature, Plug, Kanban, Zap, GitBranch,
   CreditCard, FileText, Building2, Users, Wallet, Cpu, Link2, HardDrive,
-  Brain, AudioLines,
+  Brain, AudioLines, Clock,
 } from 'lucide-react';
 import { useRole } from '@/lib/useRole';
 import { RouteGuard } from '@/components/RouteGuard';
@@ -73,6 +73,12 @@ const settingsSections: MenuSection[] = [
       { label: 'Integração MCP', href: '/atendimento/settings/mcp', icon: Plug },
     ],
   },
+  {
+    title: 'Sistema',
+    items: [
+      { label: 'Crons (Tarefas Agendadas)', href: '/atendimento/settings/crons', icon: Clock },
+    ],
+  },
 ];
 
 // Rotas restritas a ADMIN
@@ -90,6 +96,7 @@ const adminOnlyPaths = new Set([
   '/atendimento/settings/payment-templates',
   '/atendimento/settings/nota-fiscal',
   '/atendimento/settings/transcricao',
+  '/atendimento/settings/crons',
 ]);
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
