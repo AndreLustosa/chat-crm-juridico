@@ -311,6 +311,12 @@ export class InternService {
    * petições devolvidas para correção (RASCUNHO com versions > 0)
    */
   async getBadgeCount(userId: string) {
+    // Guard defensivo: model casePetition pode nao existir no Prisma client
+    // gerado (schema atualiza antes do client). Sem isso, o endpoint quebra
+    // a sidebar inteira do estagiario.
+    if (!(this.prisma as any).casePetition) {
+      return { corrections: 0 };
+    }
     const corrections = await (this.prisma as any).casePetition.count({
       where: {
         created_by_id: userId,

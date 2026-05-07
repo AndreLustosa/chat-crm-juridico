@@ -54,9 +54,13 @@ function summarizePayload(payload: EvolutionWebhookPayload): string {
  * Extrai o melhor número de telefone de dois JIDs do Evolution API.
  *
  * O WhatsApp Multi-Device pode enviar LIDs (Linked Device Identifiers)
- * como JID primário em alguns eventos. LIDs são números com 14+ dígitos
- * (ex: "237791032135755") e NÃO são números de telefone reais.
- * Números de telefone reais têm ≤13 dígitos (ex: "558291420467" = 55+DDD+número).
+ * como JID primário em alguns eventos. LIDs usam o sufixo "@lid" e NÃO
+ * são números de telefone reais — o telefone real, quando disponível,
+ * vem em remoteJidAlt (@s.whatsapp.net).
+ *
+ * Importante: LIDs podem ter 13 dígitos (ex: "3174081540241"), então a
+ * heurística de contagem de dígitos sozinha não é confiável. O sufixo
+ * "@lid" é o indicador definitivo.
  *
  * Esta função sempre prefere o JID que parece um número de telefone real.
  */
@@ -64,7 +68,10 @@ function extractPhone(remoteJid: string, remoteJidAlt?: string): string {
   const p1 = (remoteJid || '').split('@')[0];
   const p2 = (remoteJidAlt || '').split('@')[0];
 
-  // Heurística: telefones reais têm no máximo 13 dígitos (DDI+DDD+número)
+  // @lid é indicador definitivo de LID — não usar como telefone, independente do tamanho
+  if ((remoteJid || '').endsWith('@lid')) return p2 || '';
+
+  // Heurística de fallback: telefones reais têm no máximo 13 dígitos (DDI+DDD+número)
   // LIDs do WhatsApp geralmente têm 14+ dígitos
   const looksLikePhone = (p: string) => p.length > 0 && p.length <= 13;
 
@@ -351,11 +358,12 @@ export class EvolutionService implements OnApplicationBootstrap {
       }
 
       // ── Auto-merge de conversa LID ─────────────────────────────────────────
-      // Se o remoteJid era um LID (14+ dígitos) e conseguimos o telefone real via
-      // remoteJidAlt, verifica se existe uma conversa "gêmea" do LID e mescla
-      // todas as mensagens na conversa do telefone real, encerrando a do LID.
+      // Se o remoteJid era um @lid e conseguimos o telefone real via remoteJidAlt,
+      // verifica se existe uma conversa "gêmea" do LID e mescla todas as mensagens
+      // na conversa do telefone real, encerrando a do LID.
+      // Usa sufixo @lid (confiável) em vez de contagem de dígitos (LIDs podem ter 13 dígitos).
       const rawLidPhone = remoteJid.split('@')[0];
-      if (rawLidPhone.length > 13 && phone !== rawLidPhone) {
+      if (remoteJid.endsWith('@lid') && phone !== rawLidPhone) {
         // Auto-merge so isola por tenant — antes podia juntar conversas de
         // tenants distintos com o mesmo LID (bug 2026-04-29).
         const lidLead = await this.prisma.lead.findFirst({
