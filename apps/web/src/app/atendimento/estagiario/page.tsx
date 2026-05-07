@@ -1051,6 +1051,7 @@ function KanbanView() {
 // ─── Lista View (existente) ─────────────────────────────────────
 
 function ListView() {
+  const { socket } = useSocket();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
