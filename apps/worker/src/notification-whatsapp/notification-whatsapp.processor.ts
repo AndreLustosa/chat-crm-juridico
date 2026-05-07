@@ -6,6 +6,37 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 
 /**
+ * Circuit breaker contra ban da Evolution / WhatsApp.
+ *
+ * Contexto: incidente 28/04/2026 — broadcast de 78 alvos derrubou a conta
+ * (memoria `whatsapp_ban_disparo`). A causa raiz foi 100 jobs disparando
+ * em rajada apos delay BullMQ — Evolution nao detecta como humano.
+ *
+ * Defesas adicionadas aqui:
+ *   1. Jitter aleatorio 0.5-3s antes de cada envio — quebra rajada
+ *      sincrona de jobs que terminam delay BullMQ ao mesmo tempo
+ *   2. Circuit breaker — se taxa de erro nas ultimas N janelas for >= 50%,
+ *      pula envio e re-enfileira pra mais tarde. Reseta janela 5min.
+ *   3. Counters em memoria — perde no restart, mas se houver problema real,
+ *      a janela de 5min nova ja vai pegar de novo.
+ *
+ * NAO substitui rate-limit do lado do worker BullMQ (concurrency=1 evita
+ * paralelismo), mas previne picos quando varias notificacoes terminam
+ * delay no mesmo segundo.
+ */
+const CIRCUIT_WINDOW_MS = 5 * 60 * 1000;     // janela de 5min
+const CIRCUIT_MIN_SAMPLES = 5;               // so abre circuit apos 5 samples
+const CIRCUIT_FAILURE_THRESHOLD = 0.5;       // 50% de erro = abre
+const JITTER_MIN_MS = 500;
+const JITTER_MAX_MS = 3000;
+
+interface CircuitWindow {
+  windowStart: number;
+  total: number;
+  failures: number;
+}
+
+/**
  * Processa jobs de notificação por WhatsApp.
  * Cada job é enfileirado com delay de 5min após uma Notification ser criada.
  * Se a notificação já foi lida (push/socket), o WhatsApp NÃO é enviado.
@@ -13,6 +44,7 @@ import { SettingsService } from '../settings/settings.service';
 @Processor('notification-whatsapp')
 export class NotificationWhatsappProcessor extends WorkerHost {
   private readonly logger = new Logger(NotificationWhatsappProcessor.name);
+  private circuit: CircuitWindow = { windowStart: Date.now(), total: 0, failures: 0 };
 
   constructor(
     private prisma: PrismaService,
@@ -21,8 +53,52 @@ export class NotificationWhatsappProcessor extends WorkerHost {
     super();
   }
 
+  /** Janela rotativa: zera counters apos CIRCUIT_WINDOW_MS desde o ultimo reset. */
+  private rotateCircuitWindowIfNeeded(): void {
+    const now = Date.now();
+    if (now - this.circuit.windowStart >= CIRCUIT_WINDOW_MS) {
+      this.circuit = { windowStart: now, total: 0, failures: 0 };
+    }
+  }
+
+  /**
+   * Retorna true se o circuit ESTA ABERTO (ou seja, nao deve enviar).
+   * So abre se ja teve samples suficientes — evita falso-positivo no boot.
+   */
+  private isCircuitOpen(): boolean {
+    this.rotateCircuitWindowIfNeeded();
+    if (this.circuit.total < CIRCUIT_MIN_SAMPLES) return false;
+    return this.circuit.failures / this.circuit.total >= CIRCUIT_FAILURE_THRESHOLD;
+  }
+
+  private recordSuccess(): void {
+    this.rotateCircuitWindowIfNeeded();
+    this.circuit.total++;
+  }
+
+  private recordFailure(): void {
+    this.rotateCircuitWindowIfNeeded();
+    this.circuit.total++;
+    this.circuit.failures++;
+  }
+
+  private async jitter(): Promise<void> {
+    const ms = JITTER_MIN_MS + Math.floor(Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS));
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async process(job: Job<{ notificationId: string; userId: string }>) {
     const { notificationId, userId } = job.data;
+
+    // Circuit breaker: se taxa de erro >50% nos ultimos 5min, throw para
+    // BullMQ retentar com backoff. Protege contra ban Evolution quando algo
+    // sistemico esta errado (instancia desconectada, apikey rotacionada, etc).
+    if (this.isCircuitOpen()) {
+      this.logger.warn(
+        `[NotifWA] Circuit breaker ABERTO (${this.circuit.failures}/${this.circuit.total} falhas em ${CIRCUIT_WINDOW_MS / 1000 / 60}min) — re-enfileirando`,
+      );
+      throw new Error('Circuit breaker open — temporary backoff');
+    }
 
     try {
       // 1. Notificação já foi lida? (socket/push dentro dos 5min)
@@ -193,11 +269,26 @@ export class NotificationWhatsappProcessor extends WorkerHost {
       lines.push(`Abrir o chat: ${deepLink}`);
       const text = lines.join('\n');
 
-      await axios.post(
-        `${apiUrl}/message/sendText/${instanceName}`,
-        { number: user.phone, text },
-        { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
-      );
+      // Jitter pre-envio: quebra rajada sincrona quando varios jobs
+      // terminam delay BullMQ no mesmo segundo (ban risk).
+      await this.jitter();
+
+      try {
+        await axios.post(
+          `${apiUrl}/message/sendText/${instanceName}`,
+          { number: user.phone, text },
+          { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
+        );
+        this.recordSuccess();
+      } catch (sendErr: any) {
+        this.recordFailure();
+        this.logger.warn(
+          `[NotifWA] Envio falhou (${sendErr.response?.status || sendErr.code || 'unknown'}): ${sendErr.message}`,
+        );
+        // Re-throw pra BullMQ retentar (e nao gravar whatsapp_sent_at — vai
+        // tentar de novo no proximo retry com novo job)
+        throw sendErr;
+      }
 
       // Marca whatsapp_sent_at — usado pelo dedup das proximas notificacoes
       // da mesma conversa (60min de janela).
@@ -209,6 +300,7 @@ export class NotificationWhatsappProcessor extends WorkerHost {
       this.logger.log(`[NotifWA] WhatsApp enviado para ${user.phone}: "${notification.title}"`);
     } catch (e: any) {
       this.logger.error(`[NotifWA] Falha ao processar job: ${e.message}`);
+      throw e; // re-throw para BullMQ contar como retry e respeitar attempts
     }
   }
 }

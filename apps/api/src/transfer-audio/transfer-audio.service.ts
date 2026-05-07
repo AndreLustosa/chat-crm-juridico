@@ -1,8 +1,15 @@
-import { Injectable, Logger, NotFoundException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, HttpException, HttpStatus, PayloadTooLargeException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+
+/**
+ * Limite duro do upload de audio de transferencia (50MB).
+ * Cobre audios longos (audiencia, briefing) sem permitir DoS via 1GB+ que
+ * estouraria a memoria do Pod antes do MinIO rejeitar.
+ */
+const MAX_AUDIO_SIZE_BYTES = 50 * 1024 * 1024;
 
 @Injectable()
 export class TransferAudioService {
@@ -22,6 +29,13 @@ export class TransferAudioService {
     size: number,
     uploadedById?: string,
   ) {
+    if (size > MAX_AUDIO_SIZE_BYTES) {
+      const sizeMb = (size / 1024 / 1024).toFixed(1);
+      throw new PayloadTooLargeException(
+        `Audio de ${sizeMb}MB excede o limite de ${MAX_AUDIO_SIZE_BYTES / 1024 / 1024}MB`,
+      );
+    }
+
     const id = crypto.randomUUID();
     const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'webm';
     const s3Key = `transfer-audios/${conversationId}/${id}.${ext}`;

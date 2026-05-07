@@ -1,21 +1,32 @@
-import { Controller, Post, Body, HttpCode, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, UseGuards, UsePipes, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { EvolutionService } from './evolution.service';
 import { HmacGuard } from './guards/hmac.guard';
 import { Public } from '../auth/decorators/public.decorator';
+import { EvolutionWebhookDto } from './dto/evolution-webhook.dto';
 
 @Public()
 @SkipThrottle()
 @UseGuards(HmacGuard)
 @Controller('webhooks/evolution')
+// ValidationPipe local: precisa de whitelist=false porque Evolution envia
+// muitos campos extras nao declarados no DTO (sender, fromMe, etc) que
+// variam por evento. O global usa forbidNonWhitelisted=true que rejeitaria.
+@UsePipes(new ValidationPipe({
+  transform: true,
+  whitelist: false,
+  forbidNonWhitelisted: false,
+}))
 export class EvolutionController {
   constructor(private readonly evolutionService: EvolutionService) {}
 
   @Post()
   @HttpCode(200)
-  async handleWebhook(@Body() payload: any) {
-    // Basic support for different event types
-    const eventType = payload.event as string;
+  async handleWebhook(@Body() payload: EvolutionWebhookDto) {
+    if (!EvolutionWebhookDto.hasInstance(payload)) {
+      throw new BadRequestException('instance ou instanceId eh obrigatorio');
+    }
+    const eventType = payload.event;
 
     if (eventType === 'messages.upsert' || eventType === 'send.message') {
       // send.message = echo de mensagens enviadas pela API (IA, operador via Evolution)
