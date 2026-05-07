@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Cron de retry de transcricao de audios que ficaram sem texto.
@@ -37,11 +38,15 @@ export class AudioRetranscribeCronService {
   constructor(
     private prisma: PrismaService,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
+    private cronRunner: CronRunnerService,
   ) {}
 
   @Cron('*/15 * * * *', { timeZone: 'America/Maceio' })
   async retryPendingTranscriptions() {
-    try {
+    await this.cronRunner.run(
+      'ai-audio-retranscribe',
+      14 * 60,
+      async () => {
       // Audios sem texto (null ou vazio) dos ultimos 3 dias COM file_path
       // (indica que o download inicial funcionou mas transcricao falhou)
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
@@ -143,8 +148,8 @@ export class AudioRetranscribeCronService {
           }
         }
       }
-    } catch (e: any) {
-      this.logger.warn(`[AUDIO-RETRY] Erro no cron: ${e?.message || e}`);
-    }
+      },
+      { description: 'Re-enfileira transcricao de audios sem texto (3d janela, agrupado por conv)', schedule: '*/15 * * * *' },
+    );
   }
 }

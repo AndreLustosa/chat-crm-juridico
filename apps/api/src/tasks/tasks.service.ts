@@ -8,6 +8,7 @@ import { ChatGateway } from '../gateway/chat.gateway';
 import { CalendarService } from '../calendar/calendar.service';
 import { MediaS3Service } from '../media/s3.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 // Whitelist de MIME types pra anexos de Task. Mesma do portal/upload —
 // PDF, imagens, Office, TXT. Bloqueia executaveis e scripts.
@@ -62,6 +63,7 @@ export class TasksService {
     private calendarService: CalendarService,
     private s3: MediaS3Service,
     private notifications: NotificationsService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   private tenantWhere(tenantId?: string) {
@@ -1311,7 +1313,10 @@ export class TasksService {
 
   @Cron(CronExpression.EVERY_HOUR)
   async checkOverdueTasks() {
-    try {
+    await this.cronRunner.run(
+      'tasks-overdue-escalation',
+      30 * 60,
+      async () => {
       const now = new Date();
       const overdueTasks = await this.prisma.task.findMany({
         where: {
@@ -1399,9 +1404,9 @@ export class TasksService {
       }
 
       this.logger.log(`[TasksCron] Verificadas ${overdueTasks.length} tarefas vencidas`);
-    } catch (e: any) {
-      this.logger.error(`[TasksCron] Erro ao verificar tarefas vencidas: ${e.message}`);
-    }
+      },
+      { description: 'Escalonamento progressivo (warning/urgent/critical) de tarefas vencidas', schedule: '0 * * * *' },
+    );
   }
 
   // ─── SPRINT 4: Carga de trabalho por usuário (smart assignment) ───────────

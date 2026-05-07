@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import type { Response } from 'express';
 import { SettingsService } from '../settings/settings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import Anthropic from '@anthropic-ai/sdk';
 
 // ─── Constants ──────────────────────────────────────────────
@@ -51,6 +52,7 @@ export class PetitionChatService {
   constructor(
     private readonly settings: SettingsService,
     private readonly prisma: PrismaService,
+    private readonly cronRunner: CronRunnerService,
   ) {}
 
   // ─── Public: Get Anthropic client ──────────────────────
@@ -917,21 +919,26 @@ export class PetitionChatService {
 
   /** Cleanup: delete chats not updated in 6 months — runs daily at 3:17 AM */
   @Cron('17 3 * * *')
-  async cleanupOldChats(): Promise<number> {
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  async cleanupOldChats(): Promise<void> {
+    await this.cronRunner.run(
+      'petitions-cleanup-old-chats',
+      10 * 60,
+      async () => {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
-    const result = await this.prisma.aiChat.deleteMany({
-      where: { updated_at: { lt: sixMonthsAgo } },
-    });
+        const result = await this.prisma.aiChat.deleteMany({
+          where: { updated_at: { lt: sixMonthsAgo } },
+        });
 
-    if (result.count > 0) {
-      this.logger.log(
-        `Cleanup: ${result.count} AI chats deleted (> 6 months inactive)`,
-      );
-    }
-
-    return result.count;
+        if (result.count > 0) {
+          this.logger.log(
+            `Cleanup: ${result.count} AI chats deleted (> 6 months inactive)`,
+          );
+        }
+      },
+      { description: 'Apaga AiChat de peticoes inativos > 6 meses', schedule: '17 3 * * *' },
+    );
   }
 
   // ─── Private ──────────────────────────────────────────

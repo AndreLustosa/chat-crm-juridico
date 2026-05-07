@@ -3734,3 +3734,36 @@ model LandingPage {
   @@index([tenant_id, last_pagespeed_at])
   @@index([campaign_id])
 }
+
+
+/// Controle global de crons (ativar/desativar via admin + historico de execucao).
+///
+/// Modelo registrado automaticamente no primeiro disparo de cada cron via
+/// CronRunnerService.ensureExists. enabled e last_* sao atualizados a cada run.
+/// Nao tem tenant_id: crons rodam globais (single-process), e a logica de
+/// tenant fica dentro da implementacao de cada cron.
+model CronConfig {
+  id               String    @id @default(uuid())
+  /// Nome unico do cron — usado como chave de lookup (ex: "payment-due-reminders")
+  name             String    @unique
+  /// Descricao curta pra UI (ex: "Lembrete de vencimento 3 dias antes")
+  description      String?
+  /// Expressao cron pra display na UI (ex: "0 9 * * 1-5") — nao runtime
+  schedule         String?
+  /// Se false, cron nao executa (mas continua tentando lock)
+  enabled          Boolean   @default(true)
+  /// Timestamp da ultima execucao (sucesso ou erro)
+  last_run_at      DateTime?
+  /// "ok" | "error" | null (nunca rodou)
+  last_status      String?
+  /// Mensagem de erro do ultimo run (truncada em 1000 chars)
+  last_error       String?   @db.Text
+  /// Duracao do ultimo run em ms
+  last_duration_ms Int?
+  /// Total de execucoes desde o primeiro registro
+  run_count        Int       @default(0)
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  @@index([enabled])
+}

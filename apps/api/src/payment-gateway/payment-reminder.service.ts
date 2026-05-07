@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { PaymentGatewayService } from './payment-gateway.service';
 import { SettingsService } from '../settings/settings.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Tipos de template suportados — string union centralizada pra UI e
@@ -264,6 +265,7 @@ export class PaymentReminderService {
     private whatsapp: WhatsappService,
     private paymentGateway: PaymentGatewayService,
     private settings: SettingsService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   // ─── Templates customizaveis pelo admin ───────────────────────
@@ -849,6 +851,10 @@ export class PaymentReminderService {
    */
   @Cron('0 9 * * *', { timeZone: 'America/Maceio' })
   async sendPreDueReminders() {
+    await this.cronRunner.run(
+      'payment-pre-due-reminders',
+      30 * 60,
+      async () => {
     const now = new Date();
     const today0 = new Date(now); today0.setHours(0, 0, 0, 0);
     const buckets: Array<{ kind: string; minDays: number; maxDays: number }> = [
@@ -890,6 +896,9 @@ export class PaymentReminderService {
       totalSent += sent;
     }
     if (totalSent > 0) this.logger.log(`[Cron pre-due] ${totalSent} lembrete(s) enviado(s)`);
+      },
+      { description: 'Lembrete WhatsApp 3/1/0 dias antes do vencimento (Asaas)', schedule: '0 9 * * *' },
+    );
   }
 
   /**
@@ -981,6 +990,10 @@ export class PaymentReminderService {
    */
   @Cron('0 14 * * *', { timeZone: 'America/Maceio' })
   async sendOverdueReminders() {
+    await this.cronRunner.run(
+      'payment-overdue-reminders',
+      30 * 60,
+      async () => {
     const now = new Date();
     const today0 = new Date(now); today0.setHours(0, 0, 0, 0);
     const buckets: Array<{ kind: string; minDays: number; maxDays: number; alertLawyer?: boolean }> = [
@@ -1033,6 +1046,9 @@ export class PaymentReminderService {
     }
     if (totalSent > 0) this.logger.log(`[Cron overdue] ${totalSent} cobranca(s) enviada(s)`);
     if (totalAlerts > 0) this.logger.log(`[Cron overdue] ${totalAlerts} alerta(s) ao advogado (15d+)`);
+      },
+      { description: 'Lembrete WhatsApp para cobrancas atrasadas (1/3/7 dias) + alerta advogado em 15d+', schedule: '0 14 * * *' },
+    );
   }
 
   private async sendOverdueReminder(chargeId: string, kind: string): Promise<boolean> {
@@ -1108,15 +1124,18 @@ export class PaymentReminderService {
    */
   @Cron('*/30 * * * *')
   async reconcilePendingCharges() {
-    try {
-      // Reconcile sem tenantId — varre todos os tenants (ATTENTION:
-      // multi-tenant ainda eh single-instance, sem isolation real aqui).
-      const result = await this.paymentGateway.reconcile();
-      if (result.updated > 0) {
-        this.logger.log(`[Cron reconcile] ${result.updated} charge(s) atualizada(s)`);
-      }
-    } catch (e: any) {
-      this.logger.error(`[Cron reconcile] Falhou: ${e.message}`);
-    }
+    await this.cronRunner.run(
+      'payment-reconcile-pending',
+      20 * 60,
+      async () => {
+        // Reconcile sem tenantId — varre todos os tenants (ATTENTION:
+        // multi-tenant ainda eh single-instance, sem isolation real aqui).
+        const result = await this.paymentGateway.reconcile();
+        if (result.updated > 0) {
+          this.logger.log(`[Cron reconcile] ${result.updated} charge(s) atualizada(s)`);
+        }
+      },
+      { description: 'Sincroniza status de cobrancas PENDING com Asaas (fallback de webhook)', schedule: '*/30 * * * *' },
+    );
   }
 }

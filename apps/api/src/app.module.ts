@@ -51,6 +51,8 @@ import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
 import { NotaFiscalModule } from './nota-fiscal/nota-fiscal.module';
 import { MemoriesModule } from './memories/memories.module';
 import { LockModule } from './common/locks/lock.module';
+import { CronModule } from './common/cron/cron.module';
+import { AdminCronsModule } from './admin/admin-crons.module';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { PortalProcessesModule } from './portal-processes/portal-processes.module';
 import { PortalDocumentsModule } from './portal-documents/portal-documents.module';
@@ -86,6 +88,8 @@ import { RolesGuard } from './auth/guards/roles.guard';
       }),
     }),
     LockModule,
+    CronModule,
+    AdminCronsModule,
     PrismaModule,
     S3Module,
     UsersModule,

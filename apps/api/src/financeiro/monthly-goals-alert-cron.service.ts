@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MonthlyGoalsService } from './monthly-goals.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Cron de alerta de metas em risco.
@@ -25,6 +26,7 @@ export class MonthlyGoalsAlertCronService {
   constructor(
     private prisma: PrismaService,
     private goalsService: MonthlyGoalsService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   /**
@@ -34,6 +36,10 @@ export class MonthlyGoalsAlertCronService {
    */
   @Cron('0 9 * * *', { timeZone: 'America/Maceio' })
   async checkGoalsAtRisk() {
+    await this.cronRunner.run(
+      'financeiro-monthly-goals-alert',
+      15 * 60,
+      async () => {
     const now = new Date();
     const dayOfMonth = now.getUTCDate();
     if (dayOfMonth < 25) {
@@ -140,6 +146,9 @@ export class MonthlyGoalsAlertCronService {
 
     this.logger.log(
       `[GOALS-ALERT] Concluido: ${goals.length} meta(s) verificadas, ${alertsSent} notificacao(oes) enviadas, ${alertsSkipped} ja alertadas hoje.`,
+    );
+      },
+      { description: 'Alerta de meta mensal em risco (dia 25+, atingimento <70%)', schedule: '0 9 * * *' },
     );
   }
 

@@ -9,6 +9,7 @@ import { GoogleAdsClientService } from './google-ads-client.service';
 import { TrafegoAlertEvaluatorService } from './trafego-alert-evaluator.service';
 import { TrafegoAlertNotifierService } from './trafego-alert-notifier.service';
 import { TrafegoSyncExtendedService } from './trafego-sync-extended.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 // ─── Helpers de conversao de tipos do Google Ads API → Prisma ──────────────
 //
@@ -93,6 +94,7 @@ export class TrafegoSyncService extends WorkerHost {
     private alertEvaluator: TrafegoAlertEvaluatorService,
     private alertNotifier: TrafegoAlertNotifierService,
     private syncExtended: TrafegoSyncExtendedService,
+    private cronRunner: CronRunnerService,
   ) {
     super();
   }
@@ -132,38 +134,45 @@ export class TrafegoSyncService extends WorkerHost {
 
   @Cron('0 6 * * *', { timeZone: 'America/Maceio' })
   async runDailySync() {
-    const accounts = await this.prisma.trafficAccount.findMany({
-      where: { status: 'ACTIVE' },
-      include: {
-        tenant: {
-          select: {
-            traffic_settings: { select: { sync_enabled: true } },
+    await this.cronRunner.run(
+      'trafego-daily-sync',
+      60 * 60,
+      async () => {
+        const accounts = await this.prisma.trafficAccount.findMany({
+          where: { status: 'ACTIVE' },
+          include: {
+            tenant: {
+              select: {
+                traffic_settings: { select: { sync_enabled: true } },
+              },
+            },
           },
-        },
-      },
-    });
+        });
 
-    if (accounts.length === 0) {
-      this.logger.log('[TRAFEGO_SYNC] Nenhuma conta ativa — skip');
-      return;
-    }
+        if (accounts.length === 0) {
+          this.logger.log('[TRAFEGO_SYNC] Nenhuma conta ativa — skip');
+          return;
+        }
 
-    this.logger.log(
-      `[TRAFEGO_SYNC] Sync diario de ${accounts.length} conta(s)`,
-    );
-
-    for (const account of accounts) {
-      const enabled = account.tenant?.traffic_settings?.sync_enabled ?? true;
-      if (!enabled) continue;
-      try {
-        await this.syncAccount(account.id, 'CRON');
-      } catch (e: any) {
-        this.logger.error(
-          `[TRAFEGO_SYNC] Erro sync conta ${account.id}: ${e.message}`,
+        this.logger.log(
+          `[TRAFEGO_SYNC] Sync diario de ${accounts.length} conta(s)`,
         );
-        // Continua pras proximas — erro de uma conta nao trava as outras
-      }
-    }
+
+        for (const account of accounts) {
+          const enabled = account.tenant?.traffic_settings?.sync_enabled ?? true;
+          if (!enabled) continue;
+          try {
+            await this.syncAccount(account.id, 'CRON');
+          } catch (e: any) {
+            this.logger.error(
+              `[TRAFEGO_SYNC] Erro sync conta ${account.id}: ${e.message}`,
+            );
+            // Continua pras proximas — erro de uma conta nao trava as outras
+          }
+        }
+      },
+      { description: 'Sync diario de metricas Google Ads (todas contas ATIVAS)', schedule: '0 6 * * *' },
+    );
   }
 
   /**
@@ -171,16 +180,23 @@ export class TrafegoSyncService extends WorkerHost {
    */
   @Cron('30 2 * * *', { timeZone: 'America/Maceio' })
   async pruneOldSyncLogs() {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 90);
-    const result = await this.prisma.trafficSyncLog.deleteMany({
-      where: { started_at: { lt: cutoff } },
-    });
-    if (result.count > 0) {
-      this.logger.log(
-        `[TRAFEGO_SYNC] Purge: ${result.count} log(s) > 90d removido(s)`,
-      );
-    }
+    await this.cronRunner.run(
+      'trafego-prune-old-sync-logs',
+      10 * 60,
+      async () => {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 90);
+        const result = await this.prisma.trafficSyncLog.deleteMany({
+          where: { started_at: { lt: cutoff } },
+        });
+        if (result.count > 0) {
+          this.logger.log(
+            `[TRAFEGO_SYNC] Purge: ${result.count} log(s) > 90d removido(s)`,
+          );
+        }
+      },
+      { description: 'Apaga TrafficSyncLog > 90 dias (limpeza diaria 02:30)', schedule: '30 2 * * *' },
+    );
   }
 
   // ─── Sync de uma conta especifica ────────────────────────────────────────

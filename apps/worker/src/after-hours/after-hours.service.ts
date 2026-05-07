@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import {
   computeBusinessHoursStatus,
   loadBusinessHoursSettings,
@@ -31,33 +32,43 @@ import {
 export class AfterHoursService {
   private readonly logger = new Logger(AfterHoursService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cronRunner: CronRunnerService,
+  ) {}
 
   /** Roda a cada 5 minutos no timezone de Maceió. */
   @Cron('*/5 * * * *', { timeZone: 'America/Maceio' })
   async tick() {
-    let enabled: boolean;
-    try {
-      enabled = await this.isEnabled();
-    } catch (e: any) {
-      this.logger.error(`[AfterHours] Falha ao carregar settings: ${e.message}`);
-      return;
-    }
-    if (!enabled) {
-      this.logger.debug('[AfterHours] AFTER_HOURS_AI_ENABLED=false — pulando tick');
-      return;
-    }
+    await this.cronRunner.run(
+      'after-hours-tick',
+      4 * 60,
+      async () => {
+        let enabled: boolean;
+        try {
+          enabled = await this.isEnabled();
+        } catch (e: any) {
+          this.logger.error(`[AfterHours] Falha ao carregar settings: ${e.message}`);
+          return;
+        }
+        if (!enabled) {
+          this.logger.debug('[AfterHours] AFTER_HOURS_AI_ENABLED=false — pulando tick');
+          return;
+        }
 
-    const status = await computeBusinessHoursStatus(this.prisma);
-    this.logger.debug(
-      `[AfterHours] ${status.currentDayName} ${status.currentTime} businessHour=${status.isBusinessHour} holiday=${status.isHoliday}`,
+        const status = await computeBusinessHoursStatus(this.prisma);
+        this.logger.debug(
+          `[AfterHours] ${status.currentDayName} ${status.currentTime} businessHour=${status.isBusinessHour} holiday=${status.isHoliday}`,
+        );
+
+        if (status.isBusinessHour) {
+          await this.restoreBusinessHours();
+        } else {
+          await this.activateAfterHours();
+        }
+      },
+      { description: 'Liga IA fora do expediente (apenas conversas de cliente, lead.is_client=true)', schedule: '*/5 * * * *' },
     );
-
-    if (status.isBusinessHour) {
-      await this.restoreBusinessHours();
-    } else {
-      await this.activateAfterHours();
-    }
   }
 
   // ─── Flag global ON/OFF ────────────────────────────────────────────

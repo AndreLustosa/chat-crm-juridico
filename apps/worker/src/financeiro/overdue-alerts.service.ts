@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Notificação de dívidas e recebíveis vencidos a cada 2 horas (horário comercial).
@@ -12,14 +13,20 @@ import { PrismaService } from '../prisma/prisma.service';
 export class OverdueAlertsService {
   private readonly logger = new Logger(OverdueAlertsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cronRunner: CronRunnerService,
+  ) {}
 
   /**
    * A cada 2 horas em horário comercial (8h, 10h, 12h, 14h, 16h, 18h) Seg-Sex
    */
   @Cron('0 8,10,12,14,16,18 * * 1-5', { timeZone: 'America/Maceio' })
   async checkOverdueItems() {
-    try {
+    await this.cronRunner.run(
+      'financeiro-overdue-alerts',
+      10 * 60,
+      async () => {
       const now = new Date();
 
       // 1. Despesas pendentes vencidas
@@ -74,8 +81,8 @@ export class OverdueAlertsService {
           },
         },
       });
-    } catch (e: any) {
-      this.logger.error(`[OVERDUE] Erro ao verificar vencidos: ${e.message}`);
-    }
+      },
+      { description: 'Audit-log de despesas/recebiveis vencidos a cada 2h (8h-18h)', schedule: '0 8,10,12,14,16,18 * * 1-5' },
+    );
   }
 }

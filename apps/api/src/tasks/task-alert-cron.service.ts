@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import {
   brazilRealNowToNaive,
   brazilRealEpochToNaive,
@@ -21,6 +22,7 @@ export class TaskAlertCronService {
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
+    private cronRunner: CronRunnerService,
   ) {}
 
   /**
@@ -32,7 +34,10 @@ export class TaskAlertCronService {
    */
   @Cron('*/5 * * * *')
   async emitDueSoonAlerts() {
-    try {
+    await this.cronRunner.run(
+      'tasks-due-soon-push',
+      4 * 60,
+      async () => {
       const nowMs = Date.now();
       // "now" e "15min" em coordenadas UTC naive BRT pra comparar com o banco
       const nowNaive = brazilRealNowToNaive(nowMs);
@@ -98,9 +103,9 @@ export class TaskAlertCronService {
           caseNumber: evt.legal_case?.case_number || null,
         });
       }
-    } catch (e: any) {
-      this.logger.warn(`[TASK-PUSH] Erro due soon: ${e.message}`);
-    }
+      },
+      { description: 'Emite alerta socket pra tarefas/eventos vencendo nos proximos 15min', schedule: '*/5 * * * *' },
+    );
   }
 
   /**
@@ -108,7 +113,10 @@ export class TaskAlertCronService {
    */
   @Cron('*/30 * * * *')
   async emitOverdueAlerts() {
-    try {
+    await this.cronRunner.run(
+      'tasks-overdue-push',
+      15 * 60,
+      async () => {
       const nowMs = Date.now();
       // Compara com colunas "UTC naive BRT" (ver timezone.util.ts)
       const nowNaive = brazilRealNowToNaive(nowMs);
@@ -176,9 +184,9 @@ export class TaskAlertCronService {
           .to(`user:${userId}`)
           .emit('task_overdue_batch', { items: topItems, total: items.length });
       }
-    } catch (e: any) {
-      this.logger.warn(`[TASK-PUSH] Erro overdue: ${e.message}`);
-    }
+      },
+      { description: 'Emite alerta socket batch de tarefas/eventos ja vencidos', schedule: '*/30 * * * *' },
+    );
   }
 
   private emitAlert(userId: string, data: any) {

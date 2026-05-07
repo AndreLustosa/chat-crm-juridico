@@ -6,6 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { LockService } from '../common/locks/lock.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
@@ -201,6 +202,7 @@ export class DjenService {
     private readonly calendarService: CalendarService,
     @Inject(forwardRef(() => WhatsappService)) private readonly whatsappService: WhatsappService,
     private readonly lock: LockService,
+    private readonly cronRunner: CronRunnerService,
   ) {}
 
   /**
@@ -237,7 +239,10 @@ export class DjenService {
    */
   @Cron('15 8-19 * * *', { timeZone: 'America/Maceio' })
   async retryPendingClientNotifications() {
-    const result = await this.lock.withLock('djen-retry-notify', 5 * 60, async () => {
+    await this.cronRunner.run(
+      'djen-retry-notify',
+      5 * 60,
+      async () => {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       const pendings = await this.prisma.djenPublication.findMany({
         where: {
@@ -288,30 +293,26 @@ export class DjenService {
         }
       }
       this.logger.log(`[DJEN-RETRY] ${notified}/${pendings.length} notificacoes enviadas`);
-      return notified;
-    });
-    if (result === null) {
-      this.logger.warn('[DJEN-RETRY] Skipado — outra replica ja esta rodando');
-    }
+      },
+      { description: 'Repesca publicacoes DJEN ainda nao notificadas ao cliente (zero perda)', schedule: '15 8-19 * * *' },
+    );
   }
 
   @Cron('0 8,17 * * *', { timeZone: 'America/Maceio' })
   async syncDaily() {
-    // Lock distribuido pra impedir double-run em ambiente multi-replica.
-    // TTL 20min: sync de N OABs com retry vai geralmente em <5min.
-    // Migrado 2026-04-26.
-    const result = await this.lock.withLock('djen-sync', 20 * 60, async () => {
-      const today = new Date();
-      const yesterday = subtractDays(today, 1);
-      this.logger.log('[DJEN] Iniciando sync diário...');
-      await this.syncForDate(toDateStr(yesterday));
-      await this.syncForDate(toDateStr(today));
-      this.logger.log('[DJEN] Sync diário concluído.');
-      return true;
-    });
-    if (result === null) {
-      this.logger.warn('[DJEN] Sync diário skipado — outra réplica já está rodando');
-    }
+    await this.cronRunner.run(
+      'djen-sync',
+      20 * 60,
+      async () => {
+        const today = new Date();
+        const yesterday = subtractDays(today, 1);
+        this.logger.log('[DJEN] Iniciando sync diário...');
+        await this.syncForDate(toDateStr(yesterday));
+        await this.syncForDate(toDateStr(today));
+        this.logger.log('[DJEN] Sync diário concluído.');
+      },
+      { description: 'Sync diario DJEN (8h e 17h) — pega publicacoes de ontem + hoje', schedule: '0 8,17 * * *' },
+    );
   }
 
   /** Busca items da API DJEN para uma OAB específica em uma data, com retry */

@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
+import { LockModule } from './common/locks/lock.module';
+import { CronModule } from './common/cron/cron.module';
 import { S3Module } from './s3/s3.module';
 import { SettingsModule } from './settings/settings.module';
 import { MediaModule } from './media/media.module';
@@ -22,6 +24,8 @@ import { TrafegoModule } from './trafego/trafego.module';
 @Module({
   imports: [
     PrismaModule,
+    LockModule,
+    CronModule,
     S3Module,
     SettingsModule,
     ScheduleModule.forRoot(),

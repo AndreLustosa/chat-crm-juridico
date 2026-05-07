@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { EmbeddingService } from './embedding.service';
 import { MemoryRetrievalService } from './memory-retrieval.service';
 import { BATCH_EXTRACTION_PROMPT } from './memory-prompts';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 const DEFAULT_BATCH_SIZE = 30;
 const MIN_MESSAGE_LEN = 3;
@@ -55,35 +56,43 @@ export class DailyMemoryBatchProcessor {
     private readonly embedding: EmbeddingService,
     private readonly retrieval: MemoryRetrievalService,
     @InjectQueue('memory-jobs') private readonly memoryQueue: Queue,
+    private readonly cronRunner: CronRunnerService,
   ) {}
 
   // ─── Cron: agenda todos os tenants meia-noite ─────────────
 
   @Cron('0 0 * * *', { timeZone: 'America/Maceio' })
   async scheduleDailyExtraction() {
-    const enabled = await this.isEnabled();
-    if (!enabled) {
-      this.logger.log('[MemoryBatch] MEMORY_BATCH_ENABLED=false — pulando extracao diaria');
-      return;
-    }
+    await this.cronRunner.run(
+      'memory-daily-batch-extract',
+      30 * 60,
+      async () => {
+        const enabled = await this.isEnabled();
+        if (!enabled) {
+          this.logger.log('[MemoryBatch] MEMORY_BATCH_ENABLED=false — pulando extracao diaria');
+          return;
+        }
 
-    this.logger.log('=== Inicio da extracao diaria de memorias ===');
-    const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
-    const today = new Date().toISOString().split('T')[0];
+        this.logger.log('=== Inicio da extracao diaria de memorias ===');
+        const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
+        const today = new Date().toISOString().split('T')[0];
 
-    for (const tenant of tenants) {
-      await this.memoryQueue.add(
-        'daily-batch-extract',
-        { tenant_id: tenant.id },
-        {
-          jobId: `daily-batch-${tenant.id}-${today}`,
-          removeOnComplete: true,
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 60000 },
-        },
-      );
-    }
-    this.logger.log(`[MemoryBatch] Agendada extracao para ${tenants.length} tenants`);
+        for (const tenant of tenants) {
+          await this.memoryQueue.add(
+            'daily-batch-extract',
+            { tenant_id: tenant.id },
+            {
+              jobId: `daily-batch-${tenant.id}-${today}`,
+              removeOnComplete: true,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 60000 },
+            },
+          );
+        }
+        this.logger.log(`[MemoryBatch] Agendada extracao para ${tenants.length} tenants`);
+      },
+      { description: 'Enfileira extracao diaria de memorias (LLM) por tenant a meia-noite', schedule: '0 0 * * *' },
+    );
   }
 
   private async isEnabled(): Promise<boolean> {

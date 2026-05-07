@@ -4,6 +4,7 @@ import { Cron } from '@nestjs/schedule';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrafficRecommendationsService } from './traffic-recommendations.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Processor + cron pra Recommendations.
@@ -24,6 +25,7 @@ export class TrafficRecommendationsProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private recs: TrafficRecommendationsService,
+    private cronRunner: CronRunnerService,
   ) {
     super();
   }
@@ -59,32 +61,39 @@ export class TrafficRecommendationsProcessor extends WorkerHost {
    */
   @Cron('30 7 * * *', { timeZone: 'America/Maceio' })
   async runDailySync() {
-    const accounts = await this.prisma.trafficAccount.findMany({
-      where: { status: 'ACTIVE' },
-      select: { id: true, customer_id: true },
-    });
-    if (accounts.length === 0) {
-      this.logger.log('[recommendations-cron] sem contas ativas — skip');
-      return;
-    }
+    await this.cronRunner.run(
+      'trafego-recommendations-daily',
+      30 * 60,
+      async () => {
+        const accounts = await this.prisma.trafficAccount.findMany({
+          where: { status: 'ACTIVE' },
+          select: { id: true, customer_id: true },
+        });
+        if (accounts.length === 0) {
+          this.logger.log('[recommendations-cron] sem contas ativas — skip');
+          return;
+        }
 
-    this.logger.log(
-      `[recommendations-cron] iniciando p/ ${accounts.length} conta(s)`,
-    );
-
-    let ok = 0;
-    let fail = 0;
-    for (const acc of accounts) {
-      try {
-        await this.recs.syncRecommendations(acc.id);
-        ok++;
-      } catch (err: any) {
-        fail++;
-        this.logger.error(
-          `[recommendations-cron] account=${acc.id} customer=${acc.customer_id}: ${err?.message ?? err}`,
+        this.logger.log(
+          `[recommendations-cron] iniciando p/ ${accounts.length} conta(s)`,
         );
-      }
-    }
-    this.logger.log(`[recommendations-cron] done ok=${ok} fail=${fail}`);
+
+        let ok = 0;
+        let fail = 0;
+        for (const acc of accounts) {
+          try {
+            await this.recs.syncRecommendations(acc.id);
+            ok++;
+          } catch (err: any) {
+            fail++;
+            this.logger.error(
+              `[recommendations-cron] account=${acc.id} customer=${acc.customer_id}: ${err?.message ?? err}`,
+            );
+          }
+        }
+        this.logger.log(`[recommendations-cron] done ok=${ok} fail=${fail}`);
+      },
+      { description: 'Sync de Recommendations Google Ads (07:30 diario)', schedule: '30 7 * * *' },
+    );
   }
 }

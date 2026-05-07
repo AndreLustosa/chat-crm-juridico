@@ -8,6 +8,7 @@ import {
   ORG_PROFILE_CONSOLIDATION_PROMPT,
   ORG_PROFILE_INCREMENTAL_PROMPT,
 } from './memory-prompts';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 const MIN_CONFIDENCE_FOR_INCLUSION = 0.6;
 
@@ -35,18 +36,25 @@ export class OrgProfileConsolidationProcessor {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly cronRunner: CronRunnerService,
   ) {}
 
   // ─── Cron: roda diariamente as 02h ────────────────────────
 
   @Cron('0 2 * * *', { timeZone: 'America/Maceio' })
   async scheduleDailyConsolidation() {
-    const enabled = await this.prisma.globalSetting.findUnique({
-      where: { key: 'MEMORY_BATCH_ENABLED' },
-    });
-    if ((enabled?.value ?? 'true').toLowerCase() === 'false') return;
-
-    await this.consolidateAll();
+    await this.cronRunner.run(
+      'memory-org-profile-consolidation',
+      60 * 60,
+      async () => {
+        const enabled = await this.prisma.globalSetting.findUnique({
+          where: { key: 'MEMORY_BATCH_ENABLED' },
+        });
+        if ((enabled?.value ?? 'true').toLowerCase() === 'false') return;
+        await this.consolidateAll();
+      },
+      { description: 'Consolida memorias organizacionais via LLM (perfil unificado)', schedule: '0 2 * * *' },
+    );
   }
 
   /**

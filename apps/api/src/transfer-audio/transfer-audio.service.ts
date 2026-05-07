@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, HttpException, HttpStatus } from
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 @Injectable()
 export class TransferAudioService {
@@ -10,6 +11,7 @@ export class TransferAudioService {
   constructor(
     private prisma: PrismaService,
     private s3: MediaS3Service,
+    private cronRunner: CronRunnerService,
   ) {}
 
   /** Upload de um áudio de transferência — retorna o registro criado */
@@ -94,26 +96,33 @@ export class TransferAudioService {
   /** Cron: toda hora limpa registros expirados */
   @Cron(CronExpression.EVERY_HOUR)
   async cleanupExpired() {
-    const expired = await (this.prisma as any).transferAudio.findMany({
-      where: { expires_at: { lt: new Date() } },
-      select: { id: true, s3_key: true },
-    });
+    await this.cronRunner.run(
+      'transfer-audio-cleanup-expired',
+      15 * 60,
+      async () => {
+        const expired = await (this.prisma as any).transferAudio.findMany({
+          where: { expires_at: { lt: new Date() } },
+          select: { id: true, s3_key: true },
+        });
 
-    if (!expired.length) return;
+        if (!expired.length) return;
 
-    this.logger.log(`[TransferAudio] Cleaning up ${expired.length} expired audio(s)...`);
+        this.logger.log(`[TransferAudio] Cleaning up ${expired.length} expired audio(s)...`);
 
-    await Promise.allSettled(
-      expired.map(async (rec: any) => {
-        try {
-          await this.s3.deleteObject(rec.s3_key);
-        } catch (e: any) {
-          this.logger.warn(`[TransferAudio] S3 delete failed for ${rec.s3_key}: ${e?.message}`);
-        }
-        await (this.prisma as any).transferAudio.delete({ where: { id: rec.id } });
-      }),
+        await Promise.allSettled(
+          expired.map(async (rec: any) => {
+            try {
+              await this.s3.deleteObject(rec.s3_key);
+            } catch (e: any) {
+              this.logger.warn(`[TransferAudio] S3 delete failed for ${rec.s3_key}: ${e?.message}`);
+            }
+            await (this.prisma as any).transferAudio.delete({ where: { id: rec.id } });
+          }),
+        );
+
+        this.logger.log(`[TransferAudio] Cleanup done.`);
+      },
+      { description: 'Apaga audios de transferencia expirados (>7d) do S3 e do banco', schedule: '0 * * * *' },
     );
-
-    this.logger.log(`[TransferAudio] Cleanup done.`);
   }
 }

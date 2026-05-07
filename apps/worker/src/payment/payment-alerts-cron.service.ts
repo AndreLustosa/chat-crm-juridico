@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import axios from 'axios';
 
 /**
@@ -17,34 +18,41 @@ export class PaymentAlertsCronService {
   constructor(
     private prisma: PrismaService,
     private settings: SettingsService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   // ─── 0h diário: marcar parcelas vencidas como ATRASADO ─────────────────
 
   @Cron('5 0 * * *', { timeZone: 'America/Maceio' })
   async markOverduePayments() {
-    try {
-      const result = await this.prisma.honorarioPayment.updateMany({
-        where: {
-          status: 'PENDENTE',
-          due_date: { lt: new Date() },
-        },
-        data: { status: 'ATRASADO' },
-      });
-      if (result.count > 0) {
-        this.logger.log(`[PAYMENT-ALERTS] ${result.count} parcelas marcadas como ATRASADO`);
-      }
-    } catch (e: any) {
-      this.logger.error(`[PAYMENT-ALERTS] Erro ao marcar atrasados: ${e.message}`);
-    }
+    await this.cronRunner.run(
+      'payment-alerts-mark-overdue',
+      10 * 60,
+      async () => {
+        const result = await this.prisma.honorarioPayment.updateMany({
+          where: {
+            status: 'PENDENTE',
+            due_date: { lt: new Date() },
+          },
+          data: { status: 'ATRASADO' },
+        });
+        if (result.count > 0) {
+          this.logger.log(`[PAYMENT-ALERTS] ${result.count} parcelas marcadas como ATRASADO`);
+        }
+      },
+      { description: 'Marca HonorarioPayment vencidos como ATRASADO (00h diario)', schedule: '5 0 * * *' },
+    );
   }
 
   // ─── 8h Seg-Sex: lembrete de vencimento (3 dias antes) ─────────────────
 
   @Cron('0 8 * * 1-5', { timeZone: 'America/Maceio' })
   async sendDueReminders() {
+    await this.cronRunner.run(
+      'payment-alerts-due-reminders',
+      20 * 60,
+      async () => {
     this.logger.log('[PAYMENT-ALERTS] Verificando parcelas vencendo em 3 dias...');
-    try {
       const now = new Date();
       const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
@@ -101,17 +109,20 @@ export class PaymentAlertsCronService {
         await this.logReminder(payment.id, 'DUE_REMINDER', lead.id);
         this.logger.log(`[PAYMENT-ALERTS] Lembrete enviado para ${lead.phone} (parcela ${payment.id})`);
       }
-    } catch (e: any) {
-      this.logger.error(`[PAYMENT-ALERTS] Erro nos lembretes de vencimento: ${e.message}`);
-    }
+      },
+      { description: 'Lembrete WhatsApp de honorario vencendo em 3 dias (HonorarioPayment)', schedule: '0 8 * * 1-5' },
+    );
   }
 
   // ─── 9h Seg-Sex: alerta de inadimplência ───────────────────────────────
 
   @Cron('0 9 * * 1-5', { timeZone: 'America/Maceio' })
   async sendOverdueAlerts() {
+    await this.cronRunner.run(
+      'payment-alerts-overdue',
+      20 * 60,
+      async () => {
     this.logger.log('[PAYMENT-ALERTS] Verificando parcelas atrasadas...');
-    try {
       const overdue = await this.prisma.honorarioPayment.findMany({
         where: {
           status: { in: ['ATRASADO', 'PENDENTE'] },
@@ -181,9 +192,9 @@ export class PaymentAlertsCronService {
         await this.logReminder(leadId, 'OVERDUE_ALERT', leadId);
         this.logger.log(`[PAYMENT-ALERTS] Alerta inadimplência enviado para ${lead.phone} (${count} parcelas, ${totalStr})`);
       }
-    } catch (e: any) {
-      this.logger.error(`[PAYMENT-ALERTS] Erro nos alertas de inadimplência: ${e.message}`);
-    }
+      },
+      { description: 'Alerta WhatsApp de honorario inadimplente (1x/semana por lead)', schedule: '0 9 * * 1-5' },
+    );
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────

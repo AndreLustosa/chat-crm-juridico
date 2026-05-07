@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { FollowupService } from '../followup/followup.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 @Injectable()
 export class AutomationsService {
@@ -11,6 +12,7 @@ export class AutomationsService {
   constructor(
     private prisma: PrismaService,
     private moduleRef: ModuleRef,
+    private cronRunner: CronRunnerService,
   ) {}
 
   // ─── CRUD ──────────────────────────────────────────────────────
@@ -155,6 +157,10 @@ export class AutomationsService {
 
   @Cron(CronExpression.EVERY_HOUR)
   async checkNoResponse() {
+    await this.cronRunner.run(
+      'automations-no-response',
+      10 * 60,
+      async () => {
     this.logger.log('Checking no-response automations...');
     const now = new Date();
     const h24 = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -201,12 +207,19 @@ export class AutomationsService {
       }
       if (convs.length > 0) this.logger.log(`NO_RESPONSE_48H: executado em ${convs.length} conversa(s)`);
     }
+      },
+      { description: 'Dispara automacoes NO_RESPONSE_24H/48H (lead sem resposta)', schedule: '0 * * * *' },
+    );
   }
 
   // ─── Cron: PAYMENT_OVERDUE ─────────────────────────────────────
 
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   async checkPaymentOverdue() {
+    await this.cronRunner.run(
+      'automations-payment-overdue',
+      10 * 60,
+      async () => {
     const rules = await this.prisma.automationRule.findMany({
       where: { trigger: 'PAYMENT_OVERDUE', enabled: true },
     });
@@ -242,5 +255,8 @@ export class AutomationsService {
     if (overduePayments.length > 0) {
       this.logger.log(`PAYMENT_OVERDUE: executado em ${overduePayments.length} pagamento(s)`);
     }
+      },
+      { description: 'Dispara automacoes PAYMENT_OVERDUE (honorario vencido)', schedule: '0 9 * * *' },
+    );
   }
 }

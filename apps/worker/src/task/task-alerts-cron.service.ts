@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import axios from 'axios';
 
 /**
@@ -16,13 +17,17 @@ export class TaskAlertsCronService {
   constructor(
     private prisma: PrismaService,
     private settings: SettingsService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   // ─── A cada 10 min: tarefas prestes a vencer (próximos 30 min) ────────
 
   @Cron('*/10 * * * *', { timeZone: 'America/Maceio' })
   async checkDueSoon() {
-    try {
+    await this.cronRunner.run(
+      'task-alerts-due-soon-whatsapp',
+      9 * 60,
+      async () => {
       const now = new Date();
       const thirtyMinFromNow = new Date(now.getTime() + 30 * 60 * 1000);
 
@@ -86,16 +91,19 @@ export class TaskAlertsCronService {
         await this.logAlert(task.id, 'TASK_DUE_SOON', task.user.id);
         this.logger.log(`[TASK-ALERTS] Lembrete enviado para ${task.user.name} — tarefa: ${task.title}`);
       }
-    } catch (e: any) {
-      this.logger.error(`[TASK-ALERTS] Erro no check due soon: ${e.message}`);
-    }
+      },
+      { description: 'WhatsApp de aviso para tarefas/eventos vencendo em 30 min', schedule: '*/10 * * * *' },
+    );
   }
 
   // ─── 8h e 14h Seg-Sex: tarefas vencidas ─────────────────────────────
 
   @Cron('0 8,14 * * 1-6', { timeZone: 'America/Maceio' })
   async checkOverdue() {
-    try {
+    await this.cronRunner.run(
+      'task-alerts-overdue-whatsapp',
+      15 * 60,
+      async () => {
       const now = new Date();
 
       // 1. Tasks vencidas
@@ -174,9 +182,9 @@ export class TaskAlertsCronService {
         await this.logAlert(userId, 'TASK_OVERDUE_BATCH', userId);
         this.logger.log(`[TASK-ALERTS] Alerta overdue enviado para ${user.name} (${count} tarefas)`);
       }
-    } catch (e: any) {
-      this.logger.error(`[TASK-ALERTS] Erro no check overdue: ${e.message}`);
-    }
+      },
+      { description: 'WhatsApp batch de tarefas/eventos vencidos (8h e 14h seg-sab)', schedule: '0 8,14 * * 1-6' },
+    );
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────

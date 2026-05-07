@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
-import { LockService } from '../common/locks/lock.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Re-hidrata source_raw das movimentacoes ESAJ antigas com cd_movimentacao
@@ -26,24 +26,22 @@ import { LockService } from '../common/locks/lock.service';
 export class EsajRehydrateCronService {
   private readonly logger = new Logger(EsajRehydrateCronService.name);
   private readonly scraper = new EsajTjalScraper();
-  private readonly LOCK_KEY = 'esaj-rehydrate';
-  private readonly LOCK_TTL_SECONDS = 30 * 60;
   private readonly BATCH_SIZE = 50;
   private readonly REQUEST_DELAY_MS = 2000;
 
   constructor(
     private prisma: PrismaService,
-    private lock: LockService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   @Cron('0 2 * * *', { timeZone: 'America/Maceio' })
   async runDaily() {
-    const result = await this.lock.withLock(this.LOCK_KEY, this.LOCK_TTL_SECONDS, async () => {
-      return this.rehydrate();
-    });
-    if (result === null) {
-      this.logger.warn('[REHYDRATE] Skipado — outra replica ja esta rodando');
-    }
+    await this.cronRunner.run(
+      'esaj-rehydrate',
+      30 * 60,
+      async () => { await this.rehydrate(); },
+      { description: 'Hidrata cd_movimentacao em CaseEvents ESAJ antigos (1x/dia)', schedule: '0 2 * * *' },
+    );
   }
 
   /**

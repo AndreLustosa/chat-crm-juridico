@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 @Injectable()
 export class RecurringExpensesService {
   private readonly logger = new Logger(RecurringExpensesService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cronRunner: CronRunnerService,
+  ) {}
 
   /**
    * Todo dia às 1h (Maceió): gera despesas recorrentes do mês.
@@ -14,7 +18,10 @@ export class RecurringExpensesService {
    */
   @Cron('0 1 * * *', { timeZone: 'America/Maceio' })
   async generateRecurringExpenses() {
-    try {
+    await this.cronRunner.run(
+      'financeiro-recurring-expenses',
+      15 * 60,
+      async () => {
       const now = new Date();
       const currentMonth = now.getMonth();
       const currentYear = now.getFullYear();
@@ -97,9 +104,9 @@ export class RecurringExpensesService {
       if (generated > 0) {
         this.logger.log(`[RECURRING] ${generated} despesa(s) recorrente(s) gerada(s) para ${currentMonth + 1}/${currentYear}`);
       }
-    } catch (e: any) {
-      this.logger.error(`[RECURRING] Erro: ${e.message}`);
-    }
+      },
+      { description: 'Gera despesas recorrentes do mes a partir de transacoes-mae (1h diario)', schedule: '0 1 * * *' },
+    );
   }
 
   /**

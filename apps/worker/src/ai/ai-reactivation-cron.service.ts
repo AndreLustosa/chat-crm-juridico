@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Reativa automaticamente o ai_mode em conversas onde a IA ficou desligada
@@ -18,13 +19,18 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AiReactivationCronService {
   private readonly logger = new Logger(AiReactivationCronService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cronRunner: CronRunnerService,
+  ) {}
 
   @Cron('17 * * * *', { timeZone: 'America/Maceio' }) // Minuto 17 de cada hora (evita :00)
   async reactivateStaleConversations() {
+    await this.cronRunner.run(
+      'ai-reactivation-stale',
+      10 * 60,
+      async () => {
     this.logger.log('[AI-REACTIVATION] Verificando conversas com IA desligada há 24h+...');
-
-    try {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
       // Busca conversas candidatas: ai_mode desligado há 24h+ em conversas abertas
@@ -74,8 +80,8 @@ export class AiReactivationCronService {
       } else {
         this.logger.log(`[AI-REACTIVATION] Nenhuma conversa para reativar (${candidates.length} candidata(s) verificadas)`);
       }
-    } catch (e: any) {
-      this.logger.error(`[AI-REACTIVATION] Erro ao verificar conversas: ${e.message}`);
-    }
+      },
+      { description: 'Reativa IA em conversas onde operador nao respondeu em 24h', schedule: '17 * * * *' },
+    );
   }
 }

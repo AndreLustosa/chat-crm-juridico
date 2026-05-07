@@ -5,6 +5,7 @@ import { Job, Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrafficBackfillService } from './traffic-backfill.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Processor + cron driver pro backfill histórico (Sprint H.1).
@@ -27,6 +28,7 @@ export class TrafficBackfillProcessor extends WorkerHost {
     private prisma: PrismaService,
     private backfill: TrafficBackfillService,
     @InjectQueue('trafego-backfill') private readonly queue: Queue,
+    private cronRunner: CronRunnerService,
   ) {
     super();
   }
@@ -45,24 +47,30 @@ export class TrafficBackfillProcessor extends WorkerHost {
    */
   @Cron('*/5 * * * *', { timeZone: 'America/Maceio' })
   async pulse() {
-    const running = await this.prisma.trafficAccount.findMany({
-      where: { backfill_status: 'RUNNING' },
-      select: { id: true, customer_id: true },
-    });
-    if (running.length === 0) return;
+    await this.cronRunner.run(
+      'trafego-backfill-pulse',
+      4 * 60,
+      async () => {
+        const running = await this.prisma.trafficAccount.findMany({
+          where: { backfill_status: 'RUNNING' },
+          select: { id: true, customer_id: true },
+        });
+        if (running.length === 0) return;
 
-    for (const acc of running) {
-      // jobId único por timestamp evita BullMQ silent dedupe
-      await this.queue.add(
-        'step',
-        { accountId: acc.id },
-        {
-          jobId: `backfill-${acc.id}-${Date.now()}`,
-          removeOnComplete: 50,
-          removeOnFail: 30,
-        },
-      );
-    }
-    this.logger.log(`[backfill-pulse] enqueued steps p/ ${running.length} conta(s)`);
+        for (const acc of running) {
+          await this.queue.add(
+            'step',
+            { accountId: acc.id },
+            {
+              jobId: `backfill-${acc.id}-${Date.now()}`,
+              removeOnComplete: 50,
+              removeOnFail: 30,
+            },
+          );
+        }
+        this.logger.log(`[backfill-pulse] enqueued steps p/ ${running.length} conta(s)`);
+      },
+      { description: 'Pulse de backfill historico Google Ads (a cada 5min)', schedule: '*/5 * * * *' },
+    );
   }
 }

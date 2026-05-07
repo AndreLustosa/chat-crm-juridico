@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 @Injectable()
 export class NotificationsService {
@@ -11,6 +12,7 @@ export class NotificationsService {
   constructor(
     private prisma: PrismaService,
     @InjectQueue('notification-whatsapp') private whatsappQueue: Queue,
+    private cronRunner: CronRunnerService,
   ) {}
 
   /** Cria uma notificação persistente (fire-and-forget, chamado pelo ChatGateway).
@@ -117,7 +119,12 @@ export class NotificationsService {
   /** Retenção: remove notificações com mais de X dias (cron diário às 3h) */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async handleCleanupCron() {
-    await this.cleanup();
+    await this.cronRunner.run(
+      'notifications-cleanup',
+      15 * 60,
+      async () => { await this.cleanup(); },
+      { description: 'Remove notificacoes > 90 dias do banco', schedule: '0 3 * * *' },
+    );
   }
 
   async cleanup(retentionDays = 90) {

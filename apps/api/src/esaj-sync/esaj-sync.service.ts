@@ -6,6 +6,7 @@ import { EsajTjalScraper, inferTrackingStage } from '../court-scraper/scrapers/e
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { SettingsService } from '../settings/settings.service';
 import { LockService } from '../common/locks/lock.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
@@ -42,6 +43,7 @@ export class EsajSyncService {
     private whatsapp: WhatsappService,
     private settings: SettingsService,
     private lock: LockService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   // ─── Cron Jobs ─────────────────────────────────────────────
@@ -51,14 +53,28 @@ export class EsajSyncService {
   // rapido — custo proximo de zero. Em dia util normal fluxo continua.
   @Cron('0 8 * * *', { timeZone: 'America/Maceio' })
   async syncMorning() {
-    this.logger.log('[CRON] Sync matinal ESAJ iniciado');
-    await this.syncAllTrackedCases();
+    await this.cronRunner.run(
+      'esaj-sync-morning',
+      35 * 60,
+      async () => {
+        this.logger.log('[CRON] Sync matinal ESAJ iniciado');
+        await this.syncAllTrackedCases();
+      },
+      { description: 'Sync matinal de processos ESAJ rastreados (TJAL)', schedule: '0 8 * * *' },
+    );
   }
 
   @Cron('0 14 * * *', { timeZone: 'America/Maceio' })
   async syncAfternoon() {
-    this.logger.log('[CRON] Sync vespertino ESAJ iniciado');
-    await this.syncAllTrackedCases();
+    await this.cronRunner.run(
+      'esaj-sync-afternoon',
+      35 * 60,
+      async () => {
+        this.logger.log('[CRON] Sync vespertino ESAJ iniciado');
+        await this.syncAllTrackedCases();
+      },
+      { description: 'Sync vespertino de processos ESAJ rastreados (TJAL)', schedule: '0 14 * * *' },
+    );
   }
 
   /**
@@ -79,7 +95,10 @@ export class EsajSyncService {
    */
   @Cron('30 8-19 * * *', { timeZone: 'America/Maceio' })
   async retryPendingEsajNotifications() {
-    const result = await this.lock.withLock('esaj-retry-notify', 10 * 60, async () => {
+    await this.cronRunner.run(
+      'esaj-retry-notify',
+      10 * 60,
+      async () => {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       // Pega movimentos pendentes de notificacao ao ADVOGADO.
       // Cliente foi DESATIVADO em 2026-05-07 — ESAJ enviava cada juntada de
@@ -155,11 +174,9 @@ export class EsajSyncService {
       this.logger.log(
         `[ESAJ-RETRY] advogado: ${lawyerNotified}/${pending.length} (cliente desativado)`,
       );
-      return lawyerNotified;
-    });
-    if (result === null) {
-      this.logger.warn('[ESAJ-RETRY] Skipado — outra replica ja esta rodando');
-    }
+      },
+      { description: 'Repesca movimentos ESAJ ainda nao notificados ao advogado (zero perda)', schedule: '30 8-19 * * *' },
+    );
   }
 
   // ─── Core Sync ─────────────────────────────────────────────

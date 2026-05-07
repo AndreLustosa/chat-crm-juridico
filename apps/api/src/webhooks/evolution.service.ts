@@ -12,6 +12,7 @@ import { FollowupService } from '../followup/followup.service';
 import { AdminBotService } from '../admin-bot/admin-bot.service';
 import { MediaDownloadService } from '../media/media-download.service';
 import { MessagesService } from '../messages/messages.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 interface EvolutionWebhookPayload {
   event: string;
@@ -96,6 +97,7 @@ export class EvolutionService implements OnApplicationBootstrap {
     private moduleRef: ModuleRef,
     private adminBotService: AdminBotService,
     private mediaDownloadService: MediaDownloadService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   async handleMessagesUpsert(payload: EvolutionWebhookPayload) {
@@ -1434,30 +1436,33 @@ export class EvolutionService implements OnApplicationBootstrap {
 
   @Cron('*/15 * * * *', { name: 'evolution-resync-safety-net' })
   async resyncPeriodicSafetyNet(): Promise<void> {
-    try {
-      const instances = await this.prisma.instance.findMany({
-        where: { type: 'whatsapp' },
-        select: { name: true },
-      });
+    await this.cronRunner.run(
+      'evolution-resync-safety-net',
+      10 * 60,
+      async () => {
+        const instances = await this.prisma.instance.findMany({
+          where: { type: 'whatsapp' },
+          select: { name: true },
+        });
 
-      if (!instances.length) return;
+        if (!instances.length) return;
 
-      this.logger.log(`[CRON] Resync de segurança para ${instances.length} instância(s)`);
+        this.logger.log(`[CRON] Resync de segurança para ${instances.length} instância(s)`);
 
-      for (const inst of instances) {
-        try {
-          await this.scheduleResyncAfterReconnect(inst.name, {
-            cutoffHours: 2, // janela curta — última fatia
-            stabilizeDelayMs: 0,
-            triggerReason: 'cron',
-          });
-        } catch (e: any) {
-          this.logger.warn(`[CRON] Resync falhou para ${inst.name}: ${e.message}`);
+        for (const inst of instances) {
+          try {
+            await this.scheduleResyncAfterReconnect(inst.name, {
+              cutoffHours: 2, // janela curta — última fatia
+              stabilizeDelayMs: 0,
+              triggerReason: 'cron',
+            });
+          } catch (e: any) {
+            this.logger.warn(`[CRON] Resync falhou para ${inst.name}: ${e.message}`);
+          }
         }
-      }
-    } catch (e: any) {
-      this.logger.error(`[CRON] Erro no resync periódico: ${e.message}`);
-    }
+      },
+      { description: 'Resync de seguranca (cutoff 2h) das instancias WhatsApp — webhook fallback', schedule: '*/15 * * * *' },
+    );
   }
 
   // ─── presence.update ──────────────────────────────────────────

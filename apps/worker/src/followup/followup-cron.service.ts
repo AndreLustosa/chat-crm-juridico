@@ -5,6 +5,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { FollowupAnalyzerService } from './followup-analyzer.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 import axios from 'axios';
 
 interface StaleConfig {
@@ -23,6 +24,7 @@ export class FollowupCronService {
     private settings: SettingsService,
     private analyzer: FollowupAnalyzerService,
     @InjectQueue('followup-jobs') private followupQueue: Queue,
+    private cronRunner: CronRunnerService,
   ) {}
 
   /**
@@ -30,11 +32,18 @@ export class FollowupCronService {
    */
   @Cron('0 9 * * 1-5', { timeZone: 'America/Maceio' })
   async checkStaleLeads() {
-    this.logger.log('[FOLLOWUP] Iniciando verificação...');
-    await Promise.all([
-      this.processEnrollments(),
-      this.legacyStageFollowup(),
-    ]);
+    await this.cronRunner.run(
+      'followup-stale-leads',
+      30 * 60,
+      async () => {
+        this.logger.log('[FOLLOWUP] Iniciando verificação...');
+        await Promise.all([
+          this.processEnrollmentsImpl(),
+          this.legacyStageFollowup(),
+        ]);
+      },
+      { description: 'Followup matinal: processa enrollments + legacy stage followup com IA', schedule: '0 9 * * 1-5' },
+    );
   }
 
   /**
@@ -42,6 +51,15 @@ export class FollowupCronService {
    */
   @Cron('0 * * * *', { timeZone: 'America/Maceio' })
   async processEnrollments() {
+    await this.cronRunner.run(
+      'followup-process-enrollments',
+      10 * 60,
+      async () => { await this.processEnrollmentsImpl(); },
+      { description: 'Enfileira enrollments de followup com next_send_at vencido', schedule: '0 * * * *' },
+    );
+  }
+
+  private async processEnrollmentsImpl() {
     const now = new Date();
     const enrollments = await this.prisma.followupEnrollment.findMany({
       where: { status: 'ATIVO', next_send_at: { lte: now } },

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleDriveService } from './google-drive.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Limpeza mensal de pastas do Google Drive criadas para leads
@@ -23,10 +24,15 @@ export class GoogleDriveCleanupCron {
   constructor(
     private readonly prisma: PrismaService,
     private readonly driveService: GoogleDriveService,
+    private readonly cronRunner: CronRunnerService,
   ) {}
 
   @Cron('0 3 1 * *') // dia 1 de cada mês às 03:00
   async cleanupStaleLeadFolders() {
+    await this.cronRunner.run(
+      'google-drive-cleanup-stale-folders',
+      60 * 60,
+      async () => {
     this.logger.log('[DRIVE-CLEANUP] Iniciando limpeza de pastas de leads inativos...');
 
     const configured = await this.driveService.isConfigured();
@@ -103,6 +109,9 @@ export class GoogleDriveCleanupCron {
 
     this.logger.log(
       `[DRIVE-CLEANUP] Concluído. Excluídas: ${totalDeleted} | Não encontradas: ${totalNotFound} | Erros: ${totalErrors}`,
+    );
+      },
+      { description: 'Apaga pastas Google Drive de leads inativos > 6 meses (dia 1)', schedule: '0 3 1 * *' },
     );
   }
 }

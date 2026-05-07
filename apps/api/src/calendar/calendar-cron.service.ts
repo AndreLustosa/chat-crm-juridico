@@ -4,6 +4,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 @Injectable()
 export class CalendarCronService {
@@ -13,6 +14,7 @@ export class CalendarCronService {
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
     @InjectQueue('calendar-reminders') private reminderQueue: Queue,
+    private cronRunner: CronRunnerService,
   ) {}
 
   /**
@@ -25,7 +27,10 @@ export class CalendarCronService {
    */
   @Cron('*/1 * * * *')
   async checkPushReminders() {
-    try {
+    await this.cronRunner.run(
+      'calendar-push-reminders',
+      2 * 60,
+      async () => {
       const now = new Date();
       const in2min = new Date(now.getTime() + 2 * 60 * 1000);
 
@@ -67,9 +72,9 @@ export class CalendarCronService {
           data: { sent_at: new Date() },
         });
       }
-    } catch (e: any) {
-      this.logger.error(`[CRON] Erro no checkPushReminders: ${e.message}`);
-    }
+      },
+      { description: 'Dispara lembretes PUSH (Socket.IO) 1min antes do evento', schedule: '*/1 * * * *' },
+    );
   }
 
   /**
@@ -93,7 +98,10 @@ export class CalendarCronService {
    */
   @Cron('*/5 * * * *')
   async checkOrphanReminders() {
-    try {
+    await this.cronRunner.run(
+      'calendar-orphan-reminders',
+      5 * 60,
+      async () => {
       const orphans = await this.prisma.$queryRaw<
         { id: string; event_id: string; channel: string; minutes_before: number; start_at: Date }[]
       >`
@@ -146,9 +154,9 @@ export class CalendarCronService {
           this.logger.warn(`[CRON-FALLBACK] Falha ao enfileirar ${r.id}: ${e.message}`);
         }
       }
-    } catch (e: any) {
-      this.logger.error(`[CRON-FALLBACK] Erro: ${e.message}`);
-    }
+      },
+      { description: 'Re-enfileira reminders WHATSAPP/EMAIL orfaos (perdidos em restart)', schedule: '*/5 * * * *' },
+    );
   }
 
   /**
@@ -162,7 +170,10 @@ export class CalendarCronService {
    */
   @Cron('0 6 * * *', { timeZone: 'America/Maceio' })
   async discardStaleReminders() {
-    try {
+    await this.cronRunner.run(
+      'calendar-discard-stale-reminders',
+      10 * 60,
+      async () => {
       const result = await this.prisma.$executeRaw`
         UPDATE "EventReminder" er
         SET sent_at = NOW()
@@ -174,8 +185,8 @@ export class CalendarCronService {
       if (result > 0) {
         this.logger.log(`[CRON-DISCARD] ${result} reminders vencidos ha mais de 24h marcados como descartados`);
       }
-    } catch (e: any) {
-      this.logger.error(`[CRON-DISCARD] Erro: ${e.message}`);
-    }
+      },
+      { description: 'Marca como descartados reminders WHATSAPP/EMAIL vencidos > 24h', schedule: '0 6 * * *' },
+    );
   }
 }

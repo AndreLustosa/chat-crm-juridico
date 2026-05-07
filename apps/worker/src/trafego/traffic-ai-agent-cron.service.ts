@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrafficAIAgentService } from './traffic-ai-agent.service';
+import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 /**
  * Orquestra os loops do TrafficAIAgentService por cron.
@@ -28,39 +29,68 @@ export class TrafficAIAgentCronService {
   constructor(
     private prisma: PrismaService,
     private agent: TrafficAIAgentService,
+    private cronRunner: CronRunnerService,
   ) {}
 
   // 06:30 daily — começo do dia comercial em Maceió
   @Cron('30 6 * * *', { timeZone: 'America/Maceio' })
   async runDaily() {
-    await this.runForAllEnabledAccounts('DAILY', (id) =>
-      this.agent.runDailyLoop(id),
+    await this.cronRunner.run(
+      'trafego-ai-agent-daily',
+      45 * 60,
+      async () => {
+        await this.runForAllEnabledAccounts('DAILY', (id) =>
+          this.agent.runDailyLoop(id),
+        );
+      },
+      { description: 'Loop diario do agente IA de Trafego (06:30)', schedule: '30 6 * * *' },
     );
   }
 
   // Segunda 09:00 — reflexão semanal
   @Cron('0 9 * * 1', { timeZone: 'America/Maceio' })
   async runWeekly() {
-    await this.runForAllEnabledAccounts('WEEKLY', (id) =>
-      this.agent.runWeeklyLoop(id),
+    await this.cronRunner.run(
+      'trafego-ai-agent-weekly',
+      45 * 60,
+      async () => {
+        await this.runForAllEnabledAccounts('WEEKLY', (id) =>
+          this.agent.runWeeklyLoop(id),
+        );
+      },
+      { description: 'Reflexao semanal do agente IA de Trafego (segunda 09h)', schedule: '0 9 * * 1' },
     );
   }
 
   // Dia 1 do mês 09:00 — fechamento mensal
   @Cron('0 9 1 * *', { timeZone: 'America/Maceio' })
   async runMonthly() {
-    await this.runForAllEnabledAccounts('MONTHLY', (id) =>
-      this.agent.runMonthlyLoop(id),
+    await this.cronRunner.run(
+      'trafego-ai-agent-monthly',
+      45 * 60,
+      async () => {
+        await this.runForAllEnabledAccounts('MONTHLY', (id) =>
+          this.agent.runMonthlyLoop(id),
+        );
+      },
+      { description: 'Fechamento mensal do agente IA de Trafego (dia 1, 09h)', schedule: '0 9 1 * *' },
     );
   }
 
   // :17 de cada hora — só pra contas com hourly_enabled=true (opt-in)
   @Cron('17 * * * *', { timeZone: 'America/Maceio' })
   async runHourly() {
-    await this.runForAllEnabledAccounts(
-      'HOURLY',
-      (id) => this.agent.runHourlyLoop(id),
-      { onlyHourlyEnabled: true },
+    await this.cronRunner.run(
+      'trafego-ai-agent-hourly',
+      15 * 60,
+      async () => {
+        await this.runForAllEnabledAccounts(
+          'HOURLY',
+          (id) => this.agent.runHourlyLoop(id),
+          { onlyHourlyEnabled: true },
+        );
+      },
+      { description: 'Loop horario opt-in do agente IA de Trafego (:17 de cada hora)', schedule: '17 * * * *' },
     );
   }
 
@@ -75,8 +105,15 @@ export class TrafficAIAgentCronService {
    */
   @Cron('0 22 * * *', { timeZone: 'America/Maceio' })
   async runEscalation() {
-    await this.runForAllEnabledAccounts('ESCALATION', (id) =>
-      this.agent.escalateOrAutoIgnore(id),
+    await this.cronRunner.run(
+      'trafego-ai-agent-escalation',
+      30 * 60,
+      async () => {
+        await this.runForAllEnabledAccounts('ESCALATION', (id) =>
+          this.agent.escalateOrAutoIgnore(id),
+        );
+      },
+      { description: 'Escalation diario (22h): conta strikes em decisoes IA sem feedback', schedule: '0 22 * * *' },
     );
   }
 
