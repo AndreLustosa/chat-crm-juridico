@@ -1,7 +1,9 @@
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient({
-  datasources: { db: { url: 'postgresql://crm_user:lustosa1125180124@69.62.93.186:45432/lexcrm?schema=public' } },
-});
+if (!process.env.DATABASE_URL) {
+  console.error('DATABASE_URL nao definida. Exporte no shell ou rode com .env carregado.');
+  process.exit(1);
+}
+const prisma = new PrismaClient();
 
 async function main() {
   // Check stats before deleting

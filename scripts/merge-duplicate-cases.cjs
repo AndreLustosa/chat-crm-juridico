@@ -33,8 +33,11 @@ const tenantId = tenantArg ? (tenantArg.split('=')[1] || args[args.indexOf(tenan
 const caseArg = args.find(a => a.startsWith('--case'));
 const caseFilter = caseArg ? (caseArg.split('=')[1] || args[args.indexOf(caseArg) + 1]) : undefined;
 
-const DATABASE_URL = process.env.DATABASE_URL
-  || 'postgresql://crm_user:lustosa1125180124@69.62.93.186:45432/lexcrm?schema=public';
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL nao definida. Exporte no shell ou rode com .env carregado.');
+  process.exit(1);
+}
 
 const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
 

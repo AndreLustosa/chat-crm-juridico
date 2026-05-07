@@ -25,8 +25,11 @@ const { PrismaClient } = require('@prisma/client');
 const args = process.argv.slice(2);
 const EXECUTE = args.includes('--execute');
 
-const DATABASE_URL = process.env.DATABASE_URL
-  || 'postgresql://crm_user:lustosa1125180124@69.62.93.186:45432/lexcrm?schema=public';
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL nao definida. Exporte no shell ou rode com .env carregado.');
+  process.exit(1);
+}
 
 const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
 
