@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { ChatGateway } from '../gateway/chat.gateway';
 
 @Injectable()
 export class NotificationsService {
@@ -13,6 +14,10 @@ export class NotificationsService {
     private prisma: PrismaService,
     @InjectQueue('notification-whatsapp') private whatsappQueue: Queue,
     private cronRunner: CronRunnerService,
+    // forwardRef: ChatGateway tambem injeta NotificationsService (ciclo).
+    // NestJS resolve isso em runtime atraves do forwardRef.
+    @Inject(forwardRef(() => ChatGateway))
+    private chatGateway: ChatGateway,
   ) {}
 
   /** Cria uma notificação persistente (fire-and-forget, chamado pelo ChatGateway).
@@ -45,6 +50,19 @@ export class NotificationsService {
         { notificationId: notification.id, userId: params.userId },
         { delay: 5 * 60 * 1000, removeOnComplete: true, removeOnFail: 10 },
       ).catch(() => {});
+
+      // Emite socket event para o frontend atualizar o badge em tempo real
+      // (substitui polling de 60s no NotificationCenter). Best-effort:
+      // falha aqui nao quebra create — frontend tem fallback de 5min.
+      try {
+        this.chatGateway.server?.to(`user:${params.userId}`).emit('notification_created', {
+          id: notification.id,
+          notification_type: params.type,
+          title: params.title,
+        });
+      } catch (e: any) {
+        this.logger.warn(`[Notifications] Falha ao emitir socket: ${e.message}`);
+      }
 
       return notification;
     } catch (e: any) {

@@ -76,7 +76,11 @@ export function NotificationCenter() {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  // Fetch unread count periodicamente
+  // Fetch unread count — usado:
+  //  1) na primeira montagem (load inicial)
+  //  2) safety net periodico (5min)
+  //  3) on socket reconnect (cobre eventos perdidos durante desconexao)
+  //  4) apos eventos pontuais (conversation_read, etc)
   const fetchUnreadCount = useCallback(async () => {
     try {
       const { data } = await api.get('/notifications/unread-count', { _silent401: true } as any);
@@ -86,14 +90,28 @@ export function NotificationCenter() {
 
   useEffect(() => {
     fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 60000); // a cada 1min
+    // Safety net — caso socket caia sem reconectar, ou um cron crie
+    // notification via prisma direto (bypass NotificationsService) e
+    // nao emita socket. 5min eh balance entre overhead e staleness.
+    const interval = setInterval(fetchUnreadCount, 5 * 60_000);
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 
-  // Incrementa badge em tempo real quando chega notificação.
-  // Se a msg chega na conversa que o operador ja esta lendo com a aba em foco,
-  // o backend ja marcou como lida via mark-read automatico do listener newMessage
-  // (page.tsx); aqui apenas suprimimos o +1 visual para evitar badge flicker.
+  // Listener generico — disparado por NotificationsService.create() em qualquer
+  // tipo de notification. Cobre tipos sem evento dedicado (task_overdue,
+  // calendar_reminder, transfer_request, legal_case_update, etc).
+  //
+  // Skip pra incoming_message e new_lead: esses ja tem evento dedicado emitido
+  // ao mesmo tempo (chat.gateway.ts dispara ambos). Sem skip, badge incrementa 2x.
+  useSocketEvent('notification_created', (data: { notification_type?: string }) => {
+    if (data?.notification_type === 'incoming_message' || data?.notification_type === 'new_lead') {
+      return;
+    }
+    setUnreadCount(prev => prev + 1);
+  });
+
+  // Eventos especificos com logica condicional (mantidos pra aproveitar
+  // o payload extra e suprimir badge flicker quando relevante).
   useSocketEvent('incoming_message_notification', (data: { conversationId?: string }) => {
     if (
       data?.conversationId &&
@@ -113,6 +131,10 @@ export function NotificationCenter() {
   // lidas e emite conversation_read direto para o user (todas as abas).
   // Refetcha para sincronizar o badge do sino.
   useSocketEvent('conversation_read', () => {
+    fetchUnreadCount();
+  });
+  // On reconnect: re-sync porque pode ter perdido eventos durante a queda.
+  useSocketEvent('connect', () => {
     fetchUnreadCount();
   });
 
