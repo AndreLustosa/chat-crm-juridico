@@ -134,10 +134,13 @@ export class AsaasClient {
         );
         this.logger.warn(lastError.message);
 
-        // Backoff exponencial apenas para erros de rede / 5xx
+        // Backoff exponencial + jitter — apenas para erros de rede / 5xx.
+        // Jitter aleatorio (+0-500ms) quebra thundering herd quando varias
+        // replicas batem no Asaas ao mesmo tempo apos uma queda transitoria.
         if (attempt < this.MAX_RETRIES) {
-          const delay = Math.pow(2, attempt) * 500;
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          const baseDelay = Math.pow(2, attempt) * 500;
+          const jitter = Math.floor(Math.random() * 500);
+          await new Promise((resolve) => setTimeout(resolve, baseDelay + jitter));
         }
       }
     }

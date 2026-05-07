@@ -70,11 +70,17 @@ export class ClicksignService {
     body?: object,
   ): Promise<T> {
     const { baseUrl, token } = await this.getCfg();
+    // NOTA: Clicksign API v1 exige access_token via query string (limitacao
+    // da API). Migrar pra v2 (Authorization: Bearer) requer mudar todos os
+    // endpoints — fora de escopo. Por isso o token vaza em logs de proxy
+    // intermediarios. Mitigacao parcial: rotacionar token periodicamente.
     const url = `${baseUrl}/api/v1${path}?access_token=${token}`;
     const init: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      // Timeout 30s — clicksign as vezes lenta em uploads/downloads grandes
+      signal: AbortSignal.timeout(30_000),
     };
 
     const res = await fetch(url, init);

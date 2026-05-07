@@ -539,7 +539,12 @@ Para qual processo? (responda 1, 2, 3 ou "nenhum")`;
     userId: string,
     tenantId: string | null,
   ): Promise<any> {
-    this.logger.log(`[AdminBot] Tool: ${name} | args: ${JSON.stringify(args)}`);
+    // Loga apenas chave estrutural — JSON.stringify(args) vazaria PII em
+    // logs (CPFs, valores, nomes completos preenchidos pela IA via tool
+    // input). Pra debug detalhado, usar audit log dedicado por tool com
+    // controle de retencao.
+    const argKeys = args && typeof args === 'object' ? Object.keys(args).join(',') : '<empty>';
+    this.logger.log(`[AdminBot] Tool: ${name} | args_keys: [${argKeys}]`);
 
     try {
       switch (name) {

@@ -509,6 +509,19 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     filename?: string | null,
   ): Promise<{ text: string; truncated: boolean } | null> {
     const MAX_DOC_TEXT_CHARS = 50_000;
+    // Limite duro de tamanho do buffer pra evitar OOM. PDFs/DOCX maiores
+    // que 30MB geralmente sao varreduras OCR ou anexos cheios de imagem
+    // — pdf-parse/mammoth alocam string em RAM proporcional, podem
+    // estourar o pod. WhatsApp limita a ~16MB nos uploads, mas portal
+    // do cliente nao tem esse cap.
+    const MAX_DOC_BUFFER_BYTES = 30 * 1024 * 1024;
+    if (buffer.length > MAX_DOC_BUFFER_BYTES) {
+      this.logger.warn(
+        `[AI] Documento ${filename || '?'} excede ${MAX_DOC_BUFFER_BYTES / 1024 / 1024}MB ` +
+        `(${(buffer.length / 1024 / 1024).toFixed(1)}MB) — pulando extracao pra evitar OOM`,
+      );
+      return null;
+    }
 
     const truncate = (raw: string): { text: string; truncated: boolean } => {
       const trimmed = raw.trim();
