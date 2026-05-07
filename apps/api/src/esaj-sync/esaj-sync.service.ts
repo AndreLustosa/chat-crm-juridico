@@ -81,13 +81,14 @@ export class EsajSyncService {
   async retryPendingEsajNotifications() {
     const result = await this.lock.withLock('esaj-retry-notify', 10 * 60, async () => {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      // Pega tudo que tem PELO MENOS uma das pontas pendentes (advogado OU cliente).
-      // Em uma unica query, processamos os 2 fluxos depois.
+      // Pega movimentos pendentes de notificacao ao ADVOGADO.
+      // Cliente foi DESATIVADO em 2026-05-07 — ESAJ enviava cada juntada de
+      // certidao/protocolo, gerando ruido. Cliente recebe so via DJEN agora.
       const pending = await this.prisma.caseEvent.findMany({
         where: {
           type: 'MOVIMENTACAO',
           source: 'ESAJ',
-          OR: [{ notified_at: null }, { client_notified_at: null }],
+          notified_at: null,
           created_at: { gte: thirtyDaysAgo },
           legal_case: {
             in_tracking: true,
@@ -122,7 +123,6 @@ export class EsajSyncService {
       this.logger.log(`[ESAJ-RETRY] ${pending.length} movimento(s) pendente(s) em ${byCase.size} processo(s)`);
 
       let lawyerNotified = 0;
-      let clientNotified = 0;
       for (const [caseId, events] of byCase.entries()) {
         const lc = events[0].legal_case;
         const movements = events.map(e => ({
@@ -145,27 +145,17 @@ export class EsajSyncService {
           }
         }
 
-        // ── Cliente ──
-        const clientPending = events.filter(e => !e.client_notified_at);
-        if (clientPending.length > 0 && lc.lead?.phone) {
-          try {
-            const sent = await this.sendClientNotification(lc, movements, null);
-            if (sent) {
-              await this.prisma.caseEvent.updateMany({
-                where: { id: { in: clientPending.map(e => e.id) } },
-                data: { client_notified_at: new Date() },
-              });
-              clientNotified += clientPending.length;
-            }
-          } catch (e: any) {
-            this.logger.warn(`[ESAJ-RETRY/cli] Falha pra ${lc.case_number}: ${e.message}`);
-          }
-        }
+        // ── Cliente: DESATIVADO em 2026-05-07 ──
+        // ESAJ enviava cada juntada de certidao/protocolo no processo, gerando
+        // ruido para o cliente leigo. Cliente recebe so via DJEN agora (que
+        // tem filtro melhor de "publicacao relevante"). Funcao
+        // sendClientNotification() mantida no arquivo caso queiramos
+        // reativar com filtro de tipo de movimento no futuro.
       }
       this.logger.log(
-        `[ESAJ-RETRY] advogado: ${lawyerNotified}/${pending.length} | cliente: ${clientNotified}/${pending.length}`,
+        `[ESAJ-RETRY] advogado: ${lawyerNotified}/${pending.length} (cliente desativado)`,
       );
-      return lawyerNotified + clientNotified;
+      return lawyerNotified;
     });
     if (result === null) {
       this.logger.warn('[ESAJ-RETRY] Skipado — outra replica ja esta rodando');
@@ -322,21 +312,13 @@ export class EsajSyncService {
             }
           }
 
-          // ── Notifica cliente (mesma condicao). Se fora do horario,
-          //    o cron de repescagem retryPendingClientEsajNotifications pega.
-          if (isBusinessHours() && legalCase.lead?.phone) {
-            try {
-              const sent = await this.sendClientNotification(legalCase, newMovements, stageChangePayload);
-              if (sent) {
-                await this.prisma.caseEvent.updateMany({
-                  where: { movement_hash: { in: hashes } },
-                  data: { client_notified_at: new Date() },
-                });
-              }
-            } catch (err: any) {
-              this.logger.warn(`[SYNC] Falha WhatsApp cliente ${legalCase.lead?.name}: ${err.message}`);
-            }
-          }
+          // ── Cliente: DESATIVADO em 2026-05-07 ──
+          // ESAJ disparava notificacao pra cada juntada de certidao/protocolo
+          // no processo (lixo pro cliente leigo). Cliente recebe so via DJEN
+          // agora — tem filtro melhor de "publicacao relevante" (intimacoes,
+          // sentencas, despachos), nao todo movimento de tribunal.
+          // sendClientNotification() mantida abaixo se precisar reativar com
+          // filtro de tipo no futuro.
         } catch (err: any) {
           const caseNum = legalCase.case_number || legalCase.id;
           errors.push(`${caseNum}: ${err.message}`);
