@@ -144,7 +144,18 @@ model User {
 model Lead {
   id                  String   @id @default(uuid())
   tenant_id           String?
+  /// Nome confiavel do lead — preenchido apenas por fontes que o lead
+  /// validou: formulario do site, SDR coletando, cadastro manual,
+  /// ficha trabalhista. NAO inclui pushName do WhatsApp (que vai pra
+  /// `whatsapp_push_name` separado). A IA usa este campo como fonte
+  /// de verdade — se vazio, pergunta o nome ao lead.
   name                String?
+  /// PushName do WhatsApp (apelido do contato). NAO eh fonte confiavel
+  /// — pode ser apelido, "Mae", emoji ou nome falso. Salvamos so pra
+  /// referencia do operador no painel; a IA NUNCA usa esse campo no
+  /// prompt. Antes (pre 2026-05-06) era misturado em `name` o que fazia
+  /// a IA chamar leads pelo apelido do whatsapp.
+  whatsapp_push_name  String?
   // Unicidade ISOLADA por tenant — vide @@unique([tenant_id, phone]).
   // Antes era @unique global, mas isso impedia dois tenants distintos de
   // terem o mesmo telefone como lead, causando vazamento entre tenants

@@ -219,13 +219,18 @@ export class EvolutionService implements OnApplicationBootstrap {
       // tenant_id (via tenant.connect) eh OBRIGATORIO pos-bug 2026-04-29: sem
       // ele, o upsert busca/cria com tenant_id=null e dois escritorios passam
       // a brigar pelo mesmo registro.
+      // pushName vai pra `whatsapp_push_name` (referencia do operador), nunca
+      // pra `name` — antes (pre 2026-05-06) misturava ambos e a IA acabava
+      // chamando o lead pelo apelido do WhatsApp ("Toninho", "Mae", etc).
+      // So passa o campo se pushName tem valor, pra nao apagar o existente
+      // em mensagens fromMe (onde pushName eh null).
       const lead = await this.leadsService.upsert(
         {
           phone,
-          name: pushName,
+          ...(pushName ? { whatsapp_push_name: pushName } : {}),
           origin: 'whatsapp',
           ...(inbox?.tenant_id ? { tenant: { connect: { id: inbox.tenant_id } } } : {}),
-        },
+        } as any,
         inboxId, // isola notificacao de lead novo ao inbox do setor
       );
 
@@ -761,12 +766,13 @@ export class EvolutionService implements OnApplicationBootstrap {
         });
       }
 
-      // Atualizar nome se lead não tem (nunca sobrescrever)
+      // Atualizar pushName do WhatsApp em campo separado — nunca mexer
+      // em `name` (fonte de verdade pra IA, so SDR/site/manual preenchem).
       const pushName = (data.pushName as string) || (data.name as string) || null;
-      if (pushName && !existingLead.name) {
+      if (pushName && (existingLead as any).whatsapp_push_name !== pushName) {
         await this.prisma.lead.update({
           where: { id: existingLead.id },
-          data: { name: pushName },
+          data: { whatsapp_push_name: pushName } as any,
         });
       }
 
@@ -966,14 +972,16 @@ export class EvolutionService implements OnApplicationBootstrap {
 
       const updates: Record<string, string> = {};
 
-      // Atualizar nome se lead não tem (nunca sobrescrever nome existente)
-      const name =
+      // pushName/verifiedName vao pra `whatsapp_push_name` (referencia do
+      // operador, nao usado pela IA). `Lead.name` so eh tocado por fonte
+      // confiavel (formulario, SDR coletando, manual).
+      const newPushName =
         (data.pushName as string) ||
         (data.name as string) ||
         (data.verifiedName as string) ||
         null;
-      if (name && !existingContact.name) {
-        updates.name = name;
+      if (newPushName && newPushName !== (existingContact as any).whatsapp_push_name) {
+        updates.whatsapp_push_name = newPushName;
       }
 
       // Buscar foto se o lead não tem
@@ -1065,15 +1073,12 @@ export class EvolutionService implements OnApplicationBootstrap {
 
       const updates: Record<string, string> = {};
 
-      // Atualizar nome apenas se:
-      // 1. O contato tem nome
-      // 2. O nome mudou em relação ao registrado
-      // 3. O lead ainda não tem nome (null) OU o novo nome não parece ser nome do escritório.
-      //    contacts.update pode disparar após msgs enviadas trazendo o pushName do escritório —
-      //    para evitar sobrescrita, só aceita nome do webhook se o lead já não tiver nome.
-      const newName = contact.pushName || contact.name || contact.verifiedName;
-      if (newName && newName !== lead.name && !lead.name) {
-        updates.name = newName;
+      // pushName do contacts.update vai pra `whatsapp_push_name` (referencia
+      // do operador, nunca usado pela IA). `Lead.name` so eh preenchido por
+      // fonte confiavel (formulario do site, SDR coletando, cadastro manual).
+      const newPushName = contact.pushName || contact.name || contact.verifiedName;
+      if (newPushName && newPushName !== (lead as any).whatsapp_push_name) {
+        updates.whatsapp_push_name = newPushName;
       }
 
       // Buscar nova foto de perfil — URLs do WhatsApp expiram, sempre atualizar com URL fresca
@@ -1238,18 +1243,19 @@ export class EvolutionService implements OnApplicationBootstrap {
             if (existingConv) return; // Já existe conversa ativa → será sincronizada na fase 2
           }
 
-          // Chat recente sem conversa no CRM → criar lead + conversa
+          // Chat recente sem conversa no CRM → criar lead + conversa.
+          // pushName vai pra whatsapp_push_name (referencia, nao usado pela IA).
           const pushName = (chat.pushName as string) || (chat.name as string) || null;
-          if (!existingLead && !pushName) return; // Sem lead e sem nome → ignorar
+          if (!existingLead && !pushName) return; // Sem lead e sem pushName → ignorar (nao da pra criar lead)
 
           const lead = await this.leadsService.upsert(
             {
               phone,
-              name: existingLead?.name ? null : pushName,
+              ...(pushName ? { whatsapp_push_name: pushName } : {}),
               ...(chat.profilePicUrl ? { profile_picture_url: chat.profilePicUrl as string } : {}),
               origin: 'whatsapp',
               ...(tenantId ? { tenant: { connect: { id: tenantId } } } : {}),
-            },
+            } as any,
             inboxId, // isola notificacao de lead novo ao inbox do setor (resync pos-reconexao)
           );
 
