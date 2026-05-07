@@ -677,9 +677,38 @@ function KanbanView() {
     } catch {}
   }, []);
   useEffect(() => { fetchDiligencias(); }, [fetchDiligencias]);
-  // Refresh quando algo muda
+  // Real-time via WebSocket: backend emite task:status-changed quando
+  // muda; task_comment em comentarios novos; notification_created cobre
+  // delegacao de novas tasks pro estagiario. Substituiu polling 60s.
+  // Safety net 5min cobre casos sem evento (cron interno, race conditions).
   useEffect(() => {
-    const interval = setInterval(() => fetchDiligencias(), 60_000);
+    if (!socket) return;
+    const refetch = () => fetchDiligencias();
+    const onNotif = (data: { notification_type?: string }) => {
+      // Tipos relevantes pro estagiario: nova diligencia delegada, prazo
+      // de tarefa proxima do vencimento, etc.
+      if (
+        data?.notification_type === 'task_overdue' ||
+        data?.notification_type === 'task_overdue_delegate' ||
+        data?.notification_type === 'calendar_reminder'
+      ) {
+        fetchDiligencias();
+      }
+    };
+    socket.on('task:status-changed', refetch);
+    socket.on('task_comment', refetch);
+    socket.on('notification_created', onNotif);
+    socket.on('connect', refetch);
+    return () => {
+      socket.off('task:status-changed', refetch);
+      socket.off('task_comment', refetch);
+      socket.off('notification_created', onNotif);
+      socket.off('connect', refetch);
+    };
+  }, [socket, fetchDiligencias]);
+  // Safety net — eventos socket cobrem o caso comum
+  useEffect(() => {
+    const interval = setInterval(() => fetchDiligencias(), 5 * 60_000);
     return () => clearInterval(interval);
   }, [fetchDiligencias]);
 
@@ -721,22 +750,24 @@ function KanbanView() {
 
   useEffect(() => { fetchKanban(); }, [fetchKanban]);
 
-  // Auto-refresh every 60s
+  // Safety net 5min — eventos socket cobrem o caso comum (petition_*).
   useEffect(() => {
-    const interval = setInterval(() => fetchKanban(), 60_000);
+    const interval = setInterval(() => fetchKanban(), 5 * 60_000);
     return () => clearInterval(interval);
   }, [fetchKanban]);
 
-  // WebSocket: refresh quando petição muda de status (devolvida/aprovada)
+  // WebSocket: refresh quando peticao muda (criada / status / devolvida) +
+  // re-sync on reconnect (cobre eventos perdidos durante queda).
   useEffect(() => {
     if (!socket) return;
-
-    const onPetitionStatusChange = () => { fetchKanban(); };
-
-    socket.on('petition_status_change', onPetitionStatusChange);
-
+    const refetch = () => fetchKanban();
+    socket.on('petition_status_change', refetch);
+    socket.on('petition_created', refetch);
+    socket.on('connect', refetch);
     return () => {
-      socket.off('petition_status_change', onPetitionStatusChange);
+      socket.off('petition_status_change', refetch);
+      socket.off('petition_created', refetch);
+      socket.off('connect', refetch);
     };
   }, [socket, fetchKanban]);
 
@@ -1047,11 +1078,27 @@ function ListView() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Refresh every 60s
+  // Safety net — dashboard agregado; eventos socket cobrem mudancas pontuais
+  // (mesmos triggers do fetchDiligencias acima — tasks/notifications).
   useEffect(() => {
-    const interval = setInterval(() => fetchData(), 60_000);
+    const interval = setInterval(() => fetchData(), 5 * 60_000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const refetch = () => fetchData();
+    socket.on('task:status-changed', refetch);
+    socket.on('task_comment', refetch);
+    socket.on('notification_created', refetch);
+    socket.on('connect', refetch);
+    return () => {
+      socket.off('task:status-changed', refetch);
+      socket.off('task_comment', refetch);
+      socket.off('notification_created', refetch);
+      socket.off('connect', refetch);
+    };
+  }, [socket, fetchData]);
 
   const handleAction = async (eventId: string, action: string, kind: 'event' | 'task' = 'event') => {
     setData(prev => {
