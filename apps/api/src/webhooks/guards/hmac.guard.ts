@@ -39,14 +39,17 @@ export class HmacGuard implements CanActivate {
       return true;
     }
 
-    const signature =
-      req.headers['x-webhook-signature'] ||
-      req.headers['x-signature'] ||
+    // Header pode vir como `<hex>` ou `sha256=<hex>` (padrao GitHub/Stripe).
+    // Descascar prefixo antes da comparacao.
+    const rawSig =
+      (req.headers['x-webhook-signature'] as string | undefined) ||
+      (req.headers['x-signature'] as string | undefined) ||
       '';
+    const signature = rawSig.startsWith('sha256=') ? rawSig.slice(7) : rawSig;
 
     if (!signature) {
       // Se WEBHOOK_HMAC_REQUIRED=true, rejeitar sem assinatura (fail-closed)
-      if (process.env.WEBHOOK_HMAC_REQUIRED === 'true') {
+      if (hmacRequired) {
         this.logger.warn('[HMAC] Webhook sem assinatura — rejeitado (HMAC obrigatório)');
         throw new UnauthorizedException('Webhook signature required');
       }
@@ -54,14 +57,25 @@ export class HmacGuard implements CanActivate {
       return true;
     }
 
-    // O body ja foi parseado pelo NestJS; recalcular HMAC sobre o JSON stringificado
-    const rawBody = JSON.stringify(req.body);
+    // rawBody eh capturado em main.ts via verify do express.json (utf8 string).
+    // NAO usar JSON.stringify(req.body): a re-serializacao difere da payload
+    // original (whitespace, ordem de chaves) e a assinatura nunca bateria.
+    const rawBody = (req as { rawBody?: string }).rawBody;
+    if (!rawBody) {
+      this.logger.error('[HMAC] req.rawBody ausente — verify do body parser nao rodou');
+      throw new UnauthorizedException('Cannot verify signature');
+    }
     const expected = crypto
       .createHmac('sha256', apiKey)
       .update(rawBody)
       .digest('hex');
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    // timingSafeEqual exige buffers de mesmo tamanho — comparar tamanho antes
+    // pra evitar TypeError (que viraria 500). Tamanho diferente ja eh sinal
+    // de assinatura malformada.
+    const sigBuf = Buffer.from(signature, 'utf8');
+    const expBuf = Buffer.from(expected, 'utf8');
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
       this.logger.warn('[HMAC] Assinatura invalida no webhook — rejeitado');
       throw new UnauthorizedException('Invalid webhook signature');
     }
