@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, UseGuards, ValidationPipe, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, UseGuards, BadRequestException } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { EvolutionService } from './evolution.service';
 import { HmacGuard } from './guards/hmac.guard';
@@ -14,19 +14,29 @@ export class EvolutionController {
 
   @Post()
   @HttpCode(200)
-  async handleWebhook(
-    // ValidationPipe NO PARAMETRO — prioridade maxima sobre o global.
-    // Evolution envia muitos campos extras (destination, date_time, sender,
-    // server_url, apikey, fromMe, etc) que variam por evento. Sem
-    // forbidNonWhitelisted=false aqui, o pipe global (com forbid=true)
-    // rejeitaria com 400 antes do controller-level pipe atuar.
-    // Bug 2026-05-08: webhook 400 → mensagens nao chegavam no chat.
-    @Body(new ValidationPipe({
-      transform: true,
-      whitelist: false,
-      forbidNonWhitelisted: false,
-    })) payload: EvolutionWebhookDto,
-  ) {
+  // Param tipado como `any` (NAO `EvolutionWebhookDto`) — NestJS concatena
+  // pipes (global + controller + param), entao um pipe local NAO sobrescreve
+  // o global. Quando metatype eh `Object`, o ValidationPipe pula validacao
+  // inteiramente — eh o unico jeito de aceitar campos extras com
+  // forbidNonWhitelisted=true no global.
+  //
+  // Validacao do shape eh manual: hasInstance() + checagem do `event`
+  // logo abaixo. DTO continua disponivel pra documentar o contrato — apenas
+  // nao eh usado como metatype.
+  //
+  // Bug 2026-05-08: webhook 400 (mensagens nao chegavam no chat) apos
+  // commit 448e025 trocar `any` por `EvolutionWebhookDto`. Memoria
+  // feedback_nestjs_validationpipe_hierarchy.md.
+  async handleWebhook(@Body() payload: any) {
+    if (!payload || typeof payload !== 'object') {
+      throw new BadRequestException('payload deve ser objeto');
+    }
+    if (!payload.event || typeof payload.event !== 'string') {
+      throw new BadRequestException('event eh obrigatorio (string)');
+    }
+    if (!payload.data || typeof payload.data !== 'object') {
+      throw new BadRequestException('data eh obrigatorio (objeto)');
+    }
     if (!EvolutionWebhookDto.hasInstance(payload)) {
       throw new BadRequestException('instance ou instanceId eh obrigatorio');
     }
