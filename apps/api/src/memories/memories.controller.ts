@@ -186,16 +186,25 @@ export class MemoriesController {
     const tenantId = req.user?.tenant_id;
     if (!tenantId) throw new BadRequestException('tenant_id ausente');
 
-    // Leads ativos (last_message_at < 60 dias) sem LeadProfile.summary
+    // Leads ativos (qualquer Conversation com mensagem nos ultimos 60d)
+    // sem LeadProfile.summary preenchido.
+    // Bug 2026-05-08: query original usava l.last_message_at, mas essa
+    // coluna fica em Conversation. Reescrita usa EXISTS+Conversation.
     const leadsWithoutProfile = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT l.id FROM "Lead" l
       WHERE l.tenant_id = ${tenantId}
-        AND l.last_message_at > NOW() - INTERVAL '60 days'
+        AND EXISTS (
+          SELECT 1 FROM "Conversation" c
+          WHERE c.lead_id = l.id
+            AND c.last_message_at > NOW() - INTERVAL '60 days'
+        )
         AND NOT EXISTS (
           SELECT 1 FROM "LeadProfile" lp
           WHERE lp.lead_id = l.id AND length(coalesce(lp.summary, '')) > 50
         )
-      ORDER BY l.last_message_at DESC
+      ORDER BY (
+        SELECT MAX(c.last_message_at) FROM "Conversation" c WHERE c.lead_id = l.id
+      ) DESC
     `;
 
     let enqueued = 0;
