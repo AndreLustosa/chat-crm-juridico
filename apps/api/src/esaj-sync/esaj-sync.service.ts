@@ -329,13 +329,25 @@ export class EsajSyncService {
             }
           }
 
-          // ── Cliente: DESATIVADO em 2026-05-07 ──
-          // ESAJ disparava notificacao pra cada juntada de certidao/protocolo
-          // no processo (lixo pro cliente leigo). Cliente recebe so via DJEN
-          // agora — tem filtro melhor de "publicacao relevante" (intimacoes,
-          // sentencas, despachos), nao todo movimento de tribunal.
-          // sendClientNotification() mantida abaixo se precisar reativar com
-          // filtro de tipo no futuro.
+          // ── Cliente: REATIVADO em 2026-05-08 com flag ──
+          // Antes ESAJ disparava notificacao pra cada juntada (lixo pro
+          // cliente leigo) — desligado em 2026-05-07. Agora reativado,
+          // mas controlado pela flag MOVEMENT_NOTIFY_CLIENT (default OFF).
+          //
+          // Decisao 2026-05-08: DJEN intimacao = sempre notifica, ESAJ
+          // movimento simples = so se admin ligar. Quando OFF (default),
+          // mantem comportamento atual (so advogado recebe).
+          //
+          // Pra evitar ruido, recomenda-se manter OFF salvo em casos
+          // especificos (ex: cliente pediu acompanhar tudo).
+          try {
+            const movementNotifyEnabled = await this.settings.get('MOVEMENT_NOTIFY_CLIENT');
+            if (movementNotifyEnabled === 'true') {
+              await this.sendClientNotification(legalCase, newMovements, null);
+            }
+          } catch (err: any) {
+            this.logger.warn(`[SYNC] Falha ao notificar cliente: ${err.message}`);
+          }
         } catch (err: any) {
           const caseNum = legalCase.case_number || legalCase.id;
           errors.push(`${caseNum}: ${err.message}`);

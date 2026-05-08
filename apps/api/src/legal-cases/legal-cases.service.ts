@@ -636,6 +636,17 @@ export class LegalCasesService {
     source?: string;
     reference_url?: string;
     event_date?: Date;
+    /**
+     * Quando true (default), o CalendarEvent criado automaticamente pra
+     * audiencias/pericias dispara notificacao imediata ao cliente
+     * (1 min apos criacao). Quando false, evento eh criado em modo
+     * "interno" — sem WhatsApp pro cliente.
+     *
+     * Bug fix 2026-05-08: antes nao havia controle. Admin que criava
+     * audiencia via UI legalCase nao percebia que cliente recebia WA
+     * 1 min depois.
+     */
+    notify_client?: boolean;
   }, tenantId?: string) {
     await this.verifyTenantOwnership(caseId, tenantId);
     const caseEvent = await this.prisma.caseEvent.create({
@@ -659,6 +670,10 @@ export class LegalCasesService {
         });
         if (legalCase?.lawyer_id) {
           const calType = data.type.toLowerCase() === 'audiencia' ? 'AUDIENCIA' : 'PRAZO';
+          // Bug fix 2026-05-08: notify_client default true mantem comportamento
+          // atual (audiencia notifica cliente 1 min depois). UI pode passar
+          // false pra criar evento interno sem aviso ao cliente.
+          const shouldNotifyClient = data.notify_client !== false;
           await this.calendarService.create({
             type: calType,
             title: data.title,
@@ -671,8 +686,13 @@ export class LegalCasesService {
             created_by_id: legalCase.lawyer_id,
             tenant_id: legalCase.tenant_id || undefined,
             reminders: [{ minutes_before: 1440, channel: 'PUSH' }, { minutes_before: 60, channel: 'PUSH' }],
-          });
-          this.logger.log(`CalendarEvent ${calType} criado automaticamente para caso ${caseId}`);
+            // Default true; UI pode passar false pra evento interno
+            notify_client: shouldNotifyClient,
+          } as any);
+          this.logger.log(
+            `CalendarEvent ${calType} criado automaticamente para caso ${caseId}` +
+            (shouldNotifyClient ? ' (cliente sera notificado em 1min)' : ' (modo interno — sem WhatsApp ao cliente)'),
+          );
         }
       } catch (e: any) {
         this.logger.warn(`Erro ao criar CalendarEvent para CaseEvent: ${e.message}`);

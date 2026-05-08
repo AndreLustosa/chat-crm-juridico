@@ -2058,12 +2058,16 @@ export default function AdvogadoPage() {
     // Fetch prazos/tarefas pendentes — chamada inicial. O refetch ao mudar
     // o filtro de advogado vem via useEffect separado abaixo.
 
-    // Fetch setting DJEN_NOTIFY_CLIENT (admin only)
+    // Fetch setting MOVEMENT_NOTIFY_CLIENT (admin only)
+    // 2026-05-08: substitui DJEN_NOTIFY_CLIENT — DJEN sempre notifica
+    // (intimacao tem prazo legal); essa flag controla SO movimentacoes
+    // simples do ESAJ (default OFF — opt-in pra evitar spam).
     if (isAdmin) {
       api.get('/settings').then(r => {
         const settings = r.data || [];
-        const notify = settings.find((s: any) => s.key === 'DJEN_NOTIFY_CLIENT');
-        setDjenNotify(notify?.value !== 'false');
+        const notify = settings.find((s: any) => s.key === 'MOVEMENT_NOTIFY_CLIENT');
+        // Default OFF — admin precisa ligar conscientemente
+        setDjenNotify(notify?.value === 'true');
       }).catch(() => {});
 
       // Lista de advogados pra popular o dropdown de filtro (admin only).
@@ -2347,14 +2351,18 @@ export default function AdvogadoPage() {
               />
             </div>
 
-            {/* Toggle notificação DJEN (admin only) */}
+            {/* Toggle notificação de movimentações simples ao cliente (admin only).
+                2026-05-08: substituiu DJEN_NOTIFY_CLIENT. DJEN intimacao
+                sempre notifica (tem prazo legal). Esta flag controla so
+                movimentacoes simples do ESAJ — default OFF pra evitar
+                spam de juntadas/certidoes ao cliente. */}
             {isAdmin && (
               <button
                 onClick={async () => {
                   setLoadingNotify(true);
                   const newVal = !djenNotify;
                   try {
-                    await api.put('/settings', { key: 'DJEN_NOTIFY_CLIENT', value: newVal ? 'true' : 'false' });
+                    await api.put('/settings', { key: 'MOVEMENT_NOTIFY_CLIENT', value: newVal ? 'true' : 'false' });
                     setDjenNotify(newVal);
                   } catch {}
                   setLoadingNotify(false);
@@ -2363,12 +2371,16 @@ export default function AdvogadoPage() {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
                   djenNotify
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                    : 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                    : 'bg-muted border-border text-muted-foreground hover:bg-muted/80'
                 }`}
-                title={djenNotify ? 'Notificação DJEN ao cliente: ATIVADA' : 'Notificação DJEN ao cliente: DESATIVADA'}
+                title={
+                  djenNotify
+                    ? 'Cliente recebe TODAS movimentações ESAJ (juntadas, certidões, etc.). Intimações DJEN sempre notificam, independente desta flag.'
+                    : 'Cliente recebe SOMENTE intimações DJEN (prazo legal). Movimentações simples ficam só com o advogado. Recomendado.'
+                }
               >
                 <Bell size={11} />
-                {djenNotify ? 'Notif. Cliente ON' : 'Notif. Cliente OFF'}
+                {djenNotify ? 'Movs. Cliente ON' : 'Movs. Cliente OFF'}
               </button>
             )}
 

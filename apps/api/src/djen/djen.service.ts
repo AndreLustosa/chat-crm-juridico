@@ -726,13 +726,48 @@ export class DjenService {
       const legalCase = await this.prisma.legalCase.findFirst({
         where: { case_number: { in: variants }, in_tracking: true },
         // Select expandido — notify precisa de lead{id,name,phone}+tenant_id.
+        // renounced/archived adicionado no fix 2026-05-08 pra reconcile
+        // respeitar status do processo (antes ignorava).
         select: {
           id: true,
           tenant_id: true,
+          renounced: true,
+          archived: true,
           lead: { select: { id: true, name: true, phone: true } },
         },
       });
       if (!legalCase) continue;
+
+      // Bug fix 2026-05-08: reconcile nao filtrava renounced/archived/ignored.
+      // Resultado: cliente que renunciou continuava recebendo intimacoes
+      // velhas reconciliadas dias depois.
+      if (legalCase.renounced || legalCase.archived) {
+        // Vincula a publicacao mesmo (pra historico) mas nao notifica
+        await this.prisma.djenPublication.update({
+          where: { id: pub.id },
+          data: { legal_case_id: legalCase.id, archived: true },
+        });
+        this.logger.log(
+          `[DJEN/recon] Pub ${pub.id} vinculada a processo renunciado/arquivado ${legalCase.id} — pulando notificacao`,
+        );
+        continue;
+      }
+
+      // Verifica DjenIgnoredProcess
+      const isIgnored = await this.prisma.djenIgnoredProcess.findUnique({
+        where: { numero_processo: pub.numero_processo },
+        select: { id: true },
+      });
+      if (isIgnored) {
+        await this.prisma.djenPublication.update({
+          where: { id: pub.id },
+          data: { legal_case_id: legalCase.id, archived: true },
+        });
+        this.logger.log(
+          `[DJEN/recon] Pub ${pub.id} de processo ignorado (renuncia) ${pub.numero_processo} — pulando notificacao`,
+        );
+        continue;
+      }
 
       await this.prisma.djenPublication.update({
         where: { id: pub.id },
@@ -1627,9 +1662,13 @@ ${pub.conteudo.slice(0, 6000)}`;
     const lead = legalCase.lead;
     if (!lead?.phone) return;
 
-    // Verificar setting (default: habilitado)
-    const notifyEnabled = await this.settings.get('DJEN_NOTIFY_CLIENT');
-    if (notifyEnabled === 'false') return;
+    // INTIMACAO DJEN SEMPRE NOTIFICA (decisao 2026-05-08): intimacao tem
+    // prazo legal — cliente DEVE saber. A flag DJEN_NOTIFY_CLIENT antiga
+    // (que desligava DJEN) foi descontinuada conceitualmente.
+    //
+    // Movimentacoes simples do ESAJ continuam controladas por flag separada
+    // (MOVEMENT_NOTIFY_CLIENT, lida no esaj-sync.service quando ESAJ-cliente
+    // for reativado).
 
     // Horario comercial: 8h-20h Maceio, TODOS os dias (politica unificada
     // 2026-04-26 — antes era seg-sex, agora inclui sab/dom).
@@ -1830,17 +1869,33 @@ ${pub.conteudo.slice(0, 6000)}`;
       }
     }
 
+    // Bug fix 2026-05-08: race entre sync principal e retry cron — ambos
+    // podiam ler client_notified_at=null ao mesmo tempo e enviar 2× a
+    // mesma intimacao pro cliente. Lock otimista via updateMany +
+    // WHERE client_notified_at IS NULL: a primeira chamada ganha o lock
+    // (count=1), as outras retornam count=0 e nao enviam.
+    const lockResult = await this.prisma.djenPublication.updateMany({
+      where: { id: pub.id, client_notified_at: null },
+      data: { client_notified_at: new Date() },
+    });
+
+    if (lockResult.count === 0) {
+      this.logger.log(
+        `[DJEN] Pub ${pub.id} ja foi notificada por outro fluxo concorrente — pulando (race protection)`,
+      );
+      return;
+    }
+
     try {
       await this.whatsappService.sendText(lead.phone, message, instance);
-
-      await this.prisma.djenPublication.update({
-        where: { id: pub.id },
-        data: { client_notified_at: new Date() },
-      });
-
       this.logger.log(`[DJEN] ✅ Lead ${lead.id} notificado sobre movimentação no processo ${numeroProcesso}`);
     } catch (e: any) {
-      this.logger.warn(`[DJEN] Falha ao enviar WhatsApp para lead ${lead.id}: ${e.message}`);
+      // Falha no envio — desfaz o lock pra cron retry pegar de novo
+      await this.prisma.djenPublication.update({
+        where: { id: pub.id },
+        data: { client_notified_at: null },
+      }).catch(() => {});
+      this.logger.warn(`[DJEN] Falha ao enviar WhatsApp para lead ${lead.id}: ${e.message} — lock revertido`);
     }
   }
 

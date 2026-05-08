@@ -409,8 +409,11 @@ export class CalendarService implements OnApplicationBootstrap {
       } catch {}
     }
 
-    // Notificação imediata ao cliente (1 min de delay) quando audiência ou perícia é agendada
-    if ((data.type === 'AUDIENCIA' || data.type === 'PERICIA') && leadPhone) {
+    // Notificação imediata ao cliente (1 min de delay) quando audiência ou perícia é agendada.
+    // Bug fix 2026-05-08: respeita data.notify_client (default true). UI pode
+    // passar false pra criar evento "interno" sem WhatsApp ao cliente.
+    const shouldNotifyClient = (data as any).notify_client !== false;
+    if ((data.type === 'AUDIENCIA' || data.type === 'PERICIA') && leadPhone && shouldNotifyClient) {
       try {
         await this.reminderQueue.add(
           'notify-hearing-scheduled',
