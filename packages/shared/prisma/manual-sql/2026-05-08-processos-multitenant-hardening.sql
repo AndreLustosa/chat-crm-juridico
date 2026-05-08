@@ -40,17 +40,30 @@ WHERE dp.legal_case_id = lc.id
   AND dp.tenant_id IS NULL
   AND lc.tenant_id IS NOT NULL;
 
--- Backfill 2: via DjenLawyerOab (matching de OAB cadastrada)
--- Tabela tem oab_numero + tenant_id. Cruza com nome_advogado da pub.
-UPDATE "DjenPublication" dp
-SET tenant_id = (
-  SELECT dlo.tenant_id FROM "DjenLawyerOab" dlo
-  WHERE dlo.lawyer_name IS NOT NULL
-    AND POSITION(UPPER(dlo.lawyer_name) IN UPPER(COALESCE(dp.nome_advogado, ''))) > 0
-  LIMIT 1
-)
-WHERE dp.tenant_id IS NULL
-  AND dp.nome_advogado IS NOT NULL;
+-- Backfill 2: via DjenLawyerOab — SE A TABELA EXISTIR.
+-- (Em algumas instalacoes a tabela nao existe — IF EXISTS evita falha
+-- da transacao. Update aplicado via 2026-05-08 no banco prod.)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema='public' AND table_name='DjenLawyerOab'
+  ) THEN
+    EXECUTE $sql$
+      UPDATE "DjenPublication" dp
+      SET tenant_id = (
+        SELECT dlo.tenant_id FROM "DjenLawyerOab" dlo
+        WHERE dlo.lawyer_name IS NOT NULL
+          AND POSITION(UPPER(dlo.lawyer_name) IN UPPER(COALESCE(dp.nome_advogado, ''))) > 0
+        LIMIT 1
+      )
+      WHERE dp.tenant_id IS NULL
+        AND dp.nome_advogado IS NOT NULL
+    $sql$;
+  ELSE
+    RAISE NOTICE 'Tabela DjenLawyerOab nao existe — pulando backfill 2';
+  END IF;
+END $$;
 
 -- Backfill 3: tenant default pras restantes (1 tenant em prod)
 -- Apenas se houver um unico tenant ativo (caso atual).
