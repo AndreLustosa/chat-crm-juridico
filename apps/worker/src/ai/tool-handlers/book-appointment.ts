@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import axios from 'axios';
 import type { ToolHandler, ToolContext } from '../tool-executor';
+import { tenantOrDefault } from '../../common/constants/tenant';
 
 /**
  * Agenda uma reunião/consulta para o lead.
@@ -56,14 +57,27 @@ export class BookAppointmentHandler implements ToolHandler {
       };
     }
 
-    // Modalidade: define duracao + descricao + local. Sem param valido,
-    // assume LIGACAO (15min) — modalidade mais leve, evita reservar 60min.
-    const modality = params.modality || 'LIGACAO';
+    // Modalidade obrigatoria — sem default. A IA tem que perguntar antes
+    // de chamar a tool. Default LIGACAO causava IA prometer ligacao ate
+    // pra cliente que pediu presencial (bug 2026-05-08).
+    if (!params.modality) {
+      return {
+        success: false,
+        error: 'Modalidade obrigatoria. Pergunte ao cliente: ligacao, video ou presencial. Depois chame book_appointment com modality definido.',
+      };
+    }
+    const modality = params.modality;
     const modalityCfg = {
       LIGACAO: { minutes: 15, label: 'Ligação telefônica', emoji: '📞' },
       VIDEO: { minutes: 30, label: 'Videochamada', emoji: '💻' },
       PRESENCIAL: { minutes: 30, label: 'Atendimento presencial', emoji: '📍' },
     }[modality];
+    if (!modalityCfg) {
+      return {
+        success: false,
+        error: `Modalidade invalida: "${modality}". Use LIGACAO, VIDEO ou PRESENCIAL.`,
+      };
+    }
     const durationMinutes = params.duration_minutes ?? modalityCfg.minutes;
 
     // UTC naive: datas são gravadas com os componentes locais como se fossem UTC.
@@ -75,6 +89,53 @@ export class BookAppointmentHandler implements ToolHandler {
 
     if (startAt.getTime() <= Date.now()) {
       return { success: false, error: 'Data/hora já passou. Ofereça outro horário.' };
+    }
+
+    // ─── DEDUP por lead ────────────────────────────────────────────
+    // Se o lead JA tem CONSULTA futura agendada (qualquer data/hora ainda
+    // por vir), nao criar outra. Isso bloqueia o caso onde a IA dispara
+    // book_appointment varias vezes na mesma conversa (race de jobs
+    // duplicados, IA confusa com retry, etc.) e o lead acaba com 4
+    // consultas. Idempotencia por lead — fix do bug 2026-05-08 (Jhennify).
+    if (context.leadId) {
+      const existingForLead = await prisma.calendarEvent.findFirst({
+        where: {
+          lead_id: context.leadId,
+          type: 'CONSULTA',
+          status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
+          start_at: { gt: new Date() },
+        },
+        select: { id: true, title: true, start_at: true },
+        orderBy: { start_at: 'asc' },
+      });
+      if (existingForLead) {
+        // Mesmo dia + mesmo horario → idempotencia (retorna o existente)
+        const isSameSlot =
+          existingForLead.start_at.getTime() === startAt.getTime();
+        if (isSameSlot) {
+          this.logger.log(
+            `[book_appointment] Lead ${context.leadId} ja tem evento ${existingForLead.id} no mesmo horario — retornando existente (idempotente)`,
+          );
+          return {
+            success: true,
+            eventId: existingForLead.id,
+            date: params.date,
+            time: params.time,
+            duration_minutes: durationMinutes,
+            already_exists: true,
+            message: `Reunião já estava agendada para ${params.date} às ${params.time}.`,
+          };
+        }
+        // Horario diferente → bloqueia (lead nao pode ter 2 consultas
+        // simultaneas; se quiser remarcar, precisa cancelar a anterior)
+        const existingDate = existingForLead.start_at.toISOString().slice(0, 10);
+        const existingTime = existingForLead.start_at.toISOString().slice(11, 16);
+        return {
+          success: false,
+          error: `Lead ja tem reuniao agendada em ${existingDate} as ${existingTime} ("${existingForLead.title}"). Cancele a anterior antes de marcar nova, ou confirme com o cliente se ele quer remarcar.`,
+          existing_event_id: existingForLead.id,
+        };
+      }
     }
 
     // Conflito com evento existente do advogado
@@ -125,7 +186,7 @@ export class BookAppointmentHandler implements ToolHandler {
         conversation_id: context.conversationId,
         created_by_id: assignedUserId,
         created_by_ai: true,
-        tenant_id: convo.tenant_id || undefined,
+        tenant_id: tenantOrDefault(convo.tenant_id),
         reminders: {
           create: [
             { minutes_before: 30, channel: 'WHATSAPP' },

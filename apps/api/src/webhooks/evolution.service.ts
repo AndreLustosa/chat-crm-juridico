@@ -582,28 +582,83 @@ export class EvolutionService implements OnApplicationBootstrap {
           const jobId = `ai-debounce-${conv.id}`;
 
           if (debounceMs > 0) {
-            let useFixedId = true;
+            // ─── Debounce robusto baseado em estado do job ─────────────
+            //
+            // Antes: tentava existing.remove() e, se falhasse, enfileirava
+            // SEM jobId fixo — resultando em 2-3 jobs paralelos quando
+            // mensagens rapidas chegavam (bug 2026-05-08 Jhennify).
+            //
+            // Agora: lemos o estado REAL do job e decidimos:
+            //   - delayed/waiting -> changeDelay() pra resetar timer no
+            //     job existente (sem criar duplicado). Se changeDelay
+            //     falhar, remove + recria com mesmo jobId.
+            //   - active -> NAO enfileira novo. O worker que ja esta
+            //     processando vai ler as mensagens novas do DB no comeco.
+            //     A proxima mensagem do lead, se vier, dispara um novo
+            //     ciclo (porque ai o jobId atual ja terminou).
+            //   - completed/failed -> remove + recria.
+            //   - sem job -> cria novo.
             const existing = await this.aiQueue.getJob(jobId);
+            let action: 'created' | 'reset' | 'skipped' = 'created';
+
             if (existing) {
+              let state: string;
               try {
-                await existing.remove();
-                this.logger.log(`[AI] Debounce: job ${jobId} removido, timer resetado`);
-              } catch {
-                useFixedId = false;
-                this.logger.warn(
-                  `[AI] Debounce: job ${jobId} ativo/bloqueado — novo job agendado sem ID fixo`,
-                );
+                state = await existing.getState();
+              } catch (e: any) {
+                this.logger.warn(`[AI] Debounce: getState falhou para ${jobId}: ${e.message}`);
+                state = 'unknown';
+              }
+
+              if (state === 'delayed' || state === 'waiting') {
+                // Job aguardando o timer — reseta o delay
+                try {
+                  // BullMQ v3+: changeDelay reseta o timer sem remover o job
+                  if (typeof (existing as any).changeDelay === 'function') {
+                    await (existing as any).changeDelay(debounceMs);
+                    action = 'reset';
+                    this.logger.log(`[AI] Debounce: timer do job ${jobId} resetado (state=${state})`);
+                  } else {
+                    // Fallback: remove + recria com mesmo jobId
+                    await existing.remove();
+                    action = 'created';
+                  }
+                } catch (e: any) {
+                  this.logger.warn(`[AI] Debounce: changeDelay falhou (${e.message}), tentando remove+recreate`);
+                  try {
+                    await existing.remove();
+                    action = 'created';
+                  } catch {
+                    // remove tambem falhou — provavelmente virou active
+                    // entre as chamadas. Pula este ciclo; o job ativo
+                    // vai ler as msgs novas do DB.
+                    action = 'skipped';
+                  }
+                }
+              } else if (state === 'active' || state === 'waiting-children') {
+                // Job em execucao — nao enfileira outro. O worker ja vai
+                // pegar as mensagens novas no findMany do DB.
+                action = 'skipped';
+                this.logger.log(`[AI] Debounce: job ${jobId} ja active — confiando no re-fetch do worker`);
+              } else {
+                // completed/failed/unknown — remove e cria novo
+                try {
+                  await existing.remove();
+                } catch {
+                  // ignora — pode ja ter sido removido pelo BullMQ
+                }
+                action = 'created';
               }
             }
 
-            await this.aiQueue.add(
-              'process_ai_response',
-              { conversation_id: conv.id, lead_id: lead.id },
-              useFixedId
-                ? { jobId, delay: debounceMs, removeOnComplete: true, removeOnFail: false }
-                : { delay: debounceMs, removeOnComplete: true, removeOnFail: false },
-            );
-            this.logger.log(`[AI] Job enfileirado: ${useFixedId ? jobId : '(sem ID fixo)'} delay=${debounceMs}ms`);
+            if (action === 'created') {
+              await this.aiQueue.add(
+                'process_ai_response',
+                { conversation_id: conv.id, lead_id: lead.id },
+                { jobId, delay: debounceMs, removeOnComplete: true, removeOnFail: false },
+              );
+              this.logger.log(`[AI] Debounce: job ${jobId} criado delay=${debounceMs}ms`);
+            }
           } else {
             await this.aiQueue.add('process_ai_response', {
               conversation_id: conv.id,
