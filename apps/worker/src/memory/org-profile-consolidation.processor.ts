@@ -189,9 +189,11 @@ export class OrgProfileConsolidationProcessor {
       where: { tenant_id: tenantId },
     });
 
-    // Primeira geracao ou profile zerado: from-scratch obrigatorio
+    // Primeira geracao ou profile zerado: from-scratch obrigatorio.
+    // forcePublish=true porque nao tem summary publicado pra IA usar
+    // enquanto admin aprova — pending nao faz sentido aqui.
     if (!existing || !existing.summary || existing.summary.trim().length < 50) {
-      await this.consolidateProfile(tenantId);
+      await this.consolidateProfile(tenantId, { forcePublish: true });
       return { changed: true };
     }
 
@@ -348,7 +350,7 @@ export class OrgProfileConsolidationProcessor {
    *   - Botao "Refazer do zero" na UI
    *   - Fallback quando incremental nao e possivel
    */
-  async consolidateProfile(tenantId: string): Promise<void> {
+  async consolidateProfile(tenantId: string, options: { forcePublish?: boolean } = {}): Promise<void> {
     const memories = await this.prisma.memory.findMany({
       where: {
         tenant_id: tenantId,
@@ -386,6 +388,39 @@ export class OrgProfileConsolidationProcessor {
     });
     const changed = !existing || existing.summary?.trim() !== result.summary.trim();
 
+    // Fase 3 PR2: workflow de aprovacao — quando setting
+    // MEMORY_ORG_REQUIRE_APPROVAL=true, grava em pending_* em vez de
+    // sobrescrever summary direto.
+    //
+    // Excecao: forcePublish=true OU primeira geracao (existing=null, sem
+    // summary publicado). Nesses casos NAO faz sentido pending — nao tem
+    // o que a IA usar enquanto admin aprova.
+    const requireApproval = await this.isApprovalRequired();
+    const shouldUsePending =
+      requireApproval &&
+      changed &&
+      !options.forcePublish &&
+      existing &&
+      existing.summary &&
+      existing.summary.trim().length >= 50;
+
+    if (shouldUsePending) {
+      await this.prisma.organizationProfile.update({
+        where: { tenant_id: tenantId },
+        data: {
+          pending_summary: result.summary,
+          pending_facts: result.facts as any,
+          pending_changes_applied: ['Refeito do zero a partir de todas as memórias'],
+          pending_at: new Date(),
+        },
+      });
+      await this.notifyPendingProposal(tenantId, result.summary.length, 1);
+      this.logger.log(
+        `[OrgProfileConsolidation] Tenant ${tenantId}: REBUILD pendente criado — aguardando aprovacao admin`,
+      );
+      return;
+    }
+
     // Fase 3: salva snapshot da versao anterior antes de sobrescrever
     // (rebuild eh destrutivo — sempre faz snapshot se ha versao previa).
     if (existing && changed) {
@@ -414,7 +449,7 @@ export class OrgProfileConsolidationProcessor {
     });
 
     this.logger.log(
-      `[OrgProfileConsolidation] Tenant ${tenantId}: from-scratch — ${memories.length} memorias → ${result.summary.length} chars`,
+      `[OrgProfileConsolidation] Tenant ${tenantId}: from-scratch publicado direto — ${memories.length} memorias → ${result.summary.length} chars`,
     );
   }
 
