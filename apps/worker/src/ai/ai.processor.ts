@@ -1711,6 +1711,8 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
       let officeMemoriesStr = '';
       let leadProfileStr = '';
       let recentEpisodesStr = '';
+      // Fase 3: capturado pra extrair vars estruturadas depois do try interno
+      let orgProfileFacts: any = null;
       try {
         const leadIdForMem = convo.lead_id || convo.lead?.id || null;
         if (tenantIdForBH && leadIdForMem) {
@@ -1718,7 +1720,9 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
             // OrganizationProfile consolidado (prosa) — fonte principal
             this.prisma.organizationProfile.findUnique({
               where: { tenant_id: tenantIdForBH },
-              select: { summary: true },
+              // Fase 3: inclui facts pra extrair vars estruturadas
+              // ({{office_phones}}, {{office_address}}, etc.)
+              select: { summary: true, facts: true },
             }),
             // Memorias org cruas — fallback se perfil nao existir ainda
             this.prisma.memory.findMany({
@@ -1760,6 +1764,8 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
           } else {
             officeMemoriesStr = this.promptBuilder.buildOrganizationMemoryBlock(orgMems) || '';
           }
+          // Captura facts pra exposicao como vars estruturadas (Fase 3)
+          orgProfileFacts = orgProfile?.facts || null;
           leadProfileStr = profile?.summary?.trim() || '';
           recentEpisodesStr = recentEpisodes.length
             ? recentEpisodes.map((m) => `- ${m.content}`).join('\n')
@@ -1786,6 +1792,29 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
       vars.lead_profile = leadProfileStr;
       vars.recent_episodes = recentEpisodesStr;
       vars.memory_block = memoryBlock;
+
+      // Fase 3: variaveis ESTRUTURADAS extraidas do orgProfile.facts JSON.
+      // Antes o LLM gerava facts mas era ignorado em runtime — desperdicio.
+      // Agora skill writer pode usar {{office_name}}, {{office_phones}},
+      // {{office_address}}, {{office_hours}}, {{honorario_tipico}} etc.
+      // diretamente em qualquer skill prompt.
+      try {
+        const facts = orgProfileFacts || {};
+        const office = facts.office || {};
+        const fees = facts.fees || {};
+        vars.office_name = office.name || '';
+        vars.office_address = office.address ? `${office.address}${office.city ? ', ' + office.city : ''}${office.state ? '/' + office.state : ''}` : '';
+        vars.office_phones = Array.isArray(office.phones) ? office.phones.filter(Boolean).join(', ') : '';
+        vars.office_email = office.email || '';
+        vars.office_hours = office.hours || '';
+        vars.honorario_tipico = fees.typical_range || '';
+        vars.honorario_pagamento = Array.isArray(fees.payment_methods) ? fees.payment_methods.filter(Boolean).join(', ') : '';
+        vars.consulta_gratuita = typeof fees.free_consultation === 'boolean'
+          ? (fees.free_consultation ? 'sim' : 'não')
+          : (fees.free_consultation || '');
+      } catch (e: any) {
+        this.logger.warn(`[AI] Falha ao extrair vars estruturadas de facts: ${e.message}`);
+      }
 
       if (skill) {
         // Injetar references (SkillAssets com inject_mode=full_text) no prompt via PromptBuilder

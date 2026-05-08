@@ -315,7 +315,7 @@ export class MemoriesService {
    * Atualiza o texto do OrganizationProfile manualmente (edicao do admin).
    * Marca `manually_edited_at` para proteger contra sobrescrita pelo cron.
    */
-  async updateOrganizationProfileSummary(tenantId: string, summary: string) {
+  async updateOrganizationProfileSummary(tenantId: string, summary: string, actorId?: string) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
     const clean = (summary || '').trim();
     if (clean.length < 50) {
@@ -330,6 +330,27 @@ export class MemoriesService {
     if (!existing) {
       throw new NotFoundException('Perfil ainda nao foi gerado — use "Regenerar" primeiro');
     }
+
+    // Fase 3: snapshot da versao anterior antes de sobrescrever.
+    // Permite reverter caso edicao manual quebre alguma coisa.
+    if (existing.summary && existing.summary.trim().length >= 50) {
+      try {
+        await (this.prisma as any).organizationProfileSnapshot.create({
+          data: {
+            tenant_id: tenantId,
+            version: existing.version,
+            summary: existing.summary,
+            facts: existing.facts,
+            source: 'manual_edit',
+            created_by_user_id: actorId || null,
+            source_memory_count: existing.source_memory_count,
+          },
+        });
+      } catch (e: any) {
+        this.logger.warn(`[setOrgSummary] Falha ao salvar snapshot: ${e.message}`);
+      }
+    }
+
     const updated = await this.prisma.organizationProfile.update({
       where: { tenant_id: tenantId },
       data: {
@@ -340,6 +361,101 @@ export class MemoriesService {
       },
     });
     return updated;
+  }
+
+  /**
+   * Lista versoes anteriores do OrganizationProfile (historico).
+   * Max 50 snapshots, ordenado por created_at desc.
+   */
+  async listOrganizationSnapshots(tenantId: string) {
+    const snapshots = await (this.prisma as any).organizationProfileSnapshot.findMany({
+      where: { tenant_id: tenantId },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        version: true,
+        source: true,
+        created_at: true,
+        created_by_user_id: true,
+        source_memory_count: true,
+        summary: true, // pra UI mostrar preview ou comparar
+      },
+    });
+
+    // Carrega nome dos users que editaram (lookup separado pra nao fazer JOIN)
+    const userIds = snapshots
+      .map((s: any) => s.created_by_user_id)
+      .filter((id: string | null): id is string => !!id);
+    const users = userIds.length > 0
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const userMap = new Map(users.map((u: any) => [u.id, u.name]));
+
+    return snapshots.map((s: any) => ({
+      ...s,
+      created_by_user_name: s.created_by_user_id ? userMap.get(s.created_by_user_id) || null : null,
+    }));
+  }
+
+  /**
+   * Restaura snapshot como a versao oficial. Faz snapshot da versao ATUAL
+   * antes da restauracao (source='restore') pra preservar continuidade.
+   * Marca manually_edited_at pra proteger contra cron 02h.
+   */
+  async restoreOrganizationSnapshot(tenantId: string, snapshotId: string, actorId: string) {
+    const snapshot = await (this.prisma as any).organizationProfileSnapshot.findFirst({
+      where: { id: snapshotId, tenant_id: tenantId },
+    });
+    if (!snapshot) {
+      throw new NotFoundException('Snapshot nao encontrado');
+    }
+
+    const current = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+    });
+    if (!current) {
+      throw new NotFoundException('OrganizationProfile nao existe — nada a restaurar contra');
+    }
+
+    // Snapshot da versao atual antes de sobrescrever
+    if (current.summary && current.summary.trim().length >= 50) {
+      try {
+        await (this.prisma as any).organizationProfileSnapshot.create({
+          data: {
+            tenant_id: tenantId,
+            version: current.version,
+            summary: current.summary,
+            facts: current.facts,
+            source: 'restore', // a versao atual virou snapshot porque foi restaurada
+            created_by_user_id: actorId,
+            source_memory_count: current.source_memory_count,
+          },
+        });
+      } catch (e: any) {
+        this.logger.warn(`[restoreSnapshot] Falha ao salvar snapshot atual: ${e.message}`);
+      }
+    }
+
+    const restored = await this.prisma.organizationProfile.update({
+      where: { tenant_id: tenantId },
+      data: {
+        summary: snapshot.summary,
+        facts: snapshot.facts,
+        version: { increment: 1 }, // restauracao tambem incrementa
+        generated_at: new Date(),
+        manually_edited_at: new Date(), // proteção contra cron
+        source_memory_count: snapshot.source_memory_count,
+      },
+    });
+
+    this.logger.log(
+      `[Memory] Snapshot v${snapshot.version} restaurado pelo user ${actorId} (tenant=${tenantId})`,
+    );
+    return restored;
   }
 
   async getOrganizationStats(tenantId: string) {

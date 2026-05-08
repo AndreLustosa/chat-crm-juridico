@@ -217,6 +217,12 @@ export class OrgProfileConsolidationProcessor {
 
     const changed = result.summary.trim() !== existing.summary.trim();
 
+    // Fase 3: salva snapshot da versao ATUAL antes de sobrescrever (so
+    // se o texto mudou — snapshot identico nao agrega valor).
+    if (changed) {
+      await this.saveSnapshot(existing, 'cron');
+    }
+
     // Bug 1 fix: race UI/cron — usa updateMany com WHERE manually_edited_at
     // IS NULL pra nao sobrescrever edicao manual feita entre o snapshot
     // do consolidateAll e este update. Se admin clicou Salvar entre as
@@ -291,9 +297,14 @@ export class OrgProfileConsolidationProcessor {
     // Antes incrementava sempre — UI mostrava v3→v4 sem motivo.
     const existing = await this.prisma.organizationProfile.findUnique({
       where: { tenant_id: tenantId },
-      select: { summary: true },
     });
     const changed = !existing || existing.summary?.trim() !== result.summary.trim();
+
+    // Fase 3: salva snapshot da versao anterior antes de sobrescrever
+    // (rebuild eh destrutivo — sempre faz snapshot se ha versao previa).
+    if (existing && changed) {
+      await this.saveSnapshot(existing, 'rebuild');
+    }
 
     await this.prisma.organizationProfile.upsert({
       where: { tenant_id: tenantId },
@@ -319,6 +330,41 @@ export class OrgProfileConsolidationProcessor {
     this.logger.log(
       `[OrgProfileConsolidation] Tenant ${tenantId}: from-scratch — ${memories.length} memorias → ${result.summary.length} chars`,
     );
+  }
+
+  /**
+   * Salva snapshot da versao atual do OrganizationProfile no histórico.
+   *
+   * Chamado ANTES de qualquer update destrutivo (cron incremental,
+   * rebuild from-scratch, edicao manual via API). Permite reverter ou
+   * auditar mudancas posteriores.
+   *
+   * source: 'cron' | 'rebuild' | 'manual_edit' | 'regenerate' | 'restore'
+   */
+  async saveSnapshot(
+    existing: { tenant_id: string; summary: string; facts: any; version: number; source_memory_count: number },
+    source: 'cron' | 'rebuild' | 'manual_edit' | 'regenerate' | 'restore',
+    createdByUserId?: string,
+  ): Promise<void> {
+    if (!existing.summary || existing.summary.trim().length < 50) return; // Nada util pra snapshot
+    try {
+      await (this.prisma as any).organizationProfileSnapshot.create({
+        data: {
+          tenant_id: existing.tenant_id,
+          version: existing.version,
+          summary: existing.summary,
+          facts: existing.facts,
+          source,
+          created_by_user_id: createdByUserId || null,
+          source_memory_count: existing.source_memory_count,
+        },
+      });
+      this.logger.log(
+        `[OrgProfileConsolidation] Snapshot v${existing.version} salvo (tenant=${existing.tenant_id}, source=${source})`,
+      );
+    } catch (e: any) {
+      this.logger.warn(`[OrgProfileConsolidation] Falha ao salvar snapshot: ${e.message}`);
+    }
   }
 
   /**

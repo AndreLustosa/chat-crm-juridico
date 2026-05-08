@@ -2033,6 +2033,54 @@ model OrganizationProfile {
 
   generated_at DateTime @default(now())
   version      Int      @default(1)
+
+  snapshots OrganizationProfileSnapshot[]
+}
+
+/// Histórico de versões do OrganizationProfile.
+///
+/// Toda vez que o `summary` é atualizado (cron, regen manual, edição via UI,
+/// rebuild), uma snapshot da versão ANTERIOR é gravada aqui. Permite:
+///   - Reverter pra versão anterior (botão "Restaurar")
+///   - Auditoria de mudanças (quem editou? cron? rebuild?)
+///   - Comparar versões pra entender o que mudou
+///
+/// Retenção: snapshots ficam indefinidamente (vai crescer). Se virar
+/// problema, criar cron mensal pra purgar snapshots > 90 dias mantendo
+/// só 1 snapshot/mês.
+model OrganizationProfileSnapshot {
+  id        String @id @default(uuid())
+  tenant_id String
+
+  /// Versão capturada (igual OrganizationProfile.version no momento do snapshot)
+  version Int
+
+  /// Texto consolidado capturado
+  summary String @db.Text
+  /// Facts JSON capturado
+  facts   Json   @default("{}")
+
+  /// Origem da mudança que GEROU este snapshot (qual ação criou versão nova
+  /// ANTES desta — cuja anterior virou snapshot):
+  ///   - 'cron'        → cron 02h regenerou e a versão antiga virou snapshot
+  ///   - 'rebuild'     → admin clicou "Refazer do zero"
+  ///   - 'manual_edit' → admin editou via UI
+  ///   - 'regenerate'  → admin clicou "Regenerar perfil"
+  ///   - 'restore'     → admin restaurou versão anterior (snapshot vira o atual)
+  source String
+
+  /// User que disparou a ação (null se foi cron). FK opcional pra User.
+  created_by_user_id String?
+
+  /// Snapshot count de memórias quando a versão foi capturada
+  source_memory_count Int @default(0)
+
+  created_at DateTime @default(now())
+
+  organization_profile OrganizationProfile @relation(fields: [tenant_id], references: [tenant_id], onDelete: Cascade)
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, version])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

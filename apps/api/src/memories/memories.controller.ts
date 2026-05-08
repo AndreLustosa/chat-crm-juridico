@@ -125,7 +125,38 @@ export class MemoriesController {
     return this.memoriesService.updateOrganizationProfileSummary(
       req.user.tenant_id,
       body.summary,
+      req.user.id,
     );
+  }
+
+  /**
+   * GET /memories/organization/snapshots
+   *
+   * Lista versoes anteriores do OrganizationProfile (historico). Cada
+   * snapshot foi capturado ANTES de uma mudanca (cron, rebuild, edicao
+   * manual, regenerate). Retorna ordenado por created_at desc, max 50.
+   */
+  @Get('organization/snapshots')
+  @Roles('ADMIN', 'ADVOGADO')
+  async listOrgSnapshots(@Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.listOrganizationSnapshots(tenantId);
+  }
+
+  /**
+   * POST /memories/organization/snapshots/:id/restore
+   *
+   * Restaura uma versao anterior do OrganizationProfile. A versao ATUAL
+   * vira um snapshot novo (source='restore') antes da restauracao.
+   * Marca manually_edited_at = NOW pra proteger contra cron 02h.
+   */
+  @Post('organization/snapshots/:id/restore')
+  @Roles('ADMIN', 'ADVOGADO')
+  async restoreOrgSnapshot(@Request() req: any, @Param('id') snapshotId: string) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.restoreOrganizationSnapshot(tenantId, snapshotId, req.user.id);
   }
 
   @Post('organization')

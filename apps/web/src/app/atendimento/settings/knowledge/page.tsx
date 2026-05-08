@@ -31,6 +31,8 @@ import {
   Settings,
   Cpu,
   FileCode2,
+  History,
+  Eye,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -153,6 +155,20 @@ export default function KnowledgeSettingsPage() {
   const [profileOpen, setProfileOpen] = useState(true);
   const [regeneratingProfile, setRegeneratingProfile] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
+  // Histórico de versões (Fase 3)
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [snapshots, setSnapshots] = useState<Array<{
+    id: string;
+    version: number;
+    source: string;
+    created_at: string;
+    created_by_user_name: string | null;
+    source_memory_count: number;
+    summary: string;
+  }>>([]);
+  const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+  const [restoringSnapshotId, setRestoringSnapshotId] = useState<string | null>(null);
+  const [previewSnapshot, setPreviewSnapshot] = useState<typeof snapshots[number] | null>(null);
   const [editProfileContent, setEditProfileContent] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [rebuildingProfile, setRebuildingProfile] = useState(false);
@@ -292,6 +308,53 @@ export default function KnowledgeSettingsPage() {
     } finally {
       setExtracting(false);
     }
+  };
+
+  const loadSnapshots = useCallback(async () => {
+    setLoadingSnapshots(true);
+    try {
+      const res = await api.get('/memories/organization/snapshots');
+      setSnapshots(res.data || []);
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao carregar histórico', 'err');
+    } finally {
+      setLoadingSnapshots(false);
+    }
+  }, []);
+
+  const handleToggleSnapshots = () => {
+    const next = !snapshotsOpen;
+    setSnapshotsOpen(next);
+    if (next && snapshots.length === 0) loadSnapshots();
+  };
+
+  const handleRestoreSnapshot = async (snapshotId: string, version: number) => {
+    const ok = confirm(
+      `Restaurar versão v${version}?\n\nA versão atual será salva no histórico antes da restauração. Você pode desfazer voltando ao snapshot mais recente.`,
+    );
+    if (!ok) return;
+    setRestoringSnapshotId(snapshotId);
+    try {
+      await api.post(`/memories/organization/snapshots/${snapshotId}/restore`);
+      showFeedback(`Versão v${version} restaurada com sucesso`);
+      await loadData();
+      await loadSnapshots();
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao restaurar versão', 'err');
+    } finally {
+      setRestoringSnapshotId(null);
+    }
+  };
+
+  const sourceLabel = (s: string): string => {
+    const map: Record<string, string> = {
+      cron: 'Cron 02h',
+      rebuild: 'Refeito do zero',
+      manual_edit: 'Edição manual',
+      regenerate: 'Regeneração',
+      restore: 'Restauração',
+    };
+    return map[s] || s;
   };
 
   const handleRegenerateProfile = async () => {
@@ -527,6 +590,19 @@ export default function KnowledgeSettingsPage() {
           </button>
           {!editingProfile && orgProfile && (
             <button
+              onClick={handleToggleSnapshots}
+              className={`px-3 py-2 transition-colors ${
+                snapshotsOpen
+                  ? 'text-primary bg-primary/10'
+                  : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+              }`}
+              title="Histórico de versões"
+            >
+              <History className="w-4 h-4" />
+            </button>
+          )}
+          {!editingProfile && orgProfile && (
+            <button
               onClick={handleStartEditProfile}
               className="px-3 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               title="Editar manualmente"
@@ -637,7 +713,140 @@ export default function KnowledgeSettingsPage() {
             )}
           </div>
         )}
+
+        {/* Histórico de versões (Fase 3) */}
+        {snapshotsOpen && !editingProfile && (
+          <div className="border-t border-primary/10 bg-background/60 px-5 py-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-primary" />
+                <span className="text-xs font-bold text-foreground uppercase tracking-wider">
+                  Histórico de versões
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  ({snapshots.length})
+                </span>
+              </div>
+              <button
+                onClick={() => loadSnapshots()}
+                className="text-[10px] text-muted-foreground hover:text-primary"
+              >
+                Atualizar
+              </button>
+            </div>
+
+            {loadingSnapshots ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-xs py-3">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Carregando...
+              </div>
+            ) : snapshots.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground text-center py-3">
+                Nenhuma versão anterior — snapshots começam a ser registrados a partir da próxima
+                edição/regeneração/cron.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {snapshots.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex items-center gap-3 px-3 py-2 rounded-lg bg-card border border-border hover:border-primary/30 transition-colors"
+                  >
+                    <span className="text-[11px] font-mono text-muted-foreground w-10 shrink-0">
+                      v{s.version}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground w-28 shrink-0">
+                      {sourceLabel(s.source)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground flex-1 min-w-0 truncate">
+                      {formatDate(s.created_at)}
+                      {s.created_by_user_name && ` • ${s.created_by_user_name}`}
+                    </span>
+                    <button
+                      onClick={() => setPreviewSnapshot(s)}
+                      className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors"
+                      title="Ver conteúdo"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleRestoreSnapshot(s.id, s.version)}
+                      disabled={restoringSnapshotId === s.id}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 rounded transition-colors disabled:opacity-50"
+                      title="Restaurar esta versão"
+                    >
+                      {restoringSnapshotId === s.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3 h-3" />
+                      )}
+                      Restaurar
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Modal preview do snapshot */}
+      {previewSnapshot && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setPreviewSnapshot(null)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <div>
+                <h3 className="text-sm font-semibold">
+                  Versão v{previewSnapshot.version} — {sourceLabel(previewSnapshot.source)}
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {formatDate(previewSnapshot.created_at)}
+                  {previewSnapshot.created_by_user_name && ` • ${previewSnapshot.created_by_user_name}`}
+                  {' • '}
+                  {previewSnapshot.source_memory_count} memórias
+                </p>
+              </div>
+              <button
+                onClick={() => setPreviewSnapshot(null)}
+                className="p-1.5 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <pre className="text-[12px] whitespace-pre-wrap leading-relaxed text-foreground">
+                {previewSnapshot.summary}
+              </pre>
+            </div>
+            <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+              <button
+                onClick={() => setPreviewSnapshot(null)}
+                className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => {
+                  const id = previewSnapshot.id;
+                  const v = previewSnapshot.version;
+                  setPreviewSnapshot(null);
+                  handleRestoreSnapshot(id, v);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Restaurar esta versão
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative mb-4">
