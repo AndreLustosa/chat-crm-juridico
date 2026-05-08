@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, UseGuards, UsePipes, ValidationPipe, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, UseGuards, ValidationPipe, BadRequestException } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { EvolutionService } from './evolution.service';
 import { HmacGuard } from './guards/hmac.guard';
@@ -9,20 +9,24 @@ import { EvolutionWebhookDto } from './dto/evolution-webhook.dto';
 @SkipThrottle()
 @UseGuards(HmacGuard)
 @Controller('webhooks/evolution')
-// ValidationPipe local: precisa de whitelist=false porque Evolution envia
-// muitos campos extras nao declarados no DTO (sender, fromMe, etc) que
-// variam por evento. O global usa forbidNonWhitelisted=true que rejeitaria.
-@UsePipes(new ValidationPipe({
-  transform: true,
-  whitelist: false,
-  forbidNonWhitelisted: false,
-}))
 export class EvolutionController {
   constructor(private readonly evolutionService: EvolutionService) {}
 
   @Post()
   @HttpCode(200)
-  async handleWebhook(@Body() payload: EvolutionWebhookDto) {
+  async handleWebhook(
+    // ValidationPipe NO PARAMETRO — prioridade maxima sobre o global.
+    // Evolution envia muitos campos extras (destination, date_time, sender,
+    // server_url, apikey, fromMe, etc) que variam por evento. Sem
+    // forbidNonWhitelisted=false aqui, o pipe global (com forbid=true)
+    // rejeitaria com 400 antes do controller-level pipe atuar.
+    // Bug 2026-05-08: webhook 400 → mensagens nao chegavam no chat.
+    @Body(new ValidationPipe({
+      transform: true,
+      whitelist: false,
+      forbidNonWhitelisted: false,
+    })) payload: EvolutionWebhookDto,
+  ) {
     if (!EvolutionWebhookDto.hasInstance(payload)) {
       throw new BadRequestException('instance ou instanceId eh obrigatorio');
     }
