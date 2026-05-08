@@ -11,6 +11,10 @@ import {
   ChevronUp,
   Sparkles,
   X,
+  FileText,
+  Copy,
+  Calendar,
+  Check,
 } from 'lucide-react';
 import api from '@/lib/api';
 
@@ -68,6 +72,8 @@ export function LeadMemoryPanel({ leadId, canEdit = false }: Props) {
   const [profile, setProfile] = useState<LeadProfile | null>(null);
   const [memories, setMemories] = useState<LeadMemory[]>([]);
   const [regenerating, setRegenerating] = useState(false);
+  const [generatingFacts, setGeneratingFacts] = useState(false);
+  const [copiedFacts, setCopiedFacts] = useState(false);
   const [adding, setAdding] = useState(false);
   const [addContent, setAddContent] = useState('');
   const [addType, setAddType] = useState<'semantic' | 'episodic'>('semantic');
@@ -101,10 +107,41 @@ export function LeadMemoryPanel({ leadId, canEdit = false }: Props) {
     try {
       await api.post(`/memories/lead/${leadId}/regenerate`);
       // Dá tempo do worker processar
-      setTimeout(() => load(), 8000);
+      setTimeout(() => {
+        load();
+        setRegenerating(false);
+      }, 8000);
     } catch (e: any) {
       setErr(e?.response?.data?.message || 'Erro ao regenerar');
       setRegenerating(false);
+    }
+  };
+
+  const handleGenerateFacts = async () => {
+    setGeneratingFacts(true);
+    setErr(null);
+    try {
+      await api.post(`/memories/lead/${leadId}/generate-facts`);
+      // narrative_facts geration leva ~10-15s (LLM gpt-4.1)
+      setTimeout(() => {
+        load();
+        setGeneratingFacts(false);
+      }, 15000);
+    } catch (e: any) {
+      setErr(e?.response?.data?.message || 'Erro ao gerar fatos');
+      setGeneratingFacts(false);
+    }
+  };
+
+  const handleCopyFacts = async () => {
+    const narrative = profile?.facts?.narrative;
+    if (!narrative) return;
+    try {
+      await navigator.clipboard.writeText(narrative);
+      setCopiedFacts(true);
+      setTimeout(() => setCopiedFacts(false), 2000);
+    } catch {
+      setErr('Erro ao copiar — tente selecionar manualmente');
     }
   };
 
@@ -150,8 +187,14 @@ export function LeadMemoryPanel({ leadId, canEdit = false }: Props) {
     }
   };
 
-  const semanticMems = memories.filter((m) => m.type === 'semantic');
-  const episodicMems = memories.filter((m) => m.type === 'episodic');
+  // Ordena cronologicamente (asc) — fato mais antigo em cima.
+  // Antes ordenava desc (mais recente em cima), o que dava leitura
+  // invertida. Pra IA/contexto humano, ler do contexto inicial pro
+  // mais recente faz mais sentido.
+  const sortAsc = (a: LeadMemory, b: LeadMemory) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  const semanticMems = memories.filter((m) => m.type === 'semantic').sort(sortAsc);
+  const episodicMems = memories.filter((m) => m.type === 'episodic').sort(sortAsc);
 
   return (
     <div className="border-b border-border">
@@ -245,6 +288,104 @@ export function LeadMemoryPanel({ leadId, canEdit = false }: Props) {
             </div>
           )}
 
+          {/* ─── Dos Fatos (narrative_facts gerada sob demanda) ────────── */}
+          {profile && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                  <FileText size={10} />
+                  Dos Fatos {profile.facts?.narrative ? '(petição inicial)' : ''}
+                </p>
+                {canEdit && (
+                  <div className="flex items-center gap-1.5">
+                    {profile.facts?.narrative && (
+                      <>
+                        <span className="text-[10px] text-muted-foreground">
+                          {profile.facts?.narrative_generated_at
+                            ? formatDate(profile.facts.narrative_generated_at)
+                            : ''}
+                        </span>
+                        <button
+                          onClick={handleCopyFacts}
+                          title="Copiar narrativa pra petição"
+                          className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                        >
+                          {copiedFacts ? (
+                            <Check size={12} className="text-emerald-400" />
+                          ) : (
+                            <Copy size={12} />
+                          )}
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={handleGenerateFacts}
+                      disabled={generatingFacts}
+                      title={profile.facts?.narrative ? 'Regenerar fatos' : 'Gerar fatos'}
+                      className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                    >
+                      {generatingFacts ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <RefreshCw size={12} />
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {profile.facts?.narrative ? (
+                <div className="text-[13px] text-foreground leading-relaxed bg-foreground/[0.03] rounded-xl p-3 border border-border whitespace-pre-wrap font-serif">
+                  {profile.facts.narrative}
+                </div>
+              ) : (
+                <div className="text-[12px] text-muted-foreground bg-foreground/[0.02] rounded-xl p-3 border border-dashed border-border text-center">
+                  {generatingFacts ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 size={12} className="animate-spin" />
+                      Gerando narrativa cronológica... pode levar até 15s
+                    </span>
+                  ) : (
+                    <>
+                      <p className="mb-2">
+                        Narrativa estilo petição inicial não gerada ainda.
+                      </p>
+                      {canEdit && (
+                        <button
+                          onClick={handleGenerateFacts}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-[12px] font-medium hover:bg-primary/20"
+                        >
+                          <FileText size={12} />
+                          Gerar Fatos
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Datas-chave */}
+              {profile.facts?.key_dates?.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                    <Calendar size={10} />
+                    Datas-chave
+                  </p>
+                  <ul className="flex flex-col gap-1.5">
+                    {profile.facts.key_dates.map((d: any, i: number) => (
+                      <li key={i} className="flex items-baseline gap-2 text-[12px]">
+                        <span className="font-mono text-emerald-400 shrink-0 min-w-[80px]">
+                          {d.date}
+                        </span>
+                        <span className="text-foreground">{d.event}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {!profile && !loading && (
             <div className="text-center py-3 text-[12px] text-muted-foreground">
               Perfil ainda não foi gerado. Acontece na próxima extração noturna.
@@ -260,11 +401,14 @@ export function LeadMemoryPanel({ leadId, canEdit = false }: Props) {
             </div>
           )}
 
-          {/* Memórias semantic */}
+          {/* Memórias coletadas (semantic) — fatos atomicos extraidos. */}
+          {/* Diferente de "Dos Fatos" acima (narrativa pra peticao), aqui */}
+          {/* sao bullets em ordem cronologica de descoberta. Ferramenta */}
+          {/* de referencia rapida pra advogado/atendente. */}
           {semanticMems.length > 0 && (
             <div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">
-                Fatos ({semanticMems.length})
+                Memórias coletadas ({semanticMems.length})
               </p>
               <ul className="flex flex-col gap-1.5">
                 {semanticMems.map((m) => (
