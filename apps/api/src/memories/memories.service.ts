@@ -5,12 +5,15 @@ import { createHash } from 'crypto';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+// Prompts ORG agora ficam em @crm/shared — fonte unica de verdade
+// (antes duplicado em apps/worker/src/memory/memory-prompts.ts e
+// apps/api/src/memories/memory-prompts-defaults.ts).
 import {
-  DEFAULT_ORG_PROFILE_INCREMENTAL_PROMPT,
-  DEFAULT_ORG_PROFILE_REBUILD_PROMPT,
+  ORG_PROFILE_INCREMENTAL_PROMPT as DEFAULT_ORG_PROFILE_INCREMENTAL_PROMPT,
+  ORG_PROFILE_CONSOLIDATION_PROMPT as DEFAULT_ORG_PROFILE_REBUILD_PROMPT,
   DEFAULT_ORG_MODEL,
   AVAILABLE_ORG_MODELS,
-} from './memory-prompts-defaults';
+} from '@crm/shared';
 import { applyMemoryVarsMigration } from './skill-migration.util';
 import { cleanHardcodedOrgInfo } from './skill-cleanup.util';
 
@@ -25,6 +28,7 @@ const VALID_ORG_SUBCATEGORIES = new Set([
   'legal_knowledge',
   'contacts',
   'rules',
+  'geral', // fallback pra memorias sem categoria especifica (Bug 8 fix)
 ]);
 
 const DUPLICATE_THRESHOLD = 0.9;
@@ -161,7 +165,8 @@ export class MemoriesService {
   async createOrganization(tenantId: string, body: { content: string; subcategory: string; confidence?: number }) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
     const content = (body.content || '').trim();
-    if (content.length < 5) throw new BadRequestException('content muito curto');
+    if (content.length < 5) throw new BadRequestException('content muito curto (min 5 chars)');
+    if (content.length > 500) throw new BadRequestException('content longo demais (max 500 chars). Resumir em 1-2 frases.');
     const subcategory = (body.subcategory || '').trim();
     if (!VALID_ORG_SUBCATEGORIES.has(subcategory)) {
       throw new BadRequestException(`subcategory invalida. Opcoes: ${[...VALID_ORG_SUBCATEGORIES].join(', ')}`);
@@ -393,7 +398,8 @@ export class MemoriesService {
 
   async createLeadMemory(tenantId: string, leadId: string, body: { content: string; type?: string }) {
     const content = (body.content || '').trim();
-    if (content.length < 5) throw new BadRequestException('content muito curto');
+    if (content.length < 5) throw new BadRequestException('content muito curto (min 5 chars)');
+    if (content.length > 500) throw new BadRequestException('content longo demais (max 500 chars). Resumir em 1-2 frases.');
     const type = body.type === 'episodic' ? 'episodic' : 'semantic';
 
     const embedding = await this.generateEmbedding(content);

@@ -225,7 +225,14 @@ export class DailyMemoryBatchProcessor {
     let orgCount = 0;
 
     for (const memory of result.memories) {
+      // Bug 11 fix: validacao de tamanho min/max nas memorias atomicas.
+      // Antes so validava >= 5. Sem max, LLM podia retornar memoria de
+      // 5KB e estourava prompt da consolidacao posterior.
       if (!memory.content || memory.content.trim().length < 5) continue;
+      if (memory.content.length > 500) {
+        this.logger.warn(`[MemoryBatch] Memoria descartada: tamanho ${memory.content.length} > 500 chars (LLM ignorou limite)`);
+        continue;
+      }
       const scopeId = memory.scope === 'organization' ? tenantId : leadId;
 
       let embedding: number[];

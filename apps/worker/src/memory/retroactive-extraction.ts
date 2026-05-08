@@ -110,6 +110,7 @@ async function main() {
         if (!memory?.content || typeof memory.content !== 'string') continue;
         const content = memory.content.trim();
         if (content.length < 5) continue;
+        if (content.length > 500) continue; // Bug 11: descarta memoria longa demais
 
         const embResp = await openai.embeddings.create({
           model: 'text-embedding-3-small',

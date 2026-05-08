@@ -4,10 +4,11 @@ import { Job } from 'bullmq';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+// Prompts ORG agora ficam em @crm/shared — fonte unica de verdade
 import {
   ORG_PROFILE_CONSOLIDATION_PROMPT,
   ORG_PROFILE_INCREMENTAL_PROMPT,
-} from './memory-prompts';
+} from '@crm/shared';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
 
 const MIN_CONFIDENCE_FOR_INCLUSION = 0.6;

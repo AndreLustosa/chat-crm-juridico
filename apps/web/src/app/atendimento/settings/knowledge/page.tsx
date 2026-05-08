@@ -48,6 +48,9 @@ const SUBCATEGORIES: Array<{
   { key: 'legal_knowledge', label: 'Conhecimento Local', icon: BookOpen, hint: 'Prazos típicos, jurisprudência local' },
   { key: 'contacts', label: 'Contatos Úteis', icon: Phone, hint: 'Peritos, parceiros, terceiros' },
   { key: 'rules', label: 'Regras', icon: ShieldAlert, hint: 'O que aceitamos/não aceitamos' },
+  // Bug 8 fix: categoria fallback pra memorias com subcategory=null/geral.
+  // Antes ficavam orfas — extraidas pelo LLM mas invisiveis na UI.
+  { key: 'geral', label: 'Outros / Geral', icon: BookOpen, hint: 'Memórias sem categoria específica' },
 ];
 
 interface MemoryItem {
@@ -446,13 +449,13 @@ export default function KnowledgeSettingsPage() {
           <Layers className="w-4 h-4 text-muted-foreground" />
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Extração automática diária</span>
+              <span className="text-sm font-medium">Extração diária de novos fatos</span>
               <button
                 onClick={() => handleToggleBatch(!batchEnabled)}
                 className={`relative w-10 h-5 rounded-full transition-colors ${
                   batchEnabled ? 'bg-primary' : 'bg-muted'
                 }`}
-                aria-label="Alternar extração automática"
+                aria-label="Alternar extração diária"
               >
                 <span
                   className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
@@ -462,7 +465,12 @@ export default function KnowledgeSettingsPage() {
               </button>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Roda toda noite à meia-noite analisando as conversas do dia.
+              Toda noite à meia-noite, varre as conversas do dia e extrai novos fatos do escritório
+              (memórias atômicas abaixo).
+              <br />
+              <span className="opacity-70">
+                A consolidação do <em>Resumo</em> roda separadamente às 02h e respeita edições manuais.
+              </span>
             </p>
           </div>
         </div>

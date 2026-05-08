@@ -1,16 +1,20 @@
 /**
- * Prompts DEFAULT do sistema de memoria organizacional.
+ * Prompts da memoria organizacional — fonte UNICA de verdade.
  *
- * COPIA dos prompts originais em apps/worker/src/memory/memory-prompts.ts.
- * Mantemos duplicado aqui porque API e worker sao containers separados e nao
- * compartilham codigo runtime. Se um dos lados mudar, alinhe manualmente.
+ * Antes existia DUPLICATA:
+ *   - apps/worker/src/memory/memory-prompts.ts (worker usa em runtime)
+ *   - apps/api/src/memories/memory-prompts-defaults.ts (API expoe via GET
+ *     pra UI mostrar texto padrao)
  *
- * Usado pelo GET /memories/organization/settings para informar ao frontend
- * qual e o texto padrao (pra botao "Restaurar padrao" e exibir quando admin
- * ainda nao customizou).
+ * O comentario na duplicata admitia "Se um dos lados mudar, alinhe
+ * manualmente". Solucao: mover pra @crm/shared, ambos importam daqui.
+ *
+ * Quando admin customiza via UI, o texto custom fica em GlobalSetting
+ * (MEMORY_ORG_INCREMENTAL_PROMPT, MEMORY_ORG_REBUILD_PROMPT). Esses
+ * exports sao apenas o DEFAULT, usado quando nao ha custom.
  */
 
-export const DEFAULT_ORG_PROFILE_INCREMENTAL_PROMPT = `Voce e o Organization Profile Updater de um CRM juridico.
+export const ORG_PROFILE_INCREMENTAL_PROMPT = `Voce e o Organization Profile Updater de um CRM juridico.
 
 ATUALIZACAO INCREMENTAL (nao regeracao): voce recebe o summary ATUAL do escritorio e uma lista
 curta de mudancas (memorias novas adicionadas + memorias recentemente removidas). Seu trabalho
@@ -56,7 +60,7 @@ RESPOSTA (JSON):
 
 Se new_memories e deleted_memories estao vazios ou nao trouxeram nada util, retorne current_summary inalterado e changes_applied: [].`;
 
-export const DEFAULT_ORG_PROFILE_REBUILD_PROMPT = `Voce e o Organization Profile Generator de um CRM juridico.
+export const ORG_PROFILE_CONSOLIDATION_PROMPT = `Voce e o Organization Profile Generator de um CRM juridico.
 
 Recebe uma lista de memorias atomicas sobre UM escritorio de advocacia (endereco, equipe,
 honorarios, procedimentos, regras, foruns, etc.) e gera um RESUMO COESO em prosa que sera
@@ -125,6 +129,10 @@ Preencha o que conseguir inferir com seguranca. Use null/array vazio para o que 
 
 Responda APENAS JSON: { "summary": "...", "facts": { ... } }`;
 
+// Modelos disponiveis pro admin escolher na UI da Base de Conhecimento.
+// Default eh gpt-4.1 — equilibrio entre qualidade e custo. mini eh
+// suficiente pra incremental simples; rebuild from-scratch se beneficia
+// do modelo maior.
 export const DEFAULT_ORG_MODEL = 'gpt-4.1';
 
 export const AVAILABLE_ORG_MODELS = [
@@ -132,6 +140,6 @@ export const AVAILABLE_ORG_MODELS = [
   { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado' },
   { value: 'gpt-4o', label: 'GPT-4o — capaz' },
   { value: 'gpt-4o-mini', label: 'GPT-4o Mini — rápido, econômico' },
-  { value: 'gpt-5', label: 'GPT-5 — máxima capacidade' },
-  { value: 'gpt-5-mini', label: 'GPT-5 Mini — capaz, econômico' },
+  { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 — qualidade alta' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — rápido' },
 ];
