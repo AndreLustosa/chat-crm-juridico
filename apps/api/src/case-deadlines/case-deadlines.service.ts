@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalendarService } from '../calendar/calendar.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 const DEADLINE_TYPES = [
   'CONTESTACAO',
@@ -106,7 +107,7 @@ export class CaseDeadlinesService {
       data: {
         legal_case_id: caseId,
         created_by_id: userId,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         type: DEADLINE_TYPES.includes(data.type as any) ? data.type : 'OUTRO',
         title: data.title,
         description: data.description || null,

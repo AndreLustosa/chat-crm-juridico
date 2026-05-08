@@ -9,6 +9,7 @@ import { AsaasClient } from './asaas/asaas-client';
 import { FinanceiroService } from '../financeiro/financeiro.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 // Mapeamento de status Asaas → interno
 const ASAAS_STATUS_MAP: Record<string, string> = {
@@ -1081,7 +1082,7 @@ export class PaymentGatewayService {
         try {
           await this.prisma.paymentGatewayCustomer.create({
             data: {
-              tenant_id: tenantId || null,
+              tenant_id: tenantOrDefault(tenantId),
               lead_id: leadId,
               gateway: 'ASAAS',
               external_id: cust.id,
@@ -1124,7 +1125,7 @@ export class PaymentGatewayService {
               // Criar lead a partir dos dados do Asaas com telefone normalizado
               existingLead = await this.prisma.lead.create({
                 data: {
-                  tenant_id: tenantId || null,
+                  tenant_id: tenantOrDefault(tenantId),
                   name: cust.name || null,
                   phone: phone,
                   email: cust.email || null,
@@ -1141,7 +1142,7 @@ export class PaymentGatewayService {
             // Vincular
             await this.prisma.paymentGatewayCustomer.create({
               data: {
-                tenant_id: tenantId || null,
+                tenant_id: tenantOrDefault(tenantId),
                 lead_id: existingLead.id,
                 gateway: 'ASAAS',
                 external_id: cust.id,
@@ -1184,7 +1185,7 @@ export class PaymentGatewayService {
     // Criar vinculo
     const record = await this.prisma.paymentGatewayCustomer.create({
       data: {
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         lead_id: leadId,
         gateway: 'ASAAS',
         external_id: asaasCustomerId,

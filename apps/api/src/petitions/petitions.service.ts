@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 const VALID_TYPES = [
   'INICIAL', 'CONTESTACAO', 'REPLICA', 'EMBARGOS',
@@ -173,7 +174,7 @@ export class PetitionsService {
       data: {
         legal_case_id: caseId,
         created_by_id: userId,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         title: data.title,
         type,
         content_json: contentJson,

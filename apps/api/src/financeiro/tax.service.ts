@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 /**
  * Tabela progressiva do IRRF 2026 (Carnê-Leão)
@@ -95,7 +96,7 @@ export class TaxService {
         },
       },
       create: {
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         lawyer_id: lawyerId,
         year,
         month,

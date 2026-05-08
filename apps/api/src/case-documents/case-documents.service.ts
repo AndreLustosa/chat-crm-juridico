@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediaS3Service } from '../media/s3.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 
@@ -139,7 +140,7 @@ export class CaseDocumentsService {
       data: {
         legal_case_id: caseId,
         uploaded_by_id: userId,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         folder: VALID_FOLDERS.includes(folder as any) ? folder : 'OUTROS',
         name: file.originalname,
         original_name: file.originalname,

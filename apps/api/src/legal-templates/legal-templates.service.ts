@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 const VALID_TYPES = [
   'INICIAL', 'CONTESTACAO', 'RECURSO', 'MANIFESTACAO', 'OUTRO',
@@ -75,7 +76,7 @@ export class LegalTemplatesService {
 
     const template = await this.prisma.legalTemplate.create({
       data: {
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         created_by_id: userId,
         name: data.name,
         type,

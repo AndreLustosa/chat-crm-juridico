@@ -1,5 +1,6 @@
 import type { ToolHandler, ToolContext } from '../tool-executor';
 import { Logger } from '@nestjs/common';
+import { tenantOrDefault } from '../../common/constants/tenant';
 
 /**
  * abrir_caso_viabilidade — Cria um novo LegalCase em stage=VIABILIDADE
@@ -209,7 +210,7 @@ export class AbrirCasoViabilidadeHandler implements ToolHandler {
       await prisma.notification.create({
         data: {
           user_id: lawyerId,
-          tenant_id: tenantId || null,
+          tenant_id: tenantOrDefault(tenantId),
           notification_type: 'new_case_inquiry',
           title: `Novo caso em Viabilidade — ${lead.name || 'Cliente'}`,
           body: `${subject.slice(0, 180)}${subject.length > 180 ? '...' : ''}`,

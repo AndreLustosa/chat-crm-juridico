@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { cashRegimeWhere } from '../common/utils/cash-regime.util';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 /**
  * Service de Metas Mensais — 3 dimensoes:
@@ -516,7 +517,7 @@ export class MonthlyGoalsService {
         for (const k of kinds) {
           await tx.monthlyGoal.create({
             data: {
-              tenant_id: tenantId || null,
+              tenant_id: tenantOrDefault(tenantId),
               lawyer_id: lawyerId,
               year: m.year,
               month: m.month,

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 import OpenAI from 'openai';
 
 const TYPE_LABELS: Record<string, string> = {
@@ -140,7 +141,7 @@ export class PetitionAiService {
       data: {
         legal_case_id: caseId,
         created_by_id: userId,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         title: data.title,
         type: data.type,
         status: 'RASCUNHO',

@@ -7,6 +7,7 @@ import { CalendarService } from '../calendar/calendar.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { LockService } from '../common/locks/lock.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
 import OpenAI from 'openai';
@@ -1066,7 +1067,7 @@ export class DjenService {
       await this.prisma.conversation.create({
         data: {
           lead_id: lead.id,
-          tenant_id: tenantId || null,
+          tenant_id: tenantOrDefault(tenantId),
           instance_name: process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp',
           status: 'ABERTO',
           last_message_at: new Date(),
@@ -1895,7 +1896,7 @@ ${pub.conteudo.slice(0, 6000)}`;
       update: { reason: reason || null },
       create: {
         numero_processo: numeroProcesso,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         reason: reason || null,
       },
     });

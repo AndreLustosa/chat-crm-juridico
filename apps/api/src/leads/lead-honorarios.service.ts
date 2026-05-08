@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Inject, forwardRef, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FinanceiroService } from '../financeiro/financeiro.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 @Injectable()
 export class LeadHonorariosService {
@@ -116,7 +117,7 @@ export class LeadHonorariosService {
     return this.prisma.leadHonorario.create({
       data: {
         lead_id: leadId,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         type: data.type,
         total_value: data.total_value,
         installment_count: data.payments.length,

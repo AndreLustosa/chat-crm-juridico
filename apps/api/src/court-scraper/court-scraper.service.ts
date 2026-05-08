@@ -351,7 +351,7 @@ export class CourtScraperService {
       },
       create: {
         numero_processo: normalized,
-        tenant_id: tenantId || null,
+        tenant_id: tenantOrDefault(tenantId),
         reason: reason || null,
       },
       select: { id: true },
@@ -550,7 +550,7 @@ export class CourtScraperService {
         if (!leadId) {
           const lead = await this.prisma.lead.create({
             data: {
-              tenant_id: tenantId || null,
+              tenant_id: tenantOrDefault(tenantId),
               name: author?.name || 'Cliente - ' + data.case_number,
               phone: `import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
               origin: 'ESAJ_IMPORT',
@@ -565,7 +565,7 @@ export class CourtScraperService {
         // Criar legal case
         const legalCase = await this.prisma.legalCase.create({
           data: {
-            tenant_id: tenantId || null,
+            tenant_id: tenantOrDefault(tenantId),
             lead_id: leadId,
             lawyer_id: lawyerId,
             case_number: data.case_number,

@@ -81,7 +81,7 @@ model Tenant {
 
 model User {
   id                             String                           @id @default(uuid())
-  tenant_id                      String?
+  tenant_id                      String
   name                           String
   email                          String                           @unique
   phone                          String?
@@ -143,7 +143,7 @@ model User {
 
 model Lead {
   id                  String   @id @default(uuid())
-  tenant_id           String?
+  tenant_id           String
   /// Nome confiavel do lead — preenchido apenas por fontes que o lead
   /// validou: formulario do site, SDR coletando, cadastro manual,
   /// ficha trabalhista. NAO inclui pushName do WhatsApp (que vai pra
@@ -264,7 +264,7 @@ model ClientLoginCode {
 
 model Conversation {
   id                         String              @id @default(uuid())
-  tenant_id                  String?
+  tenant_id                  String
   lead_id                    String
   channel                    String              @default("whatsapp")
   external_id                String?
@@ -373,7 +373,7 @@ model Media {
 
 model Task {
   id                String              @id @default(uuid())
-  tenant_id         String?
+  tenant_id         String
   lead_id           String?
   conversation_id   String?
   message_id        String?
@@ -440,7 +440,7 @@ model Task {
 // que nao tem processo associado mas tem comprovante).
 model TaskAttachment {
   id             String   @id @default(uuid())
-  tenant_id      String?
+  tenant_id      String
   task_id        String
   uploaded_by_id String
   name           String // Nome amigavel — pode ser editado pelo usuario
@@ -598,7 +598,7 @@ model AiUsage {
 
 model Inbox {
   id            String         @id @default(uuid())
-  tenant_id     String?
+  tenant_id     String
   name          String
   rr_pointer    String? // ID do ultimo usuario atribuido (round-robin)
   is_active     Boolean        @default(true)
@@ -678,7 +678,7 @@ model Sector {
 
 model LegalCase {
   id                     String    @id @default(uuid())
-  tenant_id              String?
+  tenant_id              String
   lead_id                String
   conversation_id        String?
   lawyer_id              String
@@ -838,7 +838,7 @@ model DjenPublication {
 model DjenIgnoredProcess {
   id              String   @id @default(uuid())
   numero_processo String   @unique
-  tenant_id       String?
+  tenant_id       String
   reason          String?
   created_at      DateTime @default(now())
   tenant          Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
@@ -852,7 +852,7 @@ model DjenIgnoredProcess {
 
 model FollowupSequence {
   id                 String               @id @default(cuid())
-  tenant_id          String?
+  tenant_id          String
   name               String
   description        String?
   category           String               @default("LEADS") // LEADS | CLIENTS | COBRANCA | REENGAJAMENTO
@@ -933,7 +933,7 @@ model FollowupMessage {
 
 model BroadcastJob {
   id            String    @id @default(cuid())
-  tenant_id     String?
+  tenant_id     String
   name          String
   type          String    @default("AUDIENCIA")
   status        String    @default("PENDENTE")
@@ -982,7 +982,7 @@ model BroadcastItem {
 
 model CalendarEvent {
   id          String    @id @default(uuid())
-  tenant_id   String?
+  tenant_id   String
   type        String // CONSULTA, TAREFA, AUDIENCIA, PRAZO, OUTRO
   title       String
   description String?
@@ -1068,7 +1068,7 @@ model UserSchedule {
 
 model AppointmentType {
   id        String  @id @default(uuid())
-  tenant_id String?
+  tenant_id String
   name      String // "Consulta Trabalhista 30min"
   duration  Int // minutos
   color     String?
@@ -1080,7 +1080,7 @@ model AppointmentType {
 
 model Holiday {
   id               String   @id @default(uuid())
-  tenant_id        String?
+  tenant_id        String
   date             DateTime
   name             String
   recurring_yearly Boolean  @default(false)
@@ -1148,7 +1148,7 @@ model CalendarEventComment {
 
 model CaseDocument {
   id                  String   @id @default(uuid())
-  tenant_id           String?
+  tenant_id           String
   legal_case_id       String
   uploaded_by_id      String
   folder              String   @default("OUTROS") // CLIENTE, PROVAS, CONTRATOS, PETICOES, DECISOES, PROCURACOES, OUTROS
@@ -1184,7 +1184,7 @@ model CaseDocument {
 
 model CaseTranscription {
   id              String    @id @default(uuid())
-  tenant_id       String?
+  tenant_id       String
   // legal_case_id NULLABLE: transcrições avulsas (sem processo vinculado) são criadas
   // a partir do menu Ferramentas. Quando vinculadas, aparecem também na aba do workspace.
   legal_case_id   String?
@@ -1236,7 +1236,7 @@ model CaseTranscription {
 
 model CaseDeadline {
   id                String    @id @default(uuid())
-  tenant_id         String?
+  tenant_id         String
   legal_case_id     String
   created_by_id     String
   type              String // CONTESTACAO, RECURSO, IMPUGNACAO, MANIFESTACAO, AUDIENCIA, PERICIA, OUTRO
@@ -1275,7 +1275,7 @@ model CaseDeadline {
 
 model CasePetition {
   id             String    @id @default(uuid())
-  tenant_id      String?
+  tenant_id      String
   legal_case_id  String
   created_by_id  String
   title          String
@@ -1325,7 +1325,7 @@ model PetitionVersion {
 
 model LegalTemplate {
   id            String   @id @default(uuid())
-  tenant_id     String?
+  tenant_id     String
   name          String
   type          String // INICIAL, CONTESTACAO, RECURSO, MANIFESTACAO, OUTRO
   legal_area    String? // TRABALHISTA, CIVIL, PREVIDENCIARIO, etc.
@@ -1347,7 +1347,7 @@ model LegalTemplate {
 
 model CaseHonorario {
   id                 String    @id @default(uuid())
-  tenant_id          String?
+  tenant_id          String
   legal_case_id      String
   type               String // CONTRATUAL, SUCUMBENCIA, ENTRADA, ACORDO
   total_value        Decimal
@@ -1396,7 +1396,7 @@ model HonorarioPayment {
 
 model LeadHonorario {
   id                 String   @id @default(uuid())
-  tenant_id          String?
+  tenant_id          String
   lead_id            String
   type               String // CONTRATUAL, ENTRADA, ACORDO
   total_value        Decimal
@@ -1476,7 +1476,7 @@ model ContractSignature {
 
 model AiChat {
   id           String   @id @default(uuid())
-  tenant_id    String?
+  tenant_id    String
   user_id      String
   title        String   @default("Nova Conversa")
   model        String   @default("claude-sonnet-4-6")
@@ -1508,7 +1508,7 @@ model AiChatMessage {
 
 model AutomationRule {
   id           String   @id @default(cuid())
-  tenant_id    String?
+  tenant_id    String
   name         String
   trigger      String // NEW_LEAD | STAGE_CHANGE | NO_RESPONSE_24H | NO_RESPONSE_48H | PAYMENT_OVERDUE
   action       String // ADD_TAG | SEND_INTERNAL_NOTE | CHANGE_STAGE
@@ -1527,7 +1527,7 @@ model AutomationRule {
 
 model FinancialTransaction {
   id                String    @id @default(uuid())
-  tenant_id         String?
+  tenant_id         String
   type              String // RECEITA, DESPESA
   category          String // HONORARIO, CONSULTA, CUSTAS_JUDICIAIS, PERICIA, DESLOCAMENTO, ESCRITORIO, OUTRO
   description       String
@@ -1583,7 +1583,7 @@ model FinancialTransaction {
 /// purgados via cron (default: 90 dias).
 model Report {
   id           String   @id @default(uuid())
-  tenant_id    String?
+  tenant_id    String
   user_id      String? /// quem gerou (auditoria)
   /// Tipo do relatório: 'dashboard-snapshot', 'transactions-statement',
   /// 'charges-list', 'dre', 'cash-flow', etc.
@@ -1609,7 +1609,7 @@ model Report {
 /// validado no controller.
 model FinancialTransactionAttachment {
   id             String   @id @default(uuid())
-  tenant_id      String?
+  tenant_id      String
   transaction_id String
   filename       String /// Nome original do arquivo (ex: "nota-fiscal-001.pdf")
   mime_type      String /// "application/pdf", "image/jpeg", etc
@@ -1630,7 +1630,7 @@ model FinancialTransactionAttachment {
 
 model FinancialCategory {
   id         String   @id @default(uuid())
-  tenant_id  String?
+  tenant_id  String
   type       String // RECEITA, DESPESA
   name       String
   icon       String?
@@ -1655,7 +1655,7 @@ model FinancialCategory {
 /// indices parciais com COALESCE.
 model MonthlyGoal {
   id            String    @id @default(uuid())
-  tenant_id     String?
+  tenant_id     String
   /// NULL = escopo escritorio. UUID = advogado especifico.
   lawyer_id     String?
   year          Int
@@ -1683,7 +1683,7 @@ model MonthlyGoal {
 
 model PaymentGatewayCustomer {
   id             String   @id @default(uuid())
-  tenant_id      String?
+  tenant_id      String
   lead_id        String
   gateway        String   @default("ASAAS") // ASAAS, EFIBANK
   external_id    String // ID do cliente no gateway
@@ -1702,7 +1702,7 @@ model PaymentGatewayCustomer {
 
 model PaymentGatewayCharge {
   id                   String   @id @default(uuid())
-  tenant_id            String?
+  tenant_id            String
   honorario_payment_id String?  @unique
   transaction_id       String?  @unique
   legal_case_id        String?
@@ -1762,7 +1762,7 @@ model PaymentGatewayCharge {
 
 model NotaFiscal {
   id                   String  @id @default(uuid())
-  tenant_id            String?
+  tenant_id            String
   transaction_id       String? @unique // 1:1 com FinancialTransaction
   honorario_payment_id String?
   lead_id              String?
@@ -1809,7 +1809,7 @@ model NotaFiscal {
 
 model TaxRecord {
   id        String  @id @default(uuid())
-  tenant_id String?
+  tenant_id String
   lawyer_id String
   year      Int
   month     Int // 1-12
@@ -1882,7 +1882,7 @@ model ConversationMute {
 model Notification {
   id                String    @id @default(uuid())
   user_id           String
-  tenant_id         String?
+  tenant_id         String
   notification_type String /// incoming_message, transfer_request, task_overdue, etc.
   title             String
   body              String?
