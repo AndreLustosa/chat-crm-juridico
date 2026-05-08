@@ -76,6 +76,44 @@ export class SaveMemoryHandler implements ToolHandler {
       }
     }
 
+    // Bug 9 fix: dedup ANTES de inserir.
+    // Antes a IA podia chamar save_memory 10x na mesma conversa com fato
+    // similar — todas eram inseridas e so o cron 03h limpava. Resultado:
+    // base poluida durante o dia, regen incremental processava duplicatas.
+    // Agora: se ja existe memoria similar (cosine >= 0.92), retorna ok
+    // sem inserir.
+    if (embeddingVector) {
+      try {
+        const dup = (await context.prisma.$queryRawUnsafe(
+          `SELECT id, content, 1 - (embedding <=> $1::vector) AS sim
+           FROM "Memory"
+           WHERE tenant_id = $2
+             AND scope = $3
+             AND scope_id = $4
+             AND status = 'active'
+             AND embedding IS NOT NULL
+           ORDER BY embedding <=> $1::vector
+           LIMIT 1`,
+          embedding.toVectorLiteral(embeddingVector),
+          tenantId,
+          scope,
+          scopeId,
+        )) as Array<{ id: string; content: string; sim: number }>;
+        if (dup.length > 0 && Number(dup[0].sim) >= 0.92) {
+          this.logger.log(
+            `[save_memory] Dedup: memoria similar ja existe (sim=${Number(dup[0].sim).toFixed(3)}) — ignorando insert. Existente: "${dup[0].content.slice(0, 60)}"`,
+          );
+          return {
+            success: true,
+            already_exists: true,
+            message: 'Fato similar ja registrado na memoria — sem necessidade de duplicar.',
+          };
+        }
+      } catch (e: any) {
+        this.logger.warn(`[save_memory] Falha em dedup check (${e.message}) — prosseguindo com insert`);
+      }
+    }
+
     try {
       if (embeddingVector && embedding?.toVectorLiteral) {
         await context.prisma.$executeRawUnsafe(

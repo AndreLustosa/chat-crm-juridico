@@ -140,7 +140,13 @@ export class OrgProfileConsolidationProcessor {
 
     const since = existing.last_incorporated_at ?? existing.generated_at;
 
-    // Memorias NOVAS desde a ultima incorporacao
+    // Memorias NOVAS ou ATUALIZADAS desde a ultima incorporacao.
+    //
+    // Bug 5+6 fix: antes filtrava so `created_at > since`. Memoria editada
+    // (status='active') tinha updated_at novo mas created_at antigo —
+    // nao entrava no diff e o summary nunca refletia a edicao. Agora
+    // pegamos OR (created OR updated). LLM trata as recem-editadas como
+    // "nova versao" — converge eventualmente.
     const newMemories = await this.prisma.memory.findMany({
       where: {
         tenant_id: tenantId,
@@ -148,10 +154,13 @@ export class OrgProfileConsolidationProcessor {
         scope_id: tenantId,
         status: 'active',
         confidence: { gte: MIN_CONFIDENCE_FOR_INCLUSION },
-        created_at: { gt: since },
+        OR: [
+          { created_at: { gt: since } },
+          { updated_at: { gt: since } },
+        ],
       },
-      orderBy: { created_at: 'asc' },
-      select: { content: true, subcategory: true, confidence: true, created_at: true },
+      orderBy: { updated_at: 'asc' },
+      select: { content: true, subcategory: true, confidence: true, created_at: true, updated_at: true },
     });
 
     // Memorias que SAIRAM (superseded ou archived) desde a ultima incorporacao
@@ -171,11 +180,11 @@ export class OrgProfileConsolidationProcessor {
       this.logger.log(
         `[OrgProfileConsolidation] Tenant ${tenantId}: sem mudancas desde ${since.toISOString()}, pulando`,
       );
-      // Avanca o marker mesmo sem chamar LLM — evita reconsulta inutil amanha
-      await this.prisma.organizationProfile.update({
-        where: { tenant_id: tenantId },
-        data: { last_incorporated_at: new Date() },
-      });
+      // Bug 7 fix: NAO avanca last_incorporated_at em no-op. Antes
+      // avancava sempre, ocultando casos onde memoria foi editada e
+      // o filtro nao pegou (cascade do Bug 5+6). Agora deixa intacto —
+      // proxima execucao re-checa a janela inteira ate aparecer mudanca
+      // legitima ou ate alguem clicar "Refazer do zero".
       return { changed: false };
     }
 
@@ -207,17 +216,28 @@ export class OrgProfileConsolidationProcessor {
 
     const changed = result.summary.trim() !== existing.summary.trim();
 
-    await this.prisma.organizationProfile.update({
-      where: { tenant_id: tenantId },
+    // Bug 1 fix: race UI/cron — usa updateMany com WHERE manually_edited_at
+    // IS NULL pra nao sobrescrever edicao manual feita entre o snapshot
+    // do consolidateAll e este update. Se admin clicou Salvar entre as
+    // 2 fases, count = 0 e nada eh sobrescrito.
+    const updated = await this.prisma.organizationProfile.updateMany({
+      where: { tenant_id: tenantId, manually_edited_at: null },
       data: {
         summary: result.summary,
-        facts: result.facts ?? existing.facts,
+        facts: (result.facts ?? existing.facts) as any,
         source_memory_count: activeCount,
         version: changed ? { increment: 1 } : undefined,
         generated_at: changed ? new Date() : undefined,
         last_incorporated_at: new Date(),
       },
     });
+
+    if (updated.count === 0) {
+      this.logger.log(
+        `[OrgProfileConsolidation] Tenant ${tenantId}: edicao manual detectada durante consolidacao — update pulado (race protection)`,
+      );
+      return { changed: false };
+    }
 
     this.logger.log(
       `[OrgProfileConsolidation] Tenant ${tenantId}: incremental — ${newMemories.length} novas + ${deletedMemories.length} deletadas${changed ? ` → summary atualizado (${result.summary.length} chars)` : ' → sem mudanca no texto'}`,
@@ -266,6 +286,14 @@ export class OrgProfileConsolidationProcessor {
     const result = await this.callLLM(payload, 'from-scratch');
     if (!result) return;
 
+    // Bug 9 fix: incrementa version SO se houve mudanca de texto real.
+    // Antes incrementava sempre — UI mostrava v3→v4 sem motivo.
+    const existing = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+      select: { summary: true },
+    });
+    const changed = !existing || existing.summary?.trim() !== result.summary.trim();
+
     await this.prisma.organizationProfile.upsert({
       where: { tenant_id: tenantId },
       create: {
@@ -280,8 +308,8 @@ export class OrgProfileConsolidationProcessor {
         summary: result.summary,
         facts: result.facts,
         source_memory_count: memories.length,
-        version: { increment: 1 },
-        generated_at: new Date(),
+        version: changed ? { increment: 1 } : undefined,
+        generated_at: changed ? new Date() : undefined,
         last_incorporated_at: new Date(),
         manually_edited_at: null, // rebuild explicito descarta edicao manual
       },
@@ -341,8 +369,28 @@ export class OrgProfileConsolidationProcessor {
       if (!content) return null;
       const parsed = JSON.parse(content);
       if (!parsed.summary || typeof parsed.summary !== 'string') return null;
+
+      // Bug 4 fix: validacao de tamanho do summary do LLM.
+      // Antes: aceitava summary de 1 char ou 50K chars sem validar — se o
+      // LLM travasse e retornasse "ok", o sistema persistia e destruia o
+      // perfil bom anterior. Agora: 200-10000 chars, fora disso retorna
+      // null e o caller mantem `existing.summary`.
+      const trimmed = parsed.summary.trim();
+      if (trimmed.length < 200) {
+        this.logger.warn(
+          `[OrgProfileConsolidation] LLM retornou summary curto demais (${trimmed.length} chars, min 200) — descartando, mantendo perfil anterior`,
+        );
+        return null;
+      }
+      if (trimmed.length > 10000) {
+        this.logger.warn(
+          `[OrgProfileConsolidation] LLM retornou summary longo demais (${trimmed.length} chars, max 10000) — descartando, mantendo perfil anterior`,
+        );
+        return null;
+      }
+
       return {
-        summary: parsed.summary,
+        summary: trimmed,
         facts: parsed.facts ?? {},
         changes_applied: Array.isArray(parsed.changes_applied) ? parsed.changes_applied : [],
       };
