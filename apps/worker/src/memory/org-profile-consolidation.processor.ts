@@ -40,10 +40,20 @@ export class OrgProfileConsolidationProcessor {
     private readonly cronRunner: CronRunnerService,
   ) {}
 
-  // ─── Cron: roda diariamente as 02h ────────────────────────
+  // ─── Cron: roda toda hora cheia mas decide se executa ─────
+  //
+  // Antes era hardcoded em 02h diario. Fase 3 PR2: frequencia eh
+  // configuravel (daily/weekly/manual) + hora customizavel.
+  // Cron roda toda hora cheia e checa o setting pra decidir se executa.
+  //
+  // Settings lidos:
+  //   MEMORY_ORG_CONSOLIDATION_FREQUENCY = 'daily' | 'weekly' | 'manual'
+  //   MEMORY_ORG_CONSOLIDATION_WEEKDAY   = 1-7 (1=segunda, default 1)
+  //   MEMORY_ORG_CONSOLIDATION_HOUR      = 0-23 (default 2)
+  //   MEMORY_ORG_REQUIRE_APPROVAL        = 'true' | 'false' (default 'false')
 
-  @Cron('0 2 * * *', { timeZone: 'America/Maceio' })
-  async scheduleDailyConsolidation() {
+  @Cron('0 * * * *', { timeZone: 'America/Maceio' })
+  async scheduleHourlyCheck() {
     await this.cronRunner.run(
       'memory-org-profile-consolidation',
       60 * 60,
@@ -52,10 +62,56 @@ export class OrgProfileConsolidationProcessor {
           where: { key: 'MEMORY_BATCH_ENABLED' },
         });
         if ((enabled?.value ?? 'true').toLowerCase() === 'false') return;
+
+        const should = await this.shouldRunNow();
+        if (!should) return;
+
         await this.consolidateAll();
       },
-      { description: 'Consolida memorias organizacionais via LLM (perfil unificado)', schedule: '0 2 * * *' },
+      { description: 'Cron hora-em-hora: consolida org-profile se frequencia/dia/hora configurados batem com NOW()', schedule: '0 * * * *' },
     );
+  }
+
+  /**
+   * Decide se a consolidacao deve rodar AGORA baseado nos settings.
+   * Roda toda hora cheia, mas so executa se:
+   *   - frequency=daily AND hora atual == hora configurada
+   *   - frequency=weekly AND weekday atual == weekday configurado AND hora atual == hora configurada
+   *   - frequency=manual: NUNCA roda automaticamente
+   */
+  private async shouldRunNow(): Promise<boolean> {
+    const [freqRow, weekdayRow, hourRow] = await Promise.all([
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_CONSOLIDATION_FREQUENCY' } }),
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_CONSOLIDATION_WEEKDAY' } }),
+      this.prisma.globalSetting.findUnique({ where: { key: 'MEMORY_ORG_CONSOLIDATION_HOUR' } }),
+    ]);
+
+    const frequency = (freqRow?.value || 'daily').toLowerCase();
+    if (frequency === 'manual') return false;
+
+    const targetHour = parseInt(hourRow?.value || '2', 10);
+    if (isNaN(targetHour) || targetHour < 0 || targetHour > 23) return false;
+
+    // Hora local America/Maceio
+    const now = new Date();
+    const hereHour = parseInt(now.toLocaleString('en-US', { timeZone: 'America/Maceio', hour: '2-digit', hour12: false }), 10);
+    if (hereHour !== targetHour) return false;
+
+    if (frequency === 'daily') return true;
+
+    if (frequency === 'weekly') {
+      const targetWeekday = parseInt(weekdayRow?.value || '1', 10); // 1=seg, 7=dom
+      // toLocaleString('en-US', { weekday: 'long' }) em Maceio
+      const dayName = now.toLocaleDateString('en-US', { timeZone: 'America/Maceio', weekday: 'long' });
+      const dayMap: Record<string, number> = {
+        Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4,
+        Friday: 5, Saturday: 6, Sunday: 7,
+      };
+      const todayWeekday = dayMap[dayName] || 0;
+      return todayWeekday === targetWeekday;
+    }
+
+    return false;
   }
 
   /**
@@ -217,6 +273,36 @@ export class OrgProfileConsolidationProcessor {
 
     const changed = result.summary.trim() !== existing.summary.trim();
 
+    // Fase 3 PR2: workflow de aprovacao — quando setting
+    // MEMORY_ORG_REQUIRE_APPROVAL=true, grava em pending_* em vez de
+    // sobrescrever summary. IA continua usando summary atual ate admin
+    // aprovar via UI.
+    const requireApproval = await this.isApprovalRequired();
+
+    if (requireApproval && changed) {
+      await this.prisma.organizationProfile.update({
+        where: { tenant_id: tenantId },
+        data: {
+          pending_summary: result.summary,
+          pending_facts: (result.facts ?? existing.facts) as any,
+          pending_changes_applied: result.changes_applied || [],
+          pending_at: new Date(),
+          // Marker avanca pra cron nao reprocessar
+          last_incorporated_at: new Date(),
+        },
+      });
+
+      // Notifica admins/advogados via sistema de notificacoes
+      await this.notifyPendingProposal(tenantId, result.summary.length, result.changes_applied?.length || 0);
+
+      this.logger.log(
+        `[OrgProfileConsolidation] Tenant ${tenantId}: PROPOSTA pendente criada (${result.summary.length} chars, ${result.changes_applied?.length || 0} mudancas) — aguardando aprovacao admin`,
+      );
+      return { changed: true };
+    }
+
+    // Fluxo normal (sem aprovacao requerida) ─────────────────────────
+
     // Fase 3: salva snapshot da versao ATUAL antes de sobrescrever (so
     // se o texto mudou — snapshot identico nao agrega valor).
     if (changed) {
@@ -330,6 +416,60 @@ export class OrgProfileConsolidationProcessor {
     this.logger.log(
       `[OrgProfileConsolidation] Tenant ${tenantId}: from-scratch — ${memories.length} memorias → ${result.summary.length} chars`,
     );
+  }
+
+  /**
+   * Le setting MEMORY_ORG_REQUIRE_APPROVAL.
+   * Quando true, cron escreve em pending_* em vez de sobrescrever summary.
+   */
+  private async isApprovalRequired(): Promise<boolean> {
+    const row = await this.prisma.globalSetting.findUnique({
+      where: { key: 'MEMORY_ORG_REQUIRE_APPROVAL' },
+    });
+    return (row?.value || 'false').toLowerCase() === 'true';
+  }
+
+  /**
+   * Cria notificacao no sistema (sininho do CRM) pra admins/advogados
+   * quando proposta pendente eh criada. Cliente clica e abre o Painel >
+   * Base de Conhecimento pra revisar.
+   */
+  private async notifyPendingProposal(tenantId: string, summaryChars: number, changesCount: number): Promise<void> {
+    try {
+      // Pega usuarios com role ADMIN ou ADVOGADO do tenant
+      // (User.roles eh String[] — verifica se contem ADMIN ou ADVOGADO)
+      const targets = await this.prisma.user.findMany({
+        where: {
+          tenant_id: tenantId,
+          OR: [
+            { roles: { has: 'ADMIN' } },
+            { roles: { has: 'ADVOGADO' } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (targets.length === 0) return;
+
+      const title = '📋 Proposta do Resumo do Escritório';
+      const body = `${changesCount} mudança${changesCount === 1 ? '' : 's'} acumulada${changesCount === 1 ? '' : 's'} pra revisar. Clique pra abrir e aprovar.`;
+
+      await this.prisma.notification.createMany({
+        data: targets.map((t) => ({
+          tenant_id: tenantId,
+          user_id: t.id,
+          notification_type: 'memory_org_pending',
+          title,
+          body,
+          data: { link: '/atendimento/settings/knowledge', summaryChars, changesCount },
+        })),
+      });
+
+      this.logger.log(
+        `[OrgProfileConsolidation] Notificacao enviada pra ${targets.length} usuario(s) sobre proposta pendente`,
+      );
+    } catch (e: any) {
+      this.logger.warn(`[OrgProfileConsolidation] Falha ao criar notificacao: ${e.message}`);
+    }
   }
 
   /**

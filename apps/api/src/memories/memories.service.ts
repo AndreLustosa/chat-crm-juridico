@@ -364,6 +364,179 @@ export class MemoriesService {
   }
 
   /**
+   * Retorna proposta pendente do OrganizationProfile (Fase 3 PR2).
+   * Inclui o summary ATUAL pra UI fazer diff lado-a-lado.
+   */
+  async getOrganizationPending(tenantId: string) {
+    const profile = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+      select: {
+        summary: true,
+        version: true,
+        pending_summary: true,
+        pending_facts: true,
+        pending_changes_applied: true,
+        pending_at: true,
+        pending_triggered_by: true,
+      },
+    });
+    if (!profile) {
+      return { has_pending: false };
+    }
+    if (!profile.pending_summary) {
+      return { has_pending: false, current_summary: profile.summary, current_version: profile.version };
+    }
+
+    let triggeredByName: string | null = null;
+    if (profile.pending_triggered_by) {
+      const u = await this.prisma.user.findUnique({
+        where: { id: profile.pending_triggered_by },
+        select: { name: true },
+      });
+      triggeredByName = u?.name || null;
+    }
+
+    return {
+      has_pending: true,
+      current_summary: profile.summary,
+      current_version: profile.version,
+      pending_summary: profile.pending_summary,
+      pending_facts: profile.pending_facts,
+      pending_changes_applied: profile.pending_changes_applied,
+      pending_at: profile.pending_at,
+      pending_triggered_by_name: triggeredByName,
+    };
+  }
+
+  /**
+   * Aprova proposta pendente — pending_* vira oficial. Cria snapshot
+   * da versao anterior antes. Limpa pending_*.
+   */
+  async approveOrganizationPending(tenantId: string, actorId: string) {
+    const profile = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+    });
+    if (!profile || !profile.pending_summary) {
+      throw new BadRequestException('Nao ha proposta pendente pra aprovar');
+    }
+
+    // Snapshot da versao atual antes de sobrescrever
+    if (profile.summary && profile.summary.trim().length >= 50) {
+      try {
+        await (this.prisma as any).organizationProfileSnapshot.create({
+          data: {
+            tenant_id: tenantId,
+            version: profile.version,
+            summary: profile.summary,
+            facts: profile.facts,
+            source: 'cron', // proposta vinha do cron
+            created_by_user_id: actorId, // mas quem aprovou foi o admin
+            source_memory_count: profile.source_memory_count,
+          },
+        });
+      } catch (e: any) {
+        this.logger.warn(`[approvePending] Falha ao salvar snapshot: ${e.message}`);
+      }
+    }
+
+    const updated = await this.prisma.organizationProfile.update({
+      where: { tenant_id: tenantId },
+      data: {
+        summary: profile.pending_summary,
+        facts: (profile.pending_facts ?? profile.facts) as any,
+        version: { increment: 1 },
+        generated_at: new Date(),
+        // Limpa pending
+        pending_summary: null,
+        pending_facts: undefined,
+        pending_changes_applied: [],
+        pending_at: null,
+        pending_triggered_by: null,
+      },
+    });
+
+    // Limpa notificacoes do tipo memory_org_pending pra esse tenant
+    await this.prisma.notification.updateMany({
+      where: {
+        tenant_id: tenantId,
+        notification_type: 'memory_org_pending',
+        read_at: null,
+      },
+      data: { read_at: new Date() },
+    });
+
+    this.logger.log(
+      `[approvePending] Tenant ${tenantId}: proposta aprovada por user ${actorId} → v${updated.version}`,
+    );
+    return updated;
+  }
+
+  /**
+   * Rejeita proposta pendente — limpa pending_*. summary atual nao muda.
+   */
+  async rejectOrganizationPending(tenantId: string, actorId: string) {
+    const profile = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+      select: { pending_summary: true },
+    });
+    if (!profile || !profile.pending_summary) {
+      throw new BadRequestException('Nao ha proposta pendente pra rejeitar');
+    }
+
+    await this.prisma.organizationProfile.update({
+      where: { tenant_id: tenantId },
+      data: {
+        pending_summary: null,
+        pending_facts: undefined,
+        pending_changes_applied: [],
+        pending_at: null,
+        pending_triggered_by: null,
+      },
+    });
+
+    await this.prisma.notification.updateMany({
+      where: {
+        tenant_id: tenantId,
+        notification_type: 'memory_org_pending',
+        read_at: null,
+      },
+      data: { read_at: new Date() },
+    });
+
+    this.logger.log(`[rejectPending] Tenant ${tenantId}: proposta rejeitada por user ${actorId}`);
+    return { success: true };
+  }
+
+  /**
+   * Edita pending_summary antes de aprovar. Util pra ajustar 1-2 frases
+   * que o LLM errou antes de publicar.
+   */
+  async editOrganizationPending(tenantId: string, summary: string, actorId: string) {
+    const clean = (summary || '').trim();
+    if (clean.length < 50) throw new BadRequestException('Resumo muito curto (min 50 chars)');
+    if (clean.length > 10000) throw new BadRequestException('Resumo muito longo (max 10000 chars)');
+
+    const profile = await this.prisma.organizationProfile.findUnique({
+      where: { tenant_id: tenantId },
+      select: { pending_summary: true },
+    });
+    if (!profile || !profile.pending_summary) {
+      throw new BadRequestException('Nao ha proposta pendente pra editar');
+    }
+
+    const updated = await this.prisma.organizationProfile.update({
+      where: { tenant_id: tenantId },
+      data: {
+        pending_summary: clean,
+        pending_triggered_by: actorId, // marca quem editou
+      },
+    });
+
+    this.logger.log(`[editPending] Tenant ${tenantId}: pending editado por user ${actorId}`);
+    return updated;
+  }
+
+  /**
    * Lista versoes anteriores do OrganizationProfile (historico).
    * Max 50 snapshots, ordenado por created_at desc.
    */

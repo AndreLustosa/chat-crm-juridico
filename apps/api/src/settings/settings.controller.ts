@@ -215,7 +215,7 @@ export class SettingsController {
 
   @Post('ai-config')
   @Roles('ADMIN')
-  async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; djenPrompt?: string; djenNotifyTemplate?: string; adminBotEnabled?: boolean; cooldownSeconds?: number; memoryProfileModel?: string; memoryFactsModel?: string }) {
+  async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; djenPrompt?: string; djenNotifyTemplate?: string; adminBotEnabled?: boolean; cooldownSeconds?: number; memoryProfileModel?: string; memoryFactsModel?: string; memoryOrgFrequency?: string; memoryOrgWeekday?: number; memoryOrgHour?: number; memoryOrgRequireApproval?: boolean }) {
     if (data.apiKey)    await this.settingsService.setAiConfig(data.apiKey);
     if (data.adminKey)  await this.settingsService.setAdminKey(data.adminKey);
     if (data.anthropicApiKey) await this.settingsService.upsert('ANTHROPIC_API_KEY', data.anthropicApiKey);
@@ -228,6 +228,31 @@ export class SettingsController {
     // Modelos da memoria — escolha do admin via UI Ajustes IA
     if (data.memoryProfileModel) await this.settingsService.upsert('MEMORY_PROFILE_MODEL', data.memoryProfileModel);
     if (data.memoryFactsModel)   await this.settingsService.upsert('MEMORY_FACTS_MODEL', data.memoryFactsModel);
+    // Workflow OrganizationProfile (Fase 3 PR2)
+    if (data.memoryOrgFrequency) {
+      const v = data.memoryOrgFrequency.toLowerCase();
+      if (!['daily', 'weekly', 'manual'].includes(v)) {
+        throw new Error('memoryOrgFrequency deve ser daily, weekly ou manual');
+      }
+      await this.settingsService.upsert('MEMORY_ORG_CONSOLIDATION_FREQUENCY', v);
+    }
+    if (data.memoryOrgWeekday !== undefined) {
+      const w = Number(data.memoryOrgWeekday);
+      if (!Number.isInteger(w) || w < 1 || w > 7) {
+        throw new Error('memoryOrgWeekday deve ser 1-7');
+      }
+      await this.settingsService.upsert('MEMORY_ORG_CONSOLIDATION_WEEKDAY', String(w));
+    }
+    if (data.memoryOrgHour !== undefined) {
+      const h = Number(data.memoryOrgHour);
+      if (!Number.isInteger(h) || h < 0 || h > 23) {
+        throw new Error('memoryOrgHour deve ser 0-23');
+      }
+      await this.settingsService.upsert('MEMORY_ORG_CONSOLIDATION_HOUR', String(h));
+    }
+    if (data.memoryOrgRequireApproval !== undefined) {
+      await this.settingsService.upsert('MEMORY_ORG_REQUIRE_APPROVAL', String(!!data.memoryOrgRequireApproval));
+    }
     return { message: 'Configurações de IA salvas com sucesso' };
   }
 

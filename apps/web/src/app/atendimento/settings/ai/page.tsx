@@ -187,6 +187,11 @@ export default function AiSettingsPage() {
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
   const [memoryProfileModel, setMemoryProfileModel] = useState('gpt-4.1-mini');
   const [memoryFactsModel, setMemoryFactsModel] = useState('gpt-4.1');
+  // Workflow OrganizationProfile (Fase 3 PR2)
+  const [memoryOrgFrequency, setMemoryOrgFrequency] = useState<'daily' | 'weekly' | 'manual'>('daily');
+  const [memoryOrgWeekday, setMemoryOrgWeekday] = useState(1);
+  const [memoryOrgHour, setMemoryOrgHour] = useState(2);
+  const [memoryOrgRequireApproval, setMemoryOrgRequireApproval] = useState(false);
   const [djenModel, setDjenModel] = useState('gpt-4o-mini');
   const [djenPrompt, setDjenPrompt] = useState(DEFAULT_DJEN_PROMPT);
   const [djenPromptIsCustom, setDjenPromptIsCustom] = useState(false);
@@ -250,6 +255,10 @@ export default function AiSettingsPage() {
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
       setMemoryProfileModel(configRes.data.memoryProfileModel || 'gpt-4.1-mini');
       setMemoryFactsModel(configRes.data.memoryFactsModel || 'gpt-4.1');
+      setMemoryOrgFrequency(configRes.data.memoryOrgFrequency || 'daily');
+      setMemoryOrgWeekday(configRes.data.memoryOrgWeekday ?? 1);
+      setMemoryOrgHour(configRes.data.memoryOrgHour ?? 2);
+      setMemoryOrgRequireApproval(!!configRes.data.memoryOrgRequireApproval);
       setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
       setDjenPrompt(configRes.data.djenPrompt || DEFAULT_DJEN_PROMPT);
       setDjenPromptIsCustom(configRes.data.djenPromptIsCustom ?? false);
@@ -278,7 +287,7 @@ export default function AiSettingsPage() {
       // Isso garante que atualizações futuras do default no código sejam aplicadas automaticamente
       const effectiveDjenPrompt = djenPrompt === DEFAULT_DJEN_PROMPT ? '' : djenPrompt;
       const effectiveDjenNotifyTemplate = djenNotifyTemplate === DEFAULT_DJEN_NOTIFY_TEMPLATE ? '' : djenNotifyTemplate;
-      const payload: any = { defaultModel, djenModel, djenPrompt: effectiveDjenPrompt, djenNotifyTemplate: effectiveDjenNotifyTemplate, adminBotEnabled, cooldownSeconds, memoryProfileModel, memoryFactsModel };
+      const payload: any = { defaultModel, djenModel, djenPrompt: effectiveDjenPrompt, djenNotifyTemplate: effectiveDjenNotifyTemplate, adminBotEnabled, cooldownSeconds, memoryProfileModel, memoryFactsModel, memoryOrgFrequency, memoryOrgWeekday, memoryOrgHour, memoryOrgRequireApproval };
       if (apiKey.trim())       payload.apiKey         = apiKey.trim();
       if (adminKey.trim())     payload.adminKey       = adminKey.trim();
       if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
@@ -697,6 +706,100 @@ export default function AiSettingsPage() {
                   <p className="text-[11px] text-muted-foreground">
                     Roda apenas quando você clica em "Gerar Fatos" no Painel do Lead. Gera narrativa cronológica estilo "Dos Fatos" da petição inicial.
                   </p>
+                </div>
+              </div>
+
+              {/* Workflow do Resumo do Escritório (Fase 3 PR2) */}
+              <div className="space-y-3 pt-2 border-t border-border/50">
+                <div>
+                  <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-1">
+                    Resumo do Escritório — Quando consolidar
+                  </h4>
+                  <p className="text-[11px] text-muted-foreground mb-2">
+                    Frequência da consolidação e workflow de aprovação. Recomendado:
+                    semanal + aprovação ON pra controle total.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">
+                    Frequência
+                  </label>
+                  <select
+                    value={memoryOrgFrequency}
+                    onChange={(e) => setMemoryOrgFrequency(e.target.value as 'daily' | 'weekly' | 'manual')}
+                    className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+                  >
+                    <option value="daily">Diária — toda noite na hora configurada</option>
+                    <option value="weekly">Semanal — uma vez por semana (recomendado)</option>
+                    <option value="manual">Manual — só quando clicar Regenerar</option>
+                  </select>
+                </div>
+
+                {memoryOrgFrequency !== 'manual' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {memoryOrgFrequency === 'weekly' && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">
+                          Dia da semana
+                        </label>
+                        <select
+                          value={memoryOrgWeekday}
+                          onChange={(e) => setMemoryOrgWeekday(parseInt(e.target.value, 10))}
+                          className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2 text-sm outline-none focus:border-primary/50 transition-all"
+                        >
+                          <option value={1}>Segunda</option>
+                          <option value={2}>Terça</option>
+                          <option value={3}>Quarta</option>
+                          <option value={4}>Quinta</option>
+                          <option value={5}>Sexta</option>
+                          <option value={6}>Sábado</option>
+                          <option value={7}>Domingo</option>
+                        </select>
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">
+                        Hora
+                      </label>
+                      <select
+                        value={memoryOrgHour}
+                        onChange={(e) => setMemoryOrgHour(parseInt(e.target.value, 10))}
+                        className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2 text-sm outline-none focus:border-primary/50 transition-all"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>
+                            {String(i).padStart(2, '0')}:00
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/30">
+                  <div className="flex-1">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide block">
+                      Exigir aprovação manual
+                    </label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Quando ON, cron grava como proposta pendente. Você revê e aprova antes da
+                      IA usar. Notificação aparece no sininho.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setMemoryOrgRequireApproval(!memoryOrgRequireApproval)}
+                    className={`shrink-0 relative w-11 h-6 rounded-full transition-colors ${
+                      memoryOrgRequireApproval ? 'bg-primary' : 'bg-muted'
+                    }`}
+                    aria-label="Exigir aprovação"
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                        memoryOrgRequireApproval ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
 

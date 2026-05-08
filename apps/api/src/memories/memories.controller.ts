@@ -145,6 +145,65 @@ export class MemoriesController {
   }
 
   /**
+   * GET /memories/organization/pending
+   *
+   * Retorna a proposta pendente do OrganizationProfile (Fase 3 PR2).
+   * Quando MEMORY_ORG_REQUIRE_APPROVAL=true, o cron grava aqui em vez
+   * de sobrescrever o summary. Admin revisa via UI.
+   */
+  @Get('organization/pending')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getOrgPending(@Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.getOrganizationPending(tenantId);
+  }
+
+  /**
+   * POST /memories/organization/pending/approve
+   *
+   * Move pending_* para summary/facts oficial. Cria snapshot da versao
+   * anterior antes. Limpa pending_*.
+   */
+  @Post('organization/pending/approve')
+  @Roles('ADMIN', 'ADVOGADO')
+  async approveOrgPending(@Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.approveOrganizationPending(tenantId, req.user.id);
+  }
+
+  /**
+   * POST /memories/organization/pending/reject
+   *
+   * Descarta a proposta pendente. summary atual permanece intacto.
+   */
+  @Post('organization/pending/reject')
+  @Roles('ADMIN', 'ADVOGADO')
+  async rejectOrgPending(@Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.rejectOrganizationPending(tenantId, req.user.id);
+  }
+
+  /**
+   * PUT /memories/organization/pending
+   *
+   * Edita o pending_summary antes de aprovar. Util quando admin quer
+   * ajustar 1-2 frases que o LLM errou antes de publicar.
+   */
+  @Put('organization/pending')
+  @Roles('ADMIN', 'ADVOGADO')
+  async editOrgPending(
+    @Request() req: any,
+    @Body() body: { summary: string },
+  ) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    return this.memoriesService.editOrganizationPending(tenantId, body.summary, req.user.id);
+  }
+
+  /**
    * POST /memories/organization/snapshots/:id/restore
    *
    * Restaura uma versao anterior do OrganizationProfile. A versao ATUAL

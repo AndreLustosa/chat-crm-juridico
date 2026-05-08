@@ -183,6 +183,13 @@ export class SettingsService {
     // Modelos da memoria — admin escolhe via UI Ajustes IA
     const memoryProfileModel = (await this.get('MEMORY_PROFILE_MODEL')) || 'gpt-4.1-mini';
     const memoryFactsModel = (await this.get('MEMORY_FACTS_MODEL')) || 'gpt-4.1';
+    // Workflow consolidacao OrganizationProfile (Fase 3 PR2)
+    const memoryOrgFrequency = (await this.get('MEMORY_ORG_CONSOLIDATION_FREQUENCY')) || 'daily';
+    const memoryOrgWeekdayRaw = (await this.get('MEMORY_ORG_CONSOLIDATION_WEEKDAY')) || '1';
+    const memoryOrgWeekday = parseInt(memoryOrgWeekdayRaw, 10) || 1;
+    const memoryOrgHourRaw = (await this.get('MEMORY_ORG_CONSOLIDATION_HOUR')) || '2';
+    const memoryOrgHour = parseInt(memoryOrgHourRaw, 10) || 2;
+    const memoryOrgRequireApproval = ((await this.get('MEMORY_ORG_REQUIRE_APPROVAL')) || 'false').toLowerCase() === 'true';
     return {
       apiKey: apiKey || process.env.OPENAI_API_KEY || null,
       isConfigured: !!(apiKey || process.env.OPENAI_API_KEY),
@@ -198,6 +205,10 @@ export class SettingsService {
       cooldownSeconds: isNaN(cooldownSeconds) ? 8 : cooldownSeconds,
       memoryProfileModel,
       memoryFactsModel,
+      memoryOrgFrequency, // 'daily' | 'weekly' | 'manual'
+      memoryOrgWeekday,   // 1-7 (1=segunda)
+      memoryOrgHour,      // 0-23
+      memoryOrgRequireApproval, // boolean
     };
   }
 

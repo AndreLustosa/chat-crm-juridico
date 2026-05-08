@@ -169,6 +169,21 @@ export default function KnowledgeSettingsPage() {
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [restoringSnapshotId, setRestoringSnapshotId] = useState<string | null>(null);
   const [previewSnapshot, setPreviewSnapshot] = useState<typeof snapshots[number] | null>(null);
+  // Workflow de aprovação (Fase 3 PR2)
+  const [pending, setPending] = useState<{
+    has_pending: boolean;
+    current_summary?: string;
+    current_version?: number;
+    pending_summary?: string;
+    pending_changes_applied?: string[];
+    pending_at?: string;
+    pending_triggered_by_name?: string | null;
+  } | null>(null);
+  const [pendingModalOpen, setPendingModalOpen] = useState(false);
+  const [pendingEditMode, setPendingEditMode] = useState(false);
+  const [pendingEditContent, setPendingEditContent] = useState('');
+  const [approvingPending, setApprovingPending] = useState(false);
+  const [rejectingPending, setRejectingPending] = useState(false);
   const [editProfileContent, setEditProfileContent] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [rebuildingProfile, setRebuildingProfile] = useState(false);
@@ -187,15 +202,17 @@ export default function KnowledgeSettingsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [memsRes, statsRes, settingsRes, profileRes] = await Promise.all([
+      const [memsRes, statsRes, settingsRes, profileRes, pendingRes] = await Promise.all([
         api.get<OrgMemoriesResponse>('/memories/organization'),
         api.get<OrgStats>('/memories/organization/stats'),
         api.get('/settings'),
         api.get<OrgProfile | null>('/memories/organization/profile'),
+        api.get('/memories/organization/pending').catch(() => ({ data: { has_pending: false } })),
       ]);
       setGroups(memsRes.data.groups || {});
       setStats(statsRes.data);
       setOrgProfile(profileRes.data);
+      setPending(pendingRes.data);
       const rows = Array.isArray(settingsRes.data) ? settingsRes.data : [];
       const flag = rows.find((r: any) => r?.key === 'MEMORY_BATCH_ENABLED');
       setBatchEnabled((flag?.value ?? 'true').toLowerCase() !== 'false');
@@ -205,6 +222,48 @@ export default function KnowledgeSettingsPage() {
       setLoading(false);
     }
   }, []);
+
+  const handleApprovePending = async () => {
+    setApprovingPending(true);
+    try {
+      // Se tava editando, salva edição primeiro
+      if (pendingEditMode && pendingEditContent.trim().length >= 50) {
+        await api.put('/memories/organization/pending', { summary: pendingEditContent });
+      }
+      await api.post('/memories/organization/pending/approve');
+      showFeedback('Proposta aprovada — IA passa a usar a versão nova');
+      setPendingModalOpen(false);
+      setPendingEditMode(false);
+      setPendingEditContent('');
+      await loadData();
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao aprovar', 'err');
+    } finally {
+      setApprovingPending(false);
+    }
+  };
+
+  const handleRejectPending = async () => {
+    if (!confirm('Descartar a proposta? IA continua usando o resumo atual.')) return;
+    setRejectingPending(true);
+    try {
+      await api.post('/memories/organization/pending/reject');
+      showFeedback('Proposta descartada');
+      setPendingModalOpen(false);
+      setPendingEditMode(false);
+      await loadData();
+    } catch (e: any) {
+      showFeedback(e?.response?.data?.message || 'Erro ao rejeitar', 'err');
+    } finally {
+      setRejectingPending(false);
+    }
+  };
+
+  const openPendingModal = () => {
+    setPendingEditContent(pending?.pending_summary || '');
+    setPendingEditMode(false);
+    setPendingModalOpen(true);
+  };
 
   useEffect(() => {
     loadData();
@@ -546,6 +605,176 @@ export default function KnowledgeSettingsPage() {
           Rodar extração agora
         </button>
       </div>
+
+      {/* Banner de proposta pendente (Fase 3 PR2) */}
+      {pending?.has_pending && (
+        <div className="mb-4 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl shrink-0">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                Proposta de atualização do Resumo aguardando revisão
+              </h3>
+              <p className="text-xs text-amber-800/80 dark:text-amber-200/80 mt-1">
+                {pending.pending_changes_applied?.length || 0} mudança
+                {(pending.pending_changes_applied?.length || 0) === 1 ? '' : 's'} acumulada
+                {(pending.pending_changes_applied?.length || 0) === 1 ? '' : 's'}
+                {pending.pending_at && ` • gerada em ${formatDate(pending.pending_at)}`}
+                {pending.pending_triggered_by_name && ` por ${pending.pending_triggered_by_name}`}
+              </p>
+              <p className="text-xs text-amber-800/80 dark:text-amber-200/80 mt-1">
+                A IA continua usando o resumo atual (v{pending.current_version}) até você aprovar.
+              </p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={handleRejectPending}
+                disabled={rejectingPending}
+                className="px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {rejectingPending ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Descartar'}
+              </button>
+              <button
+                onClick={openPendingModal}
+                className="px-3 py-1.5 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors"
+              >
+                Revisar agora →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de revisão da proposta */}
+      {pendingModalOpen && pending?.has_pending && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => !approvingPending && !rejectingPending && setPendingModalOpen(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  Revisar proposta — v{pending.current_version} → v{(pending.current_version || 1) + 1}
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {pending.pending_at && `Gerada em ${formatDate(pending.pending_at)}`}
+                  {pending.pending_triggered_by_name && ` por ${pending.pending_triggered_by_name}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setPendingModalOpen(false)}
+                disabled={approvingPending || rejectingPending}
+                className="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Mudanças aplicadas */}
+            {pending.pending_changes_applied && pending.pending_changes_applied.length > 0 && (
+              <div className="px-5 py-3 border-b border-border bg-amber-500/5">
+                <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-1.5">
+                  Mudanças que o LLM aplicou
+                </p>
+                <ul className="space-y-1">
+                  {pending.pending_changes_applied.map((c, i) => (
+                    <li key={i} className="text-[12px] text-foreground flex items-start gap-2">
+                      <span className="text-amber-500 mt-0.5 shrink-0">→</span>
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Diff lado-a-lado */}
+            <div className="flex-1 overflow-y-auto grid grid-cols-2 divide-x divide-border">
+              <div className="px-4 py-4">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                  Versão atual (v{pending.current_version})
+                </p>
+                <pre className="text-[11px] whitespace-pre-wrap leading-relaxed text-foreground/80 font-sans">
+                  {pending.current_summary}
+                </pre>
+              </div>
+              <div className="px-4 py-4 bg-amber-500/5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                    Proposta (v{(pending.current_version || 1) + 1})
+                  </p>
+                  {!pendingEditMode && (
+                    <button
+                      onClick={() => {
+                        setPendingEditContent(pending.pending_summary || '');
+                        setPendingEditMode(true);
+                      }}
+                      className="text-[10px] text-primary hover:underline inline-flex items-center gap-1"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Editar antes de aprovar
+                    </button>
+                  )}
+                </div>
+                {pendingEditMode ? (
+                  <textarea
+                    value={pendingEditContent}
+                    onChange={(e) => setPendingEditContent(e.target.value)}
+                    className="w-full min-h-[60vh] text-[11px] p-3 rounded-lg bg-card border border-border focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed resize-y font-mono"
+                    autoFocus
+                  />
+                ) : (
+                  <pre className="text-[11px] whitespace-pre-wrap leading-relaxed text-foreground font-sans">
+                    {pending.pending_summary}
+                  </pre>
+                )}
+              </div>
+            </div>
+
+            {/* Footer: botões */}
+            <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+              <button
+                onClick={handleRejectPending}
+                disabled={approvingPending || rejectingPending}
+                className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+              >
+                {rejectingPending ? <Loader2 className="w-3 h-3 animate-spin" /> : '❌ Rejeitar'}
+              </button>
+              {pendingEditMode && (
+                <button
+                  onClick={() => {
+                    setPendingEditMode(false);
+                    setPendingEditContent('');
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Cancelar edição
+                </button>
+              )}
+              <button
+                onClick={handleApprovePending}
+                disabled={
+                  approvingPending ||
+                  rejectingPending ||
+                  (pendingEditMode && pendingEditContent.trim().length < 50)
+                }
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium hover:bg-amber-600 disabled:opacity-50"
+              >
+                {approvingPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3 h-3" />
+                )}
+                {pendingEditMode ? 'Aprovar com edição' : 'Aprovar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Profile consolidado card */}
       <div className="bg-gradient-to-br from-primary/5 via-card to-card border border-primary/20 rounded-xl mb-4 overflow-hidden">

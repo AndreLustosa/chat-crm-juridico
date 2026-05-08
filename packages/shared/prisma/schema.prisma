@@ -2034,6 +2034,18 @@ model OrganizationProfile {
   generated_at DateTime @default(now())
   version      Int      @default(1)
 
+  /// Workflow de aprovacao opcional (Fase 3 PR2): quando o setting
+  /// MEMORY_ORG_REQUIRE_APPROVAL=true, o cron de consolidacao escreve a
+  /// proposta nestes campos em vez de sobrescrever `summary`/`facts`.
+  /// IA continua usando o summary atual ate admin aprovar via UI.
+  pending_summary          String?  @db.Text
+  pending_facts            Json?
+  pending_changes_applied  String[] @default([])
+  /// Quando a proposta foi gerada (cron). Null = sem proposta pendente.
+  pending_at               DateTime?
+  /// User que disparou a consolidacao (ex: clicou Regenerar). Null se foi cron.
+  pending_triggered_by     String?
+
   snapshots OrganizationProfileSnapshot[]
 }
 
