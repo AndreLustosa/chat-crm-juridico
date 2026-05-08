@@ -7,7 +7,7 @@ export class DashboardService {
 
   private tenantWhere(tenantId?: string) {
     return tenantId
-      ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] }
+      ? { tenant_id: tenantId }
       : {};
   }
 

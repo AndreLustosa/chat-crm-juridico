@@ -3,6 +3,7 @@ import { SettingsService } from '../settings/settings.service';
 import { LeadsService } from '../leads/leads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 @Injectable()
 export class WhatsappService {
@@ -708,7 +709,7 @@ export class WhatsappService {
               external_id: jid,
               instance_name: instanceName,
               inbox_id: inboxId,
-              tenant_id: tenantId,
+              tenant_id: tenantOrDefault(tenantId),
             },
           });
         } else {

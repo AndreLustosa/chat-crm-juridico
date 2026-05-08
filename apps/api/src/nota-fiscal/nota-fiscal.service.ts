@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 @Injectable()
 export class NotaFiscalService {
@@ -180,7 +181,7 @@ export class NotaFiscalService {
     // 6. Store result in NotaFiscal
     const nf = await this.prisma.notaFiscal.create({
       data: {
-        tenant_id: tenantId || transaction.tenant_id || null,
+        tenant_id: tenantOrDefault(tenantId || transaction.tenant_id),
         transaction_id: transactionId,
         lead_id: transaction.lead_id || null,
         numero: providerResponse.numero || null,

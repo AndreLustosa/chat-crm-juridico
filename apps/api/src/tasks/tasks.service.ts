@@ -9,6 +9,7 @@ import { CalendarService } from '../calendar/calendar.service';
 import { MediaS3Service } from '../media/s3.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 // Whitelist de MIME types pra anexos de Task. Mesma do portal/upload —
 // PDF, imagens, Office, TXT. Bloqueia executaveis e scripts.
@@ -67,7 +68,7 @@ export class TasksService {
   ) {}
 
   private tenantWhere(tenantId?: string) {
-    return tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {};
+    return tenantId ? { tenant_id: tenantId } : {};
   }
 
   private async verifyTenantOwnership(id: string, tenantId?: string) {
@@ -204,7 +205,7 @@ export class TasksService {
         legal_case_id: data.legal_case_id,
         assigned_user_id: data.assigned_user_id,
         due_at: data.due_at ? new Date(data.due_at) : null,
-        tenant_id: data.tenant_id,
+        tenant_id: tenantOrDefault(data.tenant_id),
         status: 'A_FAZER',
         // Sem isso, a notificacao de conclusao nao sabe pra quem voltar
         // o aviso ("estagiario X concluiu Y" precisa do criador). Tambem

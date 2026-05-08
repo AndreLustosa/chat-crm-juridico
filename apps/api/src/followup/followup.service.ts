@@ -62,7 +62,7 @@ export class FollowupService {
 
   async listSequences(tenantId?: string) {
     return this.prisma.followupSequence.findMany({
-      where: tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {},
+      where: tenantId ? { tenant_id: tenantId } : {},
       include: { steps: { orderBy: { position: 'asc' } }, _count: { select: { enrollments: true } } },
       orderBy: { created_at: 'desc' },
     });
@@ -871,7 +871,7 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
       data: {
         name,
         type: data.type,
-        tenant_id: tenantId,
+        tenant_id: tenantOrDefault(tenantId),
         created_by_id: userId,
         total_targets: uniqueTargets.length,
         interval_ms: Math.max(5000, Math.min(3600000, data.interval_ms)),

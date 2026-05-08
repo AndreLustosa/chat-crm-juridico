@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { isAdmin } from '../common/utils/permissions.util';
 import { brazilNaiveToRealEpoch, brazilRealNowToNaive } from '../common/utils/timezone.util';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 const EVENT_TYPES = ['CONSULTA', 'TAREFA', 'AUDIENCIA', 'PERICIA', 'PRAZO', 'OUTRO'] as const;
 const EVENT_STATUSES = ['AGENDADO', 'CONFIRMADO', 'CONCLUIDO', 'CANCELADO', 'ADIADO'] as const;
@@ -134,7 +135,7 @@ export class CalendarService implements OnApplicationBootstrap {
     const where: any = {};
 
     if (query.tenantId) {
-      where.OR = [{ tenant_id: query.tenantId }, { tenant_id: null }];
+      where.tenant_id = query.tenantId;
     }
     if (query.type) where.type = query.type;
     if (query.leadId) where.lead_id = query.leadId;
@@ -353,7 +354,7 @@ export class CalendarService implements OnApplicationBootstrap {
         assigned_user_id: resolvedAssignedUserId,
         created_by_id: data.created_by_id,
         appointment_type_id: data.appointment_type_id,
-        tenant_id: data.tenant_id,
+        tenant_id: tenantOrDefault(data.tenant_id),
         recurrence_rule: data.recurrence_rule,
         recurrence_end: data.recurrence_end ? new Date(data.recurrence_end) : null,
         recurrence_days: data.recurrence_days ?? [],
@@ -834,7 +835,7 @@ export class CalendarService implements OnApplicationBootstrap {
     if (tenantId) {
       where.AND = [
         ...(where.AND || []),
-        { OR: [{ tenant_id: tenantId }, { tenant_id: null }] },
+        { tenant_id: tenantId },
       ];
     }
     if (excludeEventId) where.id = { not: excludeEventId };
@@ -1040,7 +1041,7 @@ export class CalendarService implements OnApplicationBootstrap {
 
     // Filtro de tenant: feriados globais (tenant_id NULL) + feriados do tenant
     const tenantFilter = tenantId
-      ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] }
+      ? { tenant_id: tenantId }
       : {};
 
     // Check exact date holidays
@@ -1380,7 +1381,7 @@ export class CalendarService implements OnApplicationBootstrap {
       where: {
         legal_case_id: legalCaseId,
         ...(type ? { type } : {}),
-        ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
       },
       include: {
         assigned_user: { select: { id: true, name: true } },

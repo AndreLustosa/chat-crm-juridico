@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto, UpdateTransactionDto, CreateCategoryDto, UpdateCategoryDto } from './financeiro.dto';
 import { cashRegimeWhere, effectiveTransactionDate } from '../common/utils/cash-regime.util';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 const DEFAULT_CATEGORIES = [
   { type: 'RECEITA', name: 'Honorarios', icon: 'scale' },
@@ -223,7 +224,7 @@ export class FinanceiroService {
   async createTransaction(data: CreateTransactionDto & { tenant_id?: string; actor_id?: string }) {
     const tx = await this.prisma.financialTransaction.create({
       data: {
-        tenant_id: data.tenant_id,
+        tenant_id: tenantOrDefault(data.tenant_id),
         type: data.type,
         category: data.category,
         description: data.description,

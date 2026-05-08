@@ -944,7 +944,7 @@ export class DjenService {
       const existingByPhone = await this.prisma.lead.findFirst({
         where: {
           phone: { in: variants },
-          ...(tenantId ? { tenant_id: tenantId } : { tenant_id: null }),
+          ...(tenantId ? { tenant_id: tenantId } : {}),
         },
         select: { id: true, name: true },
       });
@@ -1008,7 +1008,7 @@ export class DjenService {
       data: {
         lead_id: lead.id,
         lawyer_id: lawyerId,
-        tenant_id: tenantId,
+        tenant_id: tenantOrDefault(tenantId),
         case_number: pub.numero_processo,
         stage: 'PROTOCOLO',
         tracking_stage: finalTrackingStage,

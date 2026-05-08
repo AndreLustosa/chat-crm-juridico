@@ -11,6 +11,7 @@ import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
+import { tenantOrDefault } from '../common/constants/tenant';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -56,7 +57,7 @@ export class LegalCasesService {
   }
 
   private tenantWhere(tenantId?: string) {
-    return tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {};
+    return tenantId ? { tenant_id: tenantId } : {};
   }
 
   private async verifyTenantOwnership(id: string, tenantId?: string) {
@@ -127,7 +128,7 @@ export class LegalCasesService {
         conversation_id: data.conversation_id,
         lawyer_id: data.lawyer_id,
         legal_area: resolvedArea,
-        tenant_id: data.tenant_id,
+        tenant_id: tenantOrDefault(data.tenant_id),
         stage: 'VIABILIDADE',
         priority,
         opposing_party,
@@ -1127,7 +1128,7 @@ export class LegalCasesService {
       const newConvo = await this.prisma.conversation.create({
         data: {
           lead_id: leadId,
-          tenant_id: data.tenant_id || null,
+          tenant_id: tenantOrDefault(data.tenant_id),
           instance_name: process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp',
           status: 'ABERTO',
           last_message_at: new Date(),
@@ -1144,7 +1145,7 @@ export class LegalCasesService {
         lead_id: leadId,
         lawyer_id: effectiveLawyerId,
         conversation_id: linkedConversationId,
-        tenant_id: data.tenant_id,
+        tenant_id: tenantOrDefault(data.tenant_id),
         case_number: data.case_number,
         legal_area: data.legal_area,
         action_type: data.action_type,

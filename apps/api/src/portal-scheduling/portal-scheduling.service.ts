@@ -366,7 +366,7 @@ export class PortalSchedulingService {
         where: {
           date: { gte: from, lte: to },
           recurring_yearly: false,
-          ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+          ...(tenantId ? { tenant_id: tenantId } : {}),
         },
         select: { date: true },
       });
@@ -378,7 +378,7 @@ export class PortalSchedulingService {
       const recurring = await this.prisma.holiday.findMany({
         where: {
           recurring_yearly: true,
-          ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+          ...(tenantId ? { tenant_id: tenantId } : {}),
         },
         select: { date: true },
       });

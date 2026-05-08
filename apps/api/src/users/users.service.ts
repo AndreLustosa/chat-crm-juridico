@@ -43,7 +43,7 @@ export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   private tenantWhere(tenantId?: string) {
-    return tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {};
+    return tenantId ? { tenant_id: tenantId } : {};
   }
 
   private async verifyTenantOwnership(id: string, tenantId?: string) {

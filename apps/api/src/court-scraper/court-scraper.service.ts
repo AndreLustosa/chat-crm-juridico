@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 import {
   EsajTjalScraper,
   CourtCaseData,

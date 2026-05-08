@@ -491,7 +491,7 @@ export class PaymentGatewayService {
     // Salvar cobrança vinculada à primeira parcela
     const charge = await this.prisma.paymentGatewayCharge.create({
       data: {
-        tenant_id: tenantId || honorario.tenant_id || null,
+        tenant_id: tenantOrDefault(tenantId || honorario.tenant_id),
         lead_honorario_payment_id: honorario.payments[0].id,
         gateway: 'ASAAS',
         external_id: asaasCharge.id,

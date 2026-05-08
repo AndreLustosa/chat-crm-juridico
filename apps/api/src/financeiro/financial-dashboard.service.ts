@@ -548,7 +548,7 @@ export class FinancialDashboardService {
     // -> meta dele; senao meta do escritorio (lawyer_id null).
     const goal = await this.prisma.monthlyGoal.findFirst({
       where: {
-        ...(tenantId ? { tenant_id: tenantId } : { tenant_id: null }),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
         lawyer_id: lawyerId || null,
         year,
         month,

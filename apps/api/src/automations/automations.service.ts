@@ -20,7 +20,7 @@ export class AutomationsService {
 
   async findAll(tenantId?: string) {
     return this.prisma.automationRule.findMany({
-      where: tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {},
+      where: tenantId ? { tenant_id: tenantId } : {},
       orderBy: { created_at: 'asc' },
     });
   }
@@ -43,7 +43,7 @@ export class AutomationsService {
   // ─── Execution helpers ─────────────────────────────────────────
 
   private async executeAction(
-    rule: { action: string; action_value: string },
+    rule: { action: string; action_value: string; tenant_id: string },
     context: { leadId?: string; conversationId?: string },
   ) {
     try {
@@ -112,6 +112,7 @@ export class AutomationsService {
               conversation_id: context.conversationId ?? null,
               due_at: dueAt,
               status: 'A_FAZER',
+              tenant_id: tenantOrDefault(rule.tenant_id),
             },
           });
         }
@@ -128,7 +129,7 @@ export class AutomationsService {
       where: {
         trigger: 'NEW_LEAD',
         enabled: true,
-        ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
       },
     });
     for (const rule of rules) {
@@ -143,7 +144,7 @@ export class AutomationsService {
       where: {
         trigger: 'STAGE_CHANGE',
         enabled: true,
-        ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : {}),
+        ...(tenantId ? { tenant_id: tenantId } : {}),
       },
     });
     for (const rule of rules) {

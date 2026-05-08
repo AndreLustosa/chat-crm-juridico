@@ -35,7 +35,7 @@ export class LeadsCleanupService {
       // tenant_id eh necessario pra dedup respeitar o isolamento entre
       // escritorios (post-bug 2026-04-29: phone deixou de ser unique global).
       // Nota: cursor separado do findMany para evitar erro de inferência de tipo (TS7022)
-      const batch: { id: string; phone: string; tenant_id: string | null }[] = cursor
+      const batch: { id: string; phone: string; tenant_id: string }[] = cursor
         ? await this.prisma.lead.findMany({
             take: BATCH_SIZE,
             skip: 1,

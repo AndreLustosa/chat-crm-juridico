@@ -57,11 +57,9 @@ export class LeadsService {
       if (tenantLead) return tenantLead;
     }
 
-    return this.prisma.lead.findFirst({
-      where: { phone: { in: variants }, tenant_id: null },
-      orderBy: { created_at: 'asc' },
-      select: { id: true, tenant_id: true, phone: true },
-    });
+    // Legacy fallback removido apos migration tenant_id NOT NULL — nao
+    // existem mais leads com tenant_id IS NULL pra adotar.
+    return null;
   }
 
   async create(data: Prisma.LeadCreateInput, inboxId?: string | null): Promise<Lead> {
@@ -110,7 +108,7 @@ export class LeadsService {
     isClient?: boolean,
   ) {
     const baseWhere: any = tenant_id
-      ? { OR: [{ tenant_id }, { tenant_id: null }] }
+      ? { tenant_id }
       : {};
 
     // Filtro por stage:
@@ -316,7 +314,7 @@ export class LeadsService {
         where: {
           phone: { in: variants.length ? variants : [phone] },
           name: null,
-          ...(tenantId ? { OR: [{ tenant_id: tenantId }, { tenant_id: null }] } : { tenant_id: null }),
+          ...(tenantId ? { tenant_id: tenantId } : {}),
         },
         data: { name: incomingName },
       });
@@ -399,10 +397,9 @@ export class LeadsService {
       });
       if (tenantLead) return tenantLead;
 
-      return this.prisma.lead.findFirst({
-        where: { phone: { in: variants }, tenant_id: null },
-        orderBy: { created_at: 'asc' },
-      });
+      // Legacy fallback removido apos tenant_id NOT NULL — nao existem
+      // mais leads com tenant_id IS NULL pra adotar.
+      return null;
     }
 
     return this.prisma.lead.findFirst({

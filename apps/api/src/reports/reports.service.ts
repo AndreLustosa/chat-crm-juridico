@@ -11,6 +11,7 @@ import { buildChargesListPdf, ChargesListData } from './templates/charges-list';
 import { buildDelinquencyPdf, DelinquencyData } from './templates/delinquency';
 import { buildBillingByPeriodPdf, BillingByPeriodData } from './templates/billing-by-period';
 import { buildLawyerPerformancePdf, LawyerPerformanceData } from './templates/lawyer-performance';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 /**
  * ReportsService — orquestra geração de PDFs.
@@ -49,7 +50,7 @@ export class ReportsService {
     try {
       await this.prisma.report.create({
         data: {
-          tenant_id: params.tenantId || null,
+          tenant_id: tenantOrDefault(params.tenantId),
           user_id: params.userId,
           kind: params.kind,
           display_name: params.displayName,
