@@ -1670,6 +1670,30 @@ ${pub.conteudo.slice(0, 6000)}`;
     const tipo = tipoComunicacao || 'Publicação';
     const processoFmt = numeroProcesso.length > 20 ? numeroProcesso.slice(0, 20) + '…' : numeroProcesso;
 
+    // Bug fix 2026-05-08: publicacoes analisadas ANTES de 2026-04-26
+    // (quando o split client_analysis foi adicionado) tem client_analysis
+    // null mas lawyer_analysis cacheado. O cache de 24h servia a analise
+    // antiga e cliente recebia mensagem com labels vazias ("Assunto: ").
+    //
+    // Solucao: detectar ausencia dos campos client e FORCAR re-analise
+    // antes de tentar notificar.
+    const hasClientFields = !!(aiAnalysis?.client && (
+      aiAnalysis.client.resumo_cliente ||
+      aiAnalysis.client.proximo_passo_cliente ||
+      aiAnalysis.client.fase_processo_cliente
+    ));
+
+    if (!hasClientFields) {
+      this.logger.log(
+        `[DJEN] aiAnalysis sem campos client preenchidos pra pub ${pub.id} — forcando re-analise pra notificacao decente`,
+      );
+      try {
+        aiAnalysis = await this.analyzePublication(pub.id, /*force*/ true);
+      } catch (e: any) {
+        this.logger.warn(`[DJEN] Re-analise falhou pra pub ${pub.id}: ${e.message}`);
+      }
+    }
+
     // Campos orientados ao CLIENTE (gerados pela IA)
     // Campos do cliente vêm agora em aiAnalysis.client.* (separados dos internos)
     const clientData = aiAnalysis?.client || {};
@@ -1700,16 +1724,43 @@ ${pub.conteudo.slice(0, 6000)}`;
         '{{local_evento}}': localEvento,
       };
 
-      message = customTemplate;
+      // Bug fix 2026-05-08: antes substituiamos as vars e o filter so
+      // removia linhas EM BRANCO. Resultado: template "📝 *Assunto:* {{assunto}}"
+      // com {{assunto}}='' virava "📝 *Assunto:* " — cliente recebia label
+      // sem valor. Agora: PRIMEIRO removemos linhas onde TODAS as vars sao
+      // vazias (ex: linha "📝 *Assunto:* {{assunto}}" sem assunto = sai
+      // inteira). DEPOIS substituimos.
+      const lines = customTemplate.split('\n');
+      const keptLines: string[] = [];
+      for (const line of lines) {
+        const placeholdersInLine = line.match(/\{\{[a-z_]+\}\}/g) || [];
+        if (placeholdersInLine.length > 0) {
+          // Linha tem variavel(eis): so mantem se PELO MENOS uma tiver valor
+          const anyHasValue = placeholdersInLine.some((ph) => {
+            const val = vars[ph];
+            return val !== undefined && val.trim().length > 0;
+          });
+          if (!anyHasValue) continue; // Sai a linha inteira
+        }
+        keptLines.push(line);
+      }
+      message = keptLines.join('\n');
       for (const [key, val] of Object.entries(vars)) {
         message = message.replace(new RegExp(key.replace(/[{}]/g, '\\$&'), 'g'), val);
       }
-      // Remove linhas com variáveis vazias e colapsa quebras consecutivas
-      message = message
-        .split('\n')
-        .filter(line => line.trim() !== '' || line === '')
-        .join('\n')
-        .replace(/\n{3,}/g, '\n\n');
+      // Colapsa quebras consecutivas (3+) em duplas
+      message = message.replace(/\n{3,}/g, '\n\n').trim();
+
+      // Sanity check: se mensagem ficou muito curta apos limpeza,
+      // significa que a IA nao gerou conteudo util — NAO envia
+      // (cliente nao deve receber notif vazia/inutil).
+      if (message.length < 100) {
+        this.logger.warn(
+          `[DJEN] Notificacao pulada — template renderizado < 100 chars (${message.length}). ` +
+          `Provavel falha na analise IA da publicacao ${pub.id}. Sera tentado novamente no proximo retry cron.`,
+        );
+        return; // NAO seta client_notified_at — cron retry pega depois (com sorte aiAnalysis ja teve sucesso)
+      }
     } else {
       // Template padrão (fallback) — orientado ao cliente
       const lines = [
@@ -1764,6 +1815,19 @@ ${pub.conteudo.slice(0, 6000)}`;
       lines.push(`_André Lustosa Advogados_`);
 
       message = lines.join('\n');
+
+      // Mesmo guard do template customizado: se nao tem nenhum conteudo
+      // util da IA (sem resumo, sem proximo_passo, sem fase, sem prazo,
+      // sem orientacao), NAO envia — cliente nao deve receber so o
+      // header generico "houve uma movimentacao" sem contexto.
+      const hasUsefulContent = !!(resumoCliente || proximoPassoCliente || faseProcessoCliente || orientacaoCliente || prazoCliente || localEvento);
+      if (!hasUsefulContent) {
+        this.logger.warn(
+          `[DJEN] Notificacao pulada — IA nao gerou conteudo util pra pub ${pub.id} ` +
+          `(provavel falha na analise). Sera tentado novamente no proximo retry cron.`,
+        );
+        return;
+      }
     }
 
     try {
