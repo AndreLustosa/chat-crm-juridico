@@ -13,6 +13,7 @@ import { AdminBotService } from '../admin-bot/admin-bot.service';
 import { MediaDownloadService } from '../media/media-download.service';
 import { MessagesService } from '../messages/messages.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 interface EvolutionWebhookPayload {
   event: string;
@@ -682,6 +683,7 @@ export class EvolutionService implements OnApplicationBootstrap {
         // Criar tarefa urgente para o advogado
         await this.prisma.task.create({
           data: {
+            tenant_id: tenantOrDefault((enrollment.lead as { tenant_id?: string | null }).tenant_id),
             title: `Lead quente respondeu: ${enrollment.lead.name || enrollment.lead.phone}`,
             description: `Lead respondeu positivamente ao follow-up da sequência "${enrollment.sequence.name}".\n\nResposta: "${responseText}"\n\nAnálise IA: ${analise.resumo}\nPróxima ação sugerida: ${analise.proxima_acao}`,
             status: 'A_FAZER',
@@ -704,6 +706,7 @@ export class EvolutionService implements OnApplicationBootstrap {
         });
         await this.prisma.task.create({
           data: {
+            tenant_id: tenantOrDefault((enrollment.lead as { tenant_id?: string | null }).tenant_id),
             title: `Revisão necessária: ${enrollment.lead.name || enrollment.lead.phone}`,
             description: `A IA detectou que este lead precisa de atenção humana.\n\nResposta: "${responseText}"\n\nMotivo: ${analise.resumo}`,
             status: 'A_FAZER',

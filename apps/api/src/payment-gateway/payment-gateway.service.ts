@@ -1364,6 +1364,7 @@ export class PaymentGatewayService {
       try {
         const newConvo = await this.prisma.conversation.create({
           data: {
+            tenant_id: tenantOrDefault((lead as { tenant_id?: string | null }).tenant_id),
             lead_id: lead.id,
             channel: 'WHATSAPP',
             status: 'ABERTO',

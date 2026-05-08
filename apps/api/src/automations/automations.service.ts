@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { FollowupService } from '../followup/followup.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 
 @Injectable()
 export class AutomationsService {
@@ -25,7 +26,9 @@ export class AutomationsService {
   }
 
   async create(data: { name: string; trigger: string; action: string; action_value: string; tenant_id?: string }) {
-    return this.prisma.automationRule.create({ data });
+    return this.prisma.automationRule.create({
+      data: { ...data, tenant_id: tenantOrDefault(data.tenant_id) },
+    });
   }
 
   async update(id: string, data: { name?: string; trigger?: string; action?: string; action_value?: string; enabled?: boolean }) {

@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { tenantOrDefault, DEFAULT_TENANT_ID } from '../common/constants/tenant';
 import OpenAI from 'openai';
 
 // ─── Tipos internos ───────────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ export class FollowupService {
     return this.prisma.followupSequence.create({
       data: {
         ...seqData,
+        tenant_id: tenantOrDefault(seqData.tenant_id),
         steps: steps ? { create: steps } : undefined,
       },
       include: { steps: { orderBy: { position: 'asc' } } },
@@ -1093,6 +1095,10 @@ Considere requer_humano=true se:
         const createdSeq = await this.prisma.followupSequence.create({
           data: {
             ...seqData,
+            // Sequencias seed sao globais — antes ficavam com tenant_id NULL.
+            // Apos NOT NULL, vinculadas ao tenant default. Multi-tenant futuro
+            // precisa de seed por tenant ou flag is_global em outro mecanismo.
+            tenant_id: DEFAULT_TENANT_ID,
             steps: {
               create: steps.map(({ custom_prompt, ...rest }) => ({
                 ...rest,

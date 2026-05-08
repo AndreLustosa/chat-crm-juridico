@@ -4,6 +4,7 @@ import { Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { S3Service } from '../s3/s3.service';
+import { tenantOrDefault } from '../common/constants/tenant';
 import OpenAI, { toFile } from 'openai';
 import axios from 'axios';
 // pdf-parse v1.x: import LAZY com try/catch defensivo.
@@ -855,8 +856,17 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     conversation_id?: string;
     created_by_id: string;
   }): Promise<any> {
+    // Busca tenant_id do lead — CalendarEvent agora exige NOT NULL.
+    // Se nao houver lead (situacao improvavel pq params.lead_id eh
+    // obrigatorio), cai no DEFAULT_TENANT_ID via tenantOrDefault.
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: params.lead_id },
+      select: { tenant_id: true },
+    });
+
     const event = await this.prisma.calendarEvent.create({
       data: {
+        tenant_id: tenantOrDefault(lead?.tenant_id),
         type: params.type,
         title: params.title,
         description: params.description,
