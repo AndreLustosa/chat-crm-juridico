@@ -237,6 +237,56 @@ export class PromptBuilder {
     {
       type: 'function',
       function: {
+        name: 'save_memory',
+        description:
+          'SALVA um fato/preferencia/contexto IMPORTANTE na memoria persistente. ' +
+          'Use DURANTE a conversa quando descobrir algo que vale lembrar nas ' +
+          'proximas interacoes (suas e de outros agentes). ' +
+          'Quando usar: ' +
+          '  - Lead conta detalhe relevante do caso ("trabalhou 5 anos como vendedor") ' +
+          '  - Cliente expressa preferencia ("prefere reuniao pela manha") ' +
+          '  - Contexto pessoal critico ("filho menor depende dela financeiramente") ' +
+          '  - Detalhe sobre o ESCRITORIO descoberto pela conversa (scope=organization). ' +
+          'Quando NAO usar: ' +
+          '  - Mudar campo estruturado (use respond_to_client.updates pra nome/email/stage) ' +
+          '  - Saudacao, agradecimento, info trivial ' +
+          '  - Algo que ja esta na memoria atual (vai duplicar). ' +
+          'Maximo 1-2 chamadas por turno. Conteudo CONCISO (1 frase clara).',
+        parameters: {
+          type: 'object',
+          properties: {
+            content: {
+              type: 'string',
+              description:
+                'O fato em 1 frase clara em portugues. Min 5 chars, max 500. ' +
+                'Ex: "Cliente trabalhou 5 anos como vendedor da empresa X" ou ' +
+                '"Cliente prefere reunioes pela manha, nao consegue a tarde".',
+            },
+            type: {
+              type: 'string',
+              enum: ['fact', 'preference', 'context', 'event'],
+              description:
+                'fact=fato (default); preference=preferencia; context=contexto pessoal; event=algo que aconteceu.',
+            },
+            scope: {
+              type: 'string',
+              enum: ['lead', 'organization'],
+              description:
+                'lead=sobre essa pessoa (default); organization=sobre o escritorio (ex: regra interna, honorario).',
+            },
+            subcategory: {
+              type: 'string',
+              description:
+                'Categoria opcional. Para lead: trabalho, familia, financeiro, processo, contato. Para org: fees, procedures, team, court_info, rules.',
+            },
+          },
+          required: ['content'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
         name: 'abrir_caso_viabilidade',
         description:
           'USO EXCLUSIVO PARA CLIENTES JA CONTRATADOS (is_client=true). ' +

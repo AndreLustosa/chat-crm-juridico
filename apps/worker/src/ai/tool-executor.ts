@@ -13,6 +13,7 @@ export interface ToolContext {
   skillAssets?: any[];
   reminderQueue?: any; // Bull queue for WhatsApp reminders (optional)
   memoryRetrieval?: any; // MemoryRetrievalService (para tool search_memory)
+  embeddingService?: any; // EmbeddingService (para tool save_memory)
   tenantId?: string; // Tenant atual (para search_memory escopar por tenant)
 }
 

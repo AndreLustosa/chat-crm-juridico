@@ -180,6 +180,9 @@ export class SettingsService {
     const adminBotEnabled = adminBotEnabledRaw !== 'false';
     const cooldownRaw = await this.get('AI_COOLDOWN_SECONDS');
     const cooldownSeconds = cooldownRaw ? parseInt(cooldownRaw, 10) : 8;
+    // Modelos da memoria — admin escolhe via UI Ajustes IA
+    const memoryProfileModel = (await this.get('MEMORY_PROFILE_MODEL')) || 'gpt-4.1-mini';
+    const memoryFactsModel = (await this.get('MEMORY_FACTS_MODEL')) || 'gpt-4.1';
     return {
       apiKey: apiKey || process.env.OPENAI_API_KEY || null,
       isConfigured: !!(apiKey || process.env.OPENAI_API_KEY),
@@ -193,6 +196,8 @@ export class SettingsService {
       djenNotifyTemplateIsCustom: !!djenNotifyTemplate,
       adminBotEnabled,
       cooldownSeconds: isNaN(cooldownSeconds) ? 8 : cooldownSeconds,
+      memoryProfileModel,
+      memoryFactsModel,
     };
   }
 

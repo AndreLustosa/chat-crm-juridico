@@ -62,6 +62,7 @@ import { buildHandlerMap } from './tool-handlers';
 import { createLLMClient, calculateCost, type LLMProvider } from './llm-client';
 import { computeBusinessHoursInfo } from '@crm/shared';
 import { MemoryRetrievalService } from '../memory/memory-retrieval.service';
+import { EmbeddingService } from '../memory/embedding.service';
 
 // Modelos com suporte a visão (imagens)
 const VISION_MODELS = ['gpt-4o', 'gpt-4.1', 'gpt-5', 'claude-'];
@@ -100,6 +101,10 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     // o proprio processor processa (deferral pattern).
     @InjectQueue('ai-jobs') private aiQueue: Queue,
     private memoryRetrieval: MemoryRetrievalService,
+    // Fila de memoria pra disparar extracao+consolidacao em runtime apos
+    // IA responder. Memoria fresca em ~30s (vs 24h do cron noturno).
+    @InjectQueue('memory-jobs') private memoryQueue: Queue,
+    private embedding: EmbeddingService,
   ) {
     super();
   }
@@ -1070,22 +1075,41 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     }
 
     try {
-      // 2. Buscar conversa + lead + últimas 20 mensagens com mídia incluída
-      // orderBy desc para pegar as mais RECENTES; invertemos abaixo para ordem cronológica
-      const convo = await this.prisma.conversation.findUnique({
+      // 2. Buscar conversa + lead + ultimas 150 mensagens CROSS-CONVERSATION
+      //
+      // Antes: messages limitadas a esta conversation. Lead que voltou em
+      // nova Conversation perdia historico anterior.
+      //
+      // Agora: busca via lead_id em TODAS as conversations dele, ordenado
+      // cronologicamente. Cobre o caso "lead voltou apos arquivamento" e
+      // tambem da continuidade quando ha multiplas conversations abertas
+      // (raro, mas acontece em escritorio que arquivou e abriu de novo).
+      const convoMeta = await this.prisma.conversation.findUnique({
         where: { id: conversation_id },
         include: {
           lead: true,
-          messages: {
-            orderBy: { created_at: 'desc' },
-            take: 80,
-            include: { media: true },
-          },
         },
       });
 
-      // 3. Verificar ai_mode ativo
-      if (!convo) return;
+      if (!convoMeta) {
+        this.logger.warn(`[AI] Conversa ${conversation_id} nao encontrada`);
+        return;
+      }
+
+      // 150 msgs cross-conversation — janela maior pra conversa fluida
+      // (pesquisa indica que 80 msgs era insuficiente em conversas longas).
+      // ~5-7K tokens, viavel pra GPT-4.1 (1M ctx) e mini (128k ctx).
+      const crossConvMessages = await this.prisma.message.findMany({
+        where: { conversation: { lead_id: convoMeta.lead_id } },
+        orderBy: { created_at: 'desc' },
+        take: 150,
+        include: { media: true },
+      });
+
+      // Anexa as messages no convo pra resto do codigo seguir igual.
+      // O resto do codigo (anti-stale, autoTranscribe, build prompt) usa
+      // convo.messages — mantemos a forma esperada.
+      const convo = Object.assign(convoMeta, { messages: crossConvMessages });
 
       // 3a. Quando ai_mode=false (operador humano atende), nada a fazer aqui.
       //
@@ -1720,7 +1744,11 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
                 type: 'episodic',
               },
               orderBy: { created_at: 'desc' },
-              take: 5,
+              // 10 episodios (era 5) — mais contexto recente. Fatos
+              // semanticos vem via leadProfile.summary; episodicas sao
+              // acontecimentos especificos (ex: "ele disse que vai
+              // pensar e responder amanha").
+              take: 10,
               select: { content: true },
             }),
           ]);
@@ -2516,6 +2544,31 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         where: { id: convo.id },
         data: { last_message_at: new Date() },
       });
+
+      // 18a. Self-update da memoria — apos enviar a resposta, enfileira job
+      // que regenera o LeadProfile (summary + facts) usando a conversa
+      // atualizada. Fire-and-forget, nao bloqueia nada.
+      //
+      // Diferente do cron noturno: roda IMEDIATAMENTE (delay 0). Memoria
+      // disponivel pra proxima conversa em ~5-10s (tempo do LLM consolidar).
+      //
+      // Extracao de Memory entries fica do cron noturno — aqui consolidamos
+      // o LeadProfile direto pegando do que ja tem + msgs novas.
+      if (convo.lead_id && convo.tenant_id) {
+        try {
+          await this.memoryQueue.add(
+            'consolidate-profile',
+            { tenant_id: convo.tenant_id, lead_id: convo.lead_id },
+            {
+              jobId: `selfup-${convo.lead_id}`, // dedup: rajadas viram 1 job
+              removeOnComplete: true,
+              attempts: 2,
+            },
+          );
+        } catch (e: any) {
+          this.logger.warn(`[AI] Falha ao enfileirar self-update: ${e.message}`);
+        }
+      }
 
       this.logger.log(
         `[AI] Resposta enviada para ${convo.lead.phone} (model=${model}, skill=${skill?.name || 'NULL — badge não aparecerá'}, skill_id=${skill?.id || 'null'}, evoId=${evolutionMsgId})`,

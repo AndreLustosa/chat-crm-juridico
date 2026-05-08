@@ -3,7 +3,7 @@ import { Job } from 'bullmq';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-import { PROFILE_CONSOLIDATION_PROMPT } from './memory-prompts';
+import { PROFILE_CONSOLIDATION_PROMPT, NARRATIVE_FACTS_PROMPT } from './memory-prompts';
 
 /**
  * ProfileConsolidationProcessor
@@ -223,10 +223,12 @@ export class ProfileConsolidationProcessor {
   private async callLLM(payload: any): Promise<{ summary: string; facts: any } | null> {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) return null;
+    // Modelo configuravel via Ajustes IA. Default gpt-4.1-mini (mais barato,
+    // suficiente pra consolidar prosa). Antes era gpt-4.1.
     const modelRow = await this.prisma.globalSetting.findUnique({
-      where: { key: 'MEMORY_EXTRACTION_MODEL' },
+      where: { key: 'MEMORY_PROFILE_MODEL' },
     });
-    const model = modelRow?.value || 'gpt-4.1';
+    const model = modelRow?.value || 'gpt-4.1-mini';
 
     const client = new OpenAI({ apiKey });
     try {
@@ -247,6 +249,97 @@ export class ProfileConsolidationProcessor {
       return { summary: parsed.summary, facts: parsed.facts ?? {} };
     } catch (e: any) {
       this.logger.error(`[ProfileConsolidation] LLM erro: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * generateNarrativeFacts — sob demanda, gera "Dos Fatos" estilo peticao.
+   *
+   * Diferente de consolidateProfile (summary geral), aqui geramos uma
+   * NARRATIVA cronologica numerada que pode ser usada direto numa peticao
+   * inicial. Caro mas vale a pena: economiza horas do advogado.
+   *
+   * Modelo configurado em MEMORY_FACTS_MODEL (default gpt-4.1 — qualidade
+   * importa aqui).
+   */
+  async generateNarrativeFacts(tenantId: string, leadId: string): Promise<{ narrative: string; key_dates: any[] } | null> {
+    const apiKey = await this.settings.getOpenAiKey();
+    if (!apiKey) return null;
+
+    const [memories, lead, profile] = await Promise.all([
+      this.prisma.memory.findMany({
+        where: { tenant_id: tenantId, scope: 'lead', scope_id: leadId, status: 'active' },
+        orderBy: { created_at: 'asc' }, // cronologico
+      }),
+      this.prisma.lead.findUnique({
+        where: { id: leadId },
+        include: {
+          legal_cases: { where: { archived: false } },
+          conversations: {
+            include: {
+              messages: {
+                orderBy: { created_at: 'asc' },
+                select: { text: true, direction: true, created_at: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.leadProfile.findUnique({ where: { lead_id: leadId } }),
+    ]);
+
+    if (!lead) return null;
+
+    const allMessages = lead.conversations.flatMap((c: any) =>
+      c.messages.map((m: any) => ({
+        from: m.direction === 'in' ? 'CLIENTE' : 'ESCRITORIO',
+        text: (m.text ?? '').slice(0, 500),
+        date: m.created_at,
+      })),
+    ).sort((a: any, b: any) => a.date.getTime() - b.date.getTime());
+
+    const payload = {
+      lead_data: {
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        cpf: (lead as any).cpf || null,
+      },
+      cases: lead.legal_cases,
+      summary: profile?.summary || null,
+      memories: memories.map((m: any) => ({
+        content: m.content,
+        type: m.type,
+        date: m.created_at,
+      })),
+      conversation_chronological: allMessages,
+    };
+
+    const modelRow = await this.prisma.globalSetting.findUnique({
+      where: { key: 'MEMORY_FACTS_MODEL' },
+    });
+    const model = modelRow?.value || 'gpt-4.1';
+
+    const client = new OpenAI({ apiKey });
+    try {
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: NARRATIVE_FACTS_PROMPT },
+          { role: 'user', content: JSON.stringify(payload) },
+        ],
+        response_format: { type: 'json_object' },
+        max_completion_tokens: 4096,
+        temperature: 0.2,
+      });
+      const content = response.choices[0]?.message?.content;
+      if (!content) return null;
+      const parsed = JSON.parse(content);
+      if (!parsed.narrative || typeof parsed.narrative !== 'string') return null;
+      return { narrative: parsed.narrative, key_dates: parsed.key_dates ?? [] };
+    } catch (e: any) {
+      this.logger.error(`[NarrativeFacts] LLM erro: ${e.message}`);
       return null;
     }
   }

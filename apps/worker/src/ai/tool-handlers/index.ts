@@ -7,6 +7,7 @@ import { BookAppointmentHandler } from './book-appointment';
 import { CheckAvailabilityHandler } from './check-availability';
 import { SearchReferencesHandler } from './search-references';
 import { SearchMemoryHandler } from './search-memory';
+import { SaveMemoryHandler } from './save-memory';
 import { GetCaseMovementsHandler } from './get-case-movements';
 import { GetLeadInfoHandler } from './get-lead-info';
 import { AbrirCasoViabilidadeHandler } from './abrir-caso-viabilidade';
@@ -27,6 +28,7 @@ const BUILTIN_HANDLERS: ToolHandler[] = [
   new CheckAvailabilityHandler(),
   new SearchReferencesHandler(),
   new SearchMemoryHandler(),
+  new SaveMemoryHandler(),
   new GetCaseMovementsHandler(),
   new GetLeadInfoHandler(),
   new AbrirCasoViabilidadeHandler(),
@@ -48,6 +50,7 @@ const UNIVERSAL_TOOLS: Set<string> = new Set([
   'get_case_movements',
   'get_lead_info',
   'search_memory', // ja existia, elevado a universal
+  'save_memory', // IA salva fato/preferencia em runtime (memoria ativa)
   'abrir_caso_viabilidade', // so chamada quando lead.is_client=true (handler valida)
   'book_appointment', // agenda consulta direto via IA quando cliente prefere
   'send_portal_link', // oferece self-service quando cliente quer agendar sozinho

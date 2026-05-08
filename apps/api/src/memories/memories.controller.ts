@@ -14,6 +14,7 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { MemoriesService } from './memories.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
@@ -22,6 +23,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class MemoriesController {
   constructor(
     private readonly memoriesService: MemoriesService,
+    private readonly prisma: PrismaService,
     @InjectQueue('memory-jobs') private readonly memoryQueue: Queue,
   ) {}
 
@@ -168,6 +170,57 @@ export class MemoriesController {
     return { success: true, job_id: jobId };
   }
 
+  /**
+   * POST /memories/backfill-missing-profiles
+   *
+   * Enfileira `consolidate-profile` pra TODOS os leads ativos do tenant
+   * que ainda nao tem LeadProfile.summary. Cobre os 191 leads orfaos do
+   * diagnostico 2026-05-08.
+   *
+   * Idempotente: se um lead ja tem profile, o job apenas regenera.
+   * Custo estimado: ~$0.02-0.05 por lead × N leads.
+   */
+  @Post('backfill-missing-profiles')
+  @Roles('ADMIN')
+  async backfillMissingProfiles(@Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+
+    // Leads ativos (last_message_at < 60 dias) sem LeadProfile.summary
+    const leadsWithoutProfile = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT l.id FROM "Lead" l
+      WHERE l.tenant_id = ${tenantId}
+        AND l.last_message_at > NOW() - INTERVAL '60 days'
+        AND NOT EXISTS (
+          SELECT 1 FROM "LeadProfile" lp
+          WHERE lp.lead_id = l.id AND length(coalesce(lp.summary, '')) > 50
+        )
+      ORDER BY l.last_message_at DESC
+    `;
+
+    let enqueued = 0;
+    for (const lead of leadsWithoutProfile) {
+      try {
+        await this.memoryQueue.add(
+          'consolidate-profile',
+          { tenant_id: tenantId, lead_id: lead.id },
+          {
+            jobId: `backfill-${tenantId}-${lead.id}`,
+            // Espalha em ate 30 minutos pra nao saturar API
+            delay: Math.floor(Math.random() * 30 * 60 * 1000),
+            removeOnComplete: true,
+            attempts: 2,
+          },
+        );
+        enqueued++;
+      } catch {
+        // Ignora — proximo run pega
+      }
+    }
+
+    return { success: true, total_leads_without_profile: leadsWithoutProfile.length, enqueued };
+  }
+
   // ─── Lead ────────────────────────────────────────────────
 
   @Get('lead/:leadId')
@@ -201,6 +254,31 @@ export class MemoriesController {
     const jobId = `consolidate-${tenantId}-${leadId}-${Date.now()}`;
     await this.memoryQueue.add(
       'consolidate-profile',
+      { tenant_id: tenantId, lead_id: leadId },
+      { jobId, removeOnComplete: true, attempts: 2 },
+    );
+    return { success: true, job_id: jobId };
+  }
+
+  /**
+   * POST /memories/lead/:leadId/generate-facts
+   *
+   * Gera narrative_facts (estilo "Dos Fatos" da peticao inicial) sob demanda.
+   * Caro (LLM gpt-4.1 default) — usado em 2 momentos: contratacao do cliente
+   * e troca de atendente.
+   *
+   * Resposta: 200 OK com { job_id }. O job processa async; advogado
+   * recarrega o painel do lead em ~10-20s pra ver o resultado em
+   * LeadProfile.facts.narrative + LeadProfile.facts.key_dates.
+   */
+  @Post('lead/:leadId/generate-facts')
+  @Roles('ADMIN', 'ADVOGADO')
+  async generateFacts(@Request() req: any, @Param('leadId') leadId: string) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    const jobId = `gen-facts-${tenantId}-${leadId}-${Date.now()}`;
+    await this.memoryQueue.add(
+      'generate-narrative-facts',
       { tenant_id: tenantId, lead_id: leadId },
       { jobId, removeOnComplete: true, attempts: 2 },
     );

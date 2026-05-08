@@ -16,6 +16,7 @@ const defaultJobOptions = {
   imports: [
     BullModule.registerQueue({ name: 'ai-jobs', defaultJobOptions }),
     BullModule.registerQueue({ name: 'calendar-reminders', defaultJobOptions }),
+    BullModule.registerQueue({ name: 'memory-jobs', defaultJobOptions }),
     MemoryModule,
   ],
   providers: [AiProcessor, AiReactivationCronService, AudioRetranscribeCronService],

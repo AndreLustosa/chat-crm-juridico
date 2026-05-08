@@ -25,6 +25,7 @@ import { MessagesModule } from '../messages/messages.module';
     MessagesModule,
     BullModule.registerQueue({ name: 'media-jobs' }),
     BullModule.registerQueue({ name: 'ai-jobs' }),
+    BullModule.registerQueue({ name: 'memory-jobs' }),
   ],
   controllers: [EvolutionController, EvolutionAdminController],
   providers: [EvolutionService, HmacGuard],

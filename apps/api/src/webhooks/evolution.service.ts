@@ -94,6 +94,9 @@ export class EvolutionService implements OnApplicationBootstrap {
     private inboxesService: InboxesService,
     @InjectQueue('media-jobs') private mediaQueue: Queue,
     @InjectQueue('ai-jobs') private aiQueue: Queue,
+    // memoryQueue: trigger self-update do LeadProfile apos cada mensagem
+    // (qualquer direcao). Memoria fresh em ~5-10s sem depender do cron 0h.
+    @InjectQueue('memory-jobs') private memoryQueue: Queue,
     private whatsappService: WhatsappService,
     private moduleRef: ModuleRef,
     private adminBotService: AdminBotService,
@@ -689,6 +692,33 @@ export class EvolutionService implements OnApplicationBootstrap {
           { conversation_id: conv.id, lead_id: lead.id },
           { jobId: memJobId, delay: 15_000, removeOnComplete: true, removeOnFail: false },
         );
+      }
+
+      // 5c. Self-update do LeadProfile — qualquer mensagem (cliente, IA ou
+      // operador humano) dispara consolidacao debounced de 30s. Memoria
+      // fresh sem depender do cron 0h.
+      //
+      // jobId fixo por lead = dedup natural. Rajada de N msgs vira 1
+      // consolidacao 30s apos a ultima.
+      //
+      // Bug 2026-05-08 corrigido: 53% dos leads ativos sem LeadProfile
+      // porque cron noturno so consolidava leads que ganharam Memory
+      // entries no dia. Agora qualquer mensagem dispara update.
+      if (lead.tenant_id) {
+        try {
+          await this.memoryQueue.add(
+            'consolidate-profile',
+            { tenant_id: lead.tenant_id, lead_id: lead.id },
+            {
+              jobId: `selfup-${lead.id}`,
+              delay: 30_000, // 30s debounce — agrupa rajadas
+              removeOnComplete: true,
+              attempts: 2,
+            },
+          );
+        } catch (e: any) {
+          this.logger.warn(`[AI] Falha ao enfileirar self-update do profile: ${e.message}`);
+        }
       }
     }
   }

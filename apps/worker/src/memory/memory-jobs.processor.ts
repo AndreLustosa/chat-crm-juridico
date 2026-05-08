@@ -48,6 +48,12 @@ export class MemoryJobsProcessor extends WorkerHost {
       case 'consolidate-profile':
         return this.profile.consolidateSingle(job);
 
+      // Geracao SOB DEMANDA da narrative_facts (estilo "Dos Fatos" da
+      // peticao inicial). Disparado pelo botao "Gerar Fatos" no Painel
+      // do Lead. Usa MEMORY_FACTS_MODEL (default gpt-4.1).
+      case 'generate-narrative-facts':
+        return this.generateNarrativeFactsHandler(job);
+
       case 'consolidate-org-profile':
         return this.orgProfile.consolidateSingle(job);
 
@@ -58,5 +64,43 @@ export class MemoryJobsProcessor extends WorkerHost {
         this.logger.warn(`[MemoryJobs] Job desconhecido: ${job.name}`);
         return null;
     }
+  }
+
+  private async generateNarrativeFactsHandler(job: Job): Promise<{ ok: boolean; chars: number }> {
+    const { tenant_id, lead_id } = job.data as { tenant_id: string; lead_id: string };
+    const result = await this.profile.generateNarrativeFacts(tenant_id, lead_id);
+    if (!result) {
+      this.logger.warn(`[MemoryJobs] generateNarrativeFacts retornou null lead=${lead_id}`);
+      return { ok: false, chars: 0 };
+    }
+    // Persiste em LeadProfile.facts.narrative + facts.key_dates
+    const existing = await this.profile['prisma'].leadProfile.findUnique({
+      where: { lead_id },
+      select: { facts: true },
+    });
+    const facts = (existing?.facts as any) || {};
+    facts.narrative = result.narrative;
+    facts.key_dates = result.key_dates;
+    facts.narrative_generated_at = new Date().toISOString();
+
+    await this.profile['prisma'].leadProfile.upsert({
+      where: { lead_id },
+      create: {
+        tenant_id,
+        lead_id,
+        summary: '',
+        facts,
+        message_count: 0,
+        version: 1,
+      },
+      update: {
+        facts,
+        version: { increment: 1 },
+        generated_at: new Date(),
+      },
+    });
+
+    this.logger.log(`[MemoryJobs] narrative_facts gerada lead=${lead_id} (${result.narrative.length} chars, ${result.key_dates.length} datas)`);
+    return { ok: true, chars: result.narrative.length };
   }
 }

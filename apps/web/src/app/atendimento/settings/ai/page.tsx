@@ -185,6 +185,8 @@ export default function AiSettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [adminKey, setAdminKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
+  const [memoryProfileModel, setMemoryProfileModel] = useState('gpt-4.1-mini');
+  const [memoryFactsModel, setMemoryFactsModel] = useState('gpt-4.1');
   const [djenModel, setDjenModel] = useState('gpt-4o-mini');
   const [djenPrompt, setDjenPrompt] = useState(DEFAULT_DJEN_PROMPT);
   const [djenPromptIsCustom, setDjenPromptIsCustom] = useState(false);
@@ -246,6 +248,8 @@ export default function AiSettingsPage() {
       setIsAdminKeyConfigured(configRes.data.isAdminKeyConfigured ?? false);
       setIsAnthropicKeyConfigured(configRes.data.isAnthropicKeyConfigured ?? false);
       setDefaultModel(configRes.data.defaultModel || 'gpt-4o-mini');
+      setMemoryProfileModel(configRes.data.memoryProfileModel || 'gpt-4.1-mini');
+      setMemoryFactsModel(configRes.data.memoryFactsModel || 'gpt-4.1');
       setDjenModel(configRes.data.djenModel || 'gpt-4o-mini');
       setDjenPrompt(configRes.data.djenPrompt || DEFAULT_DJEN_PROMPT);
       setDjenPromptIsCustom(configRes.data.djenPromptIsCustom ?? false);
@@ -274,7 +278,7 @@ export default function AiSettingsPage() {
       // Isso garante que atualizações futuras do default no código sejam aplicadas automaticamente
       const effectiveDjenPrompt = djenPrompt === DEFAULT_DJEN_PROMPT ? '' : djenPrompt;
       const effectiveDjenNotifyTemplate = djenNotifyTemplate === DEFAULT_DJEN_NOTIFY_TEMPLATE ? '' : djenNotifyTemplate;
-      const payload: any = { defaultModel, djenModel, djenPrompt: effectiveDjenPrompt, djenNotifyTemplate: effectiveDjenNotifyTemplate, adminBotEnabled, cooldownSeconds };
+      const payload: any = { defaultModel, djenModel, djenPrompt: effectiveDjenPrompt, djenNotifyTemplate: effectiveDjenNotifyTemplate, adminBotEnabled, cooldownSeconds, memoryProfileModel, memoryFactsModel };
       if (apiKey.trim())       payload.apiKey         = apiKey.trim();
       if (adminKey.trim())     payload.adminKey       = adminKey.trim();
       if (anthropicKey.trim()) payload.anthropicApiKey = anthropicKey.trim();
@@ -643,6 +647,57 @@ export default function AiSettingsPage() {
                 <p className="text-[11px] text-muted-foreground">
                   Tempo mínimo entre respostas da IA na mesma conversa. Evita resposta duplicada quando o cliente envia várias mensagens em sequência rápida.
                 </p>
+              </div>
+
+              {/* Modelos da Memória */}
+              <div className="space-y-3 pt-2 border-t border-border/50">
+                <div>
+                  <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-1">Memória da IA — Modelos</h4>
+                  <p className="text-[11px] text-muted-foreground mb-2">
+                    Modelos usados pra consolidar memória do lead após cada conversa. Mais barato (mini) é suficiente pra resumo; modelo maior (4.1) recomendado pra fatos da petição.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">
+                    Modelo do Resumo (perfil + pendências)
+                  </label>
+                  <select
+                    value={memoryProfileModel}
+                    onChange={(e) => setMemoryProfileModel(e.target.value)}
+                    className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+                  >
+                    <option value="gpt-4.1-mini">GPT-4.1 Mini (recomendado — rápido + barato)</option>
+                    <option value="gpt-4.1">GPT-4.1 (qualidade máxima — 13× mais caro)</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                    <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Roda automaticamente após cada mensagem (debounce 30s). Atualiza o perfil consolidado e pendências.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wide">
+                    Modelo dos Fatos (narrativa pra petição)
+                  </label>
+                  <select
+                    value={memoryFactsModel}
+                    onChange={(e) => setMemoryFactsModel(e.target.value)}
+                    className="w-full bg-muted/50 border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
+                  >
+                    <option value="gpt-4.1">GPT-4.1 (recomendado — qualidade jurídica)</option>
+                    <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+                    <option value="claude-opus-4-1">Claude Opus 4.1</option>
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Roda apenas quando você clica em "Gerar Fatos" no Painel do Lead. Gera narrativa cronológica estilo "Dos Fatos" da petição inicial.
+                  </p>
+                </div>
               </div>
 
               {/* ── API Key (regular) ── */}
