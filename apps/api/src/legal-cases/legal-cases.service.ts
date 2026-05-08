@@ -652,6 +652,8 @@ export class LegalCasesService {
     const caseEvent = await this.prisma.caseEvent.create({
       data: {
         case_id: caseId,
+        // Bug fix 2026-05-08: passa tenant_id direto pra defesa multi-tenant
+        tenant_id: tenantId,
         type: data.type,
         title: data.title,
         description: data.description,
@@ -790,6 +792,8 @@ export class LegalCasesService {
     // Persistir com dedup via movement_hash
     const movementRows = movements.map((m: any) => ({
       case_id: caseId,
+      // Bug fix 2026-05-08: tenant_id direto
+      tenant_id: legalCase.tenant_id,
       type: 'MOVIMENTACAO',
       source: 'ESAJ',
       title: m.description.slice(0, 120),

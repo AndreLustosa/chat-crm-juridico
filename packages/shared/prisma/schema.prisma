@@ -734,11 +734,20 @@ model LegalCase {
   @@index([stage])
   @@index([in_tracking])
   @@index([tenant_id])
+  // Bug fix 2026-05-08: previne race em criacao concorrente de mesmo
+  // CNJ pelo mesmo tenant. NULL eh permitido (caso novo sem numero
+  // ainda — VIABILIDADE pre-protocolo).
+  @@unique([tenant_id, case_number], name: "tenant_case_number_unique")
 }
 
 model CaseEvent {
   id            String    @id @default(uuid())
   case_id       String
+  // Bug fix 2026-05-08: tenant_id direto pra defesa multi-tenant.
+  // Antes herdava via case_id → legal_case (validavel mas nao filtravel
+  // em queries diretas como deleteEvent). NULLABLE inicial pra retro-compat
+  // — backfill via legal_case.tenant_id em migration.
+  tenant_id     String?
   type          String // MOVIMENTACAO, PUBLICACAO, MANUAL, etc.
   title         String
   description   String?
@@ -748,7 +757,10 @@ model CaseEvent {
   created_at    DateTime  @default(now())
 
   // Campos para sync ESAJ — dedup e notificação
-  movement_hash      String?   @unique // SHA256(case_number|date|description)
+  // Bug fix 2026-05-08: movement_hash agora UNIQUE COMPOSTO com case_id
+  // (era global). Antes, tenant B nao conseguia importar processo se
+  // tenant A ja tinha mesmo CNJ+data+desc — colisao silenciosa.
+  movement_hash      String?
   notified_at        DateTime? // quando WhatsApp foi enviado ao advogado
   client_notified_at DateTime? // quando WhatsApp foi enviado ao cliente
   client_explanation String? // explicação leiga gerada pela IA on-demand (cache)
@@ -759,6 +771,8 @@ model CaseEvent {
   @@index([case_id, created_at])
   @@index([source, notified_at])
   @@index([source, client_notified_at])
+  @@index([tenant_id])
+  @@unique([case_id, movement_hash], name: "case_movement_hash_unique")
 }
 
 model TaskComment {
@@ -806,6 +820,11 @@ model FichaTrabalhista {
 
 model DjenPublication {
   id                    String     @id @default(uuid())
+  // Bug fix 2026-05-08: tenant_id obrigatorio pra defesa multi-tenant.
+  // Antes era global — escritorio A via DJEN do escritorio B. NULLABLE
+  // inicial pra retro-compat — backfill via DjenLawyerOab match em
+  // migration. Apos backfill, planeja-se SET NOT NULL em batch.
+  tenant_id             String?
   comunicacao_id        Int        @unique
   data_disponibilizacao DateTime
   numero_processo       String
@@ -833,16 +852,21 @@ model DjenPublication {
   @@index([legal_case_id])
   @@index([viewed_at])
   @@index([archived])
+  @@index([tenant_id])
 }
 
 model DjenIgnoredProcess {
   id              String   @id @default(uuid())
-  numero_processo String   @unique
+  // Bug fix 2026-05-08: era @unique global — tenant A renunciar processo X
+  // bloqueava tenant B de manipular ignored pro mesmo X. Agora composto
+  // [tenant_id, numero_processo].
+  numero_processo String
   tenant_id       String
   reason          String?
   created_at      DateTime @default(now())
   tenant          Tenant?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
+  @@unique([tenant_id, numero_processo], name: "tenant_numero_processo_unique")
   @@index([tenant_id])
 }
 

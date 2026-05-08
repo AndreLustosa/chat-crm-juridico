@@ -339,20 +339,20 @@ export class CourtScraperService {
       throw new BadRequestException('Número de processo inválido (20 dígitos esperados)');
     }
 
-    // Formato CNJ pra guardar (DjenIgnoredProcess.numero_processo eh @unique
-    // global — guardamos digits-only pra evitar duplicatas com formatos
-    // diferentes)
+    // Formato CNJ pra guardar (DjenIgnoredProcess.numero_processo agora
+    // unique COMPOSTO com tenant_id — guardamos digits-only pra evitar
+    // duplicatas com formatos diferentes)
     const normalized = digits;
+    const effTenantId = tenantOrDefault(tenantId);
 
     const ignored = await this.prisma.djenIgnoredProcess.upsert({
-      where: { numero_processo: normalized },
+      where: { tenant_numero_processo_unique: { tenant_id: effTenantId, numero_processo: normalized } },
       update: {
         ...(reason ? { reason } : {}),
-        ...(tenantId ? { tenant_id: tenantId } : {}),
       },
       create: {
         numero_processo: normalized,
-        tenant_id: tenantOrDefault(tenantId),
+        tenant_id: effTenantId,
         reason: reason || null,
       },
       select: { id: true },
@@ -615,9 +615,11 @@ export class CourtScraperService {
         if (data.movements && data.movements.length > 0) {
           const movementRows = data.movements.map((m) => ({
             case_id: legalCase.id,
+            // Bug fix 2026-05-08: tenant_id direto pra defesa multi-tenant
+            tenant_id: tenantOrDefault(tenantId),
             type: 'MOVIMENTACAO',
             source: 'ESAJ',
-            title: m.description.slice(0, 120), // primeiros 120 chars como titulo
+            title: m.description.slice(0, 120),
             description: m.description,
             event_date: parseEsajDate(m.date),
             movement_hash: makeMovementHash(data.case_number, m.date, m.description),

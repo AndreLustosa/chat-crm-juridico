@@ -264,6 +264,8 @@ export class EsajSyncService {
               await this.prisma.caseEvent.create({
                 data: {
                   case_id: legalCase.id,
+                  // Bug fix 2026-05-08: tenant_id direto pra defesa multi-tenant
+                  tenant_id: legalCase.tenant_id,
                   type: 'MOVIMENTACAO',
                   title: mov.description.slice(0, 200),
                   description: mov.description,

@@ -457,10 +457,16 @@ export class DjenService {
         if (legalCaseId) {
           const movTitle = [tipoComunicacao, assunto].filter(Boolean).join(' — ') || 'Publicação DJEN';
           const movDescription = conteudo || movTitle;
+          // Busca tenant_id do legalCase pra propagar pro CaseEvent
+          const lcTenant = await this.prisma.legalCase.findUnique({
+            where: { id: legalCaseId },
+            select: { tenant_id: true },
+          });
           try {
             await this.prisma.caseEvent.create({
               data: {
                 case_id: legalCaseId,
+                tenant_id: lcTenant?.tenant_id || null,
                 type: 'MOVIMENTACAO',
                 title: movTitle.slice(0, 200),
                 description: movDescription,
@@ -753,11 +759,13 @@ export class DjenService {
         continue;
       }
 
-      // Verifica DjenIgnoredProcess
-      const isIgnored = await this.prisma.djenIgnoredProcess.findUnique({
-        where: { numero_processo: pub.numero_processo },
+      // Verifica DjenIgnoredProcess (composto [tenant_id, numero_processo]).
+      // Filtra pelo tenant do legal_case pra nao bloquear publicacoes
+      // de outros escritorios que nao ignoraram o mesmo numero.
+      const isIgnored = legalCase.tenant_id ? await this.prisma.djenIgnoredProcess.findFirst({
+        where: { numero_processo: pub.numero_processo, tenant_id: legalCase.tenant_id },
         select: { id: true },
-      });
+      }) : null;
       if (isIgnored) {
         await this.prisma.djenPublication.update({
           where: { id: pub.id },
@@ -810,10 +818,28 @@ export class DjenService {
     return reconciled;
   }
 
-  async findRecent(days = 7) {
+  // ─── Helper de filtro multi-tenant ──────────────────────────────────
+  // Bug fix 2026-05-08: DjenPublication ganhou tenant_id direto. Use
+  // este helper em TODAS as queries pra evitar leak entre tenants.
+  // Ate completar backfill, aceita pubs com tenant_id=NULL (legadas) +
+  // pubs do tenant atual via OR.
+  private tenantWhere(tenantId?: string): any {
+    if (!tenantId) return {};
+    return {
+      OR: [
+        { tenant_id: tenantId },
+        { tenant_id: null }, // legadas pre-backfill — remover apos NOT NULL
+      ],
+    };
+  }
+
+  async findRecent(days = 7, tenantId?: string) {
     const since = subtractDays(new Date(), days);
     return this.prisma.djenPublication.findMany({
-      where: { data_disponibilizacao: { gte: since } },
+      where: {
+        data_disponibilizacao: { gte: since },
+        ...this.tenantWhere(tenantId),
+      },
       include: {
         legal_case: {
           select: {
@@ -836,14 +862,18 @@ export class DjenService {
     archived?: string;
     page?: string;
     limit?: string;
+    tenantId?: string;
   }) {
     const days = opts.days ? parseInt(opts.days) : 30;
     const since = subtractDays(new Date(), days);
-    const page = opts.page ? parseInt(opts.page) : 1;
-    const limit = Math.min(opts.limit ? parseInt(opts.limit) : 50, 200);
+    const page = Math.max(1, opts.page ? parseInt(opts.page) : 1);
+    const limit = Math.min(Math.max(1, opts.limit ? parseInt(opts.limit) : 50), 200);
     const skip = (page - 1) * limit;
 
-    const where: any = { data_disponibilizacao: { gte: since } };
+    const where: any = {
+      data_disponibilizacao: { gte: since },
+      ...this.tenantWhere(opts.tenantId),
+    };
 
     if (opts.archived === 'true') {
       where.archived = true;
@@ -879,11 +909,12 @@ export class DjenService {
     ]);
 
     const unreadCount = await this.prisma.djenPublication.count({
-      where: { viewed_at: null, archived: false, data_disponibilizacao: { gte: since } },
+      where: { viewed_at: null, archived: false, data_disponibilizacao: { gte: since }, ...this.tenantWhere(opts.tenantId) },
     });
 
-    // Enriquecer com flag "ignored" para publicações de processos na lista de ignorados
+    // Enriquecer com flag "ignored" — ja filtrado por tenant
     const ignoredRows = await this.prisma.djenIgnoredProcess.findMany({
+      where: opts.tenantId ? { tenant_id: opts.tenantId } : {},
       select: { numero_processo: true },
     });
     const ignoredSet = new Set(ignoredRows.map((r: any) => r.numero_processo));
@@ -896,37 +927,57 @@ export class DjenService {
     return { items: enrichedItems, total, page, limit, unreadCount };
   }
 
-  async findByCase(legalCaseId: string) {
+  async findByCase(legalCaseId: string, tenantId?: string) {
     return this.prisma.djenPublication.findMany({
-      where: { legal_case_id: legalCaseId },
+      where: {
+        legal_case_id: legalCaseId,
+        // Cross-check: tambem filtra pelo tenant da publicacao
+        ...this.tenantWhere(tenantId),
+      },
       orderBy: { data_disponibilizacao: 'desc' },
     });
   }
 
-  async markViewed(id: string) {
-    return this.prisma.djenPublication.update({
-      where: { id },
+  async markViewed(id: string, tenantId?: string) {
+    // updateMany pra respeitar filtro tenant — se tenant errado, count=0
+    const result = await this.prisma.djenPublication.updateMany({
+      where: { id, ...this.tenantWhere(tenantId) },
       data: { viewed_at: new Date() },
     });
+    if (result.count === 0) {
+      throw new BadRequestException('Publicacao nao encontrada ou de outro tenant');
+    }
+    return this.prisma.djenPublication.findUnique({ where: { id } });
   }
 
-  async archive(id: string) {
-    return this.prisma.djenPublication.update({
-      where: { id },
+  async archive(id: string, tenantId?: string) {
+    const result = await this.prisma.djenPublication.updateMany({
+      where: { id, ...this.tenantWhere(tenantId) },
       data: { archived: true, viewed_at: new Date() },
     });
+    if (result.count === 0) {
+      throw new BadRequestException('Publicacao nao encontrada ou de outro tenant');
+    }
+    return this.prisma.djenPublication.findUnique({ where: { id } });
   }
 
-  async unarchive(id: string) {
-    return this.prisma.djenPublication.update({
-      where: { id },
+  async unarchive(id: string, tenantId?: string) {
+    const result = await this.prisma.djenPublication.updateMany({
+      where: { id, ...this.tenantWhere(tenantId) },
       data: { archived: false },
     });
+    if (result.count === 0) {
+      throw new BadRequestException('Publicacao nao encontrada ou de outro tenant');
+    }
+    return this.prisma.djenPublication.findUnique({ where: { id } });
   }
 
-  async markAllViewed() {
+  async markAllViewed(tenantId: string) {
+    if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
+    // Bug fix 2026-05-08: antes era updateMany SEM tenant — admin marcava
+    // tudo (de outros tenants) como visto. Agora obrigatorio.
     const result = await this.prisma.djenPublication.updateMany({
-      where: { viewed_at: null, archived: false },
+      where: { viewed_at: null, archived: false, ...this.tenantWhere(tenantId) },
       data: { viewed_at: new Date() },
     });
     return { updated: result.count };
@@ -1162,7 +1213,7 @@ export class DjenService {
     return legalCase;
   }
 
-  async analyzePublication(id: string, force = false): Promise<{
+  async analyzePublication(id: string, force = false, _tenantId?: string): Promise<{
     resumo: string;
     urgencia: 'URGENTE' | 'NORMAL' | 'BAIXA';
     tipo_acao: string;
@@ -2010,31 +2061,45 @@ ${pub.conteudo.slice(0, 6000)}`;
   // ─── Ignorar processo (auto-arquivar publicações futuras) ─────
 
   async ignoreProcess(numeroProcesso: string, tenantId?: string, reason?: string) {
+    // Bug fix 2026-05-08: upsert agora usa unique composto [tenant_id, numero_processo].
+    const effTenantId = tenantOrDefault(tenantId);
     const record = await this.prisma.djenIgnoredProcess.upsert({
-      where: { numero_processo: numeroProcesso },
+      where: { tenant_numero_processo_unique: { tenant_id: effTenantId, numero_processo: numeroProcesso } },
       update: { reason: reason || null },
       create: {
         numero_processo: numeroProcesso,
-        tenant_id: tenantOrDefault(tenantId),
+        tenant_id: effTenantId,
         reason: reason || null,
       },
     });
 
-    // Auto-arquivar publicações existentes desse número
+    // Auto-arquivar publicações desse número, restritas ao tenant
     const archived = await this.prisma.djenPublication.updateMany({
-      where: { numero_processo: numeroProcesso, archived: false },
+      where: {
+        numero_processo: numeroProcesso,
+        archived: false,
+        ...this.tenantWhere(tenantId),
+      },
       data: { archived: true, viewed_at: new Date() },
     });
 
-    this.logger.log(`[DJEN] Processo ${numeroProcesso} ignorado — ${archived.count} publicação(ões) arquivada(s)`);
+    this.logger.log(`[DJEN] Processo ${numeroProcesso} ignorado (tenant=${effTenantId}) — ${archived.count} publicação(ões) arquivada(s)`);
     return { ...record, archivedCount: archived.count };
   }
 
-  async unignoreProcess(numeroProcesso: string) {
-    await this.prisma.djenIgnoredProcess.delete({
-      where: { numero_processo: numeroProcesso },
-    }).catch(() => null); // Ignora se não existir
-    this.logger.log(`[DJEN] Processo ${numeroProcesso} removido da lista de ignorados`);
+  async unignoreProcess(numeroProcesso: string, tenantId?: string) {
+    // Bug fix 2026-05-08: agora composto [tenant_id, numero_processo].
+    // Sem tenantId = legacy fallback (tenta delete por numero apenas).
+    if (tenantId) {
+      await this.prisma.djenIgnoredProcess.delete({
+        where: { tenant_numero_processo_unique: { tenant_id: tenantId, numero_processo: numeroProcesso } },
+      }).catch(() => null);
+    } else {
+      await this.prisma.djenIgnoredProcess.deleteMany({
+        where: { numero_processo: numeroProcesso },
+      }).catch(() => null);
+    }
+    this.logger.log(`[DJEN] Processo ${numeroProcesso} removido da lista de ignorados (tenant=${tenantId})`);
     return { ok: true };
   }
 

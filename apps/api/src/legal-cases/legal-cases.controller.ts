@@ -66,7 +66,11 @@ export class LegalCasesController {
     return this.service.getWorkspaceData(id, req.user?.tenant_id);
   }
 
+  // Bug fix 2026-05-08: RBAC adicionado. Antes endpoint estava aberto
+  // a qualquer usuario do tenant — estagiario podia ler chat privado
+  // entre advogado e cliente.
   @Get(':id/communications')
+  @Roles('ADMIN', 'ADVOGADO')
   getCommunications(
     @Param('id') id: string,
     @Query('page') page?: string,
