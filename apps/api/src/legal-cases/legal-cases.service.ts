@@ -12,6 +12,7 @@ import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import { tenantOrDefault } from '../common/constants/tenant';
+import { BusinessDaysCalc } from '@crm/shared';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -428,8 +429,17 @@ export class LegalCasesService {
     });
     if (existing) return;
 
-    // Calcular data de vencimento (dias úteis)
-    const dueAt = this.addBusinessDays(new Date(), taskDef.dueDays);
+    // Calcular data de vencimento (dias úteis) — usa BusinessDaysCalc
+    // do @crm/shared que considera feriados nacionais + recesso CPC
+    // art. 220 + custom holidays do tenant. Bug fix 2026-05-08.
+    const customHolidays = tenantId
+      ? await this.prisma.holiday.findMany({
+          where: { tenant_id: tenantId },
+          select: { date: true, recurring_yearly: true },
+        })
+      : [];
+    const calc = new BusinessDaysCalc({ holidays: customHolidays });
+    const dueAt = calc.addBusinessDays(new Date(), taskDef.dueDays);
 
     await this.calendarService.create({
       type: 'TAREFA',
@@ -448,16 +458,10 @@ export class LegalCasesService {
     this.logger.log(`[LEGAL] Tarefa automática criada: "${taskDef.title}" para caso ${caseId} (prazo: ${taskDef.dueDays} dias úteis)`);
   }
 
-  private addBusinessDays(date: Date, days: number): Date {
-    const d = new Date(date);
-    let added = 0;
-    while (added < days) {
-      d.setDate(d.getDate() + 1);
-      const dow = d.getDay();
-      if (dow !== 0 && dow !== 6) added++;
-    }
-    return d;
-  }
+  // addBusinessDays REMOVIDO em 2026-05-08 — substituido por
+  // BusinessDaysCalc do @crm/shared que considera feriados nacionais,
+  // moveis (Carnaval, Corpus Christi), recesso CPC art. 220 e holidays
+  // customizados do tenant. A antiga so pulava sabado/domingo.
 
   // ─── CONCLUIR TAREFAS DO ESTÁGIO ──────────────────────────────
 

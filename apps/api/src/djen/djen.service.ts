@@ -10,6 +10,7 @@ import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
+import { BusinessDaysCalc } from '@crm/shared';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -49,16 +50,9 @@ function subtractDays(date: Date, days: number): Date {
   return d;
 }
 
-function addBusinessDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  let added = 0;
-  while (added < days) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) added++;
-  }
-  return d;
-}
+// addBusinessDays standalone REMOVIDO em 2026-05-08 — usar
+// BusinessDaysCalc do @crm/shared que considera feriados nacionais
+// + recesso CPC art. 220 + holidays do tenant.
 
 // ─── Classificação de publicações DJEN ─────────────────────────
 
@@ -520,7 +514,15 @@ export class DjenService {
                 continue;
               }
 
-              const dueAt = addBusinessDays(dataDisp, classification.dueDays);
+              // Bug fix 2026-05-08: BusinessDaysCalc considera feriados
+              // nacionais + recesso CPC + holidays do tenant. Antes pulava
+              // so sabado/domingo — perdia Carnaval, Corpus Christi etc.
+              const customHolidays = await this.prisma.holiday.findMany({
+                where: { tenant_id: legalCase.tenant_id },
+                select: { date: true, recurring_yearly: true },
+              });
+              const calc = new BusinessDaysCalc({ holidays: customHolidays });
+              const dueAt = calc.addBusinessDays(dataDisp, classification.dueDays);
               const task = await this.calendarService.create({
                 type: 'TAREFA',
                 title: taskTitle,
