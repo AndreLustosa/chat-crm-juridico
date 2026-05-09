@@ -99,6 +99,10 @@ REGRAS:
 - Seja factual. Nao invente. Use null para dados desconhecidos.
 - Se o perfil existente ja estiver bom, atualize apenas o que mudou.
 - Contradicoes: use a memoria mais recente.
+- IMPORTANTE: Se "memories" estiver vazio mas "recent_messages" tem
+  conteudo, use as MENSAGENS como fonte primaria pra montar o perfil.
+  Lead recem-cadastrado nao tem Memory entries ainda (cron noturno
+  ainda nao rodou) — extraia o que da pra extrair das conversas.
 - Se receber um "legacy_memory" (sistema antigo case_state em JSON), extraia
   as informacoes relevantes dele para compor o summary/facts — trate como
   mais uma fonte equivalente a Memory entries. A estrutura contem:

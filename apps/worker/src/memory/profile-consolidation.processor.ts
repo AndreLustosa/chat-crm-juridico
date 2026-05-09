@@ -88,7 +88,11 @@ export class ProfileConsolidationProcessor {
             include: {
               messages: {
                 orderBy: { created_at: 'desc' },
-                take: 5,
+                // Bug fix 2026-05-09: era take: 5 — insuficiente pra
+                // gerar profile de lead novo que ainda nao tem Memory
+                // entries (cron 0h ainda nao rodou). Subir pra 80 garante
+                // que o LLM tenha contexto da conversa pra trabalhar.
+                take: 80,
                 select: { text: true, direction: true, created_at: true },
               },
             },
@@ -135,8 +139,23 @@ export class ProfileConsolidationProcessor {
         })
       : [];
 
-    if (memories.length === 0 && !existing && courtMovements.length === 0) {
-      // Sem memorias, sem perfil e sem movimentacoes — nao ha o que consolidar
+    // Bug fix 2026-05-09: lead novo (Jose naelson e outros) tinha esse
+    // early return e nunca gerava profile — Memory entries so sao criadas
+    // pelo cron 0h, e lead recem-cadastrado conversa pela manha mas
+    // espera 12h+ pra ter perfil. Agora: se ha mensagens NA CONVERSA,
+    // tambem vale a chamada LLM (mesmo sem Memory entries ainda).
+    const totalMessages = lead.conversations.reduce(
+      (sum: number, c: any) => sum + (c.messages?.length || 0),
+      0,
+    );
+    if (
+      memories.length === 0 &&
+      !existing &&
+      courtMovements.length === 0 &&
+      totalMessages === 0
+    ) {
+      // Sem nada — lead realmente vazio (cadastrado mas nunca conversou)
+      this.logger.debug(`[ProfileConsolidation] Lead ${leadId} sem memorias/processos/mensagens — pulando`);
       return;
     }
 
