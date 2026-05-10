@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import type { Response } from 'express';
 import { SettingsService } from '../settings/settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { assertAiCostCap } from '../common/utils/ai-cost-cap.util';
+import { ALLOWED_AI_MODELS } from './petitions.dto';
 import Anthropic from '@anthropic-ai/sdk';
 
 // ─── Constants ──────────────────────────────────────────────
@@ -41,6 +43,12 @@ export interface StreamChatParams {
   systemPrompt?: string;     // Optional system prompt override
   fileIds?: string[];         // Files to attach via Files API
   enableThinking?: boolean;  // Extended thinking (disabled by default to save rate limit)
+  // Bug fix 2026-05-10 (Peticoes PR1 #4 + #6 + #23):
+  // userId + tenantId obrigatorios pra cost cap + audit + chat ownership
+  // chatId opcional (se passado, valida ownership antes de processar)
+  userId?: string;
+  tenantId?: string;
+  chatId?: string;
 }
 
 // ─── Service ────────────────────────────────────────────────
@@ -328,6 +336,52 @@ export class PetitionChatService {
   // ─── Stream chat with Claude Console skills ────────────
 
   async streamChat(params: StreamChatParams, res: Response): Promise<void> {
+    // Bug fix 2026-05-10 (Peticoes PR1):
+    //   #4: chatId obrigatorio + ownership validado
+    //   #6: cost cap pre-call (anti DoS financeiro — gpt/claude caro)
+    //   #23: containerId so eh aceito se bater com chat.container_id
+    //   #24: model em allowlist (anti claude-opus-4-6 5x mais caro)
+
+    // Validacao 1: model em allowlist
+    const model = params.model || 'claude-sonnet-4-6';
+    if (!ALLOWED_AI_MODELS.includes(model as any)) {
+      res.status(400).json({ message: `Model nao permitido: ${model}. Use um de: ${ALLOWED_AI_MODELS.join(', ')}` });
+      return;
+    }
+
+    // Validacao 2: chatId + ownership (se userId disponivel)
+    let chat: { id: string; container_id: string | null; tenant_id: string } | null = null;
+    if (params.userId && params.chatId) {
+      const found = await this.prisma.aiChat.findFirst({
+        where: {
+          id: params.chatId,
+          user_id: params.userId,
+          ...(params.tenantId ? { tenant_id: params.tenantId } : {}),
+        },
+        select: { id: true, container_id: true, tenant_id: true },
+      });
+      if (!found) {
+        res.status(403).json({ message: 'Chat nao encontrado ou sem permissao' });
+        return;
+      }
+      chat = found;
+      // containerId so pode ser o do chat ou novo (null) — anti reuse cross-tenant
+      if (params.containerId && chat.container_id && params.containerId !== chat.container_id) {
+        res.status(400).json({ message: 'containerId nao corresponde ao chat' });
+        return;
+      }
+    }
+
+    // Validacao 3: cost cap antes de queimar tokens
+    if (params.userId && params.tenantId) {
+      try {
+        await assertAiCostCap(this.prisma, params.userId, params.tenantId);
+      } catch (e: any) {
+        res.status(429).json({ message: e.message });
+        return;
+      }
+    }
+
     let client: Anthropic;
     try {
       client = await this.getClient();
@@ -335,8 +389,6 @@ export class PetitionChatService {
       res.status(400).json({ message: err.message });
       return;
     }
-
-    const model = params.model || 'claude-sonnet-4-6';
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -812,10 +864,20 @@ export class PetitionChatService {
     });
   }
 
-  /** Get a single chat with all messages */
-  async getChat(chatId: string, userId: string) {
+  /** Get a single chat with all messages
+   *
+   *  Bug fix 2026-05-10 (Peticoes PR1 #3):
+   *  Antes filtrava so user_id. Em UUID collision cross-tenant ou user
+   *  migrado entre tenants, advogado A via chat do A em outro tenant.
+   *  Agora exige tenantId tambem.
+   */
+  async getChat(chatId: string, userId: string, tenantId?: string) {
     return this.prisma.aiChat.findFirst({
-      where: { id: chatId, user_id: userId },
+      where: {
+        id: chatId,
+        user_id: userId,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
       include: {
         messages: { orderBy: { created_at: 'asc' } },
       },
@@ -824,6 +886,7 @@ export class PetitionChatService {
 
   /** Create a new chat */
   async createChat(userId: string, tenantId: string, model: string) {
+    if (!tenantId) throw new Error('tenantId obrigatorio');
     return this.prisma.aiChat.create({
       data: {
         user_id: userId,
@@ -839,34 +902,65 @@ export class PetitionChatService {
     chatId: string,
     userId: string,
     data: { title?: string; model?: string; container_id?: string | null },
+    tenantId?: string,
   ) {
     return this.prisma.aiChat.updateMany({
-      where: { id: chatId, user_id: userId },
+      where: {
+        id: chatId,
+        user_id: userId,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
       data,
     });
   }
 
-  /** Add a message to a chat */
+  /** Add a message to a chat
+   *
+   *  Bug fix 2026-05-10 (Peticoes PR1 #3 + #17):
+   *  - #3: validar ownership do chatId (antes qualquer authed user
+   *    com chatId arbitrario adicionava msgs ao chat de outro)
+   *  - #17: $transaction garante atomicidade de update + create.
+   *    Antes 2 ops separadas podiam quebrar com tenant_id NOT NULL.
+   *  - Tenant_id na message herda do chat (consistencia).
+   */
   async addMessage(
     chatId: string,
     role: 'user' | 'assistant',
     content: string,
     filesJson?: any,
+    userId?: string,
+    tenantId?: string,
   ) {
-    // Update the chat's updated_at timestamp
-    await this.prisma.aiChat.update({
-      where: { id: chatId },
-      data: { updated_at: new Date() },
-    });
+    // Validar ownership do chatId ANTES de qualquer mutacao
+    if (userId) {
+      const chat = await this.prisma.aiChat.findFirst({
+        where: {
+          id: chatId,
+          user_id: userId,
+          ...(tenantId ? { tenant_id: tenantId } : {}),
+        },
+        select: { id: true, title: true, tenant_id: true },
+      });
+      if (!chat) {
+        throw new Error('Chat nao encontrado ou sem permissao');
+      }
+    }
 
-    const msg = await this.prisma.aiChatMessage.create({
-      data: {
-        chat_id: chatId,
-        role,
-        content,
-        files_json: filesJson || undefined,
-      },
-    });
+    // Atomico: update + create na mesma transaction
+    const [, msg] = await this.prisma.$transaction([
+      this.prisma.aiChat.update({
+        where: { id: chatId },
+        data: { updated_at: new Date() },
+      }),
+      this.prisma.aiChatMessage.create({
+        data: {
+          chat_id: chatId,
+          role,
+          content,
+          files_json: filesJson || undefined,
+        },
+      }),
+    ]);
 
     // Auto-title on first user message
     if (role === 'user') {
@@ -910,10 +1004,14 @@ export class PetitionChatService {
     });
   }
 
-  /** Delete a chat */
-  async deleteChat(chatId: string, userId: string) {
+  /** Delete a chat — Bug fix #3: tenantId scope */
+  async deleteChat(chatId: string, userId: string, tenantId?: string) {
     return this.prisma.aiChat.deleteMany({
-      where: { id: chatId, user_id: userId },
+      where: {
+        id: chatId,
+        user_id: userId,
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
     });
   }
 

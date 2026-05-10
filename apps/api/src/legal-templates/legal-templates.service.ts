@@ -23,12 +23,20 @@ export class LegalTemplatesService {
     tenantId?: string,
     filters?: { legal_area?: string; type?: string; search?: string },
   ) {
-    const where: any = {
-      OR: [
-        { tenant_id: tenantId || undefined },
-        { is_global: true },
-      ],
-    };
+    // Bug fix 2026-05-10 (Peticoes PR1 #8 — CRITICO):
+    // Antes `tenant_id: tenantId || undefined` — quando tenantId era
+    // undefined, Prisma traduzia `tenant_id: undefined` como "ignorar
+    // filtro" → OR virava `[{}, { is_global: true }]` → retornava
+    // TODOS templates de TODOS os tenants (vazamento PI juridica).
+    // Agora: se tenantId ausente, OR cobre so is_global.
+    const where: any = tenantId
+      ? {
+          OR: [
+            { tenant_id: tenantId },
+            { is_global: true },
+          ],
+        }
+      : { is_global: true }; // Sem tenant — apenas templates globais
 
     if (filters?.legal_area) {
       where.legal_area = filters.legal_area;

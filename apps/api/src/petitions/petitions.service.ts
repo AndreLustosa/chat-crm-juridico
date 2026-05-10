@@ -221,8 +221,49 @@ export class PetitionsService {
       google_doc_id?: string;
     },
     tenantId?: string,
+    actorUserId?: string,
   ) {
-    await this.verifyPetitionAccess(petitionId, tenantId);
+    const existing = await this.verifyPetitionAccess(petitionId, tenantId);
+
+    // Bug fix 2026-05-10 (Peticoes PR1 #7 — CRITICO):
+    // Bloquear update de content em peticao APROVADA ou PROTOCOLADA.
+    // Antes advogado podia mudar valor do pedido em peca ja
+    // protocolada SEM trilha de auditoria. Em incidente disciplinar
+    // OAB/processo, escritorio nao consegue provar conteudo original.
+    // Apenas metadata (title, deadline, google_doc_url) pode mudar
+    // em status terminal — conteudo eh imutavel apos APROVADA.
+    const isContentChange =
+      data.content_html !== undefined || data.content_json !== undefined;
+    if (isContentChange && (existing.status === 'APROVADA' || existing.status === 'PROTOCOLADA')) {
+      throw new BadRequestException(
+        `Peticao ${existing.status} nao pode ter conteudo alterado. ` +
+        `Use POST /:id/version pra criar nova versao se precisar revisar.`,
+      );
+    }
+
+    // Bug fix 2026-05-10 (Peticoes PR1 #7):
+    // Auto-snapshot da versao ANTERIOR antes de aplicar mudanca de
+    // conteudo. Sem isso, edits sumiam silenciosamente da trilha.
+    if (isContentChange) {
+      try {
+        // Conta versions existentes pra setar version sequencial
+        const versionCount = await this.prisma.petitionVersion.count({
+          where: { petition_id: petitionId },
+        });
+        await this.prisma.petitionVersion.create({
+          data: {
+            petition_id: petitionId,
+            version: versionCount + 1,
+            content_html: existing.content_html || '',
+            content_json: (existing.content_json || {}) as any,
+            saved_by_id: actorUserId || existing.created_by_id,
+          },
+        });
+      } catch (e: any) {
+        // Se falhar nao bloqueia o update mas loga warn pra investigar
+        this.logger.warn(`[PETITION] Snapshot pre-edit falhou pra ${petitionId}: ${e.message}`);
+      }
+    }
 
     const updateData: any = { updated_at: new Date() };
     if (data.content_json !== undefined) updateData.content_json = data.content_json;

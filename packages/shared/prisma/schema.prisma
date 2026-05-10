@@ -584,16 +584,27 @@ model AiUsage {
   conversation_id   String?
   skill_id          String?
   model             String
-  call_type         String // 'chat' | 'memory' | 'whisper'
+  call_type         String // 'chat' | 'memory' | 'whisper' | 'petition'
   prompt_tokens     Int      @default(0)
   completion_tokens Int      @default(0)
   total_tokens      Int      @default(0)
   cost_usd          Float    @default(0)
+  // Bug fix 2026-05-10 (Peticoes PR1 #6 + #10):
+  // user_id e tenant_id pra cost cap por usuario/tenant +
+  // audit log completo "quem gerou peticao X em Y".
+  // meta_json pra contexto extra (petition_id, legal_case_id, IP, etc).
+  user_id           String?
+  tenant_id         String?
+  meta_json         Json?
   created_at        DateTime @default(now())
 
   @@index([created_at])
   @@index([model])
   @@index([conversation_id])
+  // Indices novos pro cost cap performar — query soma de cost_usd
+  // dos ultimos 24h por user/tenant precisa estes.
+  @@index([user_id, created_at])
+  @@index([tenant_id, created_at])
 }
 
 model Inbox {

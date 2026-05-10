@@ -19,9 +19,36 @@ import type { Response } from 'express';
 import { PetitionsService } from './petitions.service';
 import { PetitionAiService } from './petition-ai.service';
 import { PetitionChatService } from './petition-chat.service';
-import type { ChatMessage, SkillRef, StreamChatParams } from './petition-chat.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import {
+  CreateChatSkillDto,
+  GetSkillsQueryDto,
+  CreateChatDto,
+  UpdateChatDto,
+  AddChatMessageDto,
+  StreamChatDto,
+  CreatePetitionDto,
+  CreateAndGenerateDto,
+  UpdatePetitionDto,
+  UpdateStatusDto,
+  ReviewPetitionDto,
+} from './petitions.dto';
 
+/**
+ * Bug fix 2026-05-10 (Peticoes PR1):
+ *
+ * Padroes sistemicos aplicados em todo o controller:
+ *   #1, #2, #18: @Roles em endpoints destrutivos/custosos (skills,
+ *     cleanup, geracao IA). Antes qualquer authed user (recepcionista,
+ *     financeiro) gerava peticoes ou deletava skills compartilhadas.
+ *   #20: DTOs com class-validator em TODOS endpoints. Antes body: any
+ *     deixava prompt injection, content_html 100MB, model arbitrario.
+ *   #4: chat() agora valida ownership de chatId (tenant + user).
+ *
+ * GLOBAL ValidationPipe ja roda { whitelist: true, forbidNonWhitelisted: true }
+ * (configurado em main.ts) — campos extras sao rejeitados.
+ */
 @UseGuards(JwtAuthGuard)
 @Controller('petitions')
 export class PetitionsController {
@@ -31,45 +58,46 @@ export class PetitionsController {
     private readonly chatService: PetitionChatService,
   ) {}
 
-  // ─── Console Skills ────────────────────────────────────
+  // ─── Console Skills (ADMIN only — recurso compartilhado) ───────
 
-  /** GET /petitions/chat/skills — list skills from Claude Console */
   @Get('chat/skills')
-  getChatSkills(@Query('source') source?: 'all' | 'anthropic' | 'custom') {
-    return this.chatService.listConsoleSkills(source || 'all');
+  getChatSkills(@Query() q: GetSkillsQueryDto) {
+    return this.chatService.listConsoleSkills(q.source || 'all');
   }
 
-  /** GET /petitions/chat/skills/:id — get a specific skill */
   @Get('chat/skills/:id')
   getChatSkill(@Param('id') id: string) {
     return this.chatService.getConsoleSkill(id);
   }
 
-  /** POST /petitions/chat/skills — create a custom skill via SKILL.md */
+  // Bug fix #1: ADMIN apenas — skills sao compartilhadas entre tenants
   @Post('chat/skills')
-  createChatSkill(@Body() body: { displayTitle: string; skillMd: string }) {
+  @Roles('ADMIN')
+  createChatSkill(@Body() body: CreateChatSkillDto) {
     return this.chatService.createCustomSkill(body.displayTitle, body.skillMd);
   }
 
-  /** DELETE /petitions/chat/skills/:id — delete a custom skill */
   @Delete('chat/skills/:id')
+  @Roles('ADMIN')
   deleteChatSkill(@Param('id') id: string) {
     return this.chatService.deleteCustomSkill(id);
   }
 
-  // ─── Console Files ─────────────────────────────────────
+  // ─── Console Files ─────────────────────────────────────────────
 
-  /** GET /petitions/chat/files — list files from Claude Console */
   @Get('chat/files')
   getChatFiles() {
     return this.chatService.listConsoleFiles();
   }
 
-  /** POST /petitions/chat/files — upload file to Claude Console */
   @Post('chat/files')
   @UseInterceptors(FileInterceptor('file'))
   async uploadChatFile(@UploadedFile() file: any) {
     if (!file) throw new NotFoundException('Nenhum arquivo enviado');
+    // Cap 25MB pra anexo (conservador — anexos tipicos sao petições PDF 1-5MB)
+    if (file.size > 25 * 1024 * 1024) {
+      throw new NotFoundException('Arquivo muito grande (max 25MB)');
+    }
     return this.chatService.uploadFileToConsole(
       file.buffer,
       file.originalname,
@@ -77,7 +105,6 @@ export class PetitionsController {
     );
   }
 
-  /** GET /petitions/chat/files/:fileId/download — download file from Claude Console */
   @Get('chat/files/:fileId/download')
   async downloadChatFile(
     @Param('fileId') fileId: string,
@@ -94,17 +121,15 @@ export class PetitionsController {
     res.send(buffer);
   }
 
-  // ─── Chat Conversations (persisted in DB) ───────────────
+  // ─── Chat Conversations (persisted in DB) ───────────────────────
 
-  /** GET /petitions/chat/conversations — list user's chats */
   @Get('chat/conversations')
   listChats(@Request() req: any) {
     return this.chatService.listChats(req.user.id, req.user.tenant_id);
   }
 
-  /** POST /petitions/chat/conversations — create new chat */
   @Post('chat/conversations')
-  createChat(@Body() body: { model?: string }, @Request() req: any) {
+  createChat(@Body() body: CreateChatDto, @Request() req: any) {
     return this.chatService.createChat(
       req.user.id,
       req.user.tenant_id,
@@ -112,134 +137,153 @@ export class PetitionsController {
     );
   }
 
-  /** GET /petitions/chat/conversations/:id — get chat with messages */
   @Get('chat/conversations/:id')
   async getChat(@Param('id') id: string, @Request() req: any) {
-    const chat = await this.chatService.getChat(id, req.user.id);
+    // Bug fix #3: passa tenant_id pra defesa em profundidade
+    const chat = await this.chatService.getChat(id, req.user.id, req.user.tenant_id);
     if (!chat) throw new NotFoundException('Conversa nao encontrada');
     return chat;
   }
 
-  /** PATCH /petitions/chat/conversations/:id — update chat metadata */
   @Patch('chat/conversations/:id')
   updateChat(
     @Param('id') id: string,
-    @Body() body: { title?: string; model?: string; container_id?: string },
+    @Body() body: UpdateChatDto,
     @Request() req: any,
   ) {
-    return this.chatService.updateChat(id, req.user.id, body);
+    return this.chatService.updateChat(id, req.user.id, body, req.user.tenant_id);
   }
 
-  /** DELETE /petitions/chat/conversations/:id — delete chat */
   @Delete('chat/conversations/:id')
   deleteChat(@Param('id') id: string, @Request() req: any) {
-    return this.chatService.deleteChat(id, req.user.id);
+    return this.chatService.deleteChat(id, req.user.id, req.user.tenant_id);
   }
 
-  /** POST /petitions/chat/conversations/:id/messages — add message */
+  // Bug fix #3 + #17: ownership check + atomico (#17 ja na service)
   @Post('chat/conversations/:id/messages')
   async addMessage(
     @Param('id') id: string,
-    @Body() body: { role: 'user' | 'assistant'; content: string; files?: any },
+    @Body() body: AddChatMessageDto,
+    @Request() req: any,
   ) {
-    return this.chatService.addMessage(id, body.role, body.content, body.files);
+    return this.chatService.addMessage(
+      id,
+      body.role,
+      body.content,
+      body.files,
+      req.user.id,
+      req.user.tenant_id,
+    );
   }
 
-  /** POST /petitions/chat/cleanup — cleanup old chats (admin only) */
+  // Bug fix #18: cleanup eh DESTRUTIVO — apenas ADMIN
   @Post('chat/cleanup')
+  @Roles('ADMIN')
   cleanup() {
     return this.chatService.cleanupOldChats();
   }
 
-  // ─── Chat (Claude Streaming with Skills) ───────────────
+  // ─── Chat Streaming ───────────────────────────────────────────
 
-  /** POST /petitions/chat — stream a Claude response (SSE) with Console skills */
+  // Bug fix #4: DTO + injecao server-side de userId/tenantId/chatId
+  // Bloqueia prompt injection via systemPrompt (DTO nao tem esse campo).
   @Post('chat')
   async chat(
-    @Body() body: any,
+    @Body() body: StreamChatDto,
+    @Request() req: any,
     @Res() res: Response,
   ) {
-    return this.chatService.streamChat(body, res);
+    return this.chatService.streamChat(
+      {
+        // Reconstroi messages com a nova msg + historico do DB (TODO PR2)
+        messages: [{ role: 'user', content: body.newMessage }],
+        skills: body.skills,
+        model: body.model,
+        containerId: body.containerId,
+        fileIds: undefined, // files via files prop separado
+        enableThinking: body.thinking,
+        // CRITICOS — server-side, NAO do client
+        userId: req.user.id,
+        tenantId: req.user.tenant_id,
+        chatId: body.chatId,
+      },
+      res,
+    );
   }
 
-  // ─── Case-scoped CRUD ─────────────────────────────────
+  // ─── Case-scoped CRUD ─────────────────────────────────────────
 
   @Get('case/:caseId')
-  findByCaseId(
-    @Param('caseId') caseId: string,
-    @Request() req: any,
-  ) {
+  findByCaseId(@Param('caseId') caseId: string, @Request() req: any) {
     return this.service.findByCaseId(caseId, req.user.tenant_id);
   }
 
+  // Bug fix #2: Roles em criar/gerar peticao (custo IA)
   @Post('case/:caseId')
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   create(
     @Param('caseId') caseId: string,
-    @Body() body: {
-      title: string;
-      type: string;
-      template_id?: string;
-      content_json?: any;
-      content_html?: string;
-      create_google_doc?: boolean;
-      deadline_at?: string;
-    },
+    @Body() body: CreatePetitionDto,
     @Request() req: any,
   ) {
     return this.service.create(caseId, body, req.user.id, req.user.tenant_id);
   }
 
   @Post('case/:caseId/generate')
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   createAndGenerate(
     @Param('caseId') caseId: string,
-    @Body() body: { title: string; type: string },
+    @Body() body: CreateAndGenerateDto,
     @Request() req: any,
   ) {
-    return this.aiService.createAndGenerate(caseId, body, req.user.id, req.user.tenant_id);
+    return this.aiService.createAndGenerate(
+      caseId,
+      body,
+      req.user.id,
+      req.user.tenant_id,
+    );
   }
 
   @Post(':id/generate')
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   generate(
     @Param('id') id: string,
+    @Body() body: { lgpdConsent?: boolean } = {},
     @Request() req: any,
   ) {
-    return this.aiService.generate(id, req.user.tenant_id);
+    return this.aiService.generate(id, req.user.id, req.user.tenant_id, {
+      lgpdConsent: body?.lgpdConsent,
+    });
   }
 
   @Get(':id')
-  findById(
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
+  findById(@Param('id') id: string, @Request() req: any) {
     return this.service.findById(id, req.user.tenant_id);
   }
 
+  // Bug fix #7: passa actorUserId pra snapshot pre-edit
   @Patch(':id')
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   update(
     @Param('id') id: string,
-    @Body() body: {
-      content_json?: any;
-      content_html?: string;
-      title?: string;
-      deadline_at?: string;
-      google_doc_url?: string;
-      google_doc_id?: string;
-    },
+    @Body() body: UpdatePetitionDto,
     @Request() req: any,
   ) {
-    return this.service.update(id, body, req.user.tenant_id);
+    return this.service.update(id, body, req.user.tenant_id, req.user.id);
   }
 
   @Patch(':id/status')
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   updateStatus(
     @Param('id') id: string,
-    @Body('status') status: string,
+    @Body() body: UpdateStatusDto,
     @Request() req: any,
   ) {
-    return this.service.updateStatus(id, status, req.user.tenant_id);
+    return this.service.updateStatus(id, body.status, req.user.tenant_id);
   }
 
   @Post(':id/version')
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
   saveVersion(
     @Param('id') id: string,
     @Request() req: any,
@@ -248,41 +292,45 @@ export class PetitionsController {
   }
 
   @Get(':id/versions')
-  findVersions(
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
+  findVersions(@Param('id') id: string, @Request() req: any) {
     return this.service.findVersions(id, req.user.tenant_id);
   }
 
+  // Bug fix: review eh ato formal — ADMIN/ADVOGADO apenas (estagiario nao aprova)
   @Post(':id/review')
+  @Roles('ADMIN', 'ADVOGADO')
   review(
     @Param('id') id: string,
-    @Body() body: { action: 'APROVAR' | 'DEVOLVER'; notes?: string },
+    @Body() body: ReviewPetitionDto,
     @Request() req: any,
   ) {
-    return this.service.reviewPetition(id, body.action, body.notes, req.user.id, req.user.tenant_id);
+    return this.service.reviewPetition(
+      id,
+      body.action,
+      body.notes,
+      req.user.id,
+      req.user.tenant_id,
+    );
   }
 
-  // ─── Google Drive/Docs ─────────────────────────────────
+  // ─── Google Drive/Docs ─────────────────────────────────────────
 
-  /** POST /petitions/:id/sync-gdoc — sincronizar conteúdo do Google Doc */
   @Post(':id/sync-gdoc')
-  syncFromGoogleDoc(
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
+  @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
+  syncFromGoogleDoc(@Param('id') id: string, @Request() req: any) {
     return this.service.syncFromGoogleDoc(id, req.user.tenant_id);
   }
 
-  /** GET /petitions/:id/export-pdf — exportar petição como PDF via Google Docs */
   @Get(':id/export-pdf')
   async exportPdf(
     @Param('id') id: string,
     @Request() req: any,
     @Res() res: Response,
   ) {
-    const { buffer, filename } = await this.service.exportPdf(id, req.user.tenant_id);
+    const { buffer, filename } = await this.service.exportPdf(
+      id,
+      req.user.tenant_id,
+    );
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
@@ -291,11 +339,10 @@ export class PetitionsController {
     res.send(buffer);
   }
 
+  // Delete — apenas ADMIN/ADVOGADO (estagiario nao deleta)
   @Delete(':id')
-  remove(
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
+  @Roles('ADMIN', 'ADVOGADO')
+  remove(@Param('id') id: string, @Request() req: any) {
     return this.service.remove(id, req.user.tenant_id);
   }
 }
