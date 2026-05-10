@@ -322,45 +322,74 @@ export class FinanceiroService {
       throw new ConflictException('Transação está cancelada');
     }
 
+    // Bug fix 2026-05-10 (Honorarios PR2 #9 — CRITICO):
+    // Validacao defensiva contra NaN/negativo/string. Antes
+    // controller passava amount direto sem DTO; "abc" virava NaN
+    // e NaN <= 0 eh false → passava. Agora rejeita explicito.
+    if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+      throw new ConflictException('amount deve ser um numero finito');
+    }
     const originalAmount = Number(original.amount);
     if (amount <= 0 || amount > originalAmount) {
       throw new ConflictException(`Valor deve ser entre R$ 0,01 e R$ ${originalAmount.toFixed(2)}`);
     }
 
-    const remaining = Math.round((originalAmount - amount) * 100) / 100;
+    // Calculo em centavos pra precisao
+    const originalCents = Math.round(originalAmount * 100);
+    const amountCents = Math.round(amount * 100);
+    const remainingCents = originalCents - amountCents;
+    const remaining = remainingCents / 100;
 
-    // Criar transação do pagamento parcial recebido
-    const partialTx = await this.prisma.financialTransaction.create({
-      data: {
-        tenant_id: original.tenant_id,
-        type: original.type,
-        category: original.category,
-        description: `${original.description} (parcial)`,
-        amount: amount,
-        date: new Date(),
-        due_date: original.due_date,
-        paid_at: new Date(),
-        payment_method: paymentMethod || original.payment_method,
-        status: 'PAGO',
-        legal_case_id: original.legal_case_id,
-        lead_id: original.lead_id,
-        lawyer_id: original.lawyer_id,
-        notes: `Recebimento parcial de R$ ${amount.toFixed(2)}`,
-      },
+    // Bug fix 2026-05-10 (Honorarios PR2 #9 — CRITICO):
+    // Race condition em pagamento parcial. Antes find + 2 updates
+    // separados sem transacao. 2 chamadas concorrentes com amount=600
+    // numa transacao de 1000 ambas passavam o check (cada uma via
+    // originalAmount=1000), criando 2 partials totalizando R$ 1.200
+    // pago e zerando a original. Cliente "creditado" R$ 200 a mais.
+    //
+    // Fix: $transaction com updateMany WHERE amount >= amount
+    // pra garantir lock atomico. Se 0 rows afetadas, abort.
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Reduzir/zerar a original ATOMICAMENTE — WHERE amount >=
+      //    amount garante que so vamos updatear se ainda cabe.
+      const claim = await tx.financialTransaction.updateMany({
+        where: {
+          id,
+          status: { notIn: ['PAGO', 'CANCELADO'] },
+          amount: { gte: amount },
+        },
+        data: remainingCents <= 0
+          ? { status: 'PAGO', paid_at: new Date(), amount: 0 }
+          : { amount: remaining },
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Outra requisicao concorrente ja processou parte do pagamento — re-tente com valor menor',
+        );
+      }
+
+      // 2. Criar transacao do pagamento parcial recebido (so se claim ok)
+      const partialTx = await tx.financialTransaction.create({
+        data: {
+          tenant_id: original.tenant_id,
+          type: original.type,
+          category: original.category,
+          description: `${original.description} (parcial)`,
+          amount: amount,
+          date: new Date(),
+          due_date: original.due_date,
+          paid_at: new Date(),
+          payment_method: paymentMethod || original.payment_method,
+          status: 'PAGO',
+          legal_case_id: original.legal_case_id,
+          lead_id: original.lead_id,
+          lawyer_id: original.lawyer_id,
+          notes: `Recebimento parcial de R$ ${amount.toFixed(2)}`,
+        },
+      });
+
+      return partialTx;
     });
-
-    // Atualizar original: reduzir valor ou marcar como pago se zerou
-    if (remaining <= 0) {
-      await this.prisma.financialTransaction.update({
-        where: { id },
-        data: { status: 'PAGO', paid_at: new Date(), amount: 0 },
-      });
-    } else {
-      await this.prisma.financialTransaction.update({
-        where: { id },
-        data: { amount: remaining },
-      });
-    }
 
     await this.logAction(actorId || null, 'PAGAMENTO_PARCIAL', id, {
       valor_recebido: amount, saldo_restante: remaining,
@@ -368,7 +397,7 @@ export class FinanceiroService {
       lawyer_id: original.lawyer_id,
     });
 
-    return { partial: partialTx, remaining };
+    return { partial: result, remaining };
   }
 
   async deleteTransaction(id: string, tenantId?: string, actorId?: string) {

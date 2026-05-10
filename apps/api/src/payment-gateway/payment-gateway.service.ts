@@ -277,30 +277,58 @@ export class PaymentGatewayService {
       }
     }
 
-    // Salvar localmente
-    const charge = await this.prisma.paymentGatewayCharge.create({
-      data: {
-        tenant_id: tenantId || legalCase.tenant_id,
-        honorario_payment_id: honorarioPaymentId,
-        legal_case_id: legalCase?.id || null,
-        gateway: 'ASAAS',
-        external_id: asaasCharge.id,
-        customer_external_id: customer.external_id,
-        billing_type: billingType,
-        amount: Number(payment.amount),
-        due_date: dueDate,
-        status: asaasCharge.status || 'PENDING',
-        description: asaasCharge.description || null,
-        pix_qr_code: pixData?.encodedImage || null,
-        pix_copy_paste: pixData?.payload || null,
-        pix_expiration_date: pixData?.expirationDate
-          ? new Date(pixData.expirationDate)
-          : null,
-        boleto_url: asaasCharge.bankSlipUrl || null,
-        boleto_barcode: asaasCharge.nossoNumero || null,
-        invoice_url: asaasCharge.invoiceUrl || null,
-      },
-    });
+    // Bug fix 2026-05-10 (Honorarios PR2 #3 — CRITICO):
+    // Try/catch + rollback no Asaas se DB local falhar. Antes se o
+    // prisma.create explodisse (constraint, conexao, etc), a charge
+    // ficava criada no Asaas (cliente recebe boleto, paga) mas sem
+    // registro local — webhook depois nao encontra a charge e a
+    // parcela fica em aberto. Cliente cobrado 2x quando advogado
+    // gera nova cobranca pra "parcela inadimplente".
+    let charge: any;
+    try {
+      charge = await this.prisma.paymentGatewayCharge.create({
+        data: {
+          tenant_id: tenantId || legalCase.tenant_id,
+          honorario_payment_id: honorarioPaymentId,
+          legal_case_id: legalCase?.id || null,
+          gateway: 'ASAAS',
+          external_id: asaasCharge.id,
+          customer_external_id: customer.external_id,
+          billing_type: billingType,
+          amount: Number(payment.amount),
+          due_date: dueDate,
+          status: asaasCharge.status || 'PENDING',
+          description: asaasCharge.description || null,
+          pix_qr_code: pixData?.encodedImage || null,
+          pix_copy_paste: pixData?.payload || null,
+          pix_expiration_date: pixData?.expirationDate
+            ? new Date(pixData.expirationDate)
+            : null,
+          boleto_url: asaasCharge.bankSlipUrl || null,
+          boleto_barcode: asaasCharge.nossoNumero || null,
+          invoice_url: asaasCharge.invoiceUrl || null,
+        },
+      });
+    } catch (dbErr: any) {
+      this.logger.error(
+        `[CHARGE] DB falhou apos criar Asaas ${asaasCharge.id} — tentando rollback: ${dbErr.message}`,
+      );
+      // Rollback: deleta a charge no Asaas pra evitar cobranca orfa.
+      // Se o rollback falhar tambem, alerta CRITICO — operador precisa
+      // intervir manual no painel Asaas.
+      try {
+        await this.asaas.deleteCharge(asaasCharge.id);
+        this.logger.warn(`[CHARGE] Rollback OK no Asaas: ${asaasCharge.id} deletada`);
+      } catch (rollbackErr: any) {
+        this.logger.error(
+          `[CHARGE] CRITICO: rollback no Asaas FALHOU pra ${asaasCharge.id}. ` +
+          `Charge ORFA cobrara cliente sem registro local. ` +
+          `Acao manual urgente: deletar/cancelar no painel Asaas. ` +
+          `Erro rollback: ${rollbackErr.message}`,
+        );
+      }
+      throw dbErr;
+    }
 
     return {
       ...charge,
@@ -607,7 +635,15 @@ export class PaymentGatewayService {
 
   // ─── Webhook handling ──────────────────────────────────
 
-  async handleWebhook(payload: any) {
+  /**
+   * Bug fix 2026-05-10 (Honorarios PR2 #12): expectedTenantId opcional pra
+   * validacao defensiva. Webhook do Asaas chega sem tenantId no payload —
+   * resolvido via charge.tenant_id local. Mas reconcile e callers internos
+   * podem passar expectedTenantId pra prevenir cross-tenant em cenarios de
+   * collision (rebuild/restore). Se a charge encontrada nao bater com o
+   * tenantId esperado, descarta.
+   */
+  async handleWebhook(payload: any, expectedTenantId?: string) {
     const event = payload?.event;
     const paymentData = payload?.payment;
 
@@ -624,6 +660,15 @@ export class PaymentGatewayService {
     const charge = await this.prisma.paymentGatewayCharge.findUnique({
       where: { external_id: paymentData.id },
     });
+
+    // Bug fix 2026-05-10 (PR2 #12): validacao tenant cross-protection
+    if (charge && expectedTenantId && charge.tenant_id !== expectedTenantId) {
+      this.logger.warn(
+        `[WEBHOOK-TENANT-CROSS] charge ${charge.id} tenant=${charge.tenant_id} ` +
+        `!= expected=${expectedTenantId} (external_id=${paymentData.id}) — descartado`,
+      );
+      return;
+    }
 
     if (!charge) {
       this.logger.warn(
@@ -663,9 +708,29 @@ export class PaymentGatewayService {
       return;
     }
 
-    // Atualizar cobranca local
-    const updatedCharge = await this.prisma.paymentGatewayCharge.update({
-      where: { id: charge.id },
+    // Bug fix 2026-05-10 (Honorarios PR2 #2 — CRITICO):
+    // ATOMIC update + idempotency_key. Antes find+update separados podiam
+    // race com 2 webhooks paralelos do MESMO event (Asaas re-envia em
+    // erro 5xx) — ambos passavam o `charge.status === mappedStatus` check
+    // e ambos rodavam o resto (criando 2 FinancialTransaction, 2 WhatsApp,
+    // somando 2x na MonthlyGoal).
+    //
+    // Estrategia:
+    //   1. updateMany WHERE charge.id AND status != mappedStatus AND
+    //      (idempotency_key IS NULL OR idempotency_key != newKey)
+    //   2. Se result.count == 0, OUTRO webhook venceu — retorna early
+    //   3. idempotency_key = `${paymentId}:${event}:${status}` garante
+    //      que mesma combinacao nunca eh re-processada.
+    const idempotencyKey = `${paymentData.id}:${event || 'NO_EVENT'}:${mappedStatus}`;
+    const claimResult = await this.prisma.paymentGatewayCharge.updateMany({
+      where: {
+        id: charge.id,
+        status: { not: mappedStatus },
+        OR: [
+          { idempotency_key: null },
+          { idempotency_key: { not: idempotencyKey } },
+        ],
+      },
       data: {
         status: mappedStatus,
         paid_at: paymentData.paymentDate
@@ -677,8 +742,27 @@ export class PaymentGatewayService {
         net_value: paymentData.netValue || charge.net_value,
         invoice_url: paymentData.invoiceUrl || charge.invoice_url,
         webhook_payload: payload,
+        idempotency_key: idempotencyKey,
       },
     });
+
+    if (claimResult.count === 0) {
+      // Outro webhook concorrente venceu a corrida. Sucesso silencioso —
+      // a cobranca ja foi processada com este mesmo evento+status.
+      this.logger.log(
+        `[WEBHOOK] Race deduplicado: charge ${charge.id} ja processou ${idempotencyKey}`,
+      );
+      return;
+    }
+
+    // Re-fetch pra usar dados atualizados em downstream (notify, financial)
+    const updatedCharge = await this.prisma.paymentGatewayCharge.findUnique({
+      where: { id: charge.id },
+    });
+    if (!updatedCharge) {
+      this.logger.error(`[WEBHOOK] Charge ${charge.id} desapareceu apos update — DB inconsistente?`);
+      return;
+    }
 
     // Se pagamento RECEIVED ou CONFIRMED, marcar HonorarioPayment como PAGO
     if (
@@ -961,11 +1045,13 @@ export class PaymentGatewayService {
         const mappedStatus = ASAAS_STATUS_MAP[asaasData.status] || asaasData.status;
 
         if (mappedStatus !== charge.status) {
-          // Reprocessar como se fosse um webhook
+          // Bug fix 2026-05-10 (PR2 #12): passa charge.tenant_id pra
+          // handleWebhook validar — se a charge encontrada por
+          // external_id estiver em outro tenant (collision raro), descarta.
           await this.handleWebhook({
             event: 'PAYMENT_' + asaasData.status,
             payment: asaasData,
-          });
+          }, charge.tenant_id || undefined);
           updated++;
         }
       } catch (e: any) {

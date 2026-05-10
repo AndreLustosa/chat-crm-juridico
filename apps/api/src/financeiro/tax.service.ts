@@ -89,7 +89,7 @@ export class TaxService {
     return this.prisma.taxRecord.upsert({
       where: {
         tenant_id_lawyer_id_year_month: {
-          tenant_id: tenantId || '',
+          tenant_id: tenantOrDefault(tenantId),
           lawyer_id: lawyerId,
           year,
           month,
@@ -125,7 +125,7 @@ export class TaxService {
       const record = await this.prisma.taxRecord.findUnique({
         where: {
           tenant_id_lawyer_id_year_month: {
-            tenant_id: tenantId || '',
+            tenant_id: tenantOrDefault(tenantId),
             lawyer_id: lawyerId,
             year,
             month: m,
@@ -180,7 +180,7 @@ export class TaxService {
     return this.prisma.taxRecord.update({
       where: {
         tenant_id_lawyer_id_year_month: {
-          tenant_id: tenantId || '',
+          tenant_id: tenantOrDefault(tenantId),
           lawyer_id: lawyerId,
           year,
           month,
