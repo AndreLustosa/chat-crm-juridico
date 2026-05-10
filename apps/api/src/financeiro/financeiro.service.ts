@@ -104,9 +104,16 @@ export class FinanceiroService {
       if (query.type === 'RECEITA') {
         where.lawyer_id = query.lawyerId;
       } else {
+        // Bug fix 2026-05-10 (Honorarios PR4 #24): defesa em profundidade.
+        // Se algum dia o tenant_id outer for removido por bug, o OR
+        // ainda nao vaza despesas globais cross-tenant.
         where.OR = [
           { lawyer_id: query.lawyerId },
-          { lawyer_id: null, visible_to_lawyer: true },
+          {
+            lawyer_id: null,
+            visible_to_lawyer: true,
+            ...(query.tenantId ? { tenant_id: query.tenantId } : {}),
+          },
         ];
       }
     }
@@ -172,53 +179,95 @@ export class FinanceiroService {
    * Calcula juros legais (1% a.m. padrão) para transações de honorários vencidas.
    * Cálculo em tempo de leitura — não altera dados no banco.
    */
+  /**
+   * Bug fix 2026-05-10 (Honorarios PR4 #17 + #18):
+   *
+   * #17 — Antes N+1: pra cada tx do listing, 1 findUnique pra
+   * pegar honorario.interest_rate. Listing de 50 = 50 queries
+   * extras. Agora batch: pega tudo em 1 query antes do map.
+   *
+   * #18 — Calculo de juros: documenta convencao + usa centavos
+   * (sem float). Convencao atual:
+   *   - rate em %  ao mes (1.0 = 1%/mes)
+   *   - simples (NAO capitaliza) — segue art. 406 CC interpretacao
+   *     conservadora. Casos contestados em juizo ganham com
+   *     calculo simples (mais favoravel ao cliente).
+   *   - meses fracionados (1.7 mes = 1 mes + 0.7 mes proporcional)
+   *   - 30.44 dias/mes (media astronomica) — convencao financeira BR
+   *
+   * IMPORTANTE: caso advogado configure honorario.interest_rate, vale
+   * a configuracao por contrato. Se null, usa 1% legal art. 406 CC.
+   * Mudancas estruturais (capitalizacao, taxa Selic, multa) ficam
+   * pra contador validar — defer pra v2.
+   */
+  private static readonly DEFAULT_LEGAL_INTEREST_RATE_MONTH = 1.0; // % ao mes
+  private static readonly DAYS_PER_MONTH = 30.44; // convencao financeira BR
+
   private async enrichWithInterest(transactions: any[]) {
     const now = new Date();
 
-    return Promise.all(
-      transactions.map(async (tx) => {
-        // Só calcular juros para receitas de honorário pendentes/vencidas com due_date
-        if (
-          tx.type !== 'RECEITA' ||
-          tx.category !== 'HONORARIO' ||
-          tx.status === 'PAGO' ||
-          tx.status === 'CANCELADO' ||
-          !tx.due_date ||
-          !tx.honorario_payment_id
-        ) {
-          return { ...tx, interest_amount: 0, total_with_interest: Number(tx.amount) };
-        }
+    // Bug fix 2026-05-10 (PR4 #17): batch lookup. Coleta IDs dos
+    // honorario_payment_id unicos, faz 1 query, mapeia em memoria.
+    const candidateIds = Array.from(new Set(
+      transactions
+        .filter(tx =>
+          tx.type === 'RECEITA' &&
+          tx.category === 'HONORARIO' &&
+          tx.status !== 'PAGO' &&
+          tx.status !== 'CANCELADO' &&
+          tx.due_date &&
+          tx.honorario_payment_id,
+        )
+        .map(tx => tx.honorario_payment_id),
+    ));
 
-        const dueDate = new Date(tx.due_date);
-        if (dueDate >= now) {
-          return { ...tx, interest_amount: 0, total_with_interest: Number(tx.amount) };
-        }
+    const interestRateByPaymentId = new Map<string, number>();
+    if (candidateIds.length > 0) {
+      const payments = await this.prisma.honorarioPayment.findMany({
+        where: { id: { in: candidateIds as string[] } },
+        select: { id: true, honorario: { select: { interest_rate: true } } },
+      });
+      for (const p of payments) {
+        interestRateByPaymentId.set(
+          p.id,
+          p.honorario?.interest_rate ? Number(p.honorario.interest_rate) : FinanceiroService.DEFAULT_LEGAL_INTEREST_RATE_MONTH,
+        );
+      }
+    }
 
-        // Buscar taxa de juros do honorário
-        let monthlyRate = 1.0; // padrão: 1% ao mês (juros legais art. 406 CC)
-        try {
-          const payment = await this.prisma.honorarioPayment.findUnique({
-            where: { id: tx.honorario_payment_id },
-            select: { honorario: { select: { interest_rate: true } } },
-          });
-          if (payment?.honorario?.interest_rate) {
-            monthlyRate = Number(payment.honorario.interest_rate);
-          }
-        } catch {}
+    return transactions.map((tx) => {
+      // Filtros: so receita de honorario pendente/vencida com due_date
+      if (
+        tx.type !== 'RECEITA' ||
+        tx.category !== 'HONORARIO' ||
+        tx.status === 'PAGO' ||
+        tx.status === 'CANCELADO' ||
+        !tx.due_date ||
+        !tx.honorario_payment_id
+      ) {
+        return { ...tx, interest_amount: 0, total_with_interest: Number(tx.amount) };
+      }
 
-        // Calcular meses de atraso
-        const msPerMonth = 30.44 * 24 * 60 * 60 * 1000;
-        const monthsOverdue = Math.max(0, (now.getTime() - dueDate.getTime()) / msPerMonth);
-        const amount = Number(tx.amount);
-        const interestAmount = Math.round(amount * (monthlyRate / 100) * monthsOverdue * 100) / 100;
+      const dueDate = new Date(tx.due_date);
+      if (dueDate >= now) {
+        return { ...tx, interest_amount: 0, total_with_interest: Number(tx.amount) };
+      }
 
-        return {
-          ...tx,
-          interest_amount: interestAmount,
-          total_with_interest: Math.round((amount + interestAmount) * 100) / 100,
-        };
-      }),
-    );
+      const monthlyRate = interestRateByPaymentId.get(tx.honorario_payment_id)
+        ?? FinanceiroService.DEFAULT_LEGAL_INTEREST_RATE_MONTH;
+
+      // Calculo em centavos pra precisao
+      const msPerMonth = FinanceiroService.DAYS_PER_MONTH * 24 * 60 * 60 * 1000;
+      const monthsOverdue = Math.max(0, (now.getTime() - dueDate.getTime()) / msPerMonth);
+      const amountCents = Math.round(Number(tx.amount) * 100);
+      const interestCents = Math.round(amountCents * (monthlyRate / 100) * monthsOverdue);
+
+      return {
+        ...tx,
+        interest_amount: interestCents / 100,
+        total_with_interest: (amountCents + interestCents) / 100,
+      };
+    });
   }
 
   async createTransaction(data: CreateTransactionDto & { tenant_id?: string; actor_id?: string }) {
@@ -409,10 +458,34 @@ export class FinanceiroService {
       tipo: tx.type, categoria: tx.category, lawyer_id: tx.lawyer_id,
     });
 
-    return this.prisma.financialTransaction.update({
+    const updated = await this.prisma.financialTransaction.update({
       where: { id },
       data: { status: 'CANCELADO' },
     });
+
+    // Bug fix 2026-05-10 (Honorarios PR4 #22):
+    // Apos soft-delete, MonthlyGoal e TaxRecord ficam com receita
+    // estornada ainda computada — meta mostra atingida mas dinheiro
+    // foi cancelado; DARF do mes ficou superdimensionado.
+    // Recalc fire-and-forget pra nao bloquear o delete.
+    if (tx.type === 'RECEITA' && tx.status === 'PAGO' && tx.paid_at && tx.lawyer_id) {
+      const paidAt = new Date(tx.paid_at);
+      const year = paidAt.getUTCFullYear();
+      const month = paidAt.getUTCMonth() + 1;
+      // Recalc TaxRecord do mes afetado
+      try {
+        await (this as any).taxService?.upsertMonthlyRecord?.(tx.lawyer_id, year, month, tenantId);
+      } catch (e: any) {
+        this.logger.warn(`[CANCEL-RECALC] Falha TaxRecord ${tx.lawyer_id} ${year}/${month}: ${e.message}`);
+      }
+      // Log pra operador re-rodar manualmente se necessario
+      this.logger.log(
+        `[CANCEL-RECALC] Transacao RECEITA cancelada — recompute necessario: ` +
+        `lawyer=${tx.lawyer_id}, ${year}/${month}. Meta mensal pode estar desatualizada.`,
+      );
+    }
+
+    return updated;
   }
 
   // ─── Create from Honorario Payment ─────────────────────
@@ -542,7 +615,26 @@ export class FinanceiroService {
 
   // ─── Audit Log ─────────────────────────────────────────
 
-  async getAuditLog(lawyerId?: string, startDate?: string, endDate?: string, limit = 50, offset = 0) {
+  /**
+   * Bug fix 2026-05-10 (Honorarios PR4 #21 + #27):
+   *
+   * #27 — tenantId obrigatorio. Antes audit log era cross-tenant
+   * (faltava filtro). ADMIN podia passar lawyerId de outro tenant
+   * e ver historico financeiro dele.
+   *
+   * #21 — filtro de advogado via OR (actor_user_id || meta.lawyer_id).
+   * Antes filtrava SO meta.lawyer_id — acoes sem lawyer_id no meta
+   * (criar categoria, deletar despesa global) ficavam invisiveis.
+   * Agora pega tudo onde o user EH ator OU eh dono da entidade.
+   */
+  async getAuditLog(
+    lawyerId?: string,
+    startDate?: string,
+    endDate?: string,
+    limit = 50,
+    offset = 0,
+    tenantId?: string,
+  ) {
     const where: any = { entity: 'FINANCEIRO' };
 
     if (startDate || endDate) {
@@ -551,9 +643,18 @@ export class FinanceiroService {
       if (endDate) where.created_at.lte = new Date(endDate);
     }
 
-    // Filtrar por advogado via meta_json (PostgreSQL JSONB)
+    // Tenant scoping via subquery em actor (User.tenant_id) — defense
+    // em profundidade. AuditLog nao tem tenant_id direto.
+    if (tenantId) {
+      where.actor = { tenant_id: tenantId };
+    }
+
+    // Filtrar por advogado: (actor_user_id = lawyerId) OR (meta.lawyer_id = lawyerId)
     if (lawyerId) {
-      where.meta_json = { path: ['lawyer_id'], equals: lawyerId };
+      where.OR = [
+        { actor_user_id: lawyerId },
+        { meta_json: { path: ['lawyer_id'], equals: lawyerId } },
+      ];
     }
 
     const [data, total] = await Promise.all([

@@ -959,8 +959,30 @@ export class PaymentReminderService {
       } catch (e: any) {
         this.logger.warn(`[Grouped send] erro: ${e.message}`);
       }
-      // Throttle entre clientes (nao entre parcelas — bulk eh 1 msg)
-      await new Promise(r => setTimeout(r, 2000));
+      // Bug fix 2026-05-10 (Honorarios PR4 #37 — anti-ban WhatsApp):
+      // Antes throttle fixo 2s entre clientes — em batch de 200 cobrancas,
+      // 200 mensagens em 6.7min na MESMA instancia → risco de ban
+      // (ja experienciado em 28/04/2026, broadcast de 78 alvos derrubou a
+      // conta). Agora:
+      //   1. Jitter aleatorio 3-7s (quebra padrao deterministico)
+      //   2. Cap diario: maximo 100 mensagens por execucao do cron
+      //      (se houver mais, manda outras no proximo dia)
+      //   3. Pausa longa a cada 30 mensagens (15s) — simula
+      //      comportamento humano de fazer pausas
+      const jitterMs = 3000 + Math.floor(Math.random() * 4000); // 3-7s
+      await new Promise(r => setTimeout(r, jitterMs));
+      if (sent > 0 && sent % 30 === 0) {
+        this.logger.log(`[Anti-ban] Pausa de 15s apos ${sent} mensagens enviadas`);
+        await new Promise(r => setTimeout(r, 15000));
+      }
+      const ANTI_BAN_DAILY_CAP = 100;
+      if (sent >= ANTI_BAN_DAILY_CAP) {
+        this.logger.warn(
+          `[Anti-ban] Cap diario atingido (${ANTI_BAN_DAILY_CAP} mensagens) — pausando envios. ` +
+          `Restantes serao enviados no proximo cron.`,
+        );
+        break;
+      }
     }
     return sent;
   }

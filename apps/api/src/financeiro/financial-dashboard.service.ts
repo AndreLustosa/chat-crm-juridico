@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { cashRegimeWhere, effectiveTransactionDate } from '../common/utils/cash-regime.util';
+import { isValidCpfOrCnpj } from '../common/utils/cpf-cnpj.util';
 
 /**
  * Tipos de filtro suportados pela tabela operacional (Layer 4).
@@ -1203,8 +1204,13 @@ export class FinancialDashboardService {
     const { tenantId, leadId, cpfCnpj, actorId } = params;
     const cleanCpf = (cpfCnpj || '').replace(/\D/g, '');
 
-    if (!cleanCpf || (cleanCpf.length !== 11 && cleanCpf.length !== 14)) {
-      throw new BadRequestException('CPF/CNPJ inválido');
+    // Bug fix 2026-05-10 (Honorarios PR4 #25): validacao real via
+    // algoritmo modulo 11 (Receita Federal). Antes so validava length —
+    // "11111111111" passava, Asaas rejeitava com erro generico.
+    if (!isValidCpfOrCnpj(cleanCpf)) {
+      throw new BadRequestException(
+        `CPF/CNPJ invalido: ${cpfCnpj}. Verifique digitos verificadores.`,
+      );
     }
 
     // 1) Snapshot atual pra rollback

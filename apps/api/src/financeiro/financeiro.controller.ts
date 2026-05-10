@@ -121,7 +121,15 @@ export class FinanceiroController {
     // de outro advogado.
     const isAdmin = req.user?.roles?.includes('ADMIN');
     const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
-    return this.service.getAuditLog(effectiveLawyerId, startDate, endDate, parseInt(limit || '50'), parseInt(offset || '0'));
+    // Bug fix 2026-05-10 (PR4 #27): tenantId obrigatorio
+    return this.service.getAuditLog(
+      effectiveLawyerId,
+      startDate,
+      endDate,
+      parseInt(limit || '50'),
+      parseInt(offset || '0'),
+      req.user.tenant_id,
+    );
   }
 
   // ─── Summary & Cash Flow ───────────────────────────────

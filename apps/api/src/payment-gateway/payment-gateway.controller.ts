@@ -192,11 +192,20 @@ export class PaymentGatewayController {
     return result;
   }
 
-  /** Excluir cobrança no Asaas */
+  /** Excluir cobrança no Asaas + sincronizar localmente.
+   *
+   *  Bug fix 2026-05-10 (Honorarios PR4 #14):
+   *  Antes endpoint chamava asaasClient.deleteCharge direto, sem mexer
+   *  no paymentGatewayCharge local nem no HonorarioPayment. O webhook
+   *  PAYMENT_DELETED depois eventualmente sincronizaria — mas se webhook
+   *  falhasse, estado ficava inconsistente: cobranca sumida no Asaas mas
+   *  marcada PENDING no CRM. Cliente via pendencia, advogado pensava OK.
+   *  Agora faz a operacao no service que sincroniza ambos.
+   */
   @Delete('charges/asaas/:chargeId')
-  async deleteAsaasCharge(@Param('chargeId') chargeId: string) {
-    this.logger.log(`[DELETE /charges/asaas/${chargeId}] Excluindo cobranca no Asaas`);
-    return this.asaasClient.deleteCharge(chargeId);
+  async deleteAsaasCharge(@Param('chargeId') chargeId: string, @Req() req: any) {
+    this.logger.log(`[DELETE /charges/asaas/${chargeId}] Excluindo cobranca no Asaas + sync local`);
+    return this.service.deleteChargeWithSync(chargeId, req.user?.tenant_id);
   }
 
   /** Detalhes de uma cobrança por honorarioPaymentId */

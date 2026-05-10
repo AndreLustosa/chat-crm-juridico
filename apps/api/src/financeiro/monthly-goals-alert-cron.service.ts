@@ -119,6 +119,19 @@ export class MonthlyGoalsAlertCronService {
       const title = `Meta do mês ${scopeLabel} em risco`;
       const body = `Faltam poucos dias e o atingimento está em ${progressPct.toFixed(1)}% (R$ ${realized.toLocaleString('pt-BR')} de R$ ${target.toLocaleString('pt-BR')}).`;
 
+      // Bug fix 2026-05-10 (Honorarios PR4 #30):
+      // Apos hardening tenant_id NOT NULL, qualquer goal legacy com
+      // tenant_id null faria insert de Notification quebrar (FK).
+      // Skip explicito + log warn pra Andre fazer backfill manual
+      // se acontecer.
+      if (!goal.tenant_id) {
+        this.logger.warn(
+          `[GOALS-ALERT] Goal ${goal.id} sem tenant_id — backfill necessario antes de alerta funcionar`,
+        );
+        alertsSkipped++;
+        continue;
+      }
+
       // Cria notificacao pra cada destinatario
       const ops = recipients.map((userId) =>
         this.prisma.notification.create({

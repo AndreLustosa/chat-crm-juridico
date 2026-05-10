@@ -152,7 +152,18 @@ export class PaymentGatewayService {
     if (!options) return {};
     const out: any = {};
     // Asaas exige installmentCount >= 2; 1 = nao parcelado.
+    // Bug fix 2026-05-10 (Honorarios PR4 #29): cap em 24x (limite Asaas).
+    // Antes sem validacao — advogado tentava 36x e Asaas rejeitava com
+    // erro tecnico generico ("invalid_installmentCount"). Agora rejeita
+    // local com mensagem clara e cap explicito.
+    const ASAAS_MAX_INSTALLMENTS = 24;
     if (options.installmentCount && options.installmentCount >= 2 && options.value) {
+      if (options.installmentCount > ASAAS_MAX_INSTALLMENTS) {
+        throw new BadRequestException(
+          `installmentCount=${options.installmentCount} excede o limite do Asaas (max ${ASAAS_MAX_INSTALLMENTS}). ` +
+          `Use no maximo ${ASAAS_MAX_INSTALLMENTS} parcelas.`,
+        );
+      }
       out.installmentCount = options.installmentCount;
       out.installmentValue = +(options.value / options.installmentCount).toFixed(2);
     }
@@ -1092,6 +1103,49 @@ export class PaymentGatewayService {
     return { total: pendingCharges.length, updated, errors };
   }
 
+  /**
+   * Bug fix 2026-05-10 (Honorarios PR4 #14):
+   * Deleta charge no Asaas E sincroniza estado local. Antes controller
+   * chamava asaasClient.deleteCharge direto sem mexer no banco — se
+   * webhook PAYMENT_DELETED falhasse, charge sumia no Asaas mas
+   * permanecia PENDING no CRM. Cliente via pendencia falsa.
+   */
+  async deleteChargeWithSync(asaasChargeId: string, tenantId?: string) {
+    // Buscar charge local primeiro pra validar tenant
+    const charge = await this.prisma.paymentGatewayCharge.findFirst({
+      where: { external_id: asaasChargeId },
+      select: { id: true, tenant_id: true, honorario_payment_id: true, lead_honorario_payment_id: true },
+    });
+    if (!charge) {
+      // Sem registro local — apenas deleta no Asaas (caso de orfa)
+      this.logger.warn(`[DELETE-CHARGE] external_id ${asaasChargeId} sem registro local — apenas Asaas`);
+      return this.asaas.deleteCharge(asaasChargeId);
+    }
+    if (tenantId && charge.tenant_id && charge.tenant_id !== tenantId) {
+      throw new Error('Cobranca pertence a outro tenant');
+    }
+
+    // 1. Deleta no Asaas primeiro (operacao externa, mais propensa a falhar)
+    const asaasResult = await this.asaas.deleteCharge(asaasChargeId);
+
+    // 2. Sincroniza local: marca charge como CANCELLED + reverte status do
+    //    HonorarioPayment vinculado (se nao estiver pago)
+    await this.prisma.paymentGatewayCharge.update({
+      where: { id: charge.id },
+      data: { status: 'CANCELLED' },
+    }).catch((e: any) => {
+      this.logger.warn(`[DELETE-CHARGE] Falha ao marcar charge ${charge.id} CANCELLED: ${e.message}`);
+    });
+
+    // Se tinha HonorarioPayment ou LeadHonorarioPayment vinculado, NAO altera
+    // status (operador pode querer regenerar cobranca pra mesma parcela).
+    // Apenas avisa que charge foi cancelada.
+    this.logger.log(
+      `[DELETE-CHARGE] Asaas deletado + local CANCELLED: ${asaasChargeId} (charge.id=${charge.id})`,
+    );
+    return { asaas: asaasResult, local: { id: charge.id, status: 'CANCELLED' } };
+  }
+
   // ─── Settings ──────────────────────────────────────────
 
   async getSettings(tenantId?: string) {
@@ -1216,7 +1270,18 @@ export class PaymentGatewayService {
           this.logger.warn(`[CUSTOMER-SYNC] Erro ao vincular ${cust.id}: ${e.message}`);
         }
       } else {
-        // Match 4: se tem telefone, criar lead automaticamente e vincular
+        // Bug fix 2026-05-10 (Honorarios PR4 #26):
+        // Antes criava leads automaticamente baseado em telefone do
+        // Asaas — usando `contains: phone.slice(-10)` que matcheia
+        // falsos positivos. Em importacao inicial, criava milhares de
+        // leads duplicados/errados em massa. Pior: tenantOrDefault
+        // quando tenantId null usava fallback global → leads em tenant
+        // errado.
+        //
+        // Agora: NAO cria lead automatico via fuzzy phone match.
+        // Apenas tenta busca EXATA de phone — se nao bater, deixa
+        // pra revisao manual (retorna na lista skipped). Operador
+        // confirma 1 a 1 via UI dedicada (futuro).
         const rawPhone = (cust.mobilePhone || cust.phone || '').replace(/\D/g, '');
         if (rawPhone && rawPhone.length >= 10) {
           // Normalizar telefone para formato do sistema (55+DD+8dig, sem 9 extra)
@@ -1228,28 +1293,22 @@ export class PaymentGatewayService {
           }
 
           try {
-            // Verificar se já existe lead com esse telefone (busca exata + parcial)
-            let existingLead = await this.prisma.lead.findFirst({
-              where: { OR: [{ phone }, { phone: rawPhone }, { phone: { contains: rawPhone.slice(-10) } }] },
+            // Apenas busca EXATA — sem fuzzy `contains` (gerava leads duplicados)
+            const existingLead = await this.prisma.lead.findFirst({
+              where: {
+                OR: [{ phone }, { phone: rawPhone }],
+                ...(tenantId ? { tenant_id: tenantId } : {}),
+              },
               select: { id: true },
             });
 
             if (!existingLead) {
-              // Criar lead a partir dos dados do Asaas com telefone normalizado
-              existingLead = await this.prisma.lead.create({
-                data: {
-                  tenant_id: tenantOrDefault(tenantId),
-                  name: cust.name || null,
-                  phone: phone,
-                  email: cust.email || null,
-                  cpf_cnpj: cust.cpfCnpj?.replace(/\D/g, '') || null,
-                  stage: 'FINALIZADO',
-                  is_client: true,
-                  became_client_at: new Date(),
-                  origin: 'asaas_import',
-                },
-              });
-              this.logger.log(`[CUSTOMER-SYNC] Lead criado a partir do Asaas: ${existingLead.id} (${cust.name})`);
+              // NAO cria lead automatico — adiciona pra fila de revisao manual
+              this.logger.warn(
+                `[CUSTOMER-SYNC] Cliente Asaas ${cust.id} (${cust.name}) sem match exato de phone — ` +
+                `criacao automatica BLOQUEADA. Operador deve revisar manualmente.`,
+              );
+              continue;
             }
 
             // Vincular
@@ -1451,8 +1510,16 @@ export class PaymentGatewayService {
     }
 
     // Atualizar telefone do lead para o formato normalizado (evita duplicatas)
+    // Bug fix 2026-05-10 (Honorarios PR4 #31): optimistic lock.
+    // Antes 2 webhooks concorrentes (refund + delete) podiam dar 2
+    // updates do phone — race rara mas em producao causa update perdido.
+    // updateMany com WHERE phone = old garante que so quem leu primeiro
+    // ganha; segundo no-op silencioso.
     if (lead.phone !== clientPhone) {
-      await this.prisma.lead.update({ where: { id: lead.id }, data: { phone: clientPhone } }).catch(() => {});
+      await this.prisma.lead.updateMany({
+        where: { id: lead.id, phone: lead.phone },
+        data: { phone: clientPhone },
+      }).catch(() => {});
     }
 
     // Buscar ou criar conversa para o lead — filtra por instancia

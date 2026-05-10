@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -369,7 +370,7 @@ export class HonorariosService {
 
   async markPaid(
     paymentId: string,
-    data: { payment_method?: string },
+    data: { payment_method?: string; paid_at?: string },
     tenantId?: string,
     actorId?: string,
   ) {
@@ -386,11 +387,30 @@ export class HonorariosService {
       throw new ForbiddenException('Acesso negado');
     }
 
+    // Bug fix 2026-05-10 (Honorarios PR4 #15): rejeitar re-mark de
+    // parcela ja PAGO. Antes UPDATE corria, paid_at era reescrito
+    // com new Date() — perdendo data fiscal real. Audit log mostrava
+    // "pago hoje" pra transacao antiga; conciliacao fiscal errada.
+    if (payment.status === 'PAGO') {
+      throw new ConflictException(
+        `Parcela ${paymentId} ja foi marcada como PAGO em ${payment.paid_at?.toISOString().slice(0, 10)}`,
+      );
+    }
+
+    // Bug fix 2026-05-10 (Honorarios PR4 #28): aceitar paid_at opcional
+    // do caller. Antes data era sempre new Date() — em recebimento
+    // tardio (recebeu em 2024, registra em 2026), mes fiscal errado,
+    // DARF apurado no mes errado.
+    const paidAt = data.paid_at ? new Date(data.paid_at) : new Date();
+    if (Number.isNaN(paidAt.getTime())) {
+      throw new BadRequestException(`paid_at invalido: ${data.paid_at}`);
+    }
+
     const updated = await this.prisma.honorarioPayment.update({
       where: { id: paymentId },
       data: {
         status: 'PAGO',
-        paid_at: new Date(),
+        paid_at: paidAt,
         ...(data.payment_method && { payment_method: data.payment_method }),
       },
     });
@@ -429,19 +449,27 @@ export class HonorariosService {
 
     const sentenceValue = Number(legalCase.sentence_value);
 
-    // Busca honorários de sucumbência/êxito com percentual definido
+    // Bug fix 2026-05-10 (Honorarios PR4 #23):
+    // Antes filtro `status: 'ATIVO'` excluia FINALIZADO/CANCELADO.
+    // Se sentenca chega APOS o caso ser finalizado (revisao, juiz
+    // aumenta valor da condenacao), recalculo nao acontecia.
+    // Agora cobre ATIVO + FINALIZADO. CANCELADO continua de fora
+    // (caso encerrado sem ganho — nao recalcula).
     const honorarios = await this.prisma.caseHonorario.findMany({
       where: {
         legal_case_id: caseId,
         type: { in: ['SUCUMBENCIA', 'EXITO', 'MISTO'] },
         success_percentage: { not: null },
-        status: 'ATIVO',
+        status: { in: ['ATIVO', 'FINALIZADO'] },
       },
     });
 
     for (const h of honorarios) {
       const percentage = Number(h.success_percentage);
-      const calculatedValue = Math.round(sentenceValue * percentage) / 100;
+      // Calculo em centavos pra precisao
+      const sentenceCents = Math.round(sentenceValue * 100);
+      const calculatedCents = Math.round((sentenceCents * percentage) / 100);
+      const calculatedValue = calculatedCents / 100;
 
       await this.prisma.caseHonorario.update({
         where: { id: h.id },

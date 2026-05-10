@@ -55,13 +55,39 @@ export class TaxService {
       select: { amount: true },
     });
 
-    // Despesas dedutíveis do mês
+    // Bug fix 2026-05-10 (Honorarios PR4 #19):
+    // Carne-Leao so aceita despesas vinculadas a ATIVIDADE PROFISSIONAL
+    // (livro caixa). Antes somava TODAS as despesas PAGAS — incluindo
+    // categorias como "Custas Judiciais" que sao REPASSADAS ao cliente
+    // (nao sao despesa do advogado). Resultado: imposto subdimensionado
+    // → debito tributario acumulado, multa de 75% + Selic na autuacao.
+    //
+    // Lista DEDUCTIBLE_CATEGORIES = categorias profissionais aceitas pela
+    // Receita pra livro caixa. Custas/cartorio/correios sao repasse —
+    // ficam fora.
+    //
+    // TODO: idealmente Lead/Tenant configura quais categorias sao
+    // dedutiveis (FinancialCategory.is_deductible). Por enquanto
+    // hardcoded — conservador (rejeita por default em duvida).
+    const DEDUCTIBLE_CATEGORIES = [
+      'ESCRITORIO',     // aluguel, energia, agua, internet
+      'SOFTWARE',       // assinaturas (CRM, OAB, jurisprudencia)
+      'CONTABIL',       // contador, escrita
+      'MARKETING',      // ads, site
+      'HONORARIOS_TERCEIROS', // co-advogado, perito
+      'EDUCACAO',       // OAB anuidade, cursos, congressos
+      'TRANSPORTE',     // combustivel/uber para audiencias
+      'TELEFONE',
+      'MATERIAL_ESCRITORIO',
+    ];
+
     const expenses = await this.prisma.financialTransaction.findMany({
       where: {
         lawyer_id: lawyerId,
         type: 'DESPESA',
         status: 'PAGO',
         paid_at: { gte: startDate, lte: endDate },
+        category: { in: DEDUCTIBLE_CATEGORIES },
         ...(tenantId ? { tenant_id: tenantId } : {}),
       },
       select: { amount: true },
@@ -80,12 +106,32 @@ export class TaxService {
     const taxableIncome = taxableIncomeCents / 100;
     const taxDue = Math.round(this.calculateTax(taxableIncome) * 100) / 100;
 
-    // DARF vence no último dia útil do mês seguinte
-    const nextMonth = month === 12 ? new Date(year + 1, 0, 28) : new Date(year, month, 28);
-    // Simplificação: dia 28 (sempre dia útil na prática)
-    const darfDueDate = nextMonth.toISOString().slice(0, 10);
+    // Bug fix 2026-05-10 (Honorarios PR4 #20):
+    // DARF Carne-Leao vence ULTIMO DIA UTIL do mes seguinte (regra
+    // da Receita). Antes hardcoded dia 28 — comentario dizia "sempre
+    // dia util na pratica" mas eh falso. Ex: 28/abr/2024 = domingo.
+    // Sistema mostrava DARF vencendo dia 28, real era dia 30 (ou
+    // anterior). Advogado pagava com 1-2 dias de atraso, multa de
+    // mora 0.33%/dia. Helper calcula ultimo dia util considerando
+    // sab/dom (feriados nacionais ficam pra v2 — backfill iria
+    // requerer FeriadosNacionais do BusinessDaysCalc).
+    const darfDueDate = this.computeDarfDueDate(year, month).toISOString().slice(0, 10);
 
     return { totalRevenue, totalDeductions, taxableIncome, taxDue, darfDueDate };
+  }
+
+  /** Ultimo dia util do mes seguinte ao mes de apuracao. */
+  private computeDarfDueDate(year: number, month: number): Date {
+    // Mes seguinte (month=12 vai pra ano+1, mes=1)
+    const targetYear = month === 12 ? year + 1 : year;
+    const targetMonth = month === 12 ? 0 : month; // 0-indexed
+    // Ultimo dia do mes alvo
+    const lastDay = new Date(targetYear, targetMonth + 1, 0);
+    // Volta enquanto cair em sab (6) ou dom (0)
+    while (lastDay.getDay() === 0 || lastDay.getDay() === 6) {
+      lastDay.setDate(lastDay.getDate() - 1);
+    }
+    return lastDay;
   }
 
   /**
@@ -126,20 +172,27 @@ export class TaxService {
 
   /**
    * Resumo anual — 12 meses
+   *
+   * Bug fix 2026-05-10 (Honorarios PR4 #32):
+   * Antes 12 queries sequenciais (1 por mes) — 12x latencia DB =
+   * ~1.2s por chamada do dashboard fiscal. Agora single findMany
+   * com OR/where complexo ou groupBy. Com index existente em
+   * (tenant_id, lawyer_id, year, month) eh quase instantaneo.
    */
   async getAnnualSummary(lawyerId: string, year: number, tenantId?: string) {
-    const months = [];
+    const records = await this.prisma.taxRecord.findMany({
+      where: {
+        tenant_id: tenantOrDefault(tenantId),
+        lawyer_id: lawyerId,
+        year,
+      },
+      orderBy: { month: 'asc' },
+    });
+    const recordByMonth = new Map(records.map(r => [r.month, r]));
+
+    const months: any[] = [];
     for (let m = 1; m <= 12; m++) {
-      const record = await this.prisma.taxRecord.findUnique({
-        where: {
-          tenant_id_lawyer_id_year_month: {
-            tenant_id: tenantOrDefault(tenantId),
-            lawyer_id: lawyerId,
-            year,
-            month: m,
-          },
-        },
-      });
+      const record = recordByMonth.get(m);
       if (record) {
         months.push({
           month: m,
