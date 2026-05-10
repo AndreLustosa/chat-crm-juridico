@@ -87,6 +87,11 @@ function extractPhone(remoteJid: string, remoteJidAlt?: string): string {
 export class EvolutionService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EvolutionService.name);
 
+  // Bug fix 2026-05-10 (Webhooks PR2 #10): singleton lock por instanceName
+  // pra evitar resyncs concorrentes (cron + webhook + manual + startup).
+  // Set in-memory — perdido em restart, ok (proximo trigger reabre).
+  private readonly activeResyncs = new Set<string>();
+
   constructor(
     private prisma: PrismaService,
     private chatGateway: ChatGateway,
@@ -381,8 +386,26 @@ export class EvolutionService implements OnApplicationBootstrap {
         if (lidLead && lidLead.id !== lead.id) {
           const lidConvs = await this.prisma.conversation.findMany({
             where: { lead_id: lidLead.id, channel: 'whatsapp' },
+            select: { id: true, tenant_id: true, status: true },
           });
           for (const lidConv of lidConvs) {
+            // Bug fix 2026-05-10 (Webhooks PR2 #7): revalida tenant ANTES
+            // do updateMany. Antes verificavamos so o lidLead.tenant_id no
+            // findFirst, mas conv.tenant_id pode estar diferente devido a
+            // self-healing em cascata (legacy tenant_id=null vira inbox.tenant_id
+            // quando o webhook anterior do mesmo lead disparou o heal).
+            // Sem essa revalidacao, podiamos mover mensagens de conv com
+            // tenant_id LEGACY pra conv do tenant atual — embaralhando
+            // historico cross-tenant.
+            const convTenantId = conv.tenant_id ?? null;
+            const lidConvTenantId = lidConv.tenant_id ?? null;
+            if (convTenantId && lidConvTenantId && convTenantId !== lidConvTenantId) {
+              this.logger.warn(
+                `[AUTO-MERGE-BLOCKED] LID conv ${lidConv.id} (tenant ${lidConvTenantId}) ` +
+                `!= target conv ${conv.id} (tenant ${convTenantId}) — skip merge cross-tenant`,
+              );
+              continue;
+            }
             // Move todas as mensagens da conversa LID → conversa do telefone real
             await this.prisma.message.updateMany({
               where: { conversation_id: lidConv.id },
@@ -450,6 +473,14 @@ export class EvolutionService implements OnApplicationBootstrap {
       // Atualizado em 2026-04-23 apos bug reportado (duplicata de reminder da Dra. Gianny).
       if (isFromMe && messageContent) {
         const since = new Date(Date.now() - 2 * 60 * 1000); // janela de 2 minutos
+        // Bug fix 2026-05-10 (Webhooks PR2 #6): orderBy explicito FIFO
+        // (oldest first) + claim atomico. Antes findFirst sem orderBy podia
+        // claim mensagens fora de ordem quando 2+ "Ok" iguais saiam em
+        // sequencia rapida — segunda echo podia bater na primeira pending,
+        // gerando mapping invertido entre out_X e real_Y.
+        // Agora: ordena por created_at ASC (FIFO matches WhatsApp echo
+        // ordering em sends sequenciais) + valida que o claim foi atomico
+        // via updateMany WHERE external_message_id IN (out_, sys_).
         const pendingMsg = await this.prisma.message.findFirst({
           where: {
             conversation_id: conv.id,
@@ -461,17 +492,35 @@ export class EvolutionService implements OnApplicationBootstrap {
               { external_message_id: { startsWith: 'sys_' } }, // sys_reminder_, sys_followup_ia_, sys_broadcast_
             ],
           },
+          orderBy: { created_at: 'asc' },
           include: { media: true, skill: { select: { id: true, name: true, area: true } } },
         });
         if (pendingMsg) {
-          const updated = await this.prisma.message.update({
-            where: { id: pendingMsg.id },
+          // Claim atomico: updateMany com WHERE preserva prefixo sintetico —
+          // se outro webhook concorrente ja claimou (race), updateMany
+          // retorna 0 e seguimos pro fluxo de create normal (que vai cair
+          // no catch P2002 se for o mesmo external_message_id).
+          const claimResult = await this.prisma.message.updateMany({
+            where: {
+              id: pendingMsg.id,
+              OR: [
+                { external_message_id: { startsWith: 'out_' } },
+                { external_message_id: { startsWith: 'sys_' } },
+              ],
+            },
             data: { external_message_id: externalMessageId, status: 'enviado' },
-            include: { media: true, skill: { select: { id: true, name: true, area: true } } },
           });
-          this.chatGateway.emitMessageUpdate(conv.id, updated);
-          this.logger.log(`[DEDUP] Msg pendente ${pendingMsg.id} vinculada ao ID real ${externalMessageId}`);
-          continue;
+          if (claimResult.count === 1) {
+            const updated = await this.prisma.message.findUnique({
+              where: { id: pendingMsg.id },
+              include: { media: true, skill: { select: { id: true, name: true, area: true } } },
+            });
+            if (updated) this.chatGateway.emitMessageUpdate(conv.id, updated);
+            this.logger.log(`[DEDUP] Msg pendente ${pendingMsg.id} vinculada ao ID real ${externalMessageId}`);
+            continue;
+          }
+          // claim perdeu pra concorrente — log e segue (fluxo normal de create)
+          this.logger.log(`[DEDUP-RACE] Pending ${pendingMsg.id} claimed por outro webhook — seguindo fluxo normal`);
         }
       }
 
@@ -510,18 +559,43 @@ export class EvolutionService implements OnApplicationBootstrap {
       }
 
       const isOutgoing = isFromMe;
-      const msg = await this.prisma.message.create({
-        data: {
-          conversation_id: conv.id,
-          direction: isOutgoing ? 'out' : 'in',
-          type: msgType,
-          text: messageContent,
-          external_message_id: externalMessageId,
-          status: isOutgoing ? 'enviado' : 'recebido',
-          reply_to_id: replyToId,
-          reply_to_text: replyToText,
-        },
-      });
+      // Bug fix 2026-05-10 (Webhooks PR2 #4): try/catch P2002 unique violation.
+      // Antes findUnique + create separados podiam race com retry da Evolution
+      // (maxRetries:5, retryDelay:15s). Em pico ou timeout breve, 2 webhooks
+      // concorrentes do MESMO messageId entravam no create e o segundo crashava
+      // com 500 → Evolution re-tentava em loop, log spam + msg orfa.
+      // Agora P2002 = "outro webhook ja criou" — recupera via findUnique e
+      // segue como [DEDUP].
+      let msg: any;
+      try {
+        msg = await this.prisma.message.create({
+          data: {
+            conversation_id: conv.id,
+            direction: isOutgoing ? 'out' : 'in',
+            type: msgType,
+            text: messageContent,
+            external_message_id: externalMessageId,
+            status: isOutgoing ? 'enviado' : 'recebido',
+            reply_to_id: replyToId,
+            reply_to_text: replyToText,
+          },
+        });
+      } catch (createErr: any) {
+        if (createErr?.code === 'P2002') {
+          this.logger.log(`[DEDUP-RACE] external_message_id=${externalMessageId} criado por webhook concorrente — re-emit`);
+          const concurrentMsg = await this.prisma.message.findUnique({
+            where: { external_message_id: externalMessageId },
+            include: { media: true, skill: { select: { id: true, name: true, area: true } } },
+          });
+          if (concurrentMsg) {
+            this.chatGateway.emitNewMessage(concurrentMsg.conversation_id, concurrentMsg);
+            this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
+          }
+          continue;
+        }
+        // Outros erros: re-throw (DB indisponivel, schema mismatch, etc)
+        throw createErr;
+      }
 
       // Update Convo last message
       await this.prisma.conversation.update({
@@ -839,8 +913,29 @@ export class EvolutionService implements OnApplicationBootstrap {
     // já abertas. Conversas são criadas/reabertas APENAS via messages.upsert
     // (quando chega uma mensagem real).
     // ────────────────────────────────────────────────────────────────
+    //
+    // Bug fix 2026-05-10 (Webhooks PR2 #8): chunked processing + yield
+    // event loop. Antes loop for sincrono processava 1000+ chats
+    // sequencialmente — cada um faz findByPhone + lead.update +
+    // conversation.findFirst + conversation.update + message.upsert +
+    // conversation.update = 5+ queries. Total: 5000+ queries em rajada
+    // bloqueando o event loop inteiro. Webhook subsequente (mensagem
+    // de cliente real) ficava enfileirado ate a rajada acabar, gerando
+    // timeout do Evolution e retry loop. Risco SIGKILL no API container
+    // (igual incidente 2026-04-28 do scheduleResyncAfterReconnect).
+    // Fix: processa em chunks de 25 + setImmediate entre chunks pra
+    // liberar event loop.
+    const CHUNK_SIZE = 25;
+    if (chats.length > 100) {
+      this.logger.log(`[chats.upsert] Processando ${chats.length} chats em chunks de ${CHUNK_SIZE}`);
+    }
 
-    for (const data of chats) {
+    for (let i = 0; i < chats.length; i++) {
+      // Yield event loop entre chunks
+      if (i > 0 && i % CHUNK_SIZE === 0) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      const data = chats[i];
       if (!data) continue;
 
       const remoteJid = (data.remoteJidAlt || data.remoteJid) as string;
@@ -1014,10 +1109,28 @@ export class EvolutionService implements OnApplicationBootstrap {
       if (!newStatus) continue;
 
       try {
+        // Bug fix 2026-05-10 (Webhooks PR2 #11): valida que message pertence
+        // ao mesmo tenant da inbox que recebeu o webhook. Antes findUnique
+        // global por external_message_id podia bater em mensagem de outro
+        // tenant (Lexcon e lustosa convivem na mesma Evolution — IDs sao
+        // gerados pelo WhatsApp/Baileys, podem coincidir em formato). Status
+        // "lido" do cliente do Lexcon atualizava mensagem do lustosa.
         const msg = await this.prisma.message.findUnique({
           where: { external_message_id: externalMessageId },
+          include: { conversation: { select: { tenant_id: true } } },
         });
         if (!msg) continue;
+
+        // Tenant cross check: se inbox tem tenant_id E msg tem tenant_id E
+        // sao diferentes, descarta com log warn pra investigacao.
+        const msgTenantId = msg.conversation?.tenant_id;
+        if (inbox.tenant_id && msgTenantId && msgTenantId !== inbox.tenant_id) {
+          this.logger.warn(
+            `[WEBHOOK-TENANT-CROSS] messages.update ${externalMessageId}: ` +
+            `inbox tenant=${inbox.tenant_id}, message tenant=${msgTenantId} — descartado`,
+          );
+          continue;
+        }
 
         const updated = await this.prisma.message.update({
           where: { id: msg.id },
@@ -1266,6 +1379,27 @@ export class EvolutionService implements OnApplicationBootstrap {
     const STABILIZE_DELAY = options.stabilizeDelayMs ?? 10000;
     const reason = options.triggerReason ?? 'webhook';
 
+    // Bug fix 2026-05-10 (Webhooks PR2 #10): singleton lock por instanceName.
+    // Antes cron a cada 15min + connection.update + manual + startup podiam
+    // disparar 4-5 syncs simultaneos da MESMA instancia — cada um criando
+    // setTimeout(STABILIZE_DELAY) que disparava em paralelo, saturando
+    // pool DB + rate limit Evolution. Agora se ja tem sync rodando pra
+    // essa instancia, retorna early com log warn (re-tentativa cai no
+    // proximo cron de 15min).
+    if (this.activeResyncs.has(instanceName)) {
+      this.logger.warn(
+        `[RESYNC] LOCK: ja existe resync ativo pra ${instanceName} (trigger=${reason}) — skip pra evitar duplicacao`,
+      );
+      return { newConvsCreated: 0, conversationsResynced: 0 };
+    }
+    this.activeResyncs.add(instanceName);
+
+    // Defesa: se a funcao throw inesperado (FASE 1 ou 2 nao tratado),
+    // garante que o lock seja liberado pra nao prender a instancia ate
+    // restart. setTimeout da FASE 2 tambem libera no proprio finally.
+    let setTimeoutScheduled = false;
+    try {
+
     this.logger.log(
       `[RESYNC] Iniciando resync para ${instanceName} (trigger=${reason}, cutoff=${cutoffHours}h, stabilize=${STABILIZE_DELAY}ms)`,
     );
@@ -1422,6 +1556,7 @@ export class EvolutionService implements OnApplicationBootstrap {
     // com paralelismo controlado (3 conversas por vez), apos STABILIZE_DELAY.
     const conversationsToSync = conversations.filter((c) => !!c.lead?.phone);
     if (conversationsToSync.length > 0) {
+      setTimeoutScheduled = true; // marca que o setTimeout vai liberar o lock
       // Roda em background — webhook responde rapido, sync acontece off-thread.
       setTimeout(async () => {
         try {
@@ -1454,11 +1589,25 @@ export class EvolutionService implements OnApplicationBootstrap {
           this.logger.log(`[RESYNC] FASE 2 concluida: ${synced}/${conversationsToSync.length} conversas sincronizadas`);
         } catch (e: any) {
           this.logger.error(`[RESYNC] FASE 2 erro inesperado: ${e.message}`);
+        } finally {
+          // Bug fix 2026-05-10 (PR2 #10): libera lock APOS FASE 2 terminar.
+          // Importante estar no finally pra garantir liberacao mesmo se a
+          // sync explodir — senao a instancia fica "presa" ate restart.
+          this.activeResyncs.delete(instanceName);
+          this.logger.log(`[RESYNC] LOCK liberado pra ${instanceName}`);
         }
       }, STABILIZE_DELAY);
     }
 
     return { newConvsCreated, conversationsResynced: conversationsToSync.length };
+
+    } finally {
+      // Se setTimeout foi schedulado, ele vai liberar o lock no proprio
+      // finally interno. Se nao foi (sem conversas, ou throw), libera aqui.
+      if (!setTimeoutScheduled) {
+        this.activeResyncs.delete(instanceName);
+      }
+    }
   }
 
   // ─── onApplicationBootstrap (fix principal) ─────────────────────

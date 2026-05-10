@@ -5,15 +5,67 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as crypto from 'crypto';
 import { tenantOrDefault } from '../common/constants/tenant';
 
+// Bug fix 2026-05-10 (Webhooks PR2 #1): cache em memoria pra
+// checkNumberExists. Antes cada send.message disparava 1-3 HTTPs sequenciais
+// pra Evolution (resolveBrazilianWhatsappNumber tenta 12->13 digitos). Em
+// broadcast/follow-up, vira rajada de 200+ HTTPs em segundos — vetor de
+// ban WhatsApp (mesmo padrao do incidente 2026-04-28).
+//
+// Estrategia in-memory:
+//   - Map<key, { exists, jid, expiresAt }>
+//   - key = `${instance}:${number}` (numero ja deve estar normalizado)
+//   - TTL 24h (numero raramente muda de WhatsApp; usuario deletado em 24h
+//     eh edge case aceitavel pra ganho operacional)
+//   - Cleanup lazy (proxima leitura remove expirados) — sem cron
+//   - Cap 10k entradas (evita memory leak em escritorio com muitos leads;
+//     LRU simples — quando atinge cap, remove os 1000 mais antigos)
+//
+// Persistencia: in-memory perde no restart. Aceitavel — primeira rajada
+// pos-restart ainda dispara HTTPs, mas as seguintes ficam cached.
+const CHECK_NUMBER_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const CHECK_NUMBER_CACHE_MAX_SIZE = 10_000;
+interface CheckNumberCacheEntry {
+  exists: boolean;
+  jid: string | null;
+  number: string;
+  expiresAt: number;
+}
+
+// Bug fix 2026-05-10 (Webhooks PR2 #13): cache de profile picture URLs.
+// TTL 6h porque foto pode mudar (cliente troca avatar) — janela curta o
+// suficiente pra refresh natural sem custo de HTTP por webhook.
+const PROFILE_PICTURE_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+const PROFILE_PICTURE_CACHE_MAX_SIZE = 10_000;
+interface ProfilePictureCacheEntry {
+  url: string | null;
+  expiresAt: number;
+}
+
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
-  
+  private readonly checkNumberCache = new Map<string, CheckNumberCacheEntry>();
+  private readonly profilePictureCache = new Map<string, ProfilePictureCacheEntry>();
+
   constructor(
     private readonly settingsService: SettingsService,
     @Inject(forwardRef(() => LeadsService)) private readonly leadsService: LeadsService,
     private readonly prisma: PrismaService,
   ) {}
+
+  /** Bug fix 2026-05-10 (PR2 #1): cleanup lazy do cache. */
+  private trimCheckNumberCacheIfNeeded(): void {
+    if (this.checkNumberCache.size <= CHECK_NUMBER_CACHE_MAX_SIZE) return;
+    // LRU simples: Map mantem ordem de insercao, remove os 1000 mais antigos
+    const toRemove = this.checkNumberCache.size - CHECK_NUMBER_CACHE_MAX_SIZE + 1000;
+    let removed = 0;
+    for (const key of this.checkNumberCache.keys()) {
+      if (removed >= toRemove) break;
+      this.checkNumberCache.delete(key);
+      removed++;
+    }
+    this.logger.debug(`[checkNumberCache] LRU cleanup: removeu ${removed} entradas`);
+  }
 
   private normalizeUrl(url: string): string {
     if (!url) return '';
@@ -83,19 +135,40 @@ export class WhatsappService {
    */
   async checkNumberExists(number: string, instanceName?: string): Promise<{ exists: boolean; jid: string | null; number: string }> {
     const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
+
+    // Bug fix 2026-05-10 (PR2 #1): cache lookup. Evita rajada de HTTPs em
+    // broadcast (vetor de ban WhatsApp).
+    const cacheKey = `${targetInstance}:${number}`;
+    const cached = this.checkNumberCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { exists: cached.exists, jid: cached.jid, number: cached.number };
+    }
+    if (cached) {
+      // Expirado — remove agora (lazy cleanup)
+      this.checkNumberCache.delete(cacheKey);
+    }
+
     try {
       const result: any = await this.request('POST', `chat/whatsappNumbers/${targetInstance}`, { numbers: [number] });
       // Evolution retorna array [{ exists, jid, number }]
       const entry = Array.isArray(result) ? result[0] : result?.[0] || result;
-      return {
+      const resolved = {
         exists: Boolean(entry?.exists),
         jid: entry?.jid || null,
         number: entry?.number || number,
       };
+      // Cache success — inclui exists=false (numero invalido tambem cacheia)
+      this.checkNumberCache.set(cacheKey, {
+        ...resolved,
+        expiresAt: Date.now() + CHECK_NUMBER_CACHE_TTL_MS,
+      });
+      this.trimCheckNumberCacheIfNeeded();
+      return resolved;
     } catch (e: any) {
       this.logger.warn(`[checkNumber] Falha ao verificar ${number}: ${e?.message || e}`);
       // Em caso de erro na API, retorna exists=true pra nao bloquear envio
       // (melhor tentar enviar e deixar sendText reportar erro real).
+      // NAO cacheia erro — proxima chamada tenta de novo.
       return { exists: true, jid: null, number };
     }
   }
@@ -433,9 +506,23 @@ export class WhatsappService {
   }
 
   async fetchProfilePicture(instanceName: string, number: string) {
+    // Bug fix 2026-05-10 (Webhooks PR2 #13): cache TTL 6h. Antes em rajada
+    // de contacts.upsert (1000+ contatos no reconnect), cada lead disparava
+    // 1 HTTP — 1000 HTTPs em paralelo pra Evolution, trigger de rate limit
+    // que afetava envio de mensagens reais. Cache reduz drasticamente.
+    // TTL 6h = balanco entre frescor (foto pode mudar) e custo HTTP.
+    const cleanNumber = number.replace(/@s\.whatsapp\.net$/, '');
+    const cacheKey = `${instanceName}:${cleanNumber}`;
+    const cached = this.profilePictureCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.url;
+    }
+    if (cached) {
+      this.profilePictureCache.delete(cacheKey);
+    }
+
     try {
       // Evolution API aceita tanto "5511999..." quanto "5511999...@s.whatsapp.net"
-      const cleanNumber = number.replace(/@s\.whatsapp\.net$/, '');
       const data = await this.request(
         'POST',
         `chat/fetchProfilePictureUrl/${instanceName}`,
@@ -445,11 +532,31 @@ export class WhatsappService {
       if (!url) {
         this.logger.debug(`[fetchProfilePicture] Sem foto para ${cleanNumber} na instância ${instanceName}. Resposta: ${JSON.stringify(data)}`);
       }
+      // Cache mesmo url=null (evita re-tentar lead sem foto a cada webhook)
+      this.profilePictureCache.set(cacheKey, {
+        url,
+        expiresAt: Date.now() + PROFILE_PICTURE_CACHE_TTL_MS,
+      });
+      this.trimProfilePictureCacheIfNeeded();
       return url;
     } catch (e: any) {
       this.logger.debug(`[fetchProfilePicture] Erro ao buscar foto de ${number}: ${e?.message}`);
+      // NAO cacheia erro — proxima chamada tenta de novo
       return null;
     }
+  }
+
+  /** Bug fix 2026-05-10 (PR2 #13): LRU cleanup do cache de fotos. */
+  private trimProfilePictureCacheIfNeeded(): void {
+    if (this.profilePictureCache.size <= PROFILE_PICTURE_CACHE_MAX_SIZE) return;
+    const toRemove = this.profilePictureCache.size - PROFILE_PICTURE_CACHE_MAX_SIZE + 1000;
+    let removed = 0;
+    for (const key of this.profilePictureCache.keys()) {
+      if (removed >= toRemove) break;
+      this.profilePictureCache.delete(key);
+      removed++;
+    }
+    this.logger.debug(`[profilePictureCache] LRU cleanup: removeu ${removed} entradas`);
   }
 
   async fetchMessages(instanceName: string, remoteJid: string): Promise<any[]> {
