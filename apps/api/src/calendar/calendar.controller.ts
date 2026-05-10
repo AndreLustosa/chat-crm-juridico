@@ -65,7 +65,9 @@ export class CalendarController {
   // IMPORTANTE: rotas com paths fixos ANTES de :id para evitar conflito
   @Get('events/legal-case/:caseId')
   findByLegalCase(@Param('caseId') caseId: string, @Query('type') type: string | undefined, @Request() req: any) {
-    return this.calendarService.findByLegalCase(caseId, type, req.user?.tenant_id);
+    // Bug fix 2026-05-10 (PR2 #3): passa userId+roles pra filtro RBAC
+    // por lawyer_id do processo.
+    return this.calendarService.findByLegalCase(caseId, type, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   @Get('events/:id')
@@ -116,7 +118,19 @@ export class CalendarController {
   }
 
   @Post('events/:id/notify')
-  async notifyEvent(@Param('id') id: string) {
+  async notifyEvent(@Param('id') id: string, @Request() req: any) {
+    // Bug fix 2026-05-10 (PR2 #2): antes endpoint estava aberto a qualquer
+    // user autenticado de qualquer tenant — disparava WhatsApp pago + IA
+    // gerada com dados do legal_case.notes pra cliente alheio. Vetor de
+    // abuso financeiro + spam + risco de ban WhatsApp (incidente 2026-04-29).
+    // Agora exige ownership do evento.
+    const canAccess = await this.calendarService.checkOwnership(
+      id,
+      req.user.id,
+      req.user.roles,
+      req.user?.tenant_id,
+    );
+    if (!canAccess) throw new ForbiddenException('Sem permissao para notificar este evento');
     return this.calendarService.notifyEvent(id);
   }
 
@@ -302,7 +316,10 @@ export class CalendarController {
 
   @Post('migrate-tasks')
   @Roles('ADMIN')
-  async migrateTasks() {
-    return this.calendarService.migrateOrphanTasks();
+  async migrateTasks(@Request() req: any) {
+    // Bug fix 2026-05-10 (PR2 #4): exige tenantId do admin logado.
+    // Antes endpoint migrava ALL tenants — admin de A criava events
+    // disparando reminders de WhatsApp pra clientes de B.
+    return this.calendarService.migrateOrphanTasks(req.user?.tenant_id);
   }
 }

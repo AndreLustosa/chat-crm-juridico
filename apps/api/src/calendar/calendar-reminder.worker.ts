@@ -612,6 +612,20 @@ export class CalendarReminderWorker extends WorkerHost {
       throw e;
     }
 
+    // Bug fix 2026-05-10 (PR2 #10): marca hearing_notified_at apos envio
+    // bem-sucedido pra que fallback cron nao re-dispare. Updates falham
+    // silenciosamente (campo eh idempotente — se Redis cair entre envio e
+    // update, fallback re-envia E re-tenta o update; cliente pode receber
+    // 2x mas isso eh melhor que nao receber nada).
+    try {
+      await this.prisma.calendarEvent.update({
+        where: { id: eventId },
+        data: { hearing_notified_at: new Date() } as any,
+      });
+    } catch (e: any) {
+      this.logger.warn(`[HEARING-NOTIFY] Falha ao marcar hearing_notified_at: ${e.message}`);
+    }
+
     // Salva mensagem na conversa (visível para o operador no chat)
     // e atualiza reminder_context para a IA/operador saberem o contexto
     if (lastConvo) {

@@ -100,7 +100,9 @@ export class TasksController {
 
   @Get('legal-case/:caseId')
   findByLegalCase(@Param('caseId') caseId: string, @Request() req: any) {
-    return this.tasksService.findByLegalCase(caseId, req.user?.tenant_id);
+    // Bug fix 2026-05-10 (PR2 #3): passa userId+roles pra filtrar por
+    // ownership do processo (lawyer_id) — antes vazava lateralmente.
+    return this.tasksService.findByLegalCase(caseId, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   @Get('conversation/:conversationId/active')
@@ -175,36 +177,39 @@ export class TasksController {
     return this.tasksService.postpone(id, body.new_due_at, body.reason, req.user?.id, req.user?.tenant_id);
   }
 
+  // Bug fix 2026-05-10 (PR2 #1): controllers agora passam userId+roles
+  // pra service usar verifyTaskOwnership. Antes so checava tenant —
+  // qualquer user do mesmo tenant editava task de outro advogado.
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: any) {
-    return this.tasksService.updateStatus(id, status, req.user?.tenant_id);
+    return this.tasksService.updateStatus(id, status, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() data: UpdateTaskDto, @Request() req: any) {
-    return this.tasksService.update(id, data, req.user?.tenant_id);
+    return this.tasksService.update(id, data, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   @Post(':id/comments')
   addComment(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
-    return this.tasksService.addComment(id, req.user?.id, text, req.user?.tenant_id);
+    return this.tasksService.addComment(id, req.user?.id, text, req.user?.tenant_id, req.user?.roles);
   }
 
   @Get(':id/comments')
   findComments(@Param('id') id: string, @Request() req: any) {
-    return this.tasksService.findComments(id, req.user?.tenant_id);
+    return this.tasksService.findComments(id, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   // Sprint 5: Task detail
   @Get(':id')
   findOne(@Param('id') id: string, @Request() req: any) {
-    return this.tasksService.findOne(id, req.user?.tenant_id);
+    return this.tasksService.findOne(id, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   // Sprint 5: Checklist CRUD
   @Post(':id/checklist')
   addChecklistItem(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
-    return this.tasksService.addChecklistItem(id, text, req.user?.tenant_id);
+    return this.tasksService.addChecklistItem(id, text, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   @Patch(':id/checklist/:itemId')
@@ -214,12 +219,12 @@ export class TasksController {
     @Body('done') done: boolean,
     @Request() req: any,
   ) {
-    return this.tasksService.toggleChecklistItem(id, itemId, done, req.user?.tenant_id);
+    return this.tasksService.toggleChecklistItem(id, itemId, done, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   @Delete(':id/checklist/:itemId')
   deleteChecklistItem(@Param('id') id: string, @Param('itemId') itemId: string, @Request() req: any) {
-    return this.tasksService.deleteChecklistItem(id, itemId, req.user?.tenant_id);
+    return this.tasksService.deleteChecklistItem(id, itemId, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   // ─── Attachments (anexos da diligência) ──────────────────────
@@ -231,13 +236,13 @@ export class TasksController {
    */
   @Get(':id/suggest-folder')
   suggestFolder(@Param('id') id: string, @Request() req: any) {
-    return this.tasksService.suggestFolderForTask(id, req.user?.tenant_id)
+    return this.tasksService.suggestFolderForTask(id, req.user?.tenant_id, req.user?.id, req.user?.roles)
       .then(folder => ({ folder }));
   }
 
   @Get(':id/attachments')
   listAttachments(@Param('id') id: string, @Request() req: any) {
-    return this.tasksService.listAttachments(id, req.user?.tenant_id);
+    return this.tasksService.listAttachments(id, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
   /**
@@ -260,6 +265,7 @@ export class TasksController {
       req.user?.id,
       req.user?.tenant_id,
       folder,
+      req.user?.roles,
     );
   }
 
@@ -272,6 +278,8 @@ export class TasksController {
     const result = await this.tasksService.downloadAttachment(
       attachmentId,
       req.user?.tenant_id,
+      req.user?.id,
+      req.user?.roles,
     );
     res.setHeader('Content-Type', result.mimeType);
     res.setHeader(
@@ -286,6 +294,6 @@ export class TasksController {
     @Param('attachmentId') attachmentId: string,
     @Request() req: any,
   ) {
-    return this.tasksService.removeAttachment(attachmentId, req.user?.tenant_id);
+    return this.tasksService.removeAttachment(attachmentId, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 }

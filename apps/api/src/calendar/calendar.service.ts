@@ -523,7 +523,30 @@ export class CalendarService implements OnApplicationBootstrap {
       // brazilNaiveToRealEpoch converte pro epoch real antes de calcular delay.
       // Sem isso o trigger sai 3h adiantado. Bug reportado 2026-04-23.
       const triggerAt = brazilNaiveToRealEpoch(startAt) - r.minutes_before * 60 * 1000;
-      const delay = Math.max(triggerAt - Date.now(), 1000); // min 1s
+
+      // Bug fix 2026-05-10 (PR2 #7): skip reminders retroativos. Antes
+      // `Math.max(trigger - now, 1000)` forcava delay min 1s — registro
+      // retroativo de audiencia (start_at no passado, ex: lancar audiencia
+      // que ja aconteceu ontem pra fechar dossie) disparava 4 reminders
+      // imediatos pro cliente "audiencia amanha" sobre coisa que ja passou.
+      // Tolerancia de 60s pra cobrir delays de processamento normais.
+      const nowMs = Date.now();
+      if (triggerAt < nowMs - 60_000) {
+        this.logger.log(
+          `[REMINDER] Skip retroativo: ${r.id} (channel=${r.channel}, trigger ` +
+          `${Math.round((nowMs - triggerAt) / 60000)}min no passado, evento ${eventId})`,
+        );
+        // Marca sent_at pra sair do pool de pendentes do orphan cron tambem
+        try {
+          await this.prisma.eventReminder.update({
+            where: { id: r.id },
+            data: { sent_at: new Date() },
+          });
+        } catch {}
+        continue;
+      }
+
+      const delay = Math.max(triggerAt - nowMs, 1000); // min 1s pra triggers no presente
       const jobId = `reminder-${r.id}`;
       try {
         // Remove job anterior (se existir) antes de enfileirar — garante idempotência em re-agendamentos
@@ -609,7 +632,7 @@ export class CalendarService implements OnApplicationBootstrap {
     // Carrega estado anterior para detectar mudanças relevantes na audiência
     const before = await this.prisma.calendarEvent.findUnique({
       where: { id },
-      select: { type: true, start_at: true, location: true, lead_id: true },
+      select: { type: true, start_at: true, location: true, lead_id: true, assigned_user_id: true, title: true },
     });
 
     const event = await this.prisma.calendarEvent.update({
@@ -626,6 +649,35 @@ export class CalendarService implements OnApplicationBootstrap {
     if (data.start_at && event.reminders?.length) {
       await this.enqueueReminders(event.id, event.start_at, event.reminders);
       this.logger.log(`Lembretes re-enfileirados para evento ${event.id} (start_at alterado)`);
+    }
+
+    // Bug fix 2026-05-10 (PR2 #8): se assigned_user_id mudou, antigo
+    // responsavel ainda recebia reminder + novo nao sabia da
+    // atribuicao. Re-enqueue dos reminders garante que disparem com
+    // dados atuais (template usa assigned_user.name); notify ao novo
+    // garante que ele saiba SEM esperar o reminder.
+    const reassigned = data.assigned_user_id !== undefined
+      && before?.assigned_user_id !== event.assigned_user_id;
+    if (reassigned) {
+      // Re-enfileira reminders pra garantir que template puxe assigned_user atualizado
+      if (event.reminders?.length && !data.start_at) {
+        await this.enqueueReminders(event.id, event.start_at, event.reminders);
+        this.logger.log(`Lembretes re-enfileirados para evento ${event.id} (assigned_user_id alterado: ${before?.assigned_user_id} → ${event.assigned_user_id})`);
+      }
+      // Notifica novo responsavel se existir
+      if (event.assigned_user_id) {
+        try {
+          this.chatGateway.emitCalendarReminder(event.assigned_user_id, {
+            eventId: event.id,
+            title: event.title,
+            type: event.type,
+            start_at: event.start_at.toISOString(),
+            minutesBefore: 0,
+          });
+        } catch (e: any) {
+          this.logger.warn(`Falha ao notificar novo responsavel ${event.assigned_user_id}: ${e.message}`);
+        }
+      }
     }
 
     // Se é AUDIÊNCIA ou PERÍCIA e data ou local mudaram → notificar cliente sobre a remarcação
@@ -1286,10 +1338,24 @@ export class CalendarService implements OnApplicationBootstrap {
   }
 
   async removeRecurrenceAll(parentId: string) {
+    // Bug fix 2026-05-10 (PR2 #9): antes deleteMany direto deixava jobs
+    // BullMQ orfaos pra cada filho — workers consumiam ciclos tentando
+    // processar reminder de evento ja deletado, log spam de "Reminder X
+    // nao encontrado", memory leak no Redis. Agora cancelamos jobs ANTES
+    // de deletar (cancelReminderJobs eh idempotente).
+    const children = await this.prisma.calendarEvent.findMany({
+      where: { parent_event_id: parentId },
+      select: { id: true },
+    });
+    for (const child of children) {
+      await this.cancelReminderJobs(child.id);
+    }
+    await this.cancelReminderJobs(parentId);
+
     // Deletar filhos primeiro, depois o pai
     await this.prisma.calendarEvent.deleteMany({ where: { parent_event_id: parentId } });
     await this.prisma.calendarEvent.delete({ where: { id: parentId } });
-    return { deleted: true };
+    return { deleted: true, childCount: children.length };
   }
 
   // ─── Search ───────────────────────────────────────────
@@ -1427,7 +1493,23 @@ export class CalendarService implements OnApplicationBootstrap {
 
   // ─── Legal Case Tasks ─────────────────────────────────
 
-  async findByLegalCase(legalCaseId: string, type?: string, tenantId?: string) {
+  async findByLegalCase(legalCaseId: string, type?: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    // Bug fix 2026-05-10 (PR2 #3): RBAC do processo. Antes nao-admin
+    // listava eventos de processo de outro advogado (vazava description,
+    // location, lead.phone via include nas listagens do TabAgenda).
+    if (tenantId || userId) {
+      const lc = await this.prisma.legalCase.findUnique({
+        where: { id: legalCaseId },
+        select: { tenant_id: true, lawyer_id: true },
+      });
+      if (!lc) throw new NotFoundException('Processo nao encontrado');
+      if (tenantId && lc.tenant_id && lc.tenant_id !== tenantId) {
+        throw new ForbiddenException('Processo de outro tenant');
+      }
+      if (userId && !isAdmin(roles || []) && lc.lawyer_id !== userId) {
+        throw new ForbiddenException('Sem permissao para ver eventos deste processo');
+      }
+    }
     return this.prisma.calendarEvent.findMany({
       where: {
         legal_case_id: legalCaseId,
@@ -1446,15 +1528,29 @@ export class CalendarService implements OnApplicationBootstrap {
 
   // ─── Migrate Tasks ────────────────────────────────────
 
-  async migrateOrphanTasks() {
+  async migrateOrphanTasks(tenantId?: string) {
+    // Bug fix 2026-05-10 (PR2 #4): admin de tenant A migrava tasks de
+    // TODOS os tenants. `findFirst({ roles: { has: 'ADMIN' } })` pegava
+    // qualquer admin (poderia ser de outro tenant). Calendar event criado
+    // disparava 4 reminders WhatsApp por audiencia → spam massivo
+    // cross-tenant. Agora exigimos tenantId e filtramos.
+    if (!tenantId) {
+      throw new BadRequestException('tenantId obrigatorio para migracao');
+    }
+
     const orphanTasks = await this.prisma.task.findMany({
-      where: { calendar_event_id: null },
+      where: { calendar_event_id: null, tenant_id: tenantId },
       include: { comments: true },
     });
 
     let migrated = 0;
     for (const task of orphanTasks) {
-      const creatorId = task.assigned_user_id || (await this.prisma.user.findFirst({ where: { roles: { has: 'ADMIN' } }, select: { id: true } }))?.id;
+      // Admin do MESMO tenant (filter explicito) — sem isso, podia herdar
+      // ADMIN de outro escritorio.
+      const creatorId = task.assigned_user_id || (await this.prisma.user.findFirst({
+        where: { roles: { has: 'ADMIN' }, tenant_id: tenantId },
+        select: { id: true },
+      }))?.id;
       if (!creatorId) continue;
 
       const event = await this.prisma.calendarEvent.create({
@@ -1472,7 +1568,7 @@ export class CalendarService implements OnApplicationBootstrap {
           lead_id: task.lead_id,
           conversation_id: task.conversation_id,
           legal_case_id: task.legal_case_id,
-          tenant_id: task.tenant_id,
+          tenant_id: tenantOrDefault(task.tenant_id || tenantId),
         },
       });
 
@@ -1490,9 +1586,9 @@ export class CalendarService implements OnApplicationBootstrap {
       migrated++;
     }
 
-    // Migrar comentários de tasks já vinculadas
+    // Migrar comentários de tasks já vinculadas (mesmo filtro)
     const linkedTasks = await this.prisma.task.findMany({
-      where: { calendar_event_id: { not: null } },
+      where: { calendar_event_id: { not: null }, tenant_id: tenantId },
       include: { comments: true },
     });
     let commentsMigrated = 0;

@@ -1056,6 +1056,13 @@ model CalendarEvent {
 
   created_by_ai Boolean @default(false) // true quando o evento foi criado por tool da IA (book_appointment)
 
+  // Bug fix 2026-05-10 (PR2 #10): rastreamento de notificacao imediata de
+  // audiencia/pericia agendada. Usado pelo fallback cron diario (manha)
+  // pra garantir que se Redis cair entre criacao do evento e disparo do
+  // job notify-hearing-deferred, a mensagem ainda chegue ao cliente
+  // antes do dia da audiencia. NULL = nunca foi notificado (cron pega).
+  hearing_notified_at DateTime?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 

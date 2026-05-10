@@ -10,6 +10,7 @@ import { MediaS3Service } from '../media/s3.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { tenantOrDefault } from '../common/constants/tenant';
+import { isAdmin } from '../common/utils/permissions.util';
 
 // Whitelist de MIME types pra anexos de Task. Mesma do portal/upload —
 // PDF, imagens, Office, TXT. Bloqueia executaveis e scripts.
@@ -79,6 +80,51 @@ export class TasksService {
     }
   }
 
+  /**
+   * Bug fix 2026-05-10 (PR2 #1): ownership check de Task — substitui
+   * `verifyTenantOwnership` em todos os endpoints user-facing. Sem isso,
+   * qualquer user do mesmo tenant podia editar/comentar/anexar/marcar
+   * concluida diligencia de outro advogado. Agora:
+   *   - ADMIN passa direto
+   *   - User precisa ser assigned_user_id, created_by_id, ou
+   *     acknowledged_by_id pra alterar
+   *   - Tenant ainda checado (defesa contra manipulacao de IDs)
+   *
+   * Quando legacy task.tenant_id esta NULL (pre-hardening 2026-05-07),
+   * exigimos tenant_id no caller — diferente do `verifyTenantOwnership`
+   * que era permissivo (pulava check). Tasks legacy podem precisar
+   * backfill de tenant_id antes de serem editadas.
+   */
+  private async verifyTaskOwnership(
+    id: string,
+    userId: string | undefined,
+    roles: string | string[] | undefined,
+    tenantId?: string,
+  ): Promise<void> {
+    if (!userId) {
+      throw new ForbiddenException('Operacao requer usuario autenticado');
+    }
+    const task = await this.prisma.task.findUnique({
+      where: { id },
+      select: { tenant_id: true, assigned_user_id: true, created_by_id: true, acknowledged_by_id: true },
+    });
+    if (!task) throw new NotFoundException('Tarefa nao encontrada');
+    // Tenant check primeiro
+    if (tenantId && task.tenant_id && task.tenant_id !== tenantId) {
+      throw new ForbiddenException('Tarefa de outro tenant');
+    }
+    // Admin passa
+    if (isAdmin(roles || [])) return;
+    // Owner: assigned, criador, ou ack-er
+    const isOwner =
+      task.assigned_user_id === userId ||
+      task.created_by_id === userId ||
+      task.acknowledged_by_id === userId;
+    if (!isOwner) {
+      throw new ForbiddenException('Sem permissao para acessar esta tarefa');
+    }
+  }
+
   async findAll(
     tenantId?: string,
     page?: number,
@@ -143,8 +189,15 @@ export class TasksService {
     return { data, total: data.length, page: 1, limit: data.length };
   }
 
-  async findOne(id: string, tenantId?: string) {
-    await this.verifyTenantOwnership(id, tenantId);
+  async findOne(id: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    // Bug fix 2026-05-10 (PR2 #1): findOne agora exige ownership — antes
+    // qualquer user do mesmo tenant lia titulo/descricao/comments/checklist
+    // de diligencia alheia.
+    if (userId) {
+      await this.verifyTaskOwnership(id, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(id, tenantId);
+    }
     return this.prisma.task.findUnique({
       where: { id },
       include: {
@@ -163,24 +216,36 @@ export class TasksService {
 
   // ─── Checklist CRUD ───────────────────────────────────────────────────────
 
-  async addChecklistItem(taskId: string, text: string, tenantId?: string) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async addChecklistItem(taskId: string, text: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    if (userId) {
+      await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(taskId, tenantId);
+    }
     const count = await this.prisma.taskChecklistItem.count({ where: { task_id: taskId } });
     return this.prisma.taskChecklistItem.create({
       data: { task_id: taskId, text, position: count },
     });
   }
 
-  async toggleChecklistItem(taskId: string, itemId: string, done: boolean, tenantId?: string) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async toggleChecklistItem(taskId: string, itemId: string, done: boolean, tenantId?: string, userId?: string, roles?: string | string[]) {
+    if (userId) {
+      await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(taskId, tenantId);
+    }
     return this.prisma.taskChecklistItem.update({
       where: { id: itemId },
       data: { done },
     });
   }
 
-  async deleteChecklistItem(taskId: string, itemId: string, tenantId?: string) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async deleteChecklistItem(taskId: string, itemId: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    if (userId) {
+      await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(taskId, tenantId);
+    }
     await this.prisma.taskChecklistItem.delete({ where: { id: itemId } });
     return { ok: true };
   }
@@ -283,26 +348,37 @@ export class TasksService {
     return task;
   }
 
-  async updateStatus(id: string, status: string, tenantId?: string) {
-    await this.verifyTenantOwnership(id, tenantId);
+  async updateStatus(id: string, status: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    if (userId) {
+      await this.verifyTaskOwnership(id, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(id, tenantId);
+    }
     // Auto-set started_at na 1a transicao pra EM_PROGRESSO — advogado
     // quer saber QUANDO o estagiario comecou a executar a diligencia.
     // Idempotente: se ja foi setado uma vez, nao reescreve em re-clicks
     // ou voltas (caso a task tenha sido reaberta).
-    const updateData: any = { status };
+    //
+    // Bug fix 2026-05-10 (PR2 #6): race condition no SELECT+UPDATE separado.
+    // Tentamos primeiro UPDATE atomico (started_at IS NULL), depois UPDATE
+    // simples (status only). Se o updateMany pegar 0 linhas, outro caller
+    // ja marcou started_at — fazemos so o status update sem reescrever.
+    let task: any;
     if (status === 'EM_PROGRESSO') {
-      const current = await this.prisma.task.findUnique({
-        where: { id },
-        select: { started_at: true },
+      // Tenta atomicamente setar status + started_at se ainda eh null
+      const startResult = await this.prisma.task.updateMany({
+        where: { id, started_at: null },
+        data: { status, started_at: new Date() },
       });
-      if (!current?.started_at) {
-        updateData.started_at = new Date();
+      if (startResult.count === 0) {
+        // started_at ja existe: so atualiza status
+        task = await this.prisma.task.update({ where: { id }, data: { status } });
+      } else {
+        task = await this.prisma.task.findUnique({ where: { id } });
       }
+    } else {
+      task = await this.prisma.task.update({ where: { id }, data: { status } });
     }
-    const task = await this.prisma.task.update({
-      where: { id },
-      data: updateData,
-    });
 
     // Sync calendar event status
     if (task.calendar_event_id) {
@@ -340,8 +416,12 @@ export class TasksService {
     status?: string;
     due_at?: string | Date | null;
     assigned_user_id?: string | null;
-  }, tenantId?: string) {
-    await this.verifyTenantOwnership(id, tenantId);
+  }, tenantId?: string, userId?: string, roles?: string | string[]) {
+    if (userId) {
+      await this.verifyTaskOwnership(id, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(id, tenantId);
+    }
     const updateData: any = {};
     if (data.title !== undefined) updateData.title = data.title;
     if (data.description !== undefined) updateData.description = data.description;
@@ -843,11 +923,26 @@ export class TasksService {
       return { ok: true, alreadyAcknowledged: true };
     }
 
+    // Bug fix 2026-05-10 (PR2 #6): optimistic lock — usa updateMany com
+    // WHERE acknowledged_at IS NULL pra garantir que so 1 caller vence em
+    // caso de duplo clique / race entre acknowledge individual e
+    // acknowledgeMany batch. Antes update() sobrescrevia
+    // acknowledged_by_id e double-disparava notificacao downstream.
     const now = new Date();
-    await this.prisma.task.update({
-      where: { id: taskId },
+    const result = await this.prisma.task.updateMany({
+      where: {
+        id: taskId,
+        acknowledged_at: null,
+        status: 'CONCLUIDA',
+        // Defensa extra: nao deixa user errado vencer corrida
+        ...(task.created_by_id ? { created_by_id: userId } : {}),
+      },
       data: { acknowledged_at: now, acknowledged_by_id: userId },
     });
+    if (result.count === 0) {
+      // Outro request venceu a corrida — sucesso silencioso (idempotente)
+      return { ok: true, alreadyAcknowledged: true };
+    }
     return { ok: true, acknowledgedAt: now.toISOString() };
   }
 
@@ -997,10 +1092,17 @@ export class TasksService {
       return { ok: true, alreadyViewed: true };
     }
 
-    await this.prisma.task.update({
-      where: { id: taskId },
+    // Bug fix 2026-05-10 (PR2 #6): optimistic lock — useEffect do card
+    // pode disparar 2-3 calls em paralelo no mount/re-render. Sem lock,
+    // todos UPDATE viewed_at e o socket emit (linha abaixo) dispara N vezes
+    // pro delegante.
+    const result = await this.prisma.task.updateMany({
+      where: { id: taskId, viewed_at: null, assigned_user_id: userId },
       data: { viewed_at: new Date() },
     });
+    if (result.count === 0) {
+      return { ok: true, alreadyViewed: true };
+    }
 
     // Sinal real-time pro painel do delegante — timeline da Task no
     // card pula de "Delegada" pra "Vista" sem o advogado precisar
@@ -1022,8 +1124,12 @@ export class TasksService {
    * Sugere pasta automatica baseada no titulo da Task.
    * Exposto no controller como GET /tasks/:id/suggest-folder pra UI.
    */
-  async suggestFolderForTask(taskId: string, tenantId?: string): Promise<string> {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async suggestFolderForTask(taskId: string, tenantId?: string, userId?: string, roles?: string | string[]): Promise<string> {
+    if (userId) {
+      await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(taskId, tenantId);
+    }
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       select: { title: true },
@@ -1035,8 +1141,12 @@ export class TasksService {
    * Lista anexos de uma Task. Inclui dados do uploader pra UI mostrar
    * "anexado por X em Y".
    */
-  async listAttachments(taskId: string, tenantId?: string) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async listAttachments(taskId: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    if (userId) {
+      await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(taskId, tenantId);
+    }
     return (this.prisma as any).taskAttachment.findMany({
       where: { task_id: taskId },
       include: { uploaded_by: { select: { id: true, name: true } } },
@@ -1061,8 +1171,15 @@ export class TasksService {
     userId: string,
     tenantId?: string,
     folderOverride?: string,
+    roles?: string | string[],
   ) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+    // Bug fix 2026-05-10 (PR2 #5): exige ownership ANTES de qualquer upload S3.
+    // verifyTaskOwnership tambem rejeita task com tenant_id NULL (legacy
+    // pre-hardening 2026-05-07) — sem isso anyone com taskId podia subir
+    // arquivo em diligencia legacy. Antes verifyTenantOwnership pulava o check
+    // se task.tenant_id era null.
+    await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       select: { id: true, title: true, tenant_id: true, legal_case_id: true },
@@ -1094,7 +1211,9 @@ export class TasksService {
       ? folderOverride
       : inferFolder(task.title);
 
-    // Sobe tudo no S3 em paralelo, depois persiste em transação
+    // Sobe tudo no S3 em paralelo, depois persiste em transação.
+    // Bug fix 2026-05-10 (PR2 #5): se a transacao do DB falhar, removemos
+    // os objetos S3 ja subidos pra evitar acumulo de orfaos (custo + GDPR).
     const uploads = await Promise.all(files.map(async (f) => {
       const ext = extname(f.originalname) || '';
       const s3Key = `task-attachments/${taskId}/${randomUUID()}${ext}`;
@@ -1108,23 +1227,35 @@ export class TasksService {
       };
     }));
 
-    const created = await this.prisma.$transaction(
-      uploads.map((u) =>
-        (this.prisma as any).taskAttachment.create({
-          data: {
-            task_id: taskId,
-            tenant_id: task.tenant_id || tenantId || null,
-            uploaded_by_id: userId,
-            name: u.name,
-            original_name: u.original_name,
-            s3_key: u.s3Key,
-            mime_type: u.mime_type,
-            size: u.size,
-            folder,
-          },
-        }),
-      ),
-    );
+    let created: any[];
+    try {
+      created = await this.prisma.$transaction(
+        uploads.map((u) =>
+          (this.prisma as any).taskAttachment.create({
+            data: {
+              task_id: taskId,
+              tenant_id: tenantOrDefault(task.tenant_id || tenantId),
+              uploaded_by_id: userId,
+              name: u.name,
+              original_name: u.original_name,
+              s3_key: u.s3Key,
+              mime_type: u.mime_type,
+              size: u.size,
+              folder,
+            },
+          }),
+        ),
+      );
+    } catch (txErr: any) {
+      // Cleanup S3: rollback orfaos
+      this.logger.warn(`[TaskAttachment] Transacao DB falhou — limpando ${uploads.length} S3 orfaos: ${txErr.message}`);
+      await Promise.all(uploads.map(u =>
+        this.s3.deleteObject(u.s3Key).catch(e =>
+          this.logger.warn(`[TaskAttachment] Falha cleanup S3 ${u.s3Key}: ${e.message}`)
+        )
+      ));
+      throw txErr;
+    }
 
     this.logger.log(
       `[TaskAttachment] ${created.length} anexo(s) na task ${taskId} ` +
@@ -1135,15 +1266,21 @@ export class TasksService {
   }
 
   /**
-   * Stream de download de um anexo. Verifica ownership via tenant antes.
+   * Stream de download de um anexo. Bug fix 2026-05-10 (PR2 #1): agora
+   * exige ownership da Task pai (nao apenas tenant). Antes qualquer user do
+   * mesmo tenant baixava anexo de diligencia alheia (GDPR + sigilo).
    */
-  async downloadAttachment(attachmentId: string, tenantId?: string) {
+  async downloadAttachment(attachmentId: string, tenantId?: string, userId?: string, roles?: string | string[]) {
     const att = await (this.prisma as any).taskAttachment.findUnique({
       where: { id: attachmentId },
+      select: { id: true, tenant_id: true, task_id: true, s3_key: true, original_name: true, mime_type: true },
     });
     if (!att) throw new NotFoundException('Anexo não encontrado');
     if (tenantId && att.tenant_id && att.tenant_id !== tenantId) {
       throw new ForbiddenException('Acesso negado');
+    }
+    if (userId && att.task_id) {
+      await this.verifyTaskOwnership(att.task_id, userId, roles, tenantId);
     }
     const result = await this.s3.getObjectStream(att.s3_key);
     return {
@@ -1155,15 +1292,20 @@ export class TasksService {
 
   /**
    * Remove anexo (S3 + DB). Soft delete nao faz sentido aqui — anexo
-   * errado precisa sumir do workspace tambem.
+   * errado precisa sumir do workspace tambem. Bug fix 2026-05-10 (PR2 #1):
+   * exige ownership da Task pai.
    */
-  async removeAttachment(attachmentId: string, tenantId?: string) {
+  async removeAttachment(attachmentId: string, tenantId?: string, userId?: string, roles?: string | string[]) {
     const att = await (this.prisma as any).taskAttachment.findUnique({
       where: { id: attachmentId },
+      select: { id: true, tenant_id: true, task_id: true, s3_key: true },
     });
     if (!att) throw new NotFoundException('Anexo não encontrado');
     if (tenantId && att.tenant_id && att.tenant_id !== tenantId) {
       throw new ForbiddenException('Acesso negado');
+    }
+    if (userId && att.task_id) {
+      await this.verifyTaskOwnership(att.task_id, userId, roles, tenantId);
     }
     try {
       await this.s3.deleteObject(att.s3_key);
@@ -1211,14 +1353,23 @@ export class TasksService {
 
   // ─── Legal Case Tasks ──────────────────────────────────────────
 
-  async findByLegalCase(legalCaseId: string, tenantId?: string) {
-    if (tenantId) {
+  async findByLegalCase(legalCaseId: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    // Bug fix 2026-05-10 (PR2 #3): antes so checava tenant. Qualquer
+    // user nao-admin via TODAS as tasks de qualquer processo do tenant —
+    // vazava nomes de oponentes, valores, comentarios sigilosos. Agora:
+    //   - ADMIN passa
+    //   - Demais precisam ser lawyer_id do processo
+    if (tenantId || userId) {
       const lc = await this.prisma.legalCase.findUnique({
         where: { id: legalCaseId },
-        select: { tenant_id: true },
+        select: { tenant_id: true, lawyer_id: true },
       });
-      if (lc?.tenant_id && lc.tenant_id !== tenantId) {
-        throw new ForbiddenException('Acesso negado a este recurso');
+      if (!lc) throw new NotFoundException('Processo nao encontrado');
+      if (tenantId && lc.tenant_id && lc.tenant_id !== tenantId) {
+        throw new ForbiddenException('Processo de outro tenant');
+      }
+      if (userId && !isAdmin(roles || []) && lc.lawyer_id !== userId) {
+        throw new ForbiddenException('Sem permissao para ver tarefas deste processo');
       }
     }
     // Inclui tracking timestamps + count attachments pra TabDiligencias
@@ -1241,10 +1392,20 @@ export class TasksService {
 
   // ─── Task Comments ─────────────────────────────────────────────
 
-  async addComment(taskId: string, userId: string, text: string, tenantId?: string) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async addComment(taskId: string, userId: string, text: string, tenantId?: string, roles?: string | string[]) {
+    // Bug fix 2026-05-10 (PR2 #1+#9): exige ownership ANTES de criar comment
+    // (vazava sigilo + abria vetor de DoS via notifications.create
+    // disparando WhatsApp ao destinatario sem rate limit).
+    await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+
+    // Validacao basica de input — comments nao podem ser vazios nem
+    // arbitrariamente grandes (DoS no notification body).
+    const trimmed = (text || '').trim();
+    if (!trimmed) throw new BadRequestException('Comentario vazio');
+    if (trimmed.length > 2000) throw new BadRequestException('Comentario muito longo (max 2000 chars)');
+
     const comment = await this.prisma.taskComment.create({
-      data: { task_id: taskId, user_id: userId, text },
+      data: { task_id: taskId, user_id: userId, text: trimmed },
       include: { user: { select: { id: true, name: true } } },
     });
 
@@ -1301,8 +1462,14 @@ export class TasksService {
     return comment;
   }
 
-  async findComments(taskId: string, tenantId?: string) {
-    await this.verifyTenantOwnership(taskId, tenantId);
+  async findComments(taskId: string, tenantId?: string, userId?: string, roles?: string | string[]) {
+    // Bug fix 2026-05-10 (PR2 #1): comments tem texto sigiloso entre
+    // advogado <-> estagiario sobre cliente, nao pode vazar pra terceiros.
+    if (userId) {
+      await this.verifyTaskOwnership(taskId, userId, roles, tenantId);
+    } else {
+      await this.verifyTenantOwnership(taskId, tenantId);
+    }
     return this.prisma.taskComment.findMany({
       where: { task_id: taskId },
       include: { user: { select: { id: true, name: true } } },
@@ -1319,9 +1486,24 @@ export class TasksService {
       30 * 60,
       async () => {
       const now = new Date();
+      // Bug fix 2026-05-10 (PR2 #12): paginacao + filtro de janela.
+      // Antes findMany sem take pegava TODAS as tasks vencidas
+      // historicas — escritorio com 10k tasks legacy = OOM no API +
+      // spam massivo de notifications. Agora limitamos:
+      //   - Janela: vencidas entre 1min e 75h atras (cobre os 3 niveis
+      //     warning/urgent/critical com folga). Tasks vencidas ha mais
+      //     de 75h NAO disparam mais — quem nao olhou nesse tempo
+      //     precisa de intervencao manual, nao mais alerta.
+      //   - Paginacao: 500 por execucao (cron de 1h, 1 escritorio com
+      //     >500 tasks vencidas em janela e sinal de problema operacional)
+      // tenant_id e raw — cron roda para todos os tenants.
+      const SLA_WINDOW_HOURS = 75;
+      const lowerBound = new Date(now.getTime() - SLA_WINDOW_HOURS * 3_600_000);
+      const upperBound = new Date(now.getTime() - 60_000); // 1min atras (evita race com inserts)
+
       const overdueTasks = await this.prisma.task.findMany({
         where: {
-          due_at: { lt: now },
+          due_at: { lt: upperBound, gte: lowerBound },
           status: { notIn: ['CONCLUIDA', 'CANCELADA'] },
           assigned_user_id: { not: null },
         },
@@ -1336,6 +1518,8 @@ export class TasksService {
           legal_case_id: true,
           assigned_user: { select: { id: true, name: true } },
         },
+        orderBy: { due_at: 'desc' }, // mais recentemente vencidas primeiro (mais relevantes)
+        take: 500,
       });
 
       for (const task of overdueTasks) {

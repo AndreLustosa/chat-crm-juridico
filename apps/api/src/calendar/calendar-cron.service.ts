@@ -45,6 +45,10 @@ export class CalendarCronService {
       'calendar-push-reminders',
       2 * 60,
       async () => {
+      // Bug fix 2026-05-10 (PR2 #11): LIMIT 100 evita pico O(N) no DB +
+      // emit Socket.IO. Sem limit, manha de seg-feira (200+ audiencias) podia
+      // estourar o lock TTL de 2min, deixando proxima execucao re-fazer
+      // updates ja feitos e re-emitir push duplicado pros advogados.
       const reminders = await this.prisma.$queryRaw<
         { id: string; event_id: string; minutes_before: number; title: string; type: string; start_at: Date; assigned_user_id: string | null }[]
       >`
@@ -61,12 +65,14 @@ export class CalendarCronService {
           AND ce.start_at - (er.minutes_before * interval '1 minute')
               BETWEEN brt_now.ts AND brt_now.ts + INTERVAL '2 minutes'
           AND ce.status NOT IN ('CANCELADO', 'CONCLUIDO', 'ADIADO')
+        ORDER BY ce.start_at ASC
+        LIMIT 100
       `;
 
-      if (reminders.length > 0) {
-        this.logger.log(`[CRON] Encontrados ${reminders.length} lembretes PUSH para enviar`);
-      }
+      if (reminders.length === 0) return;
+      this.logger.log(`[CRON] Encontrados ${reminders.length} lembretes PUSH para enviar`);
 
+      // Emit Socket.IO em paralelo (operacao em memoria, sem I/O bloqueante)
       for (const r of reminders) {
         if (r.assigned_user_id) {
           try {
@@ -81,12 +87,18 @@ export class CalendarCronService {
             this.logger.error(`[CRON] Erro ao emitir lembrete PUSH para user ${r.assigned_user_id}: ${e.message}`);
           }
         }
+      }
 
-        // Mark as sent
-        await this.prisma.eventReminder.update({
-          where: { id: r.id },
+      // Bug fix 2026-05-10 (PR2 #11): batch UPDATE em vez de N updates
+      // serial. Reduz de O(N) round-trips pra 1 round-trip ao banco.
+      const ids = reminders.map(r => r.id);
+      try {
+        await this.prisma.eventReminder.updateMany({
+          where: { id: { in: ids } },
           data: { sent_at: new Date() },
         });
+      } catch (e: any) {
+        this.logger.error(`[CRON] Erro no batch UPDATE sent_at de ${ids.length} reminders: ${e.message}`);
       }
       },
       { description: 'Dispara lembretes PUSH (Socket.IO) 1min antes do evento', schedule: '*/1 * * * *' },
@@ -195,6 +207,84 @@ export class CalendarCronService {
    * "Descartar" = preenche sent_at com agora + loga motivo. Assim saem do
    * pool de pendentes no dashboard mas ficam no historico.
    */
+  /**
+   * Bug fix 2026-05-10 (PR2 #10): fallback cron pra notificacao imediata
+   * de audiencia/pericia agendada. Roda diariamente as 07h BRT — varre
+   * eventos AUDIENCIA/PERICIA futuros que nao tem hearing_notified_at,
+   * indicando que algo na cadeia BullMQ falhou (Redis caiu, deploy
+   * inopportuno, ban WhatsApp). Re-enfileira o job notify-hearing-scheduled.
+   *
+   * Evita disparar pra:
+   *   - Eventos cancelados/concluidos/adiados
+   *   - Eventos sem lead.phone (worker ja pula)
+   *   - Eventos < 6h no futuro (ja muito perto pra adiar de novo — risco
+   *     de mensagem chegar APOS a audiencia)
+   *
+   * Worker preenche hearing_notified_at apos envio bem-sucedido (linha
+   * adicionada em calendar-reminder.worker.ts).
+   */
+  @Cron('0 7 * * *', { timeZone: 'America/Maceio' })
+  async fallbackHearingNotifications() {
+    await this.cronRunner.run(
+      'calendar-hearing-fallback',
+      10 * 60,
+      async () => {
+        const pending = await this.prisma.$queryRaw<
+          { id: string; type: string; start_at: Date; lead_id: string | null }[]
+        >`
+          WITH brt_now AS (
+            SELECT (NOW() AT TIME ZONE 'America/Maceio')::timestamp AS ts
+          )
+          SELECT ce.id, ce.type, ce.start_at, ce.lead_id
+          FROM "CalendarEvent" ce
+          CROSS JOIN brt_now
+          WHERE ce.type IN ('AUDIENCIA', 'PERICIA')
+            AND ce.hearing_notified_at IS NULL
+            AND ce.status NOT IN ('CANCELADO', 'CONCLUIDO', 'ADIADO')
+            AND ce.start_at > brt_now.ts + INTERVAL '6 hours'
+            AND ce.lead_id IS NOT NULL
+          LIMIT 100
+        `;
+
+        if (pending.length === 0) {
+          this.logger.log('[CRON-HEARING-FALLBACK] Nenhuma audiencia/pericia pendente');
+          return;
+        }
+
+        this.logger.warn(
+          `[CRON-HEARING-FALLBACK] ${pending.length} audiencia(s)/pericia(s) sem notificacao — re-enfileirando`,
+        );
+
+        for (const evt of pending) {
+          const jobId = `hearing-fallback-${evt.id}`;
+          try {
+            const existing = await this.reminderQueue.getJob(jobId).catch(() => null);
+            if (existing) continue; // ja re-enfileirado em execucao anterior
+
+            await this.reminderQueue.add(
+              'notify-hearing-scheduled',
+              { eventId: evt.id },
+              {
+                delay: 0,
+                jobId,
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 5000 },
+                removeOnComplete: true,
+                removeOnFail: 50,
+              },
+            );
+            this.logger.warn(
+              `[CRON-HEARING-FALLBACK] Re-enfileirado: ${evt.type} ${evt.id} (start_at=${evt.start_at.toISOString()})`,
+            );
+          } catch (e: any) {
+            this.logger.error(`[CRON-HEARING-FALLBACK] Falha em ${evt.id}: ${e.message}`);
+          }
+        }
+      },
+      { description: 'Fallback diario pra audiencia/pericia sem hearing_notified_at', schedule: '0 7 * * *' },
+    );
+  }
+
   // Bug fix 2026-05-10 (PR1 #7): NOW() comparado com `ce.start_at` wall-clock
   // BRT estava 3h off — descarte rodava 3h "antes" do esperado, deixando
   // alguns reminders pendentes que deveriam ter sido marcados.
