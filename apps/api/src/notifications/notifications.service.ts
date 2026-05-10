@@ -5,6 +5,16 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import {
+  WHATSAPP_DELAY_MS,
+  RETENTION_DAYS,
+  DEDUP_SAFEGUARD_MS,
+  PAGE_LIMIT_DEFAULT,
+  PAGE_LIMIT_MAX,
+  MAX_TITLE_LENGTH,
+  MAX_BODY_LENGTH,
+  MAX_DATA_BYTES,
+} from './notifications.constants';
 
 @Injectable()
 export class NotificationsService {
@@ -22,7 +32,32 @@ export class NotificationsService {
 
   /** Cria uma notificação persistente (fire-and-forget, chamado pelo ChatGateway).
    *  Enfileira WhatsApp fallback com delay de 5min — se a notificação for lida
-   *  via socket/push antes do delay, o WhatsApp não é enviado. */
+   *  via socket/push antes do delay, o WhatsApp não é enviado.
+   *
+   *  Bug fix 2026-05-10 (NotifService PR3 #10): validacao de input.
+   *  Antes caller podia mandar title 10MB ou data com payload gigante,
+   *  inflando o DB + travando o socket emit. Agora caps razoaveis:
+   *    - userId, type: obrigatorios e nao-vazios
+   *    - title: max 200 chars (UI trunca em 80)
+   *    - body: max 1000 chars (preview no NotifCenter)
+   *    - data: max 10KB serializado (JSON com IDs e flags, nao texto)
+   *
+   *  CALLERS (PR3 #14 docs — fonte unica documentada):
+   *  Este metodo eh chamado em 5 lugares:
+   *    1. ChatGateway:399        — incoming_message (operador atribuido)
+   *    2. ChatGateway:429        — incoming_message (advogado supervisor)
+   *    3. ChatGateway:513        — transfer_request
+   *    4. tasks.service:302      — task_assigned (delegacao)
+   *    5. tasks.service:574      — task_status_change
+   *    6. tasks.service:1031     — task_reopened
+   *    7. tasks.service:1433     — task_comment
+   *    8. tasks.service:1560     — task_overdue_delegate
+   *    9. portal-documents:390   — portal_doc_uploaded
+   *
+   *  TODOS sao fire-and-forget (.catch(() => {})) — falha aqui NUNCA
+   *  deve quebrar o fluxo principal do caller. Validacao defensiva
+   *  retorna null em vez de throw.
+   */
   async create(params: {
     userId: string;
     tenantId?: string | null;
@@ -32,14 +67,46 @@ export class NotificationsService {
     data?: Record<string, any>;
   }) {
     try {
+      // Validacao defensiva — caller eh fire-and-forget, nao throwa pra
+      // nao quebrar fluxo principal (ex: ChatGateway segue mesmo sem notif).
+      if (!params.userId || typeof params.userId !== 'string') {
+        this.logger.warn(`[Notifications] create: userId invalido (${params.userId}) — skip`);
+        return null;
+      }
+      if (!params.type || typeof params.type !== 'string') {
+        this.logger.warn(`[Notifications] create: type invalido (${params.type}) — skip`);
+        return null;
+      }
+      const safeTitle = (params.title || '').slice(0, MAX_TITLE_LENGTH);
+      if (!safeTitle.trim()) {
+        this.logger.warn(`[Notifications] create: title vazio — skip`);
+        return null;
+      }
+      const safeBody = params.body ? params.body.slice(0, MAX_BODY_LENGTH) : null;
+      let safeData: any = null;
+      if (params.data) {
+        try {
+          const serialized = JSON.stringify(params.data);
+          if (serialized.length > MAX_DATA_BYTES) {
+            this.logger.warn(`[Notifications] create: data payload muito grande (${serialized.length} bytes) — truncando pra { _truncated: true }`);
+            safeData = { _truncated: true, _originalKeys: Object.keys(params.data).slice(0, 10) };
+          } else {
+            safeData = params.data;
+          }
+        } catch (e: any) {
+          this.logger.warn(`[Notifications] create: data nao-serializavel (${e.message}) — skip`);
+          safeData = null;
+        }
+      }
+
       const notification = await (this.prisma as any).notification.create({
         data: {
           user_id: params.userId,
           tenant_id: params.tenantId || null,
           notification_type: params.type,
-          title: params.title,
-          body: params.body || null,
-          data: params.data || null,
+          title: safeTitle,
+          body: safeBody,
+          data: safeData,
         },
       });
 
@@ -48,20 +115,37 @@ export class NotificationsService {
       this.whatsappQueue.add(
         'send-notification-whatsapp',
         { notificationId: notification.id, userId: params.userId },
-        { delay: 5 * 60 * 1000, removeOnComplete: true, removeOnFail: 10 },
+        { delay: WHATSAPP_DELAY_MS, removeOnComplete: true, removeOnFail: 10 },
       ).catch(() => {});
 
       // Emite socket event para o frontend atualizar o badge em tempo real
       // (substitui polling de 60s no NotificationCenter). Best-effort:
       // falha aqui nao quebra create — frontend tem fallback de 5min.
-      try {
-        this.chatGateway.server?.to(`user:${params.userId}`).emit('notification_created', {
-          id: notification.id,
-          notification_type: params.type,
-          title: params.title,
-        });
-      } catch (e: any) {
-        this.logger.warn(`[Notifications] Falha ao emitir socket: ${e.message}`);
+      //
+      // Bug fix 2026-05-10 (NotifService PR3 #11): respeita ConversationMute
+      // tambem no socket emit. Antes badge piscava no NotifCenter mesmo
+      // com conversa mutada (ChatGateway pulava o sound/desktop, mas a
+      // Notification + emit aconteciam) — entao o sino contava +1 e o
+      // user via badge mesmo "mutado". Agora se a notif eh de mensagem
+      // E a conversa esta muted, NAO emite socket (silencio total).
+      // O DB record continua sendo criado pra historico/feed quando
+      // user abrir o NotifCenter intencionalmente.
+      const conversationIdForMute = (safeData as any)?.conversationId;
+      let suppressSocket = false;
+      if (conversationIdForMute && params.type === 'incoming_message') {
+        suppressSocket = await this.isConversationMuted(params.userId, conversationIdForMute).catch(() => false);
+      }
+
+      if (!suppressSocket) {
+        try {
+          this.chatGateway.server?.to(`user:${params.userId}`).emit('notification_created', {
+            id: notification.id,
+            notification_type: params.type,
+            title: safeTitle,
+          });
+        } catch (e: any) {
+          this.logger.warn(`[Notifications] Falha ao emitir socket: ${e.message}`);
+        }
       }
 
       return notification;
@@ -98,7 +182,7 @@ export class NotificationsService {
   async findByUser(userId: string, opts?: { type?: string; unreadOnly?: boolean; page?: number; limit?: number; tenantId?: string }) {
     const safeUserId = this.requireUserId(userId, 'findByUser');
     const page = opts?.page || 1;
-    const limit = Math.min(opts?.limit || 50, 100);
+    const limit = Math.min(opts?.limit || PAGE_LIMIT_DEFAULT, PAGE_LIMIT_MAX);
     const skip = (page - 1) * limit;
 
     const where: any = { user_id: safeUserId };
@@ -154,8 +238,16 @@ export class NotificationsService {
    *  Chamado quando o operador abre a conversa (via ConversationsService.markAsRead)
    *  para zerar o badge do sino em sincronia com o desaparecimento do badge
    *  da sidebar — antes o sino ficava desacoplado e so decrescia ao clicar
-   *  diretamente nos itens do NotificationCenter. */
+   *  diretamente nos itens do NotificationCenter.
+   *
+   *  Bug fix 2026-05-10 (NotifService PR3 #13): query usa o operator `@>`
+   *  (jsonb contains) em vez de `path: equals`. Combinado com o index
+   *  parcial GIN criado na migration 2026-05-10-notification-conversation-index.sql,
+   *  reduz de Seq Scan O(N) pra Bitmap Index Scan O(log N). Sem isso,
+   *  toda vez que operador abria conversa, PG escaneava Notification
+   *  inteira (cresce com total de notifs historicas). */
   async markByConversation(userId: string, conversationId: string) {
+    if (!userId || !conversationId) return { count: 0 };
     return (this.prisma as any).notification.updateMany({
       where: {
         user_id: userId,
@@ -174,19 +266,18 @@ export class NotificationsService {
       'notifications-cleanup',
       15 * 60,
       async () => { await this.cleanup(); },
-      { description: 'Remove notificacoes > 90 dias do banco', schedule: '0 3 * * *' },
+      { description: `Remove notificacoes > ${RETENTION_DAYS} dias do banco`, schedule: '0 3 * * *' },
     );
   }
 
-  async cleanup(retentionDays = 90) {
+  async cleanup(retentionDays: number = RETENTION_DAYS) {
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
     // Bug fix 2026-05-10 (NotifService PR2 #8): preservar notifs com
-    // whatsapp_sent_at recente (ultimos 2h) — sao usadas pelo dedup do
-    // worker. Se cleanup deletar uma notif que serviu de "anchor" de
-    // dedup ha menos de 1h, proxima notif da mesma conversa pode
-    // disparar WhatsApp duplicado. Janela 2h cobre a window de dedup
-    // (60min) com folga.
-    const dedupSafeguard = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    // whatsapp_sent_at recente — sao usadas pelo dedup do worker. Se
+    // cleanup deletar uma notif que serviu de "anchor" de dedup, proxima
+    // notif da mesma conversa pode disparar WhatsApp duplicado.
+    // DEDUP_SAFEGUARD_MS (2h) cobre a window de dedup (60min) com folga.
+    const dedupSafeguard = new Date(Date.now() - DEDUP_SAFEGUARD_MS);
     const result = await (this.prisma as any).notification.deleteMany({
       where: {
         created_at: { lt: cutoff },
@@ -263,16 +354,28 @@ export class NotificationsService {
     return new Date(mute.muted_until) > new Date();
   }
 
-  /** Retorna conversas mutadas do usuário */
+  /**
+   * Retorna conversas mutadas do usuário.
+   *
+   * Bug fix 2026-05-10 (NotifService PR3 #12): filtro SQL em vez de
+   * findMany + filter em memoria. Antes buscava TODAS as ConversationMute
+   * do user e filtrava expiradas em JS — user com 100+ mutes historicos
+   * (com muted_until expirado) trazia tudo do DB pra memoria. Agora SQL
+   * `muted_until IS NULL OR muted_until > NOW` filtra antes de transferir.
+   */
   async getMutedConversations(userId: string): Promise<string[]> {
     const safeUserId = this.requireUserId(userId, 'getMutedConversations');
-    const mutes = await (this.prisma as any).conversationMute.findMany({
-      where: { user_id: safeUserId },
-      select: { conversation_id: true, muted_until: true },
-    });
     const now = new Date();
-    return mutes
-      .filter((m: any) => !m.muted_until || new Date(m.muted_until) > now)
-      .map((m: any) => m.conversation_id);
+    const mutes = await (this.prisma as any).conversationMute.findMany({
+      where: {
+        user_id: safeUserId,
+        OR: [
+          { muted_until: null },
+          { muted_until: { gt: now } },
+        ],
+      },
+      select: { conversation_id: true },
+    });
+    return mutes.map((m: any) => m.conversation_id);
   }
 }
