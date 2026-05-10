@@ -71,13 +71,29 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Bug fix 2026-05-10 (NotifService PR1 #1 — CRITICO defesa em profundidade):
+   * helper que rejeita userId vazio/null/undefined ANTES de chegar no Prisma.
+   * Sem isso, `where: { user_id: undefined }` no Prisma vira "filtro nao
+   * aplicado" — vazava TODAS as notifs. Mesmo que o controller ja valide,
+   * isso garante que callers internos (ChatGateway, TasksService) nunca
+   * cheguem a vazar por bug futuro.
+   */
+  private requireUserId(userId: string | null | undefined, op: string): string {
+    if (!userId || typeof userId !== 'string') {
+      throw new Error(`[Notifications] ${op}: userId obrigatorio (recebeu ${userId})`);
+    }
+    return userId;
+  }
+
   /** Lista notificações do usuário com paginação */
   async findByUser(userId: string, opts?: { type?: string; unreadOnly?: boolean; page?: number; limit?: number }) {
+    const safeUserId = this.requireUserId(userId, 'findByUser');
     const page = opts?.page || 1;
     const limit = Math.min(opts?.limit || 50, 100);
     const skip = (page - 1) * limit;
 
-    const where: any = { user_id: userId };
+    const where: any = { user_id: safeUserId };
     if (opts?.type) where.notification_type = opts.type;
     if (opts?.unreadOnly) where.read_at = null;
 
@@ -96,23 +112,27 @@ export class NotificationsService {
 
   /** Contagem de não-lidas */
   async unreadCount(userId: string): Promise<number> {
+    const safeUserId = this.requireUserId(userId, 'unreadCount');
     return (this.prisma as any).notification.count({
-      where: { user_id: userId, read_at: null },
+      where: { user_id: safeUserId, read_at: null },
     });
   }
 
   /** Marca uma notificação como lida */
   async markRead(userId: string, notificationId: string) {
+    const safeUserId = this.requireUserId(userId, 'markRead');
+    if (!notificationId) throw new Error('[Notifications] markRead: notificationId obrigatorio');
     return (this.prisma as any).notification.updateMany({
-      where: { id: notificationId, user_id: userId },
+      where: { id: notificationId, user_id: safeUserId },
       data: { read_at: new Date() },
     });
   }
 
   /** Marca todas como lidas */
   async markAllRead(userId: string) {
+    const safeUserId = this.requireUserId(userId, 'markAllRead');
     return (this.prisma as any).notification.updateMany({
-      where: { user_id: userId, read_at: null },
+      where: { user_id: safeUserId, read_at: null },
       data: { read_at: new Date() },
     });
   }
@@ -160,10 +180,12 @@ export class NotificationsService {
 
   /** Muta uma conversa para um usuário */
   async muteConversation(userId: string, conversationId: string, until?: string) {
+    const safeUserId = this.requireUserId(userId, 'muteConversation');
+    if (!conversationId) throw new Error('[Notifications] muteConversation: conversationId obrigatorio');
     return (this.prisma as any).conversationMute.upsert({
-      where: { user_id_conversation_id: { user_id: userId, conversation_id: conversationId } },
+      where: { user_id_conversation_id: { user_id: safeUserId, conversation_id: conversationId } },
       create: {
-        user_id: userId,
+        user_id: safeUserId,
         conversation_id: conversationId,
         muted_until: until ? new Date(until) : null,
       },
@@ -175,13 +197,16 @@ export class NotificationsService {
 
   /** Desmuta uma conversa */
   async unmuteConversation(userId: string, conversationId: string) {
+    const safeUserId = this.requireUserId(userId, 'unmuteConversation');
+    if (!conversationId) throw new Error('[Notifications] unmuteConversation: conversationId obrigatorio');
     return (this.prisma as any).conversationMute.deleteMany({
-      where: { user_id: userId, conversation_id: conversationId },
+      where: { user_id: safeUserId, conversation_id: conversationId },
     });
   }
 
   /** Verifica se uma conversa está mutada para um usuário */
   async isConversationMuted(userId: string, conversationId: string): Promise<boolean> {
+    if (!userId || !conversationId) return false;
     const mute = await (this.prisma as any).conversationMute.findUnique({
       where: { user_id_conversation_id: { user_id: userId, conversation_id: conversationId } },
     });
@@ -194,8 +219,9 @@ export class NotificationsService {
 
   /** Retorna conversas mutadas do usuário */
   async getMutedConversations(userId: string): Promise<string[]> {
+    const safeUserId = this.requireUserId(userId, 'getMutedConversations');
     const mutes = await (this.prisma as any).conversationMute.findMany({
-      where: { user_id: userId },
+      where: { user_id: safeUserId },
       select: { conversation_id: true, muted_until: true },
     });
     const now = new Date();

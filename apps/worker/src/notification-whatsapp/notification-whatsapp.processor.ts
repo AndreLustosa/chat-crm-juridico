@@ -141,6 +141,36 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         }
       }
 
+      // Bug fix 2026-05-10 (NotifService PR1 #3): respeitar ConversationMute
+      // no fallback de WhatsApp. Antes ChatGateway so usava o mute pra
+      // pular sound/desktop, mas a Notification era criada e o WhatsApp
+      // disparava 5min depois mesmo com conversation mutada — cliente
+      // reclamava "mutei mas continuo recebendo WhatsApp". Agora:
+      //   - Se notification eh de incoming_message E conversation muted
+      //     pra esse user, marca como skip (mute respeitado em todos os
+      //     canais) e nao dispara
+      const conversationIdForMute = notification.data?.conversationId;
+      if (conversationIdForMute && notification.notification_type === 'incoming_message') {
+        const muteRecord = await (this.prisma as any).conversationMute.findUnique({
+          where: {
+            user_id_conversation_id: {
+              user_id: userId,
+              conversation_id: conversationIdForMute,
+            },
+          },
+          select: { muted_until: true },
+        }).catch(() => null);
+        const isMuted = muteRecord && (
+          !muteRecord.muted_until || new Date(muteRecord.muted_until) > new Date()
+        );
+        if (isMuted) {
+          this.logger.log(
+            `[NotifWA] Conversation ${conversationIdForMute} esta mutada pelo user ${userId} — skip WhatsApp (mute respeitado em todos canais)`,
+          );
+          return;
+        }
+      }
+
       // 4. Dedup 60min por conversa/lead — INDEPENDENTE de read_at.
       //
       // Bug reportado 2026-04-26 (Gianny): cada mensagem nova do cliente
@@ -183,9 +213,30 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         return;
       }
 
-      const instanceName = process.env.EVOLUTION_INSTANCE_NAME || '';
+      // Bug fix 2026-05-10 (NotifService PR1 #2): resolver instance via
+      // tenant_id da notification em vez de pegar EVOLUTION_INSTANCE_NAME
+      // global. Antes em deploy multi-tenant (Lexcon convive na mesma
+      // Evolution), notif do tenant A poderia disparar via instancia de B.
+      // Estrategia:
+      //   1. Busca primeira Instance whatsapp do tenant da notif
+      //   2. Fallback pra env (single-tenant deploy atual)
+      //   3. Se nada — skip com log
+      let instanceName: string | undefined;
+      if (notification.tenant_id) {
+        const tenantInstance = await (this.prisma as any).instance.findFirst({
+          where: { type: 'whatsapp', tenant_id: notification.tenant_id },
+          select: { name: true },
+        }).catch(() => null);
+        if (tenantInstance?.name) instanceName = tenantInstance.name;
+      }
       if (!instanceName) {
-        this.logger.warn('[NotifWA] EVOLUTION_INSTANCE_NAME não configurado — skip');
+        instanceName = process.env.EVOLUTION_INSTANCE_NAME || undefined;
+        if (instanceName && notification.tenant_id) {
+          this.logger.warn(`[NotifWA] Tenant ${notification.tenant_id} sem Instance cadastrada — fallback pro env ${instanceName}`);
+        }
+      }
+      if (!instanceName) {
+        this.logger.warn(`[NotifWA] Sem instancia disponivel pra notif ${notificationId} (tenant=${notification.tenant_id || 'sem'}) — skip`);
         return;
       }
 
