@@ -422,11 +422,13 @@ export class WhatsappService {
         ]
       };
     } else {
-      this.logger.warn(`⚠️ Webhook não configurado na criação de ${instanceName}: webhookUrl global está vazio.`);
+      // Bug fix 2026-05-10 (Webhooks PR3 #27): emojis removidos pra nao
+      // poluir parsers de log estruturado.
+      this.logger.warn(`Webhook nao configurado na criacao de ${instanceName}: webhookUrl global esta vazio.`);
     }
 
     const result = await this.request('POST', 'instance/create', payload);
-    this.logger.log(`✅ Instância ${instanceName} criada com provisionamento automático.`);
+    this.logger.log(`Instancia ${instanceName} criada com provisionamento automatico.`);
     
     return result;
   }
@@ -603,7 +605,10 @@ export class WhatsappService {
         if (records.length === 0) break;
 
         allMessages = allMessages.concat(records);
-        this.logger.log(
+        // Bug fix 2026-05-10 (Webhooks PR3 #32): log de pagina apenas em
+        // debug. Em historicos grandes (5000+ msgs/100 paginas), o log
+        // por pagina inundava o stdout. Resumo final continua em log.log.
+        this.logger.debug(
           `fetchMessages ${instanceName}/${remoteJid} page ${currentPage}/${totalPages}: ${records.length} msgs (total: ${allMessages.length})`,
         );
 

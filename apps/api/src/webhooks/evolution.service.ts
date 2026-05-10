@@ -66,16 +66,27 @@ function summarizePayload(payload: EvolutionWebhookPayload): string {
  *
  * Esta função sempre prefere o JID que parece um número de telefone real.
  */
+// Bug fix 2026-05-10 (Webhooks PR3 #21): constante centralizando o limite
+// de dígitos pra "telefone real" (vs LID). Antes hardcoded em 6 lugares
+// diferentes (extractPhone, handleChatsUpsert filter, contacts handlers, etc).
+// Mudanca de regra (ex: numero internacional 14+) requer atualizar so aqui.
+// 13 = DDI(2) + DDD(2) + 9 dígitos (BR padrao Anatel pos-2012).
+const MAX_PHONE_DIGITS = 13;
+
 function extractPhone(remoteJid: string, remoteJidAlt?: string): string {
   const p1 = (remoteJid || '').split('@')[0];
   const p2 = (remoteJidAlt || '').split('@')[0];
 
-  // @lid é indicador definitivo de LID — não usar como telefone, independente do tamanho
+  // Bug fix 2026-05-10 (Webhooks PR3 #17): @lid checado em AMBOS os JIDs.
+  // Antes so checava remoteJid — algumas versoes da Evolution mandam o
+  // LID em remoteJidAlt e o telefone real em remoteJid. Sem o check no
+  // p2, LID era retornado como "phone" e virava lead fantasma no banco.
   if ((remoteJid || '').endsWith('@lid')) return p2 || '';
+  if ((remoteJidAlt || '').endsWith('@lid')) return p1 || '';
 
-  // Heurística de fallback: telefones reais têm no máximo 13 dígitos (DDI+DDD+número)
-  // LIDs do WhatsApp geralmente têm 14+ dígitos
-  const looksLikePhone = (p: string) => p.length > 0 && p.length <= 13;
+  // Heurística de fallback: telefones reais têm no máximo MAX_PHONE_DIGITS
+  // dígitos (DDI+DDD+número). LIDs do WhatsApp geralmente têm 14+ dígitos
+  const looksLikePhone = (p: string) => p.length > 0 && p.length <= MAX_PHONE_DIGITS;
 
   if (!p2) return p1;
   if (looksLikePhone(p2) && !looksLikePhone(p1)) return p2; // p1 é LID, p2 é telefone
@@ -185,7 +196,7 @@ export class EvolutionService implements OnApplicationBootstrap {
       // com 14+ dígitos — NÃO são telefones reais. Quando a Evolution API envia o webhook
       // @lid sem remoteJidAlt, extractPhone retorna o LID como "telefone", criando leads
       // fantasma. A versão com telefone real (@s.whatsapp.net) sempre chega separadamente.
-      const looksLikeRealPhone = phone.length > 0 && phone.length <= 13;
+      const looksLikeRealPhone = phone.length > 0 && phone.length <= MAX_PHONE_DIGITS;
       if (!looksLikeRealPhone) {
         this.logger.debug(`[WEBHOOK] Ignorando LID ${phone} (${phone.length} dígitos) — não é telefone real`);
         continue;
@@ -255,6 +266,25 @@ export class EvolutionService implements OnApplicationBootstrap {
       // 1b. Lead PERDIDO/FINALIZADO voltou a falar → reativar para QUALIFICANDO
       // Sem isso, a conversa existe mas fica invisível no inbox (filtro de stage).
       if (!isFromMe && ['PERDIDO', 'FINALIZADO'].includes(lead.stage)) {
+        // Bug fix 2026-05-10 (Webhooks PR3 #18): preservar loss_reason
+        // em LeadStageHistory ANTES de zerar. Antes informacao era
+        // perdida — analise post-incidente perdia o motivo da perda
+        // original. Agora fica audit trail.
+        if (lead.loss_reason) {
+          await this.prisma.leadStageHistory.create({
+            data: {
+              lead_id: lead.id,
+              from_stage: lead.stage,
+              to_stage: 'QUALIFICANDO',
+              loss_reason: lead.loss_reason,
+              // actor_id null — reativacao automatica pelo webhook,
+              // nao tem operador humano associado
+            },
+          }).catch((e: any) => {
+            this.logger.warn(`[REACTIVATE] Falha ao gravar LeadStageHistory: ${e.message}`);
+          });
+        }
+
         await this.prisma.lead.update({
           where: { id: lead.id },
           data: {
@@ -459,7 +489,15 @@ export class EvolutionService implements OnApplicationBootstrap {
         // Re-emite WebSocket para cobrir o caso em que o BullMQ QueueEvents perdeu o evento
         // (mensagem já está no banco mas o frontend pode não ter sido notificado em tempo real)
         this.chatGateway.emitNewMessage(existingMsg.conversation_id, existingMsg);
-        this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
+        // Bug fix 2026-05-10 (Webhooks PR3 #22): tenant fallback. Antes
+        // se conv.tenant_id era null (lead legacy pre-hardening), emit
+        // global afetava TODOS os tenants — frontend de tenant A fazia
+        // refresh por mensagem do tenant B. Agora resolve via inbox.tenant_id
+        // como fallback. Se ainda for null, skip emit (evita ruido global).
+        const tenantForEmit = conv.tenant_id ?? inbox?.tenant_id ?? null;
+        if (tenantForEmit) {
+          this.chatGateway.emitConversationsUpdate(tenantForEmit, true);
+        }
         continue;
       }
 
@@ -589,7 +627,13 @@ export class EvolutionService implements OnApplicationBootstrap {
           });
           if (concurrentMsg) {
             this.chatGateway.emitNewMessage(concurrentMsg.conversation_id, concurrentMsg);
-            this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null, true);
+            // Bug fix 2026-05-10 (PR3 #22): tenant fallback (mesmo que o
+            // [DEDUP] path acima). Skip emit se tenant null pra evitar
+            // ruido global cross-tenant.
+            const tenantForEmit = conv.tenant_id ?? inbox?.tenant_id ?? null;
+            if (tenantForEmit) {
+              this.chatGateway.emitConversationsUpdate(tenantForEmit, true);
+            }
           }
           continue;
         }
@@ -942,7 +986,7 @@ export class EvolutionService implements OnApplicationBootstrap {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = extractPhone(data.remoteJid as string, data.remoteJidAlt as string);
-      if (phone.length > 13) continue; // LID, não é telefone real
+      if (phone.length > MAX_PHONE_DIGITS) continue; // LID, não é telefone real
 
       // Apenas atualizar leads existentes — NÃO criar novos via chats.upsert.
       // Filtra por tenant pra nao mexer em lead de outro escritorio quando
@@ -1059,7 +1103,7 @@ export class EvolutionService implements OnApplicationBootstrap {
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = extractPhone(remoteJid, chat.remoteJidAlt);
-      if (!phone || phone.length > 13) continue;
+      if (!phone || phone.length > MAX_PHONE_DIGITS) continue;
 
       const lead = await this.prisma.lead.findFirst({
         where: { phone, ...(tenantId ? { tenant_id: tenantId } : {}) },
@@ -1140,8 +1184,26 @@ export class EvolutionService implements OnApplicationBootstrap {
 
         this.chatGateway.emitMessageUpdate(msg.conversation_id, updated);
         this.logger.log(`[WEBHOOK] msg ${externalMessageId} status → ${newStatus}`);
-      } catch (e) {
-        this.logger.warn(`[WEBHOOK] Falha ao atualizar status de ${externalMessageId}: ${e.message}`);
+      } catch (e: any) {
+        // Bug fix 2026-05-10 (Webhooks PR3 #20): distinguir erros esperados
+        // vs inesperados. Antes try/catch generico engolia P2002 (race),
+        // P2025 (msg deletada entre find e update), e tambem DB indisponivel
+        // — todos como "warn". Resultado: tick azul sumindo silenciosamente
+        // sem alarme. Agora classificamos:
+        //   - P2025 (record not found): debug, msg foi deletada entre
+        //     find/update — sem impacto
+        //   - P2002 (unique violation): warn, race rara
+        //   - Outros (DB down, network): error com stack pra alarme
+        if (e?.code === 'P2025') {
+          this.logger.debug(`[WEBHOOK] msg ${externalMessageId} deletada entre find/update — skip`);
+        } else if (e?.code === 'P2002') {
+          this.logger.warn(`[WEBHOOK] Race em update de ${externalMessageId} (P2002): ${e.message}`);
+        } else {
+          this.logger.error(
+            `[WEBHOOK] Erro inesperado em update de ${externalMessageId} (${e?.code || 'unknown'}): ${e.message}`,
+            e?.stack,
+          );
+        }
       }
     }
   }
@@ -1166,15 +1228,30 @@ export class EvolutionService implements OnApplicationBootstrap {
     // leads existentes (nome e foto). Leads são criados APENAS via
     // messages.upsert (quando chega uma mensagem real).
     // ────────────────────────────────────────────────────────────────
+    //
+    // Bug fix 2026-05-10 (Webhooks PR3 #23): chunks + yield event loop.
+    // Mesmo padrao de chats.upsert (PR2 #8). Em rajada de 1000+ contatos
+    // no reconnect, sem yield bloqueia event loop. Cache de fetchProfilePicture
+    // (PR2 #13) ja reduz HTTPs, mas DB queries (findByPhone + lead.update)
+    // ainda sao sequenciais — chunks evitam que outros webhooks fiquem
+    // enfileirados.
+    const CONTACTS_CHUNK_SIZE = 25;
+    if (contacts.length > 100) {
+      this.logger.log(`[contacts.upsert] Processando ${contacts.length} contatos em chunks de ${CONTACTS_CHUNK_SIZE}`);
+    }
 
-    for (const data of contacts) {
+    for (let i = 0; i < contacts.length; i++) {
+      if (i > 0 && i % CONTACTS_CHUNK_SIZE === 0) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      const data = contacts[i];
       if (!data) continue;
 
       const remoteJid = (data.id as string) || (data.remoteJid as string);
       if (!remoteJid || remoteJid.includes('@g.us')) continue;
 
       const phone = extractPhone(remoteJid, (data.remoteJidAlt as string) || (data.remoteJid as string));
-      if (phone.length > 13) continue; // LID, não é telefone real
+      if (phone.length > MAX_PHONE_DIGITS) continue; // LID, não é telefone real
 
       // Apenas atualizar leads existentes — NÃO criar novos via contacts.upsert.
       // Filtra por tenant pra nao atualizar lead de outro escritorio (bug 2026-04-29).
@@ -1273,7 +1350,7 @@ export class EvolutionService implements OnApplicationBootstrap {
 
       const phone = jid.replace(/@.*$/, '');
       if (!phone || phone.includes('-')) continue; // Ignorar grupos
-      if (phone.length > 13) continue; // LID, não é telefone real
+      if (phone.length > MAX_PHONE_DIGITS) continue; // LID, não é telefone real
 
       // Filtra por tenant pra evitar atualizar lead de outro escritorio com
       // o mesmo telefone (bug 2026-04-29).
@@ -1457,7 +1534,7 @@ export class EvolutionService implements OnApplicationBootstrap {
         const chunk = toProcess.slice(idx, idx + CHUNK_SIZE);
         await Promise.all(chunk.map(async (chat: any) => {
           const phone = extractPhone(chat.remoteJid as string, chat.remoteJidAlt as string);
-          if (!phone || phone.length > 13 || phone.length < 10) return;
+          if (!phone || phone.length > MAX_PHONE_DIGITS || phone.length < 10) return;
 
           const lastMsgTs = chat.lastMessage?.messageTimestamp
             ? Number(chat.lastMessage.messageTimestamp) * 1000
@@ -1610,7 +1687,7 @@ export class EvolutionService implements OnApplicationBootstrap {
     }
   }
 
-  // ─── onApplicationBootstrap (fix principal) ─────────────────────
+  // ─── onApplicationBootstrap ─────────────────────────────────────
   // Executado uma vez quando o servidor sobe. Dispara o resync para cada
   // instância cadastrada, cobrindo o cenário em que o CRM caiu enquanto a
   // Evolution API continuou rodando: nesse caso o webhook `connection.update`
@@ -1704,8 +1781,20 @@ export class EvolutionService implements OnApplicationBootstrap {
 
   // ─── presence.update ──────────────────────────────────────────
 
+  // Bug fix 2026-05-10 (Webhooks PR3 #25): cache (jid -> {tenantId, leadId,
+  // conversationId, expiresAt}). WhatsApp envia presence dezenas de vezes
+  // por segundo durante "digitando" — antes cada uma fazia 3 queries
+  // (inbox + lead + conversation). Cache TTL 60s mata 90% das queries
+  // sem perder reactivity (operador raramente abre/fecha conversa em <60s).
+  // Cap 5k entradas (LRU). Cache miss/expirado ainda faz queries normais
+  // e re-popula.
+  private readonly presenceResolveCache = new Map<string, {
+    conversationId: string | null;
+    expiresAt: number;
+  }>();
+
   async handlePresenceUpdate(payload: EvolutionWebhookPayload) {
-    this.logger.log(`[WEBHOOK] presence.update received`);
+    this.logger.debug(`[WEBHOOK] presence.update received`); // log debug, eh evento de alta freq
     const data = payload?.data;
     const jid = data?.id || data?.remoteJid;
     if (!jid) return;
@@ -1724,25 +1813,57 @@ export class EvolutionService implements OnApplicationBootstrap {
     }
     const tenantId = inbox?.tenant_id ?? null;
 
-    const lead = await this.prisma.lead.findFirst({
-      where: { phone, ...(tenantId ? { tenant_id: tenantId } : {}) },
-    });
-    if (!lead) return;
+    // Cache lookup: chave (instance:jid) — pra isolar entre instancias de
+    // tenants diferentes que poderiam ter o mesmo telefone.
+    const cacheKey = `${instanceName}:${jid}`;
+    const cached = this.presenceResolveCache.get(cacheKey);
+    let conversationId: string | null;
+    if (cached && cached.expiresAt > Date.now()) {
+      conversationId = cached.conversationId;
+    } else {
+      if (cached) this.presenceResolveCache.delete(cacheKey);
 
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { lead_id: lead.id, status: { in: ['ABERTO', 'ADIADO'] } },
-      orderBy: { last_message_at: 'desc' },
-    });
-    if (!conversation) return;
+      const lead = await this.prisma.lead.findFirst({
+        where: { phone, ...(tenantId ? { tenant_id: tenantId } : {}) },
+      });
+      if (!lead) {
+        // Cacheia null tambem (lead nao existe — proxima presence skip)
+        this.presenceResolveCache.set(cacheKey, { conversationId: null, expiresAt: Date.now() + 60_000 });
+        this.trimPresenceCache();
+        return;
+      }
+
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { lead_id: lead.id, status: { in: ['ABERTO', 'ADIADO'] } },
+        orderBy: { last_message_at: 'desc' },
+      });
+      conversationId = conversation?.id ?? null;
+      this.presenceResolveCache.set(cacheKey, { conversationId, expiresAt: Date.now() + 60_000 });
+      this.trimPresenceCache();
+    }
+
+    if (!conversationId) return;
 
     // Extrair presence do payload
     const presences = data?.presences || {};
     const presenceData = Object.values(presences)[0] as any;
     const presence = presenceData?.lastKnownPresence || data?.presence || 'unavailable';
 
-    this.chatGateway.emitContactPresence(conversation.id, {
+    this.chatGateway.emitContactPresence(conversationId, {
       presence,
       lastSeen: presence === 'unavailable' ? new Date().toISOString() : undefined,
     });
+  }
+
+  private trimPresenceCache(): void {
+    const MAX = 5_000;
+    if (this.presenceResolveCache.size <= MAX) return;
+    const toRemove = this.presenceResolveCache.size - MAX + 500;
+    let removed = 0;
+    for (const key of this.presenceResolveCache.keys()) {
+      if (removed >= toRemove) break;
+      this.presenceResolveCache.delete(key);
+      removed++;
+    }
   }
 }
