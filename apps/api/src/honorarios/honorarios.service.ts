@@ -148,8 +148,25 @@ export class HonorariosService {
       if (!data.sentence_value || !data.success_percentage) {
         throw new BadRequestException('Sucumbência requer valor da condenação e porcentagem');
       }
+      // Bug fix 2026-05-10 (Honorarios PR3 #8 — CRITICO):
+      // Validar que success_percentage esta em range (0, 100].
+      // Antes se usuario passasse 0.20 em vez de 20, calculo virava
+      // 100000 * 0.20 / 100 = 200 ao inves de 20000 — escritorio
+      // perdia 99% do honorario de exito (R$ 19.800).
+      if (data.success_percentage <= 0 || data.success_percentage > 100) {
+        throw new BadRequestException(
+          `success_percentage deve estar entre 0.01 e 100 (recebido: ${data.success_percentage}). ` +
+          'Use formato 20 para 20%, nao 0.20.',
+        );
+      }
+      if (data.sentence_value <= 0) {
+        throw new BadRequestException('sentence_value deve ser maior que zero');
+      }
       sentenceValue = data.sentence_value;
-      totalValue = Math.round(data.sentence_value * data.success_percentage) / 100;
+      // Calculo em centavos pra precisao
+      const sentenceCents = Math.round(data.sentence_value * 100);
+      const totalCents = Math.round((sentenceCents * data.success_percentage) / 100);
+      totalValue = totalCents / 100;
     } else {
       if (!data.total_value || data.total_value <= 0) {
         throw new BadRequestException('Valor total é obrigatório');
@@ -157,10 +174,15 @@ export class HonorariosService {
       totalValue = data.total_value;
     }
 
-    // ─── Gerar parcelas ───
+    // ─── Gerar parcelas (centavos inteiros) ───
+    // Bug fix 2026-05-10 (Honorarios PR3 #7): aritmetica em centavos
+    // pra evitar erro de float (0.1 + 0.2 = 0.30000000000000004).
     const installmentCount = data.installment_count || 1;
-    const baseAmount = Math.floor((totalValue * 100) / installmentCount) / 100;
-    const lastAmount = Math.round((totalValue - baseAmount * (installmentCount - 1)) * 100) / 100;
+    const totalCents = Math.round(totalValue * 100);
+    const baseCents = Math.floor(totalCents / installmentCount);
+    const lastCents = totalCents - baseCents * (installmentCount - 1);
+    const baseAmount = baseCents / 100;
+    const lastAmount = lastCents / 100;
 
     const startDate = data.contract_date ? new Date(data.contract_date) : null;
     // Só gera vencimento se data foi informada E não é sucumbência
@@ -172,13 +194,31 @@ export class HonorariosService {
       status: string;
     }> = [];
 
+    // Bug fix 2026-05-10 (Honorarios PR3 #11 — CRITICO):
+    // setMonth(+1) em 31/jan vira 03/mar (porque 31/02 nao existe) —
+    // parcelas caiam em datas erradas. Cliente paga atrasado sem
+    // saber. Helper addMonthsClamped faz "month-end clamping":
+    //   31/jan + 1 mes = 28/fev (29 em ano bissexto)
+    //   30/abr + 1 mes = 30/mai (correto, abr tem 30)
+    //   31/mar + 1 mes = 30/abr (clampa)
+    const addMonthsClamped = (base: Date, monthsToAdd: number): Date => {
+      const result = new Date(base);
+      const targetMonth = result.getMonth() + monthsToAdd;
+      const targetYear = result.getFullYear() + Math.floor(targetMonth / 12);
+      const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+      // Ultimo dia do mes alvo (dia 0 do mes seguinte)
+      const lastDayOfTargetMonth = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+      const day = Math.min(base.getDate(), lastDayOfTargetMonth);
+      result.setFullYear(targetYear, normalizedMonth, day);
+      return result;
+    };
+
     for (let i = 0; i < installmentCount; i++) {
       let dueDate: Date | null = null;
       let status = 'PENDENTE';
 
       if (hasDueDate && startDate) {
-        dueDate = new Date(startDate);
-        dueDate.setMonth(dueDate.getMonth() + i);
+        dueDate = addMonthsClamped(startDate, i);
         if (dueDate < new Date()) status = 'ATRASADO';
       }
 

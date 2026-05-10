@@ -105,10 +105,14 @@ export class LeadHonorariosService {
 
     return honorarios.map(h => {
       const payments = h.payments || [];
+      // Bug fix 2026-05-10 (Honorarios PR3 #7): soma em centavos
       const contracted = Number(h.total_value);
-      const received = payments.filter(p => p.status === 'PAGO').reduce((s, p) => s + Number(p.amount), 0);
-      const pending = payments.filter(p => p.status === 'PENDENTE').reduce((s, p) => s + Number(p.amount), 0);
-      const overdue = payments.filter(p => p.status === 'ATRASADO').reduce((s, p) => s + Number(p.amount), 0);
+      const sumCents = (status: string) => payments
+        .filter(p => p.status === status)
+        .reduce((s, p) => s + Math.round(Number(p.amount) * 100), 0);
+      const received = sumCents('PAGO') / 100;
+      const pending = sumCents('PENDENTE') / 100;
+      const overdue = sumCents('ATRASADO') / 100;
       return {
         id: h.id,
         lead: h.lead,
@@ -145,11 +149,17 @@ export class LeadHonorariosService {
       throw new BadRequestException('Informe pelo menos uma parcela');
     }
 
-    // Validar soma das parcelas
-    const paymentSum = data.payments.reduce((s, p) => s + p.amount, 0);
-    const diff = Math.abs(paymentSum - data.total_value);
-    if (diff > 0.02) {
-      throw new BadRequestException(`Soma das parcelas (${paymentSum.toFixed(2)}) difere do valor total (${data.total_value.toFixed(2)})`);
+    // Bug fix 2026-05-10 (Honorarios PR3 #7): validar em centavos
+    // (precisao exata) em vez de tolerar 2 centavos de diff. Antes
+    // R$ 0,02 tolerados por contrato, em volume de 100 contratos
+    // soma R$ 2 perdidos silenciosamente.
+    const totalCents = Math.round(data.total_value * 100);
+    const paymentSumCents = data.payments.reduce((s, p) => s + Math.round(p.amount * 100), 0);
+    const diffCents = Math.abs(paymentSumCents - totalCents);
+    if (diffCents > 1) { // toleramos so 1 centavo (residuo de divisao normal)
+      throw new BadRequestException(
+        `Soma das parcelas (${(paymentSumCents / 100).toFixed(2)}) difere do valor total (${(totalCents / 100).toFixed(2)})`,
+      );
     }
 
     const now = new Date();

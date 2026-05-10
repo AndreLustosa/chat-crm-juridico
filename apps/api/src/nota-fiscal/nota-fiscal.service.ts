@@ -280,11 +280,29 @@ export class NotaFiscalService {
   // ─── Provider API call (placeholder) ──────────────────
 
   /**
-   * TODO: A integracao real depende do provider escolhido pelo usuario.
-   * Providers suportados: ENOTAS, NFEIO, FOCUSNFE
-   * Cada provider tem sua propria API e formato de payload.
-   * Este metodo deve ser substituido pela integracao real quando o
-   * provider for definido.
+   * Bug fix 2026-05-10 (Honorarios PR3 #38 — CRITICO):
+   *
+   * ANTES (PERIGOSO): este metodo retornava `success: true` com numero
+   * fake gerado de Date.now(). NotaFiscal entrava como "EMITIDA" no
+   * banco, mensagens automaticas notificavam cliente "NF emitida com
+   * numero NF12345678", mas a NF NAO EXISTE NA PREFEITURA. Crime
+   * tributario por omissao de emissao + risco de cliente apresentar
+   * NF "emitida" pelo CRM em pedido de credito → fraude documental.
+   *
+   * AGORA: lanca excecao explicita pra bloquear emissao falsa.
+   * Para habilitar:
+   *   1. Implementar uma das integrations reais (ENOTAS/NFEIO/FOCUSNFE)
+   *   2. Setar NFE_PROVIDER_INTEGRATION_ENABLED=true no env (gate de
+   *      seguranca explicito — nao basta a integration estar codada,
+   *      precisa ativacao manual confirmando que conta foi configurada).
+   *
+   * TODO: integracao real com provider — payload base:
+   *   - ENOTAS: POST https://api.enotas.com.br/v2/empresas/{cnpj}/nfes
+   *     headers: Authorization Bearer apiKey
+   *   - NFEIO: POST https://api.nfe.io/v1/companies/{id}/serviceinvoices
+   *     headers: Authorization apiKey
+   *   - FOCUSNFE: POST https://api.focusnfe.com.br/v2/nfse?ref=X
+   *     headers: Authorization Token apiKey
    */
   private async callProviderApi(
     provider: string,
@@ -299,45 +317,23 @@ export class NotaFiscalService {
     pdf_url?: string;
     error_message?: string;
   }> {
-    this.logger.log(`[MOCK] Chamando provider ${provider} para emissao de NFS-e`);
-    this.logger.log(`[MOCK] API Key: ${apiKey.substring(0, 4)}****`);
-    this.logger.log(`[MOCK] Payload: ${JSON.stringify(payload, null, 2)}`);
+    const integrationEnabled = process.env.NFE_PROVIDER_INTEGRATION_ENABLED === 'true';
+    if (!integrationEnabled) {
+      this.logger.error(
+        `[NF-E] BLOQUEADO: Tentativa de emitir NFS-e via provider ${provider} mas integracao real ` +
+        `NAO esta implementada nem ativada. Antes este metodo retornava numero MOCK fake — ` +
+        `NF aparecia como EMITIDA mas nao existia na prefeitura (crime tributario). ` +
+        `Pra habilitar: implementar integration real + setar NFE_PROVIDER_INTEGRATION_ENABLED=true.`,
+      );
+      throw new Error(
+        'Emissao de NFS-e bloqueada: integracao com provider de NF-e nao foi implementada/ativada. ' +
+        'Contate o suporte tecnico antes de tentar emitir notas fiscais.',
+      );
+    }
 
-    // TODO: Implementar chamada real com axios baseado no provider:
-    //
-    // if (provider === 'ENOTAS') {
-    //   const response = await axios.post('https://api.enotas.com.br/v2/...', payload, {
-    //     headers: { Authorization: `Bearer ${apiKey}` },
-    //   });
-    //   return { success: true, ...response.data };
-    // }
-    //
-    // if (provider === 'NFEIO') {
-    //   const response = await axios.post('https://api.nfe.io/v1/...', payload, {
-    //     headers: { Authorization: apiKey },
-    //   });
-    //   return { success: true, ...response.data };
-    // }
-    //
-    // if (provider === 'FOCUSNFE') {
-    //   const response = await axios.post('https://api.focusnfe.com.br/v2/...', payload, {
-    //     headers: { Authorization: `Token ${apiKey}` },
-    //   });
-    //   return { success: true, ...response.data };
-    // }
-
-    // Mock response for development
-    const mockNumero = `NF${Date.now().toString().slice(-8)}`;
-    const mockVerificacao = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    return {
-      success: true,
-      numero: mockNumero,
-      codigo_verificacao: mockVerificacao,
-      external_id: `mock_${provider.toLowerCase()}_${Date.now()}`,
-      xml_url: undefined,
-      pdf_url: undefined,
-      error_message: undefined,
-    };
+    // TODO: branch por provider quando integration real for codada
+    throw new Error(
+      `Emissao de NFS-e via ${provider} habilitada mas integration real nao foi codada ainda — abort.`,
+    );
   }
 }

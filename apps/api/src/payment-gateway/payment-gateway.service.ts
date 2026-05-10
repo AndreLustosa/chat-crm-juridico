@@ -487,9 +487,36 @@ export class PaymentGatewayService {
       tenantId || honorario.tenant_id || undefined,
     );
 
-    const totalValue = honorario.payments.reduce((s, p) => s + Number(p.amount), 0);
+    // Bug fix 2026-05-10 (Honorarios PR3 #7+#10 — CRITICO):
+    // 1. Soma em centavos pra precisao
+    // 2. Validar que TODAS as parcelas tem mesmo valor antes de usar
+    //    o installmentCharge do Asaas (que cria N parcelas iguais).
+    //    Antes pegava payments[0] como installmentValue, mas
+    //    honorarios.service cria parcelas onde a ULTIMA absorve resíduo
+    //    (R$ 1000/3 = 333.33 + 333.33 + 333.34). Asaas criava 3x R$ 333,33
+    //    = R$ 999,99 — cliente paga R$ 0,01 a menos, marcado inadimplente.
+    const totalCents = honorario.payments.reduce((s, p) => s + Math.round(Number(p.amount) * 100), 0);
+    const totalValue = totalCents / 100;
     const installmentCount = honorario.payments.length;
-    const installmentValue = Number(honorario.payments[0].amount); // Asaas usa valor da primeira parcela
+    const firstAmountCents = Math.round(Number(honorario.payments[0].amount) * 100);
+    const installmentValue = firstAmountCents / 100;
+
+    // Verificar simetria: se houver parcelas com valor diferente, NAO
+    // usar installmentCharge do Asaas (gera erro). Operador precisa
+    // criar charges individuais via createCharge por parcela.
+    const allSameValue = honorario.payments.every(
+      p => Math.round(Number(p.amount) * 100) === firstAmountCents,
+    );
+    if (!allSameValue) {
+      throw new BadRequestException(
+        `Parcelas com valores diferentes (resíduo de divisão). Asaas installmentCharge ` +
+        `cria N parcelas iguais e cliente pagaria centavos a menos. ` +
+        `Use criação individual por parcela ou ajuste manualmente os valores ` +
+        `pra todos serem iguais. Total: R$ ${totalValue.toFixed(2)}, ` +
+        `${installmentCount} parcelas (1ª: R$ ${installmentValue.toFixed(2)})`,
+      );
+    }
+
     const firstDueDate = honorario.payments[0].due_date || new Date();
     const dueDateStr = new Date(firstDueDate).toISOString().slice(0, 10);
 

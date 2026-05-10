@@ -67,9 +67,17 @@ export class TaxService {
       select: { amount: true },
     });
 
-    const totalRevenue = revenues.reduce((s, r) => s + Number(r.amount), 0);
-    const totalDeductions = expenses.reduce((s, e) => s + Number(e.amount), 0);
-    const taxableIncome = Math.max(0, totalRevenue - totalDeductions);
+    // Bug fix 2026-05-10 (Honorarios PR3 #7): soma em centavos pra
+    // evitar erro de float em volume agregado. Antes 100 parcelas
+    // de R$ 1.499,99 acumulavam erro tipo R$ 17.999,879999999998 →
+    // exibido como R$ 17.999,88. Em base mensal de mil leads, soma
+    // ~R$ 1-10 sumindo silenciosamente do DARF.
+    const totalRevenueCents = revenues.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
+    const totalDeductionsCents = expenses.reduce((s, e) => s + Math.round(Number(e.amount) * 100), 0);
+    const totalRevenue = totalRevenueCents / 100;
+    const totalDeductions = totalDeductionsCents / 100;
+    const taxableIncomeCents = Math.max(0, totalRevenueCents - totalDeductionsCents);
+    const taxableIncome = taxableIncomeCents / 100;
     const taxDue = Math.round(this.calculateTax(taxableIncome) * 100) / 100;
 
     // DARF vence no último dia útil do mês seguinte
