@@ -77,6 +77,11 @@ model Tenant {
   traffic_metrics_device     TrafficMetricDevice[]
   traffic_ad_schedules       TrafficAdSchedule[]
   traffic_auction_insights   TrafficAuctionInsightDaily[]
+  organic_search_config      OrganicSearchConfig?
+  organic_landing_pages      OrganicLandingPage[]
+  organic_search_metrics     OrganicSearchMetric[]
+  organic_inspection_snapshots OrganicInspectionSnapshot[]
+  organic_sync_logs          OrganicSyncLog[]
 }
 
 model User {
@@ -3835,6 +3840,148 @@ model LandingPage {
   @@unique([tenant_id, url])
   @@index([tenant_id, last_pagespeed_at])
   @@index([campaign_id])
+}
+
+/// Modulo: Trafego Organico / Google Search Console.
+/// Configuracao por tenant para leitura das propriedades verificadas no
+/// Search Console. A credencial e armazenada criptografada pela aplicacao.
+model OrganicSearchConfig {
+  id                    String    @id @default(uuid())
+  tenant_id             String    @unique
+  site_url              String
+  property_type         String    @default("DOMAIN")
+  service_account_b64   String?   @db.Text
+  service_account_email String?
+  is_active             Boolean   @default(true)
+  last_sync_at          DateTime?
+  last_inspection_at    DateTime?
+  last_error            String?   @db.Text
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([site_url])
+}
+
+/// Landing pages monitoradas em SEO organico, cadastradas por cidade e area
+/// de atuacao. Separado de LandingPage do modulo Google Ads para nao misturar
+/// final URLs pagas com paginas estrategicas de busca organica.
+model OrganicLandingPage {
+  id                 String   @id @default(uuid())
+  tenant_id          String
+  url                String
+  path               String
+  title              String
+  city               String?
+  state              String?
+  practice_area      String?
+  target_keywords    String[] @default([])
+  notes              String?  @db.Text
+  sitemap_url        String?
+  is_active          Boolean  @default(true)
+
+  clicks_30d          Int     @default(0)
+  impressions_30d     Int     @default(0)
+  ctr_30d             Float   @default(0)
+  position_30d        Float   @default(0)
+  lp_views_30d        Int     @default(0)
+  whatsapp_clicks_30d Int     @default(0)
+
+  index_verdict      String?
+  coverage_state     String?
+  indexing_state     String?
+  page_fetch_state   String?
+  robots_txt_state   String?
+  google_canonical   String?
+  user_canonical     String?
+  last_crawl_time    DateTime?
+  last_search_sync_at DateTime?
+  last_inspected_at  DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant      Tenant                       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  metrics     OrganicSearchMetric[]
+  inspections OrganicInspectionSnapshot[]
+
+  @@unique([tenant_id, url])
+  @@index([tenant_id, is_active])
+  @@index([tenant_id, city, practice_area])
+  @@index([path])
+}
+
+/// Snapshot diario/query das metricas do relatorio Search Analytics.
+model OrganicSearchMetric {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  page_id     String
+  date        DateTime @db.Date
+  query       String   @default("")
+  country     String   @default("")
+  device      String   @default("")
+  clicks      Int      @default(0)
+  impressions Int      @default(0)
+  ctr         Float    @default(0)
+  position    Float    @default(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  tenant Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  page   OrganicLandingPage @relation(fields: [page_id], references: [id], onDelete: Cascade)
+
+  @@unique([page_id, date, query, country, device])
+  @@index([tenant_id, date])
+  @@index([page_id, date])
+  @@index([query])
+}
+
+/// Historico das respostas da URL Inspection API para cada landing page.
+model OrganicInspectionSnapshot {
+  id               String   @id @default(uuid())
+  tenant_id        String
+  page_id          String
+  inspection_url   String
+  site_url         String
+  verdict          String?
+  coverage_state   String?
+  indexing_state   String?
+  page_fetch_state String?
+  robots_txt_state String?
+  google_canonical String?
+  user_canonical   String?
+  last_crawl_time  DateTime?
+  raw              Json?
+  inspected_at     DateTime @default(now())
+
+  tenant Tenant             @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  page   OrganicLandingPage @relation(fields: [page_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, inspected_at(sort: Desc)])
+  @@index([page_id, inspected_at(sort: Desc)])
+}
+
+/// Log estruturado de sincronizacoes com Search Console.
+model OrganicSyncLog {
+  id            String    @id @default(uuid())
+  tenant_id     String
+  trigger       String
+  status        String
+  date_from     DateTime? @db.Date
+  date_to       DateTime? @db.Date
+  pages_seen    Int       @default(0)
+  rows_upserted Int       @default(0)
+  inspected     Int       @default(0)
+  error_message String?   @db.Text
+  duration_ms   Int?
+  started_at    DateTime  @default(now())
+  finished_at   DateTime?
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, started_at(sort: Desc)])
+  @@index([status, started_at])
 }
 
 

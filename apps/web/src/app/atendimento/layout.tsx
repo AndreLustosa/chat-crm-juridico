@@ -198,7 +198,7 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
     { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: FileEdit, match: (p: string) => p.startsWith('/atendimento/advogado'), show: perms.canViewAdvogado },
     { label: 'Processos', href: '/atendimento/processos', icon: BookOpen, match: (p: string) => p.startsWith('/atendimento/processos'), show: perms.canViewLegalCases },
     { label: 'DJEN', href: '/atendimento/djen', icon: Gavel, match: (p: string) => p.startsWith('/atendimento/djen'), show: perms.canViewDjen },
-    { label: 'Marketing', href: '/atendimento/marketing/analytics', icon: Megaphone, match: (p: string) => p.startsWith('/atendimento/marketing'), show: perms.canViewAnalytics },
+    { label: 'Marketing', href: '/atendimento/marketing/trafego-organico', icon: Megaphone, match: (p: string) => p.startsWith('/atendimento/marketing'), show: perms.canViewOrganicTraffic },
     { label: 'Ajustes', href: '/atendimento/settings', icon: Settings, match: (p: string) => p.startsWith('/atendimento/settings'), show: perms.canManageSettings },
   ];
   const moreItems = allMoreItems.filter(item => item.show);

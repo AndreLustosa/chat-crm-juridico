@@ -19,6 +19,8 @@ export interface RoleInfo {
   canManageSettings: boolean;    // configurações do sistema
   canViewDashboard: boolean;     // dashboard
   canViewAnalytics: boolean;     // analytics/marketing
+  canViewOrganicTraffic: boolean; // trafego organico/Search Console
+  canManageOrganicTraffic: boolean; // configurar Search Console e LPs
   canViewDjen: boolean;          // publicações DJEN
   canViewFinanceiro: boolean;    // módulo financeiro
   canViewAdvogado: boolean;      // triagem e peticionamento
@@ -73,6 +75,8 @@ function buildInfo(roles: AppRole[], userId: string | null): RoleInfo {
     canManageSettings: roles.includes('ADMIN'),
     canViewDashboard: has(['ADMIN', 'ADVOGADO', 'OPERADOR', 'COMERCIAL']),
     canViewAnalytics: has(['ADMIN']),
+    canViewOrganicTraffic: has(['ADMIN', 'ADVOGADO', 'OPERADOR']),
+    canManageOrganicTraffic: has(['ADMIN', 'ADVOGADO']),
     canViewDjen: has(['ADMIN', 'ADVOGADO']),
     canViewFinanceiro: has(['ADMIN', 'FINANCEIRO', 'ADVOGADO']),
     canViewAdvogado: has(['ADMIN', 'ADVOGADO']),

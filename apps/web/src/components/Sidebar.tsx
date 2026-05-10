@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter, usePathname } from 'next/navigation';
 import {
   LogOut, Users, Briefcase, Settings, Palette, Check,
-  MessageSquare, BarChart2, Scale, BookOpen, Calendar,
+  MessageSquare, Search, Scale, BookOpen, Calendar,
   LayoutDashboard, Gavel, Wallet, HelpCircle,
   ChevronRight, ClipboardList, Sparkles, Wrench,
   TrendingUp,
@@ -326,11 +326,11 @@ export function Sidebar() {
       show: perms.canViewFinanceiro,
     },
     analytics: {
-      label: 'Analytics',
-      href: '/atendimento/marketing/analytics',
-      icon: <BarChart2 size={20} strokeWidth={2} />,
-      match: (p) => p.startsWith('/atendimento/marketing/analytics') || p.startsWith('/atendimento/marketing/landing-pages'),
-      show: perms.canViewAnalytics,
+      label: 'Trafego Organico',
+      href: '/atendimento/marketing/trafego-organico',
+      icon: <Search size={20} strokeWidth={2} />,
+      match: (p) => p.startsWith('/atendimento/marketing/trafego-organico') || p.startsWith('/atendimento/marketing/analytics') || p.startsWith('/atendimento/marketing/landing-pages'),
+      show: perms.canViewOrganicTraffic,
     },
     trafego: {
       label: 'Tráfego (Google Ads)',

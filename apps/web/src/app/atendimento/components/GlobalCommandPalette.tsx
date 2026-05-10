@@ -51,7 +51,7 @@ const NAV_ITEMS = [
   { id: 'nav-followup',   label: 'Follow-up IA',            sublabel: 'Sequências automáticas',        href: '/atendimento/followup',            icon: <Bot size={14} className="text-pink-400" /> },
   { id: 'nav-advogado',   label: 'Triagem e Peticionamento',sublabel: 'Gerador de petições com IA',    href: '/atendimento/advogado',            icon: <FileEdit size={14} className="text-orange-400" /> },
   { id: 'nav-processos',  label: 'Processos',               sublabel: 'Casos judiciais e prazos',      href: '/atendimento/processos',           icon: <BookOpen size={14} className="text-teal-400" /> },
-  { id: 'nav-analytics',  label: 'Analytics',               sublabel: 'Métricas e campanhas',          href: '/atendimento/marketing/analytics', icon: <Megaphone size={14} className="text-rose-400" /> },
+  { id: 'nav-analytics',  label: 'Trafego Organico',        sublabel: 'Search Console e landing pages', href: '/atendimento/marketing/trafego-organico', icon: <Megaphone size={14} className="text-rose-400" /> },
   { id: 'nav-settings',   label: 'Configurações',           sublabel: 'WhatsApp, IA, usuários...',     href: '/atendimento/settings',            icon: <Settings size={14} className="text-muted-foreground" /> },
 ];
 
