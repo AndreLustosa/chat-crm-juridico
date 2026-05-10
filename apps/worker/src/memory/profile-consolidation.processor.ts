@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { PROFILE_CONSOLIDATION_PROMPT, NARRATIVE_FACTS_PROMPT } from './memory-prompts';
+import { checkMemoryDailyCap } from './memory-cost-cap.util';
 
 /**
  * ProfileConsolidationProcessor
@@ -26,6 +27,20 @@ export class ProfileConsolidationProcessor {
   async consolidateAfterBatch(job: Job): Promise<{ leads: number }> {
     const { tenant_id } = job.data as { tenant_id: string };
 
+    // Bug fix 2026-05-10 (Memoria PR1 #C6 — CRITICO):
+    // Cap diario global. Se ja gastei US$ 50 nas ultimas 24h em
+    // memoria/consolidacao, aborto. Antes esse path nao tinha cap nenhum —
+    // bug em prompt ou tenant com 1000 conversas/dia ja gerou US$ 200+
+    // de fatura noturna sem ninguem perceber.
+    const cap = await checkMemoryDailyCap(this.prisma);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[ProfileConsolidation] CAP DIARIO ATINGIDO: gastei US$ ${cap.spent.toFixed(2)} ` +
+        `de US$ ${cap.cap.toFixed(2)}. Skipping batch consolidation tenant ${tenant_id}.`,
+      );
+      return { leads: 0 };
+    }
+
     const rows = await this.prisma.$queryRaw<{ lead_id: string }[]>`
       SELECT DISTINCT scope_id AS lead_id
       FROM "Memory"
@@ -36,6 +51,16 @@ export class ProfileConsolidationProcessor {
     `;
 
     for (const { lead_id } of rows) {
+      // Re-checa o cap a cada lead — extracao em batch pode estourar
+      // o cap no meio do loop. Aborto cedo evita gasto extra.
+      const recheck = await checkMemoryDailyCap(this.prisma);
+      if (!recheck.ok) {
+        this.logger.warn(
+          `[ProfileConsolidation] CAP estourado durante loop (US$ ${recheck.spent.toFixed(2)}/${recheck.cap.toFixed(2)}). ` +
+          `Abortando consolidacao restante de ${rows.length} leads.`,
+        );
+        break;
+      }
       try {
         await this.consolidateProfile(tenant_id, lead_id);
       } catch (e: any) {
@@ -54,11 +79,25 @@ export class ProfileConsolidationProcessor {
     return { leads: rows.length };
   }
 
-  async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
+  async consolidateSingle(job: Job): Promise<{ ok: boolean; reason?: string }> {
     const { tenant_id, lead_id } = job.data as {
       tenant_id: string;
       lead_id: string;
     };
+
+    // Bug fix 2026-05-10 (Memoria PR1 #C6): cap diario tambem em manual.
+    // Manual regen costuma ser pontual (1 lead) entao raramente bate o cap,
+    // mas se ja estourou (extracao + cron noturno), falha loud em vez de
+    // gerar mais cobranca silenciosa.
+    const cap = await checkMemoryDailyCap(this.prisma);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[ProfileConsolidation] CAP DIARIO ATINGIDO em consolidateSingle: ` +
+        `US$ ${cap.spent.toFixed(2)}/${cap.cap.toFixed(2)} — abortando lead ${lead_id}`,
+      );
+      return { ok: false, reason: 'daily_cost_cap_exceeded' };
+    }
+
     await this.consolidateProfile(tenant_id, lead_id);
     return { ok: true };
   }
@@ -285,6 +324,18 @@ export class ProfileConsolidationProcessor {
   async generateNarrativeFacts(tenantId: string, leadId: string): Promise<{ narrative: string; key_dates: any[] } | null> {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) return null;
+
+    // Bug fix 2026-05-10 (Memoria PR1 #C6): narrative_facts usa gpt-4.1
+    // (~$0.05-0.15 por lead). Sem cap, advogado clicando varias vezes
+    // ou loop em UI drena saldo. Ja estourou cap = nega.
+    const cap = await checkMemoryDailyCap(this.prisma);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[NarrativeFacts] CAP DIARIO ATINGIDO: US$ ${cap.spent.toFixed(2)}/${cap.cap.toFixed(2)} — ` +
+        `abortando narrative_facts lead ${leadId}`,
+      );
+      return null;
+    }
 
     const [memories, lead, profile] = await Promise.all([
       this.prisma.memory.findMany({

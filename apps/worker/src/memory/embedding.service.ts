@@ -4,6 +4,41 @@ import OpenAI from 'openai';
 import { SettingsService } from '../settings/settings.service';
 
 /**
+ * Bug fix 2026-05-10 (Memoria PR1 #C4 — CRITICO LGPD):
+ * Antes embeddings recebiam memorias com CPF/RG/processo/endereco
+ * em plaintext direto pra OpenAI. Toda memoria do escritorio passava
+ * por la sem ofuscacao. Quebra de sigilo profissional advogado
+ * (Art. 7 §1 EAOAB) + risco LGPD.
+ *
+ * Estrategia: mascara minima ANTES de enviar pra embeddings. Embedding
+ * semantico mantem-se relevante (mascaras genericas tipo <CPF> nao
+ * mudam vetor significativamente; mas previnem reconstrucao de PII
+ * via reverse lookup do indice OpenAI).
+ *
+ * Patterns mascarados:
+ *   CPF: 11 digitos com ou sem formatacao
+ *   CNPJ: 14 digitos
+ *   RG: 7-9 digitos com sufixo opcional
+ *   Processo: NNNNNNN-DD.AAAA.J.TR.OOOO (CNJ)
+ *   Email: <local>@<domain>
+ *   Telefone BR: +55, DDD, etc
+ */
+function maskPiiInText(text: string): string {
+  if (!text) return text;
+  return text
+    // CPF: 123.456.789-00 ou 12345678900
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '<CPF>')
+    // CNPJ: 12.345.678/0001-23 ou 12345678000123
+    .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, '<CNPJ>')
+    // Numero de processo CNJ: 1234567-89.2026.5.04.0001
+    .replace(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g, '<PROCESSO>')
+    // Email
+    .replace(/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g, '<EMAIL>')
+    // Telefone BR (com DDI 55, opcional 9): +55 82 99999-8888 ou 5582999998888
+    .replace(/\b(?:\+?55\s?)?\(?\d{2}\)?\s?9?\s?\d{4,5}-?\d{4}\b/g, '<TELEFONE>');
+}
+
+/**
  * EmbeddingService
  * ────────────────
  * Gera vetores (1536-dim) para memorias usando text-embedding-3-small.
@@ -44,16 +79,22 @@ export class EmbeddingService {
     }
   }
 
-  /** Gera embedding para um unico texto. Usa cache. */
+  /** Gera embedding para um unico texto. Usa cache.
+   *
+   * Bug fix 2026-05-10 (PR1 #C4): mascara PII antes de enviar pra
+   * OpenAI embeddings. Cache key usa texto MASCARADO (consistente
+   * com o que vai pra IA).
+   */
   async generate(text: string): Promise<number[]> {
-    const hash = this.hashText(text);
+    const masked = maskPiiInText(text);
+    const hash = this.hashText(masked);
     const cached = this.cache.get(hash);
     if (cached) return cached;
 
     const client = await this.getClient();
     const response = await client.embeddings.create({
       model: 'text-embedding-3-small',
-      input: text,
+      input: masked,
       dimensions: 1536,
     });
     const embedding = response.data[0].embedding;
@@ -62,19 +103,22 @@ export class EmbeddingService {
     return embedding;
   }
 
-  /** Gera embeddings em lote (mais barato — 1 request por ate 2048 textos). */
+  /** Gera embeddings em lote (mais barato — 1 request por ate 2048 textos).
+   *  Bug fix 2026-05-10 (PR1 #C4): mascara PII em batch tambem.
+   */
   async generateBatch(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
-    // Checa cache primeiro
-    const results: (number[] | null)[] = new Array(texts.length).fill(null);
+    const maskedTexts = texts.map(t => maskPiiInText(t));
+    // Checa cache primeiro (key = masked)
+    const results: (number[] | null)[] = new Array(maskedTexts.length).fill(null);
     const missingIdx: number[] = [];
     const missingTexts: string[] = [];
-    for (let i = 0; i < texts.length; i++) {
-      const cached = this.cache.get(this.hashText(texts[i]));
+    for (let i = 0; i < maskedTexts.length; i++) {
+      const cached = this.cache.get(this.hashText(maskedTexts[i]));
       if (cached) results[i] = cached;
       else {
         missingIdx.push(i);
-        missingTexts.push(texts[i]);
+        missingTexts.push(maskedTexts[i]);
       }
     }
     if (missingTexts.length === 0) return results as number[][];

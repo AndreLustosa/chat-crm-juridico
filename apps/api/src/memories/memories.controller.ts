@@ -263,21 +263,82 @@ export class MemoriesController {
   /**
    * POST /memories/backfill-missing-profiles
    *
-   * Enfileira `consolidate-profile` pra TODOS os leads ativos do tenant
-   * que ainda nao tem LeadProfile.summary. Cobre os 191 leads orfaos do
-   * diagnostico 2026-05-08.
+   * Enfileira `consolidate-profile` pra leads ativos do tenant que ainda
+   * nao tem LeadProfile.summary. Cobre os 191 leads orfaos do diagnostico
+   * 2026-05-08.
    *
    * Idempotente: se um lead ja tem profile, o job apenas regenera.
    * Custo estimado: ~$0.02-0.05 por lead × N leads.
+   *
+   * Bug fix 2026-05-10 (Memoria PR1 #C8 — CRITICO):
+   * Antes este endpoint enfileirava TODOS os leads sem profile sem confirmacao.
+   * 1 clique acidental = ate US$ 50 de OpenAI gerado em background, sem cap
+   * configuravel pelo caller. Pior: nao havia preview — admin descobria so
+   * pelo log/fatura.
+   *
+   * Agora exige body explicito:
+   *   { confirm: true, max_leads: number (1-200) }
+   *
+   * - `confirm: true` obrigatorio (previne CSRF + clique duplo)
+   * - `max_leads` limitado a [1, 200] — nunca mais que 200 por chamada
+   *   (US$ 10 max por execucao; admin chama de novo se precisar mais)
+   *
+   * GET /memories/backfill-missing-profiles/preview retorna o COUNT sem
+   * enfileirar nada. Use isso pra planejar.
    */
+  @Get('backfill-missing-profiles/preview')
+  @Roles('ADMIN')
+  async previewBackfill(@Request() req: any) {
+    const tenantId = req.user?.tenant_id;
+    if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    const rows = await this.prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT COUNT(*)::bigint as count FROM "Lead" l
+      WHERE l.tenant_id = ${tenantId}
+        AND EXISTS (
+          SELECT 1 FROM "Conversation" c
+          WHERE c.lead_id = l.id
+            AND c.last_message_at > NOW() - INTERVAL '60 days'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "LeadProfile" lp
+          WHERE lp.lead_id = l.id AND length(coalesce(lp.summary, '')) > 50
+        )
+    `;
+    const total = Number(rows[0]?.count || 0);
+    return {
+      total_leads_without_profile: total,
+      estimated_cost_usd_max: (total * 0.05).toFixed(2),
+      estimated_cost_usd_min: (total * 0.02).toFixed(2),
+      hint: 'POST com body { confirm: true, max_leads: N (1-200) } pra enfileirar.',
+    };
+  }
+
   @Post('backfill-missing-profiles')
   @Roles('ADMIN')
-  async backfillMissingProfiles(@Request() req: any) {
+  async backfillMissingProfiles(
+    @Request() req: any,
+    @Body() body: { confirm?: boolean; max_leads?: number },
+  ) {
     const tenantId = req.user?.tenant_id;
     if (!tenantId) throw new BadRequestException('tenant_id ausente');
 
+    // Bug fix #C8: confirmacao explicita obrigatoria
+    if (body?.confirm !== true) {
+      throw new BadRequestException(
+        'Confirmacao obrigatoria. Envie { confirm: true, max_leads: N } no body. ' +
+        'Use GET /memories/backfill-missing-profiles/preview pra ver o total antes.',
+      );
+    }
+    const maxLeadsRaw = Number(body?.max_leads);
+    if (!Number.isInteger(maxLeadsRaw) || maxLeadsRaw < 1 || maxLeadsRaw > 200) {
+      throw new BadRequestException(
+        'max_leads obrigatorio: inteiro entre 1 e 200. ' +
+        'Para enfileirar mais que 200 leads, faca multiplas chamadas em sequencia.',
+      );
+    }
+
     // Leads ativos (qualquer Conversation com mensagem nos ultimos 60d)
-    // sem LeadProfile.summary preenchido.
+    // sem LeadProfile.summary preenchido. Limitado por max_leads.
     // Bug 2026-05-08: query original usava l.last_message_at, mas essa
     // coluna fica em Conversation. Reescrita usa EXISTS+Conversation.
     const leadsWithoutProfile = await this.prisma.$queryRaw<{ id: string }[]>`
@@ -295,6 +356,7 @@ export class MemoriesController {
       ORDER BY (
         SELECT MAX(c.last_message_at) FROM "Conversation" c WHERE c.lead_id = l.id
       ) DESC
+      LIMIT ${maxLeadsRaw}
     `;
 
     let enqueued = 0;
@@ -317,7 +379,29 @@ export class MemoriesController {
       }
     }
 
-    return { success: true, total_leads_without_profile: leadsWithoutProfile.length, enqueued };
+    // Audit log — quem disparou e quantos leads foram enfileirados
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: req.user?.id || null,
+        action: 'memory_backfill_profiles',
+        entity: 'Tenant',
+        entity_id: tenantId,
+        meta_json: {
+          tenant_id: tenantId,
+          requested_max: maxLeadsRaw,
+          enqueued,
+        },
+      },
+    }).catch(() => { /* nao bloqueia */ });
+
+    return {
+      success: true,
+      enqueued,
+      max_leads_requested: maxLeadsRaw,
+      hint: enqueued === maxLeadsRaw
+        ? 'Limite atingido. Pode haver mais leads sem profile — chame de novo apos os jobs concluirem.'
+        : undefined,
+    };
   }
 
   // ─── Lead ────────────────────────────────────────────────
@@ -388,6 +472,7 @@ export class MemoriesController {
   @Roles('ADMIN')
   async deleteAllLeadMemories(@Request() req: any, @Param('leadId') leadId: string) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.deleteAllLeadMemories(req.user.tenant_id, leadId);
+    // Bug fix #C5: passa actorUserId pra audit log
+    return this.memoriesService.deleteAllLeadMemories(req.user.tenant_id, leadId, req.user.id);
   }
 }

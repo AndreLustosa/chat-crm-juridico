@@ -68,6 +68,33 @@ export class MemoryJobsProcessor extends WorkerHost {
 
   private async generateNarrativeFactsHandler(job: Job): Promise<{ ok: boolean; chars: number }> {
     const { tenant_id, lead_id } = job.data as { tenant_id: string; lead_id: string };
+
+    // Bug fix 2026-05-10 (Memoria PR1 #C1 — CRITICO):
+    // Antes upsert do LeadProfile usava `WHERE lead_id` apenas (eh @unique).
+    // Atacante (ou bug em outro caller) podia enfileirar job com
+    // tenant_id=A + lead_id=<lead-do-tenant-B> → profile do B sobrescrito
+    // com facts de A. Catastrofico (cross-tenant).
+    // Agora valida que lead realmente pertence ao tenant_id do job.
+    if (!tenant_id || !lead_id) {
+      this.logger.error(`[MemoryJobs] generate-narrative-facts sem tenant_id ou lead_id`);
+      return { ok: false, chars: 0 };
+    }
+    const lead = await (this.profile as any).prisma.lead.findUnique({
+      where: { id: lead_id },
+      select: { tenant_id: true },
+    });
+    if (!lead) {
+      this.logger.warn(`[MemoryJobs] Lead ${lead_id} nao encontrado — abort`);
+      return { ok: false, chars: 0 };
+    }
+    if (lead.tenant_id !== tenant_id) {
+      this.logger.error(
+        `[MemoryJobs] CROSS-TENANT BLOCKED: job tenant_id=${tenant_id} ` +
+        `mas lead ${lead_id} pertence a tenant ${lead.tenant_id} — abort`,
+      );
+      return { ok: false, chars: 0 };
+    }
+
     const result = await this.profile.generateNarrativeFacts(tenant_id, lead_id);
     if (!result) {
       this.logger.warn(`[MemoryJobs] generateNarrativeFacts retornou null lead=${lead_id}`);

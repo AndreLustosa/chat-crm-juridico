@@ -719,14 +719,59 @@ export class MemoriesService {
     return { success: true };
   }
 
-  async deleteAllLeadMemories(tenantId: string, leadId: string) {
-    const deleted = await this.prisma.memory.deleteMany({
-      where: { tenant_id: tenantId, scope: 'lead', scope_id: leadId },
+  /**
+   * Bug fix 2026-05-10 (Memoria PR1 #C5 — CRITICO):
+   *
+   * Antes: hard delete sem audit. Admin clicado "Apagar memorias" no
+   * lead errado → meses de extracao perdidos sem trilha de auditoria.
+   *
+   * Agora:
+   *   1. Soft delete (status='archived', timestamp) em vez de DELETE
+   *   2. AuditLog com actor_user_id + count + lead_id pra trace
+   *   3. LeadProfile NAO eh deletado (so memorias) — perfil pode ser
+   *      reconsolidado depois das memorias serem restauradas
+   *
+   * Recuperacao: cron de cleanup eventual (defer pra futuro) pode
+   * fisicamente deletar memorias com status='archived' apos 90 dias.
+   * Janela de undo manual via UPDATE direta no banco.
+   */
+  async deleteAllLeadMemories(tenantId: string, leadId: string, actorUserId?: string) {
+    // Soft delete em vez de DELETE — preserva trilha de auditoria
+    const updated = await this.prisma.memory.updateMany({
+      where: {
+        tenant_id: tenantId,
+        scope: 'lead',
+        scope_id: leadId,
+        status: 'active',
+      },
+      data: {
+        status: 'archived',
+      },
     });
-    await this.prisma.leadProfile.deleteMany({
-      where: { tenant_id: tenantId, lead_id: leadId },
+
+    // Audit log obrigatorio
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_purge_lead',
+        entity: 'Lead',
+        entity_id: leadId,
+        meta_json: {
+          tenant_id: tenantId,
+          archived_count: updated.count,
+          note: 'Soft delete via deleteAllLeadMemories — memorias com status=archived. Recuperavel via UPDATE manual no banco.',
+        },
+      },
+    }).catch((e: any) => {
+      this.logger.warn(`[MEMORY] Falha audit log de purge_lead ${leadId}: ${e.message}`);
     });
-    return { success: true, deleted_count: deleted.count };
+
+    this.logger.log(
+      `[MEMORY] Soft-delete de ${updated.count} memorias do lead ${leadId} ` +
+      `(actor=${actorUserId || 'system'}, tenant=${tenantId})`,
+    );
+
+    return { success: true, archived_count: updated.count };
   }
 
   // ─── Configuracoes do OrganizationProfile (prompt + modelo) ──────

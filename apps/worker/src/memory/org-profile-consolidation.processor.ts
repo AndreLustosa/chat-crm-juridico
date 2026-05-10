@@ -10,6 +10,7 @@ import {
   ORG_PROFILE_INCREMENTAL_PROMPT,
 } from '@crm/shared';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { checkMemoryDailyCap } from './memory-cost-cap.util';
 
 const MIN_CONFIDENCE_FOR_INCLUSION = 0.6;
 
@@ -123,6 +124,20 @@ export class OrgProfileConsolidationProcessor {
    * desde a ultima incorporacao. Se nao houver mudancas, summary permanece igual.
    */
   async consolidateAll(): Promise<{ tenants: number; skipped: number; changed: number }> {
+    // Bug fix 2026-05-10 (Memoria PR1 #C7 — CRITICO):
+    // Cap diario antes de iterar tenants. Cron 02h consolida org-profile
+    // de TODOS os tenants. Se um prompt ruim faz LLM gerar 8K tokens em
+    // resposta + 50 tenants, ja sao US$ 4 so nessa execucao — somando com
+    // a extracao das 00h, drena rapido. Cap protege a fatura mensal.
+    const cap = await checkMemoryDailyCap(this.prisma);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[OrgProfileConsolidation] CAP DIARIO ATINGIDO: gastei US$ ${cap.spent.toFixed(2)} ` +
+        `de US$ ${cap.cap.toFixed(2)}. Pulando consolidateAll inteiro.`,
+      );
+      return { tenants: 0, skipped: 0, changed: 0 };
+    }
+
     const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
     const manuallyEdited = await this.prisma.organizationProfile.findMany({
       where: { manually_edited_at: { not: null } },
@@ -138,6 +153,16 @@ export class OrgProfileConsolidationProcessor {
         skipped++;
         this.logger.log(`[OrgProfileConsolidation] Tenant ${t.id}: pulado (editado manualmente)`);
         continue;
+      }
+      // Re-checa o cap a cada tenant — gasto acumula durante a iteracao
+      const recheck = await checkMemoryDailyCap(this.prisma);
+      if (!recheck.ok) {
+        this.logger.warn(
+          `[OrgProfileConsolidation] CAP estourado durante loop ` +
+          `(US$ ${recheck.spent.toFixed(2)}/${recheck.cap.toFixed(2)}). ` +
+          `Abortando ${tenants.length - processed - skipped} tenants restantes.`,
+        );
+        break;
       }
       try {
         const result = await this.consolidateIncremental(t.id);
@@ -159,8 +184,17 @@ export class OrgProfileConsolidationProcessor {
    * Job incremental disparado por CRUD de memoria org ou por regen manual.
    * Usa o modo INCREMENTAL (preserva summary, so aplica mudancas).
    */
-  async consolidateSingle(job: Job): Promise<{ ok: boolean }> {
+  async consolidateSingle(job: Job): Promise<{ ok: boolean; reason?: string }> {
     const { tenant_id } = job.data as { tenant_id: string };
+    // Bug fix 2026-05-10 (Memoria PR1 #C7): cap diario tambem em manual.
+    const cap = await checkMemoryDailyCap(this.prisma);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[OrgProfileConsolidation] CAP DIARIO ATINGIDO em consolidateSingle: ` +
+        `US$ ${cap.spent.toFixed(2)}/${cap.cap.toFixed(2)} — abortando tenant ${tenant_id}`,
+      );
+      return { ok: false, reason: 'daily_cost_cap_exceeded' };
+    }
     await this.consolidateIncremental(tenant_id);
     return { ok: true };
   }
@@ -170,8 +204,19 @@ export class OrgProfileConsolidationProcessor {
    * de TODAS as memorias ativas. Usado apenas quando admin clica explicitamente
    * em "Refazer do zero" na UI.
    */
-  async rebuildFromScratch(job: Job): Promise<{ ok: boolean }> {
+  async rebuildFromScratch(job: Job): Promise<{ ok: boolean; reason?: string }> {
     const { tenant_id } = job.data as { tenant_id: string };
+    // Bug fix 2026-05-10 (Memoria PR1 #C7): rebuild from-scratch envia
+    // TODAS as memorias org (40-100+) pro LLM — ate US$ 0.20 por chamada.
+    // Se admin clicar 5x em sequencia, drena saldo. Cap previne.
+    const cap = await checkMemoryDailyCap(this.prisma);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[OrgProfileConsolidation] CAP DIARIO ATINGIDO em rebuildFromScratch: ` +
+        `US$ ${cap.spent.toFixed(2)}/${cap.cap.toFixed(2)} — abortando tenant ${tenant_id}`,
+      );
+      return { ok: false, reason: 'daily_cost_cap_exceeded' };
+    }
     await this.consolidateProfile(tenant_id);
     return { ok: true };
   }
