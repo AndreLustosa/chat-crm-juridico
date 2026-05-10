@@ -165,7 +165,17 @@ export default function PaymentGatewaySettingsPage() {
 
         <button
           onClick={handleSave}
-          disabled={saving || !apiKey.trim()}
+          // Bug fix 2026-05-10: botao habilita quando QUALQUER campo for
+          // editado E (status ja configurado OU API key digitada agora).
+          // Antes exigia apiKey.trim() sempre — mas backend nao devolve
+          // a API key salva pra UI (correto por seguranca), entao usuario
+          // que so queria atualizar o webhook_token nao conseguia salvar
+          // sem re-colar a API key (que ja estava no banco).
+          disabled={
+            saving ||
+            (!apiKey.trim() && !webhookToken.trim() && status?.sandbox === sandbox) ||
+            (!status?.configured && !apiKey.trim())
+          }
           className="w-full py-3 text-sm font-semibold bg-primary text-primary-foreground rounded-xl hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
