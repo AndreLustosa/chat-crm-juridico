@@ -118,7 +118,20 @@ export class PetitionAiService {
     const model = (await this.settings.get('AI_PETITION_MODEL')) || 'gpt-4o';
     const ai = new OpenAI({ apiKey: aiConfig.apiKey, timeout: OPENAI_TIMEOUT_MS, maxRetries: 2 });
 
-    this.logger.log(`[PETITION-IA] Gerando ${petitionId} com ${model} (user=${userId}, tenant=${tenantId}, lgpd_consent=${!!opts.lgpdConsent})`);
+    // Bug fix 2026-05-10 (Peticoes PR3 #27):
+    // prompt_hash + first chars do system/user pra investigar
+    // incidente "peticao saiu com nome errado" sem capturar prompts
+    // completos (privacidade). Hash sha256 reproduzivel — mesmo
+    // input gera mesmo hash, util pra detectar reuso.
+    const promptHash = require('crypto').createHash('sha256')
+      .update(systemPrompt + '\n' + userPrompt)
+      .digest('hex')
+      .slice(0, 16);
+    this.logger.log(
+      `[PETITION-IA] Gerando ${petitionId} model=${model} user=${userId} tenant=${tenantId} ` +
+      `lgpd_consent=${!!opts.lgpdConsent} prompt_hash=${promptHash} ` +
+      `system_chars=${systemPrompt.length} user_chars=${userPrompt.length}`,
+    );
 
     const response = await ai.chat.completions.create({
       model,
@@ -151,11 +164,11 @@ export class PetitionAiService {
       },
     });
 
-    // 7. Registrar uso (audit completo #10)
-    await this.saveUsage(model, response.usage, petition.legal_case_id, userId, tenantId, petitionId);
+    // 7. Registrar uso (audit completo #10 + prompt_hash #27)
+    await this.saveUsage(model, response.usage, petition.legal_case_id, userId, tenantId, petitionId, promptHash);
 
     this.logger.log(
-      `[PETITION-IA] ${petitionId} gerada: ${response.usage?.total_tokens || 0} tokens`,
+      `[PETITION-IA] ${petitionId} gerada tokens=${response.usage?.total_tokens || 0} prompt_hash=${promptHash}`,
     );
 
     return updated;
@@ -325,6 +338,7 @@ REGRAS:
     userId: string,
     tenantId: string,
     petitionId: string,
+    promptHash?: string,
   ): Promise<void> {
     if (!usage) return;
 
@@ -353,9 +367,11 @@ REGRAS:
         // Metadata estruturada — schema atual nao tem petition_id direto,
         // grava em meta_json se schema permitir, senao loga no descritor
         // (TODO: migration adicionar coluna petition_id no AiUsage)
-        ...((this.prisma.aiUsage as any).fields?.meta_json
-          ? { meta_json: { petition_id: petitionId, legal_case_id: legalCaseId } }
-          : { call_type: `petition:${petitionId}` }),
+        meta_json: {
+          petition_id: petitionId,
+          legal_case_id: legalCaseId,
+          ...(promptHash ? { prompt_hash: promptHash } : {}),
+        } as any,
       } as any,
     });
   }

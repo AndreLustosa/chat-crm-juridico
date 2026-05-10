@@ -19,6 +19,21 @@ const VALID_STATUSES = [
   'RASCUNHO', 'EM_REVISAO', 'APROVADA', 'PROTOCOLADA',
 ] as const;
 
+/**
+ * Bug fix 2026-05-10 (Peticoes PR3 #38): documentar workflow.
+ *
+ * Maquina de estados:
+ *   RASCUNHO → EM_REVISAO            (estagiario submete pra revisao)
+ *   EM_REVISAO → RASCUNHO            (advogado devolve via /review action=DEVOLVER)
+ *   EM_REVISAO → APROVADA            (advogado aprova via /review action=APROVAR)
+ *   APROVADA → EM_REVISAO            (correção pos-aprovacao — caso raro)
+ *   APROVADA → PROTOCOLADA           (peca enviada ao tribunal — terminal)
+ *   PROTOCOLADA → (nada)             (terminal — peca ja no fisico)
+ *
+ * Bloqueios:
+ *   - update() rejeita mudanca de content em APROVADA/PROTOCOLADA (PR1 #7)
+ *   - delete() so permite RASCUNHO (line ~570)
+ */
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   RASCUNHO: ['EM_REVISAO'],
   EM_REVISAO: ['RASCUNHO', 'APROVADA'],
@@ -37,6 +52,45 @@ export class PetitionsService {
   ) {}
 
   // ─── Helpers ────────────────────────────────────────────
+
+  // Bug fix 2026-05-10 (Peticoes PR3 #28): cache de templates 5min.
+  // Templates raramente mudam (admin edita 1x/mes); pico de criacao
+  // gera dezenas de findUnique iguais. Cache LRU simples.
+  private templateCache = new Map<string, { template: any; expiresAt: number }>();
+  private readonly TEMPLATES_CACHE_TTL_MS = 5 * 60_000;
+
+  private async getCachedTemplate(templateId: string): Promise<any | null> {
+    const cached = this.templateCache.get(templateId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.template;
+    }
+    if (cached) this.templateCache.delete(templateId);
+
+    const template = await this.prisma.legalTemplate.findUnique({
+      where: { id: templateId },
+    });
+
+    if (template) {
+      this.templateCache.set(templateId, {
+        template,
+        expiresAt: Date.now() + this.TEMPLATES_CACHE_TTL_MS,
+      });
+      // LRU cap simples
+      if (this.templateCache.size > 500) {
+        for (const k of this.templateCache.keys()) {
+          this.templateCache.delete(k);
+          if (this.templateCache.size <= 400) break;
+        }
+      }
+    }
+    return template;
+  }
+
+  /** Invalidator pra LegalTemplate.update e .remove */
+  invalidateTemplateCache(templateId?: string): void {
+    if (templateId) this.templateCache.delete(templateId);
+    else this.templateCache.clear();
+  }
 
   private async verifyCaseAccess(caseId: string, tenantId?: string) {
     const lc = await this.prisma.legalCase.findUnique({
@@ -110,13 +164,16 @@ export class PetitionsService {
     let contentJson = data.content_json || null;
     let contentHtml = data.content_html || null;
 
-    // Se vem de template, copiar conteúdo e incrementar usage_count
+    // Bug fix 2026-05-10 (Peticoes PR3 #28):
+    // Cache 5min do template content. Antes findUnique por template_id
+    // em CADA criacao de peticao — pico de criacao gerava 100 SELECTs
+    // identicos. Templates raramente mudam (admin edita 1x/mes).
     if (data.template_id) {
-      const template = await this.prisma.legalTemplate.findUnique({
-        where: { id: data.template_id },
-      });
+      const template = await this.getCachedTemplate(data.template_id);
       if (template) {
         contentJson = template.content_json;
+        // Incremento de usage_count ainda eh hit no DB (correto — eh
+        // dado mutavel, nao cacheavel)
         await this.prisma.legalTemplate.update({
           where: { id: data.template_id },
           data: { usage_count: { increment: 1 } },
@@ -132,7 +189,11 @@ export class PetitionsService {
       try {
         const configured = await this.googleDrive.isConfigured();
         if (configured) {
-          this.logger.log(`Google Drive configurado. Criando Doc para petição "${data.title}" no caso ${caseId}...`);
+          // Bug fix 2026-05-10 (Peticoes PR3 #34):
+          // logs de criacao do Drive eram log.log (info) — em alta
+          // volumetria poluiam stdout. Movidos pra debug. Resumo final
+          // continua em log.log pra audit operacional.
+          this.logger.debug(`[GDRIVE] Criando Doc pra peticao "${data.title}" no caso ${caseId}`);
           const legalCase = await this.prisma.legalCase.findUnique({
             where: { id: caseId },
             select: { lead_id: true, legal_area: true, case_number: true },
@@ -142,13 +203,13 @@ export class PetitionsService {
               .filter(Boolean)
               .join(' - ');
 
-            this.logger.log(`Criando pasta do caso: ${caseLabel}`);
+            this.logger.debug(`[GDRIVE] Criando pasta do caso: ${caseLabel}`);
             const folderId = await this.googleDrive.ensureCaseFolder(
               caseId,
               legalCase.lead_id,
               caseLabel,
             );
-            this.logger.log(`Pasta do caso OK: ${folderId}. Criando Google Doc...`);
+            this.logger.debug(`[GDRIVE] Pasta do caso OK: ${folderId}. Criando Google Doc...`);
 
             const doc = await this.googleDrive.createDoc(
               data.title,
@@ -157,7 +218,7 @@ export class PetitionsService {
             );
             googleDocId = doc.docId;
             googleDocUrl = doc.docUrl;
-            this.logger.log(`Google Doc criado com sucesso: ${googleDocId} - ${googleDocUrl}`);
+            this.logger.log(`[GDRIVE] Doc criado: ${googleDocId} (${data.title})`);
           } else {
             this.logger.warn(`Caso ${caseId} não encontrado para criar Google Doc`);
           }
@@ -309,10 +370,6 @@ export class PetitionsService {
       select: { id: true, status: true, updated_at: true },
     });
 
-    // appendPetitionToMemory REMOVIDO em 2026-04-20 (fase 2d-1 da remocao total).
-    // Historico de peticoes fica na propria tabela Petition (consultavel por
-    // lead_id via JOIN com LegalCase).
-
     // WebSocket: notificar advogado quando petição enviada para revisão
     if (newStatus === 'EM_REVISAO') {
       this.notifyPetitionStatusChange(petition, newStatus, petition.status).catch(() => {});
@@ -353,10 +410,6 @@ export class PetitionsService {
     }
   }
 
-  // appendPetitionToMemory() REMOVIDO em 2026-04-20 (fase 2d-1). Historico
-  // de peticoes fica em Petition.status / Petition.updated_at — consulta via
-  // JOIN LegalCase -> Petition sempre que precisar.
-
   /**
    * Review de petição pelo advogado: aprovar ou devolver com notas.
    */
@@ -383,8 +436,6 @@ export class PetitionsService {
         },
         select: { id: true, status: true, review_notes: true, updated_at: true },
       });
-
-      // appendPetitionToMemory REMOVIDO em 2026-04-20 (fase 2d-1).
 
       // WebSocket: notificar estagiário que petição foi aprovada
       this.notifyPetitionStatusChange(petition, 'APROVADA', 'EM_REVISAO', notes).catch(() => {});
@@ -508,6 +559,19 @@ export class PetitionsService {
     }
 
     const buffer = await this.googleDrive.exportAsPdf(petition.google_doc_id);
+
+    // Bug fix 2026-05-10 (Peticoes PR3 #33):
+    // Cap de 20MB. Antes Google Doc gigante derrubava memoria do
+    // container — 50MB carregado em RAM por request, 10 requests
+    // paralelos = 500MB RAM. Cap conservador (peca normal eh 100KB-2MB).
+    const EXPORT_PDF_MAX_BYTES = 20 * 1024 * 1024;
+    if (buffer.length > EXPORT_PDF_MAX_BYTES) {
+      throw new BadRequestException(
+        `PDF muito grande (${(buffer.length / 1024 / 1024).toFixed(1)}MB, max 20MB). ` +
+        `Reduza imagens ou divida em multiplos documentos.`,
+      );
+    }
+
     return { buffer, filename: `${petition.title}.pdf` };
   }
 
