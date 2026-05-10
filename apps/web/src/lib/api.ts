@@ -1,7 +1,45 @@
 import axios from 'axios';
 
+const CONFIGURED_API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+function cleanTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function getSameOriginApiUrl(): string {
+  return typeof window !== 'undefined' ? `${window.location.origin}/api` : 'http://localhost:3005';
+}
+
+function resolveApiBaseUrl(): string {
+  if (typeof window === 'undefined') {
+    return cleanTrailingSlash(CONFIGURED_API_BASE_URL || 'http://localhost:3005');
+  }
+
+  const fallback = getSameOriginApiUrl();
+  if (!CONFIGURED_API_BASE_URL) return fallback;
+
+  try {
+    const configured = new URL(CONFIGURED_API_BASE_URL, window.location.origin);
+    const pageIsPublicHttps = window.location.protocol === 'https:' && !LOCAL_HOSTS.has(window.location.hostname);
+    const pointsToLocalhost = LOCAL_HOSTS.has(configured.hostname);
+    const wouldBeMixedContent = window.location.protocol === 'https:' && configured.protocol === 'http:';
+
+    if (pageIsPublicHttps && (pointsToLocalhost || wouldBeMixedContent)) {
+      return fallback;
+    }
+
+    return cleanTrailingSlash(CONFIGURED_API_BASE_URL);
+  } catch {
+    return fallback;
+  }
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005',
+  baseURL: API_BASE_URL,
+  timeout: 15000,
 });
 
 // ─── Helpers de token ────────────────────────────────────────────────────────
@@ -125,9 +163,6 @@ api.interceptors.response.use(
 );
 
 // ─── Helpers de URL ─────────────────────────────────────────────────────────
-
-/** URL base da API — centralizado para evitar hardcode em cada componente */
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
 /** Gera URL completa para o endpoint de mídia */
 export function getMediaUrl(messageId: string, download = false): string {

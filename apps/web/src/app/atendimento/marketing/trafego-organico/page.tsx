@@ -214,8 +214,10 @@ export default function TrafegoOrganicoPage() {
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    if (perms.canViewOrganicTraffic) {
+      load();
+    }
+  }, [perms.canViewOrganicTraffic]);
 
   const areas = useMemo(
     () =>
