@@ -578,15 +578,22 @@ export class FinancialDashboardService {
 
   // ─── Layer 3: Análises ────────────────────────────────────
 
-  /** Receita realizada por advogado no período (para gráfico de barras). */
+  /** Receita realizada por advogado no período (para gráfico de barras).
+   *
+   *  Bug fix 2026-05-10 (Honorarios PR5 #40): trocar filtro `date` pra
+   *  `paid_at` (regime de caixa). Antes filtrava por `date` (regime
+   *  competencia) enquanto resto do dashboard usa cashRegimeWhere
+   *  (paid_at). Resultado: soma dos by-lawyer divergente do
+   *  totalRevenue do KPI principal — gestor via numeros que nao
+   *  bateavam. Agora usa o mesmo helper.
+   */
   async getRevenueByLawyer(tenantId?: string, from?: string, to?: string) {
     const fromDate = from ? new Date(from) : this.firstOfMonth(new Date().getUTCFullYear(), new Date().getUTCMonth());
     const toDate = to ? new Date(to) : new Date();
 
     const where: any = {
       type: 'RECEITA',
-      status: 'PAGO',
-      date: { gte: fromDate, lte: toDate },
+      ...cashRegimeWhere(fromDate, toDate),
       lawyer_id: { not: null },
     };
     if (tenantId) where.tenant_id = tenantId;
@@ -685,15 +692,32 @@ export class FinancialDashboardService {
       const fromDate = from ? new Date(from) : null;
       const toDate = to ? new Date(to) : null;
 
+      // Bug fix 2026-05-10 (Honorarios PR5 #41):
+      // Antes filtro `contract_date: { gte, lte }` excluia honorarios
+      // sem contract_date (null). Donut subdimensionava a area —
+      // honorario "Pendente preenchimento de data" sumia. Agora OR
+      // com created_at como fallback (igual ao computeRealizedValue
+      // do MonthlyGoals).
       const honorarios = await this.prisma.caseHonorario.findMany({
         where: {
           ...(tenantId ? { tenant_id: tenantId } : {}),
           ...(fromDate || toDate
             ? {
-                contract_date: {
-                  ...(fromDate ? { gte: fromDate } : {}),
-                  ...(toDate ? { lte: toDate } : {}),
-                },
+                OR: [
+                  {
+                    contract_date: {
+                      ...(fromDate ? { gte: fromDate } : {}),
+                      ...(toDate ? { lte: toDate } : {}),
+                    },
+                  },
+                  {
+                    contract_date: null,
+                    created_at: {
+                      ...(fromDate ? { gte: fromDate } : {}),
+                      ...(toDate ? { lte: toDate } : {}),
+                    },
+                  },
+                ],
               }
             : {}),
         },
@@ -758,6 +782,14 @@ export class FinancialDashboardService {
     const caseWhere = this.buildCaseHonorarioWhere(tenantId, lawyerId);
     const leadWhere = this.buildLeadHonorarioWhere(tenantId);
 
+    // Bug fix 2026-05-10 (Honorarios PR5 #35):
+    // Antes findMany sem take — escritorio com 5000+ parcelas pendentes
+    // trazia tudo pra memoria e filtrava em 13 buckets em loop. Agora
+    // cap de 5000 (mais que suficiente pra 90 dias). Se atingido, log
+    // alertando que forecast pode estar incompleto.
+    // TODO: refactorar pra single $queryRaw com date_trunc('week') —
+    // elimina materializacao e filter em memoria.
+    const FORECAST_CAP = 5000;
     const [casePayments, leadPayments] = await Promise.all([
       this.prisma.honorarioPayment.findMany({
         where: {
@@ -767,6 +799,7 @@ export class FinancialDashboardService {
         },
         select: { amount: true, due_date: true },
         orderBy: { due_date: 'asc' },
+        take: FORECAST_CAP,
       }),
       this.prisma.leadHonorarioPayment.findMany({
         where: {
@@ -776,8 +809,15 @@ export class FinancialDashboardService {
         },
         select: { amount: true, due_date: true },
         orderBy: { due_date: 'asc' },
+        take: FORECAST_CAP,
       }),
     ]);
+    if (casePayments.length === FORECAST_CAP || leadPayments.length === FORECAST_CAP) {
+      this.logger.warn(
+        `[FORECAST] Cap de ${FORECAST_CAP} parcelas atingido em ${days}d — ` +
+        `forecast pode estar incompleto. case=${casePayments.length}, lead=${leadPayments.length}`,
+      );
+    }
 
     const factor = scenario === 'optimistic' ? 1 : scenario === 'realistic' ? 0.85 : 0.6;
 
@@ -1047,7 +1087,14 @@ export class FinancialDashboardService {
     // Pra paginacao combinada (case + lead), trazemos ate (skip+pageSize)*2 de
     // cada lado, mesclamos, ordenamos por due_date e cortamos. Total real vem
     // de count separado pra mostrar "Pagina X de Y" correto.
-    const fetchCap = (skip + pageSize) * 2;
+    //
+    // Bug fix 2026-05-10 (Honorarios PR5 #33):
+    // Cap absoluto MAX_FETCH_CAP=2000 (cobre paginas profundas sem
+    // explodir memoria). Antes (skip+pageSize)*2 podia chegar em 10k+
+    // em paginas profundas — pegava 5k items pra retornar 20.
+    // TODO: paginacao via UNION SQL pra eliminar materializacao em memoria.
+    const MAX_FETCH_CAP = 2000;
+    const fetchCap = Math.min((skip + pageSize) * 2, MAX_FETCH_CAP);
 
     const [caseItems, leadItems, caseTotal, leadTotal] = await Promise.all([
       this.prisma.honorarioPayment.findMany({

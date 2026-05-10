@@ -880,16 +880,28 @@ export class MonthlyGoalsService {
     const thisByMonth = new Map(thisYearGoals.map((g) => [g.month, Number(g.value)]));
     const prevByMonth = new Map(prevYearGoals.map((g) => [g.month, Number(g.value)]));
 
-    // Calcula realized de cada mes em paralelo (24 chamadas: 12 meses × 2 anos)
-    const realizedThisPromises = Array.from({ length: 12 }, (_, i) =>
-      this.computeRealizedValue({ tenantId, year, month: i + 1, lawyerId, kind }),
-    );
-    const realizedPrevPromises = Array.from({ length: 12 }, (_, i) =>
-      this.computeRealizedValue({ tenantId, year: previousYear, month: i + 1, lawyerId, kind }),
-    );
+    // Bug fix 2026-05-10 (Honorarios PR5 #34):
+    // Antes 24 promises paralelas (12 meses × 2 anos × 2-3 queries cada =
+    // ate 72 queries paralelas). Pool de 10 conexoes Prisma saturava,
+    // outros endpoints ficavam lentos enquanto YoY abria.
+    // Agora chunked em 4 por vez — total tempo ~igual mas pool nao
+    // satura. TODO: refactorar pra single $queryRaw com GROUP BY
+    // date_trunc('month', paid_at) — eliminaria 24 queries pra 2-4.
+    const PARALLEL_CHUNK = 4;
+    const computeChunked = async (yr: number): Promise<number[]> => {
+      const results = new Array<number>(12);
+      for (let i = 0; i < 12; i += PARALLEL_CHUNK) {
+        const monthsInChunk = Array.from({ length: Math.min(PARALLEL_CHUNK, 12 - i) }, (_, j) => i + j + 1);
+        const chunkResults = await Promise.all(
+          monthsInChunk.map(m => this.computeRealizedValue({ tenantId, year: yr, month: m, lawyerId, kind })),
+        );
+        chunkResults.forEach((v, j) => { results[monthsInChunk[j] - 1] = v; });
+      }
+      return results;
+    };
     const [realizedThis, realizedPrev] = await Promise.all([
-      Promise.all(realizedThisPromises),
-      Promise.all(realizedPrevPromises),
+      computeChunked(year),
+      computeChunked(previousYear),
     ]);
 
     return Array.from({ length: 12 }, (_, i) => {

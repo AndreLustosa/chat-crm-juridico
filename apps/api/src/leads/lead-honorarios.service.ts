@@ -299,7 +299,14 @@ export class LeadHonorariosService {
       await this.financeiroService.createFromLeadHonorarioPayment(paymentId, payment.lead_honorario.tenant_id || undefined);
       this.logger.log(`[LEAD-HON] Transação financeira criada para pagamento ${paymentId}`);
     } catch (e: any) {
-      this.logger.warn(`[LEAD-HON] Falha ao criar transação financeira: ${e.message}`);
+      // Bug fix 2026-05-10 (Honorarios PR5 #49):
+      // ERROR em vez de warn — pagamento marcado PAGO sem transacao
+      // financeira eh inconsistencia critica.
+      this.logger.error(
+        `[LEAD-HON] CRITICO: Pagamento ${paymentId} marcado PAGO mas createFromLeadHonorarioPayment FALHOU. ` +
+        `Livro caixa pode estar inconsistente. Erro: ${e.message}`,
+        e?.stack,
+      );
     }
 
     return updated;

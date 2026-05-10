@@ -105,6 +105,11 @@ export class NotaFiscalService {
             name: true,
             phone: true,
             email: true,
+            // Bug fix 2026-05-10 (Honorarios PR5 #39):
+            // Schema usa cpf_cnpj — antes select nao incluia esse campo
+            // E payload usava lead?.cpf (campo inexistente). NF era
+            // emitida sem identificacao fiscal do tomador → invalida.
+            cpf_cnpj: true,
           },
         },
       },
@@ -158,7 +163,7 @@ export class NotaFiscalService {
         inscricao_municipal: inscricaoMunicipal,
       },
       tomador: {
-        cpf_cnpj: lead?.cpf || null,
+        cpf_cnpj: lead?.cpf_cnpj || null,
         razao_social: lead?.name || 'Consumidor Final',
         email: lead?.email || null,
       },
@@ -192,7 +197,7 @@ export class NotaFiscalService {
         valor: valor,
         aliquota_iss: aliquotaIss,
         valor_iss: valorIss,
-        tomador_cpf_cnpj: lead?.cpf || null,
+        tomador_cpf_cnpj: lead?.cpf_cnpj || null,
         tomador_nome: lead?.name || null,
         tomador_email: lead?.email || null,
         provider: provider.toUpperCase(),

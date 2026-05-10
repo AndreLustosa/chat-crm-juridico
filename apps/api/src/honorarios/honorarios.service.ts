@@ -50,13 +50,21 @@ export class HonorariosService {
   /**
    * Atualiza parcelas vencidas para status ATRASADO em tempo de leitura.
    */
-  private async markOverduePayments(honorarioIds: string[]) {
+  /**
+   * Bug fix 2026-05-10 (Honorarios PR5 #46): tenant filter via relation.
+   * Defesa em profundidade — caller ja deve validar IDs do mesmo caso,
+   * mas se algum dia for chamado indiretamente com IDs de outro tenant
+   * (sync/import errado), o filtro adicional via honorario.tenant_id
+   * impede mark cross-tenant.
+   */
+  private async markOverduePayments(honorarioIds: string[], tenantId?: string) {
     if (honorarioIds.length === 0) return;
     await this.prisma.honorarioPayment.updateMany({
       where: {
         honorario_id: { in: honorarioIds },
         status: 'PENDENTE',
         due_date: { lt: new Date(), not: null },
+        ...(tenantId ? { honorario: { tenant_id: tenantId } } : {}),
       },
       data: { status: 'ATRASADO' },
     });
@@ -419,7 +427,15 @@ export class HonorariosService {
       await this.financeiroService.createFromHonorarioPayment(paymentId, tenantId);
       this.logger.log(`[HONORARIO] Transação financeira atualizada para pagamento ${paymentId}`);
     } catch (e: any) {
-      this.logger.warn(`[HONORARIO] Falha ao atualizar transação financeira: ${e.message}`);
+      // Bug fix 2026-05-10 (Honorarios PR5 #49):
+      // Antes warn engolia falha silenciosa — pagamento marcado PAGO mas
+      // livro caixa nao recebia transacao. Agora ERROR pra alarme +
+      // stack pra debug.
+      this.logger.error(
+        `[HONORARIO] CRITICO: Pagamento ${paymentId} marcado PAGO mas createFromHonorarioPayment FALHOU. ` +
+        `Livro caixa pode estar inconsistente. Erro: ${e.message}`,
+        e?.stack,
+      );
     }
 
     const lc = (payment as any).honorario?.legal_case;

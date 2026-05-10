@@ -432,9 +432,13 @@ export class PaymentGatewayService {
       catch (e: any) { this.logger.warn(`[CHARGE] Falha QR Code PIX: ${e.message}`); }
     }
 
+    // Bug fix 2026-05-10 (Honorarios PR5 #42):
+    // Antes `tenant_id: tenantId || honTenant || null`. Schema diz
+    // tenant_id NOT NULL apos hardening — insert quebrava em legacy
+    // sem honTenant nem tenantId.
     const charge = await this.prisma.paymentGatewayCharge.create({
       data: {
-        tenant_id: tenantId || honTenant || null,
+        tenant_id: tenantOrDefault(tenantId || honTenant),
         lead_honorario_payment_id: leadHonorarioPaymentId,
         gateway: 'ASAAS',
         external_id: asaasCharge.id,
@@ -597,7 +601,11 @@ export class PaymentGatewayService {
       where: {
         honorario_id: honorarioId,
         status: 'PENDENTE',
-        gateway_charge: null, // sem cobranca existente
+        // Bug fix 2026-05-10 (Honorarios PR5 #47):
+        // Em relacao 1:1 inversa, o correto eh `is: null`, nao `null`.
+        // A sintaxe antiga funcionava por sorte mas pode parar em
+        // upgrade do Prisma. Explicito eh mais robusto.
+        gateway_charge: { is: null },
       },
       orderBy: { due_date: 'asc' },
     });
@@ -1245,6 +1253,17 @@ export class PaymentGatewayService {
       }
 
       if (leadId) {
+        // Bug fix 2026-05-10 (Honorarios PR5 #57):
+        // Pre-check pra mensagem amigavel se ja existir vinculo
+        // (P2002 unique violation antes lancava generico).
+        const existing = await this.prisma.paymentGatewayCustomer.findFirst({
+          where: { external_id: cust.id, gateway: 'ASAAS' },
+          select: { id: true },
+        });
+        if (existing) {
+          this.logger.debug(`[CUSTOMER-SYNC] ${cust.id} ja vinculado — skip`);
+          continue;
+        }
         // Vincular
         try {
           await this.prisma.paymentGatewayCustomer.create({
@@ -1447,12 +1466,39 @@ export class PaymentGatewayService {
       const sendResult = await this.whatsapp.sendText(clientPhone, msg, lastConvo?.instance_name ?? undefined);
       this.logger.log(`[WEBHOOK] Confirmação de pagamento enviada para ${clientPhone}`);
 
-      if (lastConvo) {
+      // Bug fix 2026-05-10 (Honorarios PR5 #44):
+      // Antes se nao havia lastConvo, mensagem era enviada mas NAO
+      // gravada em Message/Conversation — advogado nao via no
+      // historico do chat, auditoria incompleta. Agora cria
+      // conversation se nao existe (igual padrao do
+      // notifyClientChargeDeleted).
+      let convoId = lastConvo?.id;
+      if (!convoId) {
+        try {
+          const created = await this.prisma.conversation.create({
+            data: {
+              lead_id: lead.id,
+              tenant_id: lead.tenant_id ?? null,
+              channel: 'whatsapp',
+              status: 'ABERTO',
+              instance_name: knownInstances[0] || null,
+              external_id: clientPhone,
+              last_message_at: new Date(),
+            },
+          });
+          convoId = created.id;
+          this.logger.log(`[WEBHOOK] Conversation nova criada pra confirmar pagamento: ${convoId}`);
+        } catch (e: any) {
+          this.logger.warn(`[WEBHOOK] Falha ao criar conversation pra ${lead.id}: ${e.message}`);
+        }
+      }
+
+      if (convoId) {
         const evolutionMsgId = sendResult?.data?.key?.id || `sys_payment_${Date.now()}`;
         await this.prisma.message.create({
-          data: { conversation_id: lastConvo.id, direction: 'out', type: 'text', text: msg, external_message_id: evolutionMsgId, status: 'enviado' },
-        });
-        await this.prisma.conversation.update({ where: { id: lastConvo.id }, data: { last_message_at: new Date() } });
+          data: { conversation_id: convoId, direction: 'out', type: 'text', text: msg, external_message_id: evolutionMsgId, status: 'enviado' },
+        }).catch(() => { /* fire-and-forget — mensagem ja foi entregue ao cliente */ });
+        await this.prisma.conversation.update({ where: { id: convoId }, data: { last_message_at: new Date() } }).catch(() => {});
       }
     } catch (e: any) {
       this.logger.warn(`[WEBHOOK] Falha ao enviar confirmação para ${clientPhone}: ${e.message}`);

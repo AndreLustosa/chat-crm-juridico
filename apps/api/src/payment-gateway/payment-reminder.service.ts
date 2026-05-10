@@ -276,7 +276,18 @@ export class PaymentReminderService {
    *
    * Settings key: PAYMENT_TEMPLATES contem JSON { kind: text }.
    */
+  // Bug fix 2026-05-10 (Honorarios PR5 #36):
+  // Cache TTL 60s. Antes cron 9h/14h percorria 200 charges, chamando
+  // loadAllTemplates por charge → settings.get → DB (200 round-trips
+  // redundantes). saveTemplates invalida cache via invalidateTemplateCache.
+  private templatesCache: Record<TemplateKind, string> | null = null;
+  private templatesCacheExpiresAt = 0;
+  private static readonly TEMPLATES_CACHE_TTL_MS = 60_000;
+
   async loadAllTemplates(): Promise<Record<TemplateKind, string>> {
+    if (this.templatesCache && this.templatesCacheExpiresAt > Date.now()) {
+      return this.templatesCache;
+    }
     const raw = await this.settings.get('PAYMENT_TEMPLATES').catch(() => null);
     let custom: Partial<Record<TemplateKind, string>> = {};
     if (raw) {
@@ -293,7 +304,15 @@ export class PaymentReminderService {
         result[k] = custom[k] as string;
       }
     }
+    this.templatesCache = result;
+    this.templatesCacheExpiresAt = Date.now() + PaymentReminderService.TEMPLATES_CACHE_TTL_MS;
     return result;
+  }
+
+  /** Invalidador chamado por saveTemplates pra que UI ja veja edicao. */
+  private invalidateTemplateCache(): void {
+    this.templatesCache = null;
+    this.templatesCacheExpiresAt = 0;
   }
 
   /**
@@ -312,6 +331,8 @@ export class PaymentReminderService {
       }
     }
     await this.settings.set('PAYMENT_TEMPLATES', JSON.stringify(existing));
+    // Bug fix 2026-05-10 (PR5 #36): invalida cache pra UI ja ver
+    this.invalidateTemplateCache();
     return this.loadAllTemplates();
   }
 
