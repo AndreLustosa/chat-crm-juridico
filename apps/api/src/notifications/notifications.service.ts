@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -86,14 +86,23 @@ export class NotificationsService {
     return userId;
   }
 
-  /** Lista notificações do usuário com paginação */
-  async findByUser(userId: string, opts?: { type?: string; unreadOnly?: boolean; page?: number; limit?: number }) {
+  /**
+   * Lista notificações do usuário com paginação.
+   *
+   * Bug fix 2026-05-10 (NotifService PR2 #6): tenantId opcional pra
+   * defesa em profundidade. Ja temos PR1 #1 protegendo contra userId
+   * undefined, mas se algum dia 2 tenants tiverem o mesmo user_id por
+   * bug futuro (UUID collision, restore parcial de backup, sync ID
+   * compartilhado), filtro adicional protege.
+   */
+  async findByUser(userId: string, opts?: { type?: string; unreadOnly?: boolean; page?: number; limit?: number; tenantId?: string }) {
     const safeUserId = this.requireUserId(userId, 'findByUser');
     const page = opts?.page || 1;
     const limit = Math.min(opts?.limit || 50, 100);
     const skip = (page - 1) * limit;
 
     const where: any = { user_id: safeUserId };
+    if (opts?.tenantId) where.tenant_id = opts.tenantId;
     if (opts?.type) where.notification_type = opts.type;
     if (opts?.unreadOnly) where.read_at = null;
 
@@ -111,28 +120,32 @@ export class NotificationsService {
   }
 
   /** Contagem de não-lidas */
-  async unreadCount(userId: string): Promise<number> {
+  async unreadCount(userId: string, tenantId?: string): Promise<number> {
     const safeUserId = this.requireUserId(userId, 'unreadCount');
-    return (this.prisma as any).notification.count({
-      where: { user_id: safeUserId, read_at: null },
-    });
+    const where: any = { user_id: safeUserId, read_at: null };
+    if (tenantId) where.tenant_id = tenantId;
+    return (this.prisma as any).notification.count({ where });
   }
 
   /** Marca uma notificação como lida */
-  async markRead(userId: string, notificationId: string) {
+  async markRead(userId: string, notificationId: string, tenantId?: string) {
     const safeUserId = this.requireUserId(userId, 'markRead');
     if (!notificationId) throw new Error('[Notifications] markRead: notificationId obrigatorio');
+    const where: any = { id: notificationId, user_id: safeUserId };
+    if (tenantId) where.tenant_id = tenantId;
     return (this.prisma as any).notification.updateMany({
-      where: { id: notificationId, user_id: safeUserId },
+      where,
       data: { read_at: new Date() },
     });
   }
 
   /** Marca todas como lidas */
-  async markAllRead(userId: string) {
+  async markAllRead(userId: string, tenantId?: string) {
     const safeUserId = this.requireUserId(userId, 'markAllRead');
+    const where: any = { user_id: safeUserId, read_at: null };
+    if (tenantId) where.tenant_id = tenantId;
     return (this.prisma as any).notification.updateMany({
-      where: { user_id: safeUserId, read_at: null },
+      where,
       data: { read_at: new Date() },
     });
   }
@@ -167,21 +180,53 @@ export class NotificationsService {
 
   async cleanup(retentionDays = 90) {
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    // Bug fix 2026-05-10 (NotifService PR2 #8): preservar notifs com
+    // whatsapp_sent_at recente (ultimos 2h) — sao usadas pelo dedup do
+    // worker. Se cleanup deletar uma notif que serviu de "anchor" de
+    // dedup ha menos de 1h, proxima notif da mesma conversa pode
+    // disparar WhatsApp duplicado. Janela 2h cobre a window de dedup
+    // (60min) com folga.
+    const dedupSafeguard = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const result = await (this.prisma as any).notification.deleteMany({
-      where: { created_at: { lt: cutoff } },
+      where: {
+        created_at: { lt: cutoff },
+        OR: [
+          { whatsapp_sent_at: null },
+          { whatsapp_sent_at: { lt: dedupSafeguard } },
+        ],
+      },
     });
     if (result.count > 0) {
-      this.logger.log(`[Notifications] Cleanup: ${result.count} notificações removidas (> ${retentionDays} dias)`);
+      this.logger.log(`[Notifications] Cleanup: ${result.count} notificações removidas (> ${retentionDays} dias, preservando dedup-anchors recentes)`);
     }
     return result;
   }
 
   // ─── ConversationMute ──────────────────────────────────────────
 
+  /**
+   * Bug fix 2026-05-10 (NotifService PR2 #7): valida ownership da
+   * Conversation antes de mute/unmute. Antes user podia mutar
+   * conversa de outro tenant (via API direta com conversationId
+   * conhecido) — nao tinha impacto direto, so polui o banco com
+   * registros zumbis. Agora rejeita com 404/403.
+   */
+  private async assertConversationAccess(conversationId: string, tenantId?: string): Promise<void> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, tenant_id: true },
+    });
+    if (!conversation) throw new NotFoundException('Conversa nao encontrada');
+    if (tenantId && conversation.tenant_id && conversation.tenant_id !== tenantId) {
+      throw new ForbiddenException('Conversa de outro tenant');
+    }
+  }
+
   /** Muta uma conversa para um usuário */
-  async muteConversation(userId: string, conversationId: string, until?: string) {
+  async muteConversation(userId: string, conversationId: string, until?: string, tenantId?: string) {
     const safeUserId = this.requireUserId(userId, 'muteConversation');
     if (!conversationId) throw new Error('[Notifications] muteConversation: conversationId obrigatorio');
+    await this.assertConversationAccess(conversationId, tenantId);
     return (this.prisma as any).conversationMute.upsert({
       where: { user_id_conversation_id: { user_id: safeUserId, conversation_id: conversationId } },
       create: {
@@ -196,9 +241,10 @@ export class NotificationsService {
   }
 
   /** Desmuta uma conversa */
-  async unmuteConversation(userId: string, conversationId: string) {
+  async unmuteConversation(userId: string, conversationId: string, tenantId?: string) {
     const safeUserId = this.requireUserId(userId, 'unmuteConversation');
     if (!conversationId) throw new Error('[Notifications] unmuteConversation: conversationId obrigatorio');
+    await this.assertConversationAccess(conversationId, tenantId);
     return (this.prisma as any).conversationMute.deleteMany({
       where: { user_id: safeUserId, conversation_id: conversationId },
     });

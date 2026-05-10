@@ -28,6 +28,10 @@ function requireUserId(req: any): string {
 export class NotificationsController {
   constructor(private readonly service: NotificationsService) {}
 
+  // Bug fix 2026-05-10 (NotifService PR2 #6): passa tenantId pra defesa
+  // em profundidade. Combinado com PR1 #1 (req.user.id), garante isolamento
+  // mesmo em cenarios anormais (UUID collision, restore parcial).
+
   /** Lista notificações do usuário autenticado */
   @Get()
   async list(
@@ -42,27 +46,28 @@ export class NotificationsController {
       unreadOnly: unread === 'true',
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 50,
+      tenantId: req.user?.tenant_id,
     });
   }
 
   /** Contagem de não-lidas */
   @Get('unread-count')
   async unreadCount(@Request() req: any) {
-    const count = await this.service.unreadCount(requireUserId(req));
+    const count = await this.service.unreadCount(requireUserId(req), req.user?.tenant_id);
     return { count };
   }
 
   /** Marca uma notificação como lida */
   @Patch(':id/read')
   async markRead(@Request() req: any, @Param('id') id: string) {
-    await this.service.markRead(requireUserId(req), id);
+    await this.service.markRead(requireUserId(req), id, req.user?.tenant_id);
     return { ok: true };
   }
 
   /** Marca todas como lidas */
   @Post('mark-all-read')
   async markAllRead(@Request() req: any) {
-    await this.service.markAllRead(requireUserId(req));
+    await this.service.markAllRead(requireUserId(req), req.user?.tenant_id);
     return { ok: true };
   }
 
@@ -75,13 +80,13 @@ export class NotificationsController {
     @Param('id') conversationId: string,
     @Body() body?: { until?: string },
   ) {
-    return this.service.muteConversation(requireUserId(req), conversationId, body?.until);
+    return this.service.muteConversation(requireUserId(req), conversationId, body?.until, req.user?.tenant_id);
   }
 
   /** Desmuta uma conversa */
   @Delete('conversations/:id/mute')
   async unmute(@Request() req: any, @Param('id') conversationId: string) {
-    await this.service.unmuteConversation(requireUserId(req), conversationId);
+    await this.service.unmuteConversation(requireUserId(req), conversationId, req.user?.tenant_id);
     return { ok: true };
   }
 

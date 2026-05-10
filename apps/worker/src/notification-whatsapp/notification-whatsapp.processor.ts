@@ -30,6 +30,20 @@ const CIRCUIT_FAILURE_THRESHOLD = 0.5;       // 50% de erro = abre
 const JITTER_MIN_MS = 500;
 const JITTER_MAX_MS = 3000;
 
+// Bug fix 2026-05-10 (NotifService PR2 #4): rate limit por user.
+// Antes circuit breaker era GLOBAL (mede saude da Evolution toda) — nao
+// protegia contra cenario "pico de 50 mensagens em conversas diferentes
+// pro mesmo advogado em 5min". Cada conversa diferente bypassa dedup
+// (dedup eh por conversation), entao 50 WhatsApps em rajada saem pro
+// mesmo numero de telefone — Evolution flagga isso como bot.
+//
+// Estrategia: DB count (Notification.whatsapp_sent_at) na ultima 1h.
+// Se >= MAX_WHATSAPP_PER_HOUR, skip + log warn. Persistente (sobrevive
+// restart). Custo: 1 query extra por job (negligivel — index existe em
+// user_id, whatsapp_sent_at).
+const MAX_WHATSAPP_PER_HOUR_PER_USER = 15;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1h
+
 interface CircuitWindow {
   windowStart: number;
   total: number;
@@ -171,26 +185,62 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         }
       }
 
-      // 4. Dedup 60min por conversa/lead — INDEPENDENTE de read_at.
+      // Bug fix 2026-05-10 (NotifService PR2 #4): rate limit por user.
+      // Conta WhatsApps enviados ao user nas ultimas 1h. Se >=15, skip.
+      // Janela conservadora — advogado normal recebe 5-10/dia. Pico
+      // de 15+/hora indica problema (bot escrevendo no chat, varias
+      // delegacoes ao mesmo estagiario, evento massivo). Melhor perder
+      // 1 notif do que arriscar ban (bug 2026-04-28 ainda fresco).
+      const sentInLastHour = await (this.prisma as any).notification.count({
+        where: {
+          user_id: userId,
+          whatsapp_sent_at: { gte: new Date(Date.now() - RATE_LIMIT_WINDOW_MS) },
+        },
+      }).catch(() => 0);
+      if (sentInLastHour >= MAX_WHATSAPP_PER_HOUR_PER_USER) {
+        this.logger.warn(
+          `[NotifWA] Rate limit: user ${userId} ja recebeu ${sentInLastHour} WhatsApps na ultima hora ` +
+          `(max ${MAX_WHATSAPP_PER_HOUR_PER_USER}) — skip notif ${notificationId}. ` +
+          `Notificacao continua acessivel via push/socket/sino.`,
+        );
+        return;
+      }
+
+      // 4. Dedup por (conversa | lead | task | type-fallback) — INDEPENDENTE
+      // de read_at.
       //
       // Bug reportado 2026-04-26 (Gianny): cada mensagem nova do cliente
       // gerava 1 WhatsApp se a Notification anterior tivesse read_at
       // preenchido (advogado tinha aberto o app no meio). Spam.
       //
-      // Fix: dedup baseado em whatsapp_sent_at — se ja mandei WhatsApp pra
-      // essa conversa nas ultimas 60min, NAO mando de novo (mesmo que
-      // tenha mensagens novas). Janela ampla porque advogado nao precisa
-      // de aviso a cada 5min — uma vez por hora cobre o caso de "voltei
-      // depois e tem mensagem".
-      const dedupKey = notification.data?.conversationId || notification.data?.leadId;
+      // Bug fix 2026-05-10 (NotifService PR2 #5): EXPANDIR dedup. Antes
+      // so cobria conversationId/leadId. Resultado: 5 tasks delegadas
+      // ao mesmo estagiario no mesmo minuto = 5 WhatsApps em rajada
+      // (cada Notification tem data.taskId diferente, sem cobertura).
+      //
+      // Estrategia em camadas:
+      //   a) Se tem conversationId → dedup por conversationId+type 60min
+      //   b) Se tem leadId → dedup por leadId+type 60min
+      //   c) Se tem taskId → dedup por taskId+type 60min (cobre task_assigned,
+      //      task_comment, task_overdue, task_reopened do MESMO task)
+      //   d) Fallback: dedup por type-only 15min (cobre rajada de
+      //      task_assigned multiplas tasks diferentes ao mesmo user)
       const DEDUP_WINDOW_MS = 60 * 60 * 1000;
-      if (dedupKey) {
-        const path = notification.data?.conversationId ? 'conversationId' : 'leadId';
+      const FALLBACK_DEDUP_MS = 15 * 60 * 1000;
+
+      const data = notification.data || {};
+      let dedupKey: string | undefined;
+      let dedupPath: string | undefined;
+      if (data.conversationId) { dedupKey = data.conversationId; dedupPath = 'conversationId'; }
+      else if (data.leadId) { dedupKey = data.leadId; dedupPath = 'leadId'; }
+      else if (data.taskId) { dedupKey = data.taskId; dedupPath = 'taskId'; }
+
+      if (dedupKey && dedupPath) {
         const recentWhatsappSent = await (this.prisma as any).notification.findFirst({
           where: {
             user_id: userId,
             notification_type: notification.notification_type,
-            data: { path: [path], equals: dedupKey },
+            data: { path: [dedupPath], equals: dedupKey },
             whatsapp_sent_at: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
             id: { not: notificationId },
           },
@@ -199,8 +249,29 @@ export class NotificationWhatsappProcessor extends WorkerHost {
         });
         if (recentWhatsappSent) {
           this.logger.log(
-            `[NotifWA] Dedup ativo: WhatsApp ja enviado pra ${path}=${dedupKey} ` +
+            `[NotifWA] Dedup ativo: WhatsApp ja enviado pra ${dedupPath}=${dedupKey} ` +
             `as ${recentWhatsappSent.whatsapp_sent_at?.toISOString()} — skip`,
+          );
+          return;
+        }
+      } else {
+        // Fallback: sem chave de entidade — dedup por (user, type) 15min.
+        // Protege contra rajadas de notif sem dedup-key (raras, mas existem).
+        const recentTypeSent = await (this.prisma as any).notification.findFirst({
+          where: {
+            user_id: userId,
+            notification_type: notification.notification_type,
+            whatsapp_sent_at: { gte: new Date(Date.now() - FALLBACK_DEDUP_MS) },
+            id: { not: notificationId },
+          },
+          orderBy: { whatsapp_sent_at: 'desc' },
+          select: { id: true, whatsapp_sent_at: true },
+        });
+        if (recentTypeSent) {
+          this.logger.log(
+            `[NotifWA] Dedup fallback (type-only ${FALLBACK_DEDUP_MS / 60000}min): ` +
+            `${notification.notification_type} ja enviado pra user ${userId} as ` +
+            `${recentTypeSent.whatsapp_sent_at?.toISOString()} — skip`,
           );
           return;
         }
