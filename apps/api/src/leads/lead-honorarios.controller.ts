@@ -87,9 +87,16 @@ export class LeadHonorariosController {
   }
 
   // ─── CRUD por lead ──────────────────────────────────────
+  //
+  // Bug fix 2026-05-10 (Honorarios PR1 #5 — CRITICO):
+  // Antes update/delete/addPayment/deletePayment/markPaid NAO recebiam
+  // nem passavam tenantId pro service. User do tenant A enumerava UUIDs
+  // de payment do tenant B e marcava como PAGO — entrava na receita do
+  // tenant errado. Agora todos passam req.user.tenant_id e o service
+  // valida ownership.
   @Get(':leadId/honorarios-negociados')
-  findAll(@Param('leadId') leadId: string) {
-    return this.service.findByLead(leadId);
+  findAll(@Param('leadId') leadId: string, @Request() req: any) {
+    return this.service.findByLead(leadId, req.user?.tenant_id);
   }
 
   @Post(':leadId/honorarios-negociados')
@@ -105,13 +112,14 @@ export class LeadHonorariosController {
   update(
     @Param('id') id: string,
     @Body() body: UpdateLeadHonorarioDto,
+    @Request() req: any,
   ) {
-    return this.service.update(id, body);
+    return this.service.update(id, body, req.user?.tenant_id);
   }
 
   @Delete(':leadId/honorarios-negociados/:id')
-  delete(@Param('id') id: string) {
-    return this.service.delete(id);
+  delete(@Param('id') id: string, @Request() req: any) {
+    return this.service.delete(id, req.user?.tenant_id);
   }
 
   // ─── Parcelas (payments) ────────────────────────────────
@@ -119,20 +127,22 @@ export class LeadHonorariosController {
   addPayment(
     @Param('honorarioId') honorarioId: string,
     @Body() body: AddPaymentDto,
+    @Request() req: any,
   ) {
-    return this.service.addPayment(honorarioId, body);
+    return this.service.addPayment(honorarioId, body, req.user?.tenant_id);
   }
 
   @Delete('honorarios-negociados/payments/:paymentId')
-  deletePayment(@Param('paymentId') paymentId: string) {
-    return this.service.deletePayment(paymentId);
+  deletePayment(@Param('paymentId') paymentId: string, @Request() req: any) {
+    return this.service.deletePayment(paymentId, req.user?.tenant_id);
   }
 
   @Patch('honorarios-negociados/payments/:paymentId/mark-paid')
   markPaid(
     @Param('paymentId') paymentId: string,
     @Body() body: MarkPaidDto,
+    @Request() req: any,
   ) {
-    return this.service.markPaid(paymentId, body);
+    return this.service.markPaid(paymentId, body, req.user?.tenant_id);
   }
 }

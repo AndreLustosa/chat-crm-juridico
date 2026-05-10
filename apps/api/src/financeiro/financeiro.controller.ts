@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FinanceiroService } from './financeiro.service';
 import { TaxService } from './tax.service';
@@ -187,6 +188,23 @@ export class FinanceiroController {
   }
 
   // ─── Tax / Impostos ────────────────────────────────────────
+  //
+  // Bug fix 2026-05-10 (Honorarios PR1 #4 — CRITICO):
+  // Antes endpoints aceitavam `lawyerId` query/body sem checar role.
+  // Estagiario podia passar lawyerId de socio e:
+  //   - Ler DARF anual (faturamento individual confidencial)
+  //   - Forcar recalculate em advogado errado
+  //   - Marcar DARF de outro como pago → fraude fiscal direta
+  // Agora helper resolveLawyerId garante que so ADMIN pode
+  // sobrescrever — demais usam o proprio req.user.id.
+
+  private resolveLawyerId(requestedLawyerId: string | undefined, req: any): string {
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    if (requestedLawyerId && requestedLawyerId !== req.user?.id && !isAdmin) {
+      throw new ForbiddenException('Apenas ADMIN pode consultar/alterar dados fiscais de outro advogado');
+    }
+    return requestedLawyerId || req.user.id;
+  }
 
   @Get('tax/annual')
   getAnnualTax(
@@ -195,7 +213,7 @@ export class FinanceiroController {
     @Request() req: any,
   ) {
     const y = parseInt(year) || new Date().getUTCFullYear();
-    const lid = lawyerId || req.user.id;
+    const lid = this.resolveLawyerId(lawyerId, req);
     return this.taxService.getAnnualSummary(lid, y, req.user.tenant_id);
   }
 
@@ -205,7 +223,7 @@ export class FinanceiroController {
     @Request() req: any,
   ) {
     const y = body.year || new Date().getUTCFullYear();
-    const lid = body.lawyerId || req.user.id;
+    const lid = this.resolveLawyerId(body.lawyerId, req);
     return this.taxService.recalculateYear(lid, y, req.user.tenant_id);
   }
 
@@ -214,7 +232,7 @@ export class FinanceiroController {
     @Body() body: { year: number; month: number; lawyerId?: string },
     @Request() req: any,
   ) {
-    const lid = body.lawyerId || req.user.id;
+    const lid = this.resolveLawyerId(body.lawyerId, req);
     return this.taxService.markDarfPaid(lid, body.year, body.month, req.user.tenant_id);
   }
 
@@ -227,7 +245,7 @@ export class FinanceiroController {
   ) {
     const y = parseInt(year) || new Date().getUTCFullYear();
     const m = parseInt(month) || new Date().getUTCMonth() + 1;
-    const lid = lawyerId || req.user.id;
+    const lid = this.resolveLawyerId(lawyerId, req);
     return this.taxService.getClientBreakdown(lid, y, m, req.user.tenant_id);
   }
 }

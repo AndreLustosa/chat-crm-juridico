@@ -12,11 +12,51 @@ export class LeadHonorariosService {
     @Inject(forwardRef(() => FinanceiroService)) private financeiroService: FinanceiroService,
   ) {}
 
+  /**
+   * Bug fix 2026-05-10 (Honorarios PR1 #5 — CRITICO):
+   * Verifica ownership de LeadHonorario via tenant. Antes update/delete/
+   * markPaid nao validavam — user do tenant A enumerava UUID e marcava
+   * como PAGO na receita do tenant B.
+   */
+  private async assertHonorarioTenant(id: string, tenantId?: string): Promise<{ tenant_id: string | null; status: string; lead_id: string }> {
+    const honorario = await this.prisma.leadHonorario.findUnique({
+      where: { id },
+      select: { id: true, tenant_id: true, status: true, lead_id: true },
+    });
+    if (!honorario) throw new NotFoundException('Honorário não encontrado');
+    if (tenantId && honorario.tenant_id && honorario.tenant_id !== tenantId) {
+      throw new ForbiddenException('Honorário pertence a outro tenant');
+    }
+    return honorario;
+  }
+
+  /** Verifica ownership de LeadHonorarioPayment (busca o honorario pai). */
+  private async assertPaymentTenant(paymentId: string, tenantId?: string): Promise<any> {
+    const payment = await this.prisma.leadHonorarioPayment.findUnique({
+      where: { id: paymentId },
+      include: {
+        lead_honorario: {
+          select: { id: true, tenant_id: true, status: true, lead: { select: { name: true } } },
+        },
+      },
+    });
+    if (!payment) throw new NotFoundException('Parcela não encontrada');
+    if (tenantId && payment.lead_honorario.tenant_id && payment.lead_honorario.tenant_id !== tenantId) {
+      throw new ForbiddenException('Parcela pertence a outro tenant');
+    }
+    return payment;
+  }
+
   // ─── Queries ────────────────────────────────────────────
 
-  async findByLead(leadId: string) {
+  async findByLead(leadId: string, tenantId?: string) {
+    // Bug fix 2026-05-10 (PR1 #5): filtra por tenant — antes listava
+    // honorarios de QUALQUER tenant pelo leadId (lead em si tem tenant,
+    // mas nao validavamos antes).
+    const where: any = { lead_id: leadId };
+    if (tenantId) where.tenant_id = tenantId;
     return this.prisma.leadHonorario.findMany({
-      where: { lead_id: leadId },
+      where,
       include: {
         payments: { orderBy: { due_date: 'asc' } },
       },
@@ -144,9 +184,9 @@ export class LeadHonorariosService {
     total_value?: number;
     notes?: string;
     status?: string;
-  }) {
-    const existing = await this.prisma.leadHonorario.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Honorário negociado não encontrado');
+  }, tenantId?: string) {
+    // Bug fix 2026-05-10 (PR1 #5): valida ownership antes de atualizar
+    const existing = await this.assertHonorarioTenant(id, tenantId);
     if (existing.status === 'CONVERTIDO') {
       throw new ForbiddenException('Honorário já convertido não pode ser alterado');
     }
@@ -177,9 +217,8 @@ export class LeadHonorariosService {
     });
   }
 
-  async delete(id: string) {
-    const existing = await this.prisma.leadHonorario.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Honorário negociado não encontrado');
+  async delete(id: string, tenantId?: string) {
+    const existing = await this.assertHonorarioTenant(id, tenantId);
     if (existing.status === 'CONVERTIDO') {
       throw new ForbiddenException('Honorário já convertido não pode ser excluído');
     }
@@ -190,9 +229,8 @@ export class LeadHonorariosService {
 
   // ─── Parcelas (Payments) ────────────────────────────────
 
-  async addPayment(leadHonorarioId: string, data: { amount: number; due_date: string }) {
-    const hon = await this.prisma.leadHonorario.findUnique({ where: { id: leadHonorarioId } });
-    if (!hon) throw new NotFoundException('Honorário não encontrado');
+  async addPayment(leadHonorarioId: string, data: { amount: number; due_date: string }, tenantId?: string) {
+    const hon = await this.assertHonorarioTenant(leadHonorarioId, tenantId);
     if (hon.status === 'CONVERTIDO') throw new ForbiddenException('Honorário já convertido');
 
     const dueDate = new Date(data.due_date);
@@ -215,9 +253,8 @@ export class LeadHonorariosService {
     return payment;
   }
 
-  async deletePayment(paymentId: string) {
-    const payment = await this.prisma.leadHonorarioPayment.findUnique({ where: { id: paymentId } });
-    if (!payment) throw new NotFoundException('Parcela não encontrada');
+  async deletePayment(paymentId: string, tenantId?: string) {
+    const payment = await this.assertPaymentTenant(paymentId, tenantId);
     if (payment.status === 'PAGO') throw new ForbiddenException('Parcela já paga não pode ser excluída');
 
     await this.prisma.leadHonorarioPayment.delete({ where: { id: paymentId } });
@@ -232,16 +269,12 @@ export class LeadHonorariosService {
     return { ok: true };
   }
 
-  async markPaid(paymentId: string, data: { payment_method?: string }) {
-    const payment = await this.prisma.leadHonorarioPayment.findUnique({
-      where: { id: paymentId },
-      include: {
-        lead_honorario: {
-          select: { tenant_id: true, type: true, lead: { select: { name: true } } },
-        },
-      },
-    });
-    if (!payment) throw new NotFoundException('Parcela não encontrada');
+  async markPaid(paymentId: string, data: { payment_method?: string }, tenantId?: string) {
+    // Bug fix 2026-05-10 (PR1 #5 — CRITICO): valida ownership ANTES de
+    // marcar como PAGO. Antes user enumerava UUID e marcava parcela de
+    // outro tenant como PAGO — entrava na receita errada via
+    // createFromLeadHonorarioPayment.
+    const payment = await this.assertPaymentTenant(paymentId, tenantId);
 
     const updated = await this.prisma.leadHonorarioPayment.update({
       where: { id: paymentId },
