@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
@@ -860,7 +860,50 @@ export class CalendarService implements OnApplicationBootstrap {
   async setSchedule(
     userId: string,
     slots: { day_of_week: number; start_time: string; end_time: string; lunch_start?: string | null; lunch_end?: string | null }[],
+    tenantId?: string,
   ) {
+    // Bug fix 2026-05-09: validar tenant + dados antes de gravar.
+    // Antes nao validava tenant nem ranges → invasor sequestrava agenda
+    // de advogado de outro escritorio + nao validava start<lunch<end.
+    if (tenantId) {
+      const targetUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { tenant_id: true },
+      });
+      if (!targetUser) throw new NotFoundException('User nao encontrado');
+      if (targetUser.tenant_id !== tenantId) {
+        throw new ForbiddenException('User pertence a outro tenant');
+      }
+    }
+
+    // Validar cada slot
+    const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/;
+    for (const s of slots) {
+      if (!Number.isInteger(s.day_of_week) || s.day_of_week < 0 || s.day_of_week > 6) {
+        throw new BadRequestException(`day_of_week invalido (${s.day_of_week}): use 0=domingo a 6=sabado`);
+      }
+      if (!HHMM.test(s.start_time) || !HHMM.test(s.end_time)) {
+        throw new BadRequestException(`Horarios devem ser HH:MM (got start=${s.start_time}, end=${s.end_time})`);
+      }
+      if (s.start_time >= s.end_time) {
+        throw new BadRequestException(`start_time (${s.start_time}) deve ser < end_time (${s.end_time})`);
+      }
+      if (s.lunch_start || s.lunch_end) {
+        if (!s.lunch_start || !s.lunch_end) {
+          throw new BadRequestException('lunch_start e lunch_end devem ser ambos preenchidos ou ambos null');
+        }
+        if (!HHMM.test(s.lunch_start) || !HHMM.test(s.lunch_end)) {
+          throw new BadRequestException('lunch_start e lunch_end devem ser HH:MM');
+        }
+        if (s.lunch_start >= s.lunch_end) {
+          throw new BadRequestException(`lunch_start (${s.lunch_start}) deve ser < lunch_end (${s.lunch_end})`);
+        }
+        if (s.lunch_start <= s.start_time || s.lunch_end >= s.end_time) {
+          throw new BadRequestException('Pausa de almoco deve estar dentro do expediente (start < lunch_start < lunch_end < end)');
+        }
+      }
+    }
+
     const results = await Promise.all(
       slots.map((s) =>
         this.prisma.userSchedule.upsert({
@@ -1164,6 +1207,11 @@ export class CalendarService implements OnApplicationBootstrap {
       childStart.setHours(startAt.getHours(), startAt.getMinutes(), startAt.getSeconds());
       const childEnd = new Date(childStart.getTime() + duration);
 
+      // Bug fix 2026-05-10 (PR1 #8): tenant_id do parent pode ser null em
+      // eventos criados antes do hardening 2026-05-07 (legacy). Sem o
+      // tenantOrDefault, child herda null → quebra com Prisma NOT NULL
+      // violation OU vaza pra todos os tenants no findAll (sem filtro de
+      // tenant). Usar mesmo helper que this.create() pra manter consistente.
       const child = await this.prisma.calendarEvent.create({
         data: {
           type: parentEvent.type,
@@ -1181,7 +1229,7 @@ export class CalendarService implements OnApplicationBootstrap {
           assigned_user_id: parentEvent.assigned_user_id,
           created_by_id: parentEvent.created_by_id,
           appointment_type_id: parentEvent.appointment_type_id,
-          tenant_id: parentEvent.tenant_id,
+          tenant_id: tenantOrDefault(parentEvent.tenant_id),
           parent_event_id: parentEvent.id,
           // Replicar lembretes do pai nos filhos
           ...(parentReminders.length > 0

@@ -1,9 +1,15 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CalendarService } from '../calendar/calendar.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CaseDeadlinesService } from '../case-deadlines/case-deadlines.service';
 import { HonorariosService } from '../honorarios/honorarios.service';
 import { PrismaService } from '../prisma/prisma.service';
+
+const isAdmin = (roles: string | string[] | undefined): boolean => {
+  if (!roles) return false;
+  if (typeof roles === 'string') return roles === 'ADMIN' || roles.includes('ADMIN');
+  return roles.includes('ADMIN');
+};
 
 export type EventTarget =
   | { type: 'CALENDAR'; id: string }
@@ -175,18 +181,92 @@ export class EventsService {
   }
 
   /**
+   * Bug fix 2026-05-09: ownership check unificado.
+   * Antes complete/cancel/postpone/reopen aceitavam qualquer ID sem
+   * validar que o user logado eh dono ou admin — atacante autenticado
+   * cancelava audiencia alheia, propagando pra Task/Deadline.
+   *
+   * Regra:
+   *   ADMIN → libera tudo
+   *   CALENDAR → checkOwnership do CalendarService (created_by | assigned_user | admin)
+   *   TASK → created_by | assigned_user | delegated_by | admin
+   *   DEADLINE → lawyer do legal_case | created_by | admin
+   * Multi-tenant: confere tenant em todos os casos.
+   */
+  private async verifyOwnership(
+    target: EventTarget,
+    userId: string,
+    userRoles: string | string[] | undefined,
+    tenantId?: string,
+  ): Promise<void> {
+    if (isAdmin(userRoles)) return; // admin pode tudo
+
+    switch (target.type) {
+      case 'CALENDAR': {
+        const ok = await this.calendarService.checkOwnership(target.id, userId, userRoles || [], tenantId);
+        if (!ok) throw new ForbiddenException('Sem permissao para alterar este evento de calendario');
+        return;
+      }
+      case 'TASK': {
+        // Owner = quem foi designado, quem criou/delegou, ou o ack-er.
+        // Schema nao tem `delegated_by_id` separado — `created_by_id` ja faz
+        // esse papel (advogado que delegou pra estagiario fica em created_by_id).
+        const task = await this.prisma.task.findUnique({
+          where: { id: target.id },
+          select: { tenant_id: true, assigned_user_id: true, created_by_id: true, acknowledged_by_id: true },
+        });
+        if (!task) throw new NotFoundException('Tarefa nao encontrada');
+        if (tenantId && task.tenant_id && task.tenant_id !== tenantId) {
+          throw new ForbiddenException('Tarefa de outro tenant');
+        }
+        const isOwner =
+          task.assigned_user_id === userId ||
+          task.created_by_id === userId ||
+          task.acknowledged_by_id === userId;
+        if (!isOwner) throw new ForbiddenException('Sem permissao para alterar esta tarefa');
+        return;
+      }
+      case 'DEADLINE': {
+        const deadline = await this.prisma.caseDeadline.findUnique({
+          where: { id: target.id },
+          select: {
+            tenant_id: true,
+            created_by_id: true,
+            legal_case: { select: { lawyer_id: true, tenant_id: true } },
+          },
+        });
+        if (!deadline) throw new NotFoundException('Prazo nao encontrado');
+        const dlTenantId = deadline.tenant_id || deadline.legal_case?.tenant_id;
+        if (tenantId && dlTenantId && dlTenantId !== tenantId) {
+          throw new ForbiddenException('Prazo de outro tenant');
+        }
+        const isOwner =
+          deadline.created_by_id === userId ||
+          deadline.legal_case?.lawyer_id === userId;
+        if (!isOwner) throw new ForbiddenException('Sem permissao para alterar este prazo');
+        return;
+      }
+      default:
+        throw new BadRequestException(`Tipo de evento invalido: ${(target as any).type}`);
+    }
+  }
+
+  /**
    * Marca evento como cumprido/concluido.
    * @param target - tipo + id do evento
    * @param note - nota opcional de cumprimento (ex: "audiencia ocorreu, conciliacao pendente")
    * @param userId - quem esta cumprindo
    * @param tenantId - isolamento multi-tenant
+   * @param userRoles - papel do user (pra ownership check) — opcional pra retro-compat
    */
   async complete(
     target: EventTarget,
     note: string | undefined,
     userId: string,
     tenantId?: string,
+    userRoles?: string | string[],
   ) {
+    await this.verifyOwnership(target, userId, userRoles, tenantId);
     this.logger.log(`[Complete] ${target.type}:${target.id} por ${userId}`);
 
     switch (target.type) {
@@ -211,7 +291,9 @@ export class EventsService {
     reason: string | undefined,
     userId: string,
     tenantId?: string,
+    userRoles?: string | string[],
   ) {
+    await this.verifyOwnership(target, userId, userRoles, tenantId);
     this.logger.log(`[Cancel] ${target.type}:${target.id} por ${userId}`);
 
     switch (target.type) {
@@ -242,10 +324,12 @@ export class EventsService {
     reason: string,
     userId: string,
     tenantId?: string,
+    userRoles?: string | string[],
   ) {
     if (!newDateISO) {
       throw new BadRequestException('Nova data e obrigatoria pra adiar');
     }
+    await this.verifyOwnership(target, userId, userRoles, tenantId);
     this.logger.log(`[Postpone] ${target.type}:${target.id} -> ${newDateISO} por ${userId}`);
 
     switch (target.type) {
@@ -290,7 +374,10 @@ export class EventsService {
     },
     userId: string,
     tenantId?: string,
+    userRoles?: string | string[],
   ) {
+    // Bug fix 2026-05-09: ownership check
+    await this.verifyOwnership({ type: 'CALENDAR', id: eventId }, userId, userRoles, tenantId);
     this.logger.log(`[CompleteHearing] event:${eventId} result:${data.result} por ${userId}`);
 
     const event = await this.prisma.calendarEvent.findUnique({
@@ -420,7 +507,11 @@ export class EventsService {
    * Reabre evento concluido/cancelado (volta pra pendente).
    * Util se o advogado marcou errado.
    */
-  async reopen(target: EventTarget, tenantId?: string) {
+  async reopen(target: EventTarget, tenantId?: string, userId?: string, userRoles?: string | string[]) {
+    // Bug fix 2026-05-09: ownership check
+    if (userId) {
+      await this.verifyOwnership(target, userId, userRoles, tenantId);
+    }
     this.logger.log(`[Reopen] ${target.type}:${target.id}`);
 
     switch (target.type) {

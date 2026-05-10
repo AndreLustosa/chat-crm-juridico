@@ -69,7 +69,13 @@ export class CalendarController {
   }
 
   @Get('events/:id')
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Request() req: any) {
+    // Bug fix 2026-05-09: antes findOne nao verificava ownership.
+    // Qualquer user autenticado lia qualquer evento (description, location,
+    // lead.phone, case_number, assigned_user.name) — vazamento lateral
+    // entre advogados + cross-tenant.
+    const canAccess = await this.calendarService.checkOwnership(id, req.user.id, req.user.roles, req.user?.tenant_id);
+    if (!canAccess) throw new ForbiddenException('Sem permissao para acessar este evento');
     return this.calendarService.findOne(id);
   }
 
@@ -182,8 +188,16 @@ export class CalendarController {
   setSchedule(
     @Param('userId') userId: string,
     @Body('slots') slots: { day_of_week: number; start_time: string; end_time: string }[],
+    @Request() req: any,
   ) {
-    return this.calendarService.setSchedule(userId, slots);
+    // Bug fix 2026-05-09: antes qualquer user podia sobrescrever agenda
+    // de OUTRO user (ate de outro tenant). Agora: ADMIN pode tudo,
+    // demais users so podem editar a propria agenda.
+    const isAdmin = req.user?.roles?.includes('ADMIN');
+    if (!isAdmin && req.user?.id !== userId) {
+      throw new ForbiddenException('Voce so pode editar sua propria agenda. Peca a um admin se precisar mudar a de outro usuario.');
+    }
+    return this.calendarService.setSchedule(userId, slots, req.user?.tenant_id);
   }
 
   // ─── Appointment Types ────────────────────────────────

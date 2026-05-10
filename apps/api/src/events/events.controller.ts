@@ -37,6 +37,11 @@ export class EventsController {
     });
   }
 
+  // Bug fix 2026-05-10 (PR1 Tarefas+Calendario): controllers passavam
+  // tenant_id mas NAO passavam roles — efetivamente nao-admin podia
+  // completar/cancelar/adiar evento de qualquer outro user no mesmo
+  // tenant. EventsService.verifyOwnership precisa de roles pra liberar
+  // ADMIN sem precisar do checkOwnership por entidade.
   @Post('complete')
   @HttpCode(HttpStatus.OK)
   complete(
@@ -44,7 +49,7 @@ export class EventsController {
     @Request() req: any,
   ) {
     const target: EventTarget = { type: body.type, id: body.id };
-    return this.eventsService.complete(target, body.note, req.user?.id, req.user?.tenant_id);
+    return this.eventsService.complete(target, body.note, req.user?.id, req.user?.tenant_id, req.user?.roles);
   }
 
   @Post('cancel')
@@ -54,7 +59,7 @@ export class EventsController {
     @Request() req: any,
   ) {
     const target: EventTarget = { type: body.type, id: body.id };
-    return this.eventsService.cancel(target, body.reason, req.user?.id, req.user?.tenant_id);
+    return this.eventsService.cancel(target, body.reason, req.user?.id, req.user?.tenant_id, req.user?.roles);
   }
 
   @Post('postpone')
@@ -70,6 +75,7 @@ export class EventsController {
       body.reason || 'Sem motivo informado',
       req.user?.id,
       req.user?.tenant_id,
+      req.user?.roles,
     );
   }
 
@@ -103,6 +109,7 @@ export class EventsController {
       },
       req.user?.id,
       req.user?.tenant_id,
+      req.user?.roles,
     );
   }
 
@@ -113,6 +120,6 @@ export class EventsController {
     @Request() req: any,
   ) {
     const target: EventTarget = { type: body.type, id: body.id };
-    return this.eventsService.reopen(target, req.user?.tenant_id);
+    return this.eventsService.reopen(target, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 }

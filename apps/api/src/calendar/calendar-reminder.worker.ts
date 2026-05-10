@@ -242,15 +242,38 @@ export class CalendarReminderWorker extends WorkerHost {
     if (job.name === 'notify-hearing-scheduled' || job.name === 'notify-hearing-rescheduled') {
       const delay = msUntilNextBusinessHour();
       if (delay > 0) {
+        // Bug fix 2026-05-10 (PR1 #4): jobId determinístico baseado em
+        // (eventId + janela 08h alvo). Antes usava `${job.id}-deferred-${Date.now()}`
+        // — `Date.now()` mudava em cada retry, ent ao se o worker crashasse
+        // a meio do `add()` ou se o BullMQ re-tentasse o job original, criava
+        // múltiplos jobs deferred do mesmo evento e o cliente recebia 2-3
+        // mensagens. Agora o jobId é estável por (evento + dia/hora alvo),
+        // ent ao re-tentativas no MESMO destino sao deduplicadas pelo BullMQ.
+        // Se a audiencia for re-agendada amanha pra outra data, o eventId
+        // ainda eh o mesmo mas o jobId fica diferente porque a janela alvo
+        // passou — sem colis ao acidental.
+        const targetTs = Date.now() + delay;
+        const targetSlot = Math.floor(targetTs / 1000); // segundos UNIX (granularidade suficiente)
+        const eventId = job.data.eventId || 'unknown';
+        const deferredJobId = `${job.name}-deferred-${eventId}-${targetSlot}`;
+
         this.logger.log(
           `[HEARING-NOTIFY] Fora do horario comercial — adiando ${Math.round(delay / 60000)}min ` +
-          `(eventId=${job.data.eventId}, jobId=${job.id})`,
+          `(eventId=${eventId}, jobId=${job.id} → deferredJobId=${deferredJobId})`,
         );
+
+        // Remove job duplicado anterior (idempotencia) caso ja exista
+        const existing = await this.reminderQueue.getJob(deferredJobId).catch(() => null);
+        if (existing) {
+          this.logger.log(`[HEARING-NOTIFY] Deferred job ${deferredJobId} ja existe — pulando re-enfileiramento`);
+          return;
+        }
+
         // Re-enfileira o mesmo job com delay. Isso preserva os attempts/backoff
         // configurados originalmente.
         await this.reminderQueue.add(job.name, job.data, {
           delay,
-          jobId: `${job.id}-deferred-${Date.now()}`,
+          jobId: deferredJobId,
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
           removeOnComplete: true,
