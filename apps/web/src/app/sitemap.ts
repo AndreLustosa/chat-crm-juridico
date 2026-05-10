@@ -24,6 +24,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
+      url: `${baseUrl}/arapiraca/criminal`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.9,
+    },
+    {
       url: `${baseUrl}/arapiraca/trabalhista/sem-carteira-assinada`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
