@@ -131,7 +131,7 @@ export class CalendarController {
       req.user?.tenant_id,
     );
     if (!canAccess) throw new ForbiddenException('Sem permissao para notificar este evento');
-    return this.calendarService.notifyEvent(id);
+    return this.calendarService.notifyEvent(id, req.user?.id);
   }
 
   @Delete('events/:id')
@@ -221,25 +221,26 @@ export class CalendarController {
     return this.calendarService.findAppointmentTypes(req.user?.tenant_id);
   }
 
+  // Bug fix 2026-05-10 (PR3 medio #6): passa actorUserId pra audit log
   @Post('appointment-types')
   @Roles('ADMIN')
   createAppointmentType(@Body() data: CreateAppointmentTypeDto, @Request() req: any) {
     return this.calendarService.createAppointmentType({
       ...data,
       tenant_id: req.user?.tenant_id,
-    });
+    }, req.user?.id);
   }
 
   @Patch('appointment-types/:id')
   @Roles('ADMIN')
-  updateAppointmentType(@Param('id') id: string, @Body() data: UpdateAppointmentTypeDto) {
-    return this.calendarService.updateAppointmentType(id, data);
+  updateAppointmentType(@Param('id') id: string, @Body() data: UpdateAppointmentTypeDto, @Request() req: any) {
+    return this.calendarService.updateAppointmentType(id, data, req.user?.id);
   }
 
   @Delete('appointment-types/:id')
   @Roles('ADMIN')
-  deleteAppointmentType(@Param('id') id: string) {
-    return this.calendarService.deleteAppointmentType(id);
+  deleteAppointmentType(@Param('id') id: string, @Request() req: any) {
+    return this.calendarService.deleteAppointmentType(id, req.user?.id);
   }
 
   // ─── Holidays ─────────────────────────────────────────
@@ -255,19 +256,19 @@ export class CalendarController {
     return this.calendarService.createHoliday({
       ...data,
       tenant_id: req.user?.tenant_id,
-    });
+    }, req.user?.id);
   }
 
   @Patch('holidays/:id')
   @Roles('ADMIN')
-  updateHoliday(@Param('id') id: string, @Body() data: UpdateHolidayDto) {
-    return this.calendarService.updateHoliday(id, data);
+  updateHoliday(@Param('id') id: string, @Body() data: UpdateHolidayDto, @Request() req: any) {
+    return this.calendarService.updateHoliday(id, data, req.user?.id);
   }
 
   @Delete('holidays/:id')
   @Roles('ADMIN')
-  deleteHoliday(@Param('id') id: string) {
-    return this.calendarService.deleteHoliday(id);
+  deleteHoliday(@Param('id') id: string, @Request() req: any) {
+    return this.calendarService.deleteHoliday(id, req.user?.id);
   }
 
   // ─── Search ───────────────────────────────────────────

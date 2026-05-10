@@ -203,7 +203,13 @@ export class CalendarService implements OnApplicationBootstrap {
       }
     }
 
-    return this.prisma.calendarEvent.findMany({
+    // Bug fix 2026-05-10 (PR3 medio #1): cap de 1000 eventos por request.
+    // Antes findMany sem take retornava todos os eventos do range com 7
+    // includes pesados — escritorio com 1000+ eventos no mes travava o
+    // frontend e o pool de conexao. Caller pode passar `start`/`end`
+    // mais estreitos pra ver o que falta. Limit logado pra alertar UX.
+    const FINDALL_LIMIT = 1000;
+    const events = await this.prisma.calendarEvent.findMany({
       where,
       include: {
         assigned_user: { select: { id: true, name: true } },
@@ -215,7 +221,12 @@ export class CalendarService implements OnApplicationBootstrap {
         _count: { select: { comments: true } },
       },
       orderBy: { start_at: 'asc' },
+      take: FINDALL_LIMIT,
     });
+    if (events.length === FINDALL_LIMIT) {
+      this.logger.warn(`[findAll] Cap de ${FINDALL_LIMIT} atingido — frontend pode estar pedindo range muito largo (start=${query.start}, end=${query.end})`);
+    }
+    return events;
   }
 
   async findOne(id: string) {
@@ -517,6 +528,20 @@ export class CalendarService implements OnApplicationBootstrap {
   }
 
   private async enqueueReminders(eventId: string, startAt: Date, reminders: { id: string; minutes_before: number; channel: string }[]) {
+    // Bug fix 2026-05-10 (PR3 medio #3): paraleliza I/O Redis. Antes loop
+    // serial fazia 3N round-trips (getJob+remove+add por reminder) — criar
+    // evento com 4 reminders = 12 round-trips bloqueantes. Agora:
+    //   1. Filtra/computa em memoria (sync)
+    //   2. Remove jobs antigos em paralelo (Promise.all)
+    //   3. Adiciona novos jobs em batch (addBulk)
+    // Ganho: 12 round-trips → 2 (1 paralelo + 1 batch).
+
+    // Etapa 1: prepara payload + filtra retroativos
+    const nowMs = Date.now();
+    const retroactiveIds: string[] = [];
+    const jobsToAdd: Array<{ name: string; data: any; opts: any }> = [];
+    const jobsToRemove: string[] = [];
+
     for (const r of reminders) {
       if (r.channel !== 'WHATSAPP' && r.channel !== 'EMAIL') continue; // PUSH handled by cron
       // startAt eh "UTC naive" (horario BRT armazenado como UTC no banco) —
@@ -524,48 +549,59 @@ export class CalendarService implements OnApplicationBootstrap {
       // Sem isso o trigger sai 3h adiantado. Bug reportado 2026-04-23.
       const triggerAt = brazilNaiveToRealEpoch(startAt) - r.minutes_before * 60 * 1000;
 
-      // Bug fix 2026-05-10 (PR2 #7): skip reminders retroativos. Antes
-      // `Math.max(trigger - now, 1000)` forcava delay min 1s — registro
-      // retroativo de audiencia (start_at no passado, ex: lancar audiencia
-      // que ja aconteceu ontem pra fechar dossie) disparava 4 reminders
-      // imediatos pro cliente "audiencia amanha" sobre coisa que ja passou.
-      // Tolerancia de 60s pra cobrir delays de processamento normais.
-      const nowMs = Date.now();
+      // Bug fix 2026-05-10 (PR2 #7): skip reminders retroativos.
       if (triggerAt < nowMs - 60_000) {
         this.logger.log(
           `[REMINDER] Skip retroativo: ${r.id} (channel=${r.channel}, trigger ` +
           `${Math.round((nowMs - triggerAt) / 60000)}min no passado, evento ${eventId})`,
         );
-        // Marca sent_at pra sair do pool de pendentes do orphan cron tambem
-        try {
-          await this.prisma.eventReminder.update({
-            where: { id: r.id },
-            data: { sent_at: new Date() },
-          });
-        } catch {}
+        retroactiveIds.push(r.id);
         continue;
       }
 
-      const delay = Math.max(triggerAt - nowMs, 1000); // min 1s pra triggers no presente
+      const delay = Math.max(triggerAt - nowMs, 1000);
       const jobId = `reminder-${r.id}`;
-      try {
-        // Remove job anterior (se existir) antes de enfileirar — garante idempotência em re-agendamentos
-        try { const old = await this.reminderQueue.getJob(jobId); if (old) await old.remove(); } catch {}
-        await this.reminderQueue.add('send-reminder', {
-          reminderId: r.id,
-          eventId,
-          channel: r.channel,
-        }, {
+      jobsToRemove.push(jobId);
+      jobsToAdd.push({
+        name: 'send-reminder',
+        data: { reminderId: r.id, eventId, channel: r.channel },
+        opts: {
           delay,
           jobId,
           attempts: 3,
           backoff: { type: 'exponential', delay: 5000 },
           removeOnComplete: true,
           removeOnFail: 50,
-        });
-        this.logger.log(`Lembrete ${r.id} enfileirado: canal=${r.channel}, delay=${Math.round(delay / 60000)}min`);
+        },
+      });
+    }
+
+    // Etapa 2: marca retroativos como sent_at em batch (sem bloquear queue)
+    if (retroactiveIds.length > 0) {
+      this.prisma.eventReminder.updateMany({
+        where: { id: { in: retroactiveIds } },
+        data: { sent_at: new Date() },
+      }).catch(() => { /* fire-and-forget — apenas evita re-processamento */ });
+    }
+
+    // Etapa 3: remove jobs antigos em paralelo (idempotencia em re-agendamento)
+    await Promise.all(
+      jobsToRemove.map(jobId =>
+        this.reminderQueue.getJob(jobId)
+          .then(job => job?.remove())
+          .catch(() => { /* no-op */ })
+      )
+    );
+
+    // Etapa 4: addBulk — 1 round-trip pra todos os jobs
+    if (jobsToAdd.length > 0) {
+      try {
+        await this.reminderQueue.addBulk(jobsToAdd);
+        for (const j of jobsToAdd) {
+          this.logger.log(`Lembrete ${j.data.reminderId} enfileirado: canal=${j.data.channel}, delay=${Math.round(j.opts.delay / 60000)}min`);
+        }
       } catch (e: any) {
-        this.logger.error(`Erro ao enfileirar lembrete ${r.id}: ${e.message}`);
+        this.logger.error(`Erro no addBulk de ${jobsToAdd.length} reminders: ${e.message}`);
       }
     }
   }
@@ -1080,21 +1116,47 @@ export class CalendarService implements OnApplicationBootstrap {
     });
   }
 
+  // Bug fix 2026-05-10 (PR3 medio #6): audit log em mutacoes de
+  // configuracao (appointment-types + holidays). Antes admin podia
+  // alterar/deletar tipo de consulta ou feriado sem audit — investigar
+  // config corrompida (cliente reclamou que feriado sumiu) era
+  // impossivel. Audit fire-and-forget, nao bloqueia operacao.
+  private auditFireAndForget(actorUserId: string | undefined, action: string, entity: string, entityId: string, meta?: any) {
+    this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action,
+        entity,
+        entity_id: entityId,
+        meta_json: meta || undefined,
+      },
+    }).catch((e: any) => {
+      this.logger.warn(`[AUDIT] Falha ao gravar log ${entity}.${action}: ${e.message}`);
+    });
+  }
+
   async createAppointmentType(data: {
     name: string;
     duration: number;
     color?: string;
     tenant_id?: string;
-  }) {
-    return this.prisma.appointmentType.create({ data });
+  }, actorUserId?: string) {
+    const created = await this.prisma.appointmentType.create({ data });
+    this.auditFireAndForget(actorUserId, 'create', 'AppointmentType', created.id, { name: data.name, duration: data.duration });
+    return created;
   }
 
-  async updateAppointmentType(id: string, data: { name?: string; duration?: number; color?: string; active?: boolean }) {
-    return this.prisma.appointmentType.update({ where: { id }, data });
+  async updateAppointmentType(id: string, data: { name?: string; duration?: number; color?: string; active?: boolean }, actorUserId?: string) {
+    const before = await this.prisma.appointmentType.findUnique({ where: { id } });
+    const updated = await this.prisma.appointmentType.update({ where: { id }, data });
+    this.auditFireAndForget(actorUserId, 'update', 'AppointmentType', id, { before, after: data });
+    return updated;
   }
 
-  async deleteAppointmentType(id: string) {
+  async deleteAppointmentType(id: string, actorUserId?: string) {
+    const before = await this.prisma.appointmentType.findUnique({ where: { id } });
     await this.prisma.appointmentType.delete({ where: { id } });
+    this.auditFireAndForget(actorUserId, 'delete', 'AppointmentType', id, { before });
     return { deleted: true };
   }
 
@@ -1107,8 +1169,8 @@ export class CalendarService implements OnApplicationBootstrap {
     });
   }
 
-  async createHoliday(data: { date: string; name: string; recurring_yearly?: boolean; tenant_id?: string }) {
-    return this.prisma.holiday.create({
+  async createHoliday(data: { date: string; name: string; recurring_yearly?: boolean; tenant_id?: string }, actorUserId?: string) {
+    const created = await this.prisma.holiday.create({
       data: {
         date: new Date(data.date),
         name: data.name,
@@ -1116,18 +1178,25 @@ export class CalendarService implements OnApplicationBootstrap {
         tenant_id: data.tenant_id,
       },
     });
+    this.auditFireAndForget(actorUserId, 'create', 'Holiday', created.id, { date: data.date, name: data.name });
+    return created;
   }
 
-  async updateHoliday(id: string, data: { date?: string; name?: string; recurring_yearly?: boolean }) {
+  async updateHoliday(id: string, data: { date?: string; name?: string; recurring_yearly?: boolean }, actorUserId?: string) {
+    const before = await this.prisma.holiday.findUnique({ where: { id } });
     const updateData: any = {};
     if (data.date) updateData.date = new Date(data.date);
     if (data.name !== undefined) updateData.name = data.name;
     if (data.recurring_yearly !== undefined) updateData.recurring_yearly = data.recurring_yearly;
-    return this.prisma.holiday.update({ where: { id }, data: updateData });
+    const updated = await this.prisma.holiday.update({ where: { id }, data: updateData });
+    this.auditFireAndForget(actorUserId, 'update', 'Holiday', id, { before, after: data });
+    return updated;
   }
 
-  async deleteHoliday(id: string) {
+  async deleteHoliday(id: string, actorUserId?: string) {
+    const before = await this.prisma.holiday.findUnique({ where: { id } });
     await this.prisma.holiday.delete({ where: { id } });
+    this.auditFireAndForget(actorUserId, 'delete', 'Holiday', id, { before });
     return { deleted: true };
   }
 
@@ -1272,7 +1341,13 @@ export class CalendarService implements OnApplicationBootstrap {
           start_at: childStart,
           end_at: childEnd,
           all_day: parentEvent.all_day,
-          status: parentEvent.status || 'AGENDADO',
+          // Bug fix 2026-05-10 (PR3 medio #12): forca AGENDADO em filhos
+          // novos. Antes herdava parentEvent.status — se o pai foi marcado
+          // CONCLUIDO/CANCELADO antes de virar recorrente (raro mas possivel
+          // via update), filhos nasciam com status terminal e nem apareciam
+          // na agenda. AGENDADO eh o estado correto pra evento futuro recem
+          // criado, independente do pai.
+          status: 'AGENDADO',
           priority: parentEvent.priority || 'NORMAL',
           color: parentEvent.color,
           location: parentEvent.location,
@@ -1316,6 +1391,23 @@ export class CalendarService implements OnApplicationBootstrap {
     return children;
   }
 
+  /**
+   * Bug fix 2026-05-10 (PR3 medio #7): documentado escopo da propagacao.
+   *
+   * Propagados pra todos os filhos da serie:
+   *   - title, description, type, priority, location, assigned_user_id
+   *
+   * NAO propagados (intencionalmente — cada filho tem o proprio):
+   *   - start_at / end_at (cada ocorrencia tem horario fixo na serie)
+   *   - status (cada ocorrencia pode estar concluida/cancelada
+   *     individualmente — propagar quebraria audit do que ja aconteceu)
+   *   - recurrence_rule (so faz sentido no parent)
+   *
+   * Se assigned_user_id mudar, NAO re-enfileira reminders dos filhos
+   * (essa propagacao geraria N round-trips ao Redis pra serie longa).
+   * Se for critico atualizar reminders, usar /events/:id (cada filho
+   * individual) — `update` ja trata reassign corretamente desde PR2 #8.
+   */
   async updateRecurrenceAll(parentId: string, data: any) {
     // Atualizar pai
     const parent = await this.update(parentId, data);
@@ -1329,10 +1421,11 @@ export class CalendarService implements OnApplicationBootstrap {
     if (data.assigned_user_id !== undefined) updateData.assigned_user_id = data.assigned_user_id;
 
     if (Object.keys(updateData).length > 0) {
-      await this.prisma.calendarEvent.updateMany({
+      const result = await this.prisma.calendarEvent.updateMany({
         where: { parent_event_id: parentId },
         data: updateData,
       });
+      this.logger.log(`[Recurrence] Propagado pra ${result.count} filho(s) da serie ${parentId}`);
     }
     return parent;
   }
@@ -1611,7 +1704,10 @@ export class CalendarService implements OnApplicationBootstrap {
 
   // ─── Re-envio manual de notificação ──────────────────────────────────────────
 
-  async notifyEvent(eventId: string): Promise<{ queued: boolean; message: string }> {
+  // Bug fix 2026-05-10 (PR3 medio #5): adicionar actorUserId pra audit log.
+  // Re-envio manual de WhatsApp pago precisa rastrear quem disparou pra
+  // investigar abuso interno (estagiario disparando 100x pro mesmo cliente).
+  async notifyEvent(eventId: string, actorUserId?: string): Promise<{ queued: boolean; message: string }> {
     const event = await this.prisma.calendarEvent.findUnique({
       where: { id: eventId },
       select: {
@@ -1664,7 +1760,12 @@ export class CalendarService implements OnApplicationBootstrap {
       },
     );
 
-    this.logger.log(`[NOTIFY] Re-envio manual enfileirado para evento ${eventId} (${event.type}: "${event.title}")`);
+    this.logger.log(`[NOTIFY] Re-envio manual enfileirado para evento ${eventId} (${event.type}: "${event.title}") por user ${actorUserId || 'desconhecido'}`);
+    this.auditFireAndForget(actorUserId, 'notify_manual', 'CalendarEvent', eventId, {
+      type: event.type,
+      title: event.title,
+      lead_phone_redacted: event.lead?.phone ? `***${event.lead.phone.slice(-4)}` : null,
+    });
     return { queued: true, message: `Notificação de ${event.type === 'PERICIA' ? 'perícia' : 'audiência'} enfileirada com sucesso` };
   }
 }

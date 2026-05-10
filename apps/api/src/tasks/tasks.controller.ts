@@ -10,7 +10,8 @@ import { CreateTaskDto, UpdateTaskDto } from './dto/tasks.dto';
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
-  // Sprint 4: Carga de trabalho por usuário (deve vir ANTES de :id)
+  // Carga de trabalho por usuario — base do smart-assignment.
+  // IMPORTANTE: rota fixa antes de :id pra nao colidir com /:id pattern.
   @Get('workload')
   getWorkload(@Request() req: any) {
     return this.tasksService.getWorkload(req.user?.tenant_id);
@@ -46,7 +47,8 @@ export class TasksController {
     return this.tasksService.acknowledgeMany(body?.taskIds || [], req.user?.id, req.user?.tenant_id);
   }
 
-  // Sprint 4: Sugestão de próxima ação por IA
+  // Sugestao de proxima acao por IA (Next-Best-Action).
+  // Usado pelo botao "O que fazer agora?" no card da diligencia.
   @Post('next-action')
   @HttpCode(HttpStatus.OK)
   suggestNextAction(@Body() body: any) {
@@ -200,13 +202,13 @@ export class TasksController {
     return this.tasksService.findComments(id, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
-  // Sprint 5: Task detail
+  // Detalhe completo da tarefa (comments + checklist + counts) — abre modal
   @Get(':id')
   findOne(@Param('id') id: string, @Request() req: any) {
     return this.tasksService.findOne(id, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
 
-  // Sprint 5: Checklist CRUD
+  // Checklist CRUD (sub-itens da tarefa)
   @Post(':id/checklist')
   addChecklistItem(@Param('id') id: string, @Body('text') text: string, @Request() req: any) {
     return this.tasksService.addChecklistItem(id, text, req.user?.tenant_id, req.user?.id, req.user?.roles);

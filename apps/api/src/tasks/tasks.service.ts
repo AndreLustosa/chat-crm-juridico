@@ -11,6 +11,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { isAdmin } from '../common/utils/permissions.util';
+import { inferFolder, VALID_FOLDERS } from './task-folder-inference.util';
+import { MAX_ATTACHMENT_BYTES, ACK_BATCH_MAX_IDS, OVERDUE_SLA_WINDOW_HOURS, OVERDUE_TASKS_BATCH_LIMIT, WORKLOAD_WINDOW_DAYS, DELEGATION_METRICS_TASKS_LIMIT, OPENAI_NBA_TIMEOUT_MS } from '../calendar/calendar.constants';
 
 // Whitelist de MIME types pra anexos de Task. Mesma do portal/upload —
 // PDF, imagens, Office, TXT. Bloqueia executaveis e scripts.
@@ -24,36 +26,6 @@ const ALLOWED_ATTACHMENT_MIMES = new Set<string>([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'text/plain',
 ]);
-
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25MB por arquivo
-
-// Pastas validas pra espelhamento no workspace do processo
-const VALID_FOLDERS = new Set([
-  'CLIENTE', 'PROVAS', 'CONTRATOS', 'PETICOES',
-  'DECISOES', 'PROCURACOES', 'OUTROS',
-]);
-
-/**
- * Sugere automaticamente a pasta CaseDocument baseada no titulo da Task.
- * Acerta ~80% dos casos comuns; estagiario pode trocar manualmente no UI.
- *
- * Calibrado em titulos reais do escritorio:
- *   "Pegar comprovante de residencia" → CLIENTE
- *   "Buscar RG/CPF do cliente" → CLIENTE
- *   "Imprimir contrato de honorarios" → CONTRATOS
- *   "Anexar procuracao assinada" → PROCURACOES
- *   "Baixar decisao do TJ" → DECISOES
- */
-function inferFolder(title: string): string {
-  const t = (title || '').toLowerCase();
-  if (/\b(rg|cpf|comprovante|endere[cç]o|cnh|carteira|identidade)\b/.test(t)) return 'CLIENTE';
-  if (/\b(contrato|honor[aá]rio|honorarios)\b/.test(t)) return 'CONTRATOS';
-  if (/\b(procura[cç][aã]o|procuracao)\b/.test(t)) return 'PROCURACOES';
-  if (/\b(decis[aã]o|senten[cç]a|ac[oó]rd[aã]o|despacho)\b/.test(t)) return 'DECISOES';
-  if (/\b(prova|laudo|per[ií]cia|testemunho)\b/.test(t)) return 'PROVAS';
-  if (/\b(peti[cç][aã]o|peticao)\b/.test(t)) return 'PETICOES';
-  return 'OUTROS';
-}
 
 @Injectable()
 export class TasksService {
@@ -813,7 +785,12 @@ export class TasksService {
     const since = new Date(Date.now() - SINCE_DAYS * 24 * 60 * 60 * 1000);
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    // Todas as tasks delegadas no periodo (status final + datas)
+    // Todas as tasks delegadas no periodo (status final + datas).
+    // Bug fix 2026-05-10 (PR3 medio #8): cap em 2000 tasks pra evitar
+    // OOM. Advogado prolifico (5000+ delegacoes em 30d) representa um
+    // outlier — calcular metrics em cima de 5000 tasks via reduce JS
+    // estoura memoria do Node + bloqueia event loop. Cap conservador
+    // mantem metricas representativas (sample dos 2000 mais recentes).
     const tasks = await this.prisma.task.findMany({
       where: {
         created_by_id: userId,
@@ -825,6 +802,8 @@ export class TasksService {
         id: true, title: true, status: true,
         created_at: true, completed_at: true,
       },
+      orderBy: { created_at: 'desc' },
+      take: DELEGATION_METRICS_TASKS_LIMIT,
     });
 
     // Contagem de reaberturas — taskComment com texto começando em "↩️ Reaberta"
@@ -956,6 +935,13 @@ export class TasksService {
    */
   async acknowledgeMany(taskIds: string[], userId: string, tenantId?: string) {
     if (!taskIds?.length) return { acknowledged: 0 };
+
+    // Bug fix 2026-05-10 (PR3 medio #13): cap em 200 IDs por request.
+    // Antes cliente buggy/malicioso podia mandar 100k IDs — IN (...) com
+    // muitos elementos pode estourar limite do PG ou bloquear o pool.
+    if (taskIds.length > ACK_BATCH_MAX_IDS) {
+      throw new BadRequestException(`Maximo ${ACK_BATCH_MAX_IDS} tarefas por request — quebre em batches menores`);
+    }
 
     const now = new Date();
     const result = await this.prisma.task.updateMany({
@@ -1497,8 +1483,7 @@ export class TasksService {
       //   - Paginacao: 500 por execucao (cron de 1h, 1 escritorio com
       //     >500 tasks vencidas em janela e sinal de problema operacional)
       // tenant_id e raw — cron roda para todos os tenants.
-      const SLA_WINDOW_HOURS = 75;
-      const lowerBound = new Date(now.getTime() - SLA_WINDOW_HOURS * 3_600_000);
+      const lowerBound = new Date(now.getTime() - OVERDUE_SLA_WINDOW_HOURS * 3_600_000);
       const upperBound = new Date(now.getTime() - 60_000); // 1min atras (evita race com inserts)
 
       const overdueTasks = await this.prisma.task.findMany({
@@ -1519,7 +1504,7 @@ export class TasksService {
           assigned_user: { select: { id: true, name: true } },
         },
         orderBy: { due_at: 'desc' }, // mais recentemente vencidas primeiro (mais relevantes)
-        take: 500,
+        take: OVERDUE_TASKS_BATCH_LIMIT,
       });
 
       for (const task of overdueTasks) {
@@ -1597,12 +1582,23 @@ export class TasksService {
   // ─── SPRINT 4: Carga de trabalho por usuário (smart assignment) ───────────
 
   async getWorkload(tenantId?: string) {
+    // Bug fix 2026-05-10 (PR3 medio #9): janela de 90d nas tasks
+    // pendentes. Antes agregava TODAS as tasks pendentes historicas
+    // (algumas legacy nunca concluidas inflam contagem) — smart-
+    // assignment escolhia o user com menos pendentes, mas a contagem
+    // estava distorcida por lixo. Agora considera so tasks ativas
+    // (criadas ou com due_at nos ultimos 90d).
     const baseTenant = this.tenantWhere(tenantId);
+    const cutoff = new Date(Date.now() - WORKLOAD_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     const tasks = await this.prisma.task.findMany({
       where: {
         ...baseTenant,
         status: { notIn: ['CONCLUIDA', 'CANCELADA'] },
         assigned_user_id: { not: null },
+        OR: [
+          { due_at: { gte: cutoff } },
+          { created_at: { gte: cutoff } },
+        ],
       },
       select: {
         assigned_user_id: true,
@@ -1681,13 +1677,25 @@ Contexto:
 Responda APENAS em JSON válido no formato:
 {"acao": "texto da ação sugerida (máx 80 chars)", "urgencia": "alta|media|baixa", "justificativa": "por que esta ação é prioritária (máx 120 chars)", "tipo": "ligacao|email|elaborar_peca|reuniao|protocolar|outro"}`;
 
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4.1-mini',
-        messages: [{ role: 'user', content: prompt }],
-        response_format: { type: 'json_object' },
-        max_tokens: 256,
-        temperature: 0.4,
-      });
+      // Bug fix 2026-05-10 (PR3 medio #10): timeout de 10s pra evitar
+      // travamento do request HTTP do frontend se OpenAI degradar (6h+
+      // ja aconteceram em outages historicas). Sem AbortController, o
+      // SDK aguarda timeout default do undici (~5min) e o usuario fica
+      // com loader infinito.
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), OPENAI_NBA_TIMEOUT_MS);
+      let completion: any;
+      try {
+        completion = await openai.chat.completions.create({
+          model: 'gpt-4.1-mini',
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          max_tokens: 256,
+          temperature: 0.4,
+        }, { signal: ctrl.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       return JSON.parse(completion.choices[0].message.content || '{}');
     } catch (e: any) {

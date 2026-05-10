@@ -218,6 +218,16 @@ function buildContext(event: any, memory: any, legalCase: any, ficha: any, djenP
 export class CalendarReminderWorker extends WorkerHost {
   private readonly logger = new Logger(CalendarReminderWorker.name);
 
+  // Bug fix 2026-05-10 (PR3 medio #11): SMTP transporter cached. Antes
+  // criava transporter novo por job — TLS handshake por mensagem
+  // (200-500ms cada). Pool reutiliza ate 5 conexoes em paralelo. Nullable
+  // pra suportar config dinamica (settings podem mudar sem restart) —
+  // invalidamos via setter quando settings retorna config diferente.
+  private cachedTransporter: nodemailer.Transporter | null = null;
+  private cachedSmtpKey: string | null = null;
+
+  // Bug fix 2026-05-10 (PR3 baixo #5): emoji removido do log de boot —
+  // dashboards de log nao precisam de unicode estrutural.
   constructor(
     private readonly prisma: PrismaService,
     private readonly whatsapp: WhatsappService,
@@ -227,7 +237,34 @@ export class CalendarReminderWorker extends WorkerHost {
     @InjectQueue('calendar-reminders') private readonly reminderQueue: Queue,
   ) {
     super();
-    this.logger.log('✅ CalendarReminderWorker registrado na fila calendar-reminders (API container)');
+    this.logger.log('CalendarReminderWorker registrado na fila calendar-reminders (API container)');
+  }
+
+  /**
+   * Retorna transporter SMTP cached. Recria se config mudou (compara
+   * host:port:user). Pool=true reutiliza conexoes TLS, maxConnections=5.
+   */
+  private async getTransporter(): Promise<nodemailer.Transporter | null> {
+    const smtp = await this.settings.getSmtpConfig();
+    if (!smtp.host) return null;
+    const key = `${smtp.host}:${smtp.port}:${smtp.user || ''}`;
+    if (this.cachedTransporter && this.cachedSmtpKey === key) {
+      return this.cachedTransporter;
+    }
+    if (this.cachedTransporter) {
+      try { this.cachedTransporter.close(); } catch {}
+    }
+    this.cachedTransporter = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.port === 465,
+      auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
+      pool: true,
+      maxConnections: 5,
+      maxMessages: 100, // recicla conexao apos 100 emails (boa pratica anti-leak)
+    });
+    this.cachedSmtpKey = key;
+    return this.cachedTransporter;
   }
 
   async process(job: Job<any>) {
@@ -933,18 +970,12 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
       return false;
     }
 
-    const smtp = await this.settings.getSmtpConfig();
-    if (!smtp.host) {
+    const transporter = await this.getTransporter();
+    if (!transporter) {
       this.logger.warn('SMTP nao configurado — lembrete email ignorado');
       return false;
     }
-
-    const transporter = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.port === 465,
-      auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
-    });
+    const smtp = await this.settings.getSmtpConfig();
 
     const typeEmoji = TYPE_EMOJI[event.type] || '📅';
     const label = TYPE_LABEL[event.type] || 'Evento';

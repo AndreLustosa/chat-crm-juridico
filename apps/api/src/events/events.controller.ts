@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, Query, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
 import { EventsService, EventTarget } from './events.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CompleteEventDto, CancelEventDto, PostponeEventDto, CompleteHearingDto, ReopenEventDto } from './dto/events.dto';
 
 /**
  * Events — endpoints unificados de cumprimento/cancelamento/adiamento
@@ -44,30 +45,21 @@ export class EventsController {
   // ADMIN sem precisar do checkOwnership por entidade.
   @Post('complete')
   @HttpCode(HttpStatus.OK)
-  complete(
-    @Body() body: { type: 'CALENDAR' | 'TASK' | 'DEADLINE'; id: string; note?: string },
-    @Request() req: any,
-  ) {
+  complete(@Body() body: CompleteEventDto, @Request() req: any) {
     const target: EventTarget = { type: body.type, id: body.id };
     return this.eventsService.complete(target, body.note, req.user?.id, req.user?.tenant_id, req.user?.roles);
   }
 
   @Post('cancel')
   @HttpCode(HttpStatus.OK)
-  cancel(
-    @Body() body: { type: 'CALENDAR' | 'TASK' | 'DEADLINE'; id: string; reason?: string },
-    @Request() req: any,
-  ) {
+  cancel(@Body() body: CancelEventDto, @Request() req: any) {
     const target: EventTarget = { type: body.type, id: body.id };
     return this.eventsService.cancel(target, body.reason, req.user?.id, req.user?.tenant_id, req.user?.roles);
   }
 
   @Post('postpone')
   @HttpCode(HttpStatus.OK)
-  postpone(
-    @Body() body: { type: 'CALENDAR' | 'TASK' | 'DEADLINE'; id: string; new_date: string; reason?: string },
-    @Request() req: any,
-  ) {
+  postpone(@Body() body: PostponeEventDto, @Request() req: any) {
     const target: EventTarget = { type: body.type, id: body.id };
     return this.eventsService.postpone(
       target,
@@ -81,20 +73,7 @@ export class EventsController {
 
   @Post('complete-hearing')
   @HttpCode(HttpStatus.OK)
-  completeHearing(
-    @Body() body: {
-      id: string;
-      result: string;
-      note?: string;
-      deadline_date?: string;
-      deadline_title?: string;
-      acordo_honorario_value?: number;
-      acordo_honorario_parcelas?: number;
-      contratual_honorario_value?: number;
-      contratual_honorario_parcelas?: number;
-    },
-    @Request() req: any,
-  ) {
+  completeHearing(@Body() body: CompleteHearingDto, @Request() req: any) {
     return this.eventsService.completeHearing(
       body.id,
       {
@@ -115,10 +94,7 @@ export class EventsController {
 
   @Post('reopen')
   @HttpCode(HttpStatus.OK)
-  reopen(
-    @Body() body: { type: 'CALENDAR' | 'TASK' | 'DEADLINE'; id: string },
-    @Request() req: any,
-  ) {
+  reopen(@Body() body: ReopenEventDto, @Request() req: any) {
     const target: EventTarget = { type: body.type, id: body.id };
     return this.eventsService.reopen(target, req.user?.tenant_id, req.user?.id, req.user?.roles);
   }
