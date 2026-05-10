@@ -15,6 +15,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { PetitionsService } from './petitions.service';
 import { PetitionAiService } from './petition-ai.service';
@@ -176,26 +177,39 @@ export class PetitionsController {
     );
   }
 
-  // Bug fix #18: cleanup eh DESTRUTIVO — apenas ADMIN
+  // Bug fix #18: cleanup eh DESTRUTIVO — apenas ADMIN + tenant scope
+  // (admin so pode limpar chats do proprio escritorio)
   @Post('chat/cleanup')
   @Roles('ADMIN')
-  cleanup() {
-    return this.chatService.cleanupOldChats();
+  cleanup(@Request() req: any) {
+    return this.chatService.cleanupOldChats(req.user.tenant_id);
   }
 
   // ─── Chat Streaming ───────────────────────────────────────────
 
   // Bug fix #4: DTO + injecao server-side de userId/tenantId/chatId
   // Bloqueia prompt injection via systemPrompt (DTO nao tem esse campo).
+  // Bug fix #13: rate limit 20 msgs/min (chat eh interativo, mais
+  // permissivo que generate). Cap de custo por dia esta em assertAiCostCap.
+  // Bug fix #15: AbortController detecta close do client e propaga
+  // cancelamento pra Anthropic — antes fechar aba continuava cobrando
+  // tokens (8000 output tokens = US$ 0.12) sem ninguem ver a resposta.
   @Post('chat')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async chat(
     @Body() body: StreamChatDto,
     @Request() req: any,
     @Res() res: Response,
   ) {
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) {
+        abortController.abort();
+      }
+    });
+
     return this.chatService.streamChat(
       {
-        // Reconstroi messages com a nova msg + historico do DB (TODO PR2)
         messages: [{ role: 'user', content: body.newMessage }],
         skills: body.skills,
         model: body.model,
@@ -206,6 +220,7 @@ export class PetitionsController {
         userId: req.user.id,
         tenantId: req.user.tenant_id,
         chatId: body.chatId,
+        abortSignal: abortController.signal,
       },
       res,
     );
@@ -229,8 +244,12 @@ export class PetitionsController {
     return this.service.create(caseId, body, req.user.id, req.user.tenant_id);
   }
 
+  // Bug fix #13: rate limit pra geracao IA (5 chamadas / 5min por IP).
+  // Cap diario por user/tenant esta no service via assertAiCostCap (#6).
+  // Esse Throttle eh defesa adicional contra burst (script automatizado).
   @Post('case/:caseId/generate')
   @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
+  @Throttle({ default: { limit: 5, ttl: 5 * 60_000 } })
   createAndGenerate(
     @Param('caseId') caseId: string,
     @Body() body: CreateAndGenerateDto,
@@ -246,6 +265,7 @@ export class PetitionsController {
 
   @Post(':id/generate')
   @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
+  @Throttle({ default: { limit: 5, ttl: 5 * 60_000 } })
   generate(
     @Param('id') id: string,
     @Body() body: { lgpdConsent?: boolean } = {},

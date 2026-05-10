@@ -131,6 +131,7 @@ export class LegalTemplatesService {
       description?: string;
     },
     tenantId?: string,
+    actorUserId?: string,
   ) {
     const template = await this.prisma.legalTemplate.findUnique({
       where: { id: templateId },
@@ -151,6 +152,34 @@ export class LegalTemplatesService {
     if (data.content_json !== undefined) updateData.content_json = data.content_json;
     if (data.variables) updateData.variables = data.variables;
     if (data.description !== undefined) updateData.description = data.description || null;
+
+    // Bug fix 2026-05-10 (Peticoes PR2 #22):
+    // Audit log antes do update — captura before/after pra investigar
+    // template alterado erroneamente (peticoes futuras saem com novo
+    // conteudo, sem trilha de quem mudou e quando).
+    this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'update',
+        entity: 'LegalTemplate',
+        entity_id: templateId,
+        meta_json: {
+          before: {
+            name: template.name,
+            type: template.type,
+            legal_area: template.legal_area,
+            description: template.description,
+            // content_json eh grande — guarda hash em vez do conteudo
+            content_hash: template.content_json
+              ? require('crypto').createHash('sha256').update(JSON.stringify(template.content_json)).digest('hex').slice(0, 16)
+              : null,
+          },
+          after: data,
+        } as any,
+      },
+    }).catch((e: any) => {
+      this.logger.warn(`[TEMPLATE-AUDIT] Falha ao gravar log: ${e.message}`);
+    });
 
     return this.prisma.legalTemplate.update({
       where: { id: templateId },

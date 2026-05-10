@@ -74,7 +74,8 @@ export class LegalTemplatesController {
     },
     @Request() req: any,
   ) {
-    return this.service.update(id, body, req.user.tenant_id);
+    // Bug fix #22: passa actorUserId pra audit log
+    return this.service.update(id, body, req.user.tenant_id, req.user.id);
   }
 
   @Delete(':id')
