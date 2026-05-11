@@ -12,6 +12,18 @@ export class SaveOrganicSearchConfigDto {
   @IsString()
   @IsOptional()
   serviceAccountJson?: string;
+
+  @IsString()
+  @IsOptional()
+  oauthClientId?: string;
+
+  @IsString()
+  @IsOptional()
+  oauthClientSecret?: string;
+
+  @IsString()
+  @IsOptional()
+  oauthRedirectUri?: string;
 }
 
 export class CreateOrganicLandingPageDto {

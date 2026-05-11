@@ -3850,8 +3850,15 @@ model OrganicSearchConfig {
   tenant_id             String    @unique
   site_url              String
   property_type         String    @default("DOMAIN")
+  auth_method           String    @default("SERVICE_ACCOUNT")
   service_account_b64   String?   @db.Text
   service_account_email String?
+  oauth_client_id       String?   @db.Text
+  oauth_client_secret   String?   @db.Text
+  oauth_redirect_uri    String?
+  oauth_refresh_token   String?   @db.Text
+  oauth_user_email      String?
+  oauth_connected_at    DateTime?
   is_active             Boolean   @default(true)
   last_sync_at          DateTime?
   last_inspection_at    DateTime?

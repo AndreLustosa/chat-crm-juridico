@@ -8,6 +8,7 @@ import {
   CircleOff,
   FileSearch,
   Globe2,
+  LogIn,
   Loader2,
   MapPin,
   MousePointerClick,
@@ -17,9 +18,10 @@ import {
   Settings,
   ShieldCheck,
   Target,
+  Unlink,
   X,
 } from "lucide-react";
-import api from "@/lib/api";
+import api, { API_BASE_URL } from "@/lib/api";
 import { showError, showSuccess } from "@/lib/toast";
 import { useRole } from "@/lib/useRole";
 
@@ -27,6 +29,11 @@ interface OrganicConfig {
   configured: boolean;
   site_url: string | null;
   property_type: string | null;
+  auth_method: string | null;
+  oauth_configured: boolean;
+  oauth_connected: boolean;
+  oauth_user_email: string | null;
+  oauth_connected_at: string | null;
   service_account_email: string | null;
   is_active: boolean;
   last_sync_at: string | null;
@@ -116,6 +123,8 @@ const DEFAULT_FORM = {
   sitemapUrl: "https://andrelustosaadvogados.com.br/sitemap.xml",
 };
 
+const ORGANIC_OAUTH_REDIRECT_URI = `${API_BASE_URL}/organic-traffic/oauth/callback`;
+
 function fmtNumber(value: number): string {
   return value.toLocaleString("pt-BR");
 }
@@ -188,6 +197,8 @@ export default function TrafegoOrganicoPage() {
   const [pageForm, setPageForm] = useState(DEFAULT_FORM);
   const [configForm, setConfigForm] = useState({
     siteUrl: "sc-domain:andrelustosaadvogados.com.br",
+    oauthClientId: "",
+    oauthClientSecret: "",
     serviceAccountJson: "",
   });
 
@@ -218,6 +229,28 @@ export default function TrafegoOrganicoPage() {
       load();
     }
   }, [perms.canViewOrganicTraffic]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const oauth = params.get("oauth");
+    if (!oauth) return;
+
+    if (oauth === "success") {
+      showSuccess("Google Search Console conectado.");
+    } else {
+      showError(params.get("reason") || "Falha ao conectar Google Search Console.");
+    }
+
+    params.delete("oauth");
+    params.delete("reason");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`,
+    );
+  }, []);
 
   const areas = useMemo(
     () =>
@@ -323,14 +356,63 @@ export default function TrafegoOrganicoPage() {
     try {
       await api.post("/organic-traffic/config", {
         siteUrl: configForm.siteUrl.trim(),
+        oauthClientId: configForm.oauthClientId.trim() || undefined,
+        oauthClientSecret: configForm.oauthClientSecret.trim() || undefined,
+        oauthRedirectUri: ORGANIC_OAUTH_REDIRECT_URI,
         serviceAccountJson: configForm.serviceAccountJson.trim() || undefined,
       });
-      setConfigForm((prev) => ({ ...prev, serviceAccountJson: "" }));
+      setConfigForm((prev) => ({
+        ...prev,
+        oauthClientId: "",
+        oauthClientSecret: "",
+        serviceAccountJson: "",
+      }));
       setShowConfigForm(false);
-      showSuccess("Search Console configurado.");
+      showSuccess("Configuracao do Search Console salva.");
       await load();
     } catch (err) {
       showError(getApiErrorMessage(err, "Falha ao salvar configuracao."));
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function connectOAuth() {
+    const hasSavedOAuth = !!summary?.config.oauth_configured;
+    if (
+      !hasSavedOAuth &&
+      (!configForm.oauthClientId.trim() || !configForm.oauthClientSecret.trim())
+    ) {
+      showError("Informe Client ID e Client Secret para conectar com Google.");
+      return;
+    }
+
+    setActing("connect-oauth");
+    try {
+      await api.post("/organic-traffic/config", {
+        siteUrl: configForm.siteUrl.trim(),
+        oauthClientId: configForm.oauthClientId.trim() || undefined,
+        oauthClientSecret: configForm.oauthClientSecret.trim() || undefined,
+        oauthRedirectUri: ORGANIC_OAUTH_REDIRECT_URI,
+      });
+      const res = await api.get<{ authorize_url: string }>(
+        "/organic-traffic/oauth/start",
+      );
+      window.location.href = res.data.authorize_url;
+    } catch (err) {
+      showError(getApiErrorMessage(err, "Falha ao iniciar conexao com Google."));
+      setActing(null);
+    }
+  }
+
+  async function disconnectOAuth() {
+    setActing("disconnect-oauth");
+    try {
+      await api.post("/organic-traffic/oauth/disconnect");
+      showSuccess("Google Search Console desconectado.");
+      await load();
+    } catch (err) {
+      showError(getApiErrorMessage(err, "Falha ao desconectar Google."));
     } finally {
       setActing(null);
     }
@@ -466,7 +548,9 @@ export default function TrafegoOrganicoPage() {
             config={summary.config}
             onOpenConfig={() => setShowConfigForm(true)}
             onSync={syncNow}
+            onDisconnectOAuth={disconnectOAuth}
             syncing={acting === "sync"}
+            disconnecting={acting === "disconnect-oauth"}
           />
         )}
       </div>
@@ -566,23 +650,53 @@ export default function TrafegoOrganicoPage() {
                 placeholder="sc-domain:andrelustosaadvogados.com.br"
               />
             </Field>
-            <Field label="Service Account JSON">
-              <textarea
-                value={configForm.serviceAccountJson}
+            <Field label="URI de redirecionamento">
+              <input
+                value={ORGANIC_OAUTH_REDIRECT_URI}
+                readOnly
+                className={`${INPUT_CLASS} font-mono text-xs`}
+              />
+            </Field>
+            <Field label="Client ID">
+              <input
+                value={configForm.oauthClientId}
+                onChange={(e) =>
+                  setConfigForm((p) => ({ ...p, oauthClientId: e.target.value }))
+                }
+                className={`${INPUT_CLASS} font-mono text-xs`}
+                placeholder={
+                  summary?.config.oauth_configured
+                    ? "Ja configurado, cole outro para substituir"
+                    : "Client ID do OAuth 2.0"
+                }
+              />
+            </Field>
+            <Field label="Client Secret">
+              <input
+                type="password"
+                value={configForm.oauthClientSecret}
                 onChange={(e) =>
                   setConfigForm((p) => ({
                     ...p,
-                    serviceAccountJson: e.target.value,
+                    oauthClientSecret: e.target.value,
                   }))
                 }
-                rows={8}
-                className={`${INPUT_CLASS} min-h-36 resize-y py-2 font-mono text-xs`}
-                placeholder={'{\n  "type": "service_account",\n  "client_email": "...",\n  "private_key": "..."\n}'}
+                className={`${INPUT_CLASS} font-mono text-xs`}
+                placeholder={
+                  summary?.config.oauth_configured
+                    ? "Ja configurado, cole outro para substituir"
+                    : "Client Secret do OAuth 2.0"
+                }
               />
             </Field>
-            {summary?.config.service_account_email && (
+            {summary?.config.oauth_user_email && (
               <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600">
-                Conectada como {summary.config.service_account_email}
+                Conectado como {summary.config.oauth_user_email}
+              </div>
+            )}
+            {summary?.config.service_account_email && !summary.config.oauth_connected && (
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+                Fallback antigo: {summary.config.service_account_email}
               </div>
             )}
           </div>
@@ -600,6 +714,18 @@ export default function TrafegoOrganicoPage() {
             >
               {acting === "save-config" && <Loader2 className="animate-spin" size={15} />}
               Salvar
+            </button>
+            <button
+              onClick={connectOAuth}
+              disabled={acting === "connect-oauth"}
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-60"
+            >
+              {acting === "connect-oauth" ? (
+                <Loader2 className="animate-spin" size={15} />
+              ) : (
+                <LogIn size={15} />
+              )}
+              Conectar Google
             </button>
           </div>
         </Modal>
@@ -958,13 +1084,21 @@ function ConfigTab({
   config,
   onOpenConfig,
   onSync,
+  onDisconnectOAuth,
   syncing,
+  disconnecting,
 }: {
   config: OrganicConfig;
   onOpenConfig: () => void;
   onSync: () => void;
+  onDisconnectOAuth: () => void;
   syncing: boolean;
+  disconnecting: boolean;
 }) {
+  const connectionLabel = config.oauth_connected
+    ? config.oauth_user_email || "Conta Google conectada"
+    : config.service_account_email || "-";
+
   return (
     <section className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
       <div className="rounded-lg border border-border bg-card p-5">
@@ -981,7 +1115,8 @@ function ConfigTab({
         </div>
         <div className="mt-5 space-y-3 text-sm">
           <InfoRow label="Tipo" value={config.property_type || "-"} />
-          <InfoRow label="Service Account" value={config.service_account_email || "-"} />
+          <InfoRow label="Metodo" value={config.oauth_connected ? "OAuth Google" : config.auth_method || "-"} />
+          <InfoRow label="Conta" value={connectionLabel} />
           <InfoRow label="Ultimo sync" value={fmtDate(config.last_sync_at)} />
           <InfoRow label="Ultima inspecao" value={fmtDate(config.last_inspection_at)} />
         </div>
@@ -993,6 +1128,16 @@ function ConfigTab({
             <Settings size={16} />
             Editar
           </button>
+          {config.oauth_connected && (
+            <button
+              onClick={onDisconnectOAuth}
+              disabled={disconnecting}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-red-500/20 px-4 text-sm font-semibold text-red-600 hover:bg-red-500/10 disabled:opacity-60"
+            >
+              {disconnecting ? <Loader2 className="animate-spin" size={16} /> : <Unlink size={16} />}
+              Desconectar
+            </button>
+          )}
           <button
             onClick={onSync}
             disabled={!config.configured || syncing}
@@ -1009,7 +1154,8 @@ function ConfigTab({
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {[
             "Search Console API ativa no Google Cloud",
-            "Service Account adicionada como usuario da propriedade",
+            "OAuth 2.0 Client ID configurado",
+            "Conta Google proprietaria autorizada",
             "Propriedade informada como sc-domain ou URL-prefix",
             "Landing pages cadastradas por cidade e area",
           ].map((item) => (

@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { google, searchconsole_v1 } from 'googleapis';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptValue, encryptValue } from '../common/utils/crypto.util';
@@ -19,6 +20,11 @@ type SyncTrigger = 'MANUAL' | 'CRON';
 
 const SEARCH_CONSOLE_SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
+];
+
+const SEARCH_CONSOLE_OAUTH_SCOPES = [
+  ...SEARCH_CONSOLE_SCOPES,
+  'https://www.googleapis.com/auth/userinfo.email',
 ];
 
 const DEFAULT_SITE_BASE =
@@ -58,9 +64,21 @@ export class OrganicTrafficService {
     });
 
     return {
-      configured: !!(config?.site_url && config.service_account_b64),
+      configured: !!(
+        config?.site_url &&
+        (config.oauth_refresh_token || config.service_account_b64)
+      ),
       site_url: config?.site_url ?? null,
       property_type: config?.property_type ?? null,
+      auth_method: config?.oauth_refresh_token
+        ? 'OAUTH'
+        : config?.service_account_b64
+          ? 'SERVICE_ACCOUNT'
+          : config?.auth_method ?? null,
+      oauth_configured: !!(config?.oauth_client_id && config.oauth_client_secret),
+      oauth_connected: !!config?.oauth_refresh_token,
+      oauth_user_email: config?.oauth_user_email ?? null,
+      oauth_connected_at: config?.oauth_connected_at ?? null,
       service_account_email: config?.service_account_email ?? null,
       is_active: config?.is_active ?? false,
       last_sync_at: config?.last_sync_at ?? null,
@@ -77,6 +95,11 @@ export class OrganicTrafficService {
 
     let encryptedB64: string | undefined;
     let serviceAccountEmail: string | undefined;
+    let encryptedOAuthClientId: string | undefined;
+    let encryptedOAuthClientSecret: string | undefined;
+    const oauthClientId = dto.oauthClientId?.trim();
+    const oauthClientSecret = dto.oauthClientSecret?.trim();
+    const oauthRedirectUri = dto.oauthRedirectUri?.trim();
 
     if (dto.serviceAccountJson?.trim()) {
       const parsed = this.parseServiceAccountJson(dto.serviceAccountJson);
@@ -85,16 +108,47 @@ export class OrganicTrafficService {
       serviceAccountEmail = parsed.client_email;
     }
 
+    if ((oauthClientId && !oauthClientSecret) || (!oauthClientId && oauthClientSecret)) {
+      throw new HttpException(
+        'Informe Client ID e Client Secret do OAuth juntos.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (oauthClientId && oauthClientSecret) {
+      encryptedOAuthClientId = encryptValue(oauthClientId);
+      encryptedOAuthClientSecret = encryptValue(oauthClientSecret);
+    }
+
     const existing = await this.prisma.organicSearchConfig.findUnique({
       where: { tenant_id: tenantId },
     });
 
-    if (!existing && !encryptedB64) {
+    if (!existing && !encryptedB64 && !encryptedOAuthClientId) {
       throw new HttpException(
-        'Cole o JSON da Service Account para configurar o Search Console.',
+        'Informe Client ID e Client Secret do OAuth para conectar o Search Console.',
         HttpStatus.BAD_REQUEST,
       );
     }
+
+    if (
+      existing &&
+      !encryptedB64 &&
+      !encryptedOAuthClientId &&
+      !existing.service_account_b64 &&
+      !(existing.oauth_client_id && existing.oauth_client_secret)
+    ) {
+      throw new HttpException(
+        'Informe credenciais OAuth ou Service Account para configurar o Search Console.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const nextAuthMethod = encryptedOAuthClientId
+      ? 'OAUTH'
+      : encryptedB64
+        ? 'SERVICE_ACCOUNT'
+        : existing?.auth_method ?? 'OAUTH';
 
     const config = await this.prisma.organicSearchConfig.upsert({
       where: { tenant_id: tenantId },
@@ -102,24 +156,41 @@ export class OrganicTrafficService {
         tenant_id: tenantId,
         site_url: siteUrl,
         property_type: propertyType,
+        auth_method: nextAuthMethod,
         service_account_b64: encryptedB64,
         service_account_email: serviceAccountEmail,
+        oauth_client_id: encryptedOAuthClientId,
+        oauth_client_secret: encryptedOAuthClientSecret,
+        oauth_redirect_uri: oauthRedirectUri || this.getDefaultOAuthRedirectUri(),
         is_active: true,
       },
       update: {
         site_url: siteUrl,
         property_type: propertyType,
+        auth_method: nextAuthMethod,
         service_account_b64: encryptedB64 ?? undefined,
         service_account_email: serviceAccountEmail ?? undefined,
+        oauth_client_id: encryptedOAuthClientId ?? undefined,
+        oauth_client_secret: encryptedOAuthClientSecret ?? undefined,
+        oauth_redirect_uri: oauthRedirectUri || undefined,
         is_active: true,
         last_error: null,
       },
     });
 
     return {
-      configured: !!config.service_account_b64,
+      configured: !!(config.oauth_refresh_token || config.service_account_b64),
       site_url: config.site_url,
       property_type: config.property_type,
+      auth_method: config.oauth_refresh_token
+        ? 'OAUTH'
+        : config.service_account_b64
+          ? 'SERVICE_ACCOUNT'
+          : config.auth_method,
+      oauth_configured: !!(config.oauth_client_id && config.oauth_client_secret),
+      oauth_connected: !!config.oauth_refresh_token,
+      oauth_user_email: config.oauth_user_email,
+      oauth_connected_at: config.oauth_connected_at,
       service_account_email: config.service_account_email,
       is_active: config.is_active,
     };
@@ -132,6 +203,99 @@ export class OrganicTrafficService {
       ok: true,
       site: site.data,
     };
+  }
+
+  async buildOAuthUrl(tenantId: string) {
+    const config = await this.prisma.organicSearchConfig.findUnique({
+      where: { tenant_id: tenantId },
+    });
+
+    if (!config?.site_url) {
+      throw new HttpException(
+        'Salve a propriedade do Search Console antes de conectar o Google.',
+        HttpStatus.PRECONDITION_FAILED,
+      );
+    }
+
+    const oauthClient = this.createOAuthClientFromConfig(config);
+    const state = this.generateOAuthState(tenantId);
+
+    return oauthClient.generateAuthUrl({
+      access_type: 'offline',
+      prompt: 'consent',
+      include_granted_scopes: true,
+      scope: SEARCH_CONSOLE_OAUTH_SCOPES,
+      state,
+    });
+  }
+
+  async handleOAuthCallback(code: string, state: string) {
+    const tenantId = this.parseOAuthState(state);
+
+    const config = await this.prisma.organicSearchConfig.findUnique({
+      where: { tenant_id: tenantId },
+    });
+    if (!config) {
+      throw new HttpException(
+        'Configuracao do Search Console nao encontrada.',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const oauthClient = this.createOAuthClientFromConfig(config);
+    const { tokens } = await oauthClient.getToken(code);
+    if (!tokens.refresh_token) {
+      throw new HttpException(
+        'Google nao retornou refresh_token. Remova o acesso antigo em myaccount.google.com/permissions e tente novamente.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    oauthClient.setCredentials(tokens);
+    const email = await this.fetchOAuthUserEmail(oauthClient);
+
+    await this.prisma.organicSearchConfig.update({
+      where: { tenant_id: tenantId },
+      data: {
+        oauth_refresh_token: encryptValue(tokens.refresh_token),
+        oauth_user_email: email,
+        oauth_connected_at: new Date(),
+        auth_method: 'OAUTH',
+        is_active: true,
+        last_error: null,
+      },
+    });
+
+    return { tenantId, email };
+  }
+
+  async disconnectOAuth(tenantId: string) {
+    const config = await this.prisma.organicSearchConfig.findUnique({
+      where: { tenant_id: tenantId },
+    });
+    if (!config) return { ok: true };
+
+    if (config.oauth_refresh_token) {
+      try {
+        const oauthClient = this.createOAuthClientFromConfig(config);
+        await oauthClient.revokeToken(decryptValue(config.oauth_refresh_token));
+      } catch (e: any) {
+        this.logger.warn(`Falha ao revogar OAuth Search Console: ${e.message}`);
+      }
+    }
+
+    await this.prisma.organicSearchConfig.update({
+      where: { tenant_id: tenantId },
+      data: {
+        oauth_refresh_token: null,
+        oauth_user_email: null,
+        oauth_connected_at: null,
+        auth_method: config.service_account_b64 ? 'SERVICE_ACCOUNT' : 'OAUTH',
+        is_active: !!config.service_account_b64,
+      },
+    });
+
+    return { ok: true };
   }
 
   async listSitemaps(tenantId: string) {
@@ -588,26 +752,130 @@ export class OrganicTrafficService {
     const config = await this.prisma.organicSearchConfig.findUnique({
       where: { tenant_id: tenantId },
     });
-    if (!config?.site_url || !config.service_account_b64 || !config.is_active) {
+    if (!config?.site_url || !config.is_active) {
       throw new HttpException(
         'Search Console nao configurado para este tenant.',
         HttpStatus.PRECONDITION_FAILED,
       );
     }
 
-    const b64 = decryptValue(config.service_account_b64);
-    const credentials = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-    const auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: SEARCH_CONSOLE_SCOPES,
-    });
-    const authClient = await auth.getClient();
+    let authClient: any;
+
+    if (config.oauth_refresh_token) {
+      authClient = this.createOAuthClientFromConfig(config);
+      authClient.setCredentials({
+        refresh_token: decryptValue(config.oauth_refresh_token),
+      });
+    } else if (config.service_account_b64) {
+      const b64 = decryptValue(config.service_account_b64);
+      const credentials = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: SEARCH_CONSOLE_SCOPES,
+      });
+      authClient = await auth.getClient();
+    } else {
+      throw new HttpException(
+        'Search Console sem OAuth conectado. Conecte sua conta Google.',
+        HttpStatus.PRECONDITION_FAILED,
+      );
+    }
+
     const client = google.searchconsole({
       version: 'v1',
       auth: authClient as any,
     });
 
     return { config, client };
+  }
+
+  private createOAuthClientFromConfig(config: {
+    oauth_client_id: string | null;
+    oauth_client_secret: string | null;
+    oauth_redirect_uri: string | null;
+  }) {
+    if (!config.oauth_client_id || !config.oauth_client_secret) {
+      throw new HttpException(
+        'Credenciais OAuth do Search Console nao configuradas.',
+        HttpStatus.PRECONDITION_FAILED,
+      );
+    }
+
+    return new google.auth.OAuth2(
+      decryptValue(config.oauth_client_id),
+      decryptValue(config.oauth_client_secret),
+      config.oauth_redirect_uri || this.getDefaultOAuthRedirectUri(),
+    );
+  }
+
+  private async fetchOAuthUserEmail(oauthClient: any): Promise<string | null> {
+    try {
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauthClient });
+      const userInfo = await oauth2.userinfo.get();
+      return userInfo.data.email ?? null;
+    } catch (e: any) {
+      this.logger.warn(`Nao foi possivel ler email OAuth: ${e.message}`);
+      return null;
+    }
+  }
+
+  private getDefaultOAuthRedirectUri(): string {
+    const apiBase =
+      process.env.SEARCH_CONSOLE_OAUTH_API_BASE_URL ||
+      process.env.API_PUBLIC_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      'https://andrelustosaadvogados.com.br/api';
+
+    return `${apiBase.replace(/\/+$/, '')}/organic-traffic/oauth/callback`;
+  }
+
+  private generateOAuthState(tenantId: string): string {
+    const payload = Buffer.from(
+      JSON.stringify({
+        tenantId,
+        nonce: randomBytes(16).toString('hex'),
+        exp: Date.now() + 10 * 60 * 1000,
+      }),
+    ).toString('base64url');
+    return `${payload}.${this.signOAuthState(payload)}`;
+  }
+
+  private parseOAuthState(state: string): string {
+    const [payload, signature] = state.split('.');
+    if (!payload || !signature) {
+      throw new HttpException('State OAuth invalido.', HttpStatus.BAD_REQUEST);
+    }
+
+    const expected = this.signOAuthState(payload);
+    const expectedBuffer = Buffer.from(expected);
+    const signatureBuffer = Buffer.from(signature);
+    if (
+      expectedBuffer.length !== signatureBuffer.length ||
+      !timingSafeEqual(expectedBuffer, signatureBuffer)
+    ) {
+      throw new HttpException('State OAuth invalido.', HttpStatus.BAD_REQUEST);
+    }
+
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!decoded?.tenantId || !decoded?.exp || Date.now() > decoded.exp) {
+      throw new HttpException(
+        'Sessao OAuth expirada. Volte ao CRM e clique em conectar novamente.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    return decoded.tenantId;
+  }
+
+  private signOAuthState(payload: string): string {
+    const secret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET;
+    if (!secret) {
+      throw new HttpException(
+        'JWT_SECRET ou ENCRYPTION_KEY deve estar configurado para OAuth.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    return createHmac('sha256', secret).update(payload).digest('base64url');
   }
 
   private async fetchMetricsForPage(

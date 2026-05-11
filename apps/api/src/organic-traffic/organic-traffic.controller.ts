@@ -8,10 +8,13 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { OrganicTrafficService } from './organic-traffic.service';
 import {
   CreateOrganicLandingPageDto,
@@ -47,6 +50,56 @@ export class OrganicTrafficController {
   @Roles('ADMIN')
   testConfig(@Req() req: any) {
     return this.service.testConfig(req.user.tenant_id);
+  }
+
+  @Get('oauth/start')
+  @Roles('ADMIN')
+  async oauthStart(@Req() req: any) {
+    const url = await this.service.buildOAuthUrl(req.user.tenant_id);
+    return { authorize_url: url };
+  }
+
+  @Public()
+  @Get('oauth/callback')
+  async oauthCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Query('error') error: string | undefined,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const forwardedHost = req.get('x-forwarded-host') || req.get('host');
+    const forwardedProto =
+      req.get('x-forwarded-proto') || req.protocol || 'https';
+    const webBase =
+      process.env.FRONTEND_BASE_URL ||
+      (forwardedHost ? `${forwardedProto}://${forwardedHost}` : null) ||
+      'https://andrelustosaadvogados.com.br';
+    const pagePath = '/atendimento/marketing/trafego-organico';
+
+    if (error) {
+      return res.redirect(
+        `${webBase}${pagePath}?oauth=error&reason=${encodeURIComponent(error)}`,
+      );
+    }
+    if (!code || !state) {
+      return res.redirect(`${webBase}${pagePath}?oauth=error&reason=missing_params`);
+    }
+
+    try {
+      await this.service.handleOAuthCallback(code, state);
+      return res.redirect(`${webBase}${pagePath}?oauth=success`);
+    } catch (e: any) {
+      return res.redirect(
+        `${webBase}${pagePath}?oauth=error&reason=${encodeURIComponent(e.message ?? 'unknown')}`,
+      );
+    }
+  }
+
+  @Post('oauth/disconnect')
+  @Roles('ADMIN')
+  disconnectOAuth(@Req() req: any) {
+    return this.service.disconnectOAuth(req.user.tenant_id);
   }
 
   @Get('sitemaps')
