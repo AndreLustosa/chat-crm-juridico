@@ -162,14 +162,24 @@ export class MemoriesService {
     return { groups, total: memories.length };
   }
 
-  async createOrganization(tenantId: string, body: { content: string; subcategory: string; confidence?: number }) {
+  async createOrganization(
+    tenantId: string,
+    body: { content: string; subcategory: string; confidence?: number },
+    actorUserId?: string,
+  ) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
     const content = (body.content || '').trim();
+    // Bug fix 2026-05-11 (Memoria PR2 #A8): validacao reforcada
     if (content.length < 5) throw new BadRequestException('content muito curto (min 5 chars)');
     if (content.length > 500) throw new BadRequestException('content longo demais (max 500 chars). Resumir em 1-2 frases.');
     const subcategory = (body.subcategory || '').trim();
     if (!VALID_ORG_SUBCATEGORIES.has(subcategory)) {
       throw new BadRequestException(`subcategory invalida. Opcoes: ${[...VALID_ORG_SUBCATEGORIES].join(', ')}`);
+    }
+    // Confidence range [0, 1]
+    let confidence = typeof body.confidence === 'number' ? body.confidence : 1.0;
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      throw new BadRequestException('confidence deve ser numero entre 0 e 1');
     }
 
     const embedding = await this.generateEmbedding(content);
@@ -183,36 +193,66 @@ export class MemoriesService {
       throw new ConflictException(`Ja existe memoria similar: "${dup.content}"`);
     }
 
-    const confidence = typeof body.confidence === 'number' ? body.confidence : 1.0;
+    // Bug fix #A4: usa Prisma.memory.create + retorna ID pra audit log
+    // (em vez de executeRawUnsafe sem RETURNING). Embedding vai por update.
+    const created = await this.prisma.memory.create({
+      data: {
+        tenant_id: tenantId,
+        scope: 'organization',
+        scope_id: tenantId,
+        type: 'semantic',
+        subcategory,
+        content,
+        source_type: 'manual',
+        confidence,
+        status: 'active',
+      },
+      select: { id: true },
+    });
     await this.prisma.$executeRawUnsafe(
-      `
-      INSERT INTO "Memory" (
-        id, tenant_id, scope, scope_id, type, subcategory, content, embedding,
-        source_type, confidence, status, created_at, updated_at
-      ) VALUES (
-        gen_random_uuid(), $1, 'organization', $1, 'semantic', $2, $3, $4::vector,
-        'manual', $5, 'active', NOW(), NOW()
-      )
-      `,
-      tenantId,
-      subcategory,
-      content,
+      `UPDATE "Memory" SET embedding = $1::vector WHERE id = $2`,
       this.toVectorLiteral(embedding),
-      confidence,
+      created.id,
     );
+
+    // Bug fix #A4: audit log de criacao
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_create',
+        entity: 'Memory',
+        entity_id: created.id,
+        meta_json: {
+          tenant_id: tenantId,
+          scope: 'organization',
+          subcategory,
+          content_preview: content.slice(0, 100),
+        },
+      },
+    }).catch((e: any) => this.logger.warn(`[MEMORY] Falha audit memory_create: ${e.message}`));
+
     await this.triggerOrgProfileRegen(tenantId, 'create-org');
-    return { success: true };
+    return { success: true, id: created.id };
   }
 
-  async updateMemory(id: string, tenantId: string, body: { content?: string; subcategory?: string }) {
+  async updateMemory(
+    id: string,
+    tenantId: string,
+    body: { content?: string; subcategory?: string },
+    actorUserId?: string,
+  ) {
     const existing = await this.prisma.memory.findFirst({
       where: { id, tenant_id: tenantId },
     });
     if (!existing) throw new NotFoundException('Memoria nao encontrada');
 
     const patch: any = { updated_at: new Date() };
-    if (typeof body.content === 'string' && body.content.trim().length >= 5) {
-      patch.content = body.content.trim();
+    // Bug fix #A8: validacao reforcada (antes aceitava 5+ chars sem cap superior)
+    if (typeof body.content === 'string') {
+      const c = body.content.trim();
+      if (c.length < 5) throw new BadRequestException('content muito curto (min 5 chars)');
+      if (c.length > 500) throw new BadRequestException('content longo demais (max 500 chars)');
+      patch.content = c;
     }
     if (typeof body.subcategory === 'string' && existing.scope === 'organization') {
       if (!VALID_ORG_SUBCATEGORIES.has(body.subcategory)) {
@@ -242,18 +282,66 @@ export class MemoriesService {
     } else {
       await this.prisma.memory.update({ where: { id }, data: patch });
     }
+
+    // Bug fix #A4: audit log de update (preserva content anterior pra trace)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_update',
+        entity: 'Memory',
+        entity_id: id,
+        meta_json: {
+          tenant_id: tenantId,
+          scope: existing.scope,
+          before_content_preview: existing.content?.slice(0, 100) || null,
+          after_content_preview: patch.content?.slice(0, 100) || existing.content?.slice(0, 100) || null,
+          subcategory_changed: !!patch.subcategory && patch.subcategory !== existing.subcategory,
+        },
+      },
+    }).catch((e: any) => this.logger.warn(`[MEMORY] Falha audit memory_update: ${e.message}`));
+
     if (existing.scope === 'organization') {
       await this.triggerOrgProfileRegen(tenantId, 'update-org');
     }
     return { success: true };
   }
 
-  async deleteMemory(id: string, tenantId: string) {
+  /**
+   * Bug fix 2026-05-11 (Memoria PR2 #A4):
+   * - Soft delete (status='archived') em vez de hard DELETE
+   * - Audit log obrigatorio com snapshot do content antes
+   * - Permite recuperacao via UPDATE manual
+   */
+  async deleteMemory(id: string, tenantId: string, actorUserId?: string) {
     const existing = await this.prisma.memory.findFirst({
       where: { id, tenant_id: tenantId },
     });
     if (!existing) throw new NotFoundException('Memoria nao encontrada');
-    await this.prisma.memory.delete({ where: { id } });
+
+    // Soft delete em vez de DELETE
+    await this.prisma.memory.update({
+      where: { id },
+      data: { status: 'archived' },
+    });
+
+    // Audit log com snapshot do conteudo (max 200 chars)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_delete',
+        entity: 'Memory',
+        entity_id: id,
+        meta_json: {
+          tenant_id: tenantId,
+          scope: existing.scope,
+          scope_id: existing.scope_id,
+          subcategory: existing.subcategory,
+          deleted_content_preview: existing.content?.slice(0, 200) || null,
+          note: 'Soft delete (status=archived). Recuperavel via UPDATE manual.',
+        },
+      },
+    }).catch((e: any) => this.logger.warn(`[MEMORY] Falha audit memory_delete: ${e.message}`));
+
     if (existing.scope === 'organization') {
       await this.triggerOrgProfileRegen(tenantId, 'delete-org');
     }
@@ -275,8 +363,10 @@ export class MemoriesService {
    * Se houver edicao manual, limpa o flag primeiro — admin abdicou dela ao
    * clicar "Regenerar". Atualizacao cirurgica: LLM recebe summary + mudancas
    * desde a ultima incorporacao.
+   *
+   * Bug fix 2026-05-11 (Memoria PR2 #A4): audit log obrigatorio.
    */
-  async regenerateOrganizationProfile(tenantId: string) {
+  async regenerateOrganizationProfile(tenantId: string, actorUserId?: string) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
     await this.prisma.organizationProfile.updateMany({
       where: { tenant_id: tenantId, manually_edited_at: { not: null } },
@@ -288,6 +378,15 @@ export class MemoriesService {
       { tenant_id: tenantId, reason: 'manual-force' },
       { jobId, removeOnComplete: true, attempts: 2 },
     );
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_org_regenerate',
+        entity: 'OrganizationProfile',
+        entity_id: tenantId,
+        meta_json: { mode: 'incremental', job_id: jobId },
+      },
+    }).catch(() => { /* nao bloqueia */ });
     return { success: true, job_id: jobId, mode: 'incremental' };
   }
 
@@ -296,7 +395,7 @@ export class MemoriesService {
    * as memorias ativas. Usado pelo botao "Refazer do zero" (operacao cara
    * e irreversivel — perde qualquer edicao manual e o texto atual).
    */
-  async rebuildOrganizationProfile(tenantId: string) {
+  async rebuildOrganizationProfile(tenantId: string, actorUserId?: string) {
     if (!tenantId) throw new BadRequestException('tenant_id obrigatorio');
     await this.prisma.organizationProfile.updateMany({
       where: { tenant_id: tenantId, manually_edited_at: { not: null } },
@@ -308,6 +407,16 @@ export class MemoriesService {
       { tenant_id: tenantId, reason: 'manual-rebuild' },
       { jobId, removeOnComplete: true, attempts: 2 },
     );
+    // Bug fix #A4: audit log de rebuild (operacao destrutiva, sempre logar)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_org_rebuild',
+        entity: 'OrganizationProfile',
+        entity_id: tenantId,
+        meta_json: { mode: 'from-scratch', job_id: jobId, note: 'Operacao destrutiva: descarta summary atual.' },
+      },
+    }).catch(() => { /* nao bloqueia */ });
     return { success: true, job_id: jobId, mode: 'from-scratch' };
   }
 
@@ -685,11 +794,27 @@ export class MemoriesService {
     return profile || null;
   }
 
-  async createLeadMemory(tenantId: string, leadId: string, body: { content: string; type?: string }) {
+  async createLeadMemory(
+    tenantId: string,
+    leadId: string,
+    body: { content: string; type?: string },
+    actorUserId?: string,
+  ) {
     const content = (body.content || '').trim();
+    // Bug fix #A8: validacao reforcada
     if (content.length < 5) throw new BadRequestException('content muito curto (min 5 chars)');
     if (content.length > 500) throw new BadRequestException('content longo demais (max 500 chars). Resumir em 1-2 frases.');
     const type = body.type === 'episodic' ? 'episodic' : 'semantic';
+
+    // Bug fix #A5: valida que lead pertence ao tenant antes de criar memoria
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { tenant_id: true },
+    });
+    if (!lead) throw new NotFoundException('Lead nao encontrado');
+    if (lead.tenant_id !== tenantId) {
+      throw new BadRequestException('Lead nao pertence ao tenant atual');
+    }
 
     const embedding = await this.generateEmbedding(content);
     const dup = await this.findDuplicate({
@@ -700,23 +825,43 @@ export class MemoriesService {
     });
     if (dup) throw new ConflictException(`Ja existe memoria similar: "${dup.content}"`);
 
+    const created = await this.prisma.memory.create({
+      data: {
+        tenant_id: tenantId,
+        scope: 'lead',
+        scope_id: leadId,
+        type,
+        content,
+        source_type: 'manual',
+        confidence: 1.0,
+        status: 'active',
+      },
+      select: { id: true },
+    });
     await this.prisma.$executeRawUnsafe(
-      `
-      INSERT INTO "Memory" (
-        id, tenant_id, scope, scope_id, type, content, embedding,
-        source_type, confidence, status, created_at, updated_at
-      ) VALUES (
-        gen_random_uuid(), $1, 'lead', $2, $3, $4, $5::vector,
-        'manual', 1.0, 'active', NOW(), NOW()
-      )
-      `,
-      tenantId,
-      leadId,
-      type,
-      content,
+      `UPDATE "Memory" SET embedding = $1::vector WHERE id = $2`,
       this.toVectorLiteral(embedding),
+      created.id,
     );
-    return { success: true };
+
+    // Bug fix #A4: audit log
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_create',
+        entity: 'Memory',
+        entity_id: created.id,
+        meta_json: {
+          tenant_id: tenantId,
+          scope: 'lead',
+          scope_id: leadId,
+          type,
+          content_preview: content.slice(0, 100),
+        },
+      },
+    }).catch((e: any) => this.logger.warn(`[MEMORY] Falha audit memory_create (lead): ${e.message}`));
+
+    return { success: true, id: created.id };
   }
 
   /**

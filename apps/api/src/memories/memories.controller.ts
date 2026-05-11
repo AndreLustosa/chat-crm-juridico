@@ -11,6 +11,7 @@ import {
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { MemoriesService } from './memories.service';
@@ -44,18 +45,28 @@ export class MemoriesController {
     return this.memoriesService.getOrganizationProfile(req.user?.tenant_id);
   }
 
+  /**
+   * Bug fix 2026-05-11 (Memoria PR2 #A6):
+   * Throttle agressivo (5 chamadas / 10min) em operacoes caras de LLM.
+   * Antes: admin clicando 10x = 10 jobs enfileirados = 10x o custo.
+   * Cada regen custa ~US$0.04, batch de 10 cliques sairia US$0.40 por
+   * impaciencia. BullMQ deduplica jobs por ID, mas o ID e timestamp-based
+   * em alguns flows — Throttle e a defesa robusta.
+   */
   @Post('organization/regenerate-profile')
   @Roles('ADMIN', 'ADVOGADO')
+  @Throttle({ default: { limit: 5, ttl: 10 * 60_000 } })
   async regenerateOrgProfile(@Request() req: any) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.regenerateOrganizationProfile(req.user.tenant_id);
+    return this.memoriesService.regenerateOrganizationProfile(req.user.tenant_id, req.user.id);
   }
 
   @Post('organization/rebuild-profile')
   @Roles('ADMIN')
+  @Throttle({ default: { limit: 3, ttl: 30 * 60_000 } })
   async rebuildOrgProfile(@Request() req: any) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.rebuildOrganizationProfile(req.user.tenant_id);
+    return this.memoriesService.rebuildOrganizationProfile(req.user.tenant_id, req.user.id);
   }
 
   @Get('organization/settings')
@@ -220,34 +231,39 @@ export class MemoriesController {
 
   @Post('organization')
   @Roles('ADMIN', 'ADVOGADO')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async createOrg(
     @Request() req: any,
     @Body() body: { content: string; subcategory: string; confidence?: number },
   ) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.createOrganization(req.user.tenant_id, body);
+    // Bug fix #A4: passa actorUserId pra audit log
+    return this.memoriesService.createOrganization(req.user.tenant_id, body, req.user.id);
   }
 
   @Put(':id')
   @Roles('ADMIN', 'ADVOGADO')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   async updateMemory(
     @Request() req: any,
     @Param('id') id: string,
     @Body() body: { content?: string; subcategory?: string },
   ) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.updateMemory(id, req.user.tenant_id, body);
+    return this.memoriesService.updateMemory(id, req.user.tenant_id, body, req.user.id);
   }
 
   @Delete(':id')
   @Roles('ADMIN', 'ADVOGADO')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async deleteMemory(@Request() req: any, @Param('id') id: string) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.deleteMemory(id, req.user.tenant_id);
+    return this.memoriesService.deleteMemory(id, req.user.tenant_id, req.user.id);
   }
 
   @Post('extract-now')
   @Roles('ADMIN')
+  @Throttle({ default: { limit: 2, ttl: 60 * 60_000 } })
   async extractNow(@Request() req: any) {
     const tenantId = req.user?.tenant_id;
     if (!tenantId) throw new BadRequestException('tenant_id ausente');
@@ -257,6 +273,16 @@ export class MemoriesController {
       { tenant_id: tenantId },
       { jobId, removeOnComplete: true, attempts: 2 },
     );
+    // Audit log da extracao manual (custosa)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: req.user.id,
+        action: 'memory_manual_extract',
+        entity: 'Tenant',
+        entity_id: tenantId,
+        meta_json: { job_id: jobId },
+      },
+    }).catch(() => { /* nao bloqueia */ });
     return { success: true, job_id: jobId };
   }
 
@@ -313,8 +339,11 @@ export class MemoriesController {
     };
   }
 
+  // Throttle: 3 backfills por hora — operacao MUITO cara
+  // (max_leads=200 × $0.05 = US$10 por chamada)
   @Post('backfill-missing-profiles')
   @Roles('ADMIN')
+  @Throttle({ default: { limit: 3, ttl: 60 * 60_000 } })
   async backfillMissingProfiles(
     @Request() req: any,
     @Body() body: { confirm?: boolean; max_leads?: number },
@@ -420,20 +449,33 @@ export class MemoriesController {
 
   @Post('lead/:leadId')
   @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   async createLeadMemory(
     @Request() req: any,
     @Param('leadId') leadId: string,
     @Body() body: { content: string; type?: string },
   ) {
     if (!req.user?.tenant_id) throw new BadRequestException('tenant_id ausente');
-    return this.memoriesService.createLeadMemory(req.user.tenant_id, leadId, body);
+    return this.memoriesService.createLeadMemory(req.user.tenant_id, leadId, body, req.user.id);
   }
 
+  // Throttle: 10 regen por lead em 10min (admin clicando varias vezes em
+  // sequencia drena cap diario). Cada regen custa ~US$0.02-0.05.
   @Post('lead/:leadId/regenerate')
   @Roles('ADMIN', 'ADVOGADO')
+  @Throttle({ default: { limit: 10, ttl: 10 * 60_000 } })
   async regenerateProfile(@Request() req: any, @Param('leadId') leadId: string) {
     const tenantId = req.user?.tenant_id;
     if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    // Bug fix #A5: valida que lead pertence ao tenant antes de enfileirar
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { tenant_id: true },
+    });
+    if (!lead) throw new BadRequestException('Lead nao encontrado');
+    if (lead.tenant_id !== tenantId) {
+      throw new BadRequestException('Lead nao pertence ao tenant atual');
+    }
     const jobId = `consolidate-${tenantId}-${leadId}-${Date.now()}`;
     await this.memoryQueue.add(
       'consolidate-profile',
@@ -454,11 +496,24 @@ export class MemoriesController {
    * recarrega o painel do lead em ~10-20s pra ver o resultado em
    * LeadProfile.facts.narrative + LeadProfile.facts.key_dates.
    */
+  // Throttle: 3 generate-facts por lead em 30min — gpt-4.1 e o modelo mais
+  // caro do sistema de memoria (~US$0.05-0.15 por chamada). Sem cap, admin
+  // gerando varias versoes "pra escolher uma" detona orcamento.
   @Post('lead/:leadId/generate-facts')
   @Roles('ADMIN', 'ADVOGADO')
+  @Throttle({ default: { limit: 3, ttl: 30 * 60_000 } })
   async generateFacts(@Request() req: any, @Param('leadId') leadId: string) {
     const tenantId = req.user?.tenant_id;
     if (!tenantId) throw new BadRequestException('tenant_id ausente');
+    // Bug fix #A5: valida lead pertence ao tenant
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { tenant_id: true },
+    });
+    if (!lead) throw new BadRequestException('Lead nao encontrado');
+    if (lead.tenant_id !== tenantId) {
+      throw new BadRequestException('Lead nao pertence ao tenant atual');
+    }
     const jobId = `gen-facts-${tenantId}-${leadId}-${Date.now()}`;
     await this.memoryQueue.add(
       'generate-narrative-facts',

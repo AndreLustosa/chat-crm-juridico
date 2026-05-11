@@ -2,7 +2,6 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Cron } from '@nestjs/schedule';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { EmbeddingService } from './embedding.service';
@@ -10,6 +9,7 @@ import { MemoryRetrievalService } from './memory-retrieval.service';
 import { BATCH_EXTRACTION_PROMPT } from './memory-prompts';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { checkMemoryDailyCap } from './memory-cost-cap.util';
+import { callOpenAiChat, MAX_LLM_OUTPUT_CHARS } from './memory-llm.util';
 
 const DEFAULT_BATCH_SIZE = 30;
 const MIN_MESSAGE_LEN = 3;
@@ -263,7 +263,7 @@ export class DailyMemoryBatchProcessor {
       existing_org_memories: existingOrg,
     };
 
-    const result = await this.callLLM(payload);
+    const result = await this.callLLM(payload, tenantId);
     if (!result) return { leadCount: 0, orgCount: 0 };
 
     let leadCount = 0;
@@ -366,8 +366,17 @@ export class DailyMemoryBatchProcessor {
     return { leadCount, orgCount };
   }
 
-  /** Chamada ao GPT-4.1 com response_format=json_object. */
-  private async callLLM(payload: any): Promise<ExtractionResult | null> {
+  /**
+   * Chamada ao GPT-4.1 com response_format=json_object.
+   *
+   * Bug fix 2026-05-11 (Memoria PR2 #A1+#A2+#A3+#A10+#A11):
+   * - Retry+backoff em erros transientes (callOpenAiChat util)
+   * - Timeout explicito (60s no client cache)
+   * - Client reusado por apiKey (sem leak de sockets)
+   * - Output capado (#A10): descarta resposta > MAX_LLM_OUTPUT_CHARS
+   * - AiUsage registra prompt_tokens/completion_tokens/cost_usd
+   */
+  private async callLLM(payload: any, tenantId?: string): Promise<ExtractionResult | null> {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) {
       this.logger.warn('[MemoryBatch] OPENAI_API_KEY ausente — abortando');
@@ -378,27 +387,44 @@ export class DailyMemoryBatchProcessor {
     });
     const model = modelRow?.value || 'gpt-4.1';
 
-    const client = new OpenAI({ apiKey });
     try {
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: BATCH_EXTRACTION_PROMPT },
-          { role: 'user', content: JSON.stringify(payload) },
-        ],
-        response_format: { type: 'json_object' },
-        max_completion_tokens: 1500,
-        temperature: 0.3,
-      });
+      const response = await callOpenAiChat(
+        apiKey,
+        this.prisma,
+        {
+          model,
+          messages: [
+            { role: 'system', content: BATCH_EXTRACTION_PROMPT },
+            { role: 'user', content: JSON.stringify(payload) },
+          ],
+          response_format: { type: 'json_object' },
+          max_completion_tokens: 1500,
+          temperature: 0.3,
+        },
+        {
+          logger: this.logger,
+          callType: 'memory_batch',
+          tenantId,
+          contextLabel: 'extract',
+        },
+      );
       const content = response.choices[0]?.message?.content;
       if (!content) return null;
+      // #A10 — cap de saida do LLM (defende contra resposta gigante que
+      // estoura JSON.parse + memoria do processo)
+      if (content.length > MAX_LLM_OUTPUT_CHARS) {
+        this.logger.warn(
+          `[MemoryBatch] LLM retornou ${content.length} chars (max ${MAX_LLM_OUTPUT_CHARS}) — descartando`,
+        );
+        return null;
+      }
       const parsed = JSON.parse(content);
       return {
         memories: Array.isArray(parsed.memories) ? parsed.memories : [],
         superseded: Array.isArray(parsed.superseded) ? parsed.superseded : [],
       };
     } catch (e: any) {
-      this.logger.error(`[MemoryBatch] Erro no LLM: ${e.message}`);
+      this.logger.error(`[MemoryBatch] Erro no LLM apos retries: ${e.message}`);
       return null;
     }
   }

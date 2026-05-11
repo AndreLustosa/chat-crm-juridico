@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmbeddingService } from './embedding.service';
+import { MAX_MEMORY_SEARCH_RESULTS, MAX_MEMORY_QUERY_CHARS } from './memory-llm.util';
 
 export interface MemoryHit {
   id: string;
@@ -37,7 +38,15 @@ export class MemoryRetrievalService {
     private readonly embedding: EmbeddingService,
   ) {}
 
-  /** Busca memorias por similaridade semantica (cosine). */
+  /** Busca memorias por similaridade semantica (cosine).
+   *
+   * Bug fix 2026-05-11 (Memoria PR2 #A7):
+   * - limit hard-capped em MAX_MEMORY_SEARCH_RESULTS (20). Antes podia ser
+   *   qualquer valor — query semantica com limit=10000 puxava toda a tabela
+   *   pra memoria do worker e custava embedding-time + scan-time exagerados.
+   * - query text capped em MAX_MEMORY_QUERY_CHARS (500). Antes podia ser
+   *   livre — query gigante = embedding caro + custo desnecessario.
+   */
   async searchMemories(params: {
     tenant_id: string;
     scope: 'lead' | 'organization';
@@ -46,9 +55,19 @@ export class MemoryRetrievalService {
     limit?: number;
     min_similarity?: number;
   }): Promise<MemoryHit[]> {
-    const { tenant_id, scope, scope_id, query } = params;
-    const limit = params.limit ?? 5;
-    const minSim = params.min_similarity ?? 0.7;
+    const { tenant_id, scope, scope_id } = params;
+    // #A7 — cap query text
+    const query = (params.query || '').slice(0, MAX_MEMORY_QUERY_CHARS);
+    if (!query.trim()) return [];
+    // #A7 — cap limit em MAX_MEMORY_SEARCH_RESULTS
+    let limit = params.limit ?? 5;
+    if (!Number.isInteger(limit) || limit < 1) limit = 5;
+    if (limit > MAX_MEMORY_SEARCH_RESULTS) {
+      this.logger.warn(`[MemoryRetrieval] limit=${limit} excede cap ${MAX_MEMORY_SEARCH_RESULTS} — capando`);
+      limit = MAX_MEMORY_SEARCH_RESULTS;
+    }
+    let minSim = params.min_similarity ?? 0.7;
+    if (!Number.isFinite(minSim) || minSim < 0 || minSim > 1) minSim = 0.7;
 
     const queryEmbedding = await this.embedding.generate(query);
     const vec = this.embedding.toVectorLiteral(queryEmbedding);
@@ -94,23 +113,32 @@ export class MemoryRetrievalService {
     }));
   }
 
-  /** Busca fulltext em mensagens historicas do lead. */
+  /** Busca fulltext em mensagens historicas do lead.
+   *
+   * Bug fix 2026-05-11 (Memoria PR2 #A7): caps em limit e query length.
+   */
   async searchMessages(params: {
     tenant_id: string;
     lead_id: string;
     query: string;
     limit?: number;
   }): Promise<MessageHit[]> {
+    const query = (params.query || '').slice(0, MAX_MEMORY_QUERY_CHARS);
+    if (!query.trim()) return [];
+    let limit = params.limit ?? 10;
+    if (!Number.isInteger(limit) || limit < 1) limit = 10;
+    if (limit > MAX_MEMORY_SEARCH_RESULTS) limit = MAX_MEMORY_SEARCH_RESULTS;
+
     const rows = await this.prisma.message.findMany({
       where: {
         conversation: {
           lead_id: params.lead_id,
           tenant_id: params.tenant_id,
         },
-        text: { contains: params.query, mode: 'insensitive' },
+        text: { contains: query, mode: 'insensitive' },
       },
       orderBy: { created_at: 'desc' },
-      take: params.limit ?? 10,
+      take: limit,
       select: {
         id: true,
         text: true,

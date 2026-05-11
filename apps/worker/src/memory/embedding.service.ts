@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
-import OpenAI from 'openai';
 import { SettingsService } from '../settings/settings.service';
+import { getOpenAIClient } from './memory-llm.util';
 
 /**
  * Bug fix 2026-05-10 (Memoria PR1 #C4 — CRITICO LGPD):
@@ -52,16 +52,19 @@ export class EmbeddingService {
   private readonly logger = new Logger(EmbeddingService.name);
   private readonly cache = new Map<string, number[]>();
   private readonly maxCacheEntries = 2000;
-  private client: OpenAI | null = null;
 
   constructor(private readonly settings: SettingsService) {}
 
-  private async getClient(): Promise<OpenAI> {
-    if (this.client) return this.client;
+  /**
+   * Bug fix 2026-05-11 (Memoria PR2 #A3): client reusado via cache global
+   * em memory-llm.util.ts. Antes cada EmbeddingService instanciava o seu
+   * proprio client; agora compartilha com profile/org/batch processors,
+   * reusando keepAlive agent e sockets sob carga.
+   */
+  private async getClient() {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) throw new Error('OPENAI_API_KEY nao configurado');
-    this.client = new OpenAI({ apiKey });
-    return this.client;
+    return getOpenAIClient(apiKey);
   }
 
   private hashText(text: string): string {

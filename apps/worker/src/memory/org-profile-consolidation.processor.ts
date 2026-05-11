@@ -1,7 +1,6 @@
 import { Cron } from '@nestjs/schedule';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
-import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 // Prompts ORG agora ficam em @crm/shared — fonte unica de verdade
@@ -11,6 +10,7 @@ import {
 } from '@crm/shared';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { checkMemoryDailyCap } from './memory-cost-cap.util';
+import { callOpenAiChat, MAX_LLM_OUTPUT_CHARS } from './memory-llm.util';
 
 const MIN_CONFIDENCE_FOR_INCLUSION = 0.6;
 
@@ -305,7 +305,7 @@ export class OrgProfileConsolidationProcessor {
       })),
     };
 
-    const result = await this.callLLM(payload, 'incremental');
+    const result = await this.callLLM(payload, 'incremental', tenantId);
     if (!result) return { changed: false };
 
     // Contar total de memorias ativas atuais (para source_memory_count)
@@ -423,7 +423,7 @@ export class OrgProfileConsolidationProcessor {
       })),
     };
 
-    const result = await this.callLLM(payload, 'from-scratch');
+    const result = await this.callLLM(payload, 'from-scratch', tenantId);
     if (!result) return;
 
     // Bug 9 fix: incrementa version SO se houve mudanca de texto real.
@@ -599,6 +599,7 @@ export class OrgProfileConsolidationProcessor {
   private async callLLM(
     payload: any,
     mode: 'from-scratch' | 'incremental',
+    tenantId?: string,
   ): Promise<{ summary: string; facts: any; changes_applied?: string[] } | null> {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) {
@@ -620,20 +621,37 @@ export class OrgProfileConsolidationProcessor {
         ? (customIncremental?.value?.trim() || ORG_PROFILE_INCREMENTAL_PROMPT)
         : (customRebuild?.value?.trim() || ORG_PROFILE_CONSOLIDATION_PROMPT);
 
-    const client = new OpenAI({ apiKey });
     try {
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: JSON.stringify(payload) },
-        ],
-        response_format: { type: 'json_object' },
-        max_completion_tokens: 2500,
-        temperature: 0.3,
-      });
+      // Bug fix 2026-05-11 (Memoria PR2 #A1-#A3+#A10+#A11):
+      // retry+timeout+client reuse+output cap+cost tracking via callOpenAiChat util.
+      const response = await callOpenAiChat(
+        apiKey,
+        this.prisma,
+        {
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: JSON.stringify(payload) },
+          ],
+          response_format: { type: 'json_object' },
+          max_completion_tokens: 2500,
+          temperature: 0.3,
+        },
+        {
+          logger: this.logger,
+          callType: 'org_profile_consolidation',
+          tenantId,
+          contextLabel: mode,
+        },
+      );
       const content = response.choices[0]?.message?.content;
       if (!content) return null;
+      if (content.length > MAX_LLM_OUTPUT_CHARS) {
+        this.logger.warn(
+          `[OrgProfileConsolidation] LLM retornou ${content.length} chars (max ${MAX_LLM_OUTPUT_CHARS}) — descartando`,
+        );
+        return null;
+      }
       const parsed = JSON.parse(content);
       if (!parsed.summary || typeof parsed.summary !== 'string') return null;
 
@@ -662,7 +680,7 @@ export class OrgProfileConsolidationProcessor {
         changes_applied: Array.isArray(parsed.changes_applied) ? parsed.changes_applied : [],
       };
     } catch (e: any) {
-      this.logger.error(`[OrgProfileConsolidation] LLM erro (${mode}, model=${model}): ${e.message}`);
+      this.logger.error(`[OrgProfileConsolidation] LLM erro apos retries (${mode}, model=${model}): ${e.message}`);
       return null;
     }
   }

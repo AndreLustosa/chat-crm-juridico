@@ -1,10 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
-import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { PROFILE_CONSOLIDATION_PROMPT, NARRATIVE_FACTS_PROMPT } from './memory-prompts';
 import { checkMemoryDailyCap } from './memory-cost-cap.util';
+import { callOpenAiChat, MAX_LLM_OUTPUT_CHARS } from './memory-llm.util';
 
 /**
  * ProfileConsolidationProcessor
@@ -233,7 +233,7 @@ export class ProfileConsolidationProcessor {
       existing_summary: existing?.summary || null,
     };
 
-    const result = await this.callLLM(payload);
+    const result = await this.callLLM(payload, tenantId);
     if (!result) return;
 
     await this.prisma.leadProfile.upsert({
@@ -278,7 +278,7 @@ export class ProfileConsolidationProcessor {
     }
   }
 
-  private async callLLM(payload: any): Promise<{ summary: string; facts: any } | null> {
+  private async callLLM(payload: any, tenantId?: string): Promise<{ summary: string; facts: any } | null> {
     const apiKey = await this.settings.getOpenAiKey();
     if (!apiKey) return null;
     // Modelo configuravel via Ajustes IA. Default gpt-4.1-mini (mais barato,
@@ -288,25 +288,42 @@ export class ProfileConsolidationProcessor {
     });
     const model = modelRow?.value || 'gpt-4.1-mini';
 
-    const client = new OpenAI({ apiKey });
     try {
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: PROFILE_CONSOLIDATION_PROMPT },
-          { role: 'user', content: JSON.stringify(payload) },
-        ],
-        response_format: { type: 'json_object' },
-        max_completion_tokens: 2048,
-        temperature: 0.3,
-      });
+      // Bug fix 2026-05-11 (Memoria PR2 #A1+#A2+#A3+#A10+#A11):
+      // retry+timeout+client reuse+cost tracking via callOpenAiChat util.
+      const response = await callOpenAiChat(
+        apiKey,
+        this.prisma,
+        {
+          model,
+          messages: [
+            { role: 'system', content: PROFILE_CONSOLIDATION_PROMPT },
+            { role: 'user', content: JSON.stringify(payload) },
+          ],
+          response_format: { type: 'json_object' },
+          max_completion_tokens: 2048,
+          temperature: 0.3,
+        },
+        {
+          logger: this.logger,
+          callType: 'profile_consolidation',
+          tenantId,
+          contextLabel: 'lead-profile',
+        },
+      );
       const content = response.choices[0]?.message?.content;
       if (!content) return null;
+      if (content.length > MAX_LLM_OUTPUT_CHARS) {
+        this.logger.warn(
+          `[ProfileConsolidation] LLM retornou ${content.length} chars (max ${MAX_LLM_OUTPUT_CHARS}) — descartando`,
+        );
+        return null;
+      }
       const parsed = JSON.parse(content);
       if (!parsed.summary || typeof parsed.summary !== 'string') return null;
       return { summary: parsed.summary, facts: parsed.facts ?? {} };
     } catch (e: any) {
-      this.logger.error(`[ProfileConsolidation] LLM erro: ${e.message}`);
+      this.logger.error(`[ProfileConsolidation] LLM erro apos retries: ${e.message}`);
       return null;
     }
   }
@@ -391,25 +408,41 @@ export class ProfileConsolidationProcessor {
     });
     const model = modelRow?.value || 'gpt-4.1';
 
-    const client = new OpenAI({ apiKey });
     try {
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: NARRATIVE_FACTS_PROMPT },
-          { role: 'user', content: JSON.stringify(payload) },
-        ],
-        response_format: { type: 'json_object' },
-        max_completion_tokens: 4096,
-        temperature: 0.2,
-      });
+      // Bug fix 2026-05-11 (Memoria PR2 #A1-#A3+#A10+#A11): retry+timeout+reuse+cost
+      const response = await callOpenAiChat(
+        apiKey,
+        this.prisma,
+        {
+          model,
+          messages: [
+            { role: 'system', content: NARRATIVE_FACTS_PROMPT },
+            { role: 'user', content: JSON.stringify(payload) },
+          ],
+          response_format: { type: 'json_object' },
+          max_completion_tokens: 4096,
+          temperature: 0.2,
+        },
+        {
+          logger: this.logger,
+          callType: 'narrative_facts',
+          tenantId,
+          contextLabel: `lead=${leadId}`,
+        },
+      );
       const content = response.choices[0]?.message?.content;
       if (!content) return null;
+      if (content.length > MAX_LLM_OUTPUT_CHARS) {
+        this.logger.warn(
+          `[NarrativeFacts] LLM retornou ${content.length} chars (max ${MAX_LLM_OUTPUT_CHARS}) — descartando`,
+        );
+        return null;
+      }
       const parsed = JSON.parse(content);
       if (!parsed.narrative || typeof parsed.narrative !== 'string') return null;
       return { narrative: parsed.narrative, key_dates: parsed.key_dates ?? [] };
     } catch (e: any) {
-      this.logger.error(`[NarrativeFacts] LLM erro: ${e.message}`);
+      this.logger.error(`[NarrativeFacts] LLM erro apos retries: ${e.message}`);
       return null;
     }
   }
