@@ -169,6 +169,23 @@ export class OrganicTrafficController {
     });
   }
 
+  @Get('performance')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  performance(
+    @Req() req: any,
+    @Query('page_id') pageId?: string,
+    @Query('days') days?: string,
+    @Query('start_date') startDate?: string,
+    @Query('end_date') endDate?: string,
+  ) {
+    return this.service.getPerformance(req.user.tenant_id, {
+      pageId: pageId || undefined,
+      days: days ? parseInt(days, 10) : undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    });
+  }
+
   @Post('sync')
   @Roles('ADMIN', 'ADVOGADO')
   sync(@Req() req: any, @Body() dto: SyncOrganicTrafficDto) {

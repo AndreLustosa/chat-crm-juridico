@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
   AlertCircle,
   ArrowUpRight,
   CheckCircle2,
@@ -100,10 +109,51 @@ interface OrganicSummary {
   }[];
 }
 
-type TabId = "visao" | "paginas" | "consultas" | "indexacao" | "config";
+interface OrganicPerformance {
+  range: {
+    startDate: string;
+    endDate: string;
+    days: number;
+  };
+  totals: {
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    position: number;
+  };
+  daily: {
+    date: string;
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    position: number;
+  }[];
+  pages: {
+    id: string;
+    title: string;
+    url: string;
+    path: string;
+    city: string | null;
+    state: string | null;
+    practice_area: string | null;
+    clicks: number;
+    impressions: number;
+    ctr: number;
+    position: number;
+  }[];
+}
+
+type TabId =
+  | "visao"
+  | "desempenho"
+  | "paginas"
+  | "consultas"
+  | "indexacao"
+  | "config";
 
 const TABS: { id: TabId; label: string; icon: typeof Globe2 }[] = [
   { id: "visao", label: "Visao geral", icon: Globe2 },
+  { id: "desempenho", label: "Desempenho", icon: Target },
   { id: "paginas", label: "Landing pages", icon: MapPin },
   { id: "consultas", label: "Consultas", icon: Search },
   { id: "indexacao", label: "Indexacao", icon: FileSearch },
@@ -124,6 +174,11 @@ const DEFAULT_FORM = {
 };
 
 const ORGANIC_OAUTH_REDIRECT_URI = `${API_BASE_URL}/organic-traffic/oauth/callback`;
+const PERFORMANCE_PERIODS = [
+  { label: "7 dias", days: 7 },
+  { label: "28 dias", days: 28 },
+  { label: "3 meses", days: 90 },
+] as const;
 
 function fmtNumber(value: number): string {
   return value.toLocaleString("pt-BR");
@@ -145,6 +200,26 @@ function fmtDate(value?: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function fmtChartDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year.slice(2)}`;
+}
+
+function toDateParam(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function getDateRangeForDays(days: number) {
+  const end = new Date();
+  end.setDate(end.getDate() - 1);
+  const start = new Date(end);
+  start.setDate(start.getDate() - (days - 1));
+  return {
+    startDate: toDateParam(start),
+    endDate: toDateParam(end),
+  };
 }
 
 function getApiErrorMessage(err: unknown, fallback: string): string {
@@ -187,11 +262,15 @@ export default function TrafegoOrganicoPage() {
   const [summary, setSummary] = useState<OrganicSummary | null>(null);
   const [pages, setPages] = useState<OrganicPage[]>([]);
   const [queries, setQueries] = useState<OrganicQuery[]>([]);
+  const [performance, setPerformance] = useState<OrganicPerformance | null>(null);
   const [loading, setLoading] = useState(true);
+  const [performanceLoading, setPerformanceLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [areaFilter, setAreaFilter] = useState("");
   const [cityFilter, setCityFilter] = useState("");
+  const [performanceDays, setPerformanceDays] = useState(90);
+  const [performancePageId, setPerformancePageId] = useState("");
   const [showPageForm, setShowPageForm] = useState(false);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [pageForm, setPageForm] = useState(DEFAULT_FORM);
@@ -224,11 +303,35 @@ export default function TrafegoOrganicoPage() {
     }
   }
 
+  async function loadPerformance() {
+    setPerformanceLoading(true);
+    try {
+      const params = new URLSearchParams({
+        days: String(performanceDays),
+      });
+      if (performancePageId) params.set("page_id", performancePageId);
+      const res = await api.get<OrganicPerformance>(
+        `/organic-traffic/performance?${params.toString()}`,
+      );
+      setPerformance(res.data);
+    } catch (err) {
+      showError(getApiErrorMessage(err, "Erro ao carregar desempenho organico."));
+    } finally {
+      setPerformanceLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (perms.canViewOrganicTraffic) {
       load();
     }
   }, [perms.canViewOrganicTraffic]);
+
+  useEffect(() => {
+    if (perms.canViewOrganicTraffic) {
+      loadPerformance();
+    }
+  }, [perms.canViewOrganicTraffic, performanceDays, performancePageId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -285,9 +388,15 @@ export default function TrafegoOrganicoPage() {
   async function syncNow() {
     setActing("sync");
     try {
-      await api.post("/organic-traffic/sync", { inspect: false });
+      const range = getDateRangeForDays(performanceDays);
+      await api.post("/organic-traffic/sync", {
+        inspect: false,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      });
       showSuccess("Sync do Search Console iniciado.");
       await load();
+      await loadPerformance();
     } catch (err) {
       showError(getApiErrorMessage(err, "Falha ao sincronizar Search Console."));
     } finally {
@@ -518,6 +627,20 @@ export default function TrafegoOrganicoPage() {
 
         {tab === "visao" && summary && (
           <OverviewTab summary={summary} pages={pages} onOpenPages={() => setTab("paginas")} />
+        )}
+
+        {tab === "desempenho" && (
+          <PerformanceTab
+            performance={performance}
+            pages={pages}
+            selectedDays={performanceDays}
+            selectedPageId={performancePageId}
+            loading={performanceLoading}
+            syncing={acting === "sync"}
+            onDaysChange={setPerformanceDays}
+            onPageChange={setPerformancePageId}
+            onSync={syncNow}
+          />
         )}
 
         {tab === "paginas" && (
@@ -848,6 +971,273 @@ function OverviewTab({
         <h2 className="text-base font-bold text-foreground">Principais consultas</h2>
         <QueriesTable queries={summary.top_queries} compact />
       </section>
+    </div>
+  );
+}
+
+function PerformanceTab({
+  performance,
+  pages,
+  selectedDays,
+  selectedPageId,
+  loading,
+  syncing,
+  onDaysChange,
+  onPageChange,
+  onSync,
+}: {
+  performance: OrganicPerformance | null;
+  pages: OrganicPage[];
+  selectedDays: number;
+  selectedPageId: string;
+  loading: boolean;
+  syncing: boolean;
+  onDaysChange: (days: number) => void;
+  onPageChange: (pageId: string) => void;
+  onSync: () => void;
+}) {
+  const empty = !loading && (!performance || performance.daily.length === 0);
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-lg border border-border bg-card">
+        <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-foreground">
+              Desempenho por landing page
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {performance
+                ? `${fmtChartDate(performance.range.startDate)} ate ${fmtChartDate(performance.range.endDate)}`
+                : "Dados diarios do Search Console"}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="inline-flex h-10 overflow-hidden rounded-lg border border-border bg-background">
+              {PERFORMANCE_PERIODS.map((period) => (
+                <button
+                  key={period.days}
+                  onClick={() => onDaysChange(period.days)}
+                  className={`px-3 text-sm font-semibold transition ${
+                    selectedDays === period.days
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  {period.label}
+                </button>
+              ))}
+            </div>
+            <select
+              value={selectedPageId}
+              onChange={(event) => onPageChange(event.target.value)}
+              className="h-10 rounded-lg border border-border bg-background px-3 text-sm font-semibold text-foreground outline-none"
+            >
+              <option value="">Todas as landing pages</option>
+              {pages.map((page) => (
+                <option key={page.id} value={page.id}>
+                  {page.title}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={onSync}
+              disabled={syncing}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground disabled:opacity-60"
+            >
+              {syncing ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+              Sincronizar periodo
+            </button>
+          </div>
+        </div>
+
+        {loading && (
+          <div className="flex h-96 items-center justify-center text-sm text-muted-foreground">
+            <Loader2 className="mr-2 animate-spin" size={18} />
+            Carregando desempenho...
+          </div>
+        )}
+
+        {empty && (
+          <div className="flex h-96 items-center justify-center text-sm text-muted-foreground">
+            Nenhum dado sincronizado para este periodo.
+          </div>
+        )}
+
+        {!loading && performance && (
+          <div className="space-y-5 p-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <KpiCard
+                label="Total de cliques"
+                value={fmtNumber(performance.totals.clicks)}
+                icon={MousePointerClick}
+                tone="text-blue-500 bg-blue-500/10"
+              />
+              <KpiCard
+                label="Total de impressoes"
+                value={fmtNumber(performance.totals.impressions)}
+                icon={Globe2}
+                tone="text-violet-500 bg-violet-500/10"
+              />
+              <KpiCard
+                label="CTR media"
+                value={fmtPercent(performance.totals.ctr)}
+                icon={Target}
+                tone="text-amber-500 bg-amber-500/10"
+              />
+              <KpiCard
+                label="Posicao media"
+                value={fmtPosition(performance.totals.position)}
+                icon={ShieldCheck}
+                tone="text-emerald-500 bg-emerald-500/10"
+              />
+            </div>
+
+            <div className="rounded-lg border border-border bg-background p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-4 text-xs font-semibold text-muted-foreground">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
+                    Cliques
+                  </span>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-violet-600" />
+                    Impressoes
+                  </span>
+                </div>
+                <span className="text-xs text-muted-foreground">Diaria</span>
+              </div>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={performance.daily}
+                    margin={{ top: 10, right: 12, bottom: 0, left: -18 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={fmtChartDate}
+                      tick={{ fontSize: 11 }}
+                      minTickGap={22}
+                    />
+                    <YAxis
+                      yAxisId="clicks"
+                      tick={{ fontSize: 11 }}
+                      allowDecimals={false}
+                    />
+                    <YAxis
+                      yAxisId="impressions"
+                      orientation="right"
+                      tick={{ fontSize: 11 }}
+                      allowDecimals={false}
+                    />
+                    <Tooltip content={<PerformanceTooltip />} />
+                    <Line
+                      yAxisId="clicks"
+                      type="monotone"
+                      dataKey="clicks"
+                      name="Cliques"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                    <Line
+                      yAxisId="impressions"
+                      type="monotone"
+                      dataKey="impressions"
+                      name="Impressoes"
+                      stroke="#6d28d9"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {performance && (
+        <section className="rounded-lg border border-border bg-card">
+          <div className="border-b border-border p-4">
+            <h2 className="text-base font-bold text-foreground">Paginas</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-sm">
+              <thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 text-left">Pagina</th>
+                  <th className="px-4 py-3 text-left">Cidade/area</th>
+                  <th className="px-4 py-3 text-right">Cliques</th>
+                  <th className="px-4 py-3 text-right">Impressoes</th>
+                  <th className="px-4 py-3 text-right">CTR</th>
+                  <th className="px-4 py-3 text-right">Posicao</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {performance.pages.map((page) => (
+                  <tr key={page.id} className="hover:bg-muted/25">
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-foreground">{page.title}</p>
+                      <a
+                        href={page.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex max-w-xs items-center gap-1 truncate font-mono text-[11px] text-primary"
+                      >
+                        {page.path}
+                        <ArrowUpRight size={11} />
+                      </a>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <p className="font-semibold text-foreground">
+                        {page.city || "-"} {page.state ? `/${page.state}` : ""}
+                      </p>
+                      <p>{page.practice_area || "-"}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-blue-600">
+                      {fmtNumber(page.clicks)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {fmtNumber(page.impressions)}
+                    </td>
+                    <td className="px-4 py-3 text-right">{fmtPercent(page.ctr)}</td>
+                    <td className="px-4 py-3 text-right">{fmtPosition(page.position)}</td>
+                  </tr>
+                ))}
+                {performance.pages.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                      Nenhuma landing page encontrada.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function PerformanceTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-lg">
+      <p className="mb-2 font-bold text-foreground">{fmtChartDate(label)}</p>
+      {payload.map((item: any) => (
+        <p key={item.dataKey} className="flex items-center gap-2" style={{ color: item.color }}>
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: item.color }}
+          />
+          {item.name}: {fmtNumber(Number(item.value ?? 0))}
+        </p>
+      ))}
     </div>
   );
 }

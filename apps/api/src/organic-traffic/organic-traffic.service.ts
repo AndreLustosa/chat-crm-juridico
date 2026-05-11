@@ -578,6 +578,183 @@ export class OrganicTrafficService {
       .slice(0, limit);
   }
 
+  async getPerformance(
+    tenantId: string,
+    opts: {
+      pageId?: string;
+      days?: number;
+      startDate?: string;
+      endDate?: string;
+    } = {},
+  ) {
+    const dateRange = this.resolvePerformanceDateRange(opts);
+    const pages = await this.prisma.organicLandingPage.findMany({
+      where: {
+        tenant_id: tenantId,
+        is_active: true,
+        id: opts.pageId,
+      },
+      orderBy: [
+        { city: 'asc' },
+        { practice_area: 'asc' },
+        { title: 'asc' },
+      ],
+      select: {
+        id: true,
+        title: true,
+        url: true,
+        path: true,
+        city: true,
+        state: true,
+        practice_area: true,
+      },
+    });
+
+    const metrics = await this.prisma.organicSearchMetric.findMany({
+      where: {
+        tenant_id: tenantId,
+        page_id: opts.pageId,
+        date: {
+          gte: this.dateStringToDate(dateRange.startDate),
+          lte: this.dateStringToDate(dateRange.endDate),
+        },
+      },
+      select: {
+        page_id: true,
+        date: true,
+        clicks: true,
+        impressions: true,
+        position: true,
+      },
+    });
+
+    const pageIds = new Set(pages.map((page) => page.id));
+    const daily = new Map<
+      string,
+      {
+        date: string;
+        clicks: number;
+        impressions: number;
+        positionSum: number;
+        positionWeight: number;
+      }
+    >();
+    for (const date of this.enumerateDateRange(
+      dateRange.startDate,
+      dateRange.endDate,
+    )) {
+      daily.set(date, {
+        date,
+        clicks: 0,
+        impressions: 0,
+        positionSum: 0,
+        positionWeight: 0,
+      });
+    }
+
+    const byPage = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        url: string;
+        path: string;
+        city: string | null;
+        state: string | null;
+        practice_area: string | null;
+        clicks: number;
+        impressions: number;
+        positionSum: number;
+        positionWeight: number;
+      }
+    >();
+
+    for (const page of pages) {
+      byPage.set(page.id, {
+        ...page,
+        clicks: 0,
+        impressions: 0,
+        positionSum: 0,
+        positionWeight: 0,
+      });
+    }
+
+    const totals = {
+      clicks: 0,
+      impressions: 0,
+      positionSum: 0,
+      positionWeight: 0,
+    };
+
+    for (const metric of metrics) {
+      if (!pageIds.has(metric.page_id)) continue;
+
+      const dateKey = this.formatDate(metric.date);
+      const day = daily.get(dateKey);
+      const page = byPage.get(metric.page_id);
+      if (!day || !page) continue;
+
+      day.clicks += metric.clicks;
+      day.impressions += metric.impressions;
+      page.clicks += metric.clicks;
+      page.impressions += metric.impressions;
+      totals.clicks += metric.clicks;
+      totals.impressions += metric.impressions;
+
+      if (metric.impressions > 0) {
+        const weighted = metric.position * metric.impressions;
+        day.positionSum += weighted;
+        day.positionWeight += metric.impressions;
+        page.positionSum += weighted;
+        page.positionWeight += metric.impressions;
+        totals.positionSum += weighted;
+        totals.positionWeight += metric.impressions;
+      }
+    }
+
+    return {
+      range: dateRange,
+      totals: {
+        clicks: totals.clicks,
+        impressions: totals.impressions,
+        ctr:
+          totals.impressions > 0 ? totals.clicks / totals.impressions : 0,
+        position:
+          totals.positionWeight > 0
+            ? totals.positionSum / totals.positionWeight
+            : 0,
+      },
+      daily: [...daily.values()].map((item) => ({
+        date: item.date,
+        clicks: item.clicks,
+        impressions: item.impressions,
+        ctr: item.impressions > 0 ? item.clicks / item.impressions : 0,
+        position:
+          item.positionWeight > 0
+            ? item.positionSum / item.positionWeight
+            : 0,
+      })),
+      pages: [...byPage.values()]
+        .map((item) => ({
+          id: item.id,
+          title: item.title,
+          url: item.url,
+          path: item.path,
+          city: item.city,
+          state: item.state,
+          practice_area: item.practice_area,
+          clicks: item.clicks,
+          impressions: item.impressions,
+          ctr: item.impressions > 0 ? item.clicks / item.impressions : 0,
+          position:
+            item.positionWeight > 0
+              ? item.positionSum / item.positionWeight
+              : 0,
+        }))
+        .sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions),
+    };
+  }
+
   async syncSearchAnalytics(
     tenantId: string,
     trigger: SyncTrigger,
@@ -1050,6 +1227,60 @@ export class OrganicTrafficService {
       startDate: this.validateDateString(dto.startDate) ?? this.formatDate(start),
       endDate: this.validateDateString(dto.endDate) ?? this.formatDate(end),
     };
+  }
+
+  private resolvePerformanceDateRange(opts: {
+    days?: number;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    if (opts.startDate || opts.endDate) {
+      const startDate = this.validateDateString(opts.startDate);
+      const endDate = this.validateDateString(opts.endDate);
+      if (!startDate || !endDate) {
+        throw new HttpException(
+          'Informe start_date e end_date juntos.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      if (startDate > endDate) {
+        throw new HttpException(
+          'Periodo invalido: start_date maior que end_date.',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      return { startDate, endDate, days: this.diffDays(startDate, endDate) + 1 };
+    }
+
+    const rawDays = Number.isFinite(opts.days) ? opts.days ?? 90 : 90;
+    const days = Math.min(Math.max(Math.trunc(rawDays), 1), 180);
+    const end = new Date();
+    end.setDate(end.getDate() - 1);
+    const start = new Date(end);
+    start.setDate(start.getDate() - (days - 1));
+
+    return {
+      startDate: this.formatDate(start),
+      endDate: this.formatDate(end),
+      days,
+    };
+  }
+
+  private enumerateDateRange(startDate: string, endDate: string): string[] {
+    const dates: string[] = [];
+    const cursor = this.dateStringToDate(startDate);
+    const end = this.dateStringToDate(endDate);
+    while (cursor <= end) {
+      dates.push(this.formatDate(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return dates;
+  }
+
+  private diffDays(startDate: string, endDate: string): number {
+    const start = this.dateStringToDate(startDate).getTime();
+    const end = this.dateStringToDate(endDate).getTime();
+    return Math.round((end - start) / 86_400_000);
   }
 
   private normalizeSiteUrl(raw: string): string {
