@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import { PrismaService } from '../prisma/prisma.service';
 import { DailyMemoryBatchProcessor } from './daily-memory-batch.processor';
 import { ProfileConsolidationProcessor } from './profile-consolidation.processor';
 import { OrgProfileConsolidationProcessor } from './org-profile-consolidation.processor';
@@ -32,6 +33,10 @@ export class MemoryJobsProcessor extends WorkerHost {
     private readonly batch: DailyMemoryBatchProcessor,
     private readonly profile: ProfileConsolidationProcessor,
     private readonly orgProfile: OrgProfileConsolidationProcessor,
+    // Bug fix 2026-05-11 (Memoria PR3 #M1): inject direta do PrismaService
+    // em vez de acessar via `(this.profile as any).prisma`. Cast pra `any`
+    // quebra type-safety e oculta erros em refactors do ProfileConsolidationProcessor.
+    private readonly prisma: PrismaService,
   ) {
     super();
   }
@@ -79,7 +84,7 @@ export class MemoryJobsProcessor extends WorkerHost {
       this.logger.error(`[MemoryJobs] generate-narrative-facts sem tenant_id ou lead_id`);
       return { ok: false, chars: 0 };
     }
-    const lead = await (this.profile as any).prisma.lead.findUnique({
+    const lead = await this.prisma.lead.findUnique({
       where: { id: lead_id },
       select: { tenant_id: true },
     });
@@ -101,7 +106,7 @@ export class MemoryJobsProcessor extends WorkerHost {
       return { ok: false, chars: 0 };
     }
     // Persiste em LeadProfile.facts.narrative + facts.key_dates
-    const existing = await this.profile['prisma'].leadProfile.findUnique({
+    const existing = await this.prisma.leadProfile.findUnique({
       where: { lead_id },
       select: { facts: true },
     });
@@ -110,7 +115,7 @@ export class MemoryJobsProcessor extends WorkerHost {
     facts.key_dates = result.key_dates;
     facts.narrative_generated_at = new Date().toISOString();
 
-    await this.profile['prisma'].leadProfile.upsert({
+    await this.prisma.leadProfile.upsert({
       where: { lead_id },
       create: {
         tenant_id,

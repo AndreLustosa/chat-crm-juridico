@@ -667,7 +667,18 @@ export class LeadsService {
    * antes resetava apenas AiMemory. Agora reseta ambos em paralelo dentro
    * de transaction.
    */
-  async resetMemory(id: string, tenantId?: string): Promise<{ ok: boolean; deleted: { leadProfile: number; memories: number } }> {
+  /**
+   * Bug fix 2026-05-11 (Memoria PR3 #M10):
+   * Antes: hard DELETE de leadProfile + memorias sem audit. Operacao
+   * destrutiva irrecuperavel — admin clicava no lead errado = perdia
+   * meses de extracao IA.
+   *
+   * Agora:
+   *   - leadProfile: continua DELETE (regenera via consolidate-profile)
+   *   - memorias: SOFT delete (status='archived') — recuperavel via UPDATE
+   *   - audit log obrigatorio
+   */
+  async resetMemory(id: string, tenantId?: string, actorUserId?: string): Promise<{ ok: boolean; deleted: { leadProfile: number; memories: number } }> {
     if (tenantId) {
       const lead = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
       if (lead?.tenant_id && lead.tenant_id !== tenantId) {
@@ -677,8 +688,28 @@ export class LeadsService {
 
     const [lpResult, memResult] = await this.prisma.$transaction([
       this.prisma.leadProfile.deleteMany({ where: { lead_id: id } }),
-      this.prisma.memory.deleteMany({ where: { scope: 'lead', scope_id: id } }),
+      // Soft delete em vez de DELETE — preserva trilha de auditoria
+      this.prisma.memory.updateMany({
+        where: { scope: 'lead', scope_id: id, status: 'active' },
+        data: { status: 'archived' },
+      }),
     ]);
+
+    // Audit log (best-effort, nao bloqueia)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'memory_reset_lead',
+        entity: 'Lead',
+        entity_id: id,
+        meta_json: {
+          tenant_id: tenantId || null,
+          leadProfile_deleted: lpResult.count,
+          memories_archived: memResult.count,
+          note: 'Memorias com status=archived (soft delete). LeadProfile hard-deleted (regenera via consolidate-profile).',
+        },
+      },
+    }).catch(() => { /* nao bloqueia */ });
 
     return {
       ok: true,

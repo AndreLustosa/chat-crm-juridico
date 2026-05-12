@@ -218,3 +218,22 @@ export const MAX_MEMORY_QUERY_CHARS = 500;
 
 /** Cap max de caracteres na saida do LLM (JSON parseable) antes de descartar. */
 export const MAX_LLM_OUTPUT_CHARS = 50_000;
+
+// ─── #M6 Constantes nomeadas (antes magic numbers) ────────────────
+
+/** Threshold de similaridade cosine pra considerar duplicata em LEAD memories.
+ *  Mais alto que org porque conversas individuais geram memoria parecida frequentemente. */
+export const DEDUP_THRESHOLD_LEAD = 0.95;
+
+/** Threshold de similaridade cosine pra considerar duplicata em ORG memories.
+ *  Mais baixo porque queremos consolidar conhecimento institucional agressivamente. */
+export const DEDUP_THRESHOLD_ORG = 0.93;
+
+/** Threshold pra rejeitar nova memoria duplicada antes de inserir (API/worker dedup). */
+export const DEDUP_THRESHOLD_INSERT = 0.9;
+
+/** Cap em quantas memorias org sao injetadas no prompt (evita blow up tokens). */
+export const MAX_ORG_MEMORIES_IN_PROMPT = 200;
+
+/** Cap em quantas memorias episodicas recentes sao injetadas no prompt. */
+export const MAX_EPISODIC_MEMORIES_IN_PROMPT = 20;

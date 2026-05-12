@@ -183,7 +183,12 @@ export class MemoryRetrievalService {
     return { id: rows[0].id, content: rows[0].content };
   }
 
-  /** Busca memorias organizacionais agrupadas por subcategoria — usado no prompt-builder. */
+  /** Busca memorias organizacionais agrupadas por subcategoria — usado no prompt-builder.
+   *
+   * Bug fix 2026-05-11 (Memoria PR3 #M4): cap em 200 memorias.
+   * Antes: sem cap — tenant com 500+ memorias org injetaria 500 no prompt =
+   * blow up tokens + alucinacao do LLM. 200 ja cobre 99% dos casos reais.
+   */
   async getOrganizationMemories(tenantId: string) {
     return this.prisma.memory.findMany({
       where: {
@@ -193,11 +198,17 @@ export class MemoryRetrievalService {
         status: 'active',
       },
       orderBy: [{ subcategory: 'asc' }, { confidence: 'desc' }],
+      take: 200,
     });
   }
 
-  /** Memorias episodicas recentes do lead — injetadas no prompt. */
+  /** Memorias episodicas recentes do lead — injetadas no prompt.
+   *
+   * Bug fix 2026-05-11 (Memoria PR3 #M4): hard cap em 20 mesmo se caller pedir mais.
+   */
   async getRecentEpisodicMemories(tenantId: string, leadId: string, limit = 5) {
+    const HARD_CAP = 20;
+    const safeLimit = Math.min(Math.max(1, Math.floor(limit)), HARD_CAP);
     return this.prisma.memory.findMany({
       where: {
         tenant_id: tenantId,
@@ -207,7 +218,7 @@ export class MemoryRetrievalService {
         type: 'episodic',
       },
       orderBy: { created_at: 'desc' },
-      take: limit,
+      take: safeLimit,
     });
   }
 }

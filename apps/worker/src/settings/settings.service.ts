@@ -5,6 +5,15 @@ import { PrismaService } from '../prisma/prisma.service';
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+
+  // Bug fix 2026-05-11 (Memoria PR3 #M7):
+  // Cache do OPENAI_API_KEY com TTL 60s. Antes: cada chamada de LLM
+  // hitava o Prisma pra ler o setting. Em cron noturno (300+ chamadas),
+  // sao 300 queries desnecessarias. 60s e curto o bastante pra rotacao
+  // de chave via admin nao gerar downtime perceptivel.
+  private cachedOpenAiKey: { value: string | null; expires: number } | null = null;
+  private readonly OPENAI_KEY_TTL_MS = 60_000;
+
   constructor(private prisma: PrismaService) {}
 
   async getEvolutionConfig() {
@@ -24,9 +33,21 @@ export class SettingsService {
   }
 
   async getOpenAiKey(): Promise<string | null> {
+    // PR3 #M7: cache TTL 60s
+    const now = Date.now();
+    if (this.cachedOpenAiKey && this.cachedOpenAiKey.expires > now) {
+      return this.cachedOpenAiKey.value;
+    }
     const row = await this.prisma.globalSetting.findUnique({ where: { key: 'OPENAI_API_KEY' } });
     const raw = row?.value || process.env.OPENAI_API_KEY || null;
-    return raw ? this.decryptIfNeeded(raw) : null;
+    const value = raw ? this.decryptIfNeeded(raw) : null;
+    this.cachedOpenAiKey = { value, expires: now + this.OPENAI_KEY_TTL_MS };
+    return value;
+  }
+
+  /** Invalida o cache do OpenAI key — chamado quando admin atualiza via UI. */
+  invalidateOpenAiKeyCache(): void {
+    this.cachedOpenAiKey = null;
   }
 
   async getDefaultModel(): Promise<string> {

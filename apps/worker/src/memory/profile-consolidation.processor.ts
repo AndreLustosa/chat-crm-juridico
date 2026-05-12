@@ -256,8 +256,14 @@ export class ProfileConsolidationProcessor {
     });
   }
 
-  /** Deduplica memorias muito similares do lead (cosine > 0.95). */
+  /** Deduplica memorias muito similares do lead (cosine > 0.95).
+   *
+   * Bug fix 2026-05-11 (Memoria PR3 #M3): LIMIT pra evitar processar tabela
+   * inteira em lead com historico longo. Por lead, raramente passa de 200,
+   * mas leads de litigancia coletiva podem ter 1000+.
+   */
   private async dedupLeadMemories(tenantId: string, leadId: string): Promise<void> {
+    const DEDUP_BATCH_LIMIT = 200;
     const duplicates = await this.prisma.$queryRaw<{ id_a: string; id_b: string }[]>`
       SELECT a.id AS id_a, b.id AS id_b
       FROM "Memory" a JOIN "Memory" b ON a.id < b.id
@@ -268,6 +274,8 @@ export class ProfileConsolidationProcessor {
         AND a.status = 'active' AND b.status = 'active'
         AND a.embedding IS NOT NULL AND b.embedding IS NOT NULL
         AND 1 - (a.embedding <=> b.embedding) > 0.95
+      ORDER BY a.created_at ASC
+      LIMIT ${DEDUP_BATCH_LIMIT}
     `;
 
     for (const dup of duplicates) {
@@ -275,6 +283,11 @@ export class ProfileConsolidationProcessor {
         where: { id: dup.id_a },
         data: { status: 'superseded', superseded_by: dup.id_b },
       }).catch(() => {});
+    }
+    if (duplicates.length >= DEDUP_BATCH_LIMIT) {
+      this.logger.warn(
+        `[ProfileConsolidation] Lead ${leadId}: cap ${DEDUP_BATCH_LIMIT} de dedup atingido — pode haver mais.`,
+      );
     }
   }
 

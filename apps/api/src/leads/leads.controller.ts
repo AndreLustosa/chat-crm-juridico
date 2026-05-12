@@ -121,7 +121,8 @@ export class LeadsController {
 
   @Delete(':id/memory')
   resetMemory(@Param('id') id: string, @Request() req: any) {
-    return this.leadsService.resetMemory(id, req.user?.tenant_id);
+    // Bug fix PR3 #M10: passa actorUserId pra audit log
+    return this.leadsService.resetMemory(id, req.user?.tenant_id, req.user?.id);
   }
 
   // DELETE /leads/:id — exclui contato e TODOS os seus dados (somente ADMIN)

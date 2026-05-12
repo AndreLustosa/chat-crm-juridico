@@ -19,6 +19,11 @@ import { cleanHardcodedOrgInfo } from './skill-cleanup.util';
 
 const ORG_PROFILE_DEBOUNCE_MS = 60_000; // 60s — evita regenerar a cada edit
 
+// Bug fix 2026-05-11 (Memoria PR3 #M5):
+// Removido 'geral' do allowlist — era brecha de seguranca alinhada com
+// PR1 #C9 (worker ja rejeita). Antes: admin podia criar memoria org com
+// subcategory='geral' e a IA injetava no prompt sem contexto claro, virando
+// vetor de plant horizontal entre tenants. Agora API e worker convergem.
 const VALID_ORG_SUBCATEGORIES = new Set([
   'office_info',
   'team',
@@ -28,7 +33,6 @@ const VALID_ORG_SUBCATEGORIES = new Set([
   'legal_knowledge',
   'contacts',
   'rules',
-  'geral', // fallback pra memorias sem categoria especifica (Bug 8 fix)
 ]);
 
 const DUPLICATE_THRESHOLD = 0.9;

@@ -43,11 +43,7 @@ export class OrgProfileConsolidationProcessor {
 
   // ─── Cron: roda toda hora cheia mas decide se executa ─────
   //
-  // Antes era hardcoded em 02h diario. Fase 3 PR2: frequencia eh
-  // configuravel (daily/weekly/manual) + hora customizavel.
-  // Cron roda toda hora cheia e checa o setting pra decidir se executa.
-  //
-  // Settings lidos:
+  // Frequencia/hora/weekday configuraveis via GlobalSettings:
   //   MEMORY_ORG_CONSOLIDATION_FREQUENCY = 'daily' | 'weekly' | 'manual'
   //   MEMORY_ORG_CONSOLIDATION_WEEKDAY   = 1-7 (1=segunda, default 1)
   //   MEMORY_ORG_CONSOLIDATION_HOUR      = 0-23 (default 2)
@@ -144,34 +140,43 @@ export class OrgProfileConsolidationProcessor {
       select: { tenant_id: true },
     });
     const skipSet = new Set(manuallyEdited.map((p) => p.tenant_id));
+    const toProcess = tenants.filter((t) => !skipSet.has(t.id));
+    let skipped = tenants.length - toProcess.length;
 
     let processed = 0;
-    let skipped = 0;
     let changed = 0;
-    for (const t of tenants) {
-      if (skipSet.has(t.id)) {
-        skipped++;
-        this.logger.log(`[OrgProfileConsolidation] Tenant ${t.id}: pulado (editado manualmente)`);
-        continue;
-      }
-      // Re-checa o cap a cada tenant — gasto acumula durante a iteracao
+
+    // Bug fix 2026-05-11 (Memoria PR3 #M2):
+    // Antes: serial — 100 tenants × ~5s/cada = 500s. Cron de 02h podia
+    // estourar 8min (timeout do CronRunner). Agora processa em batches
+    // paralelos de 5. OpenAI rate-limita por org/key, mas 5 simultaneos
+    // ficam abaixo do tier 4 (5000 RPM em gpt-4.1).
+    const PARALLEL_BATCH_SIZE = 5;
+    for (let i = 0; i < toProcess.length; i += PARALLEL_BATCH_SIZE) {
+      // Re-checa o cap a cada batch — gasto acumula entre batches
       const recheck = await checkMemoryDailyCap(this.prisma);
       if (!recheck.ok) {
         this.logger.warn(
           `[OrgProfileConsolidation] CAP estourado durante loop ` +
           `(US$ ${recheck.spent.toFixed(2)}/${recheck.cap.toFixed(2)}). ` +
-          `Abortando ${tenants.length - processed - skipped} tenants restantes.`,
+          `Abortando ${toProcess.length - processed} tenants restantes.`,
         );
         break;
       }
-      try {
-        const result = await this.consolidateIncremental(t.id);
-        processed++;
-        if (result?.changed) changed++;
-      } catch (e: any) {
-        this.logger.warn(
-          `[OrgProfileConsolidation] Falha tenant ${t.id}: ${e.message}`,
-        );
+      const batch = toProcess.slice(i, i + PARALLEL_BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map((t) => this.consolidateIncremental(t.id)),
+      );
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j];
+        if (r.status === 'fulfilled') {
+          processed++;
+          if (r.value?.changed) changed++;
+        } else {
+          this.logger.warn(
+            `[OrgProfileConsolidation] Falha tenant ${batch[j].id}: ${r.reason?.message || r.reason}`,
+          );
+        }
       }
     }
     this.logger.log(

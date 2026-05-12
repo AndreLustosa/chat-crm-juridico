@@ -2019,6 +2019,12 @@ model Memory {
   @@index([tenant_id, scope, scope_id])
   @@index([status])
   @@index([tenant_id, subcategory])
+  // Bug fix 2026-05-11 (Memoria PR3 #B3):
+  // Indice composto para o hot path: searchMemories + listLead +
+  // dedupOrganizationMemories filtram sempre por (tenant_id, scope, scope_id, status='active').
+  // Postgres pode usar o (tenant_id, scope, scope_id) existente, mas tem que
+  // filtrar status no heap depois. Com status incluso, vira index-only scan.
+  @@index([tenant_id, scope, scope_id, status])
 }
 
 /// Perfil consolidado do lead — summary em texto corrido + facts JSON.
