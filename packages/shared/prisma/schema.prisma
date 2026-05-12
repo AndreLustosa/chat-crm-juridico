@@ -372,6 +372,12 @@ model Media {
   checksum      String?
   original_url  String? /// URL temporária Evolution CDN (fallback, expira ~48h)
   original_name String?
+  // Bug fix 2026-05-12 (Skills PR2 #A9):
+  // Cap em tentativas de transcricao. Antes: AudioRetranscribeCron re-enfileirava
+  // audio corrompido indefinidamente, queimando cota Whisper/Groq.
+  transcribe_attempts Int      @default(0)
+  transcribe_failed   Boolean  @default(false)
+  transcribe_last_err String?
   created_at    DateTime @default(now())
   message       Message  @relation(fields: [message_id], references: [id], onDelete: Cascade)
 }
@@ -1071,6 +1077,13 @@ model CalendarEvent {
   tenant    Tenant?                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
 
   created_by_ai Boolean @default(false) // true quando o evento foi criado por tool da IA (book_appointment)
+
+  // Bug fix 2026-05-12 (Skills PR2 #A12):
+  // Idempotency da notificacao ao advogado em book_appointment. Quando job
+  // re-executa (BullMQ retry, restart), nao notifica de novo — evita
+  // mensagens duplicadas no WhatsApp do advogado (queima cota, vaza
+  // telefone do cliente N vezes).
+  lawyer_notified_at DateTime?
 
   // Bug fix 2026-05-10 (PR2 #10): rastreamento de notificacao imediata de
   // audiencia/pericia agendada. Usado pelo fallback cron diario (manha)

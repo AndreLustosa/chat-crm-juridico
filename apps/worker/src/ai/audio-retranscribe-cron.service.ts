@@ -49,8 +49,17 @@ export class AudioRetranscribeCronService {
       async () => {
       // Audios sem texto (null ou vazio) dos ultimos 3 dias COM file_path
       // (indica que o download inicial funcionou mas transcricao falhou)
+      //
+      // Bug fix 2026-05-12 (Skills PR2 #A9 — ALTO):
+      // Cap em transcribe_attempts. Antes: audio corrompido entrava neste cron
+      // a cada 15min indefinidamente, queimando cota Whisper/Groq em audios
+      // que nunca vao transcrever (audio danificado, vazio, formato nao suportado).
+      // Cap 3 tentativas. Apos isso media.transcribe_failed=true e cron pula.
+      const MAX_TRANSCRIBE_ATTEMPTS = 3;
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-      const audioMessages = await this.prisma.message.findMany({
+      // NOTE: where com transcribe_failed/transcribe_attempts via cast (campos
+      // novos em 2026-05-12 — Prisma generate roda na VPS).
+      const audioMessages = await (this.prisma.message.findMany as any)({
         where: {
           type: 'audio',
           direction: 'in',
@@ -58,13 +67,13 @@ export class AudioRetranscribeCronService {
           OR: [{ text: null }, { text: '' }],
           media: {
             is: {
-              // So retry se tem file_path (download original deu certo).
-              // Se nao tem file_path nem s3_key, o download original falhou
-              // e retry aqui nao resolveria (precisa retry do download).
               OR: [
                 { file_path: { not: null } },
                 { s3_key: { not: null } },
               ],
+              // PR2 #A9: pula audios que ja falharam 3+ vezes ou marcados como failed
+              transcribe_failed: false,
+              transcribe_attempts: { lt: MAX_TRANSCRIBE_ATTEMPTS },
             },
           },
         },
@@ -92,7 +101,7 @@ export class AudioRetranscribeCronService {
       const apiInternalUrl = process.env.API_INTERNAL_URL || 'http://crm-api:3001';
       let recovered = 0;
       let recoveryFailed = 0;
-      for (const m of audioMessages) {
+      for (const m of audioMessages as any[]) {
         try {
           const r = await axios.get(`${apiInternalUrl}/media/${m.id}`, {
             timeout: 60_000,
@@ -114,7 +123,7 @@ export class AudioRetranscribeCronService {
 
       // Agrupa por conversation_id (1 job por conversa)
       const conversationIds = Array.from(
-        new Set(audioMessages.map((m) => m.conversation_id).filter(Boolean)),
+        new Set((audioMessages as any[]).map((m: any) => m.conversation_id).filter(Boolean)),
       );
 
       this.logger.log(

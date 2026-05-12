@@ -264,9 +264,33 @@ export class BookAppointmentHandler implements ToolHandler {
   }
 
   // ─── Notificação imediata ao advogado responsável ────────────────────
+  //
+  // Bug fix 2026-05-12 (Skills PR2 #A12 — ALTO):
+  // Antes: notifyLawyer rodava sempre, sem idempotency. Se job de
+  // book_appointment falhava no final (timeout do BullMQ, restart) e o
+  // mesmo job re-executava, ELE NOTIFICAVA O ADVOGADO DE NOVO.
+  // Resultado: advogado recebia 2x ou 3x a mesma notificacao no WhatsApp.
+  // Pior: vaza telefone do cliente novamente + queima cota WhatsApp (risco
+  // de ban — ver project_whatsapp_ban_disparo.md).
+  //
+  // Agora: marca lawyer_notified_at no event ANTES de enviar. Re-execucoes
+  // checam esse flag e pulam. updateMany retorna count=0 se ja marcado.
   private async notifyLawyer(event: any, prisma: any): Promise<void> {
     if (!event.assigned_user?.phone) {
       this.logger.warn(`[book_appointment] Advogado ${event.assigned_user_id} sem telefone — notificação pulada`);
+      return;
+    }
+
+    // Idempotency lock: marca lawyer_notified_at no row.
+    // Se ja foi notificado (notified_at IS NOT NULL), count=0 e abortamos.
+    // NOTE: campo lawyer_notified_at adicionado em 2026-05-12 — Prisma generate
+    // roda na VPS, ate la cast pra any.
+    const claim = await (prisma.calendarEvent.updateMany as any)({
+      where: { id: event.id, lawyer_notified_at: null },
+      data: { lawyer_notified_at: new Date() },
+    });
+    if (claim.count === 0) {
+      this.logger.log(`[book_appointment] Advogado ja notificado pra event ${event.id} — pulando (idempotent)`);
       return;
     }
 

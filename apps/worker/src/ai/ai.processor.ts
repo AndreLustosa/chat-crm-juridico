@@ -340,6 +340,11 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
 
       // Helper que escolhe placeholder + sinaliza defer pra audios frescos.
       // Tudo que faz msg.text = placeholder passa por aqui.
+      //
+      // Bug fix 2026-05-12 (Skills PR2 #A9):
+      // Tambem incrementa Media.transcribe_attempts e seta transcribe_failed=true
+      // ao atingir cap de 3. Cron AudioRetranscribeCron filtra esses fora.
+      const MAX_TRANSCRIBE_ATTEMPTS = 3;
       const markFailed = (reason: string) => {
         if (isFresh) {
           needsDefer = true;
@@ -348,6 +353,30 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         } else {
           msg.text = STALE_PLACEHOLDER;
           this.logger.warn(`[AI] Audio msg=${msg.id} antigo sem transcricao (${reason}) — placeholder educado`);
+        }
+        // Incrementa contador atomicamente (best-effort, nao bloqueia).
+        // NOTE: campos transcribe_attempts/transcribe_failed adicionados em
+        // 2026-05-12 — Prisma generate roda na VPS, ate la usar `as any`.
+        if (msg.id) {
+          (this.prisma.media.updateMany as any)({
+            where: { message_id: msg.id },
+            data: {
+              transcribe_attempts: { increment: 1 },
+              transcribe_last_err: reason.slice(0, 500),
+            },
+          }).then(async () => {
+            const m = await (this.prisma.media.findUnique as any)({
+              where: { message_id: msg.id },
+              select: { transcribe_attempts: true },
+            });
+            if (m && m.transcribe_attempts >= MAX_TRANSCRIBE_ATTEMPTS) {
+              await (this.prisma.media.update as any)({
+                where: { message_id: msg.id },
+                data: { transcribe_failed: true },
+              }).catch(() => {});
+              this.logger.warn(`[AI] Audio msg=${msg.id} atingiu max ${MAX_TRANSCRIBE_ATTEMPTS} tentativas — marcado como failed (cron nao tenta mais)`);
+            }
+          }).catch(() => {});
         }
       };
 
@@ -725,6 +754,17 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         }
       } catch (e: any) {
         this.logger.warn(`[AI] Falha ao criar tarefa automática: ${e.message}`);
+        // Bug fix 2026-05-12 (Skills PR2 #A10 — ALTO):
+        // IA pode ter prometido "agendei sua consulta" mas o CalendarEvent
+        // nao foi criado. Flag ai_notes pro operador revisar manualmente.
+        try {
+          await this.prisma.conversation.update({
+            where: { id: convoId },
+            data: {
+              ai_notes: `[${new Date().toISOString()}] [REVISAR] Falha ao criar tarefa/evento automatico: ${e.message?.slice(0, 200)}. IA pode ter prometido acao que nao foi executada — verifique conversa.`,
+            },
+          });
+        } catch { /* nao bloqueia */ }
       }
     }
 
@@ -1984,6 +2024,23 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
 
       // 11. Montar histórico MULTI-TURN (memória natural do modelo)
       // Imagens do cliente são incluídas inline no turn correto (não descoladas no final).
+      //
+      // Bug fix 2026-05-12 (Skills PR2 #A4 — ALTO — MEMORY):
+      // Antes: convertia base64 de TODAS as imagens no chronological (150 msgs).
+      // Conversa com 10 imagens × ate 30MB cada = ate 300MB em memoria do worker
+      // POR REQUEST. OOM em conversas com muitas midias. Tambem latencia alta
+      // (cada base64 e network call + conversao). Agora: so as ULTIMAS 5
+      // imagens entram inline; as mais antigas viram placeholder "[imagem]".
+      // 5 cobre praticamente todos os fluxos legitimos (cliente raramente
+      // envia mais que isso num turno).
+      const MAX_INLINE_IMAGES = 5;
+      const imageMsgIds = new Set<string>();
+      for (let i = chronological.length - 1; i >= 0 && imageMsgIds.size < MAX_INLINE_IMAGES; i--) {
+        const m = chronological[i] as any;
+        if (m.direction === 'in' && m.type === 'image') {
+          imageMsgIds.add(m.id);
+        }
+      }
       const supportsVision = this.modelSupportsVision(model);
       const chatTurns: Array<{role: 'user' | 'assistant', content: string | any[]}> = [];
       for (const m of chronological) {
@@ -1998,7 +2055,9 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         // removeu o upload S3 mas esqueceu de atualizar este path — desde
         // 24/04 todas as imagens NOVAS (so com file_path, sem s3_key) eram
         // silenciosamente puladas. IA so via "[imagem enviada]" sem ver.
-        if (isClient && (m as any).type === 'image' && supportsVision) {
+        if (isClient && (m as any).type === 'image' && supportsVision && imageMsgIds.has((m as any).id)) {
+          // Bug fix #A4: so processa inline as ultimas MAX_INLINE_IMAGES imagens.
+          // Imagens mais antigas caem no path "[imagem]" placeholder no final do loop.
           let mediaRecord = (m as any).media ?? null;
           const hasStorage = (med: any) => med && (med.file_path || med.s3_key);
 
@@ -2454,8 +2513,32 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
 
       // 14a. Reply vazio = conversa encerrada — IA decidiu não responder
       // (ex: cliente disse "obrigado" após despedida, loop detectado)
+      //
+      // Bug fix 2026-05-12 (Skills PR2 #A3 — ALTO):
+      // Antes: reply vazio aplicava QUALQUER update.stage incluindo PERDIDO/
+      // FINALIZADO/ARQUIVADO. Se IA falhasse em parsear JSON (parseAiResponse
+      // retornava reply='' em malformacao), updates.stage='PERDIDO' ainda
+      // rodava — leads sumiam silenciosamente sem mensagem nem trace.
+      // Agora: stage destrutivo SO se respondCall foi explicitamente chamado.
       if (!finalText || !finalText.trim()) {
         this.logger.log(`[AI] Reply vazio — conversa encerrada, IA não responde (conv ${conversation_id})`);
+        const DESTRUCTIVE_STAGES = new Set(['PERDIDO', 'FINALIZADO', 'ARQUIVADO']);
+        if (updates?.stage && DESTRUCTIVE_STAGES.has(String(updates.stage).toUpperCase())) {
+          // Tem stage destrutivo. So aplica se respondCall foi explicito (parseado
+          // de tool call), nao parseado de JSON ambiguo.
+          const respondCallExplicit = toolCallLogs.find((l: any) => l.name === 'respond_to_client');
+          if (!respondCallExplicit) {
+            this.logger.warn(
+              `[AI] Reply vazio + stage destrutivo "${updates.stage}" sem respond_to_client explicito — ` +
+              `BLOQUEADO (provavel parse ambiguo). Stage NAO aplicado. conv=${conversation_id}`,
+            );
+            // Remove o stage destrutivo do updates antes de aplicar
+            const cleanUpdates = { ...updates };
+            delete cleanUpdates.stage;
+            await this.applyAiUpdates(cleanUpdates, convo.id, convo.lead.id, convo.lead.phone, convo.instance_name || null);
+            return;
+          }
+        }
         // Ainda aplica updates e salva log, mas não envia mensagem
         await this.applyAiUpdates(updates, convo.id, convo.lead.id, convo.lead.phone, convo.instance_name || null);
         return;
@@ -2616,16 +2699,27 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       // Flag de sucesso do envio. Se texto+audio ambos falham, NAO salvamos
       // Message no banco (evita mensagem fantasma no chat do CRM mostrando
       // algo que cliente nunca recebeu no WhatsApp — bug reportado 2026-04-23).
-      // _willAudio=true pula sendText porque audio vai em passo posterior (TTS);
-      // consideramos "ok" nesse caso pra seguir o fluxo pro passo do audio.
-      let sendOk = !!_willAudio;
+      //
+      // Bug fix 2026-05-12 (Skills PR2 #A1 — ALTO):
+      // Antes: `sendOk = !!_willAudio` marcava sucesso ANTES do TTS rodar.
+      // Se TTS falhava no passo 18, fallback de texto rodava com evolutionMsgId
+      // diferente — Message ja salva com sys_ai_${Date.now()} divergia do
+      // evolution real, echo dedup falhava, mensagem aparecia duplicada na inbox.
+      // Agora: sendOk comeca SEMPRE false. So vira true apos confirmacao real
+      // (sendText 200 com key.id OU TTS+sendMedia confirmados no passo 18).
+      let sendOk = false;
       let sendErrMsg: string | null = null;
       try {
         let sendResult: any;
         const evoHeaders = { 'Content-Type': 'application/json', apikey: apiKey };
 
         if (_willAudio) {
-          // Não envia texto — será enviado apenas áudio no passo 18 (TTS)
+          // Não envia texto — será enviado apenas áudio no passo 18 (TTS).
+          // Bug fix #A1: sendOk preliminar true SO pra seguir o flow ate
+          // o TTS. Sera revertido pra false se TTS falhar e o fallback de
+          // texto NAO conseguir enviar (passo 18). Message so eh salva
+          // depois de confirmacao real do envio.
+          sendOk = true;
         } else {
           // sendList (listas interativas) não funciona via Baileys —
           // WhatsApp deprecou para conexões não-oficiais (só Cloud API).
@@ -2648,7 +2742,21 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           }
         }
       } catch (sendErr: any) {
-        sendErrMsg = `${sendErr.response?.status || sendErr.message}: ${JSON.stringify(sendErr.response?.data || {}).slice(0, 200)}`;
+        // Bug fix 2026-05-12 (Skills PR2 #A2 — SECURITY):
+        // Antes logava sendErr.response.data completo. Alguns proxies/middlewares
+        // ecoam headers da request (incluindo apikey Evolution) no body de erro.
+        // Sanitiza removendo headers da resposta antes de logar.
+        const errData = sendErr.response?.data || {};
+        // Se for objeto, remove campos sensiveis; se for string, mantem
+        const safe = typeof errData === 'string'
+          ? errData.slice(0, 200)
+          : JSON.stringify({
+              message: errData.message,
+              error: errData.error,
+              status: errData.status,
+              // NAO inclui headers, request, config — podem ter apikey
+            }).slice(0, 200);
+        sendErrMsg = `${sendErr.response?.status || sendErr.message}: ${safe}`;
         sendOk = false;
       }
 
@@ -2757,12 +2865,20 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
           const styledText = `Mulher profissional, voz serena e confiante. Fala com clareza e empatia. Adapta automaticamente o tom conforme o conteúdo da mensagem. Atendimento ao cliente jurídico via áudio. O cliente pode estar ansioso, aliviado, inadimplente ou aguardando notícias do processo. A voz deve espelhar o momento emocional do conteúdo narrado. Português brasileiro padrão, dicção clara. REGRAS DE ADAPTAÇÃO: mensagem de prazo ou urgência, ritmo mais acelerado com ênfase nas datas e valores; mensagem de atualização processual, tom informativo com pausas após termos jurídicos; mensagem de boas notícias, voz mais leve com leve sorriso perceptível; mensagem de cobrança, tom sério e respeitoso sem agressividade; mensagem de situação delicada, voz mais suave com ritmo lento; mensagem de boas-vindas, tom acolhedor e animado; mensagem informativa, tom neutro e preciso. Agora diga: ${ttsText}`;
 
           // Gemini 2.5 Flash TTS
+          // Bug fix 2026-05-12 (Skills PR2 #A2 — ALTO — SECURITY):
+          // Antes: API key na query string da URL. Em qualquer log de
+          // exception/network trace (Sentry, axios interceptor, proxy access log)
+          // a key vazava. Agora via header x-goog-api-key (suportado pelo Gemini).
           const geminiModel = 'gemini-2.5-flash-preview-tts';
           const ttsRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${ttsConfig.googleApiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                // Bug fix #A2: API key via header em vez de query string
+                'x-goog-api-key': ttsConfig.googleApiKey,
+              },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: styledText }] }],
                 generationConfig: {
@@ -2841,15 +2957,44 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
         } catch (ttsErr: any) {
           this.logger.warn(`[TTS] Falha ao gerar/enviar áudio: ${ttsErr.message} — enviando texto como fallback`);
           // Fallback: envia texto quando TTS falha (créditos esgotados, erro de API, etc.)
+          // Bug fix 2026-05-12 (Skills PR2 #A1):
+          // Antes: fallback rodava mas se TAMBEM falhasse, Message ja estava salva
+          // como "enviada" — mensagem fantasma no chat do CRM. Agora: se ambos
+          // falham, deleta savedMsg pra nao deixar fantasma.
+          let fallbackOk = false;
+          let fallbackEvoId: string | null = null;
           try {
-            await axios.post(
+            const fallbackRes = await axios.post(
               `${apiUrl}/message/sendText/${instanceName}`,
               { number: convo.lead.phone, text: textToSend },
               { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 30000 },
             );
-            this.logger.log('[TTS] Fallback texto enviado com sucesso');
+            fallbackEvoId = fallbackRes?.data?.key?.id || null;
+            if (fallbackEvoId) {
+              fallbackOk = true;
+              this.logger.log(`[TTS] Fallback texto enviado com sucesso (evoId=${fallbackEvoId})`);
+              // Atualiza Message com evolutionMsgId real do fallback pra echo dedup funcionar
+              if (savedMsg?.id) {
+                await this.prisma.message.update({
+                  where: { id: savedMsg.id },
+                  data: { external_message_id: fallbackEvoId },
+                }).catch((e: any) => {
+                  this.logger.warn(`[TTS] Falha ao atualizar evoId do fallback: ${e.message}`);
+                });
+              }
+            }
           } catch (fallbackErr: any) {
             this.logger.error(`[TTS] Fallback texto também falhou: ${fallbackErr.message}`);
+          }
+          // TTS falhou E fallback falhou: deleta a Message pra nao deixar mensagem
+          // fantasma no chat do CRM mostrando algo que cliente nunca recebeu.
+          if (!fallbackOk && savedMsg?.id) {
+            await this.prisma.message.delete({
+              where: { id: savedMsg.id },
+            }).catch((e: any) => {
+              this.logger.warn(`[TTS] Falha ao deletar Message fantasma ${savedMsg.id}: ${e.message}`);
+            });
+            this.logger.error(`[TTS] TTS+fallback falharam — Message ${savedMsg.id} deletada (ghost prevention)`);
           }
         }
       }

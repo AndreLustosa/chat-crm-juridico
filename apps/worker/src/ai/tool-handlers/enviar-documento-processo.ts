@@ -167,10 +167,15 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
 
     for (const doc of toSend) {
       try {
+        // Bug fix 2026-05-12 (Skills PR2 #A11 — ALTO — SECURITY):
+        // Antes TTL 7 dias. Cliente podia encaminhar URL via WhatsApp e
+        // qualquer um acessava o documento (sentença/contrato/decisão) por
+        // 7 dias sem auditoria. Reduzido pra 24h.
+        // Inclui tenant_id no payload pra defense-in-depth no /portal/documents/share.
         const token = signShareToken(
-          { sub: doc.id, lead_id: leadId, aud: 'doc-share' },
+          { sub: doc.id, lead_id: leadId, tenant_id: tenantId, aud: 'doc-share' },
           secret,
-          7 * 24 * 60 * 60, // 7 dias
+          24 * 60 * 60, // 24h
         );
         const url = `${apiBase}/portal/documents/share/${doc.id}?token=${encodeURIComponent(token)}`;
         const folderLabel = FOLDER_LABELS[doc.folder] || doc.folder;

@@ -123,12 +123,26 @@ export class AbrirCasoViabilidadeHandler implements ToolHandler {
       lawyerId = lastCase?.lawyer_id ?? undefined;
     }
 
+    // Bug fix 2026-05-12 (Skills PR2 #A5 — ALTO):
+    // Antes: se !tenantId, query rodava SEM filtro tenant — pegava advogado
+    // de TENANT ALEATORIO. Cliente do tenant A virava caso atribuido a
+    // advogado do tenant B (cross-tenant lawyer assignment).
+    // Tambem: findFirst sem orderBy era nao-deterministico — cliente VIP
+    // podia cair em estagiario aleatorio. Agora orderBy(created_at: 'asc')
+    // garante consistencia (sempre o advogado mais antigo cadastrado).
     if (!lawyerId) {
+      if (!tenantId) {
+        return {
+          success: false,
+          error: 'tenant_id ausente no contexto — nao foi possivel determinar advogado fallback',
+        };
+      }
       const anyLawyer = await prisma.user.findFirst({
         where: {
           roles: { hasSome: ['ADVOGADO', 'Advogados', 'ADMIN'] },
-          ...(tenantId ? { tenant_id: tenantId } : {}),
+          tenant_id: tenantId, // obrigatorio (defense-in-depth)
         },
+        orderBy: { created_at: 'asc' },
         select: { id: true },
       });
       lawyerId = anyLawyer?.id ?? undefined;
@@ -137,7 +151,7 @@ export class AbrirCasoViabilidadeHandler implements ToolHandler {
     if (!lawyerId) {
       return {
         success: false,
-        error: 'Nao ha nenhum advogado/admin disponivel no sistema pra atribuir o caso',
+        error: 'Nao ha nenhum advogado/admin disponivel no tenant pra atribuir o caso',
       };
     }
 

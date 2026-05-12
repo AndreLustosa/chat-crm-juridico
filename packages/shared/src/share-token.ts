@@ -20,6 +20,7 @@ import * as crypto from 'crypto';
 export interface ShareTokenPayload {
   sub: string;        // ID do recurso (doc_id, etc)
   lead_id: string;    // dono — pra dupla-checagem de ownership
+  tenant_id?: string; // tenant — defense-in-depth contra cross-tenant via token
   aud: string;        // "doc-share" pra documentos, futuro pode ter outros
   exp: number;        // unix epoch seconds
 }
