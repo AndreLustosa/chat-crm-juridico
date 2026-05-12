@@ -11,6 +11,7 @@ import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 /**
  * Converte telefone pro formato canonico (55+DDD+8dig). Wrapper que
@@ -899,7 +900,7 @@ export class LeadsService {
     const openai = new OpenAI({ apiKey });
     const completion = await openai.chat.completions.create({
       model: 'gpt-4.1-mini',
-      max_tokens: 300,
+      ...buildTokenParam('gpt-4.1-mini', 300),
       messages: [
         {
           role: 'system',

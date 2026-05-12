@@ -6,6 +6,7 @@ import { CalendarService } from '../calendar/calendar.service';
 import { FinanceiroService } from '../financeiro/financeiro.service';
 import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 // ─── Session Types ────────────────────────────────────────────────────────────
 
@@ -207,7 +208,7 @@ export class AdminBotService implements OnModuleInit, OnModuleDestroy {
         messages,
         tools: this.getTools(),
         tool_choice: 'auto',
-        max_tokens: 600,
+        ...buildTokenParam('gpt-4.1-mini', 600),
         temperature: 0.2,
       });
 

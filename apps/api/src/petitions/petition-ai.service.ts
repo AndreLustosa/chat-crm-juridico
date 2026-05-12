@@ -10,6 +10,7 @@ import { tenantOrDefault } from '../common/constants/tenant';
 import { maskCpf, maskCnpj, maskRg, maskAddress, maskSalary } from '../common/utils/lgpd-mask.util';
 import { assertAiCostCap } from '../common/utils/ai-cost-cap.util';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 // Bug fix 2026-05-10 (Peticoes PR1 #14): timeout de 120s pra chamadas
 // OpenAI. Antes sem timeout — fetch ficava in-flight indefinidamente.
@@ -139,7 +140,7 @@ export class PetitionAiService {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: PETITION_MAX_TOKENS,
+      ...buildTokenParam(model, PETITION_MAX_TOKENS),
       temperature: 0.4,
     });
 

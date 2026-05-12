@@ -10,6 +10,7 @@ import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 import { BusinessDaysCalc } from '@crm/shared';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -1442,7 +1443,8 @@ ${pub.conteudo.slice(0, 6000)}`;
         const completion = await openai.chat.completions.create({
           model: configuredModel,
           temperature: 0.2,
-          max_tokens: 2048,
+          // Bug fix 2026-05-12: usa max_completion_tokens pra modelos gen 5.x/4.1/o-series
+          ...buildTokenParam(configuredModel, 2048),
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: systemPrompt },

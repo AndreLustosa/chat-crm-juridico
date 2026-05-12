@@ -11,6 +11,7 @@ import { isBusinessHours } from '../common/utils/business-hours.util';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -644,7 +645,7 @@ export class EsajSyncService {
       const completion = await openai.chat.completions.create({
         model,
         temperature: 0.4,
-        max_tokens: 400,
+        ...buildTokenParam(model, 400),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

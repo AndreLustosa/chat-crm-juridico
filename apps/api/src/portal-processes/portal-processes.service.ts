@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 /**
  * Servico de processos pra portal do cliente. Sempre filtra por
@@ -459,7 +460,7 @@ export class PortalProcessesService {
       const completion = await openai.chat.completions.create({
         model,
         temperature: 0.4,
-        max_tokens: 400,
+        ...buildTokenParam(model, 400),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

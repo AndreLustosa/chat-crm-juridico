@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { buildTokenParam } from '../common/openai-token-param.util';
 
 /**
  * Analisa o contexto de um lead e decide o que fazer no followup automatico.
@@ -130,7 +131,7 @@ export class FollowupAnalyzerService {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        max_tokens: 400,
+        ...buildTokenParam('gpt-4.1-mini', 400),
         temperature: 0.3,
         response_format: { type: 'json_object' },
       });

@@ -1,6 +1,7 @@
 import { Injectable, Logger, ForbiddenException, NotFoundException, BadRequestException, PayloadTooLargeException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 import { extname } from 'path';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1690,7 +1691,7 @@ Responda APENAS em JSON válido no formato:
           model: 'gpt-4.1-mini',
           messages: [{ role: 'user', content: prompt }],
           response_format: { type: 'json_object' },
-          max_tokens: 256,
+          ...buildTokenParam('gpt-4.1-mini', 256),
           temperature: 0.4,
         }, { signal: ctrl.signal });
       } finally {

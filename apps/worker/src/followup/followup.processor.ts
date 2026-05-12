@@ -6,6 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { FollowupService } from './followup.service';
 import { FollowupAnalyzerService } from './followup-analyzer.service';
 import { buildCaseWelcomeMessage } from './case-welcome-message.template';
+import { buildTokenParam } from '../common/openai-token-param.util';
 import axios from 'axios';
 
 @Processor('followup-jobs')
@@ -615,7 +616,7 @@ Gere APENAS o texto da mensagem, sem introduções.`;
       const completion = await openai.chat.completions.create({
         model: 'gpt-4.1-mini',
         messages: [{ role: 'system', content: systemPrompt }],
-        max_tokens: 500,
+        ...buildTokenParam('gpt-4.1-mini', 500),
         temperature: 0.7,
       });
       return completion.choices[0]?.message?.content?.trim() || this.fallbackBroadcastMessage(nome, type, dataEvento, event?.location);

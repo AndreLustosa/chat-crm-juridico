@@ -5,6 +5,7 @@ import { ChatGateway } from '../gateway/chat.gateway';
 import { SettingsService } from '../settings/settings.service';
 import { UpdateFichaDto } from './dto/update-ficha.dto';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 // Total de campos úteis do formulário (para cálculo de %)
 const TOTAL_FIELDS = 76;
@@ -330,7 +331,7 @@ export class FichaTrabalhistaService {
       const result = await openai.chat.completions.create({
         model: 'gpt-4.1-mini',
         temperature: 0.3,
-        max_tokens: 1000,
+        ...buildTokenParam('gpt-4.1-mini', 1000),
         messages: [
           {
             role: 'system',

@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { tenantOrDefault, DEFAULT_TENANT_ID } from '../common/constants/tenant';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 // ─── Tipos internos ───────────────────────────────────────────────────────────
 
@@ -667,7 +668,7 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
     const completion = await this.openai.chat.completions.create({
       model: 'gpt-4.1-mini',
       messages: [{ role: 'system', content: systemPrompt }],
-      max_tokens: 600,
+      ...buildTokenParam('gpt-4.1-mini', 600),
       temperature: 0.85,
     });
 
@@ -996,7 +997,7 @@ Considere requer_humano=true se:
       const r = await this.openai.chat.completions.create({
         model: 'gpt-4.1-mini',
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300, temperature: 0.3,
+        ...buildTokenParam('gpt-4.1-mini', 300), temperature: 0.3,
         response_format: { type: 'json_object' },
       });
       const json = JSON.parse(r.choices[0]?.message?.content || '{}');

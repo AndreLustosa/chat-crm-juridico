@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { normalizeBrazilianPhone } from '../common/utils/phone';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 import * as nodemailer from 'nodemailer';
 
 // ─── Labels/emojis para lembretes EMAIL (portado do worker em 2026-04-20) ──
@@ -804,7 +805,7 @@ Gere APENAS a mensagem final para WhatsApp, sem explicações.`;
       if (!openaiKey) throw new Error('OPENAI_API_KEY não configurada');
       const openai = new OpenAI({ apiKey: openaiKey });
       const completion = await openai.chat.completions.create({
-        model, max_tokens: 350, temperature: 0.7,
+        model, ...buildTokenParam(model, 350), temperature: 0.7,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -874,7 +875,7 @@ Gere APENAS a mensagem final formatada para WhatsApp, sem explicações adiciona
       const openai = new OpenAI({ apiKey: openaiKey });
       const completion = await openai.chat.completions.create({
         model,
-        max_tokens: 400,
+        ...buildTokenParam(model, 400),
         temperature: 0.7,
         messages: [
           { role: 'system', content: systemPrompt },

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import OpenAI from 'openai';
+import { buildTokenParam } from '../common/openai-token-param.util';
 
 @Injectable()
 export class FollowupService {
@@ -251,7 +252,7 @@ Gere APENAS o texto da mensagem final, sem introduções, sem "Aqui está a mens
       const completion = await this.openai.chat.completions.create({
         model: 'gpt-4.1-mini',
         messages: [{ role: 'system', content: systemPrompt }],
-        max_tokens: 700,
+        ...buildTokenParam('gpt-4.1-mini', 700),
         temperature: 0.88,
       });
       return completion.choices[0]?.message?.content?.trim() || this.fallbackMessage(nome);
@@ -323,7 +324,8 @@ Considere requer_humano=true se:
       const r = await this.openai.chat.completions.create({
         model: 'gpt-4.1-mini',
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 300, temperature: 0.3,
+        ...buildTokenParam('gpt-4.1-mini', 300),
+        temperature: 0.3,
         response_format: { type: 'json_object' },
       });
       const json = JSON.parse(r.choices[0]?.message?.content || '{}');
