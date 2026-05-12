@@ -1344,8 +1344,40 @@ function ProcessoDetailPanel({
     try {
       const res = await api.get(`/djen/case/${legalCase.id}`);
       setDjenPubs(res.data || []);
+      // Bug fix 2026-05-12 (DJEN reanalise):
+      // Quando recarrega a lista de publicacoes (ex: usuario clicou Atualizar),
+      // limpa o state local de analises pra forcar refetch via clique IA.
+      // Antes: state local persistia analises antigas mesmo apos cache do
+      // backend ter sido limpo, fazendo botao IA so expandir sem refazer.
+      setDjenAnalyses({});
+      setDjenAnalysisErrors({});
     } catch {} finally { setLoadingDjen(false); }
   }, [legalCase.id]);
+
+  // Bug fix 2026-05-12 (DJEN reanalise):
+  // Funcao reusavel pra dispar analise — com flag force pra bypassar cache
+  // de 24h do backend (lawyer_analysis salvo na publicacao).
+  const analyzePub = useCallback(async (pubId: string, force: boolean = false) => {
+    setAnalyzingDjen(pubId);
+    setExpandedDjen(pubId);
+    setDjenAnalysisErrors(prev => {
+      const next = { ...prev };
+      delete next[pubId];
+      return next;
+    });
+    try {
+      const res = await api.post(`/djen/${pubId}/analyze`, { force });
+      setDjenAnalyses(prev => ({ ...prev, [pubId]: res.data }));
+    } catch (err: any) {
+      const msg = err?.response?.data?.message
+        || err?.message
+        || 'Erro desconhecido ao analisar publicacao';
+      setDjenAnalysisErrors(prev => ({ ...prev, [pubId]: String(msg) }));
+      console.error('[DJEN/IA] Falha na analise', err?.response?.data || err);
+    } finally {
+      setAnalyzingDjen(null);
+    }
+  }, []);
 
   useEffect(() => {
     fetchTasks();
@@ -2314,25 +2346,9 @@ function ProcessoDetailPanel({
                                 setExpandedDjen(isExpanded ? null : pub.id);
                                 return;
                               }
-                              setAnalyzingDjen(pub.id);
-                              setExpandedDjen(pub.id);
-                              // Bug fix 2026-05-12 (DJEN IA nao funcionava):
-                              // Limpa erro anterior + captura mensagem do backend
-                              setDjenAnalysisErrors(prev => {
-                                const next = { ...prev };
-                                delete next[pub.id];
-                                return next;
-                              });
-                              try {
-                                const res = await api.post(`/djen/${pub.id}/analyze`);
-                                setDjenAnalyses(prev => ({ ...prev, [pub.id]: res.data }));
-                              } catch (err: any) {
-                                const msg = err?.response?.data?.message
-                                  || err?.message
-                                  || 'Erro desconhecido ao analisar publicacao';
-                                setDjenAnalysisErrors(prev => ({ ...prev, [pub.id]: String(msg) }));
-                                console.error('[DJEN/IA] Falha na analise', err?.response?.data || err);
-                              } finally { setAnalyzingDjen(null); }
+                              // Bug fix 2026-05-12 (DJEN reanalise):
+                              // Usa analyzePub centralizado. Primeira analise: force=false (usa cache se houver).
+                              await analyzePub(pub.id, false);
                             }}
                             disabled={!pub.legal_case_id}
                             className={`shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg border transition-colors ${
@@ -2388,8 +2404,22 @@ function ProcessoDetailPanel({
                             )}
                             {analysis && (
                               <div className="space-y-2 border-t border-border/50 pt-3">
-                                <div className="flex items-center gap-1 text-[10px] font-bold text-violet-400 uppercase tracking-wider">
-                                  <Sparkles size={10} /> Análise IA
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1 text-[10px] font-bold text-violet-400 uppercase tracking-wider">
+                                    <Sparkles size={10} /> Análise IA
+                                  </div>
+                                  {/* Bug fix 2026-05-12 (DJEN reanalise):
+                                      Botao explicito de reanalise com force=true.
+                                      Bypassa cache 24h do backend + state local. */}
+                                  <button
+                                    onClick={() => analyzePub(pub.id, true)}
+                                    disabled={isAnalyzing}
+                                    className="text-[10px] flex items-center gap-1 px-2 py-1 rounded-md border border-violet-500/30 text-violet-400 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
+                                    title="Refazer análise com o modelo atual (bypass do cache)"
+                                  >
+                                    {isAnalyzing ? <Loader2 size={10} className="animate-spin" /> : <RefreshCcw size={10} />}
+                                    Reanalisar
+                                  </button>
                                 </div>
                                 <p className="text-[11px] text-foreground/90 leading-relaxed">{analysis.resumo}</p>
                                 <div className="flex flex-wrap gap-2">
