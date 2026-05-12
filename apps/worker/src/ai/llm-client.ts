@@ -47,15 +47,18 @@ export interface LLMChatParams {
 
 // ─── Pricing ──────────────────────────────────────────────────
 
+// Bug fix 2026-05-12: removido 'gpt-5.4-mini' do pricing — modelo NAO EXISTE
+// na OpenAI. Estava aqui por engano (provavelmente alucinacao de IA durante
+// commit anterior) e a UI de settings expoes a opcao, fazendo admin escolher
+// e quebrar DJEN/Sophia silenciosamente.
+//
+// Pricing por 1M tokens (input/output) — atualizar quando OpenAI publicar novos.
 export const OPENAI_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4o-mini':  { input: 0.15,  output: 0.60  },
   'gpt-4o':       { input: 5.00,  output: 15.00 },
   'gpt-4.1':      { input: 2.00,  output: 8.00  },
   'gpt-4.1-mini': { input: 0.40,  output: 1.60  },
   'gpt-4.1-nano': { input: 0.10,  output: 0.40  },
-  'gpt-5':        { input: 15.00, output: 60.00 },
-  'gpt-5-mini':   { input: 1.50,  output: 6.00  },
-  'gpt-5.4-mini': { input: 1.00,  output: 4.00  },
   'o1':           { input: 15.00, output: 60.00 },
   'o3-mini':      { input: 1.10,  output: 4.40  },
 };

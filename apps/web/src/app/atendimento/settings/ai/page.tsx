@@ -62,14 +62,16 @@ interface SkillForm {
   provider: string;
 }
 
+// Bug fix 2026-05-12 (DJEN IA quebrada):
+// Antes a lista tinha 'gpt-5.4-mini' e 'gpt-5.1' — modelos QUE NAO EXISTEM
+// na OpenAI. Admin escolheu na UI achando que era novo, salvou em
+// DJEN_AI_MODEL=gpt-5.4-mini, e DJEN ficou retornando 404 silenciosamente.
+// Mantemos so modelos VERIFICADOS no API da OpenAI.
 const OPENAI_MODELS = [
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini — rápido, inteligente' },
-  { value: 'gpt-5.1', label: 'GPT-5.1 — conversacional avançado' },
   { value: 'gpt-4.1', label: 'GPT-4.1 — analítico' },
-  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini — rápido, econômico' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado (recomendado)' },
   { value: 'gpt-4o', label: 'GPT-4o — capaz' },
-  { value: 'o1-mini', label: 'o1 Mini — raciocínio' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini — rápido, econômico' },
 ];
 
 const ANTHROPIC_MODELS = [
@@ -436,7 +438,6 @@ export default function AiSettingsPage() {
     const colors: Record<string, string> = {
       'gpt-4o-mini': 'bg-sky-500/10 text-sky-400 border-sky-500/20',
       'gpt-4o': 'bg-violet-500/10 text-violet-400 border-violet-500/20',
-      'gpt-5.4-mini': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
       'gpt-4.1': 'bg-purple-500/10 text-purple-400 border-purple-500/20',
       'gpt-4.1-mini': 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
       'o1-mini': 'bg-pink-500/10 text-pink-400 border-pink-500/20',
@@ -504,10 +505,10 @@ export default function AiSettingsPage() {
                   className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
                 >
                   <optgroup label="OpenAI">
+                    {/* Bug fix 2026-05-12: removido gpt-5.4-mini (nao existe na OpenAI) */}
                     {[
-                      { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini — rápido, inteligente' },
+                      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado (recomendado)' },
                       { value: 'gpt-4o-mini',  label: 'GPT-4o Mini — rápido, econômico' },
-                      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado' },
                       { value: 'gpt-4.1',      label: 'GPT-4.1 — analítico avançado' },
                       { value: 'gpt-4o',       label: 'GPT-4o — alta precisão' },
                     ].map((m) => (
