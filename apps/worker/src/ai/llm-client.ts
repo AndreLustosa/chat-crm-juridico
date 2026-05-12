@@ -47,18 +47,28 @@ export interface LLMChatParams {
 
 // ─── Pricing ──────────────────────────────────────────────────
 
-// Bug fix 2026-05-12: removido 'gpt-5.4-mini' do pricing — modelo NAO EXISTE
-// na OpenAI. Estava aqui por engano (provavelmente alucinacao de IA durante
-// commit anterior) e a UI de settings expoes a opcao, fazendo admin escolher
-// e quebrar DJEN/Sophia silenciosamente.
+// Pricing por 1M tokens (input/output).
+// Atualizado 2026-05-12 com a lista oficial da OpenAI (developers.openai.com/pricing).
+// Familias atuais (gen 5.4/5.5) + retrocompat com gen anterior (4.1/4o) e legados (o1/o3).
 //
-// Pricing por 1M tokens (input/output) — atualizar quando OpenAI publicar novos.
+// IMPORTANTE: quando OpenAI publicar novos modelos, atualizar AQUI e em
+// apps/web/src/app/atendimento/settings/ai/page.tsx (lista do dropdown).
 export const OPENAI_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4o-mini':  { input: 0.15,  output: 0.60  },
+  // ─── Geracao 5.5 (flagship atual) ───
+  'gpt-5.5':      { input: 5.00,  output: 30.00 },
+  'gpt-5.5-pro':  { input: 30.00, output: 180.00 },
+  // ─── Geracao 5.4 ───
+  'gpt-5.4':      { input: 2.50,  output: 15.00 },
+  'gpt-5.4-mini': { input: 0.75,  output: 4.50  },
+  'gpt-5.4-nano': { input: 0.20,  output: 1.25  },
+  'gpt-5.4-pro':  { input: 30.00, output: 180.00 },
+  // ─── Geracao 4.x (compat) ───
   'gpt-4o':       { input: 5.00,  output: 15.00 },
+  'gpt-4o-mini':  { input: 0.15,  output: 0.60  },
   'gpt-4.1':      { input: 2.00,  output: 8.00  },
   'gpt-4.1-mini': { input: 0.40,  output: 1.60  },
   'gpt-4.1-nano': { input: 0.10,  output: 0.40  },
+  // ─── Legados (o-series) ───
   'o1':           { input: 15.00, output: 60.00 },
   'o3-mini':      { input: 1.10,  output: 4.40  },
 };

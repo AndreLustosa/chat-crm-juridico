@@ -62,16 +62,25 @@ interface SkillForm {
   provider: string;
 }
 
-// Bug fix 2026-05-12 (DJEN IA quebrada):
-// Antes a lista tinha 'gpt-5.4-mini' e 'gpt-5.1' — modelos QUE NAO EXISTEM
-// na OpenAI. Admin escolheu na UI achando que era novo, salvou em
-// DJEN_AI_MODEL=gpt-5.4-mini, e DJEN ficou retornando 404 silenciosamente.
-// Mantemos so modelos VERIFICADOS no API da OpenAI.
+// Lista atualizada 2026-05-12 com modelos oficiais OpenAI
+// (developers.openai.com/pricing). Familia 5.4/5.5 = geracao atual.
+// 4.1/4o = geracao anterior (compat). Removido 'gpt-5.1' (nao existe).
+//
+// IMPORTANTE: a lista precisa estar sincronizada com OPENAI_PRICING em
+// apps/worker/src/ai/llm-client.ts pra saveUsage calcular custo corretamente.
 const OPENAI_MODELS = [
-  { value: 'gpt-4.1', label: 'GPT-4.1 — analítico' },
-  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado (recomendado)' },
-  { value: 'gpt-4o', label: 'GPT-4o — capaz' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini — rápido, econômico' },
+  // Gen 5.5 (flagship)
+  { value: 'gpt-5.5', label: 'GPT-5.5 — flagship' },
+  { value: 'gpt-5.5-pro', label: 'GPT-5.5 Pro — máxima capacidade' },
+  // Gen 5.4 (atual padrao)
+  { value: 'gpt-5.4', label: 'GPT-5.4 — analítico avançado' },
+  { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini — balanceado, econômico' },
+  { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano — ultra rápido/barato' },
+  // Gen 4.x (compat)
+  { value: 'gpt-4.1', label: 'GPT-4.1 — analítico (gen anterior)' },
+  { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado (gen anterior)' },
+  { value: 'gpt-4o', label: 'GPT-4o — capaz (gen anterior)' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o Mini — rápido (gen anterior)' },
 ];
 
 const ANTHROPIC_MODELS = [
@@ -505,12 +514,14 @@ export default function AiSettingsPage() {
                   className="w-full bg-muted/50 border border-border rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary/50 transition-all"
                 >
                   <optgroup label="OpenAI">
-                    {/* Bug fix 2026-05-12: removido gpt-5.4-mini (nao existe na OpenAI) */}
+                    {/* Atualizado 2026-05-12 com modelos oficiais OpenAI */}
                     {[
-                      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — balanceado (recomendado)' },
-                      { value: 'gpt-4o-mini',  label: 'GPT-4o Mini — rápido, econômico' },
-                      { value: 'gpt-4.1',      label: 'GPT-4.1 — analítico avançado' },
-                      { value: 'gpt-4o',       label: 'GPT-4o — alta precisão' },
+                      { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini — balanceado, econômico (recomendado)' },
+                      { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano — ultra rápido/barato' },
+                      { value: 'gpt-5.4',      label: 'GPT-5.4 — analítico avançado' },
+                      { value: 'gpt-5.5',      label: 'GPT-5.5 — flagship' },
+                      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini — gen anterior' },
+                      { value: 'gpt-4o-mini',  label: 'GPT-4o Mini — gen anterior' },
                     ].map((m) => (
                       <option key={m.value} value={m.value}>{m.label}</option>
                     ))}
