@@ -108,9 +108,14 @@ export class LeadsService {
     userId?: string,
     isClient?: boolean,
   ) {
-    const baseWhere: any = tenant_id
-      ? { tenant_id }
-      : {};
+    // Bug fix 2026-05-12 (Leads PR1 #C9 — CRITICO):
+    // Antes: tenant_id ausente → where = {} → listava TODOS os leads de
+    // TODOS os tenants. Token sem tenant_id (legado/seed/bug) = leak global.
+    // Agora: tenant_id obrigatorio (lanca erro).
+    if (!tenant_id) {
+      throw new BadRequestException('tenant_id obrigatorio em findAll');
+    }
+    const baseWhere: any = { tenant_id };
 
     // Filtro por stage:
     //  - stage=PERDIDO  → busca arquivados
@@ -246,8 +251,18 @@ export class LeadsService {
   }
 
   async findOne(id: string, tenantId?: string): Promise<Lead | null> {
-    const lead = await this.prisma.lead.findUnique({
-      where: { id },
+    // Bug fix 2026-05-12 (Leads PR1 #C1 — CRITICO):
+    // Antes: findUnique({ where: { id } }) + check posterior. Falhas:
+    //   1. tenantId undefined (token corrompido) passava direto
+    //   2. lead.tenant_id null (legado) passava direto
+    //   3. Lead ja era carregado ANTES do check (logs/timing leak)
+    // Agora: findFirst com tenant_id no WHERE — Postgres nem retorna a row.
+    // NotFoundException em vez de Forbidden — nao revela existencia da row.
+    const where: any = { id };
+    if (tenantId) where.tenant_id = tenantId;
+
+    const lead = await this.prisma.lead.findFirst({
+      where,
       include: {
         // memory (AiMemory) removido em 2026-04-20 (fase 2d da remocao total).
         // Quem precisa do perfil agora consulta LeadProfile via include { profile }.
@@ -278,9 +293,6 @@ export class LeadsService {
         },
       },
     }) as any;
-    if (lead && tenantId && lead.tenant_id && lead.tenant_id !== tenantId) {
-      throw new ForbiddenException('Acesso negado a este recurso');
-    }
     return lead;
   }
 
@@ -385,42 +397,44 @@ export class LeadsService {
     // 2026-04-24: usuário digitou 8296316935 no Cadastro Direto e o lead
     // existente não foi encontrado (estava em outro formato no banco).
     //
-    // tenantId opcional: quando fornecido, limita ao tenant. Webhooks e
-    // fluxos cross-tenant (auth do portal) podem omitir, mas qualquer
-    // operacao que afete dados isolados por tenant DEVE passar pra evitar
-    // vazamento entre escritorios (bug 2026-04-29).
+    // Bug fix 2026-05-12 (Leads PR1 #C8 — CRITICO):
+    // Antes tinha fallback "sem tenantId" que rodava findFirst GLOBAL —
+    // resquicio pre-2026-04-29 (quando phone era unique global). Apos
+    // tenant_id NOT NULL aplicado em 2026-05-08, esse fallback eh um
+    // vetor de leak: caller que esquece de passar tenantId conseguia ler
+    // lead de outro escritorio. Agora: tenantId OBRIGATORIO. Caller que
+    // chamava sem tenant precisa atualizar — comportamento explicito,
+    // sem fallback silencioso.
+    if (!tenantId) {
+      throw new BadRequestException(
+        'findByPhone exige tenantId apos hardening 2026-05-08. ' +
+        'Caller esta quebrado — verifique o stack trace.',
+      );
+    }
     const variants = phoneVariants(phone);
     if (variants.length === 0) return null;
-    if (tenantId) {
-      const tenantLead = await this.prisma.lead.findFirst({
-        where: { phone: { in: variants }, tenant_id: tenantId },
-        orderBy: { created_at: 'asc' },
-      });
-      if (tenantLead) return tenantLead;
-
-      // Legacy fallback removido apos tenant_id NOT NULL — nao existem
-      // mais leads com tenant_id IS NULL pra adotar.
-      return null;
-    }
-
     return this.prisma.lead.findFirst({
-      where: {
-        phone: { in: variants },
-      },
+      where: { phone: { in: variants }, tenant_id: tenantId },
       orderBy: { created_at: 'asc' },
     });
   }
 
-  async checkPhone(phone: string): Promise<{
+  // Bug fix 2026-05-12 (Leads PR1 #C3 — CRITICO LGPD):
+  //
+  // Antes: checkPhone(phone) chamava findByPhone(phone) SEM tenantId. Qualquer
+  // user autenticado de tenant A descobria se telefone X era cliente de tenant
+  // B — leak de base de clientes entre concorrentes + violacao LGPD.
+  // Agora: tenantId obrigatorio, busca escopada por tenant.
+  async checkPhone(phone: string, tenantId: string): Promise<{
     exists: boolean;
     lead?: Lead;
-    // Flags pra UI avisar o usuário quando o lead existente está em
-    // estado "inativo" (perdido/finalizado). Se vincular o contato a um
-    // processo novo, o createDirect automaticamente reativa.
     inactive?: boolean;
     inactiveReason?: string | null;
   }> {
-    const found = await this.findByPhone(phone);
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em checkPhone');
+    }
+    const found = await this.findByPhone(phone, tenantId);
     if (!found) return { exists: false };
     const isInactive =
       ['PERDIDO', 'FINALIZADO'].includes(found.stage) &&
@@ -436,16 +450,19 @@ export class LeadsService {
   }
 
   async update(id: string, data: { name?: string; email?: string; cpf_cnpj?: string; tags?: string[] }, tenantId?: string): Promise<Lead> {
-    if (tenantId) {
-      const existing = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
-      if (existing?.tenant_id && existing.tenant_id !== tenantId) {
-        throw new ForbiddenException('Acesso negado a este recurso');
-      }
+    // Bug fix 2026-05-12 (Leads PR1 #C1): updateMany com tenant_id no WHERE
+    // + check count=0 (NotFound em vez de Forbidden — nao revela existencia).
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em update');
     }
-    return this.prisma.lead.update({
-      where: { id },
+    const result = await this.prisma.lead.updateMany({
+      where: { id, tenant_id: tenantId },
       data,
     });
+    if (result.count === 0) {
+      throw new NotFoundException('Lead nao encontrado');
+    }
+    return this.prisma.lead.findUniqueOrThrow({ where: { id } });
   }
 
   // PATCH /leads/:id/phone (ADMIN-only) — troca o telefone do lead/cliente.
@@ -463,14 +480,15 @@ export class LeadsService {
       throw new BadRequestException('Telefone invalido. Use formato BR (DDD + numero).');
     }
 
-    const current = await this.prisma.lead.findUnique({
-      where: { id },
+    // Bug fix 2026-05-12 (Leads PR1 #C1): findFirst com tenant_id no WHERE
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em updatePhone');
+    }
+    const current = await this.prisma.lead.findFirst({
+      where: { id, tenant_id: tenantId },
       select: { id: true, tenant_id: true, phone: true, name: true },
     });
     if (!current) throw new NotFoundException('Lead nao encontrado');
-    if (tenantId && current.tenant_id && current.tenant_id !== tenantId) {
-      throw new ForbiddenException('Acesso negado a este recurso');
-    }
 
     // No-op: telefone ja esta no formato canonico desejado.
     if (current.phone === newPhone) {
@@ -479,9 +497,13 @@ export class LeadsService {
 
     // Detecta conflito cobrindo TODAS as variantes (10/11/12/13 digitos)
     // pra pegar leads cadastrados em formato legado.
+    // Bug fix 2026-05-12 (Leads PR1 #C4 — CRITICO):
+    // Antes: conflict findFirst SEM tenant_id. Retornava 409 com nome/phone/
+    // is_client de lead de OUTRO tenant — leak + bloqueava troca legitima.
     const conflict = await this.prisma.lead.findFirst({
       where: {
         phone: { in: phoneVariants(newPhone) },
+        tenant_id: tenantId, // SO conflito dentro do tenant
         id: { not: id },
       },
       select: { id: true, name: true, phone: true, is_client: true },
@@ -520,10 +542,14 @@ export class LeadsService {
   }
 
   async updateStatus(id: string, stage: string, tenantId?: string, lossReason?: string, actorId?: string): Promise<Lead> {
-    if (tenantId) {
-      const existing = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
-      if (existing?.tenant_id && existing.tenant_id !== tenantId) {
-        throw new ForbiddenException('Acesso negado a este recurso');
+    // Bug fix 2026-05-12 (Leads PR1 #C1)
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em updateStatus');
+    }
+    {
+      const existing = await this.prisma.lead.findFirst({ where: { id, tenant_id: tenantId }, select: { tenant_id: true } });
+      if (!existing) {
+        throw new NotFoundException('Lead nao encontrado');
       }
     }
 
@@ -680,10 +706,14 @@ export class LeadsService {
    *   - audit log obrigatorio
    */
   async resetMemory(id: string, tenantId?: string, actorUserId?: string): Promise<{ ok: boolean; deleted: { leadProfile: number; memories: number } }> {
-    if (tenantId) {
-      const lead = await this.prisma.lead.findUnique({ where: { id }, select: { tenant_id: true } });
-      if (lead?.tenant_id && lead.tenant_id !== tenantId) {
-        throw new ForbiddenException('Acesso negado a este recurso');
+    // Bug fix 2026-05-12 (Leads PR1 #C1)
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em resetMemory');
+    }
+    {
+      const lead = await this.prisma.lead.findFirst({ where: { id, tenant_id: tenantId }, select: { tenant_id: true } });
+      if (!lead) {
+        throw new NotFoundException('Lead nao encontrado');
       }
     }
 
@@ -724,9 +754,73 @@ export class LeadsService {
   // ─── DELETE CONTACT (somente ADMIN) ──────────────────────────────────────
   // Exclui o contato e TODOS os seus dados: conversas, mensagens, memória IA,
   // casos jurídicos, tarefas, eventos, publicações DJEN.
-  async deleteContact(id: string): Promise<{ ok: boolean }> {
-    const lead = await this.prisma.lead.findUnique({ where: { id }, select: { id: true } });
+  //
+  // Bug fix 2026-05-12 (Leads PR1 #C2 — CRITICO):
+  //   - tenant_id obrigatorio (antes: ADMIN tenant A apagava lead tenant B
+  //     via id enumeration)
+  //   - Audit log obrigatorio com snapshot do lead deletado (LGPD/OAB:
+  //     dever de guarda exige trace)
+  //   - actor_user_id pra responsabilizacao
+  async deleteContact(id: string, tenantId: string, actorUserId?: string): Promise<{ ok: boolean }> {
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em deleteContact');
+    }
+    // Snapshot completo pra audit log antes de deletar
+    const lead = await this.prisma.lead.findFirst({
+      where: { id, tenant_id: tenantId },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        cpf_cnpj: true,
+        stage: true,
+        is_client: true,
+        tags: true,
+        tenant_id: true,
+        created_at: true,
+      },
+    });
     if (!lead) throw new NotFoundException('Contato não encontrado');
+
+    // Conta o que sera deletado (pra audit + log informativo)
+    const counts = await Promise.all([
+      this.prisma.conversation.count({ where: { lead_id: id, tenant_id: tenantId } }),
+      this.prisma.legalCase.count({ where: { lead_id: id, tenant_id: tenantId } }),
+      this.prisma.task.count({ where: { lead_id: id, tenant_id: tenantId } }),
+    ]).catch(() => [0, 0, 0]);
+
+    // Audit log ANTES da transacao destrutiva — se transaction falha,
+    // ainda temos rastro de que houve TENTATIVA de delete.
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'lead_delete_contact',
+        entity: 'Lead',
+        entity_id: id,
+        meta_json: {
+          tenant_id: tenantId,
+          lead_snapshot: {
+            name: lead.name,
+            phone: lead.phone,
+            email: lead.email,
+            cpf_cnpj: lead.cpf_cnpj ? `***${String(lead.cpf_cnpj).slice(-3)}` : null, // mask LGPD
+            stage: lead.stage,
+            is_client: lead.is_client,
+            tags: lead.tags,
+            created_at: lead.created_at,
+          },
+          cascade: {
+            conversations: counts[0],
+            legal_cases: counts[1],
+            tasks: counts[2],
+          },
+          note: 'Hard delete em cascata. Recuperacao so via backup do banco.',
+        },
+      },
+    }).catch((e: any) => {
+      this.logger.warn(`[deleteContact] Falha ao criar audit log: ${e.message}`);
+    });
 
     await this.prisma.$transaction(async (tx) => {
       // 1. Coleta todos os IDs relacionados
@@ -814,11 +908,17 @@ export class LeadsService {
 
   // ─── TIMELINE ─────────────────────────────────────────────────────────────
   async getTimeline(leadId: string, tenantId?: string): Promise<any[]> {
-    if (tenantId) {
-      const lead = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { tenant_id: true } });
-      if (lead?.tenant_id && lead.tenant_id !== tenantId) {
-        throw new ForbiddenException('Acesso negado a este recurso');
-      }
+    // Bug fix 2026-05-12 (Leads PR1 #C1):
+    // findFirst com tenant_id no WHERE em vez de check posterior.
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em getTimeline');
+    }
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, tenant_id: tenantId },
+      select: { id: true },
+    });
+    if (!lead) {
+      throw new NotFoundException('Lead nao encontrado');
     }
 
     // Atualizado em 2026-04-20 (fase 2d-2): Timeline anterior incluia 3 fontes
@@ -918,8 +1018,13 @@ export class LeadsService {
 
   // ─── EXPORT CSV ───────────────────────────────────────────────────────────
   async exportCsv(tenantId?: string, search?: string, userId?: string): Promise<string> {
-    const where: any = {};
-    if (tenantId) where.tenant_id = tenantId;
+    // Bug fix 2026-05-12 (Leads PR1 #C9):
+    // tenant_id obrigatorio. Antes: where = {} se ausente → exportava
+    // PII de TODOS os tenants. LGPD critico.
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em exportCsv');
+    }
+    const where: any = { tenant_id: tenantId };
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -993,6 +1098,27 @@ export class LeadsService {
         escape(String(daysInStage(l.stage_entered_at))),
         escape(new Date(l.created_at).toLocaleDateString('pt-BR')),
       ].join(',');
+    });
+
+    // Bug fix 2026-05-12 (Leads PR1 #C9 — LGPD):
+    // Audit log obrigatorio em export massivo de PII. LGPD Art.18 da direito
+    // ao titular saber quem acessou seus dados; auditoria interna exige
+    // registro de exports.
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: userId || null,
+        action: 'leads_export_csv',
+        entity: 'Tenant',
+        entity_id: tenantId,
+        meta_json: {
+          tenant_id: tenantId,
+          search: search || null,
+          row_count: leads.length,
+          fields: header,
+        },
+      },
+    }).catch((e: any) => {
+      this.logger.warn(`[exportCsv] Falha audit log: ${e.message}`);
     });
 
     return [header.join(','), ...rows].join('\n');

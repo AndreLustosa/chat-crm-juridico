@@ -991,7 +991,10 @@ export class EvolutionService implements OnApplicationBootstrap {
       // Apenas atualizar leads existentes — NÃO criar novos via chats.upsert.
       // Filtra por tenant pra nao mexer em lead de outro escritorio quando
       // dois tenants tem o mesmo telefone (bug 2026-04-29).
-      const existingLead = await this.leadsService.findByPhone(phone, inbox?.tenant_id ?? null);
+      // Bug fix 2026-05-12 (Leads PR1 #C8): se inbox sem tenant_id, pula
+      // (antes passava null e findByPhone aceitava — agora throw).
+      if (!inbox?.tenant_id) continue;
+      const existingLead = await this.leadsService.findByPhone(phone, inbox.tenant_id);
       if (!existingLead) continue;
 
       // Atualizar foto se disponível (URLs do WhatsApp expiram)

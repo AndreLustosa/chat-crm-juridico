@@ -15,7 +15,22 @@ export class LeadsCleanupService {
 
   constructor(private prisma: PrismaService) {}
 
-  async deduplicatePhones(): Promise<CleanupResult> {
+  // Bug fix 2026-05-12 (Leads PR1 #C6 — CRITICO):
+  //
+  // Antes: deduplicatePhones() rodava SEM filtro tenant_id no findMany.
+  // ADMIN de tenant A podia disparar e processar TODOS os leads do sistema.
+  // Se 2 tenants tinham mesmo telefone normalizado em escritorios diferentes,
+  // mergeLeads movia conversations/tasks/profile entre eles — VAZAMENTO
+  // IRREVERSIVEL de dados entre escritorios.
+  //
+  // Agora: tenantId obrigatorio. findMany filtra por tenant_id. mergeLeads
+  // valida que source.tenant_id === target.tenant_id antes de mover.
+  // Audit log no inicio + fim.
+  async deduplicatePhones(tenantId: string, actorUserId?: string): Promise<CleanupResult> {
+    if (!tenantId) {
+      throw new Error('tenant_id obrigatorio em deduplicatePhones');
+    }
+
     const result: CleanupResult = {
       totalDuplicatesFound: 0,
       mergedLeads: 0,
@@ -23,28 +38,39 @@ export class LeadsCleanupService {
       errors: [],
     };
 
+    // Audit antes (mesmo se falhar, fica rastro da tentativa)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'leads_dedup_start',
+        entity: 'Tenant',
+        entity_id: tenantId,
+        meta_json: { tenant_id: tenantId },
+      },
+    }).catch(() => { /* nao bloqueia */ });
+
     // Processa em batches para não carregar todos os leads na memória de uma vez
     const BATCH_SIZE = 500;
     let cursor: string | undefined = undefined;
     let totalProcessed = 0;
 
-    this.logger.log('Iniciando deduplicação de telefones em batches...');
+    this.logger.log(`Iniciando deduplicação de telefones em batches (tenant=${tenantId})...`);
 
     while (true) {
       // Busca apenas id, phone e tenant_id para minimizar uso de memória.
-      // tenant_id eh necessario pra dedup respeitar o isolamento entre
-      // escritorios (post-bug 2026-04-29: phone deixou de ser unique global).
-      // Nota: cursor separado do findMany para evitar erro de inferência de tipo (TS7022)
+      // Bug fix #C6: filtro tenant_id no where.
       const batch: { id: string; phone: string; tenant_id: string }[] = cursor
         ? await this.prisma.lead.findMany({
             take: BATCH_SIZE,
             skip: 1,
             cursor: { id: cursor },
+            where: { tenant_id: tenantId },
             select: { id: true, phone: true, tenant_id: true },
             orderBy: { id: 'asc' },
           })
         : await this.prisma.lead.findMany({
             take: BATCH_SIZE,
+            where: { tenant_id: tenantId },
             select: { id: true, phone: true, tenant_id: true },
             orderBy: { id: 'asc' },
           });
@@ -115,11 +141,32 @@ export class LeadsCleanupService {
   /**
    * Move todas as relações do lead source para o target e deleta o source.
    * Executado dentro de uma transaction para garantir atomicidade.
+   *
+   * Bug fix 2026-05-12 (Leads PR1 #C6 — DEFENSE-IN-DEPTH):
+   * Mesmo com filtro tenant_id no caller, valida AQUI que source.tenant_id ===
+   * target.tenant_id antes de mover dados. Previne merge cross-tenant em
+   * qualquer cenario (bug futuro no caller, race condition, etc).
    */
   private async mergeLeads(
     sourceLeadId: string,
     targetLeadId: string,
   ): Promise<void> {
+    // Pre-check de tenant (FORA da transaction pra falhar rapido)
+    const [source, target] = await Promise.all([
+      this.prisma.lead.findUnique({ where: { id: sourceLeadId }, select: { tenant_id: true } }),
+      this.prisma.lead.findUnique({ where: { id: targetLeadId }, select: { tenant_id: true } }),
+    ]);
+    if (!source || !target) {
+      throw new Error(`mergeLeads: source ou target nao encontrado (${sourceLeadId} → ${targetLeadId})`);
+    }
+    if (source.tenant_id !== target.tenant_id) {
+      this.logger.error(
+        `[mergeLeads] CROSS-TENANT BLOCKED: source=${sourceLeadId} (tenant=${source.tenant_id}) ` +
+        `≠ target=${targetLeadId} (tenant=${target.tenant_id}). Operacao abortada.`,
+      );
+      throw new Error('mergeLeads: leads de tenants diferentes — operacao bloqueada por seguranca');
+    }
+
     await this.prisma.$transaction(async (tx) => {
       // 1. Mover conversations
       await tx.conversation.updateMany({

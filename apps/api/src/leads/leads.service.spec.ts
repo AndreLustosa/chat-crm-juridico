@@ -285,11 +285,14 @@ describe('LeadsService', () => {
   });
 
   describe('checkPhone', () => {
+    // Atualizado 2026-05-12 (PR1 Leads #C3): tenantId obrigatorio
+    const FAKE_TENANT = '00000000-0000-0000-0000-000000000001';
+
     it('should return exists=true when phone is found', async () => {
       const mockLead = { id: '1', name: 'Test', phone: '558299130127' };
       mockPrisma.lead.findFirst.mockResolvedValue(mockLead);
 
-      const result = await service.checkPhone('5582999130127');
+      const result = await service.checkPhone('5582999130127', FAKE_TENANT);
       expect(result.exists).toBe(true);
       expect(result.lead).toEqual(mockLead);
     });
@@ -297,7 +300,7 @@ describe('LeadsService', () => {
     it('should return exists=false when phone not found', async () => {
       mockPrisma.lead.findFirst.mockResolvedValue(null);
 
-      const result = await service.checkPhone('5582999999999');
+      const result = await service.checkPhone('5582999999999', FAKE_TENANT);
       expect(result.exists).toBe(false);
     });
   });
