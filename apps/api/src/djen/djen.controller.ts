@@ -108,6 +108,17 @@ export class DjenController {
     return this.djenService.analyzePublication(id, body?.force ?? false, req.user?.tenant_id);
   }
 
+  /**
+   * Backfill: computa content_hash em publicacoes existentes e marca duplicatas
+   * (mesmo despacho gerado 2x pelo DJEN com destinatarios diferentes) como
+   * archived. Idempotente. Use uma vez apos deploy do fix DJEN duplicado.
+   */
+  @Post('admin/backfill-content-hashes')
+  @Roles('ADMIN')
+  backfillContentHashes() {
+    return this.djenService.backfillContentHashes();
+  }
+
   /** Sugerir leads que correspondam às partes da publicação */
   @Get(':id/suggest-leads')
   suggestLeads(@Param('id') id: string, @Request() req: any) {

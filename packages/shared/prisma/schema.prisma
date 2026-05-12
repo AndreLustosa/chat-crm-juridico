@@ -869,12 +869,25 @@ model DjenPublication {
   client_notified_at    DateTime?
   created_at            DateTime   @default(now())
 
+  // Bug fix 2026-05-12 (DJEN duplicado):
+  // DJEN gera comunicacao_id SEPARADOS quando ha multiplos destinatarios
+  // (ex: intimacao da mesma audiencia gerada 2x — uma pro AUTOR, outra pro REU).
+  // content_hash = SHA256 do conteudo NORMALIZADO (sem nomes proprios variaveis
+  // entre "intimado(a) X para" e "Citado(s) - X", sem <br>, sem espacos extras).
+  // Duas publicacoes com mesmo (numero_processo, data_disponibilizacao, content_hash)
+  // sao tratadas como duplicatas — a segunda fica archived=true +
+  // duplicate_of_id apontando pra primeira, pra rastreabilidade.
+  content_hash          String?
+  duplicate_of_id       String?
+
   @@index([data_disponibilizacao])
   @@index([numero_processo])
   @@index([legal_case_id])
   @@index([viewed_at])
   @@index([archived])
   @@index([tenant_id])
+  // Indice composto pra dedup query (numero_processo + data + content_hash)
+  @@index([tenant_id, numero_processo, data_disponibilizacao, content_hash])
 }
 
 model DjenIgnoredProcess {

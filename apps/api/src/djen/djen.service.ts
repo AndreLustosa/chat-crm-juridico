@@ -311,6 +311,130 @@ export class DjenService {
     );
   }
 
+  /**
+   * Bug fix 2026-05-12 (DJEN duplicado):
+   *
+   * Normaliza conteudo e gera SHA256 pra detectar publicacoes duplicadas que
+   * o DJEN gera com comunicacao_id diferentes mas mesmo despacho (ex: 1
+   * intimacao da audiencia gerada 2x — pro AUTOR e pro REU).
+   *
+   * Normalizacao remove:
+   *   - Tags HTML (<br>, <p>, etc) → espaco
+   *   - Nomes proprios entre "intimado(a) X para" → "intimado(a) [NOME] para"
+   *   - Nomes em "Citado(s) - X" / "Intimado(s) - X" → "Citado(s) - [NOME]"
+   *   - "Intimado(s) / Citado(s)<br>... - NOME<br>" → unifica
+   *   - Datas/horarios literais (pra cobrir variacoes de formato)
+   *   - Whitespace excessivo
+   *   - Lowercase pra robustez
+   *
+   * Resultado: 2 publicacoes pro mesmo despacho com destinatarios diferentes
+   * (MARIA CICERA vs AUTO POSTO CONFIANCA) geram o MESMO hash.
+   */
+  /**
+   * Backfill: computa content_hash em publicacoes existentes e marca duplicatas
+   * como archived. Idempotente — pula publicacoes que ja tem content_hash setado.
+   *
+   * Use em situacao de "limpeza" depois do deploy do fix DJEN duplicado:
+   *   POST /djen/admin/backfill-content-hashes
+   *
+   * Algoritmo:
+   *   1. Itera todas publicacoes sem content_hash
+   *   2. Computa hash + atualiza
+   *   3. Pra cada grupo (tenant_id, numero_processo, data_disp, content_hash):
+   *      - Mantem 1 publicacao ativa (a com menor created_at — mais antiga)
+   *      - Marca as outras como archived=true + duplicate_of_id apontando pra
+   *        a antiga (a "original" detectada)
+   *
+   * NAO mexe em publicacoes ja archived manualmente pelo usuario.
+   */
+  async backfillContentHashes(): Promise<{
+    hashed: number;
+    duplicates_marked: number;
+  }> {
+    const all = await (this.prisma.djenPublication.findMany as any)({
+      where: { content_hash: null },
+      select: { id: true, conteudo: true, tenant_id: true, numero_processo: true, data_disponibilizacao: true, archived: true, created_at: true },
+      orderBy: { created_at: 'asc' },
+    });
+    this.logger.log(`[DJEN/backfill] ${all.length} publicacoes sem content_hash — computando`);
+
+    let hashed = 0;
+    let duplicatesMarked = 0;
+
+    // Indexa por chave de dedup conforme processa
+    const groupMap = new Map<string, string>(); // key → original publication id
+
+    for (const pub of all) {
+      const hash = this.computeContentHash(pub.conteudo);
+      if (!hash) {
+        // Sem hash (conteudo muito curto) — so atualiza pra nao re-processar
+        await (this.prisma.djenPublication.update as any)({
+          where: { id: pub.id },
+          data: { content_hash: '__no_hash__' },
+        }).catch(() => {});
+        continue;
+      }
+
+      const key = `${pub.tenant_id || 'null'}|${pub.numero_processo}|${pub.data_disponibilizacao.toISOString().slice(0,10)}|${hash}`;
+
+      const originalId = groupMap.get(key);
+
+      if (originalId) {
+        // Duplicata — marca como archived (so se nao ja estiver)
+        if (!pub.archived) {
+          await (this.prisma.djenPublication.update as any)({
+            where: { id: pub.id },
+            data: {
+              content_hash: hash,
+              duplicate_of_id: originalId,
+              archived: true,
+              viewed_at: new Date(),
+            },
+          });
+          duplicatesMarked++;
+        } else {
+          // Ja archived — so adiciona o link de duplicate_of_id
+          await (this.prisma.djenPublication.update as any)({
+            where: { id: pub.id },
+            data: { content_hash: hash, duplicate_of_id: originalId },
+          });
+        }
+      } else {
+        // Primeira ocorrencia — registra no map e seta hash
+        groupMap.set(key, pub.id);
+        await (this.prisma.djenPublication.update as any)({
+          where: { id: pub.id },
+          data: { content_hash: hash },
+        });
+      }
+      hashed++;
+    }
+
+    this.logger.log(
+      `[DJEN/backfill] Concluido: ${hashed} hashes calculados, ${duplicatesMarked} duplicatas marcadas como archived`,
+    );
+    return { hashed, duplicates_marked: duplicatesMarked };
+  }
+
+  private computeContentHash(conteudo: string | null | undefined): string | null {
+    if (!conteudo || typeof conteudo !== 'string') return null;
+    const trimmed = conteudo.trim();
+    if (trimmed.length < 20) return null; // muito curto pra dedup confiavel
+    let normalized = trimmed
+      // Strip HTML tags (DJEN injeta <br>, ocasional <p>, <strong>, etc)
+      .replace(/<\/?(br|p|strong|em|span|div)[^>]*>/gi, ' ')
+      // Mascara nomes proprios em padroes comuns do DJEN
+      .replace(/intimado\(a\)\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç\s\.&-]+?\s+para/gi, 'intimado(a) [NOME] para')
+      .replace(/citado\(a?s?\)\s*[\/-]?\s*[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç\s\.&-]+/gi, 'citado(s) [NOME]')
+      .replace(/-\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÁÉÍÓÚÂÊÔÃÕÇáéíóúâêôãõç\s\.&-]+?(?=\s*$|<|\.)/gi, '- [NOME]')
+      // Lowercase pra robustez
+      .toLowerCase()
+      // Whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+    return crypto.createHash('sha256').update(normalized).digest('hex');
+  }
+
   /** Busca items da API DJEN para uma OAB específica em uma data, com retry */
   private async fetchDjenItems(oabNumber: string, oabUf: string, lawyerName: string, date: string): Promise<any[]> {
     const params = new URLSearchParams({
@@ -424,11 +548,49 @@ export class DjenService {
         const assunto = item.assunto || null;
         const conteudo = item.conteudo || item.texto || item.descricao || '';
 
+        // Bug fix 2026-05-12 (DJEN duplicado):
+        // DJEN gera comunicacao_id separados quando ha multiplos destinatarios
+        // (ex: intimacao do mesmo despacho pro AUTOR + REU). Computa hash do
+        // conteudo NORMALIZADO (remove nomes proprios variaveis + tags HTML
+        // + whitespace) pra detectar duplicatas.
+        const contentHash = this.computeContentHash(conteudo);
+        const pubTenantId = legalCase?.tenant_id || null;
+
+        // Checa se ja existe publicacao com mesmo content_hash no mesmo dia/processo/tenant.
+        // Se sim, esta nova eh duplicata logica — marca como archived + duplicate_of_id.
+        let duplicateOfId: string | null = null;
+        if (contentHash && pubTenantId && numeroProcesso) {
+          const existing = await this.prisma.djenPublication.findFirst({
+            where: {
+              tenant_id: pubTenantId,
+              numero_processo: numeroProcesso,
+              data_disponibilizacao: dataDisp,
+              content_hash: contentHash,
+              archived: false,
+              // Exclui ela mesma do match (caso re-sync da mesma publicacao):
+              comunicacao_id: { not: Number(comunicacaoId) },
+            },
+            select: { id: true },
+          } as any).catch(() => null);
+          if (existing) {
+            duplicateOfId = existing.id;
+            this.logger.log(
+              `[DJEN] Duplicata detectada: comunicacao_id=${comunicacaoId} eh duplicata de pub ${existing.id} ` +
+              `(proc=${numeroProcesso}, data=${dataDisp.toISOString().slice(0,10)}, hash=${contentHash.slice(0,16)}...)`,
+            );
+          }
+        }
+
         const pub = await this.prisma.djenPublication.upsert({
           where: { comunicacao_id: Number(comunicacaoId) },
-          update: { legal_case_id: legalCaseId },
+          update: {
+            legal_case_id: legalCaseId,
+            // Atualiza content_hash em re-syncs caso ainda nao tenha (backfill)
+            ...(contentHash ? { content_hash: contentHash } : {}) as any,
+          },
           create: {
             comunicacao_id: Number(comunicacaoId),
+            tenant_id: pubTenantId, // PR2: agora sempre seta tenant_id quando ha legalCase
             data_disponibilizacao: dataDisp,
             numero_processo: numeroProcesso,
             classe_processual: item.classeProcessual || item.classe || null,
@@ -438,6 +600,15 @@ export class DjenService {
             nome_advogado: item.nomeAdvogado || lawyers.map(l => l.nome).join(', '),
             raw_json: item,
             legal_case_id: legalCaseId,
+            // Duplicata: ja nasce archived + apontando pra original
+            ...(duplicateOfId ? {
+              archived: true,
+              viewed_at: new Date(),
+              content_hash: contentHash,
+              duplicate_of_id: duplicateOfId,
+            } : {
+              content_hash: contentHash,
+            }) as any,
           },
         });
         saved++;
