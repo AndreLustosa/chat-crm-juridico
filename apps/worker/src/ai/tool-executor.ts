@@ -143,7 +143,16 @@ export class ToolExecutor {
       this.logger.log(`[ToolExecutor] Iteração ${iteration + 1}: ${otherCalls.length} tools executados`);
     }
 
-    this.logger.warn(`[ToolExecutor] Atingiu max iterações (${MAX_ITERATIONS})`);
+    // Bug fix 2026-05-12 (Skills PR3 #M4):
+    // Diagnostico claro quando MAX_ITERATIONS atingido. Antes: warn generico
+    // sem indicar QUAIS tools foram chamados — debugging chato.
+    // Agora loga o trace completo (nome + duracao) das tools que rodaram.
+    const trace = toolCallLogs.map(l => `${l.name}(${l.durationMs}ms)`).join(' → ');
+    this.logger.warn(
+      `[ToolExecutor] Atingiu max iteracoes (${MAX_ITERATIONS}). Trace: ${trace}. ` +
+      `Provavel causa: IA em loop chamando mesma tool ou skill mal-configurada ` +
+      `(prompt nao orienta a chamar respond_to_client pra encerrar).`,
+    );
     return {
       response: lastResponse!,
       toolCallLogs,

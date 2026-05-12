@@ -106,6 +106,33 @@ const SAVE_MEMORY_TURN_WINDOW_MS = 5 * 60_000;
 const SAVE_MEMORY_MAX_PER_WINDOW = 5;
 const saveMemoryCounter = new Map<string, { count: number; resetAt: number }>();
 
+// Bug fix 2026-05-12 (Skills PR3 #M5):
+// Cleanup automatico do counter a cada 10min — antes ficava acumulando keys
+// (uma por conversation_id) sem nunca expirar do Map ate o worker reiniciar.
+// Em produtor com muitas conversas, Map cresce indefinidamente (leak fraco
+// mas cumulativo). Cleanup periodico drena keys expiradas.
+//
+// timer.unref() pra nao bloquear o shutdown do processo.
+if (typeof setInterval !== 'undefined') {
+  const cleanupTimer = setInterval(() => {
+    const now = Date.now();
+    let removed = 0;
+    for (const [k, v] of saveMemoryCounter.entries()) {
+      if (v.resetAt < now) {
+        saveMemoryCounter.delete(k);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      logger.log(`[ToolGuards] saveMemoryCounter cleanup: ${removed} keys expiradas removidas`);
+    }
+  }, 10 * 60_000);
+  // Importante: unref pra nao manter event loop vivo no shutdown
+  if (typeof (cleanupTimer as any).unref === 'function') {
+    (cleanupTimer as any).unref();
+  }
+}
+
 export function checkSaveMemoryCap(conversationId: string): { ok: boolean; remaining: number } {
   const now = Date.now();
   let entry = saveMemoryCounter.get(conversationId);

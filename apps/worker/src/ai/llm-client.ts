@@ -93,12 +93,35 @@ export function calculateCost(model: string, promptTokens: number, completionTok
 }
 
 // ─── Detectar modelos que usam max_completion_tokens ──────────
+//
+// Bug fix 2026-05-12 (Skills PR3 #M2):
+// Regex anterior cobria gpt-5 (qualquer 5.x via prefixo), gpt-4.1, o1, o3.
+// Confirmado pelo screenshot oficial OpenAI (developers.openai.com/pricing):
+// gpt-5.4 e gpt-5.5 sao a familia atual e EXIGEM max_completion_tokens.
+// A regex /^gpt-5/ ja cobre — mantemos por documentacao explicita.
 
 function usesMaxCompletionTokens(model: string): boolean {
-  return /^(gpt-4\.1|gpt-5|o1|o3)/i.test(model);
+  if (!model) return false;
+  return /^(gpt-5|gpt-4\.1|o1|o3)/i.test(model);
 }
 
 // ─── OpenAI Client ────────────────────────────────────────────
+
+// Bug fix 2026-05-12 (Skills PR3 #M6+#M10):
+// Singleton cache + timeout — espelha pattern do AnthropicClient abaixo.
+const openaiClientCache = new Map<string, OpenAI>();
+function getOpenAIClientLocal(apiKey: string): OpenAI {
+  let c = openaiClientCache.get(apiKey);
+  if (!c) {
+    c = new OpenAI({
+      apiKey,
+      timeout: 60_000,
+      maxRetries: 0,
+    });
+    openaiClientCache.set(apiKey, c);
+  }
+  return c;
+}
 
 export class OpenAIClient {
   private logger = new Logger('OpenAIClient');
@@ -106,7 +129,7 @@ export class OpenAIClient {
   constructor(private apiKey: string) {}
 
   async chat(params: LLMChatParams): Promise<LLMResponse> {
-    const client = new OpenAI({ apiKey: this.apiKey });
+    const client = getOpenAIClientLocal(this.apiKey);
 
     // Build messages: system message first, then conversation
     const messages: any[] = [
@@ -158,13 +181,31 @@ export class OpenAIClient {
 
 // ─── Anthropic Client ─────────────────────────────────────────
 
+// Bug fix 2026-05-12 (Skills PR3 #M6+#M10):
+// Singleton cache do client Anthropic por apiKey + timeout explicito 60s.
+// Antes: `new Anthropic()` a cada chamada — perde keepAlive, leak de sockets.
+// Espelha o pattern de getOpenAIClient em memory-llm.util.ts.
+const anthropicClientCache = new Map<string, Anthropic>();
+function getAnthropicClient(apiKey: string): Anthropic {
+  let c = anthropicClientCache.get(apiKey);
+  if (!c) {
+    c = new Anthropic({
+      apiKey,
+      timeout: 60_000, // 60s — match com OpenAI
+      maxRetries: 0,   // desliga retry interno; deixa pro caller
+    });
+    anthropicClientCache.set(apiKey, c);
+  }
+  return c;
+}
+
 export class AnthropicClient {
   private logger = new Logger('AnthropicClient');
 
   constructor(private apiKey: string) {}
 
   async chat(params: LLMChatParams): Promise<LLMResponse> {
-    const client = new Anthropic({ apiKey: this.apiKey });
+    const client = getAnthropicClient(this.apiKey);
 
     // Convert LLMMessage[] to Anthropic format (no system role in messages)
     const messages: Anthropic.MessageParam[] = params.messages

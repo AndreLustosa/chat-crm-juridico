@@ -130,12 +130,28 @@ export class PromptBuilder {
     }
 
     // Inject references within token budget
+    // Bug fix 2026-05-12 (Skills PR3 #M3): cap em quantidade de references.
+    // Antes: skill com 50+ references todas tentavam entrar ate estourar
+    // charBudget. Cada iteracao loga warn — flood de logs. Agora: cap 30
+    // references max (antes do filtro de budget). Aviso ao admin se passar.
+    const MAX_REFERENCES = 30;
     if (references.length > 0) {
       let refBlock = '\n\n--- DOCUMENTOS DE REFERÊNCIA ---\n';
       let totalChars = 0;
       const charBudget = maxContextTokens * 4; // rough token-to-char ratio
+      const refsToUse = references.length > MAX_REFERENCES
+        ? references.slice(0, MAX_REFERENCES)
+        : references;
+      if (references.length > MAX_REFERENCES) {
+        this.logger.warn(
+          `[PromptBuilder] Skill tem ${references.length} references — usando apenas ` +
+          `as ${MAX_REFERENCES} primeiras (cap pra evitar prompt explosion). ` +
+          `Revise as references da skill.`,
+        );
+      }
 
-      for (const ref of references) {
+      let injectedCount = 0;
+      for (const ref of refsToUse) {
         if (totalChars + ref.content.length > charBudget) {
           this.logger.warn(`[PromptBuilder] Reference "${ref.name}" truncada (budget de ${maxContextTokens} tokens)`);
           const remaining = charBudget - totalChars;
@@ -146,10 +162,11 @@ export class PromptBuilder {
         }
         refBlock += `\n### ${ref.name}\n${ref.content}\n`;
         totalChars += ref.content.length;
+        injectedCount++;
       }
 
       prompt += refBlock;
-      this.logger.log(`[PromptBuilder] ${references.length} references injetadas (${totalChars} chars)`);
+      this.logger.log(`[PromptBuilder] ${injectedCount}/${references.length} references injetadas (${totalChars} chars)`);
     } else {
       this.logger.warn('[PromptBuilder] NENHUMA reference encontrada para injeção');
     }

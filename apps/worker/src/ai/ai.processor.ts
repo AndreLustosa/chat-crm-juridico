@@ -127,6 +127,29 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     return VISION_MODELS.some((prefix) => model.startsWith(prefix));
   }
 
+  /**
+   * Bug fix 2026-05-12 (Skills PR3 #M8):
+   * Valida modelo configurado contra lista conhecida. Se o admin setou um
+   * modelo nao reconhecido (typo, modelo descontinuado), loga warn pra ajudar
+   * diagnostico. Nao bloqueia — confia no OpenAI/Anthropic API pra rejeitar
+   * se inexistente (vide bug DJEN do dia 2026-05-12).
+   */
+  private warnIfUnknownModel(model: string, where: string): void {
+    if (!model) return;
+    const KNOWN_PREFIXES = [
+      'gpt-5', 'gpt-4.1', 'gpt-4o', 'gpt-3.5',
+      'o1', 'o3',
+      'claude-opus', 'claude-sonnet', 'claude-haiku',
+    ];
+    const isKnown = KNOWN_PREFIXES.some(p => model.startsWith(p));
+    if (!isKnown) {
+      this.logger.warn(
+        `[AI] Modelo "${model}" em ${where} nao parece familia conhecida. ` +
+        `Pode falhar com 404. Modelos suportados: ${KNOWN_PREFIXES.join(', ')}.`,
+      );
+    }
+  }
+
   // ─── Tabela de preços OpenAI (USD por 1M tokens) ───
   private static readonly OPENAI_PRICING: Record<string, { input: number; output: number }> = {
     'gpt-4o-mini':  { input: 0.15,  output: 0.60  },
@@ -1982,10 +2005,12 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
           `[AI] systemPrompt: literal_var=${hasLiteralVar} resolved_block=${hasResolved} length=${systemPrompt.length}`,
         );
         model = this.normalizeModelId(skill.model || (await this.settings.getDefaultModel()));
+        // PR3 #M8: warn se modelo nao reconhecido (ajuda diagnostico antes do 404)
+        this.warnIfUnknownModel(model, `skill="${skill.name}"`);
         maxTokens = Math.max(skill.max_tokens || 500, 800);
         temperature = skill.temperature ?? 0.7;
         this.logger.log(
-          `[AI] Usando skill: "${skill.name}" (area=${skill.area}, model=${model})`,
+          `[AI] Usando skill: "${skill.name}" (area=${skill.area}, model=${model}, tenant=${tenantIdForBH || 'null'})`,
         );
       } else {
         const fallbackSkillPrompt = `Você é Sophia, assistente de pré-atendimento do escritório André Lustosa Advogados.

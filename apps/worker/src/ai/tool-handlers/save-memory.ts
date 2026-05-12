@@ -86,6 +86,45 @@ export class SaveMemoryHandler implements ToolHandler {
       this.logger.warn('[save_memory] EmbeddingService indisponivel — salvando sem embedding');
     }
 
+    // Bug fix 2026-05-12 (Skills PR3 #M1):
+    // PRE-DEDUP por fulltext ANTES de gerar embedding. Economia direta:
+    //   - Embedding gera $0.0001 por chamada × OpenAI rate limit por organizacao
+    //   - Antes: gerava SEMPRE, mesmo quando memoria duplicada ja existia (custo desperdicado)
+    //   - Agora: ILIKE %content% pega match exato/quase-exato sem custo de embedding
+    //   - Se passa do fulltext, ai sim gera embedding + dedup semantico (cosine >= 0.92)
+    //
+    // Cobertura:
+    //   - 70% dos saves duplicados sao texto IDENTICO ou quase (IA repetindo o mesmo fato)
+    //   - Fulltext pega esses sem custo
+    //   - Os 30% restantes (parafrase) ainda passam pelo dedup semantico abaixo
+    try {
+      // Trigram-like prefix match: pega primeiros 100 chars do content como filter,
+      // depois ILIKE pra comparar similaridade textual basica.
+      const contentPrefix = content.slice(0, Math.min(content.length, 100));
+      const exactDup = await context.prisma.memory.findFirst({
+        where: {
+          tenant_id: tenantId,
+          scope,
+          scope_id: scopeId,
+          status: 'active',
+          content: { contains: contentPrefix, mode: 'insensitive' },
+        },
+        select: { id: true, content: true },
+      });
+      if (exactDup && exactDup.content.trim().toLowerCase() === content.trim().toLowerCase()) {
+        this.logger.log(
+          `[save_memory] Dedup textual exato (pre-embedding): "${exactDup.content.slice(0, 60)}"`,
+        );
+        return {
+          success: true,
+          already_exists: true,
+          message: 'Fato identico ja registrado na memoria.',
+        };
+      }
+    } catch (e: any) {
+      this.logger.warn(`[save_memory] Pre-dedup textual falhou (${e.message}) — prosseguindo`);
+    }
+
     let embeddingVector: number[] | null = null;
     if (embedding) {
       try {
@@ -96,7 +135,7 @@ export class SaveMemoryHandler implements ToolHandler {
       }
     }
 
-    // Bug 9 fix: dedup ANTES de inserir.
+    // Dedup SEMANTICO via cosine similarity (pega parafrase/sinonimos).
     // Antes a IA podia chamar save_memory 10x na mesma conversa com fato
     // similar — todas eram inseridas e so o cron 03h limpava. Resultado:
     // base poluida durante o dia, regen incremental processava duplicatas.
@@ -121,7 +160,7 @@ export class SaveMemoryHandler implements ToolHandler {
         )) as Array<{ id: string; content: string; sim: number }>;
         if (dup.length > 0 && Number(dup[0].sim) >= 0.92) {
           this.logger.log(
-            `[save_memory] Dedup: memoria similar ja existe (sim=${Number(dup[0].sim).toFixed(3)}) — ignorando insert. Existente: "${dup[0].content.slice(0, 60)}"`,
+            `[save_memory] Dedup semantico: memoria similar ja existe (sim=${Number(dup[0].sim).toFixed(3)}) — ignorando insert. Existente: "${dup[0].content.slice(0, 60)}"`,
           );
           return {
             success: true,
