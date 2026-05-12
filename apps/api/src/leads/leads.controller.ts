@@ -125,7 +125,9 @@ export class LeadsController {
     @Body() body: UpdateLeadDto,
     @Request() req: any,
   ) {
-    return this.leadsService.update(id, body, req.user?.tenant_id);
+    if (!req.user?.tenant_id) throw new UnauthorizedException('Token sem tenant_id');
+    // PR2 #A7: passa actorUserId pra audit log em cpf_cnpj change
+    return this.leadsService.update(id, body, req.user.tenant_id, req.user.id);
   }
 
   @Patch(':id/stage')
@@ -148,8 +150,11 @@ export class LeadsController {
   }
 
   @Post(':id/summary')
+  @Throttle({ default: { limit: 5, ttl: 10 * 60_000 } })
   summarize(@Param('id') id: string, @Request() req: any) {
-    return this.leadsService.summarizeLead(id, req.user?.tenant_id);
+    if (!req.user?.tenant_id) throw new UnauthorizedException('Token sem tenant_id');
+    // PR2 #A5: passa actorUserId pra audit log
+    return this.leadsService.summarizeLead(id, req.user.tenant_id, req.user.id);
   }
 
   @Delete(':id/memory')

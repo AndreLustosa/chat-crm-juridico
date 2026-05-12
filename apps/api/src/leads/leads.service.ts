@@ -10,6 +10,7 @@ import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
+import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import OpenAI from 'openai';
 import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
@@ -449,19 +450,85 @@ export class LeadsService {
     };
   }
 
-  async update(id: string, data: { name?: string; email?: string; cpf_cnpj?: string; tags?: string[] }, tenantId?: string): Promise<Lead> {
-    // Bug fix 2026-05-12 (Leads PR1 #C1): updateMany com tenant_id no WHERE
-    // + check count=0 (NotFound em vez de Forbidden — nao revela existencia).
+  async update(id: string, data: { name?: string; email?: string; cpf_cnpj?: string; tags?: string[] }, tenantId?: string, actorUserId?: string): Promise<Lead> {
+    // Bug fix 2026-05-12 (Leads PR1 #C1)
     if (!tenantId) {
       throw new BadRequestException('tenant_id obrigatorio em update');
     }
+
+    // Bug fix 2026-05-12 (Leads PR2 #A7 — CRITICO LGPD):
+    // Validacao Mod-11 de CPF/CNPJ. Antes: aceitava qualquer string ("111...").
+    // Tambem cap em tamanho (name/email).
+    const sanitized: any = {};
+    if (data.name !== undefined) {
+      const n = String(data.name).trim().slice(0, 200);
+      if (n.length > 0) sanitized.name = n;
+    }
+    if (data.email !== undefined) {
+      const e = String(data.email).trim().slice(0, 200);
+      if (e.length === 0) {
+        sanitized.email = null;
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+        throw new BadRequestException('Email invalido');
+      } else {
+        sanitized.email = e;
+      }
+    }
+    if (data.cpf_cnpj !== undefined) {
+      const raw = String(data.cpf_cnpj).replace(/\D/g, '');
+      if (raw.length === 0) {
+        sanitized.cpf_cnpj = null;
+      } else if (raw.length === 11) {
+        if (!isValidCPF(raw)) {
+          throw new BadRequestException('CPF invalido (Mod-11). Verifique digitos.');
+        }
+        sanitized.cpf_cnpj = raw;
+      } else if (raw.length === 14) {
+        if (!isValidCNPJ(raw)) {
+          throw new BadRequestException('CNPJ invalido (Mod-11). Verifique digitos.');
+        }
+        sanitized.cpf_cnpj = raw;
+      } else {
+        throw new BadRequestException('CPF/CNPJ deve ter 11 ou 14 digitos');
+      }
+    }
+    if (data.tags !== undefined) {
+      if (!Array.isArray(data.tags)) {
+        throw new BadRequestException('tags deve ser array');
+      }
+      if (data.tags.length > 30) {
+        throw new BadRequestException('Maximo 30 tags por lead');
+      }
+      sanitized.tags = data.tags.map(t => String(t).slice(0, 60)).filter(t => t.length > 0);
+    }
+
     const result = await this.prisma.lead.updateMany({
       where: { id, tenant_id: tenantId },
-      data,
+      data: sanitized,
     });
     if (result.count === 0) {
       throw new NotFoundException('Lead nao encontrado');
     }
+
+    // PR2 #A7: audit log se mudou cpf_cnpj (LGPD — PII change deve ser logada)
+    if (sanitized.cpf_cnpj !== undefined) {
+      await this.prisma.auditLog.create({
+        data: {
+          actor_user_id: actorUserId || null,
+          action: 'lead_cpf_cnpj_update',
+          entity: 'Lead',
+          entity_id: id,
+          meta_json: {
+            tenant_id: tenantId,
+            // Nao loga valor completo — so ultimos 3 digitos
+            cpf_cnpj_preview: sanitized.cpf_cnpj
+              ? `***${String(sanitized.cpf_cnpj).slice(-3)}`
+              : 'null',
+          },
+        },
+      }).catch(() => { /* nao bloqueia */ });
+    }
+
     return this.prisma.lead.findUniqueOrThrow({ where: { id } });
   }
 
@@ -584,13 +651,19 @@ export class LeadsService {
       csUserId = lastConv?.assigned_user_id ?? undefined;
     }
 
-    const lead = await this.prisma.lead.update({
-      where: { id },
+    // Bug fix 2026-05-12 (Leads PR2 #A6 — ALTO):
+    // Optimistic lock pra transicao de stage. Antes: 2 requests paralelos
+    // ambos leem stage=QUALIFICANDO + ambos escrevem stage=FINALIZADO →
+    // 2x criacao de LegalCase (via createFromFinalizado fora da tx) +
+    // 2x cs_user_id set + 2x followup auto-enroll.
+    // Agora: updateMany WHERE stage = current.stage. Se 2o request ja mudou,
+    // count=0 e abortamos com 409.
+    const updateResult = await this.prisma.lead.updateMany({
+      where: { id, tenant_id: tenantId, stage: current?.stage ?? '' },
       data: {
         stage,
         stage_entered_at: new Date(),
         ...(stage === 'PERDIDO' && lossReason ? { loss_reason: lossReason } : {}),
-        // Marcar como cliente ao FINALIZAR
         ...(stage === 'FINALIZADO' ? {
           is_client: true,
           became_client_at: new Date(),
@@ -598,6 +671,13 @@ export class LeadsService {
         } : {}),
       },
     });
+    if (updateResult.count === 0) {
+      // Stage mudou entre read e write — outro request rodou primeiro
+      throw new ConflictException(
+        `Stage do lead mudou simultaneamente. Recarregue a tela e tente de novo.`,
+      );
+    }
+    const lead = await this.prisma.lead.findUniqueOrThrow({ where: { id } });
 
     // Registra o histórico de mudança de stage
     this.prisma.leadStageHistory.create({
@@ -965,9 +1045,18 @@ export class LeadsService {
   }
 
   // ─── IA SUMMARY ───────────────────────────────────────────────────────────
-  async summarizeLead(leadId: string, tenantId?: string): Promise<{ summary: string }> {
-    const lead = await this.prisma.lead.findUnique({
-      where: { id: leadId },
+  async summarizeLead(leadId: string, tenantId?: string, actorUserId?: string): Promise<{ summary: string }> {
+    // Bug fix 2026-05-12 (Leads PR2 #A5 — CRITICO LGPD):
+    // Antes: enviava conversa CRUA (CPF/RG/endereco etc) pra OpenAI sem
+    // mask + sem audit + sem opt-in. Sigilo profissional EAOAB + LGPD Art.7
+    // (compartilhamento com operador internacional) violados.
+    // Agora: tenant obrigatorio + mask PII + audit log + cap msgs.
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio em summarizeLead');
+    }
+
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, tenant_id: tenantId },
       include: {
         conversations: {
           include: {
@@ -983,17 +1072,26 @@ export class LeadsService {
       },
     });
     if (!lead) throw new NotFoundException('Lead não encontrado');
-    if (tenantId && lead.tenant_id && lead.tenant_id !== tenantId) {
-      throw new ForbiddenException('Acesso negado');
-    }
+
+    // PR2 #A5: PII mask (CPF/CNPJ/processo CNJ/email/telefone) antes do LLM
+    const maskPii = (s: string): string =>
+      s
+        .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '<CPF>')
+        .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, '<CNPJ>')
+        .replace(/\b\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}\b/g, '<PROCESSO>')
+        .replace(/\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g, '<EMAIL>')
+        .replace(/\b(?:\+?55\s?)?\(?\d{2}\)?\s?9?\s?\d{4,5}-?\d{4}\b/g, '<TELEFONE>');
 
     const conv = lead.conversations?.[0];
     const messages = (conv?.messages ?? []).reverse();
     const messagesText = messages
       .filter((m) => m.text)
-      .map((m) => `${m.direction === 'out' ? 'Atendente' : 'Cliente'}: ${m.text}`)
-      .join('\n');
+      .map((m) => `${m.direction === 'out' ? 'Atendente' : 'Cliente'}: ${maskPii(m.text || '')}`)
+      .join('\n')
+      .slice(0, 10000); // cap defensivo
 
+    // Nota: usa process.env direto pois LeadsService nao injeta SettingsService.
+    // Pra usar key do GlobalSetting, refator futuro precisa adicionar a injecao.
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new BadRequestException('API key OpenAI não configurada.');
 
@@ -1004,14 +1102,30 @@ export class LeadsService {
       messages: [
         {
           role: 'system',
-          content: 'Você é um assistente jurídico. Produza um briefing conciso (3-5 linhas) sobre o lead: quem é, qual é o problema jurídico, o que já foi tratado e qual o próximo passo recomendado. Responda em português, sem tópicos, em texto corrido.',
+          content: 'Você é um assistente jurídico. Produza um briefing conciso (3-5 linhas) sobre o lead: quem é, qual é o problema jurídico, o que já foi tratado e qual o próximo passo recomendado. Responda em português, sem tópicos, em texto corrido. NOTA: dados sensíveis (CPF/CNPJ/processo/email/telefone) aparecem mascarados como <CPF>, <EMAIL>, etc — ignore-os no resumo.',
         },
         {
           role: 'user',
-          content: `Lead: ${lead.name || 'Sem nome'} | Etapa: ${lead.stage} | Área: ${(conv as any)?.legal_area || 'não definida'}\n\nConversa:\n${messagesText || 'Sem mensagens registradas.'}`,
+          content: `Lead: ${maskPii(lead.name || 'Sem nome')} | Etapa: ${lead.stage} | Área: ${(conv as any)?.legal_area || 'não definida'}\n\nConversa:\n${messagesText || 'Sem mensagens registradas.'}`,
         },
       ],
     });
+
+    // PR2 #A5: audit log (LGPD Art.18 — direito de saber quem acessou dados)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'lead_summarize_ai',
+        entity: 'Lead',
+        entity_id: leadId,
+        meta_json: {
+          tenant_id: tenantId,
+          messages_count: messages.length,
+          model: 'gpt-4.1-mini',
+          note: 'PII mascarada antes do envio. CPF/CNPJ/processo/email/telefone substituidos.',
+        },
+      },
+    }).catch(() => { /* nao bloqueia */ });
 
     return { summary: completion.choices[0]?.message?.content ?? 'Não foi possível gerar o resumo.' };
   }
