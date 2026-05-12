@@ -1300,6 +1300,9 @@ function ProcessoDetailPanel({
   const [expandedDjen, setExpandedDjen] = useState<string | null>(null);
   const [analyzingDjen, setAnalyzingDjen] = useState<string | null>(null);
   const [djenAnalyses, setDjenAnalyses] = useState<Record<string, AiAnalysis>>({});
+  // Bug fix 2026-05-12 (DJEN IA nao funcionava): catch silencioso swallow-ava erros.
+  // Agora mostra a mensagem real do backend numa caixa de erro abaixo do item.
+  const [djenAnalysisErrors, setDjenAnalysisErrors] = useState<Record<string, string>>({});
   const [djenTaskCreated, setDjenTaskCreated] = useState<Record<string, boolean>>({});
   const [creatingDjenTask, setCreatingDjenTask] = useState<string | null>(null);
   const [djenEventPreview, setDjenEventPreview] = useState<Record<string, {
@@ -2313,10 +2316,23 @@ function ProcessoDetailPanel({
                               }
                               setAnalyzingDjen(pub.id);
                               setExpandedDjen(pub.id);
+                              // Bug fix 2026-05-12 (DJEN IA nao funcionava):
+                              // Limpa erro anterior + captura mensagem do backend
+                              setDjenAnalysisErrors(prev => {
+                                const next = { ...prev };
+                                delete next[pub.id];
+                                return next;
+                              });
                               try {
                                 const res = await api.post(`/djen/${pub.id}/analyze`);
                                 setDjenAnalyses(prev => ({ ...prev, [pub.id]: res.data }));
-                              } catch {} finally { setAnalyzingDjen(null); }
+                              } catch (err: any) {
+                                const msg = err?.response?.data?.message
+                                  || err?.message
+                                  || 'Erro desconhecido ao analisar publicacao';
+                                setDjenAnalysisErrors(prev => ({ ...prev, [pub.id]: String(msg) }));
+                                console.error('[DJEN/IA] Falha na analise', err?.response?.data || err);
+                              } finally { setAnalyzingDjen(null); }
                             }}
                             disabled={!pub.legal_case_id}
                             className={`shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-lg border transition-colors ${
@@ -2345,6 +2361,29 @@ function ProcessoDetailPanel({
                             {isAnalyzing && (
                               <div className="flex items-center gap-2 text-[11px] text-violet-400 animate-pulse">
                                 <Loader2 size={12} className="animate-spin" /> Analisando com IA…
+                              </div>
+                            )}
+                            {/* Bug fix 2026-05-12: mostra erro do backend */}
+                            {djenAnalysisErrors[pub.id] && !isAnalyzing && (
+                              <div className="border border-red-500/30 bg-red-500/5 rounded-lg p-2 text-[11px] text-red-400">
+                                <div className="font-bold flex items-center gap-1 mb-1">
+                                  <AlertCircle size={12} /> Falha ao analisar com IA
+                                </div>
+                                <div className="text-foreground/80 whitespace-pre-wrap">
+                                  {djenAnalysisErrors[pub.id]}
+                                </div>
+                                <button
+                                  className="mt-1 text-[10px] text-violet-400 hover:text-violet-300 underline"
+                                  onClick={() => {
+                                    setDjenAnalysisErrors(prev => {
+                                      const next = { ...prev };
+                                      delete next[pub.id];
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  Fechar
+                                </button>
                               </div>
                             )}
                             {analysis && (

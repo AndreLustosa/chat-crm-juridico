@@ -1409,40 +1409,71 @@ ${pub.conteudo.slice(0, 6000)}`;
     const configuredModel = await this.settings.getDjenModel();
     const isAnthropic = configuredModel.startsWith('claude');
 
+    this.logger.log(`[DJEN/IA] Iniciando analise pubId=${id} model=${configuredModel} provider=${isAnthropic ? 'anthropic' : 'openai'}`);
+
     let raw = '{}';
 
-    if (isAnthropic) {
-      const anthropicKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
-      if (!anthropicKey) throw new BadRequestException('ANTHROPIC_API_KEY não configurada.');
+    // Bug fix 2026-05-12 (DJEN — IA nao funcionava no painel do lead):
+    // Antes: erros do LLM (timeout, 401, 429, 500) propagavam crus pro frontend
+    // que tinha catch silencioso. Usuario via "nada acontecendo".
+    // Agora: log detalhado + erro com mensagem clara.
+    try {
+      if (isAnthropic) {
+        const anthropicKey = (await this.settings.get('ANTHROPIC_API_KEY')) || process.env.ANTHROPIC_API_KEY;
+        if (!anthropicKey) throw new BadRequestException('ANTHROPIC_API_KEY não configurada. Configure em Ajustes > IA.');
 
-      const client = new Anthropic({ apiKey: anthropicKey });
-      const message = await client.messages.create({
-        model: configuredModel,
-        max_tokens: 2048,
-        temperature: 0.2,
-        system: systemPrompt + '\n\nResponda APENAS com JSON válido, sem markdown ou explicações extras.',
-        messages: [{ role: 'user', content: userPrompt }],
-      });
-      raw = (message.content[0] as any)?.text || '{}';
-      // Extrai JSON de possível markdown
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (jsonMatch) raw = jsonMatch[0];
-    } else {
-      const openaiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
-      if (!openaiKey) throw new BadRequestException('OPENAI_API_KEY não configurada.');
+        const client = new Anthropic({ apiKey: anthropicKey });
+        const message = await client.messages.create({
+          model: configuredModel,
+          max_tokens: 2048,
+          temperature: 0.2,
+          system: systemPrompt + '\n\nResponda APENAS com JSON válido, sem markdown ou explicações extras.',
+          messages: [{ role: 'user', content: userPrompt }],
+        });
+        raw = (message.content[0] as any)?.text || '{}';
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) raw = jsonMatch[0];
+        this.logger.log(`[DJEN/IA] Anthropic OK pubId=${id} tokens_in=${message.usage?.input_tokens || '?'} tokens_out=${message.usage?.output_tokens || '?'}`);
+      } else {
+        const openaiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+        if (!openaiKey) throw new BadRequestException('OPENAI_API_KEY não configurada. Configure em Ajustes > IA.');
 
-      const openai = new OpenAI({ apiKey: openaiKey });
-      const completion = await openai.chat.completions.create({
-        model: configuredModel,
-        temperature: 0.2,
-        max_tokens: 2048,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      });
-      raw = completion.choices[0]?.message?.content || '{}';
+        const openai = new OpenAI({ apiKey: openaiKey });
+        const completion = await openai.chat.completions.create({
+          model: configuredModel,
+          temperature: 0.2,
+          max_tokens: 2048,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+        });
+        raw = completion.choices[0]?.message?.content || '{}';
+        this.logger.log(`[DJEN/IA] OpenAI OK pubId=${id} model=${completion.model} tokens=${completion.usage?.total_tokens || '?'}`);
+      }
+    } catch (llmErr: any) {
+      const status = llmErr?.status || llmErr?.response?.status;
+      const code = llmErr?.code || llmErr?.error?.code;
+      const msg = llmErr?.message || 'Erro desconhecido na chamada LLM';
+      this.logger.error(
+        `[DJEN/IA] FALHA pubId=${id} model=${configuredModel} status=${status || 'n/a'} code=${code || 'n/a'}: ${msg}`,
+      );
+      // Re-throw como erro identificavel pro frontend
+      if (llmErr instanceof BadRequestException) throw llmErr;
+      if (status === 401 || status === 403) {
+        throw new BadRequestException(`Chave de API invalida ou sem permissao (${status}). Verifique ${isAnthropic ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'} em Ajustes > IA.`);
+      }
+      if (status === 429) {
+        throw new BadRequestException('Rate limit do provider de IA atingido. Tente novamente em alguns segundos.');
+      }
+      if (status === 404) {
+        throw new BadRequestException(`Modelo "${configuredModel}" nao existe ou foi descontinuado. Configure outro em Ajustes > IA.`);
+      }
+      if (status >= 500) {
+        throw new BadRequestException(`Provider de IA com falha temporaria (${status}). Tente novamente em 1 min.`);
+      }
+      throw new BadRequestException(`Falha ao analisar com IA: ${msg}`);
     }
 
     let parsed: any = {};
