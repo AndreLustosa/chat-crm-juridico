@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { ToolHandler, ToolContext } from '../tool-executor';
+import { requireTenant } from './tool-guards.util';
 
 /**
  * get_case_movements — busca TODAS as movimentacoes judiciais de um processo
@@ -36,11 +37,20 @@ export class GetCaseMovementsHandler implements ToolHandler {
       return { success: false, message: 'Lead nao identificado no contexto' };
     }
 
+    // Bug fix 2026-05-11 (Skills PR1 #C7): tenant guard. PII de processo
+    // (case_number, opposing_party, descricao) e altamente sensivel.
+    let tenantId: string;
+    try {
+      tenantId = requireTenant(context);
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+
     const limit = Math.min(params.limit ?? 200, 500);
 
     // Buscar TODOS os processos ativos do lead primeiro (normalmente <5)
     const allCases = await prisma.legalCase.findMany({
-      where: { lead_id: leadId, archived: false },
+      where: { lead_id: leadId, tenant_id: tenantId, archived: false },
       select: {
         id: true,
         case_number: true,

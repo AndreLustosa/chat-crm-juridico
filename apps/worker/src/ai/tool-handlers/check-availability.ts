@@ -1,4 +1,5 @@
 import type { ToolHandler, ToolContext } from '../tool-executor';
+import { requireTenant } from './tool-guards.util';
 
 /**
  * Verifica horários disponíveis de um advogado para agendamento.
@@ -6,6 +7,8 @@ import type { ToolHandler, ToolContext } from '../tool-executor';
  *
  * UTC naive: as datas são armazenadas com os componentes locais como se fossem
  * UTC. Portanto usamos getUTCHours()/getUTCDay() em todo lugar.
+ *
+ * Bug fix 2026-05-11 (Skills PR1 #C8): tenant guard nos CalendarEvent.findMany.
  */
 export class CheckAvailabilityHandler implements ToolHandler {
   name = 'check_availability';
@@ -14,13 +17,17 @@ export class CheckAvailabilityHandler implements ToolHandler {
     params: { date?: string; days_ahead?: number; duration_minutes?: number },
     context: ToolContext,
   ): Promise<any> {
+    const tenantId = requireTenant(context);
     const prisma = context.prisma;
     const durationMinutes = params.duration_minutes || 60;
 
     const convo = await prisma.conversation.findUnique({
       where: { id: context.conversationId },
-      select: { assigned_lawyer_id: true, assigned_user_id: true },
+      select: { assigned_lawyer_id: true, assigned_user_id: true, tenant_id: true },
     });
+    if (!convo || convo.tenant_id !== tenantId) {
+      return { available: false, message: 'Conversa nao pertence ao tenant atual.' };
+    }
 
     const userId = convo?.assigned_lawyer_id || convo?.assigned_user_id;
     if (!userId) {
@@ -45,7 +52,7 @@ export class CheckAvailabilityHandler implements ToolHandler {
       if (dow === 0 || dow === 6) continue;
 
       const dateStr = day.toISOString().split('T')[0];
-      const daySlots = await this.getSlots(prisma, userId, dateStr, durationMinutes);
+      const daySlots = await this.getSlots(prisma, userId, dateStr, durationMinutes, tenantId);
       if (daySlots.length > 0) {
         slots.push({ date: dateStr, times: daySlots.slice(0, 6) });
       }
@@ -63,6 +70,7 @@ export class CheckAvailabilityHandler implements ToolHandler {
     userId: string,
     dateStr: string,
     durationMinutes: number,
+    tenantId: string,
   ): Promise<string[]> {
     const dayStart = new Date(`${dateStr}T00:00:00Z`);
     const dayEnd = new Date(`${dateStr}T23:59:59Z`);
@@ -82,9 +90,11 @@ export class CheckAvailabilityHandler implements ToolHandler {
     if (!schedule) return [];
 
     // Eventos existentes do advogado no dia
+    // Bug fix #C8: tenant_id no filtro pra nao detectar conflitos de outro tenant.
     const events = await prisma.calendarEvent.findMany({
       where: {
         assigned_user_id: userId,
+        tenant_id: tenantId,
         start_at: { gte: dayStart, lte: dayEnd },
         status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
       },

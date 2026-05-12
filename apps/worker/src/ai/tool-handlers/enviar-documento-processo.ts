@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { signShareToken } from '@crm/shared';
 import type { ToolHandler, ToolContext } from '../tool-executor';
+import { requireTenant } from './tool-guards.util';
 
 const PUBLIC_FOLDERS = ['CLIENTE', 'CONTRATOS', 'DECISOES', 'PROCURACOES'] as const;
 
@@ -39,6 +40,12 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
     params: { keyword?: string; case_number?: string },
     context: ToolContext,
   ): Promise<any> {
+    // Bug fix 2026-05-11 (Skills PR1 #C7): tenant guard.
+    // Antes: query CaseDocument filtrava so por lead_id+folder. Se contexto
+    // corrompido (race entre workers, bug upstream), podia vazar documento
+    // de outro tenant. Mesmo case_number pode existir em tenants diferentes
+    // (numero CNJ eh global, nao tenant-scoped).
+    const tenantId = requireTenant(context);
     const { prisma, whatsappService, leadId, leadPhone, instanceName } = context;
 
     if (!whatsappService) {
@@ -60,11 +67,13 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
     }
 
     // Busca documentos publicos do lead. Filtra por case_number se passado.
+    // Bug fix #C7: filtro tenant_id na relacao legal_case (defense-in-depth).
     const docs = await prisma.caseDocument.findMany({
       where: {
         folder: { in: PUBLIC_FOLDERS as unknown as string[] },
         legal_case: {
           lead_id: leadId,
+          tenant_id: tenantId,
           archived: false,
           renounced: false,
           ...(params.case_number ? { case_number: params.case_number } : {}),
@@ -86,7 +95,7 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
       // ─── Fallback: tenta scraping do TJAL ───
       // Endpoint interno faz: CaseDocument lookup + scraper + S3 upload + auto-cria CaseDocument
       this.logger.log(`[enviar_documento] Cache vazio, tentando scraping TJAL pra keyword="${params.keyword || 'qualquer'}"`);
-      const scraped = await this.tryFetchFromCourt(params.keyword || 'sentenca', params.case_number, leadId);
+      const scraped = await this.tryFetchFromCourt(params.keyword || 'sentenca', params.case_number, leadId, tenantId);
       if (scraped) {
         // Conseguiu — manda via Evolution
         try {
@@ -217,6 +226,7 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
     keyword: string,
     caseNumber: string | undefined,
     leadId: string,
+    tenantId: string,
   ): Promise<{ id: string; name: string; folder: string; share_url: string } | null> {
     const apiBase = process.env.API_INTERNAL_URL ||
       process.env.API_PUBLIC_URL ||
@@ -237,7 +247,7 @@ export class EnviarDocumentoProcessoHandler implements ToolHandler {
           'Content-Type': 'application/json',
           'X-Internal-Secret': secret,
         },
-        body: JSON.stringify({ lead_id: leadId, keyword, case_number: caseNumber }),
+        body: JSON.stringify({ lead_id: leadId, tenant_id: tenantId, keyword, case_number: caseNumber }),
         signal: AbortSignal.timeout(60000), // scraping pode demorar
       });
       if (res.status === 404) {

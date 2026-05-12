@@ -1,4 +1,5 @@
 import type { ToolHandler, ToolContext } from '../tool-executor';
+import { requireTenant } from './tool-guards.util';
 
 /**
  * get_lead_info — retorna dados cadastrais e situacao atual do lead.
@@ -29,8 +30,19 @@ export class GetLeadInfoHandler implements ToolHandler {
       return { success: false, message: 'Contexto invalido' };
     }
 
-    const lead = await prisma.lead.findUnique({
-      where: { id: context.leadId },
+    // Bug fix 2026-05-11 (Skills PR1 #C7): tenant guard.
+    // Lead.findUnique sem tenant_id pode vazar dados pessoais (CPF, processos,
+    // calendar_events com nome de outro cliente) se contexto comprometido.
+    let tenantId: string;
+    try {
+      tenantId = requireTenant(context);
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+
+    // findFirst com tenant_id em vez de findUnique pra escopar.
+    const lead = await prisma.lead.findFirst({
+      where: { id: context.leadId, tenant_id: tenantId },
       select: {
         id: true,
         name: true,

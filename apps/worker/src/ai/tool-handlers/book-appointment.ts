@@ -91,6 +91,14 @@ export class BookAppointmentHandler implements ToolHandler {
       return { success: false, error: 'Data/hora já passou. Ofereça outro horário.' };
     }
 
+    // Bug fix 2026-05-11 (Skills PR1 #C8): cap em 365 dias no futuro.
+    // Antes: regex aceitava "9999-12-31" — IA podia marcar consulta em 2099
+    // que ficaria lotando a agenda + reminders pendurados pra sempre.
+    const MAX_BOOKING_DAYS_AHEAD = 365;
+    if (startAt.getTime() > Date.now() + MAX_BOOKING_DAYS_AHEAD * 24 * 60 * 60 * 1000) {
+      return { success: false, error: `Data muito distante (max ${MAX_BOOKING_DAYS_AHEAD} dias). Confirme com o cliente.` };
+    }
+
     // ─── DEDUP por lead ────────────────────────────────────────────
     // Se o lead JA tem CONSULTA futura agendada (qualquer data/hora ainda
     // por vir), nao criar outra. Isso bloqueia o caso onde a IA dispara
@@ -101,6 +109,8 @@ export class BookAppointmentHandler implements ToolHandler {
       const existingForLead = await prisma.calendarEvent.findFirst({
         where: {
           lead_id: context.leadId,
+          // Bug fix 2026-05-11 (Skills PR1 #C8): filtro por tenant.
+          tenant_id: convo?.tenant_id ?? undefined,
           type: 'CONSULTA',
           status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
           start_at: { gt: new Date() },
@@ -139,9 +149,14 @@ export class BookAppointmentHandler implements ToolHandler {
     }
 
     // Conflito com evento existente do advogado
+    // Bug fix 2026-05-11 (Skills PR1 #C8 — CRITICO):
+    // Antes: query sem tenant_id. Em seed compartilhado ou bug upstream, podia
+    // detectar conflito em CalendarEvent de outro tenant E vazar o title
+    // (nome do cliente alheio) na mensagem de erro pro WhatsApp.
     const conflict = await prisma.calendarEvent.findFirst({
       where: {
         assigned_user_id: assignedUserId,
+        tenant_id: convo?.tenant_id ?? undefined,
         status: { notIn: ['CANCELADO', 'CONCLUIDO'] },
         start_at: { lt: endAt },
         OR: [
@@ -153,9 +168,10 @@ export class BookAppointmentHandler implements ToolHandler {
     });
 
     if (conflict) {
+      // Nao expoe o title do evento existente (pode ser nome de outro cliente).
       return {
         success: false,
-        error: `Horário indisponível — já existe "${conflict.title}" nesse horário.`,
+        error: `Horário indisponível — advogado já tem compromisso nesse horário.`,
       };
     }
 

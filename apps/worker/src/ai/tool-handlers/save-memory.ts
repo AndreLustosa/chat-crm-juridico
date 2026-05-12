@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { ToolHandler, ToolContext } from '../tool-executor';
+import { checkSaveMemoryCap, requireTenant } from './tool-guards.util';
 
 /**
  * save_memory — IA salva um fato/preferencia/contexto na memoria persistente.
@@ -47,9 +48,28 @@ export class SaveMemoryHandler implements ToolHandler {
       return { success: false, error: 'content longo demais (max 500 chars). Resumir em 1-2 frases.' };
     }
 
-    const tenantId = context.tenantId;
-    if (!tenantId) {
-      return { success: false, error: 'tenant indisponivel' };
+    // Bug fix 2026-05-11 (Skills PR1 #C9 — CRITICO):
+    // Cap de 5 save_memory por conversa em 5min. Antes: IA confusa
+    // (ou prompt-injectada) podia chamar 20+ vezes — cada chamada gera
+    // embedding ($0.0001 × OpenAI rate limit). Em loop, drena cota.
+    const cap = checkSaveMemoryCap(context.conversationId);
+    if (!cap.ok) {
+      this.logger.warn(
+        `[save_memory] Cap atingido pra conversa ${context.conversationId} ` +
+        `(5 chamadas em 5min). Aborta.`,
+      );
+      return {
+        success: false,
+        error: 'Limite de save_memory por conversa atingido (5 em 5min). ' +
+          'Foque em responder o cliente — voce ja salvou bastante.',
+      };
+    }
+
+    let tenantId: string;
+    try {
+      tenantId = requireTenant(context);
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
 
     const scope = params.scope === 'organization' ? 'organization' : 'lead';
