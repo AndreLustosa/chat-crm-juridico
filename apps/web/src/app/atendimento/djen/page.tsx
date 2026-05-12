@@ -1416,7 +1416,20 @@ function AiPanel({
 
     api.post(`/djen/${pub.id}/analyze`, { force })
       .then(res => setAnalysis(res.data))
-      .catch(() => setError('Erro ao analisar. Verifique se a OPENAI_API_KEY está configurada.'))
+      .catch((err: any) => {
+        // Bug fix 2026-05-12 (DJEN IA nao funcionava):
+        // Antes: erro generico fixo "Verifique OPENAI_API_KEY..." que nao
+        // ajudava a diagnosticar. Agora mostra a mensagem real do backend
+        // (com PR2 Skills hotfix, backend retorna mensagens tipadas por status).
+        const backendMsg = err?.response?.data?.message || err?.response?.data?.error;
+        const status = err?.response?.status;
+        const fallback = err?.message || 'Erro desconhecido ao analisar publicacao';
+        const finalMsg = backendMsg
+          ? `${backendMsg}${status ? ` (HTTP ${status})` : ''}`
+          : `${fallback}${status ? ` (HTTP ${status})` : ''}`;
+        setError(finalMsg);
+        console.error('[DJEN/IA] Falha:', { status, data: err?.response?.data, err });
+      })
       .finally(() => setLoading(false));
   };
 
