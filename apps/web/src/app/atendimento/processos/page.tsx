@@ -2463,7 +2463,10 @@ function ProcessoDetailPanel({
                                     while (days > 0) { base.setUTCDate(base.getUTCDate() + 1); if (base.getUTCDay() !== 0 && base.getUTCDay() !== 6) days--; }
                                     return `${base.getUTCFullYear()}-${pad(base.getUTCMonth()+1)}-${pad(base.getUTCDate())}`;
                                   })();
-                                  const defaultTime = isoFromAi ? isoFromAi.slice(11, 16) || '07:00' : '07:00';
+                                  // Bug fix 2026-05-12 (Andre): hora default 09:00 (manha do expediente).
+                                  // Antes: 07:00 hardcoded fallback. Backend tambem ja seta 09:00 quando
+                                  // auto-computa data_prazo, entao isoFromAi vai trazer 09:00.
+                                  const defaultTime = isoFromAi ? isoFromAi.slice(11, 16) || '09:00' : '09:00';
                                   const defaultPriority = analysis.urgencia === 'URGENTE' ? 'ALTA' : analysis.urgencia === 'BAIXA' ? 'BAIXA' : 'NORMAL';
                                   return (
                                     <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-2.5 space-y-2">

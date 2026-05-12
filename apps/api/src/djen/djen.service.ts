@@ -1609,7 +1609,7 @@ REGRAS RIGOROSAS DE EXTRAÇÃO DE DATA/HORA:
 5. data_audiencia SÓ deve ser preenchida se houver audiência FUTURA explicitamente marcada com data E hora.
 6. data_prazo é o ÚLTIMO DIA LEGAL do prazo (data limite real). NÃO aplique margem de segurança — o sistema agenda automaticamente 1 dia útil antes.
    - Se publicação diz "manifestar-se em 15 dias úteis" sem data específica → deixe data_prazo null e preencha prazo_dias=15.
-   - Se publicação diz "até 20/05/2026" → data_prazo = "2026-05-20T17:00:00" (ou hora limite se mencionada, senão use 17:00 como fim do expediente).
+   - Se publicação diz "até 20/05/2026" → data_prazo = "2026-05-20T09:00:00" (ou hora limite se mencionada, senão use **09:00** como inicio do expediente — da tempo de trabalhar a tarefa).
 7. Se event_type = AUDIENCIA, data_audiencia DEVE estar preenchida.
 8. Se event_type = PRAZO, data_prazo DEVE estar preenchida (ou prazo_dias se for prazo relativo).
 
@@ -1847,14 +1847,18 @@ ${pub.conteudo.slice(0, 6000)}`;
         // Base: data_disponibilizacao (CPC: prazo conta do dia seguinte a publicacao)
         const baseDate = new Date(pub.data_disponibilizacao);
         const computedDue = calc.addBusinessDays(baseDate, lawyerFields.prazo_dias);
-        // Set para 17:00 BRT como fim do expediente (formato YYYY-MM-DDTHH:MM:00)
+        // Bug fix 2026-05-12 (Andre): hora 09:00 BRT (manha do dia limite) em
+        // vez de 17:00 (fim do expediente). Razao: o evento criado eh uma
+        // TAREFA pro advogado cumprir o prazo. Aparecer cedo na agenda da
+        // manha da o dia inteiro pra trabalhar. As 17:00 ja eh muito tarde
+        // pra peticionar sem correria.
         const yyyy = computedDue.getFullYear();
         const mm = String(computedDue.getMonth() + 1).padStart(2, '0');
         const dd = String(computedDue.getDate()).padStart(2, '0');
-        lawyerFields.data_prazo = `${yyyy}-${mm}-${dd}T17:00:00`;
+        lawyerFields.data_prazo = `${yyyy}-${mm}-${dd}T09:00:00`;
         this.logger.log(
           `[DJEN/IA] data_prazo auto-computada: pub=${pub.data_disponibilizacao.toISOString().slice(0,10)} ` +
-          `+ ${lawyerFields.prazo_dias} dias uteis = ${lawyerFields.data_prazo}`,
+          `+ ${lawyerFields.prazo_dias} dias uteis = ${lawyerFields.data_prazo} (09:00 manha)`,
         );
       } catch (e: any) {
         this.logger.warn(`[DJEN/IA] Falha ao auto-computar data_prazo: ${e.message}`);
