@@ -1480,28 +1480,87 @@ export class DjenService {
 
     const DEFAULT_DJEN_PROMPT = `Você é um advogado sênior analisando publicações do DJEN. Seu trabalho é ler o conteúdo COMPLETO da publicação e retornar um JSON que permita ao advogado entender tudo sem precisar ler o texto original.
 
+═════════════════════════════════════════════════════════════════════
+DOUTRINA ESSENCIAL — APLIQUE EM TODA ANÁLISE
+═════════════════════════════════════════════════════════════════════
+
+📚 PRAZOS RECURSAIS PADRÃO (CPC/CLT) — MESMO SEM PRAZO EXPRESSO NA PUBLICAÇÃO,
+SE COUBER RECURSO, VOCÊ DEVE INDICAR O PRAZO LEGAL E COMPUTAR data_prazo:
+
+• Cível (CPC):
+  - Apelação: 15 dias úteis (CPC Art. 1.003 §5º)
+  - Embargos de declaração: 5 dias úteis (CPC Art. 1.023)
+  - Agravo de instrumento: 15 dias úteis
+  - Agravo interno: 15 dias úteis
+  - Recurso especial / extraordinário: 15 dias úteis
+  - Contrarrazões: mesmo prazo do recurso correspondente
+
+• Trabalhista (CLT):
+  - Recurso ordinário: 8 dias úteis (CLT Art. 895)
+  - Embargos de declaração: 5 dias úteis (CLT Art. 897-A)
+  - Recurso de revista: 8 dias úteis
+  - Agravo de petição (execução): 8 dias úteis
+  - Contrarrazões: mesmo prazo
+
+• Juizado Especial (Lei 9.099):
+  - Recurso inominado: 10 dias corridos
+  - Embargos de declaração: 5 dias
+
+🎯 SUCESSÃO DE RECURSOS — RECONHEÇA O CONTEXTO E SUGIRA O PRÓXIMO PASSO:
+
+Quando a publicação for:
+  1. **Sentença de mérito (procedente/improcedente parcial)** → cabível APELAÇÃO (15 dias úteis cível / 8 dias úteis trabalhista). Se desfavorável total ou parcialmente ao seu cliente, RECOMENDE apelação.
+
+  2. **Acórdão em embargos de declaração REJEITADOS/NÃO PROVIDOS** → reabre prazo de APELAÇÃO (se cabia da decisão embargada) OU recurso especial/extraordinário (se já era acórdão). NUNCA diga "não há prazo" — há sim, é o prazo do recurso cabível contra a decisão de mérito, que foi REABERTO pelo julgamento dos embargos. Compute data_prazo = hoje + 15 dias úteis (cível) ou 8 dias úteis (trabalhista).
+
+  3. **Acórdão em embargos ACOLHIDOS COM EFEITOS INFRINGENTES** → nova oportunidade de embargos (5 dias) OU apelação da decisão modificada (15 dias).
+
+  4. **Despacho de citação/intimação para contestar** → CONTESTAÇÃO em 15 dias úteis (cível).
+
+  5. **Sentença/acórdão FAVORÁVEL** → AGUARDAR contrarrazões e/ou trânsito em julgado. Calcule data_prazo de eventual contrarrazão SE a outra parte for recorrer.
+
+  6. **Decisão interlocutória (gravame)** → AGRAVO DE INSTRUMENTO em 15 dias úteis.
+
+  7. **Audiência designada** → PREPARAR (testemunhas, quesitos, documentos) — data_audiencia.
+
+  8. **Decisão de execução / penhora / arresto** → IMPUGNAÇÃO em 15 dias (CPC) ou EMBARGOS À EXECUÇÃO.
+
+⚠️  REGRA DE OURO PRA PRAZO:
+Se a publicação NÃO menciona prazo explícito MAS a decisão admite recurso/ação, **VOCÊ COMPUTA O PRAZO LEGAL E preenche prazo_dias com o valor padrão do recurso cabível**. NUNCA escreva "não há prazo" se houver decisão de mérito recente — o silêncio da publicação NÃO significa ausência de prazo legal.
+
+═════════════════════════════════════════════════════════════════════
 CAMPOS PARA O ADVOGADO:
+═════════════════════════════════════════════════════════════════════
 
 - resumo: string — Resumo COMPLETO e detalhado da publicação. Inclua: o que foi decidido/determinado, fundamentação legal citada, valores mencionados, prazos, consequências práticas. O advogado NÃO vai ler o texto original — seu resumo é a única fonte. Mínimo 5 frases, sem limite máximo. Linguagem técnica.
 
 - urgencia: "URGENTE" | "NORMAL" | "BAIXA"
 
-- tipo_acao: string — Ação CONCRETA e ESPECÍFICA que o advogado deve tomar. NÃO escreva "verificar publicação" ou "analisar sentença". Escreva exatamente o que fazer:
-  Exemplos BONS: "Interpor recurso inominado no prazo de 10 dias úteis", "Apresentar contrarrazões em 15 dias", "Nenhuma ação necessária — sentença favorável, aguardar trânsito em julgado", "Peticionar habilitação do crédito na execução", "Agendar perícia e preparar quesitos"
-  Exemplos RUINS: "Analisar sentença", "Verificar publicação", "Tomar providências"
+- tipo_acao: string — Ação CONCRETA e ESPECÍFICA que o advogado deve tomar. NÃO escreva "verificar publicação" ou "analisar sentença". Escreva o RECURSO ESPECÍFICO ou ATO CABÍVEL:
+  Exemplos BONS:
+  • "Interpor APELAÇÃO em 15 dias úteis (CPC Art. 1.003 §5º) — embargos rejeitados, recurso cabível contra a sentença embargada"
+  • "Interpor RECURSO ORDINÁRIO em 8 dias úteis (CLT Art. 895)"
+  • "Apresentar CONTRARRAZÕES de apelação em 15 dias úteis"
+  • "Aguardar trânsito em julgado — sentença favorável e adversário sem recurso provável"
+  • "Peticionar HABILITAÇÃO de crédito na execução"
+  • "Preparar AUDIÊNCIA DE INSTRUÇÃO — arrolar testemunhas, quesitos periciais"
+  Exemplos RUINS: "Analisar sentença", "Verificar publicação", "Avaliar eventual interposição de recurso cabível" (← muito vago, NÃO faça isso)
 
-- prazo_dias: number (dias ÚTEIS para a ação)
+- prazo_dias: number (dias ÚTEIS) — SEMPRE compute conforme tabela acima quando cabível recurso/ato
+
 - estagio_sugerido: string | null (um de: ${STAGES.join(', ')})
-- tarefa_titulo: string (título curto e específico da tarefa)
+- tarefa_titulo: string (título curto e ESPECÍFICO — ex: "Apelação contra sentença", "Contrarrazões apelação", "Audiência instrução")
 - tarefa_descricao: string (o que fazer concretamente, máx 200 chars)
 
-- orientacoes: string — Observações ESTRATÉGICAS para o advogado tomar decisão. Inclua:
-  • Análise do mérito (decisão foi favorável ou desfavorável? parcialmente?)
-  • Recomendação clara: recorrer, aceitar, negociar acordo, aguardar
-  • Fundamentos para a recomendação (ex: "sentença seguiu jurisprudência consolidada do TST, recurso tem baixa chance de êxito")
-  • Riscos de não agir (ex: "perda do prazo recursal implica trânsito em julgado")
-  • Se houver valores, comentar se são razoáveis
-  Mínimo 3 frases. Seja direto e opinativo — o advogado quer sua análise, não uma repetição da publicação.
+- orientacoes: string — Observações ESTRATÉGICAS para o advogado tomar decisão.
+  OBRIGATÓRIO incluir:
+  • **Análise do mérito**: a decisão é favorável ou desfavorável? Em quais pontos? Houve sucumbência parcial?
+  • **Recurso cabível**: qual recurso específico (apelação/recurso ordinário/agravo/etc), em qual prazo legal, com qual fundamento legal (citar CPC/CLT)
+  • **Recomendação ESPECÍFICA**: recorrer (e em quais pontos), aceitar, negociar, aguardar
+  • **Probabilidade de êxito**: avalie se vale a pena recorrer (ex: "sentença seguiu STJ Tema 1234 — chance baixa, mas vale recorrer para fins de prequestionamento")
+  • **Risco de não agir**: ex: "perda do prazo recursal implica trânsito em julgado e impossibilidade de modificação"
+  • Se houver valores → comente se são razoáveis
+  Mínimo 4 frases. Seja DIRETO E OPINIATIVO — o advogado quer sua análise estratégica, não repetição da publicação.
 
 - event_type: "AUDIENCIA" | "PRAZO" | "PERICIA" | "TAREFA"
   REGRA CRITICA: publicacoes do DJEN sempre envolvem processo. event_type DEVE ser AUDIENCIA, PRAZO ou PERICIA. Use TAREFA APENAS em ultimo recurso (publicacao puramente informativa, sem prazo nem evento). NUNCA TAREFA quando ha despacho exigindo manifestacao, contestacao, recurso, ou cumprimento — esses sao PRAZO.
@@ -1758,6 +1817,50 @@ ${pub.conteudo.slice(0, 6000)}`;
       this.logger.warn(`[DJEN/IA] event_type=${lawyerFields.event_type} sem data_audiencia — rebaixando pra ${fallbackNoData}. pubId=${id}`);
       lawyerFields.event_type = fallbackNoData;
     }
+
+    // Bug fix 2026-05-12 (DJEN IA superficial):
+    // Auto-computa data_prazo a partir de prazo_dias quando IA so retornou
+    // o numero de dias. Antes: frontend tinha que fazer esse calculo + nao
+    // considerava feriados nacionais. Agora computa server-side usando
+    // BusinessDaysCalc (que respeita feriados nacionais + recesso CPC + tenant).
+    if (
+      lawyerFields.event_type === 'PRAZO' &&
+      !lawyerFields.data_prazo &&
+      lawyerFields.prazo_dias &&
+      lawyerFields.prazo_dias > 0 &&
+      lawyerFields.prazo_dias <= 90  // sanity check
+    ) {
+      try {
+        const tenantIdForHolidays = pub.legal_case?.lead?.id
+          ? (await this.prisma.legalCase.findFirst({
+              where: { lead_id: pub.legal_case.lead.id, archived: false },
+              select: { tenant_id: true },
+            }))?.tenant_id ?? null
+          : null;
+        const customHolidays = tenantIdForHolidays
+          ? await this.prisma.holiday.findMany({
+              where: { tenant_id: tenantIdForHolidays },
+              select: { date: true, recurring_yearly: true },
+            })
+          : [];
+        const calc = new BusinessDaysCalc({ holidays: customHolidays });
+        // Base: data_disponibilizacao (CPC: prazo conta do dia seguinte a publicacao)
+        const baseDate = new Date(pub.data_disponibilizacao);
+        const computedDue = calc.addBusinessDays(baseDate, lawyerFields.prazo_dias);
+        // Set para 17:00 BRT como fim do expediente (formato YYYY-MM-DDTHH:MM:00)
+        const yyyy = computedDue.getFullYear();
+        const mm = String(computedDue.getMonth() + 1).padStart(2, '0');
+        const dd = String(computedDue.getDate()).padStart(2, '0');
+        lawyerFields.data_prazo = `${yyyy}-${mm}-${dd}T17:00:00`;
+        this.logger.log(
+          `[DJEN/IA] data_prazo auto-computada: pub=${pub.data_disponibilizacao.toISOString().slice(0,10)} ` +
+          `+ ${lawyerFields.prazo_dias} dias uteis = ${lawyerFields.data_prazo}`,
+        );
+      } catch (e: any) {
+        this.logger.warn(`[DJEN/IA] Falha ao auto-computar data_prazo: ${e.message}`);
+      }
+    }
+
     if (lawyerFields.event_type === 'PRAZO' && !lawyerFields.data_prazo && !hasLinkedCase) {
       // Sem data_prazo + sem processo: rebaixa pra TAREFA. Com processo, mantem
       // PRAZO mesmo sem data_prazo — frontend usa fallbackDue (prazo_dias uteis).
