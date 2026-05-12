@@ -713,7 +713,8 @@ export function HighConversionTemplate({
                     title: "DIREITO CRIMINAL",
                     description: "Defesa em processos criminais, desde inquérito até julgamento. Atuamos com estratégia e compromisso na proteção dos direitos do acusado.",
                     tag: "DEFESA INTRANSIGENTE",
-                    bgImage: "/landing/img_criminal.webp"
+                    bgImage: "/landing/img_criminal.webp",
+                    href: "https://andrelustosaadvogados.com.br/arapiraca/criminal"
                   },
                   {
                     title: "DIREITO CIVIL",
