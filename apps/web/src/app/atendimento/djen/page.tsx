@@ -9,7 +9,7 @@ import {
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
   ArrowRight, CheckSquare, AlertCircle, ChevronDown, Microscope,
   Search, User, UserCheck, Scale, Ban, Users, Trash2, Save,
-  Copy, Check,
+  Copy, Check, Pencil,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -1449,6 +1449,21 @@ function AiPanel({
   const [createdByIdx, setCreatedByIdx] = useState<Set<number>>(new Set());
   const [movingStage, setMovingStage] = useState(false);
   const [stageMoved, setStageMoved] = useState(false);
+  // Bug fix 2026-05-12 (pedido Andre):
+  // Preview/edit antes de criar evento (mesmo padrao do painel processos
+  // /atendimento/processos). Antes: click no botao criava direto sem
+  // chance de editar. Agora: abre form inline com Tipo/Titulo/Data/Hora/
+  // Descricao/Prioridade editaveis + botoes Cancelar/Confirmar.
+  type EventPreviewForm = {
+    type: 'AUDIENCIA' | 'PERICIA' | 'PRAZO' | 'TAREFA' | 'OUTRO';
+    title: string;
+    date: string;       // YYYY-MM-DD
+    time: string;       // HH:MM
+    description: string;
+    priority: 'BAIXA' | 'NORMAL' | 'ALTA' | 'URGENTE';
+    location: string;
+  };
+  const [eventPreviewByIdx, setEventPreviewByIdx] = useState<Record<number, EventPreviewForm>>({});
 
   // Eventos ja agendados no processo vinculado (audiencias, pericias,
   // prazos, tarefas futuras). Permite o usuario decidir se aceita ou
@@ -1509,52 +1524,90 @@ function AiPanel({
       .catch(() => setCaseEvents([]));
   }, [pub.legal_case_id, createdByIdx]);
 
-  // Cria UM evento especifico da lista de sugestoes da IA. Cada item da lista
-  // tem seu proprio botao + status, permitindo o operador agendar todos os
-  // prazos encadeados (edital + impugnacao + parecer) em sequencia.
-  const handleCreateEvent = async (idx: number, ev: AiEvento, cfg: EventoConfig) => {
+  /**
+   * Bug fix 2026-05-12 (pedido Andre):
+   * Antes: click no botao criava o evento DIRETAMENTE sem chance de editar.
+   * Agora: click abre preview editavel com Tipo/Titulo/Data/Hora/Descricao/
+   * Prioridade. Operador confirma com botao "Confirmar" ou cancela.
+   */
+  const handleOpenPreview = (idx: number, ev: AiEvento, cfg: EventoConfig) => {
     if (!analysis) return;
+    // Descricao base (mesma logica de antes)
+    const descLines = [cfg.descricao];
+    const ctxLines: string[] = [];
+    if (cfg.condicao) ctxLines.push(`Condição: ${cfg.condicao}`);
+    if (pub.numero_processo) ctxLines.push(`Processo: ${pub.numero_processo}`);
+    if (analysis.juizo) ctxLines.push(`Juízo: ${analysis.juizo}`);
+    if (analysis.parte_autora || analysis.parte_rea) {
+      ctxLines.push(`Partes: ${analysis.parte_autora || '—'} × ${analysis.parte_rea || '—'}`);
+    }
+    if (cfg.type === 'PRAZO' && cfg.deadlineEnd && cfg.deadlineEnd.getTime() !== cfg.dueDate.getTime()) {
+      const deadlineStr = cfg.deadlineEnd.toLocaleDateString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
+      });
+      ctxLines.push(`⚠️ Último dia do prazo legal: ${deadlineStr} (agendado 1 dia útil antes por segurança)`);
+    }
+    if (ctxLines.length) descLines.push('', '— Contexto —', ...ctxLines);
+
+    // Extrair data e hora pro form a partir do dueDate (Date object UTC naive)
+    const yyyy = cfg.dueDate.getUTCFullYear();
+    const mm = String(cfg.dueDate.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(cfg.dueDate.getUTCDate()).padStart(2, '0');
+    const hh = String(cfg.dueDate.getUTCHours()).padStart(2, '0');
+    const mi = String(cfg.dueDate.getUTCMinutes()).padStart(2, '0');
+
+    setEventPreviewByIdx(prev => ({
+      ...prev,
+      [idx]: {
+        type: cfg.type as any,
+        title: `[DJEN] ${cfg.titulo}`,
+        date: `${yyyy}-${mm}-${dd}`,
+        time: `${hh}:${mi}`,
+        description: descLines.filter(Boolean).join('\n'),
+        priority: (analysis.urgencia === 'BAIXA' ? 'BAIXA' : analysis.urgencia === 'URGENTE' ? 'URGENTE' : 'NORMAL') as any,
+        location: analysis.juizo || '',
+      },
+    }));
+  };
+
+  const handleCancelPreview = (idx: number) => {
+    setEventPreviewByIdx(prev => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  };
+
+  /** Cria o evento DEPOIS de o operador confirmar/editar o preview. */
+  const handleConfirmCreate = async (idx: number, form: EventPreviewForm) => {
     setCreatingByIdx(prev => new Set(prev).add(idx));
     try {
-      // Audiencia/pericia tipicamente duram 1h; prazo eh marco no dia (30min).
-      const durationMs = (cfg.type === 'AUDIENCIA' || cfg.type === 'PERICIA') ? 60 * 60_000 : 30 * 60_000;
-
-      // Descricao DETALHADA do evento — usa a descricao especifica do item
-      // (eventos[idx].descricao) que a IA escreveu pra ESTE prazo, nao a geral
-      // da publicacao. Operador entende de cara o que aquele evento significa.
-      const descLines = [cfg.descricao];
-      const ctxLines: string[] = [];
-      if (cfg.condicao) ctxLines.push(`Condição: ${cfg.condicao}`);
-      if (pub.numero_processo) ctxLines.push(`Processo: ${pub.numero_processo}`);
-      if (analysis.juizo) ctxLines.push(`Juízo: ${analysis.juizo}`);
-      if (analysis.parte_autora || analysis.parte_rea) {
-        ctxLines.push(`Partes: ${analysis.parte_autora || '—'} × ${analysis.parte_rea || '—'}`);
-      }
-      // Se PRAZO com margem aplicada, registra final real do prazo na descricao.
-      if (cfg.type === 'PRAZO' && cfg.deadlineEnd && cfg.deadlineEnd.getTime() !== cfg.dueDate.getTime()) {
-        const deadlineStr = cfg.deadlineEnd.toLocaleDateString('pt-BR', {
-          day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
-        });
-        ctxLines.push(`⚠️ Último dia do prazo legal: ${deadlineStr} (agendado 1 dia útil antes por segurança)`);
-      }
-      if (ctxLines.length) {
-        descLines.push('', '— Contexto —', ...ctxLines);
-      }
+      // Reconstroi ISO UTC-naive a partir de date + time editados
+      const startIso = `${form.date}T${form.time}:00`;
+      const startAt = new Date(`${startIso}Z`); // UTC naive
+      const durationMs = (form.type === 'AUDIENCIA' || form.type === 'PERICIA') ? 60 * 60_000 : 30 * 60_000;
 
       await api.post('/calendar/events', {
-        type: cfg.type,
-        // Titulo especifico do evento (ex: "Impugnacao ao pedido de alvara"),
-        // nao o geral da publicacao. Operador identifica qual prazo eh.
-        title: `[DJEN] ${cfg.titulo}`,
-        description: descLines.filter(Boolean).join('\n'),
-        location: analysis.juizo || undefined,
-        start_at: cfg.dueDate.toISOString(),
-        end_at: new Date(cfg.dueDate.getTime() + durationMs).toISOString(),
+        type: form.type,
+        title: form.title.trim() || '[DJEN] Evento',
+        description: form.description,
+        location: form.location || undefined,
+        start_at: startAt.toISOString(),
+        end_at: new Date(startAt.getTime() + durationMs).toISOString(),
         legal_case_id: pub.legal_case_id || undefined,
-        priority: analysis.urgencia,
+        priority: form.priority,
       });
       setCreatedByIdx(prev => new Set(prev).add(idx));
-    } catch { /* silencioso */ } finally {
+      // Limpa o preview apos sucesso
+      setEventPreviewByIdx(prev => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+    } catch (e: any) {
+      console.error('[DJEN] Falha ao criar evento:', e?.response?.data || e);
+      alert(`Falha ao criar evento: ${e?.response?.data?.message || e?.message || 'erro desconhecido'}`);
+    } finally {
       setCreatingByIdx(prev => {
         const next = new Set(prev);
         next.delete(idx);
@@ -1816,18 +1869,20 @@ function AiPanel({
                     )}
 
                     <div className="flex flex-wrap gap-2">
-                      {/* Botão por evento sugerido */}
+                      {/* Botão por evento sugerido — agora abre PREVIEW antes de criar */}
                       {pub.legal_case_id && eventoConfigs.map((c, idx) => {
                         const isCreating = creatingByIdx.has(idx);
                         const isCreated = createdByIdx.has(idx);
+                        const hasPreview = !!eventPreviewByIdx[idx];
                         const matched = matchByIdx[idx];
-                        // Se ja tem evento equivalente, botao opcional (cinza)
                         const isOptional = matched && !isCreated;
                         return (
                           <button
                             key={idx}
-                            onClick={() => handleCreateEvent(idx, eventos[idx], c)}
-                            disabled={isCreating || isCreated}
+                            // Bug fix 2026-05-12 (pedido Andre):
+                            // Em vez de criar direto, abre PREVIEW editavel
+                            onClick={() => handleOpenPreview(idx, eventos[idx], c)}
+                            disabled={isCreating || isCreated || hasPreview}
                             title={c.descricao}
                             className={`flex-1 min-w-[200px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
                               isCreated
@@ -1837,10 +1892,10 @@ function AiPanel({
                                 : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
                             }`}
                           >
-                            {isCreating ? (
-                              <><Loader2 size={11} className="animate-spin" /> Criando…</>
-                            ) : isCreated ? (
+                            {isCreated ? (
                               <><CheckCircle2 size={11} /> {EVENT_TYPE_LABELS[c.type].done}</>
+                            ) : hasPreview ? (
+                              <><Pencil size={11} /> Editando preview…</>
                             ) : (
                               <>
                                 {c.buttonIcon === 'audience' ? <Calendar size={12} /> : c.buttonIcon === 'deadline' ? <Clock size={12} /> : c.buttonIcon === 'pericia' ? <Microscope size={12} /> : <CheckSquare size={12} />}
@@ -1880,6 +1935,142 @@ function AiPanel({
                         </button>
                       )}
                     </div>
+
+                    {/* Bug fix 2026-05-12 (pedido Andre):
+                        Preview/edit inline antes de criar evento. Espelha o
+                        padrao do painel /atendimento/processos (form com
+                        Tipo/Titulo/Data/Hora/Descricao/Prioridade + Cancelar/Confirmar). */}
+                    {Object.entries(eventPreviewByIdx).map(([idxStr, form]) => {
+                      const idx = Number(idxStr);
+                      const cfg = eventoConfigs[idx];
+                      if (!cfg) return null;
+                      const isCreating = creatingByIdx.has(idx);
+                      return (
+                        <div key={`preview-${idx}`} className="bg-emerald-500/5 border-2 border-emerald-500/30 rounded-lg p-3 space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <Pencil size={12} className="text-emerald-400" />
+                            <p className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
+                              Confirme os dados antes de criar
+                            </p>
+                          </div>
+
+                          {/* Tipo */}
+                          <div>
+                            <label className="text-[10px] text-muted-foreground mb-0.5 block">Tipo</label>
+                            <select
+                              value={form.type}
+                              onChange={e => setEventPreviewByIdx(prev => ({
+                                ...prev,
+                                [idx]: { ...prev[idx], type: e.target.value as any },
+                              }))}
+                              className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                            >
+                              <option value="AUDIENCIA">⚖️ Audiência</option>
+                              <option value="PERICIA">🔬 Perícia</option>
+                              <option value="PRAZO">🕐 Prazo</option>
+                              <option value="TAREFA">✅ Tarefa</option>
+                              <option value="OUTRO">📌 Outro</option>
+                            </select>
+                          </div>
+
+                          {/* Título */}
+                          <div>
+                            <label className="text-[10px] text-muted-foreground mb-0.5 block">Título</label>
+                            <input
+                              type="text"
+                              value={form.title}
+                              onChange={e => setEventPreviewByIdx(prev => ({
+                                ...prev,
+                                [idx]: { ...prev[idx], title: e.target.value },
+                              }))}
+                              className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                            />
+                          </div>
+
+                          {/* Data + Hora */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-muted-foreground mb-0.5 block">Data</label>
+                              <input
+                                type="date"
+                                value={form.date}
+                                onChange={e => setEventPreviewByIdx(prev => ({
+                                  ...prev,
+                                  [idx]: { ...prev[idx], date: e.target.value },
+                                }))}
+                                className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-muted-foreground mb-0.5 block">Hora</label>
+                              <input
+                                type="time"
+                                value={form.time}
+                                onChange={e => setEventPreviewByIdx(prev => ({
+                                  ...prev,
+                                  [idx]: { ...prev[idx], time: e.target.value },
+                                }))}
+                                className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Prioridade */}
+                          <div>
+                            <label className="text-[10px] text-muted-foreground mb-0.5 block">Prioridade</label>
+                            <select
+                              value={form.priority}
+                              onChange={e => setEventPreviewByIdx(prev => ({
+                                ...prev,
+                                [idx]: { ...prev[idx], priority: e.target.value as any },
+                              }))}
+                              className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none"
+                            >
+                              <option value="BAIXA">🟢 Baixa</option>
+                              <option value="NORMAL">🟡 Normal</option>
+                              <option value="ALTA">🟠 Alta</option>
+                              <option value="URGENTE">🔴 Urgente</option>
+                            </select>
+                          </div>
+
+                          {/* Descrição */}
+                          <div>
+                            <label className="text-[10px] text-muted-foreground mb-0.5 block">Descrição</label>
+                            <textarea
+                              value={form.description}
+                              onChange={e => setEventPreviewByIdx(prev => ({
+                                ...prev,
+                                [idx]: { ...prev[idx], description: e.target.value },
+                              }))}
+                              rows={4}
+                              className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground outline-none resize-y"
+                            />
+                          </div>
+
+                          {/* Botões Cancelar/Confirmar */}
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleCancelPreview(idx)}
+                              disabled={isCreating}
+                              className="flex-1 py-1.5 text-[11px] font-semibold rounded-lg border border-border text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={() => handleConfirmCreate(idx, form)}
+                              disabled={isCreating || !form.title.trim() || !form.date || !form.time}
+                              className="flex-1 py-1.5 text-[11px] font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center justify-center gap-1.5"
+                            >
+                              {isCreating ? (
+                                <><Loader2 size={11} className="animate-spin" /> Criando…</>
+                              ) : (
+                                <><CheckCircle2 size={11} /> Confirmar e criar</>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </section>
