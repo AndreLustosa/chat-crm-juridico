@@ -3020,10 +3020,15 @@ export default function AdvogadoPage() {
                       // Processos ja em tracking abrem no painel lateral
                       // do menu Processos. Casos ainda na triagem continuam
                       // indo pro workspace antigo. Pedido andre 2026-05-13.
+                      // URL pro painel lateral do menu Processos — usada pelo
+                      // botao "Abrir processo" (abre em nova aba pra nao tirar
+                      // o operador da Triagem). So aplicavel quando o caso ja
+                      // esta em tracking — caso contrario nem aparece na
+                      // listagem do menu Processos.
                       const inTracking = d.legal_case?.in_tracking === true;
-                      const caseHref = inTracking
+                      const processoHref = inTracking
                         ? `/atendimento/processos?openCase=${caseId}`
-                        : `/atendimento/workspace/${caseId}`;
+                        : null;
                       const delegateOpen = delegateOpenId === `hearing-${d.id}`;
 
                       const doAssign = async (newId: string | null, newName: string | null) => {
@@ -3047,8 +3052,8 @@ export default function AdvogadoPage() {
                       return (
                         <div
                           key={d.id}
-                          onClick={() => { if (caseId) router.push(caseHref); }}
-                          title={caseId ? (inTracking ? 'Abrir processo (painel)' : 'Abrir caso no workspace') : undefined}
+                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          title={caseId ? 'Abrir caso' : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
                           } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
@@ -3091,6 +3096,22 @@ export default function AdvogadoPage() {
                             className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
                             onClick={e => e.stopPropagation()}
                           >
+                            {/* Abrir processo no painel lateral do menu Processos
+                                (nova aba pra nao tirar o operador da Triagem). So
+                                aparece quando o caso ja esta em tracking. */}
+                            {processoHref && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  window.open(processoHref, '_blank', 'noopener');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors"
+                                title="Abrir processo no menu Processos (nova aba)"
+                              >
+                                <ExternalLink size={11} />
+                                Abrir processo
+                              </button>
+                            )}
                             <div className="relative">
                               <button
                                 onClick={e => {
@@ -3205,10 +3226,15 @@ export default function AdvogadoPage() {
                     {pendingTasks.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       const caseId = d.legal_case_id || d.legal_case?.id;
+                      // URL pro painel lateral do menu Processos — usada pelo
+                      // botao "Abrir processo" (abre em nova aba pra nao tirar
+                      // o operador da Triagem). So aplicavel quando o caso ja
+                      // esta em tracking — caso contrario nem aparece na
+                      // listagem do menu Processos.
                       const inTracking = d.legal_case?.in_tracking === true;
-                      const caseHref = inTracking
+                      const processoHref = inTracking
                         ? `/atendimento/processos?openCase=${caseId}`
-                        : `/atendimento/workspace/${caseId}`;
+                        : null;
                       const delegateOpen = delegateOpenId === `task-${d.id}`;
 
                       const doAssign = async (newId: string | null, newName: string | null) => {
@@ -3232,8 +3258,8 @@ export default function AdvogadoPage() {
                       return (
                         <div
                           key={d.id}
-                          onClick={() => { if (caseId) router.push(caseHref); }}
-                          title={caseId ? (inTracking ? 'Abrir processo (painel)' : 'Abrir caso no workspace') : undefined}
+                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          title={caseId ? 'Abrir caso' : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
                           } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
@@ -3276,6 +3302,19 @@ export default function AdvogadoPage() {
                             className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
                             onClick={e => e.stopPropagation()}
                           >
+                            {processoHref && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  window.open(processoHref, '_blank', 'noopener');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors"
+                                title="Abrir processo no menu Processos (nova aba)"
+                              >
+                                <ExternalLink size={11} />
+                                Abrir processo
+                              </button>
+                            )}
                             <div className="relative">
                               <button
                                 onClick={e => {
@@ -3391,10 +3430,15 @@ export default function AdvogadoPage() {
                     {deadlines.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       const caseId = d.legal_case_id || d.legal_case?.id;
+                      // URL pro painel lateral do menu Processos — usada pelo
+                      // botao "Abrir processo" (abre em nova aba pra nao tirar
+                      // o operador da Triagem). So aplicavel quando o caso ja
+                      // esta em tracking — caso contrario nem aparece na
+                      // listagem do menu Processos.
                       const inTracking = d.legal_case?.in_tracking === true;
-                      const caseHref = inTracking
+                      const processoHref = inTracking
                         ? `/atendimento/processos?openCase=${caseId}`
-                        : `/atendimento/workspace/${caseId}`;
+                        : null;
                       const delegateOpen = delegateOpenId === d.id;
 
                       const doAssign = async (newId: string | null, newName: string | null) => {
@@ -3423,8 +3467,8 @@ export default function AdvogadoPage() {
                       return (
                         <div
                           key={d.id}
-                          onClick={() => { if (caseId) router.push(caseHref); }}
-                          title={caseId ? (inTracking ? 'Abrir processo (painel)' : 'Abrir caso no workspace') : undefined}
+                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          title={caseId ? 'Abrir caso' : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
                           } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
@@ -3587,6 +3631,19 @@ export default function AdvogadoPage() {
                             className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
                             onClick={e => e.stopPropagation()}
                           >
+                            {processoHref && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  window.open(processoHref, '_blank', 'noopener');
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors"
+                                title="Abrir processo no menu Processos (nova aba)"
+                              >
+                                <ExternalLink size={11} />
+                                Abrir processo
+                              </button>
+                            )}
                             {/* Delegar — popover com opcoes */}
                             <div className="relative">
                               <button
