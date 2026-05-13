@@ -294,3 +294,167 @@
   from { opacity: 0; transform: scale(0.96) translateY(-4px); }
   to   { opacity: 1; transform: scale(1)    translateY(0); }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   ACCESSIBILITY OVERRIDE — Texto amarelo/âmbar/laranja
+   ────────────────────────────────────────────────────────────────
+   Pedido do Andre (2026-05-12): tem dificuldade pra ler texto em
+   amarelo/âmbar/laranja. Ao invés de mexer em 401 ocorrências
+   espalhadas em 100+ arquivos, sobrescrevemos as cores via CSS
+   global, sensível ao tema (dark/light).
+
+   Estratégia:
+   - Dark theme (fundo preto/escuro): força tons CLAROS (amber-100/
+     yellow-50/orange-100) — alto contraste em fundo escuro
+   - Light themes (claro/rose/azul/verde): força tons ESCUROS
+     (amber-800/orange-800) — alto contraste em fundo claro
+
+   NÃO tocamos em bg-amber-*, border-amber-* (backgrounds suaves
+   e bordas são OK, só o texto cansa a leitura).
+
+   Mantém a semântica visual (amber = aviso/atenção, orange = info)
+   mas dobra o contraste.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ─── DARK theme (escuro): texto bem claro pra alto contraste em fundo preto ─── */
+:root .text-amber-200,
+:root .text-amber-300,
+:root .text-amber-400,
+:root .text-amber-500,
+.dark .text-amber-200,
+.dark .text-amber-300,
+.dark .text-amber-400,
+.dark .text-amber-500,
+[data-theme="escuro"] .text-amber-200,
+[data-theme="escuro"] .text-amber-300,
+[data-theme="escuro"] .text-amber-400,
+[data-theme="escuro"] .text-amber-500 {
+  color: #fef3c7 !important; /* amber-100 — muito mais legível */
+}
+
+:root .text-amber-600,
+:root .text-amber-700,
+.dark .text-amber-600,
+.dark .text-amber-700,
+[data-theme="escuro"] .text-amber-600,
+[data-theme="escuro"] .text-amber-700 {
+  color: #fde68a !important; /* amber-200 — ainda legível em dark */
+}
+
+:root .text-yellow-200,
+:root .text-yellow-300,
+:root .text-yellow-400,
+:root .text-yellow-500,
+.dark .text-yellow-200,
+.dark .text-yellow-300,
+.dark .text-yellow-400,
+.dark .text-yellow-500,
+[data-theme="escuro"] .text-yellow-200,
+[data-theme="escuro"] .text-yellow-300,
+[data-theme="escuro"] .text-yellow-400,
+[data-theme="escuro"] .text-yellow-500 {
+  color: #fef9c3 !important; /* yellow-100 — alto contraste */
+}
+
+:root .text-yellow-600,
+:root .text-yellow-700,
+.dark .text-yellow-600,
+.dark .text-yellow-700,
+[data-theme="escuro"] .text-yellow-600,
+[data-theme="escuro"] .text-yellow-700 {
+  color: #fef08a !important; /* yellow-200 */
+}
+
+:root .text-orange-200,
+:root .text-orange-300,
+:root .text-orange-400,
+:root .text-orange-500,
+.dark .text-orange-200,
+.dark .text-orange-300,
+.dark .text-orange-400,
+.dark .text-orange-500,
+[data-theme="escuro"] .text-orange-200,
+[data-theme="escuro"] .text-orange-300,
+[data-theme="escuro"] .text-orange-400,
+[data-theme="escuro"] .text-orange-500 {
+  color: #fed7aa !important; /* orange-200 — alto contraste em dark */
+}
+
+:root .text-orange-600,
+:root .text-orange-700,
+.dark .text-orange-600,
+.dark .text-orange-700,
+[data-theme="escuro"] .text-orange-600,
+[data-theme="escuro"] .text-orange-700 {
+  color: #fdba74 !important; /* orange-300 */
+}
+
+/* ─── LIGHT themes (claro/rose/azul/verde): texto bem escuro pra alto contraste em fundo claro ─── */
+[data-theme="claro"] .text-amber-200,
+[data-theme="claro"] .text-amber-300,
+[data-theme="claro"] .text-amber-400,
+[data-theme="claro"] .text-amber-500,
+[data-theme="claro"] .text-amber-600,
+[data-theme="rose"] .text-amber-200,
+[data-theme="rose"] .text-amber-300,
+[data-theme="rose"] .text-amber-400,
+[data-theme="rose"] .text-amber-500,
+[data-theme="rose"] .text-amber-600,
+[data-theme="azul"] .text-amber-200,
+[data-theme="azul"] .text-amber-300,
+[data-theme="azul"] .text-amber-400,
+[data-theme="azul"] .text-amber-500,
+[data-theme="azul"] .text-amber-600,
+[data-theme="verde"] .text-amber-200,
+[data-theme="verde"] .text-amber-300,
+[data-theme="verde"] .text-amber-400,
+[data-theme="verde"] .text-amber-500,
+[data-theme="verde"] .text-amber-600 {
+  color: #92400e !important; /* amber-800 — bem escuro, alto contraste em fundo claro */
+}
+
+[data-theme="claro"] .text-yellow-200,
+[data-theme="claro"] .text-yellow-300,
+[data-theme="claro"] .text-yellow-400,
+[data-theme="claro"] .text-yellow-500,
+[data-theme="claro"] .text-yellow-600,
+[data-theme="rose"] .text-yellow-200,
+[data-theme="rose"] .text-yellow-300,
+[data-theme="rose"] .text-yellow-400,
+[data-theme="rose"] .text-yellow-500,
+[data-theme="rose"] .text-yellow-600,
+[data-theme="azul"] .text-yellow-200,
+[data-theme="azul"] .text-yellow-300,
+[data-theme="azul"] .text-yellow-400,
+[data-theme="azul"] .text-yellow-500,
+[data-theme="azul"] .text-yellow-600,
+[data-theme="verde"] .text-yellow-200,
+[data-theme="verde"] .text-yellow-300,
+[data-theme="verde"] .text-yellow-400,
+[data-theme="verde"] .text-yellow-500,
+[data-theme="verde"] .text-yellow-600 {
+  color: #854d0e !important; /* yellow-800 */
+}
+
+[data-theme="claro"] .text-orange-200,
+[data-theme="claro"] .text-orange-300,
+[data-theme="claro"] .text-orange-400,
+[data-theme="claro"] .text-orange-500,
+[data-theme="claro"] .text-orange-600,
+[data-theme="rose"] .text-orange-200,
+[data-theme="rose"] .text-orange-300,
+[data-theme="rose"] .text-orange-400,
+[data-theme="rose"] .text-orange-500,
+[data-theme="rose"] .text-orange-600,
+[data-theme="azul"] .text-orange-200,
+[data-theme="azul"] .text-orange-300,
+[data-theme="azul"] .text-orange-400,
+[data-theme="azul"] .text-orange-500,
+[data-theme="azul"] .text-orange-600,
+[data-theme="verde"] .text-orange-200,
+[data-theme="verde"] .text-orange-300,
+[data-theme="verde"] .text-orange-400,
+[data-theme="verde"] .text-orange-500,
+[data-theme="verde"] .text-orange-600 {
+  color: #9a3412 !important; /* orange-800 */
+}
