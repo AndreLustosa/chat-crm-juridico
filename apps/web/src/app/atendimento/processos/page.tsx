@@ -9,7 +9,7 @@ import {
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, Bell, RefreshCcw, BookOpen,
   LayoutList, LayoutGrid, DollarSign, Scale, Gavel, ArrowUpDown, FolderPlus, Pencil, Trash2,
   Sparkles, AlertCircle, SlidersHorizontal, Columns3, BookmarkPlus, Bookmark, Star,
-  Undo2, UserX, RotateCcw,
+  Undo2, UserX, RotateCcw, Copy, Check,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
@@ -54,6 +54,54 @@ import {
 } from './components/processosStorage';
 
 // ─── Helpers ─────────────────────────────────────────────────
+
+/**
+ * Bug fix 2026-05-12 (UX Andre):
+ * Botao pequeno pra copiar numero do processo no clipboard.
+ * Feedback verde por 1.5s. Usa navigator.clipboard com fallback textarea.
+ */
+function CopyProcessNumber({ value, size = 10 }: { value: string; size?: number }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return true;
+      } catch { return false; }
+    };
+    const ok = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(value).then(() => true).catch(() => fallback())
+      : Promise.resolve(fallback());
+    Promise.resolve(ok).then((success) => {
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
+    });
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title={copied ? 'Copiado!' : 'Copiar número do processo'}
+      className={`shrink-0 p-0.5 rounded transition-colors ${
+        copied
+          ? 'text-emerald-400'
+          : 'text-muted-foreground/60 hover:text-foreground hover:bg-muted/50'
+      }`}
+    >
+      {copied ? <Check size={size} /> : <Copy size={size} />}
+    </button>
+  );
+}
 
 /** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
 const formatCNJ = (num: string | null | undefined): string => {
@@ -1634,7 +1682,13 @@ function ProcessoDetailPanel({
             {legalCase.opposing_party && (
               <p className="text-[11px] text-muted-foreground truncate">vs. {legalCase.opposing_party}</p>
             )}
-            <p className="text-[10px] text-muted-foreground font-mono">{formatCNJ(legalCase.case_number)}</p>
+            {/* Bug fix 2026-05-12 (pedido Andre): botao copiar processo no header */}
+            <div className="flex items-center gap-1">
+              <p className="text-[10px] text-muted-foreground font-mono">{formatCNJ(legalCase.case_number)}</p>
+              {legalCase.case_number && (
+                <CopyProcessNumber value={legalCase.case_number} />
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="px-2 py-0.5 rounded-full text-[9px] font-bold border"
