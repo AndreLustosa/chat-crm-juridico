@@ -1166,6 +1166,11 @@ export class DjenService {
     leadName?: string,
     leadPhone?: string,
     legalArea?: string,
+    // Polo processual do cliente. true = cliente eh autor (polo ativo),
+    // false = cliente eh reu (polo passivo). Default true (paridade com o
+    // fluxo OAB do menu Processos). A IA usa esse campo pra se referir
+    // corretamente ao processo em mensagens ao cliente.
+    clientIsAuthor: boolean = true,
   ) {
     const pub = await this.prisma.djenPublication.findUniqueOrThrow({ where: { id } });
 
@@ -1246,8 +1251,15 @@ export class DjenService {
     // Extrair dados da análise IA que já estão salvos na publicação ou no raw_json
     // Se a publicação já foi analisada, parte_autora/parte_rea/etc estão preenchidos
     // Senão, tenta extrair do conteúdo via regex básico
+    const parteAutora = pub.parte_autora || null;
     const parteRea = pub.parte_rea || null;
     const rawAnalysis = (pub as any).raw_json || {};
+
+    // opposing_party = parte que NAO eh o cliente.
+    //  - clientIsAuthor=true (cliente autor)  -> opposing_party = reu
+    //  - clientIsAuthor=false (cliente reu)   -> opposing_party = autor
+    // Paridade com o fluxo OAB (legal-cases/direct).
+    const opposingParty = clientIsAuthor ? parteRea : parteAutora;
 
     // Tentar extrair juízo do conteúdo (ex: "1ª Vara do Trabalho", "2ª Vara Cível")
     let court: string | null = null;
@@ -1276,8 +1288,10 @@ export class DjenService {
         filed_at: pub.data_disponibilizacao,
         legal_area: resolvedLegalArea,
         stage_changed_at: new Date(),
+        // Polo processual do cliente — paridade com fluxo OAB
+        client_is_author: clientIsAuthor,
         // Campos pré-preenchidos pela análise IA
-        opposing_party: parteRea,
+        opposing_party: opposingParty,
         court: court,
         claim_value: claimValue,
       },

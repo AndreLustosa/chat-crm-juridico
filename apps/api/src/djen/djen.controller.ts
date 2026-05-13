@@ -83,11 +83,15 @@ export class DjenController {
   createProcess(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { leadId?: string; leadName?: string; leadPhone?: string; trackingStage?: string; legalArea?: string; lawyerId?: string },
+    @Body() body: { leadId?: string; leadName?: string; leadPhone?: string; trackingStage?: string; legalArea?: string; lawyerId?: string; clientIsAuthor?: boolean },
   ) {
     // ADMIN pode escolher outro advogado; demais usuários sempre recebem o processo
     const isAdmin = req.user?.roles?.includes('ADMIN');
     const effectiveLawyerId = (isAdmin && body?.lawyerId) ? body.lawyerId : req.user.id;
+
+    // Default true (cliente autor) — paridade com fluxo OAB do menu Processos.
+    // Aceita explicitamente false pra cliente reu (polo passivo).
+    const clientIsAuthor = typeof body?.clientIsAuthor === 'boolean' ? body.clientIsAuthor : true;
 
     return this.djenService.createProcessFromPublication(
       id,
@@ -98,6 +102,7 @@ export class DjenController {
       body?.leadName,
       body?.leadPhone,
       body?.legalArea,
+      clientIsAuthor,
     );
   }
 

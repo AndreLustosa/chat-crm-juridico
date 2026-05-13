@@ -555,6 +555,12 @@ function CreateProcessModal({
   // Modo do cliente: buscar existente ou cadastrar novo
   const [clientMode, setClientMode] = useState<'search' | 'new'>('search');
 
+  // Polo processual do cliente. true = cliente eh autor (polo ativo, default),
+  // false = cliente eh reu (polo passivo). Paridade com o fluxo OAB do menu
+  // Processos. Pre-selecionado quando o usuario clica "Buscar" em uma sugestao
+  // (autora/rea), mas pode ser alternado livremente pelo toggle.
+  const [clientIsAuthor, setClientIsAuthor] = useState(true);
+
   // Busca de cliente existente
   const [leadSearch, setLeadSearch] = useState('');
   const [leadResults, setLeadResults] = useState<Lead[]>([]);
@@ -721,6 +727,7 @@ function CreateProcessModal({
         trackingStage: selectedStage,
         legalArea: legalArea.trim() || undefined,
         lawyerId: isAdmin && selectedLawyerId ? selectedLawyerId : undefined,
+        clientIsAuthor,
       });
       onSuccess();
       const caseId = res?.data?.id;
@@ -782,7 +789,7 @@ function CreateProcessModal({
             <div className="flex items-center justify-between mb-2">
               <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                 <User size={11} />
-                Cliente
+                Cliente / {clientIsAuthor ? 'Parte Autora' : 'Parte Ré'}
                 <span className="text-red-400">*</span>
               </label>
               <div className="flex rounded-lg border border-border overflow-hidden text-[10px] font-semibold">
@@ -799,6 +806,34 @@ function CreateProcessModal({
                 >
                   <Plus size={10} className="inline mr-1" />
                   Novo cliente
+                </button>
+              </div>
+            </div>
+
+            {/* Toggle polo processual: escritorio representa Autor ou Reu */}
+            <div className="flex items-center justify-between gap-3 mb-2 px-3 py-2 rounded-xl border border-border bg-accent/20">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Scale size={11} className="text-muted-foreground shrink-0" />
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Escritório representa:
+                </span>
+              </div>
+              <div className="flex rounded-lg border border-border overflow-hidden text-[10px] font-bold shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setClientIsAuthor(true)}
+                  className={`px-3 py-1 transition-colors ${clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                  title="Cliente é autor / requerente / reclamante (polo ativo)"
+                >
+                  Autor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClientIsAuthor(false)}
+                  className={`px-3 py-1 transition-colors border-l border-border ${!clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                  title="Cliente é réu / requerido / reclamado (polo passivo)"
+                >
+                  Réu
                 </button>
               </div>
             </div>
@@ -841,7 +876,7 @@ function CreateProcessModal({
                           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">AUTORA</span>
                         </div>
                         <button
-                          onClick={() => { setLeadSearch(lead.name); setDismissedSuggestions(true); }}
+                          onClick={() => { setLeadSearch(lead.name); setClientIsAuthor(true); setDismissedSuggestions(true); }}
                           className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-bold transition-colors shrink-0"
                         >
                           Buscar
@@ -871,7 +906,7 @@ function CreateProcessModal({
                           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">RÉ</span>
                         </div>
                         <button
-                          onClick={() => { setLeadSearch(lead.name); setDismissedSuggestions(true); }}
+                          onClick={() => { setLeadSearch(lead.name); setClientIsAuthor(false); setDismissedSuggestions(true); }}
                           className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold transition-colors shrink-0"
                         >
                           Buscar
