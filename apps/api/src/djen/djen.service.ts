@@ -1248,12 +1248,14 @@ export class DjenService {
       ? trackingStage
       : 'DISTRIBUIDO';
 
-    // Extrair dados da análise IA que já estão salvos na publicação ou no raw_json
-    // Se a publicação já foi analisada, parte_autora/parte_rea/etc estão preenchidos
-    // Senão, tenta extrair do conteúdo via regex básico
+    // Extrair dados da análise IA que já estão salvos na publicação.
+    // Bug reportado 2026-05-13: o LegalCase saia com varios campos vazios
+    // (tipo_acao, parte_contraria, vara/tribunal, valor_causa, juiz)
+    // mesmo quando a IA ja tinha identificado tudo. A logica anterior so
+    // usava regex frageis no conteudo bruto, ignorando pub.lawyer_analysis.
     const parteAutora = pub.parte_autora || null;
     const parteRea = pub.parte_rea || null;
-    const rawAnalysis = (pub as any).raw_json || {};
+    const lawyerAnalysis: any = (pub as any).lawyer_analysis || {};
 
     // opposing_party = parte que NAO eh o cliente.
     //  - clientIsAuthor=true (cliente autor)  -> opposing_party = reu
@@ -1261,20 +1263,43 @@ export class DjenService {
     // Paridade com o fluxo OAB (legal-cases/direct).
     const opposingParty = clientIsAuthor ? parteRea : parteAutora;
 
-    // Tentar extrair juízo do conteúdo (ex: "1ª Vara do Trabalho", "2ª Vara Cível")
-    let court: string | null = null;
-    const conteudo = pub.conteudo || '';
-    const courtMatch = conteudo.match(/(\d+ª?\s*Vara\s+[\w\s]+?)(?:\s*[-–]|\s*de\s+\w)/i);
-    if (courtMatch) court = courtMatch[1].trim();
+    // Juizo / Vara — prioriza IA, fallback regex no conteudo
+    let court: string | null = lawyerAnalysis.juizo || null;
+    if (!court) {
+      const conteudo = pub.conteudo || '';
+      const courtMatch = conteudo.match(/(\d+ª?\s*Vara\s+[\w\s]+?)(?:\s*[-–]|\s*de\s+\w)/i);
+      if (courtMatch) court = courtMatch[1].trim();
+    }
 
-    // Tentar extrair valor da causa (ex: "R$ 50.000,00")
+    // Valor da causa — IA retorna string formatada "R$ X.XXX,XX". Parsea
+    // pra Decimal. Fallback regex se IA nao identificou.
     let claimValue: number | null = null;
-    const valorMatch = conteudo.match(/(?:valor\s+(?:da\s+)?causa|valor\s+(?:do\s+)?débito|valor\s+exequ?endo)[:\s]*R?\$?\s*([\d.,]+)/i);
-    if (valorMatch) {
-      const cleanVal = valorMatch[1].replace(/\./g, '').replace(',', '.');
-      const parsed = parseFloat(cleanVal);
+    const valorIaRaw = lawyerAnalysis.valor_causa as string | null | undefined;
+    if (valorIaRaw) {
+      // Remove "R$", espacos, separadores de milhar. Aceita vírgula ou ponto decimal.
+      const clean = String(valorIaRaw)
+        .replace(/[Rr]\$|\s/g, '')
+        .replace(/\.(?=\d{3}(\D|$))/g, '') // remove ponto de milhar
+        .replace(',', '.');
+      const parsed = parseFloat(clean);
       if (!isNaN(parsed) && parsed > 0) claimValue = parsed;
     }
+    if (claimValue === null) {
+      const conteudo = pub.conteudo || '';
+      const valorMatch = conteudo.match(/(?:valor\s+(?:da\s+)?causa|valor\s+(?:do\s+)?débito|valor\s+exequ?endo)[:\s]*R?\$?\s*([\d.,]+)/i);
+      if (valorMatch) {
+        const cleanVal = valorMatch[1].replace(/\./g, '').replace(',', '.');
+        const parsed = parseFloat(cleanVal);
+        if (!isNaN(parsed) && parsed > 0) claimValue = parsed;
+      }
+    }
+
+    // Tipo de acao judicial (classe processual). Vem do DJEN no raw_json
+    // como "Procedimento Comum Civel", "Execucao Fiscal", "Reclamatoria
+    // Trabalhista", etc. Nao confundir com lawyer_analysis.tipo_acao —
+    // esse eh o ATO que o advogado deve tomar ("opor embargos em 15 dias"),
+    // nao a classe da acao em si.
+    const actionType: string | null = pub.classe_processual || null;
 
     const legalCase = await this.prisma.legalCase.create({
       data: {
@@ -1290,10 +1315,11 @@ export class DjenService {
         stage_changed_at: new Date(),
         // Polo processual do cliente — paridade com fluxo OAB
         client_is_author: clientIsAuthor,
-        // Campos pré-preenchidos pela análise IA
+        // Campos pré-preenchidos pela análise IA (com fallback regex)
         opposing_party: opposingParty,
         court: court,
         claim_value: claimValue,
+        action_type: actionType,
       },
     });
 
