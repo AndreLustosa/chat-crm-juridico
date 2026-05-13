@@ -1278,7 +1278,9 @@ export default function FollowupPage() {
   const [dispatchingBroadcast, setDispatchingBroadcast] = useState(false);
   const [broadcastType, setBroadcastType] = useState<'AUDIENCIA' | 'COMUNICADO'>('AUDIENCIA');
   const [broadcastDaysAhead, setBroadcastDaysAhead] = useState(7);
-  const [broadcastInterval, setBroadcastInterval] = useState(10);
+  // Default elevado pra 20s (2026-05-13) — intervalos curtos foram a causa
+  // raiz do ban WhatsApp em 2026-04-28. Backend clampa 15s minimo.
+  const [broadcastInterval, setBroadcastInterval] = useState(20);
   const [broadcastCustomPrompt, setBroadcastCustomPrompt] = useState('');
   const [activeBroadcast, setActiveBroadcast] = useState<BroadcastJob | null>(null);
   const [expandedBroadcast, setExpandedBroadcast] = useState<string | null>(null);
@@ -2625,13 +2627,21 @@ export default function FollowupPage() {
                   <label className={labelCls()}>Intervalo entre mensagens (seg)</label>
                   <input
                     type="number"
-                    min={5}
+                    min={15}
                     max={3600}
                     className={inputCls()}
                     value={broadcastInterval}
-                    onChange={e => setBroadcastInterval(Math.max(5, Math.min(3600, Number(e.target.value))))}
+                    onChange={e => setBroadcastInterval(Math.max(15, Math.min(3600, Number(e.target.value))))}
                   />
-                  <p className="text-xs text-muted-foreground mt-1">Mín 5s, máx 3600s (1h). Para reduzir risco de banimento, use ≥60s. Ex.: 60=1min, 300=5min, 1800=30min, 3600=1h.</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Mín 15s (limite anti-ban WhatsApp), máx 3600s (1h). Recomendado ≥60s pra disparos com mais de 30 alvos. Worker aplica jitter aleatório ±30%.
+                  </p>
+                  {broadcastInterval < 30 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-300 mt-1 flex items-center gap-1">
+                      <AlertTriangle size={11} />
+                      Intervalo curto. Em 2026-04-28 disparo a cada 10s derrubou a conta. Considere ≥60s.
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-end">
                   <button
@@ -2735,6 +2745,52 @@ export default function FollowupPage() {
               )}
             </div>
 
+            {/* Aviso PAUSADO_AUTO — circuit breaker do anti-ban disparou */}
+            {activeBroadcast && activeBroadcast.status === 'PAUSADO_AUTO' && (
+              <div className="bg-card border border-amber-500/40 rounded-2xl p-6 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-amber-400" />
+                  <h3 className="text-sm font-semibold text-foreground">Disparo pausado automaticamente</h3>
+                  <span className="text-xs text-muted-foreground">— {activeBroadcast.name}</span>
+                </div>
+                {(activeBroadcast as any).pause_reason && (
+                  <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                    {(activeBroadcast as any).pause_reason}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  O sistema detectou problema (instância desconectada ou falhas seguidas)
+                  e parou o disparo pra preservar a conta. Verifique o WhatsApp, valide
+                  os números, e clique em <strong>Retomar</strong> pra continuar de onde parou.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Retomar disparo? Os itens pendentes serão re-enfileirados.')) return;
+                      try {
+                        await apiFetch(`/followup/broadcasts/${activeBroadcast.id}/resume`, { method: 'PATCH' });
+                        const data = await apiFetch(`/followup/broadcasts/${activeBroadcast.id}`);
+                        setActiveBroadcast(data);
+                      } catch (err) {
+                        showError(err instanceof Error ? err.message : 'Erro ao retomar');
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 hover:bg-emerald-600/30 text-xs font-medium transition-all duration-200"
+                  >
+                    <RefreshCw size={13} />
+                    Retomar disparo
+                  </button>
+                  <button
+                    onClick={() => handleCancelBroadcast(activeBroadcast.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/20 border border-red-600/30 text-red-400 hover:bg-red-600/30 text-xs font-medium transition-all duration-200"
+                  >
+                    <XCircle size={13} />
+                    Cancelar definitivamente
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Progresso do disparo ativo */}
             {activeBroadcast && activeBroadcast.status === 'ENVIANDO' && (
               <div className="bg-card border border-blue-500/30 rounded-2xl p-6 space-y-4">
@@ -2819,6 +2875,7 @@ export default function FollowupPage() {
                       ENVIANDO: 'text-blue-400 bg-blue-400/10',
                       CONCLUIDO: 'text-green-400 bg-green-400/10',
                       CANCELADO: 'text-red-400 bg-red-400/10',
+                      PAUSADO_AUTO: 'text-amber-400 bg-amber-400/10', // anti-ban 2026-05-13
                     };
 
                     return (
@@ -2860,7 +2917,24 @@ export default function FollowupPage() {
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {b.status === 'ENVIANDO' && (
+                            {b.status === 'PAUSADO_AUTO' && (
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Retomar disparo? Os itens pendentes serão re-enfileirados.')) return;
+                                  try {
+                                    await apiFetch(`/followup/broadcasts/${b.id}/resume`, { method: 'PATCH' });
+                                    fetchBroadcasts();
+                                  } catch (err) {
+                                    showError(err instanceof Error ? err.message : 'Erro ao retomar');
+                                  }
+                                }}
+                                title="Retomar disparo pausado automaticamente"
+                                className="p-1.5 rounded text-emerald-400 hover:bg-emerald-400/10 transition-all duration-200"
+                              >
+                                <RefreshCw size={14} />
+                              </button>
+                            )}
+                            {(b.status === 'ENVIANDO' || b.status === 'PAUSADO_AUTO') && (
                               <button
                                 onClick={() => handleCancelBroadcast(b.id)}
                                 title="Cancelar"

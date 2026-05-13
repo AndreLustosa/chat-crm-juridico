@@ -1022,9 +1022,20 @@ model BroadcastJob {
   total_targets Int       @default(0)
   sent_count    Int       @default(0)
   failed_count  Int       @default(0)
-  interval_ms   Int       @default(10000)
+  // Default elevado pra 20s (2026-05-13) — antes era 10s, contribuiu pro
+  // ban de 2026-04-28. Service ainda aceita override, mas com clamp min 15s.
+  interval_ms   Int       @default(20000)
   started_at    DateTime?
   completed_at  DateTime?
+  // ─── Anti-ban (Feature 2026-05-13) ─────────────────────────────
+  // Status extras possiveis: PENDENTE, ENVIANDO, PAUSADO_AUTO, CONCLUIDO,
+  // CANCELADO. PAUSADO_AUTO eh setado pelo worker quando o circuit breaker
+  // trip: muitas falhas consecutivas OU healthcheck do Evolution mostra
+  // instancia desconectada. Admin precisa clicar "Retomar" pra continuar.
+  consecutive_failures  Int       @default(0)
+  paused_until          DateTime? // worker re-enfileira sem enviar ate essa data
+  pause_reason          String?   // motivo legivel pra admin (mostrado no UI)
+  last_health_check_at  DateTime? // ultima vez que checou Evolution connectionState
   created_by_id String
   created_at    DateTime  @default(now())
   updated_at    DateTime  @updatedAt

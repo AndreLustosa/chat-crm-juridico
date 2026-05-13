@@ -132,6 +132,12 @@ export class FollowupController {
     return this.svc.cancelBroadcast(id);
   }
 
+  // Retomar broadcast PAUSADO_AUTO (feature anti-ban 2026-05-13)
+  @Patch('broadcasts/:id/resume')
+  resumeBroadcast(@Param('id') id: string) {
+    return this.svc.resumeBroadcast(id);
+  }
+
   // ─── Seed ────────────────────────────────────────────────────────────────
   @Post('seed-defaults')
   seedDefaultSequences() { return this.svc.seedDefaultSequences(); }

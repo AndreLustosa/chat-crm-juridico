@@ -875,7 +875,10 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
         tenant_id: tenantOrDefault(tenantId),
         created_by_id: userId,
         total_targets: uniqueTargets.length,
-        interval_ms: Math.max(5000, Math.min(3600000, data.interval_ms)),
+        // Clamp 15s minimo (2026-05-13): intervalo < 15s aumenta drasticamente
+        // risco de ban WhatsApp. Antes era 5s minimo — contribuiu pro ban de
+        // 2026-04-28. Max 1h. Jitter ±30% eh adicionado no worker.
+        interval_ms: Math.max(15000, Math.min(3600000, data.interval_ms)),
         custom_prompt: data.custom_prompt,
         filter_json: { type: data.type, days_ahead: data.days_ahead },
         status: 'ENVIANDO',
@@ -937,7 +940,9 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
   async cancelBroadcast(id: string) {
     const broadcast = await this.prisma.broadcastJob.findUnique({ where: { id } });
     if (!broadcast) throw new NotFoundException('Disparo não encontrado');
-    if (broadcast.status !== 'ENVIANDO') throw new BadRequestException('Disparo não está em andamento');
+    if (broadcast.status !== 'ENVIANDO' && broadcast.status !== 'PAUSADO_AUTO') {
+      throw new BadRequestException('Disparo não está em andamento');
+    }
 
     // Cancel pending items
     await this.prisma.broadcastItem.updateMany({
@@ -948,6 +953,59 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
     return this.prisma.broadcastJob.update({
       where: { id },
       data: { status: 'CANCELADO', completed_at: new Date() },
+    });
+  }
+
+  /**
+   * Retomar broadcast em PAUSADO_AUTO (feature anti-ban 2026-05-13).
+   *
+   * Quando o worker detecta muitas falhas seguidas OU connectionState !=
+   * 'open', muda status pra PAUSADO_AUTO e zera o circuit breaker. Admin
+   * resolve o problema (reconecta WhatsApp, valida numeros etc) e clica
+   * "Retomar" no UI. Aqui re-enfileiramos os itens PENDENTE no BullMQ com
+   * delay escalonado pra reconstruir a fila perdida.
+   */
+  async resumeBroadcast(id: string) {
+    const broadcast = await this.prisma.broadcastJob.findUnique({
+      where: { id },
+      include: { items: { where: { status: 'PENDENTE' }, orderBy: { created_at: 'asc' } } },
+    });
+    if (!broadcast) throw new NotFoundException('Disparo não encontrado');
+    if (broadcast.status !== 'PAUSADO_AUTO') {
+      throw new BadRequestException('Disparo não está pausado automaticamente');
+    }
+    if (broadcast.items.length === 0) {
+      // Nada mais pra enviar — apenas finaliza
+      return this.prisma.broadcastJob.update({
+        where: { id },
+        data: { status: 'CONCLUIDO', completed_at: new Date() } as any,
+      });
+    }
+
+    // Re-enfileira itens pendentes — zera contadores de pausa
+    for (let i = 0; i < broadcast.items.length; i++) {
+      const item = broadcast.items[i];
+      const delay = i * broadcast.interval_ms;
+      await this.followupQueue.add('broadcast-send', {
+        broadcast_id: id,
+        item_id: item.id,
+        custom_prompt: broadcast.custom_prompt,
+      }, {
+        delay,
+        // jobId com timestamp pra nao colidir com jobs antigos no failed zset
+        jobId: `broadcast-${id}-${item.id}-resume-${Date.now()}`,
+        removeOnComplete: true,
+      });
+    }
+
+    return this.prisma.broadcastJob.update({
+      where: { id },
+      data: {
+        status: 'ENVIANDO',
+        consecutive_failures: 0,
+        pause_reason: null,
+        paused_until: null,
+      } as any,
     });
   }
 

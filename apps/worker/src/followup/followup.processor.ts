@@ -23,7 +23,7 @@ export class FollowupProcessor extends WorkerHost {
   async process(job: Job) {
     if (job.name === 'process-step') return this.processStep(job.data.enrollment_id);
     if (job.name === 'send-message') return this.sendMessage(job.data.message_id);
-    if (job.name === 'broadcast-send') return this.processBroadcastItem(job.data.broadcast_id, job.data.item_id, job.data.custom_prompt);
+    if (job.name === 'broadcast-send') return this.processBroadcastItem(job.data.broadcast_id, job.data.item_id, job.data.custom_prompt, job.attemptsMade ?? 0);
     if (job.name === 'manual-legacy-followup') return this.processManualLegacy(job.data.lead_id, job.data.stage);
     if (job.name === 'case-welcome-message') return this.processCaseWelcomeMessage(job.data.case_id);
   }
@@ -481,12 +481,41 @@ export class FollowupProcessor extends WorkerHost {
     }
   }
 
-  private async processBroadcastItem(broadcastId: string, itemId: string, customPrompt?: string) {
-    // Check broadcast is still active
+  // ─── Anti-ban WhatsApp (feature 2026-05-13) ─────────────────────
+  //
+  // Em 2026-04-28 a conta foi banida 24h apos disparo de 78 alvos sem
+  // protecoes. Este metodo agora aplica em ordem:
+  //   1. Checa estado do broadcast (CANCELADO/PAUSADO_AUTO/paused_until)
+  //   2. Healthcheck Evolution antes de enviar
+  //   3. Jitter aleatorio ±30% do interval (anti-fingerprint)
+  //   4. Tenta envio — classifica erro 5xx/network (THROW pra BullMQ
+  //      retentar via attempts=3 + backoff exponencial) vs 4xx
+  //      (FALHOU permanente)
+  //   5. Em sucesso: zera consecutive_failures do broadcast
+  //   6. Em falha permanente: incrementa consecutive_failures;
+  //      se >= LIMIT, marca broadcast PAUSADO_AUTO (admin precisa reativar)
+  //
+  // Limites:
+  private static readonly CIRCUIT_BREAKER_FAILURE_LIMIT = 5;
+  private static readonly JITTER_PCT = 0.3; // ±30%
+
+  private async processBroadcastItem(broadcastId: string, itemId: string, customPrompt?: string, attemptsMade = 0) {
+    // 1a. Check broadcast estado
     const broadcast = await this.prisma.broadcastJob.findUnique({ where: { id: broadcastId } });
     if (!broadcast || broadcast.status === 'CANCELADO') {
-      this.logger.log(`[BROADCAST] Disparo ${broadcastId} cancelado — pulando item ${itemId}`);
+      this.logger.log(`[BROADCAST] ${broadcastId} cancelado — pulando item ${itemId}`);
       return;
+    }
+    if (broadcast.status === 'PAUSADO_AUTO') {
+      // Admin precisa retomar manualmente. Pula sem mudar item — ele continua
+      // PENDENTE pra ser reprocessado quando admin clicar "Retomar".
+      this.logger.warn(`[BROADCAST] ${broadcastId} em PAUSADO_AUTO — pulando ${itemId}`);
+      return;
+    }
+    if ((broadcast as any).paused_until && new Date((broadcast as any).paused_until) > new Date()) {
+      // Pausa temporaria — joga erro pra BullMQ retentar conforme backoff
+      const wait = new Date((broadcast as any).paused_until).getTime() - Date.now();
+      throw new Error(`Broadcast pausado por ${Math.ceil(wait/1000)}s — retry`);
     }
 
     const item = await this.prisma.broadcastItem.findUnique({ where: { id: itemId } });
@@ -508,9 +537,56 @@ export class FollowupProcessor extends WorkerHost {
       return;
     }
 
+    // 1b. Settings + instancia ANTES do healthcheck
+    const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
+    if (!apiUrl) {
+      await this.prisma.broadcastItem.update({ where: { id: itemId }, data: { status: 'FALHOU', error: 'Evolution API não configurada' } });
+      await this.prisma.broadcastJob.update({ where: { id: broadcastId }, data: { failed_count: { increment: 1 } } });
+      return;
+    }
+
+    const convo = await this.prisma.conversation.findFirst({
+      where: { lead_id: lead.id, status: 'ABERTO' },
+      orderBy: { last_message_at: 'desc' },
+    });
+    const instanceName = convo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
+
+    // 2. Healthcheck — Evolution connectionState. Se nao 'open', AUTO-PAUSA o
+    // broadcast (instancia caiu/desconectou — continuar dispararia em vazio).
     try {
-      // COMUNICADO: usa mensagem fixa do custom_prompt (sem IA)
-      // Outros tipos: gera mensagem personalizada com IA
+      const health = await axios.get(
+        `${apiUrl}/instance/connectionState/${instanceName}`,
+        { headers: { apikey: apiKey }, timeout: 8000 },
+      );
+      const state = health.data?.instance?.state || health.data?.state;
+      await this.prisma.broadcastJob.update({
+        where: { id: broadcastId },
+        data: { last_health_check_at: new Date() } as any,
+      });
+      if (state !== 'open') {
+        await this.pauseBroadcastAuto(broadcastId,
+          `Instância WhatsApp desconectada (state=${state || 'desconhecido'}). Reconecte e clique em Retomar.`);
+        this.logger.error(`[BROADCAST] ${broadcastId} pausado — connectionState=${state}`);
+        return; // nao throw — pausa eh estado terminal pra BullMQ
+      }
+    } catch (e: any) {
+      // Healthcheck falhou — nao bloqueia (pode ser endpoint indisponivel),
+      // mas conta como falha consecutiva pra circuit breaker decidir.
+      this.logger.warn(`[BROADCAST] healthcheck falhou: ${e.message}`);
+    }
+
+    // 3. Jitter ±30% — anti-fingerprint de spam
+    const intervalMs = broadcast.interval_ms || 20000;
+    const jitterRange = intervalMs * FollowupProcessor.JITTER_PCT;
+    const jitter = (Math.random() * 2 - 1) * jitterRange; // [-30%, +30%]
+    const sleepMs = Math.max(0, Math.round(jitter));
+    if (sleepMs > 0) await new Promise(r => setTimeout(r, sleepMs));
+
+    let throwForRetry = false;
+    let permanentError: string | null = null;
+
+    try {
+      // Geracao da mensagem
       let text: string;
       if (broadcast.type === 'COMUNICADO' && customPrompt) {
         const nome = lead.name?.split(' ')[0] || 'cliente';
@@ -522,27 +598,20 @@ export class FollowupProcessor extends WorkerHost {
       // Save generated text
       await this.prisma.broadcastItem.update({ where: { id: itemId }, data: { generated_text: text } });
 
-      // Send via Evolution API
-      const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
-      if (!apiUrl) {
-        await this.prisma.broadcastItem.update({ where: { id: itemId }, data: { status: 'FALHOU', error: 'Evolution API não configurada' } });
-        await this.prisma.broadcastJob.update({ where: { id: broadcastId }, data: { failed_count: { increment: 1 } } });
-        return;
-      }
-
-      const convo = await this.prisma.conversation.findFirst({
-        where: { lead_id: lead.id, status: 'ABERTO' },
-        orderBy: { last_message_at: 'desc' },
-      });
-      const instanceName = convo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
-
+      // 4. Envia via Evolution
       await axios.post(`${apiUrl}/message/sendText/${instanceName}`, {
         number: lead.phone, text,
       }, { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 });
 
-      // Update item as sent
+      // 5. Sucesso — zera contador de falhas consecutivas
       await this.prisma.broadcastItem.update({ where: { id: itemId }, data: { status: 'ENVIADO', sent_at: new Date() } });
-      await this.prisma.broadcastJob.update({ where: { id: broadcastId }, data: { sent_count: { increment: 1 } } });
+      await this.prisma.broadcastJob.update({
+        where: { id: broadcastId },
+        data: {
+          sent_count: { increment: 1 },
+          consecutive_failures: 0,
+        } as any,
+      });
 
       // Save in conversation history
       if (convo) {
@@ -554,9 +623,52 @@ export class FollowupProcessor extends WorkerHost {
 
       this.logger.log(`[BROADCAST] Enviado para ${lead.phone} (${lead.name})`);
     } catch (e: any) {
-      this.logger.error(`[BROADCAST] Falha ao enviar para ${lead.phone}: ${e.message}`);
-      await this.prisma.broadcastItem.update({ where: { id: itemId }, data: { status: 'FALHOU', error: e.message?.substring(0, 500) } });
-      await this.prisma.broadcastJob.update({ where: { id: broadcastId }, data: { failed_count: { increment: 1 } } });
+      // 6. Classifica erro: 5xx/network = transitorio (retry via throw),
+      // 4xx = permanente (FALHOU sem retry).
+      const status = e?.response?.status;
+      const isTransient = !status || status >= 500 || e.code === 'ECONNABORTED' || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT';
+
+      // attemptsMade vem do job.attemptsMade do BullMQ. attempts=3 no config,
+      // entao se ja tentamos 2x (attemptsMade=2) e o terceiro falha, eh terminal.
+      if (isTransient && attemptsMade < 2) {
+        // Deixa o BullMQ retentar via attempts=3 + backoff exponencial
+        this.logger.warn(`[BROADCAST] ${itemId}: erro transitorio (${status || e.code}) — attempt=${attemptsMade}, re-throw pra retry: ${e.message}`);
+        throwForRetry = true;
+      } else {
+        permanentError = e.message?.substring(0, 500) || 'erro desconhecido';
+        this.logger.error(`[BROADCAST] ${itemId}: erro permanente (${status || e.code}): ${e.message}`);
+      }
+    }
+
+    if (throwForRetry) {
+      // BullMQ vai retry — nao marca item como FALHOU ainda.
+      throw new Error('Retry transitorio em broadcast — BullMQ via attempts/backoff');
+    }
+
+    if (permanentError) {
+      // 7. Erro permanente: marca FALHOU + incrementa consecutive_failures
+      await this.prisma.broadcastItem.update({
+        where: { id: itemId },
+        data: { status: 'FALHOU', error: permanentError },
+      });
+      const updated = await this.prisma.broadcastJob.update({
+        where: { id: broadcastId },
+        data: {
+          failed_count: { increment: 1 },
+          consecutive_failures: { increment: 1 },
+        } as any,
+      });
+
+      // Circuit breaker: limite atingido — AUTO-PAUSA
+      const currentFails = (updated as any).consecutive_failures || 0;
+      if (currentFails >= FollowupProcessor.CIRCUIT_BREAKER_FAILURE_LIMIT) {
+        await this.pauseBroadcastAuto(
+          broadcastId,
+          `${currentFails} falhas consecutivas detectadas. Verifique a conexão WhatsApp e o número dos destinatários antes de retomar.`,
+        );
+        this.logger.error(`[BROADCAST] ${broadcastId} AUTO-PAUSADO — ${currentFails} falhas seguidas`);
+        return;
+      }
     }
 
     // Check if this was the last item
@@ -570,6 +682,17 @@ export class FollowupProcessor extends WorkerHost {
     }
   }
 
+  /** Marca broadcast como PAUSADO_AUTO + grava motivo legivel ao admin. */
+  private async pauseBroadcastAuto(broadcastId: string, reason: string) {
+    await this.prisma.broadcastJob.update({
+      where: { id: broadcastId },
+      data: {
+        status: 'PAUSADO_AUTO',
+        pause_reason: reason.substring(0, 500),
+      } as any,
+    });
+  }
+
   private async generateBroadcastMessage(lead: any, event: any, type: string, customPrompt?: string): Promise<string> {
     const nome = (lead.name || 'Cliente').split(' ')[0];
     const advogado = 'André Lustosa';
@@ -580,6 +703,21 @@ export class FollowupProcessor extends WorkerHost {
       weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
     }) : 'data a confirmar';
+
+    // Variacao de saudacao (anti-fingerprint Meta). Pool sorteado por lead —
+    // dois leads consecutivos recebem aberturas diferentes mesmo com a IA
+    // gerando o corpo. Sem isso, 78 mensagens "Olá, X!" em sequencia eh um
+    // padrao trivial de detectar (e foi o que pegamos em 2026-04-28).
+    const saudacaoOpcoes = [
+      `Olá, ${nome}!`,
+      `Bom dia, ${nome}.`,
+      `Oi ${nome}, tudo bem?`,
+      `${nome}, espero que esteja tudo bem.`,
+      `Prezado(a) ${nome},`,
+      `${nome}, falando rapidinho.`,
+      `Oi, ${nome}!`,
+    ];
+    const saudacaoEscolhida = saudacaoOpcoes[Math.floor(Math.random() * saudacaoOpcoes.length)];
 
     const systemPrompt = `Você é ${advogado}, advogado do escritório ${escritorio}.
 Está escrevendo uma mensagem de lembrete de ${type === 'AUDIENCIA' ? 'audiência' : type === 'PERICIA' ? 'perícia' : 'prazo'} via WhatsApp para seu cliente ${lead.name || 'Cliente'}.
@@ -593,6 +731,9 @@ REGRAS ABSOLUTAS:
 6. Termine com pergunta se tem dúvidas
 7. Tom: profissional mas caloroso
 8. NÃO use "venho por meio desta" ou frases burocráticas
+9. COMECE COM ESTA SAUDAÇÃO EXATA: "${saudacaoEscolhida}" (depois quebra de linha)
+10. VARIE A ORDEM das informações em relação a uma mensagem padrão — não escreva
+   sempre "data, local, documentos, dúvidas" nessa ordem. Mexa no fluxo natural.
 
 DADOS DO EVENTO:
 - Tipo: ${type}
@@ -617,18 +758,28 @@ Gere APENAS o texto da mensagem, sem introduções.`;
         model: 'gpt-4.1-mini',
         messages: [{ role: 'system', content: systemPrompt }],
         ...buildTokenParam('gpt-4.1-mini', 500),
-        temperature: 0.7,
+        temperature: 0.9, // elevado de 0.7 pra mais variacao lexical
       });
-      return completion.choices[0]?.message?.content?.trim() || this.fallbackBroadcastMessage(nome, type, dataEvento, event?.location);
+      return completion.choices[0]?.message?.content?.trim() || this.fallbackBroadcastMessage(nome, type, dataEvento, event?.location, saudacaoEscolhida);
     } catch (e: any) {
       this.logger.warn(`[BROADCAST] IA indisponível, usando fallback: ${e.message}`);
-      return this.fallbackBroadcastMessage(nome, type, dataEvento, event?.location);
+      return this.fallbackBroadcastMessage(nome, type, dataEvento, event?.location, saudacaoEscolhida);
     }
   }
 
-  private fallbackBroadcastMessage(nome: string, type: string, dataEvento: string, location?: string): string {
+  private fallbackBroadcastMessage(nome: string, type: string, dataEvento: string, location?: string, saudacao?: string): string {
     const tipoLabel = type === 'AUDIENCIA' ? 'audiência' : type === 'PERICIA' ? 'perícia' : 'compromisso';
-    return `Olá, ${nome}! Tudo bem?\n\nGostaria de lembrá-lo(a) que sua ${tipoLabel} está agendada para *${dataEvento}*${location ? ` no local: *${location}*` : ''}.\n\nPor favor, chegue com 30 minutos de antecedência e traga seus documentos pessoais.\n\nEm caso de dúvidas, estou à disposição!`;
+    // Variacao de template no fallback (caso IA caia, ainda nao queremos
+    // 78 mensagens identicas saindo). 4 esqueletos diferentes.
+    const opener = saudacao || `Olá, ${nome}!`;
+    const localStr = location ? ` no local: *${location}*` : '';
+    const templates = [
+      `${opener}\n\nGostaria de lembrá-lo(a) que sua ${tipoLabel} está agendada para *${dataEvento}*${localStr}.\n\nPor favor, chegue com 30 minutos de antecedência e traga seus documentos pessoais.\n\nEm caso de dúvidas, estou à disposição!`,
+      `${opener}\n\nSegue lembrete: ${tipoLabel} marcada para *${dataEvento}*${localStr}.\n\nÉ importante chegar 30 minutos antes e levar os documentos pessoais. Qualquer dúvida, me avise.`,
+      `${opener}\n\nLembre-se da sua ${tipoLabel}: *${dataEvento}*${localStr}.\n\nRecomendo chegar com 30 minutos de antecedência, levando os documentos pessoais. Se tiver alguma dúvida, é só falar comigo.`,
+      `${opener}\n\nReforçando a ${tipoLabel} agendada — *${dataEvento}*${localStr}.\n\nLembre de chegar 30 minutos antes com seus documentos pessoais. Estou à disposição pra qualquer dúvida.`,
+    ];
+    return templates[Math.floor(Math.random() * templates.length)];
   }
 
   private async advanceEnrollment(msgId: string) {
