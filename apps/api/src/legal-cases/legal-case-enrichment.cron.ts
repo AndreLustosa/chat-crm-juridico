@@ -58,22 +58,23 @@ export class LegalCaseEnrichmentCronService {
   async processBatch(): Promise<{ processed: number; done: number; failed: number; retried: number }> {
     const now = new Date();
 
-    const pending = await this.prisma.legalCase.findMany({
-      where: {
-        // Cast pra any: o Prisma Client ainda nao foi regenerado em dev local
-        // (rola na build da VPS). Em runtime os campos existem na coluna do banco.
-        enrichment_status: 'PENDING',
-        enrichment_scheduled_for: { lte: now },
-        archived: false,
-      } as any,
-      select: {
-        id: true, case_number: true, client_is_author: true,
-        // @ts-ignore — campo existe no banco apos migration 2026-05-13
-        enrichment_attempts: true,
-      } as any,
-      orderBy: { enrichment_scheduled_for: 'asc' } as any,
-      take: this.BATCH_SIZE,
-    });
+    // Uso $queryRaw pra tipar explicitamente sem depender do Prisma Client
+    // regenerado (campos enrichment_* foram adicionados via SQL manual).
+    // Mesmo padrao do esaj-rehydrate-cron.
+    const pending = await this.prisma.$queryRaw<Array<{
+      id: string;
+      case_number: string | null;
+      client_is_author: boolean;
+      enrichment_attempts: number;
+    }>>`
+      SELECT id, case_number, client_is_author, enrichment_attempts
+      FROM "LegalCase"
+      WHERE enrichment_status = 'PENDING'
+        AND enrichment_scheduled_for <= ${now}
+        AND archived = false
+      ORDER BY enrichment_scheduled_for ASC
+      LIMIT ${this.BATCH_SIZE}
+    `;
 
     if (pending.length === 0) {
       this.logger.log('[ENRICH] Nenhum caso pendente — fila vazia');
@@ -87,7 +88,6 @@ export class LegalCaseEnrichmentCronService {
     let retried = 0;
 
     for (const lc of pending) {
-      const lcAny = lc as any;
       try {
         if (!lc.case_number) {
           await this.markFailed(lc.id, 'Caso sem numero de processo cadastrado.');
@@ -110,7 +110,7 @@ export class LegalCaseEnrichmentCronService {
             continue;
           }
           // Transitorio
-          await this.retryOrFail(lc.id, lcAny.enrichment_attempts || 0, msg);
+          await this.retryOrFail(lc.id, lc.enrichment_attempts || 0, msg);
           retried++;
           continue;
         }
@@ -119,7 +119,7 @@ export class LegalCaseEnrichmentCronService {
           // Scraper nao encontrou — pode ser indexacao pendente. Retry.
           await this.retryOrFail(
             lc.id,
-            lcAny.enrichment_attempts || 0,
+            lc.enrichment_attempts || 0,
             'Processo nao encontrado no tribunal — pode ainda nao estar indexado.',
           );
           retried++;
@@ -164,7 +164,7 @@ export class LegalCaseEnrichmentCronService {
         try {
           await this.retryOrFail(
             lc.id,
-            lcAny.enrichment_attempts || 0,
+            lc.enrichment_attempts || 0,
             e?.message || 'Erro inesperado',
           );
           retried++;
