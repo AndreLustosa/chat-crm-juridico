@@ -3017,6 +3017,13 @@ export default function AdvogadoPage() {
                     {pendingHearings.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       const caseId = d.legal_case_id || d.legal_case?.id;
+                      // Processos ja em tracking abrem no painel lateral
+                      // do menu Processos. Casos ainda na triagem continuam
+                      // indo pro workspace antigo. Pedido andre 2026-05-13.
+                      const inTracking = d.legal_case?.in_tracking === true;
+                      const caseHref = inTracking
+                        ? `/atendimento/processos?openCase=${caseId}`
+                        : `/atendimento/workspace/${caseId}`;
                       const delegateOpen = delegateOpenId === `hearing-${d.id}`;
 
                       const doAssign = async (newId: string | null, newName: string | null) => {
@@ -3040,7 +3047,8 @@ export default function AdvogadoPage() {
                       return (
                         <div
                           key={d.id}
-                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          onClick={() => { if (caseId) router.push(caseHref); }}
+                          title={caseId ? (inTracking ? 'Abrir processo (painel)' : 'Abrir caso no workspace') : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
                           } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
@@ -3197,6 +3205,10 @@ export default function AdvogadoPage() {
                     {pendingTasks.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       const caseId = d.legal_case_id || d.legal_case?.id;
+                      const inTracking = d.legal_case?.in_tracking === true;
+                      const caseHref = inTracking
+                        ? `/atendimento/processos?openCase=${caseId}`
+                        : `/atendimento/workspace/${caseId}`;
                       const delegateOpen = delegateOpenId === `task-${d.id}`;
 
                       const doAssign = async (newId: string | null, newName: string | null) => {
@@ -3220,7 +3232,8 @@ export default function AdvogadoPage() {
                       return (
                         <div
                           key={d.id}
-                          onClick={() => { if (caseId) router.push(`/atendimento/workspace/${caseId}`); }}
+                          onClick={() => { if (caseId) router.push(caseHref); }}
+                          title={caseId ? (inTracking ? 'Abrir processo (painel)' : 'Abrir caso no workspace') : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
                           } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
@@ -3378,6 +3391,10 @@ export default function AdvogadoPage() {
                     {deadlines.map((d: any) => {
                       const isOverdue = new Date(d.start_at) < new Date();
                       const caseId = d.legal_case_id || d.legal_case?.id;
+                      const inTracking = d.legal_case?.in_tracking === true;
+                      const caseHref = inTracking
+                        ? `/atendimento/processos?openCase=${caseId}`
+                        : `/atendimento/workspace/${caseId}`;
                       const delegateOpen = delegateOpenId === d.id;
 
                       const doAssign = async (newId: string | null, newName: string | null) => {
@@ -3406,9 +3423,8 @@ export default function AdvogadoPage() {
                       return (
                         <div
                           key={d.id}
-                          onClick={() => {
-                            if (caseId) router.push(`/atendimento/workspace/${caseId}`);
-                          }}
+                          onClick={() => { if (caseId) router.push(caseHref); }}
+                          title={caseId ? (inTracking ? 'Abrir processo (painel)' : 'Abrir caso no workspace') : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
                           } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
