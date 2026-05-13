@@ -732,6 +732,21 @@ model LegalCase {
   priority               String    @default("NORMAL") // URGENTE | NORMAL | BAIXA
   google_drive_folder_id String? // Pasta do caso no Google Drive
   stage_changed_at       DateTime  @default(now()) // quando mudou de etapa
+  // Feature 2026-05-13: enriquecimento assincrono pos-protocolo.
+  // Quando advogado arrasta card pra PROTOCOLO na Triagem, gravamos so o
+  // numero do processo + polo. O resto (vara, juiz, classe, valor da
+  // causa, partes, movimentos) eh buscado automaticamente no tribunal
+  // 24h depois via court-scraper. Esse delay existe pq o protocolo recem
+  // feito demora ate o tribunal indexar.
+  // enrichment_status: PENDING (aguardando 24h ou tentativa), DONE
+  // (enriquecido e movido pra menu Processos), FAILED (esgotou retries
+  // ou tribunal nao suportado — fica na Triagem com badge pra operador
+  // preencher manual).
+  enrichment_status      String? // PENDING | DONE | FAILED | null (nao aplicavel)
+  enrichment_scheduled_for DateTime?  // quando o cron deve tentar a proxima busca
+  enriched_at            DateTime?  // quando enriquecimento DONE/FAILED finalizou
+  enrichment_attempts    Int       @default(0) // numero de tentativas (cap 3)
+  enrichment_error       String? // ultima mensagem de erro (display no UI)
   created_at             DateTime  @default(now())
   updated_at             DateTime  @updatedAt
 
@@ -756,6 +771,8 @@ model LegalCase {
   @@index([stage])
   @@index([in_tracking])
   @@index([tenant_id])
+  // Index pro cron de enriquecimento — filtra PENDING com schedule vencido.
+  @@index([enrichment_status, enrichment_scheduled_for])
   // Bug fix 2026-05-08: previne race em criacao concorrente de mesmo
   // CNJ pelo mesmo tenant. NULL eh permitido (caso novo sem numero
   // ainda — VIABILIDADE pre-protocolo).

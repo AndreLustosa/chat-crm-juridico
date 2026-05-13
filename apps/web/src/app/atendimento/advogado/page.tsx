@@ -51,6 +51,16 @@ interface LegalCase {
   stage_changed_at: string;
   created_at: string;
   updated_at: string;
+  // Polo processual do cliente (Feature 2026-04-24). Usado no toggle Autor/Reu
+  // no painel de protocolo, e enviado ao backend pra que o enriquecimento
+  // automatico saiba qual parte das partes do tribunal eh a contraria.
+  client_is_author?: boolean;
+  // Estado de enriquecimento automatico (Feature 2026-05-13). Quando o caso
+  // entra em PROTOCOLO via "Enviar p/ Processos", agendamos consulta ao
+  // tribunal pra +24h. UI mostra badge conforme status.
+  enrichment_status?: 'PENDING' | 'DONE' | 'FAILED' | null;
+  enrichment_scheduled_for?: string | null;
+  enrichment_error?: string | null;
   lead: {
     id: string;
     name: string | null;
@@ -377,6 +387,11 @@ function CaseDetailPanel({
   const [stage, setStage] = useState(legalCase.stage);
   const [caseNumber, setCaseNumber] = useState(legalCase.case_number || '');
   const [court, setCourt] = useState(legalCase.court || '');
+  // Polo do cliente. Default true (cliente AUTOR) — maioria dos processos
+  // do escritorio. Toggle no painel de protocolo + envio pro backend.
+  const [clientIsAuthor, setClientIsAuthor] = useState<boolean>(
+    legalCase.client_is_author ?? true,
+  );
   const [notes, setNotes] = useState(legalCase.notes || '');
   const [legalArea, setLegalArea] = useState(legalCase.legal_area || '');
   const [priority, setPriority] = useState(legalCase.priority || 'NORMAL');
@@ -457,6 +472,7 @@ function CaseDetailPanel({
     setStage(legalCase.stage);
     setCaseNumber(legalCase.case_number || '');
     setCourt(legalCase.court || '');
+    setClientIsAuthor(legalCase.client_is_author ?? true);
     setNotes(legalCase.notes || '');
     setLegalArea(legalCase.legal_area || '');
     setPriority(legalCase.priority || 'NORMAL');
@@ -564,7 +580,10 @@ function CaseDetailPanel({
     }
   };
 
-  // Send to tracking
+  // Send to tracking — agora agenda enriquecimento automatico em +24h.
+  // Backend nao move o caso pro menu Processos imediatamente: marca
+  // enrichment_status=PENDING e o cron busca dados do tribunal antes de
+  // promover. Court continua opcional (operador pode preencher manual).
   const handleSendToTracking = async () => {
     if (!caseNumber.trim()) {
       setTrackingError('Informe o número do processo antes de enviar.');
@@ -576,6 +595,7 @@ function CaseDetailPanel({
       await api.patch(`/legal-cases/${legalCase.id}/send-to-tracking`, {
         caseNumber: caseNumber.trim(),
         court: court.trim() || undefined,
+        clientIsAuthor,
       });
       onRefresh();
       onClose();
@@ -995,7 +1015,7 @@ function CaseDetailPanel({
                 </div>
               </div>
 
-              {/* Case number + Court */}
+              {/* Case number + Court (Vara opcional — sera enriquecida via cron) */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Nº Processo</label>
@@ -1008,13 +1028,15 @@ function CaseDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Vara / Tribunal</label>
+                  <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Vara / Tribunal <span className="text-muted-foreground/60 font-normal normal-case">(opcional)</span>
+                  </label>
                   <input
                     type="text"
                     value={court}
                     onChange={e => setCourt(e.target.value)}
                     className="mt-1 w-full px-3 py-2 text-sm bg-accent/50 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    placeholder="1ª Vara do Trabalho"
+                    placeholder="Preenchido automaticamente"
                   />
                 </div>
               </div>
@@ -1055,13 +1077,69 @@ function CaseDetailPanel({
 
               {/* Send to Processos — only when case is at PROTOCOLO */}
               {legalCase.stage === 'PROTOCOLO' && (
-                <div className="p-4 bg-pink-500/5 border border-pink-500/20 rounded-xl space-y-2">
+                <div className="p-4 bg-pink-500/5 border border-pink-500/20 rounded-xl space-y-3">
                   <p className="text-[11px] font-bold text-pink-500 uppercase tracking-wider flex items-center gap-1.5">
                     🏛️ Protocolar Processo
                   </p>
+
+                  {/* Badge de status quando ja enviado */}
+                  {legalCase.enrichment_status === 'PENDING' && (
+                    <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-500 flex items-start gap-2">
+                      <Loader2 size={12} className="animate-spin mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-semibold">Aguardando enriquecimento automático</p>
+                        <p className="text-sky-500/80 mt-0.5">
+                          O sistema consultará o tribunal e moverá o caso para o menu <strong>Processos</strong> em até 24h.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {legalCase.enrichment_status === 'FAILED' && (
+                    <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-[11px] text-destructive flex items-start gap-2">
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-semibold">Enriquecimento falhou</p>
+                        {legalCase.enrichment_error && (
+                          <p className="text-destructive/80 mt-0.5">{legalCase.enrichment_error}</p>
+                        )}
+                        <p className="text-destructive/80 mt-0.5">
+                          Preencha os campos manualmente e clique em <strong>Salvar Alterações</strong>, ou reenvie para tentar novamente.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-muted-foreground">
-                    Preencha o <strong>nº do processo</strong> e a <strong>vara</strong> acima e clique para mover o caso para o menu <strong>Processos</strong>.
+                    Informe o <strong>nº do processo</strong> e o <strong>polo do cliente</strong> abaixo.
+                    O sistema buscará os dados do tribunal automaticamente em até 24h
+                    e moverá o caso para o menu <strong>Processos</strong>.
                   </p>
+
+                  {/* Toggle polo processual: cliente eh Autor ou Reu */}
+                  <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-pink-500/20 bg-background/60">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Cliente é:
+                    </span>
+                    <div className="flex rounded-lg border border-border overflow-hidden text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setClientIsAuthor(true)}
+                        className={`px-3 py-1 transition-colors ${clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                        title="Cliente é autor / requerente / reclamante (polo ativo)"
+                      >
+                        Autor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setClientIsAuthor(false)}
+                        className={`px-3 py-1 transition-colors border-l border-border ${!clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                        title="Cliente é réu / requerido / reclamado (polo passivo)"
+                      >
+                        Réu
+                      </button>
+                    </div>
+                  </div>
+
                   {trackingError && (
                     <p className="text-[11px] text-destructive flex items-center gap-1">
                       <AlertTriangle size={11} /> {trackingError}
@@ -1073,7 +1151,11 @@ function CaseDetailPanel({
                     className="w-full py-2.5 text-sm font-semibold bg-pink-500 text-white rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2 transition-opacity"
                   >
                     {sendingToTracking ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                    Enviar para Processos
+                    {legalCase.enrichment_status === 'PENDING'
+                      ? 'Reenviar para enriquecimento'
+                      : legalCase.enrichment_status === 'FAILED'
+                        ? 'Tentar novamente'
+                        : 'Enviar para Processos'}
                   </button>
                 </div>
               )}

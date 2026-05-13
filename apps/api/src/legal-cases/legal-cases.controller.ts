@@ -230,8 +230,18 @@ export class LegalCasesController {
   }
 
   @Patch(':id/send-to-tracking')
-  sendToTracking(@Param('id') id: string, @Body() body: { caseNumber: string; court?: string }, @Request() req: any) {
-    return this.service.sendToTracking(id, body.caseNumber, body.court, req.user?.tenant_id);
+  sendToTracking(
+    @Param('id') id: string,
+    @Body() body: { caseNumber: string; court?: string; clientIsAuthor?: boolean },
+    @Request() req: any,
+  ) {
+    return this.service.sendToTracking(
+      id,
+      body.caseNumber,
+      body.court,
+      req.user?.tenant_id,
+      typeof body.clientIsAuthor === 'boolean' ? body.clientIsAuthor : undefined,
+    );
   }
 
   /** Concluir todas as tarefas pendentes de um caso (ao avançar estágio) */

@@ -1484,24 +1484,53 @@ export class LegalCasesService {
     return updated;
   }
 
-  // ─── PROTOCOLO → PROCESSOS ─────────────────────────────────────
-
-  async sendToTracking(id: string, caseNumber: string, court?: string, tenantId?: string) {
+  // ─── PROTOCOLO → ENRIQUECIMENTO ASYNC → PROCESSOS ──────────────
+  //
+  // Refatorado 2026-05-13:
+  // Antes: PATCH /send-to-tracking exigia caseNumber + court e movia
+  //   imediatamente pro menu Processos (in_tracking=true) com info crua.
+  //   Resultado: cases chegavam no kanban Processos sem vara, juiz, valor
+  //   da causa, partes, classe — operador tinha que preencher tudo manual.
+  //
+  // Agora: aceita caseNumber + clientIsAuthor. Marca enrichment_status=PENDING
+  //   e enrichment_scheduled_for=now+24h. O caso fica na Triagem na etapa
+  //   PROTOCOLO ate o cron de enriquecimento rodar, consultar o tribunal
+  //   (court-scraper) e preencher os campos. So entao in_tracking flipa
+  //   pra true e o caso aparece no menu Processos na etapa derivada dos
+  //   movimentos (DISTRIBUIDO/CITACAO/etc).
+  //
+  // Delay de 24h porque protocolo recem-feito normalmente nao foi indexado
+  // pelo tribunal ainda. Court continua opcional pra retro-compat — se
+  // operador quiser preencher manual antes de enriquecer, aceita.
+  async sendToTracking(
+    id: string,
+    caseNumber: string,
+    court?: string,
+    tenantId?: string,
+    clientIsAuthor?: boolean,
+  ) {
     await this.verifyTenantOwnership(id, tenantId);
     const lc = await this.prisma.legalCase.findUnique({ where: { id } });
     if (!lc) throw new NotFoundException('Caso não encontrado');
     if (lc.archived) throw new BadRequestException('Caso arquivado não pode ser protocolado.');
     if (lc.stage !== 'PROTOCOLO') throw new BadRequestException('Caso deve estar no stage PROTOCOLO para ser protocolado');
 
+    // Janela de 24h pro tribunal indexar o processo recem-protocolado.
+    const scheduledFor = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
     const updated = await this.prisma.legalCase.update({
       where: { id },
       data: {
         case_number: caseNumber,
         court: court ?? lc.court,
-        in_tracking: true,
-        tracking_stage: 'DISTRIBUIDO',
-        filed_at: new Date(),
-      },
+        filed_at: lc.filed_at ?? new Date(),
+        ...(typeof clientIsAuthor === 'boolean' ? { client_is_author: clientIsAuthor } : {}),
+        // Enfileira enriquecimento assincrono. NAO flipa in_tracking ainda.
+        enrichment_status: 'PENDING',
+        enrichment_scheduled_for: scheduledFor,
+        enrichment_attempts: 0,
+        enrichment_error: null,
+      } as any,
       include: { lead: { select: { name: true } } },
     });
 
