@@ -357,14 +357,42 @@ export class LegalCasesService {
 
   // ─── STAGE TRANSITIONS ─────────────────────────────────────────
 
-  async updateStage(id: string, newStage: string, userId: string, tenantId?: string) {
+  async updateStage(
+    id: string,
+    newStage: string,
+    userId: string,
+    tenantId?: string,
+    // Opts adicionados 2026-05-13 pra fluxo novo da Triagem: ao arrastar
+    // card pra PROTOCOLO, o frontend envia caseNumber + clientIsAuthor
+    // junto com o stage e o backend ja agenda enriquecimento +24h. Sem
+    // os opts, comportamento eh igual ao anterior (so muda stage) —
+    // mantem compat pra outras transicoes e edicoes manuais.
+    opts?: { caseNumber?: string; clientIsAuthor?: boolean },
+  ) {
     await this.verifyTenantOwnership(id, tenantId);
     const validStage = LEGAL_STAGES.find(s => s.id === newStage);
     if (!validStage) throw new BadRequestException(`Stage inválido: ${newStage}`);
 
+    // Montagem do data — campos extras so quando newStage === PROTOCOLO E
+    // operador informou caseNumber. Em qualquer outro caminho, fica como antes.
+    const data: any = { stage: newStage, stage_changed_at: new Date() };
+    if (newStage === 'PROTOCOLO' && opts?.caseNumber?.trim()) {
+      data.case_number = opts.caseNumber.trim();
+      data.filed_at = new Date();
+      if (typeof opts.clientIsAuthor === 'boolean') {
+        data.client_is_author = opts.clientIsAuthor;
+      }
+      // O delay de 24h comeca no momento que o card entra em PROTOCOLO —
+      // protocolo recem-feito precisa desse tempo pro tribunal indexar.
+      data.enrichment_status = 'PENDING';
+      data.enrichment_scheduled_for = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      data.enrichment_attempts = 0;
+      data.enrichment_error = null;
+    }
+
     const updated = await this.prisma.legalCase.update({
       where: { id },
-      data: { stage: newStage, stage_changed_at: new Date() },
+      data,
       include: { lead: { select: { name: true, id: true } } },
     });
 

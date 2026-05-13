@@ -194,8 +194,21 @@ export class LegalCasesController {
   }
 
   @Patch(':id/stage')
-  updateStage(@Param('id') id: string, @Body('stage') stage: string, @Request() req: any) {
-    return this.service.updateStage(id, stage, req.user.id, req.user?.tenant_id);
+  updateStage(
+    @Param('id') id: string,
+    @Body() body: { stage: string; caseNumber?: string; clientIsAuthor?: boolean },
+    @Request() req: any,
+  ) {
+    return this.service.updateStage(
+      id,
+      body.stage,
+      req.user.id,
+      req.user?.tenant_id,
+      {
+        caseNumber: body.caseNumber,
+        clientIsAuthor: typeof body.clientIsAuthor === 'boolean' ? body.clientIsAuthor : undefined,
+      },
+    );
   }
 
   @Patch(':id/archive')

@@ -387,11 +387,8 @@ function CaseDetailPanel({
   const [stage, setStage] = useState(legalCase.stage);
   const [caseNumber, setCaseNumber] = useState(legalCase.case_number || '');
   const [court, setCourt] = useState(legalCase.court || '');
-  // Polo do cliente. Default true (cliente AUTOR) — maioria dos processos
-  // do escritorio. Toggle no painel de protocolo + envio pro backend.
-  const [clientIsAuthor, setClientIsAuthor] = useState<boolean>(
-    legalCase.client_is_author ?? true,
-  );
+  // client_is_author NAO precisa de state aqui (sem toggle no painel desde
+  // 2026-05-13). O polo eh definido no modal de drag pra PROTOCOLO.
   const [notes, setNotes] = useState(legalCase.notes || '');
   const [legalArea, setLegalArea] = useState(legalCase.legal_area || '');
   const [priority, setPriority] = useState(legalCase.priority || 'NORMAL');
@@ -401,10 +398,6 @@ function CaseDetailPanel({
   const [archiveReason, setArchiveReason] = useState('');
   const [notifyLead, setNotifyLead] = useState(globalNotify);
   const [archiving, setArchiving] = useState(false);
-
-  // Send to tracking (PROTOCOLO → Processos)
-  const [sendingToTracking, setSendingToTracking] = useState(false);
-  const [trackingError, setTrackingError] = useState('');
 
   // Tasks
   const [tasks, setTasks] = useState<CaseTask[]>([]);
@@ -472,7 +465,6 @@ function CaseDetailPanel({
     setStage(legalCase.stage);
     setCaseNumber(legalCase.case_number || '');
     setCourt(legalCase.court || '');
-    setClientIsAuthor(legalCase.client_is_author ?? true);
     setNotes(legalCase.notes || '');
     setLegalArea(legalCase.legal_area || '');
     setPriority(legalCase.priority || 'NORMAL');
@@ -580,31 +572,9 @@ function CaseDetailPanel({
     }
   };
 
-  // Send to tracking — agora agenda enriquecimento automatico em +24h.
-  // Backend nao move o caso pro menu Processos imediatamente: marca
-  // enrichment_status=PENDING e o cron busca dados do tribunal antes de
-  // promover. Court continua opcional (operador pode preencher manual).
-  const handleSendToTracking = async () => {
-    if (!caseNumber.trim()) {
-      setTrackingError('Informe o número do processo antes de enviar.');
-      return;
-    }
-    setSendingToTracking(true);
-    setTrackingError('');
-    try {
-      await api.patch(`/legal-cases/${legalCase.id}/send-to-tracking`, {
-        caseNumber: caseNumber.trim(),
-        court: court.trim() || undefined,
-        clientIsAuthor,
-      });
-      onRefresh();
-      onClose();
-    } catch (e: any) {
-      setTrackingError(e?.response?.data?.message || 'Erro ao enviar para Processos.');
-    } finally {
-      setSendingToTracking(false);
-    }
-  };
+  // Removido 2026-05-13: handleSendToTracking agora vive no modal de drag
+  // pra etapa PROTOCOLO (moveCaseToStage -> setPendingMove). O painel
+  // lateral nao tem mais botao "Enviar para Processos".
 
   // Archive
   const handleArchive = async () => {
@@ -1075,88 +1045,41 @@ function CaseDetailPanel({
                 )}
               </div>
 
-              {/* Send to Processos — only when case is at PROTOCOLO */}
-              {legalCase.stage === 'PROTOCOLO' && (
-                <div className="p-4 bg-pink-500/5 border border-pink-500/20 rounded-xl space-y-3">
-                  <p className="text-[11px] font-bold text-pink-500 uppercase tracking-wider flex items-center gap-1.5">
-                    🏛️ Protocolar Processo
-                  </p>
+              {/*
+                Mudanca 2026-05-13: o bloco "Protocolar Processo" (com botao
+                "Enviar para Processos") foi REMOVIDO daqui. Agora o
+                protocolo eh disparado pelo drag-and-drop do card pra
+                etapa PROTOCOLO — o modal de mover etapa ja exige numero
+                do processo + polo (Autor/Reu) num passo so. O contador
+                de 24h ja comeca no momento do drag.
 
-                  {/* Badge de status quando ja enviado */}
-                  {legalCase.enrichment_status === 'PENDING' && (
-                    <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-500 flex items-start gap-2">
-                      <Loader2 size={12} className="animate-spin mt-0.5 shrink-0" />
-                      <div>
-                        <p className="font-semibold">Aguardando enriquecimento automático</p>
-                        <p className="text-sky-500/80 mt-0.5">
-                          O sistema consultará o tribunal e moverá o caso para o menu <strong>Processos</strong> em até 24h.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {legalCase.enrichment_status === 'FAILED' && (
-                    <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-[11px] text-destructive flex items-start gap-2">
-                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-                      <div>
-                        <p className="font-semibold">Enriquecimento falhou</p>
-                        {legalCase.enrichment_error && (
-                          <p className="text-destructive/80 mt-0.5">{legalCase.enrichment_error}</p>
-                        )}
-                        <p className="text-destructive/80 mt-0.5">
-                          Preencha os campos manualmente e clique em <strong>Salvar Alterações</strong>, ou reenvie para tentar novamente.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <p className="text-[11px] text-muted-foreground">
-                    Informe o <strong>nº do processo</strong> e o <strong>polo do cliente</strong> abaixo.
-                    O sistema buscará os dados do tribunal automaticamente em até 24h
-                    e moverá o caso para o menu <strong>Processos</strong>.
-                  </p>
-
-                  {/* Toggle polo processual: cliente eh Autor ou Reu */}
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-pink-500/20 bg-background/60">
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                      Cliente é:
-                    </span>
-                    <div className="flex rounded-lg border border-border overflow-hidden text-[10px] font-bold">
-                      <button
-                        type="button"
-                        onClick={() => setClientIsAuthor(true)}
-                        className={`px-3 py-1 transition-colors ${clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
-                        title="Cliente é autor / requerente / reclamante (polo ativo)"
-                      >
-                        Autor
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setClientIsAuthor(false)}
-                        className={`px-3 py-1 transition-colors border-l border-border ${!clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
-                        title="Cliente é réu / requerido / reclamado (polo passivo)"
-                      >
-                        Réu
-                      </button>
-                    </div>
-                  </div>
-
-                  {trackingError && (
-                    <p className="text-[11px] text-destructive flex items-center gap-1">
-                      <AlertTriangle size={11} /> {trackingError}
+                Mantemos apenas badges de status pra cards JA na etapa
+                PROTOCOLO, pra o operador saber em que ponto o
+                enriquecimento esta.
+              */}
+              {legalCase.stage === 'PROTOCOLO' && legalCase.enrichment_status === 'PENDING' && (
+                <div className="px-3 py-2 rounded-lg bg-sky-500/10 border border-sky-500/30 text-[11px] text-sky-500 flex items-start gap-2">
+                  <Loader2 size={12} className="animate-spin mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Aguardando enriquecimento automático</p>
+                    <p className="text-sky-500/80 mt-0.5">
+                      O sistema consultará o tribunal e moverá o caso para o menu <strong>Processos</strong> em até 24h após o protocolo.
                     </p>
-                  )}
-                  <button
-                    onClick={handleSendToTracking}
-                    disabled={sendingToTracking || !caseNumber.trim()}
-                    className="w-full py-2.5 text-sm font-semibold bg-pink-500 text-white rounded-lg hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2 transition-opacity"
-                  >
-                    {sendingToTracking ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-                    {legalCase.enrichment_status === 'PENDING'
-                      ? 'Reenviar para enriquecimento'
-                      : legalCase.enrichment_status === 'FAILED'
-                        ? 'Tentar novamente'
-                        : 'Enviar para Processos'}
-                  </button>
+                  </div>
+                </div>
+              )}
+              {legalCase.stage === 'PROTOCOLO' && legalCase.enrichment_status === 'FAILED' && (
+                <div className="px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/30 text-[11px] text-destructive flex items-start gap-2">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Enriquecimento falhou</p>
+                    {legalCase.enrichment_error && (
+                      <p className="text-destructive/80 mt-0.5">{legalCase.enrichment_error}</p>
+                    )}
+                    <p className="text-destructive/80 mt-0.5">
+                      Edite os campos manualmente nesta tela ou arraste o card para fora e de volta para tentar novamente.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -2112,8 +2035,27 @@ export default function AdvogadoPage() {
   const [lawyerFilter, setLawyerFilter] = useState<LawyerFilter>('all');
   const [lawyers, setLawyers] = useState<{ id: string; name: string }[]>([]);
 
-  // Modal de confirmação de conclusão de tarefas ao mover estágio
-  const [pendingMove, setPendingMove] = useState<{ caseId: string; newStage: string; pendingTasks: number } | null>(null);
+  // Modal de confirmação de conclusão de tarefas ao mover estágio.
+  // Agora carrega a lista completa das tarefas (nao so contagem) pra exibir
+  // nomes no modal. E quando newStage === 'PROTOCOLO', pede tambem
+  // numero do processo + polo do cliente — esse fluxo substitui o antigo
+  // botao "Enviar para Processos" do painel lateral.
+  interface PendingTask {
+    id: string;
+    title: string | null;
+    type: string;
+    status: string;
+    start_at: string | null;
+  }
+  const [pendingMove, setPendingMove] = useState<{
+    caseId: string;
+    newStage: string;
+    tasks: PendingTask[];
+    caseNumber: string;
+    clientIsAuthor: boolean;
+    error?: string;
+    submitting?: boolean;
+  } | null>(null);
 
   // Board pan
   const boardRef = useRef<HTMLDivElement>(null);
@@ -2303,45 +2245,117 @@ export default function AdvogadoPage() {
     };
   }, [socket, fetchCases]);
 
-  const executeMoveToStage = async (caseId: string, newStage: string) => {
+  const executeMoveToStage = async (
+    caseId: string,
+    newStage: string,
+    extras?: { caseNumber?: string; clientIsAuthor?: boolean },
+  ) => {
     // Optimistic update
     const now = new Date().toISOString();
-    setCases(prev => prev.map(c => c.id === caseId ? { ...c, stage: newStage, stage_changed_at: now } : c));
+    setCases(prev => prev.map(c => c.id === caseId ? {
+      ...c,
+      stage: newStage,
+      stage_changed_at: now,
+      // Reflete imediatamente o badge "PENDING" no card quando aplicavel
+      ...(newStage === 'PROTOCOLO' && extras?.caseNumber
+        ? {
+            case_number: extras.caseNumber,
+            client_is_author: extras.clientIsAuthor ?? true,
+            enrichment_status: 'PENDING' as const,
+          }
+        : {}),
+    } : c));
     if (selectedCase?.id === caseId) {
-      setSelectedCase(prev => prev ? { ...prev, stage: newStage, stage_changed_at: now } : prev);
+      setSelectedCase(prev => prev ? {
+        ...prev,
+        stage: newStage,
+        stage_changed_at: now,
+        ...(newStage === 'PROTOCOLO' && extras?.caseNumber
+          ? {
+              case_number: extras.caseNumber,
+              client_is_author: extras.clientIsAuthor ?? true,
+              enrichment_status: 'PENDING' as const,
+            }
+          : {}),
+      } : prev);
     }
     try {
-      await api.patch(`/legal-cases/${caseId}/stage`, { stage: newStage });
+      await api.patch(`/legal-cases/${caseId}/stage`, {
+        stage: newStage,
+        ...(extras?.caseNumber ? { caseNumber: extras.caseNumber } : {}),
+        ...(typeof extras?.clientIsAuthor === 'boolean' ? { clientIsAuthor: extras.clientIsAuthor } : {}),
+      });
     } catch {
       fetchCases(true); // rollback
     }
   };
 
   const moveCaseToStage = async (caseId: string, newStage: string) => {
-    // Verificar tarefas pendentes antes de mover
+    // Busca tarefas pendentes (necessario sempre — modal mostra a lista)
+    let tasks: PendingTask[] = [];
     try {
       const res = await api.get(`/calendar/events/legal-case/${caseId}`);
-      const tasks = (res.data || []).filter((t: any) => t.type === 'TAREFA' && ['AGENDADO', 'CONFIRMADO'].includes(t.status));
-      if (tasks.length > 0) {
-        // Mostrar modal de confirmação
-        setPendingMove({ caseId, newStage, pendingTasks: tasks.length });
-        return;
-      }
-    } catch {} // Se falhar a verificação, segue sem perguntar
-    // Sem tarefas pendentes → mover direto
+      tasks = (res.data || [])
+        .filter((t: any) => t.type === 'TAREFA' && ['AGENDADO', 'CONFIRMADO'].includes(t.status))
+        .map((t: any) => ({
+          id: t.id,
+          title: t.title || null,
+          type: t.type,
+          status: t.status,
+          start_at: t.start_at || null,
+        }));
+    } catch {} // Falha de fetch nao impede mover — segue sem listar
+
+    // Caso PROTOCOLO: modal eh OBRIGATORIO (pede n° processo + polo, mesmo
+    // sem tarefas). Em outros stages, so abre se tiver tarefas pra concluir.
+    if (newStage === 'PROTOCOLO') {
+      const lc = cases.find(c => c.id === caseId);
+      setPendingMove({
+        caseId,
+        newStage,
+        tasks,
+        caseNumber: lc?.case_number || '',
+        clientIsAuthor: lc?.client_is_author ?? true,
+      });
+      return;
+    }
+
+    if (tasks.length > 0) {
+      setPendingMove({
+        caseId,
+        newStage,
+        tasks,
+        caseNumber: '',
+        clientIsAuthor: true,
+      });
+      return;
+    }
+    // Sem tarefas pendentes e nao-PROTOCOLO → mover direto
     executeMoveToStage(caseId, newStage);
   };
 
   const handleConfirmMove = async (completeTasks: boolean) => {
     if (!pendingMove) return;
-    const { caseId, newStage } = pendingMove;
+    const { caseId, newStage, caseNumber, clientIsAuthor } = pendingMove;
+
+    // Validacao especifica PROTOCOLO
+    if (newStage === 'PROTOCOLO' && !caseNumber.trim()) {
+      setPendingMove({ ...pendingMove, error: 'Informe o número do processo para continuar.' });
+      return;
+    }
+
+    setPendingMove({ ...pendingMove, submitting: true, error: undefined });
+
     if (completeTasks) {
       try {
         await api.patch(`/legal-cases/${caseId}/complete-stage-tasks`);
       } catch {}
     }
     setPendingMove(null);
-    executeMoveToStage(caseId, newStage);
+    executeMoveToStage(caseId, newStage, {
+      caseNumber: newStage === 'PROTOCOLO' ? caseNumber.trim() : undefined,
+      clientIsAuthor: newStage === 'PROTOCOLO' ? clientIsAuthor : undefined,
+    });
   };
 
   const handleCreateCase = async (conv: IncomingLead) => {
@@ -3790,48 +3804,157 @@ export default function AdvogadoPage() {
         />
       )}
 
-      {/* Modal: Tarefas pendentes ao mover estágio */}
-      {pendingMove && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setPendingMove(null)} />
-          <div className="relative z-10 w-full max-w-sm bg-card border border-border rounded-2xl shadow-2xl p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center">
-                <CheckSquare size={18} className="text-amber-400" />
+      {/* Modal: Tarefas pendentes / Protocolar processo ao mover estágio */}
+      {pendingMove && (() => {
+        const isProtocolo = pendingMove.newStage === 'PROTOCOLO';
+        const hasTasks = pendingMove.tasks.length > 0;
+        const targetStageLabel = LEGAL_STAGES.find(s => s.id === pendingMove.newStage)?.label || pendingMove.newStage;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !pendingMove.submitting && setPendingMove(null)} />
+            <div className="relative z-10 w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+              {/* Header */}
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isProtocolo ? 'bg-pink-500/15' : 'bg-amber-500/15'}`}>
+                  {isProtocolo ? <span className="text-lg">🏛️</span> : <CheckSquare size={18} className="text-amber-400" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[14px] font-bold text-foreground">
+                    {isProtocolo ? 'Protocolar Processo' : 'Tarefas pendentes'}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    Movendo para <strong className="text-foreground">{targetStageLabel}</strong>
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-[14px] font-bold text-foreground">Tarefas pendentes</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {pendingMove.pendingTasks} tarefa{pendingMove.pendingTasks > 1 ? 's' : ''} pendente{pendingMove.pendingTasks > 1 ? 's' : ''} neste estágio
+
+              {/* Campos especificos do PROTOCOLO */}
+              {isProtocolo && (
+                <div className="space-y-3 p-3 rounded-xl bg-pink-500/5 border border-pink-500/20">
+                  <p className="text-[11px] text-muted-foreground">
+                    Informe o <strong>nº do processo</strong> e o <strong>polo do cliente</strong>.
+                    O sistema buscará os dados do tribunal automaticamente em até 24h
+                    e moverá o caso para o menu <strong>Processos</strong>.
+                  </p>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Nº Processo <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={pendingMove.caseNumber}
+                      onChange={e => setPendingMove({ ...pendingMove, caseNumber: e.target.value, error: undefined })}
+                      className="mt-1 w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-pink-500/40"
+                      placeholder="0000000-00.0000.0.00.0000"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                      Cliente é:
+                    </label>
+                    <div className="flex rounded-lg border border-border overflow-hidden text-[11px] font-bold w-fit">
+                      <button
+                        type="button"
+                        onClick={() => setPendingMove({ ...pendingMove, clientIsAuthor: true })}
+                        className={`px-4 py-1.5 transition-colors ${pendingMove.clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                        title="Cliente é autor / requerente / reclamante (polo ativo)"
+                      >
+                        Autor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingMove({ ...pendingMove, clientIsAuthor: false })}
+                        className={`px-4 py-1.5 transition-colors border-l border-border ${!pendingMove.clientIsAuthor ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+                        title="Cliente é réu / requerido / reclamado (polo passivo)"
+                      >
+                        Réu
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Lista de tarefas pendentes (nomeadas) */}
+              {hasTasks && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    {pendingMove.tasks.length} tarefa{pendingMove.tasks.length > 1 ? 's' : ''} pendente{pendingMove.tasks.length > 1 ? 's' : ''} neste estágio
+                  </p>
+                  <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                    {pendingMove.tasks.map(t => (
+                      <div key={t.id} className="flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-accent/40 border border-border">
+                        <CheckSquare size={11} className="text-muted-foreground shrink-0 mt-0.5" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] text-foreground truncate">{t.title || 'Tarefa sem título'}</p>
+                          {t.start_at && (
+                            <p className="text-[9px] text-muted-foreground">
+                              {new Date(t.start_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Deseja marcar {pendingMove.tasks.length > 1 ? 'essas tarefas' : 'essa tarefa'} como concluída{pendingMove.tasks.length > 1 ? 's' : ''} ao avançar?
+                  </p>
+                </div>
+              )}
+
+              {/* Error */}
+              {pendingMove.error && (
+                <p className="text-[11px] text-destructive flex items-center gap-1">
+                  <AlertTriangle size={11} /> {pendingMove.error}
                 </p>
+              )}
+
+              {/* Botoes */}
+              <div className="flex flex-col gap-2">
+                {hasTasks ? (
+                  <>
+                    <button
+                      onClick={() => handleConfirmMove(true)}
+                      disabled={pendingMove.submitting}
+                      className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] font-bold transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+                    >
+                      {pendingMove.submitting && <Loader2 size={12} className="animate-spin" />}
+                      {isProtocolo ? 'Concluir tarefas e protocolar' : 'Concluir tarefas e avançar'}
+                    </button>
+                    <button
+                      onClick={() => handleConfirmMove(false)}
+                      disabled={pendingMove.submitting}
+                      className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent/80 text-foreground text-[12px] font-medium transition-colors disabled:opacity-40"
+                    >
+                      {isProtocolo ? 'Protocolar sem concluir tarefas' : 'Avançar sem concluir'}
+                    </button>
+                  </>
+                ) : (
+                  // PROTOCOLO sem tarefas — botao unico
+                  <button
+                    onClick={() => handleConfirmMove(false)}
+                    disabled={pendingMove.submitting}
+                    className={`w-full py-2.5 rounded-xl text-white text-[12px] font-bold transition-colors disabled:opacity-40 flex items-center justify-center gap-2 ${isProtocolo ? 'bg-pink-500 hover:bg-pink-600' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+                  >
+                    {pendingMove.submitting && <Loader2 size={12} className="animate-spin" />}
+                    {isProtocolo ? 'Protocolar processo' : 'Avançar estágio'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setPendingMove(null)}
+                  disabled={pendingMove.submitting}
+                  className="w-full py-2 text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                >
+                  Cancelar
+                </button>
               </div>
-            </div>
-            <p className="text-[12px] text-muted-foreground">
-              Deseja concluir as tarefas antes de avançar para o próximo estágio?
-            </p>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => handleConfirmMove(true)}
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] font-bold transition-colors"
-              >
-                Concluir tarefas e avançar
-              </button>
-              <button
-                onClick={() => handleConfirmMove(false)}
-                className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent/80 text-foreground text-[12px] font-medium transition-colors"
-              >
-                Avançar sem concluir
-              </button>
-              <button
-                onClick={() => setPendingMove(null)}
-                className="w-full py-2 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Cancelar
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
