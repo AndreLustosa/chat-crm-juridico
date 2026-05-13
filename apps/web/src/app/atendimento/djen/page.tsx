@@ -1737,17 +1737,29 @@ function AiPanel({
           });
 
           // Comparacao etapa
+          // Bug fix 2026-05-12 (Andre): stageMatches considera stageMoved
+          // local. Antes: depois de clicar "Mover etapa" o card continuava
+          // mostrando "Etapa atual: X → IA sugere Y" porque pub.legal_case.
+          // tracking_stage vinha do payload original (nao recarrega).
+          // Agora: se ja clicou e moveu, trata como matched.
           const stageMatches = !!(
-            analysis.estagio_sugerido &&
-            pub.legal_case?.tracking_stage === analysis.estagio_sugerido
+            analysis.estagio_sugerido && (
+              pub.legal_case?.tracking_stage === analysis.estagio_sugerido ||
+              stageMoved // efeito local de "Processo movido!"
+            )
           );
           const stageNeedsMove = !!(
             analysis.estagio_sugerido && pub.legal_case_id && !stageMatches
           );
 
-          // Veredicto agregado — leva todos os eventos da IA em conta
-          const allEventosMatch = eventoConfigs.length > 0 && matchByIdx.every(Boolean);
-          const someEventosMatch = matchByIdx.some(Boolean);
+          // Veredicto agregado — leva todos os eventos da IA em conta.
+          // Bug fix 2026-05-12: tambem considera createdByIdx (eventos
+          // criados localmente apos o ultimo fetch). Antes: depois de criar
+          // prazo, card continuava dizendo "exige acoes" pq matchByIdx
+          // refletia so o snapshot inicial dos caseEvents.
+          const eventoCheck = (idx: number) => matchByIdx[idx] || createdByIdx.has(idx);
+          const allEventosMatch = eventoConfigs.length > 0 && eventoConfigs.every((_, idx) => eventoCheck(idx));
+          const someEventosMatch = eventoConfigs.some((_, idx) => eventoCheck(idx));
           const noEventosMatch = !someEventosMatch;
 
           let verdict: 'all-done' | 'partial' | 'all-pending';
