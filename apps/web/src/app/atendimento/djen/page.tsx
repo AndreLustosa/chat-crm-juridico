@@ -1596,6 +1596,9 @@ function AiPanel({
         end_at: new Date(startAt.getTime() + durationMs).toISOString(),
         legal_case_id: pub.legal_case_id || undefined,
         priority: form.priority,
+        // Feature 2026-05-12 (pedido Andre): vincula com a publicacao DJEN
+        // pra tela de preparacao mostrar a analise rica no card de prazo
+        djen_publication_id: pub.id,
       });
       setCreatedByIdx(prev => new Set(prev).add(idx));
       // Limpa o preview apos sucesso

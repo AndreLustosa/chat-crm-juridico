@@ -72,6 +72,13 @@ export class CreateEventDto {
   @IsOptional() @IsString()
   appointment_type_id?: string;
 
+  // Feature 2026-05-12 (pedido Andre): vincula evento criado a partir de
+  // analise IA do DJEN pra que a tela "Advogado — Preparacao" consiga
+  // mostrar a analise rica (orientacoes/prazo legal/justificativa) no card
+  // do prazo na hora do cumprimento.
+  @IsOptional() @IsString()
+  djen_publication_id?: string;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

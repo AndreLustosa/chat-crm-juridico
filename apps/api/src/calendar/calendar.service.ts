@@ -209,7 +209,7 @@ export class CalendarService implements OnApplicationBootstrap {
     // frontend e o pool de conexao. Caller pode passar `start`/`end`
     // mais estreitos pra ver o que falta. Limit logado pra alertar UX.
     const FINDALL_LIMIT = 1000;
-    const events = await this.prisma.calendarEvent.findMany({
+    const events = await (this.prisma.calendarEvent.findMany as any)({
       where,
       include: {
         assigned_user: { select: { id: true, name: true } },
@@ -218,6 +218,10 @@ export class CalendarService implements OnApplicationBootstrap {
         legal_case: { select: { id: true, case_number: true, legal_area: true, tracking_stage: true, in_tracking: true, lead: { select: { name: true } } } },
         appointment_type: true,
         reminders: true,
+        // Feature 2026-05-12 (pedido Andre): retorna apenas o ID da
+        // publicacao DJEN. Frontend usa pra mostrar botao "Ver analise IA"
+        // no card; click busca a analise completa via findOne.
+        djen_publication: { select: { id: true } },
         _count: { select: { comments: true } },
       },
       orderBy: { start_at: 'asc' },
@@ -230,7 +234,7 @@ export class CalendarService implements OnApplicationBootstrap {
   }
 
   async findOne(id: string) {
-    const event = await this.prisma.calendarEvent.findUnique({
+    const event = await (this.prisma.calendarEvent.findUnique as any)({
       where: { id },
       include: {
         assigned_user: { select: { id: true, name: true } },
@@ -239,6 +243,21 @@ export class CalendarService implements OnApplicationBootstrap {
         legal_case: { select: { id: true, case_number: true, legal_area: true, tracking_stage: true, in_tracking: true, lead: { select: { name: true } } } },
         appointment_type: true,
         reminders: true,
+        // Feature 2026-05-12 (pedido Andre):
+        // Inclui a publicacao DJEN que originou o evento (se houver) com
+        // a analise IA completa pra tela "Advogado — Preparacao" mostrar
+        // contexto rico no card de prazo.
+        djen_publication: {
+          select: {
+            id: true,
+            numero_processo: true,
+            conteudo: true,
+            data_disponibilizacao: true,
+            tipo_comunicacao: true,
+            lawyer_analysis: true,
+            analyzed_at: true,
+          },
+        },
         _count: { select: { comments: true } },
       },
     });
@@ -263,6 +282,7 @@ export class CalendarService implements OnApplicationBootstrap {
     assigned_user_id?: string;
     created_by_id: string;
     appointment_type_id?: string;
+    djen_publication_id?: string;
     tenant_id?: string;
     reminders?: { minutes_before: number; channel?: string }[];
     recurrence_rule?: string;
@@ -369,6 +389,10 @@ export class CalendarService implements OnApplicationBootstrap {
         recurrence_rule: data.recurrence_rule,
         recurrence_end: data.recurrence_end ? new Date(data.recurrence_end) : null,
         recurrence_days: data.recurrence_days ?? [],
+        // Feature 2026-05-12: link com publicacao DJEN que originou
+        // NOTE: campo novo — Prisma generate na VPS ainda nao rodou pra esse
+        // commit. Cast pra any ate o build do container regenerar o client.
+        ...(data.djen_publication_id ? { djen_publication_id: data.djen_publication_id } : {}) as any,
         reminders: effectiveReminders.length
           ? {
               create: effectiveReminders.map((r) => ({

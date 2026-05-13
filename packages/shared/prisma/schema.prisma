@@ -869,6 +869,10 @@ model DjenPublication {
   client_notified_at    DateTime?
   created_at            DateTime   @default(now())
 
+  // Feature 2026-05-12: eventos de calendario criados a partir desta publicacao.
+  // 1 publicacao pode gerar N eventos (sequencia de prazos encadeados).
+  calendar_events       CalendarEvent[] @relation("DjenPublicationEvents")
+
   // Bug fix 2026-05-12 (DJEN duplicado):
   // DJEN gera comunicacao_id SEPARADOS quando ha multiplos destinatarios
   // (ex: intimacao da mesma audiencia gerada 2x — uma pro AUTOR, outra pro REU).
@@ -1097,6 +1101,15 @@ model CalendarEvent {
   // mensagens duplicadas no WhatsApp do advogado (queima cota, vaza
   // telefone do cliente N vezes).
   lawyer_notified_at DateTime?
+
+  // Feature 2026-05-12 (pedido Andre):
+  // Quando o evento eh criado a partir de uma publicacao DJEN, salvamos o
+  // ID da publicacao pra que a tela "Advogado — Preparacao" e outras
+  // possam carregar a analise IA original (resumo, orientacoes, prazo legal,
+  // justificativa estrategica) sem precisar duplicar tudo no description.
+  // Tambem permite botao "Reanalisar" no card de prazo.
+  djen_publication_id String?
+  djen_publication    DjenPublication? @relation("DjenPublicationEvents", fields: [djen_publication_id], references: [id], onDelete: SetNull)
 
   // Bug fix 2026-05-10 (PR2 #10): rastreamento de notificacao imediata de
   // audiencia/pericia agendada. Usado pelo fallback cron diario (manha)

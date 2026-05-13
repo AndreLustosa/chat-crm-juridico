@@ -2624,6 +2624,8 @@ function ProcessoDetailPanel({
                                                     start_at: start.toISOString(),
                                                     end_at: new Date(start.getTime() + dur * 60000).toISOString(),
                                                     priority: preview.priority,
+                                                    // Feature 2026-05-12 (pedido Andre): vincula
+                                                    djen_publication_id: pub.id,
                                                   });
                                                   setDjenTaskCreated(prev => ({ ...prev, [pub.id]: true }));
                                                   setDjenEventPreview(prev => { const n = { ...prev }; delete n[pub.id]; return n; });

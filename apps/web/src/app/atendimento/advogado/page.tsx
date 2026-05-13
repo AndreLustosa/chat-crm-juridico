@@ -7,6 +7,7 @@ import {
   Plus, X, Calendar, FileText, Gavel, Clock, Archive, ArchiveRestore, Send,
   AlertTriangle, CheckCircle2, Loader2, ExternalLink, ArrowRight, Flame, ArrowDown, CheckSquare, Bell,
   Save, Trash2, Sparkles, ArrowLeft, CalendarClock, UserPlus, UserCheck,
+  RefreshCcw, BookOpen,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { EventActionButton } from '@/components/EventActionButton';
@@ -1849,6 +1850,53 @@ export default function AdvogadoPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [delegateOpenId, setDelegateOpenId] = useState<string | null>(null);
 
+  // Feature 2026-05-12 (pedido Andre):
+  // Cache da analise IA do DJEN expandida no card de prazo. Quando o usuario
+  // clica "Ver analise IA", busca via GET /calendar/events/:id (que inclui
+  // djen_publication com lawyer_analysis). Armazena por deadline.id.
+  const [aiAnalysisByDeadlineId, setAiAnalysisByDeadlineId] = useState<Record<string, any>>({});
+  const [aiExpandedDeadlineId, setAiExpandedDeadlineId] = useState<string | null>(null);
+  const [loadingAiByDeadlineId, setLoadingAiByDeadlineId] = useState<string | null>(null);
+  const [reanalyzingDeadlineId, setReanalyzingDeadlineId] = useState<string | null>(null);
+
+  const fetchDeadlineAi = useCallback(async (deadlineId: string) => {
+    // Se ja temos em cache, so toggle expand
+    if (aiAnalysisByDeadlineId[deadlineId]) {
+      setAiExpandedDeadlineId(prev => prev === deadlineId ? null : deadlineId);
+      return;
+    }
+    setLoadingAiByDeadlineId(deadlineId);
+    setAiExpandedDeadlineId(deadlineId);
+    try {
+      const res = await api.get(`/calendar/events/${deadlineId}`);
+      const djenPub = res.data?.djen_publication;
+      if (djenPub) {
+        setAiAnalysisByDeadlineId(prev => ({ ...prev, [deadlineId]: djenPub }));
+      }
+    } catch (e) {
+      console.error('[Deadline AI] Falha ao buscar analise:', e);
+    } finally {
+      setLoadingAiByDeadlineId(null);
+    }
+  }, [aiAnalysisByDeadlineId]);
+
+  const reanalyzeDeadlineAi = useCallback(async (deadlineId: string, djenPubId: string) => {
+    setReanalyzingDeadlineId(deadlineId);
+    try {
+      const res = await api.post(`/djen/${djenPubId}/analyze`, { force: true });
+      // Refetch pra pegar a publicacao atualizada via calendar
+      const evRes = await api.get(`/calendar/events/${deadlineId}`);
+      if (evRes.data?.djen_publication) {
+        setAiAnalysisByDeadlineId(prev => ({ ...prev, [deadlineId]: evRes.data.djen_publication }));
+      }
+    } catch (e: any) {
+      console.error('[Deadline AI] Falha ao reanalisar:', e);
+      alert(`Falha ao reanalisar: ${e?.response?.data?.message || e?.message}`);
+    } finally {
+      setReanalyzingDeadlineId(null);
+    }
+  }, []);
+
   // Toggle notificação DJEN ao cliente (admin only)
   const { isAdmin } = useRole();
   const [djenNotify, setDjenNotify] = useState(true);
@@ -3304,6 +3352,123 @@ export default function AdvogadoPage() {
                               </span>
                             )}
                           </div>
+
+                          {/* Feature 2026-05-12 (pedido Andre):
+                              Mostra botao "Ver análise IA" quando o prazo veio de uma publicacao DJEN.
+                              Expande inline com resumo + orientacoes + tipo_acao + prazo_dias +
+                              botao Reanalisar. Aproveita a analise rica em vez de duplicar texto
+                              no description do CalendarEvent. */}
+                          {d.djen_publication?.id && (
+                            <div
+                              className="mb-2 border-t border-violet-500/20 pt-2"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => fetchDeadlineAi(d.id)}
+                                disabled={loadingAiByDeadlineId === d.id}
+                                className="flex items-center gap-1 text-[10px] font-bold text-violet-400 hover:text-violet-300 transition-colors disabled:opacity-50"
+                              >
+                                {loadingAiByDeadlineId === d.id ? (
+                                  <Loader2 size={10} className="animate-spin" />
+                                ) : (
+                                  <Sparkles size={10} />
+                                )}
+                                {aiExpandedDeadlineId === d.id ? 'Ocultar análise IA' : 'Ver análise IA (DJEN)'}
+                                <ChevronDown size={9} className={`transition-transform ${aiExpandedDeadlineId === d.id ? 'rotate-180' : ''}`} />
+                              </button>
+
+                              {aiExpandedDeadlineId === d.id && (() => {
+                                const djenPub = aiAnalysisByDeadlineId[d.id];
+                                const analysis = djenPub?.lawyer_analysis;
+                                if (!djenPub) return null;
+                                if (!analysis) {
+                                  return (
+                                    <div className="mt-2 bg-amber-500/5 border border-amber-500/20 rounded-lg p-2 text-[10px] text-amber-400">
+                                      <p>Publicação DJEN vinculada mas sem análise IA salva.</p>
+                                      <button
+                                        onClick={() => reanalyzeDeadlineAi(d.id, djenPub.id)}
+                                        disabled={reanalyzingDeadlineId === d.id}
+                                        className="mt-1 text-violet-400 hover:text-violet-300 underline disabled:opacity-50"
+                                      >
+                                        {reanalyzingDeadlineId === d.id ? 'Analisando…' : 'Analisar agora'}
+                                      </button>
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <div className="mt-2 bg-violet-500/[0.04] border border-violet-500/20 rounded-lg p-2.5 space-y-2">
+                                    {/* Cabeçalho com data + reanalisar */}
+                                    <div className="flex items-center justify-between flex-wrap gap-1">
+                                      <span className="text-[9px] text-muted-foreground flex items-center gap-1">
+                                        <Calendar size={9} />
+                                        Publicada {djenPub.data_disponibilizacao && new Date(djenPub.data_disponibilizacao).toLocaleDateString('pt-BR')}
+                                        {djenPub.tipo_comunicacao && ` · ${djenPub.tipo_comunicacao}`}
+                                      </span>
+                                      <button
+                                        onClick={() => reanalyzeDeadlineAi(d.id, djenPub.id)}
+                                        disabled={reanalyzingDeadlineId === d.id}
+                                        className="text-[9px] flex items-center gap-1 text-violet-400 hover:text-violet-300 disabled:opacity-50"
+                                        title="Reanalisar com modelo atual"
+                                      >
+                                        {reanalyzingDeadlineId === d.id ? (
+                                          <Loader2 size={9} className="animate-spin" />
+                                        ) : (
+                                          <RefreshCcw size={9} />
+                                        )}
+                                        Reanalisar
+                                      </button>
+                                    </div>
+
+                                    {/* Resumo */}
+                                    {analysis.resumo && (
+                                      <div>
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Resumo</p>
+                                        <p className="text-[11px] text-foreground/90 leading-relaxed whitespace-pre-wrap">{analysis.resumo}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Ação necessária + prazo */}
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {analysis.tipo_acao && (
+                                        <span className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                                          <ArrowRight size={9} />
+                                          {analysis.tipo_acao}
+                                        </span>
+                                      )}
+                                      {analysis.prazo_dias > 0 && (
+                                        <span className="text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                          <Clock size={9} />
+                                          {analysis.prazo_dias} dias úteis
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Orientações estratégicas */}
+                                    {analysis.orientacoes && (
+                                      <div className="bg-card border border-border rounded-md p-2">
+                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+                                          <BookOpen size={9} /> Orientações para preparação
+                                        </p>
+                                        <p className="text-[11px] text-foreground/80 leading-relaxed whitespace-pre-wrap">{analysis.orientacoes}</p>
+                                      </div>
+                                    )}
+
+                                    {/* Conteúdo bruto da publicação (collapsed por padrão) */}
+                                    {djenPub.conteudo && (
+                                      <details className="text-[10px]">
+                                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                                          📄 Ver conteúdo original da publicação
+                                        </summary>
+                                        <p className="mt-1.5 text-[10px] text-foreground/70 leading-relaxed whitespace-pre-wrap max-h-40 overflow-y-auto custom-scrollbar bg-muted/30 p-2 rounded">
+                                          {djenPub.conteudo}
+                                        </p>
+                                      </details>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
 
                           {/* Botoes de acao — stopPropagation pra nao disparar o onClick do card */}
                           <div
