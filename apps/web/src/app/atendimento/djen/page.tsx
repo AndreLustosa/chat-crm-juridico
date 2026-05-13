@@ -9,7 +9,7 @@ import {
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
   ArrowRight, CheckSquare, AlertCircle, ChevronDown, Microscope,
   Search, User, UserCheck, Scale, Ban, Users, Trash2, Save,
-  Copy, Check, Pencil,
+  Copy, Check, Pencil, Send,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -32,6 +32,8 @@ interface DjenPublication {
   archived: boolean;
   ignored: boolean;
   auto_task_id: string | null;
+  // Feature 2026-05-12: usado pra mostrar estado do botao "Notificar cliente"
+  client_notified_at: string | null;
   legal_case?: {
     id: string;
     case_number: string | null;
@@ -1449,6 +1451,10 @@ function AiPanel({
   const [createdByIdx, setCreatedByIdx] = useState<Set<number>>(new Set());
   const [movingStage, setMovingStage] = useState(false);
   const [stageMoved, setStageMoved] = useState(false);
+  // Feature 2026-05-12 (pedido Andre): notificacao manual ao cliente via IA
+  const [notifyingClient, setNotifyingClient] = useState(false);
+  const [clientNotifiedNow, setClientNotifiedNow] = useState(false);
+  const [notifyError, setNotifyError] = useState<string | null>(null);
   // Bug fix 2026-05-12 (pedido Andre):
   // Preview/edit antes de criar evento (mesmo padrao do painel processos
   // /atendimento/processos). Antes: click no botao criava direto sem
@@ -1626,6 +1632,32 @@ function AiPanel({
       await onMoveStage(pub.legal_case_id, analysis.estagio_sugerido);
       setStageMoved(true);
     } catch { /* silencioso */ } finally { setMovingStage(false); }
+  };
+
+  // Feature 2026-05-12 (pedido Andre):
+  // Notificacao manual ao cliente. Dispara POST /djen/:id/notify-client que:
+  //   - Garante analise IA atualizada
+  //   - Bypassa horario comercial (operador escolheu o momento)
+  //   - Envia WhatsApp com template baseado em client_analysis
+  //   - Audit log
+  //   - force=true se ja notificou antes (re-envio consciente)
+  const handleNotifyClient = async (force = false) => {
+    if (!pub.legal_case_id) {
+      setNotifyError('Vincule a publicacao a um processo antes de notificar.');
+      return;
+    }
+    setNotifyingClient(true);
+    setNotifyError(null);
+    try {
+      await api.post(`/djen/${pub.id}/notify-client`, { force });
+      setClientNotifiedNow(true);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Erro desconhecido';
+      setNotifyError(String(msg));
+      console.error('[DJEN/Notify] Falha:', err?.response?.data || err);
+    } finally {
+      setNotifyingClient(false);
+    }
   };
 
   const urgConf = analysis ? URGENCIA_CONFIG[analysis.urgencia] : null;
@@ -1937,7 +1969,64 @@ function AiPanel({
                           <Plus size={12} /> Cadastrar processo na etapa <strong>{STAGE_LABELS[analysis.estagio_sugerido] || analysis.estagio_sugerido}</strong>
                         </button>
                       )}
+
+                      {/* Feature 2026-05-12 (pedido Andre):
+                          Notificar cliente manualmente via IA. Aparece SO se ha
+                          processo vinculado. Estado do botao varia:
+                            - Ja notificado (pub.client_notified_at)? mostra reenviar
+                            - Nao notificado? mostra notificar agora
+                            - clientNotifiedNow (apos click)? mostra "enviado"
+                          Bypassa horario comercial — operador decidiu enviar agora. */}
+                      {pub.legal_case_id && (
+                        <button
+                          onClick={() => handleNotifyClient(!!pub.client_notified_at)}
+                          disabled={notifyingClient || clientNotifiedNow}
+                          title={
+                            pub.client_notified_at
+                              ? `Cliente ja notificado em ${new Date(pub.client_notified_at).toLocaleString('pt-BR')}. Click pra REENVIAR.`
+                              : 'Enviar notificacao WhatsApp ao cliente com resumo da IA'
+                          }
+                          className={`flex-1 min-w-[200px] flex items-center justify-center gap-1.5 text-[11px] font-bold py-2 px-3 rounded-lg transition-colors ${
+                            clientNotifiedNow
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : pub.client_notified_at
+                              ? 'bg-card border border-amber-500/30 text-amber-400 hover:bg-amber-500/5'
+                              : 'bg-green-600 text-white hover:bg-green-500'
+                          }`}
+                        >
+                          {notifyingClient ? (
+                            <><Loader2 size={11} className="animate-spin" /> Enviando…</>
+                          ) : clientNotifiedNow ? (
+                            <><CheckCircle2 size={11} /> Cliente notificado!</>
+                          ) : pub.client_notified_at ? (
+                            <>
+                              <RefreshCw size={11} /> Reenviar ao cliente
+                            </>
+                          ) : (
+                            <>
+                              <Send size={11} /> Notificar cliente (WhatsApp)
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
+
+                    {/* Erro de notificacao manual */}
+                    {notifyError && (
+                      <div className="bg-red-500/5 border border-red-500/30 rounded-lg p-2 text-[11px] text-red-400 flex items-start gap-2">
+                        <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                        <div className="flex-1">
+                          <p className="font-bold">Falha ao notificar:</p>
+                          <p className="text-foreground/80 mt-0.5">{notifyError}</p>
+                          <button
+                            onClick={() => setNotifyError(null)}
+                            className="mt-1 text-[10px] underline hover:text-red-300"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Bug fix 2026-05-12 (pedido Andre):
                         Preview/edit inline antes de criar evento. Espelha o

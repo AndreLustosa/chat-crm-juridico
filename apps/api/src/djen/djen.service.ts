@@ -2018,34 +2018,27 @@ ${pub.conteudo.slice(0, 6000)}`;
     dataDisp: Date,
     assunto?: string | null,
     aiAnalysis?: any | null,
-  ): Promise<void> {
+    options?: { manual?: boolean; force?: boolean },
+  ): Promise<{ sent: boolean; reason?: string }> {
     // Já notificou para esta publicação
-    if (pub.client_notified_at) return;
+    if (pub.client_notified_at && !options?.force) {
+      return { sent: false, reason: 'already_notified' };
+    }
 
     // Lead deve existir e ter telefone
     const lead = legalCase.lead;
-    if (!lead?.phone) return;
+    if (!lead?.phone) return { sent: false, reason: 'no_lead_phone' };
 
-    // INTIMACAO DJEN SEMPRE NOTIFICA (decisao 2026-05-08): intimacao tem
-    // prazo legal — cliente DEVE saber. A flag DJEN_NOTIFY_CLIENT antiga
-    // (que desligava DJEN) foi descontinuada conceitualmente.
-    //
-    // Movimentacoes simples do ESAJ continuam controladas por flag separada
-    // (MOVEMENT_NOTIFY_CLIENT, lida no esaj-sync.service quando ESAJ-cliente
-    // for reativado).
-
-    // Horario comercial: 8h-20h Maceio, TODOS os dias (politica unificada
-    // 2026-04-26 — antes era seg-sex, agora inclui sab/dom).
-    //
-    // Se fora do horario, NAO descarta — `client_notified_at` continua null
-    // e o cron de repescagem `retryPendingClientNotifications` (roda 8-19h)
-    // pega esta pub e re-tenta. Garantia: zero perda.
-    if (!isBusinessHours()) {
+    // Feature 2026-05-12 (pedido Andre):
+    // Bypass do horario comercial quando manual=true. Operador clicou
+    // explicitamente — assumimos que ele decidiu que vale enviar agora
+    // (ex: prazo critico hoje, sabado, fora do expediente normal).
+    if (!options?.manual && !isBusinessHours()) {
       this.logger.log(
         `[DJEN] Notificacao fora do horario comercial — pub ${pub.id} ficara pendente ` +
         `pra cron de repescagem (lead ${lead.id})`,
       );
-      return;
+      return { sent: false, reason: 'outside_business_hours' };
     }
 
     // Buscar instância WhatsApp do tenant (da última conversa).
@@ -2162,7 +2155,7 @@ ${pub.conteudo.slice(0, 6000)}`;
           `[DJEN] Notificacao pulada — template renderizado < 100 chars (${message.length}). ` +
           `Provavel falha na analise IA da publicacao ${pub.id}. Sera tentado novamente no proximo retry cron.`,
         );
-        return; // NAO seta client_notified_at — cron retry pega depois (com sorte aiAnalysis ja teve sucesso)
+        return { sent: false, reason: 'rendered_template_too_short' };
       }
     } else {
       // Template padrão (fallback) — orientado ao cliente
@@ -2229,15 +2222,18 @@ ${pub.conteudo.slice(0, 6000)}`;
           `[DJEN] Notificacao pulada — IA nao gerou conteudo util pra pub ${pub.id} ` +
           `(provavel falha na analise). Sera tentado novamente no proximo retry cron.`,
         );
-        return;
+        return { sent: false, reason: 'ai_no_useful_content' };
       }
     }
 
-    // Bug fix 2026-05-08: race entre sync principal e retry cron — ambos
-    // podiam ler client_notified_at=null ao mesmo tempo e enviar 2× a
-    // mesma intimacao pro cliente. Lock otimista via updateMany +
-    // WHERE client_notified_at IS NULL: a primeira chamada ganha o lock
-    // (count=1), as outras retornam count=0 e nao enviam.
+    // Race protection: lock otimista. Em modo manual com force=true, reset
+    // client_notified_at primeiro (operador escolheu reenviar conscientemente).
+    if (options?.manual && options?.force) {
+      await this.prisma.djenPublication.update({
+        where: { id: pub.id },
+        data: { client_notified_at: null },
+      }).catch(() => {});
+    }
     const lockResult = await this.prisma.djenPublication.updateMany({
       where: { id: pub.id, client_notified_at: null },
       data: { client_notified_at: new Date() },
@@ -2247,12 +2243,13 @@ ${pub.conteudo.slice(0, 6000)}`;
       this.logger.log(
         `[DJEN] Pub ${pub.id} ja foi notificada por outro fluxo concorrente — pulando (race protection)`,
       );
-      return;
+      return { sent: false, reason: 'race_already_notified' };
     }
 
     try {
       await this.whatsappService.sendText(lead.phone, message, instance);
-      this.logger.log(`[DJEN] ✅ Lead ${lead.id} notificado sobre movimentação no processo ${numeroProcesso}`);
+      this.logger.log(`[DJEN] ✅ Lead ${lead.id} notificado sobre movimentação no processo ${numeroProcesso}${options?.manual ? ' (MANUAL)' : ''}`);
+      return { sent: true };
     } catch (e: any) {
       // Falha no envio — desfaz o lock pra cron retry pegar de novo
       await this.prisma.djenPublication.update({
@@ -2260,7 +2257,108 @@ ${pub.conteudo.slice(0, 6000)}`;
         data: { client_notified_at: null },
       }).catch(() => {});
       this.logger.warn(`[DJEN] Falha ao enviar WhatsApp para lead ${lead.id}: ${e.message} — lock revertido`);
+      return { sent: false, reason: `whatsapp_send_failed: ${e.message}` };
     }
+  }
+
+  /**
+   * Feature 2026-05-12 (pedido Andre):
+   *
+   * Notificacao MANUAL ao cliente disparada pelo operador. Diferente do fluxo
+   * automatico (que roda no sync inicial + cron de retry), aqui o operador
+   * clica explicitamente "Notificar cliente" no botao da UI.
+   *
+   * Vantagens sobre o automatico:
+   *   - Bypassa horario comercial (operador decide quando)
+   *   - Pode forcar re-envio mesmo se ja notificado (force=true)
+   *   - Garante que existe analise IA antes de enviar (faz analyze on-demand)
+   *   - Audit log obrigatorio
+   */
+  async manualNotifyClient(
+    pubId: string,
+    tenantId: string,
+    actorUserId?: string,
+    options?: { force?: boolean },
+  ): Promise<{ sent: boolean; reason?: string; already_notified?: boolean }> {
+    if (!tenantId) {
+      throw new BadRequestException('tenant_id obrigatorio');
+    }
+
+    // Busca pub com tenant guard + legal_case + lead
+    const pub = await this.prisma.djenPublication.findFirst({
+      where: { id: pubId, ...this.tenantWhere(tenantId) },
+      include: {
+        legal_case: {
+          select: {
+            id: true, tenant_id: true,
+            lead: { select: { id: true, name: true, phone: true } },
+          },
+        },
+      },
+    });
+    if (!pub) {
+      throw new NotFoundException('Publicacao nao encontrada');
+    }
+    if (!pub.legal_case_id || !pub.legal_case) {
+      throw new BadRequestException('Publicacao sem processo vinculado — vincule a um processo antes de notificar o cliente.');
+    }
+    if (!pub.legal_case.lead?.phone) {
+      throw new BadRequestException('Cliente do processo nao tem telefone cadastrado.');
+    }
+    if (pub.client_notified_at && !options?.force) {
+      return {
+        sent: false,
+        already_notified: true,
+        reason: `Cliente ja foi notificado em ${pub.client_notified_at.toLocaleString('pt-BR')}. Use force=true pra reenviar.`,
+      };
+    }
+
+    // Garante analise IA atualizada antes de enviar
+    let aiAnalysis: any = null;
+    try {
+      aiAnalysis = await this.analyzePublication(pubId, /*force*/ false, tenantId);
+    } catch (e: any) {
+      this.logger.warn(`[DJEN manualNotify] Analise falhou pra pub ${pubId}: ${e.message}`);
+      throw new BadRequestException(`Falha ao analisar publicacao: ${e.message}`);
+    }
+
+    // Envia via fluxo existente com options manual+force
+    const result = await this.notifyLeadAboutMovement(
+      pub as any,
+      pub.legal_case as any,
+      pub.tipo_comunicacao,
+      pub.numero_processo,
+      pub.data_disponibilizacao,
+      pub.assunto,
+      aiAnalysis,
+      { manual: true, force: options?.force ?? false },
+    );
+
+    // Audit log obrigatorio em notificacao manual (LGPD + decisao do operador)
+    await this.prisma.auditLog.create({
+      data: {
+        actor_user_id: actorUserId || null,
+        action: 'djen_manual_notify_client',
+        entity: 'DjenPublication',
+        entity_id: pubId,
+        meta_json: {
+          tenant_id: tenantId,
+          legal_case_id: pub.legal_case_id,
+          lead_id: pub.legal_case.lead?.id,
+          force: !!options?.force,
+          sent: result.sent,
+          reason: result.reason || null,
+          numero_processo: pub.numero_processo,
+        },
+      },
+    }).catch(() => { /* nao bloqueia */ });
+
+    if (!result.sent) {
+      // Erros conhecidos viram BadRequest (operador entende) em vez de 500
+      throw new BadRequestException(`Falha ao notificar: ${result.reason || 'desconhecido'}`);
+    }
+
+    return { sent: true };
   }
 
   // ─── Suggest Leads — Match automático por nome das partes ─────────────────

@@ -109,6 +109,21 @@ export class DjenController {
   }
 
   /**
+   * Feature 2026-05-12 (pedido Andre):
+   * Notificacao MANUAL do cliente via WhatsApp. Diferente do fluxo automatico
+   * que roda no sync + cron, este e disparado pelo operador clicando no botao.
+   * - Bypassa horario comercial
+   * - Garante analise IA atualizada antes de enviar
+   * - Audit log obrigatorio
+   * - force=true permite re-enviar mesmo se ja notificou antes
+   */
+  @Post(':id/notify-client')
+  @Roles('ADMIN', 'ADVOGADO')
+  notifyClient(@Param('id') id: string, @Request() req: any, @Body() body?: { force?: boolean }) {
+    return this.djenService.manualNotifyClient(id, req.user?.tenant_id, req.user?.id, { force: body?.force });
+  }
+
+  /**
    * Backfill: computa content_hash em publicacoes existentes e marca duplicatas
    * (mesmo despacho gerado 2x pelo DJEN com destinatarios diferentes) como
    * archived. Idempotente. Use uma vez apos deploy do fix DJEN duplicado.
