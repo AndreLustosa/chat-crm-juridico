@@ -314,82 +314,6 @@ function resolveEventoConfig(ev: AiEvento): EventoConfig {
   };
 }
 
-// ─── Helper legado: resolve config a partir do event_type principal ──────────
-//
-// Mantido pra retrocompat com componentes que ainda usam o formato antigo
-// (TaskSuggestion no modal, por ex). Internamente delega pro novo helper.
-//
-// Bug reportado 2026-04-24: o frontend criava sempre "TAREFA" hardcoded mesmo
-// quando a IA detectava AUDIENCIA ou PRAZO no event_type. Agora respeita.
-function resolveEventTypeConfig(analysis: AiAnalysis): EventoConfig {
-  const eventType = analysis.event_type || 'TAREFA';
-
-  // Calcula data_padrao = hoje + prazo_dias uteis (fallback).
-  //
-  // Bug confirmado em prod 2026-04-26 (TAREFA db0b23bb): se prazo_dias=0,
-  // due = new Date() = exato instante do clique → start_at fica com timestamp
-  // arbitrario tipo 02:39:04.258 UTC (created_at copiado).
-  //
-  // Fix: minimo de 1 dia util (nao faz sentido tarefa pra "agora") + hora
-  // padrao 09:00 BRT. Construido em UTC pra alinhar com convencao UTC-naive-BRT
-  // do banco — toISOString gera "T09:00:00.000Z" e display com timeZone:'UTC'
-  // mostra 09:00. setHours local nao serve: em BRT geraria 12:00 UTC.
-  const fallbackDue = (() => {
-    const now = new Date();
-    // Comeca em "hoje 09:00 BRT" (UTC naive) — base para somar dias uteis
-    const due = new Date(Date.UTC(
-      now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0,
-    ));
-    const minDays = Math.max(1, analysis.prazo_dias || 1);
-    let added = 0;
-    while (added < minDays) {
-      due.setUTCDate(due.getUTCDate() + 1);
-      const dow = due.getUTCDay();
-      if (dow !== 0 && dow !== 6) added++;
-    }
-    return due;
-  })();
-
-  // Reusa o helper novo se ja temos um item canonico — apenas TAREFA/legado
-  // continuam usando os campos `tarefa_titulo`/`tarefa_descricao`.
-  if (eventType !== 'TAREFA' && (analysis.data_audiencia || analysis.data_prazo)) {
-    const fakeEv: AiEvento = {
-      tipo: eventType as 'AUDIENCIA' | 'PRAZO' | 'PERICIA',
-      titulo: analysis.tarefa_titulo,
-      descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
-      data: (eventType === 'AUDIENCIA' || eventType === 'PERICIA')
-        ? (analysis.data_audiencia || null)
-        : (analysis.data_prazo || null),
-      prazo_dias: analysis.prazo_dias,
-      condicao: null,
-    };
-    return resolveEventoConfig(fakeEv);
-  }
-  if (eventType === 'PRAZO') {
-    // PRAZO sem data: usa fallbackDue + margem.
-    const fakeEv: AiEvento = {
-      tipo: 'PRAZO',
-      titulo: analysis.tarefa_titulo,
-      descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
-      data: null,
-      prazo_dias: analysis.prazo_dias,
-      condicao: null,
-    };
-    return resolveEventoConfig(fakeEv);
-  }
-  // Fallback: TAREFA (sem processo — captura de lead).
-  return {
-    type: 'TAREFA',
-    label: 'Tarefa sugerida',
-    buttonLabel: 'Criar tarefa',
-    buttonIcon: 'task',
-    dueDate: fallbackDue,
-    titulo: analysis.tarefa_titulo,
-    descricao: analysis.tarefa_descricao || analysis.tarefa_titulo,
-    condicao: null,
-  };
-}
-
 // ─── Helper: deriva lista canonica de eventos da analise ────────────────────
 //
 // Frontend trabalha sempre com eventos[]. Se IA antiga (cache pre-2026-04-26)
@@ -432,91 +356,6 @@ const EVENT_TYPE_LABELS: Record<'AUDIENCIA' | 'PRAZO' | 'PERICIA' | 'TAREFA', {
   PERICIA:   { noun: 'Perícia',   nounLow: 'perícia',   done: 'Perícia agendada!',   emoji: '🔬', hasExplicitDate: true },
   TAREFA:    { noun: 'Tarefa',    nounLow: 'tarefa',    done: 'Tarefa criada!',      emoji: '✅', hasExplicitDate: false },
 };
-
-// ─── TaskSuggestion (sub-componente usado dentro do modal) ────
-
-function TaskSuggestion({ analysis, pubId }: { analysis: AiAnalysis; pubId: string }) {
-  const [creating, setCreating] = useState(false);
-  const [done, setDone] = useState(false);
-  const [skipped, setSkipped] = useState(false);
-  const [err, setErr] = useState(false);
-
-  if (skipped) return null;
-
-  const createTask = async () => {
-    setCreating(true);
-    setErr(false);
-    try {
-      const cfg = resolveEventTypeConfig(analysis);
-      // Audiencia tipicamente dura 1h; prazo eh marco no dia (30min); tarefa 30min.
-      // Audiencia/pericia tipicamente duram 1h; prazo eh marco no dia (30min); tarefa 30min.
-      const durationMs = (cfg.type === 'AUDIENCIA' || cfg.type === 'PERICIA') ? 60 * 60_000 : 30 * 60_000;
-      await api.post('/calendar/events', {
-        type: cfg.type,
-        title: `[DJEN] ${analysis.tarefa_titulo}`,
-        description: analysis.tarefa_descricao,
-        start_at: cfg.dueDate.toISOString(),
-        end_at: new Date(cfg.dueDate.getTime() + durationMs).toISOString(),
-        priority: analysis.urgencia,
-      });
-      setDone(true);
-    } catch { setErr(true); }
-    finally { setCreating(false); }
-  };
-
-  const cfg = resolveEventTypeConfig(analysis);
-
-  return (
-    <div className={`rounded-xl border p-3 space-y-2 ${
-      done ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-border bg-card/60'
-    }`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
-            {cfg.buttonIcon === 'audience' ? <Calendar size={9} /> : cfg.buttonIcon === 'deadline' ? <Clock size={9} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={9} /> : <CheckSquare size={9} />}
-            {cfg.label} pela IA
-          </p>
-          <p className="text-[12px] font-semibold text-foreground truncate">{analysis.tarefa_titulo}</p>
-          {analysis.tarefa_descricao && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{analysis.tarefa_descricao}</p>
-          )}
-          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
-            <Clock size={9} />
-            {EVENT_TYPE_LABELS[cfg.type].hasExplicitDate
-              ? cfg.dueDate.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
-              : `Prazo: ${analysis.prazo_dias} dias úteis`}
-          </p>
-        </div>
-      </div>
-
-      {done ? (
-        <p className="text-[11px] text-emerald-400 flex items-center gap-1">
-          <CheckCircle2 size={11} />
-          {EVENT_TYPE_LABELS[cfg.type].done}
-        </p>
-      ) : (
-        <div className="flex gap-2">
-          <button
-            onClick={createTask}
-            disabled={creating}
-            className="flex-1 flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-primary hover:bg-primary/15 transition-colors disabled:opacity-50"
-          >
-            {creating ? <Loader2 size={10} className="animate-spin" /> : (cfg.buttonIcon === 'audience' ? <Calendar size={10} /> : cfg.buttonIcon === 'deadline' ? <Clock size={10} /> : cfg.buttonIcon === 'pericia' ? <Microscope size={10} /> : <CheckSquare size={10} />)}
-            {creating ? 'Criando…' : cfg.buttonLabel}
-          </button>
-          <button
-            onClick={() => setSkipped(true)}
-            className="px-3 text-[11px] font-semibold text-muted-foreground hover:text-foreground py-1.5 rounded-lg border border-border hover:bg-accent transition-colors"
-            title="Pular sugestão"
-          >
-            <X size={11} />
-          </button>
-        </div>
-      )}
-      {err && <p className="text-[10px] text-red-400">Erro ao criar. Tente novamente.</p>}
-    </div>
-  );
-}
 
 // ─── Helper: normaliza área jurídica livre → enum ─────────────
 function normalizeArea(raw: string): string {
@@ -1163,8 +1002,12 @@ function CreateProcessModal({
                     )}
                   </div>
                 )}
-                {/* Tarefa sugerida */}
-                <TaskSuggestion analysis={analysis} pubId={pub.id} />
+                {/*
+                  Bug reportado 2026-05-12: criar prazo/audiencia DENTRO do modal
+                  de "Criar Processo" gera CalendarEvent sem case_id (o processo
+                  ainda nao existe). Removido — o usuario cria o evento depois,
+                  na pagina DJEN, via card de acoes (que ja sabe vincular ao caso).
+                */}
               </div>
             )}
           </div>
