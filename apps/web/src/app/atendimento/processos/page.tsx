@@ -210,7 +210,8 @@ function getTribunalInfo(caseNumber: string | null | undefined): {
 
 // ─── Types ────────────────────────────────────────────────────
 
-interface LegalCase {
+// Exportado 2026-05-13 — usado por outros consumidores do ProcessoDetailPanel.
+export interface LegalCase {
   id: string;
   lead_id: string;
   conversation_id: string | null;
@@ -1229,7 +1230,11 @@ function AgendarPericiaModal({
 
 // ─── Case Detail Panel ─────────────────────────────────────────
 
-function ProcessoDetailPanel({
+// Named export 2026-05-13 — usado pela pagina Triagem & Peticoes
+// (apps/web/src/app/atendimento/advogado/page.tsx) pra renderizar o
+// mesmo painel inline sem precisar duplicar o componente.
+// Next.js permite named exports em page files alem do `export default`.
+export function ProcessoDetailPanel({
   legalCase,
   onClose,
   onRefresh,

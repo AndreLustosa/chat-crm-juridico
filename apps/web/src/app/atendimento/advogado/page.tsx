@@ -23,6 +23,16 @@ import dynamic from 'next/dynamic';
 const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
 const GoogleDocsEmbed = dynamic(() => import('@/components/GoogleDocsEmbed'), { ssr: false });
 
+// Painel inline 2026-05-13: importado da pagina /processos pra abrir o
+// painel lateral de processos SEM tirar o operador da Triagem. Lazy/dynamic
+// pra nao puxar o bundle gigante da pagina /processos no carregamento inicial
+// da Triagem — so carrega quando o usuario clica em "Abrir processo".
+const ProcessoDetailPanel = dynamic(
+  () => import('@/app/atendimento/processos/page').then(m => m.ProcessoDetailPanel),
+  { ssr: false },
+);
+type InlineProcessoLegalCase = any; // shape vem do GET /legal-cases/:id
+
 /** Formata número de processo no padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO */
 const formatCNJ = (num: string | null | undefined): string => {
   if (!num) return 'Sem número';
@@ -1855,6 +1865,26 @@ export default function AdvogadoPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [delegateOpenId, setDelegateOpenId] = useState<string | null>(null);
 
+  // Painel inline do ProcessoDetailPanel (feature 2026-05-13). Quando
+  // operador clica "Abrir processo" nos cards do topo (audiencia/pericia/
+  // tarefa/prazo), buscamos o LegalCase completo e renderizamos o mesmo
+  // painel lateral que aparece no menu Processos — sem mudar de menu.
+  const [inlineProcessoCase, setInlineProcessoCase] = useState<InlineProcessoLegalCase | null>(null);
+  const [loadingInlineProcessoId, setLoadingInlineProcessoId] = useState<string | null>(null);
+
+  const handleOpenProcessoInline = async (caseId: string) => {
+    if (!caseId) return;
+    setLoadingInlineProcessoId(caseId);
+    try {
+      const res = await api.get(`/legal-cases/${caseId}`);
+      setInlineProcessoCase(res.data);
+    } catch {
+      showError('Não foi possível abrir o processo. Tente novamente.');
+    } finally {
+      setLoadingInlineProcessoId(null);
+    }
+  };
+
   // Feature 2026-05-12 (pedido Andre):
   // Cache da analise IA do DJEN expandida no card de prazo. Quando o usuario
   // clica "Ver analise IA", busca via GET /calendar/events/:id (que inclui
@@ -3099,16 +3129,19 @@ export default function AdvogadoPage() {
                             {/* Abrir processo no painel lateral do menu Processos
                                 (nova aba pra nao tirar o operador da Triagem). So
                                 aparece quando o caso ja esta em tracking. */}
-                            {processoHref && (
+                            {processoHref && caseId && (
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
-                                  window.open(processoHref, '_blank', 'noopener');
+                                  handleOpenProcessoInline(caseId);
                                 }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors"
-                                title="Abrir processo no menu Processos (nova aba)"
+                                disabled={loadingInlineProcessoId === caseId}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors disabled:opacity-50"
+                                title="Abrir processo (painel lateral)"
                               >
-                                <ExternalLink size={11} />
+                                {loadingInlineProcessoId === caseId
+                                  ? <Loader2 size={11} className="animate-spin" />
+                                  : <ExternalLink size={11} />}
                                 Abrir processo
                               </button>
                             )}
@@ -3302,16 +3335,19 @@ export default function AdvogadoPage() {
                             className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
                             onClick={e => e.stopPropagation()}
                           >
-                            {processoHref && (
+                            {processoHref && caseId && (
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
-                                  window.open(processoHref, '_blank', 'noopener');
+                                  handleOpenProcessoInline(caseId);
                                 }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors"
-                                title="Abrir processo no menu Processos (nova aba)"
+                                disabled={loadingInlineProcessoId === caseId}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors disabled:opacity-50"
+                                title="Abrir processo (painel lateral)"
                               >
-                                <ExternalLink size={11} />
+                                {loadingInlineProcessoId === caseId
+                                  ? <Loader2 size={11} className="animate-spin" />
+                                  : <ExternalLink size={11} />}
                                 Abrir processo
                               </button>
                             )}
@@ -3631,16 +3667,19 @@ export default function AdvogadoPage() {
                             className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
                             onClick={e => e.stopPropagation()}
                           >
-                            {processoHref && (
+                            {processoHref && caseId && (
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
-                                  window.open(processoHref, '_blank', 'noopener');
+                                  handleOpenProcessoInline(caseId);
                                 }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors"
-                                title="Abrir processo no menu Processos (nova aba)"
+                                disabled={loadingInlineProcessoId === caseId}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-500/10 border border-violet-500/25 text-violet-400 text-[11px] font-bold hover:bg-violet-500/20 transition-colors disabled:opacity-50"
+                                title="Abrir processo (painel lateral)"
                               >
-                                <ExternalLink size={11} />
+                                {loadingInlineProcessoId === caseId
+                                  ? <Loader2 size={11} className="animate-spin" />
+                                  : <ExternalLink size={11} />}
                                 Abrir processo
                               </button>
                             )}
@@ -4028,6 +4067,20 @@ export default function AdvogadoPage() {
           </div>
         );
       })()}
+
+      {/* Painel inline do menu Processos — abre sem mudar de pagina */}
+      {inlineProcessoCase && (
+        <ProcessoDetailPanel
+          legalCase={inlineProcessoCase}
+          onClose={() => setInlineProcessoCase(null)}
+          onRefresh={() => { setInlineProcessoCase(null); fetchCases(true); }}
+          onOpenClientPanel={() => {/* Nao expomos painel do cliente aqui — fecha o painel pra evitar empilhamento */ setInlineProcessoCase(null);}}
+          onOpenChat={(lc: any) => {
+            // Fluxo simples: redireciona pro inbox do lead
+            if (lc?.lead_id) router.push(`/atendimento/inbox?leadId=${lc.lead_id}`);
+          }}
+        />
+      )}
     </div>
   );
 }
