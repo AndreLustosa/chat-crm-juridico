@@ -690,6 +690,30 @@ function CreateProcessModal({
     }
   };
 
+  // Seleciona um lead a partir da sugestao da IA. A sugestao traz apenas
+  // {id,name,phone,is_client,score} — busca o registro completo pra que
+  // selectLead consiga pre-preencher area juridica e advogado via
+  // conversations[0]. Fallback: usa o objeto minimo se a request falhar.
+  const selectFromSuggestion = async (
+    suggestion: { id: string; name: string; phone: string; is_client: boolean; score: number },
+    isAuthor: boolean,
+  ) => {
+    setClientIsAuthor(isAuthor);
+    setDismissedSuggestions(true);
+    try {
+      const res = await api.get(`/leads/${suggestion.id}`);
+      const lead: Lead = res.data;
+      selectLead(lead);
+    } catch {
+      // Fallback minimo — usuario consegue prosseguir mesmo sem conversations
+      selectLead({
+        id: suggestion.id,
+        name: suggestion.name,
+        phone: suggestion.phone,
+      } as Lead);
+    }
+  };
+
   const clearLead = () => {
     setSelectedLead(null);
     setLeadSearch('');
@@ -876,10 +900,10 @@ function CreateProcessModal({
                           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">AUTORA</span>
                         </div>
                         <button
-                          onClick={() => { setLeadSearch(lead.name); setClientIsAuthor(true); setDismissedSuggestions(true); }}
+                          onClick={() => selectFromSuggestion(lead, true)}
                           className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[10px] font-bold transition-colors shrink-0"
                         >
-                          Buscar
+                          Selecionar
                         </button>
                       </div>
                     ))}
@@ -906,10 +930,10 @@ function CreateProcessModal({
                           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">RÉ</span>
                         </div>
                         <button
-                          onClick={() => { setLeadSearch(lead.name); setClientIsAuthor(false); setDismissedSuggestions(true); }}
+                          onClick={() => selectFromSuggestion(lead, false)}
                           className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold transition-colors shrink-0"
                         >
-                          Buscar
+                          Selecionar
                         </button>
                       </div>
                     ))}
