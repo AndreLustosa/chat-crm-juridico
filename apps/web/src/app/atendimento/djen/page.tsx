@@ -9,6 +9,7 @@ import {
   Gavel, AlertTriangle, Calendar, Sparkles, X, Clock,
   ArrowRight, CheckSquare, AlertCircle, ChevronDown, Microscope,
   Search, User, UserCheck, Scale, Ban, Users, Trash2, Save,
+  Copy, Check,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
@@ -97,6 +98,57 @@ interface Lead {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+/**
+ * Bug fix 2026-05-12 (UX Andre):
+ * Botao pequeno pra copiar numero do processo ao lado de cada publicacao.
+ * Mostra feedback visual (icone Check + verde) por 1.5s apos copiar.
+ * Usa navigator.clipboard com fallback pra textarea selecionado.
+ */
+function CopyNumberButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const ok = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(value).then(() => true).catch(() => fallback())
+      : Promise.resolve(fallback());
+    Promise.resolve(ok).then((success) => {
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
+    });
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title={copied ? 'Copiado!' : 'Copiar numero do processo'}
+      className={`shrink-0 p-0.5 rounded transition-colors ${
+        copied
+          ? 'text-emerald-400'
+          : 'text-muted-foreground/60 hover:text-foreground hover:bg-muted/50'
+      }`}
+    >
+      {copied ? <Check size={10} /> : <Copy size={10} />}
+    </button>
+  );
 }
 
 const TIPO_COLORS: Record<string, { bg: string; text: string }> = {
@@ -1253,9 +1305,17 @@ function PublicationCard({
               </span>
             )}
           </div>
-          <p className="text-[12px] font-mono font-semibold text-foreground truncate">
-            {pub.numero_processo || '(sem número)'}
-          </p>
+          {/* Bug fix 2026-05-12 (pedido Andre):
+              - Botao copiar numero do processo ao lado do numero
+              - Remover badge duplicado do numero quando aparece nome do cliente */}
+          <div className="flex items-center gap-1.5">
+            <p className="text-[12px] font-mono font-semibold text-foreground truncate">
+              {pub.numero_processo || '(sem número)'}
+            </p>
+            {pub.numero_processo && (
+              <CopyNumberButton value={pub.numero_processo} />
+            )}
+          </div>
           {pub.assunto && (
             <p className="text-[10px] text-muted-foreground truncate mt-0.5">{pub.assunto}</p>
           )}
@@ -1265,11 +1325,8 @@ function PublicationCard({
                 <Link2 size={8} />
                 {pub.legal_case.lead?.name || '—'}
               </span>
-              {pub.legal_case.case_number && (
-                <span className="text-[9px] font-mono text-muted-foreground bg-muted/50 px-1 py-0.5 rounded">
-                  {pub.legal_case.case_number}
-                </span>
-              )}
+              {/* Badge do case_number removido — eh redundante com pub.numero_processo
+                  que ja aparece em destaque acima. Bug 2026-05-12 (UX). */}
             </div>
           )}
         </div>
