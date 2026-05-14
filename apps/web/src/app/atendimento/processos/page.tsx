@@ -5022,11 +5022,18 @@ function ProcessosPageContent() {
   const urgentCount = cases.filter(c => c.priority === 'URGENTE').length;
 
   return (
-    <div className="flex h-screen bg-background font-sans antialiased text-foreground overflow-hidden">
-      <main className="flex-1 flex flex-col overflow-hidden">
+    // Layout 2026-05-14 (fix Andre): a pagina agora SCROLLA na janela
+    // inteira (header + filtros + KPIs sobem junto quando rola). Antes
+    // usavamos h-screen + overflow-hidden que travava o scroll da pagina
+    // — so dava pra rolar o conteudo interno (cards das colunas), o que
+    // forcava o usuario a ver SEMPRE o cabecalho gigante. Agora min-h-screen
+    // permite expansao natural; o kanban tem altura calc viewport pra
+    // manter scroll horizontal/vertical interno.
+    <div className="flex min-h-screen bg-background font-sans antialiased text-foreground">
+      <main className="flex-1 flex flex-col">
 
-        {/* Header */}
-        <header className="px-6 py-4 border-b border-border shrink-0 flex items-center gap-3 flex-wrap">
+        {/* Header — sticky no topo pra ficar acessivel durante scroll da pagina */}
+        <header className="sticky top-0 z-30 bg-background/95 backdrop-blur px-6 py-4 border-b border-border flex items-center gap-3 flex-wrap">
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold text-foreground tracking-tight flex items-center gap-2">
               <BookOpen size={20} className="text-primary" />
@@ -5521,16 +5528,15 @@ function ProcessosPageContent() {
           /*
            * Kanban + DJEN Panel
            *
-           * Fix bug 2026-05-14 (reportado pelo Andre): cards das colunas
-           * do kanban nao rolavam verticalmente quando o numero de
-           * processos excedia a altura visivel. Causa: cadeia de `flex-1`
-           * aninhados — por default, items flex tem `min-height: auto`
-           * que impede shrinking quando o conteudo eh maior que o
-           * container, entao o `overflow-y-auto` interno nao tinha
-           * altura limitada pra ativar. Solucao: `min-h-0` em todos os
-           * flex-1 verticais da cadeia.
+           * Layout 2026-05-14 (fix Andre — segunda iteracao):
+           * pagina inteira agora SCROLLA na janela (header sticky sobe
+           * junto). O kanban precisa de altura DEFINIDA pra que o scroll
+           * horizontal (colunas) e vertical interno (cards) funcionem —
+           * por isso `h-[calc(100vh-220px)]` (descontando header sticky
+           * + filtros + KPIs aproximadamente) com piso `min-h-[500px]`
+           * pra nao colapsar em viewports baixos.
            */
-          <div className="flex-1 min-h-0 flex overflow-hidden">
+          <div className="flex h-[calc(100vh-220px)] min-h-[500px] overflow-hidden">
             {/* Kanban Board */}
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <div
