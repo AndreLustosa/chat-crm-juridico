@@ -5518,13 +5518,24 @@ function ProcessosPageContent() {
             onSelectLead={leadId => setClientPanelLeadId(leadId)}
           />
         ) : (
-          /* ─── Kanban + DJEN Panel ─── */
-          <div className="flex-1 flex overflow-hidden">
+          /*
+           * Kanban + DJEN Panel
+           *
+           * Fix bug 2026-05-14 (reportado pelo Andre): cards das colunas
+           * do kanban nao rolavam verticalmente quando o numero de
+           * processos excedia a altura visivel. Causa: cadeia de `flex-1`
+           * aninhados — por default, items flex tem `min-height: auto`
+           * que impede shrinking quando o conteudo eh maior que o
+           * container, entao o `overflow-y-auto` interno nao tinha
+           * altura limitada pra ativar. Solucao: `min-h-0` em todos os
+           * flex-1 verticais da cadeia.
+           */
+          <div className="flex-1 min-h-0 flex overflow-hidden">
             {/* Kanban Board */}
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <div
                 ref={boardRef}
-                className="flex-1 overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none"
+                className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none"
                 onMouseDown={handleBoardMouseDown}
                 onMouseMove={handleBoardMouseMove}
                 onMouseUp={handleBoardMouseUp}
@@ -5538,7 +5549,7 @@ function ProcessosPageContent() {
                     return (
                       <div
                         key={stage.id}
-                        className={`flex flex-col w-[260px] min-w-[260px] rounded-xl border transition-all duration-150 ${
+                        className={`flex flex-col h-full min-h-0 w-[260px] min-w-[260px] rounded-xl border transition-all duration-150 ${
                           isDragTarget
                             ? 'border-2 bg-accent/30 scale-[1.01]'
                             : 'border-border bg-card/50'
@@ -5574,7 +5585,7 @@ function ProcessosPageContent() {
                         </div>
 
                         {/* Cards */}
-                        <div className="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scrollbar">
+                        <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-2 custom-scrollbar">
                           {stageCases.map(lc => (
                             <ProcessoCard
                               key={lc.id}
