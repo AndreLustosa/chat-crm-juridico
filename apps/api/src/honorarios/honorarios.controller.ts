@@ -110,6 +110,22 @@ export class HonorariosController {
     return this.service.markPaid(paymentId, body, req.user.tenant_id, req.user.id);
   }
 
+  // PATCH parcela individual — edita amount/due_date/notes/payment_method
+  // (feature 2026-05-14, andre reportou que nao era possivel editar honorarios)
+  @Patch('payments/:paymentId')
+  updatePayment(
+    @Param('paymentId') paymentId: string,
+    @Body() body: {
+      amount?: number;
+      due_date?: string | null;
+      payment_method?: string | null;
+      notes?: string | null;
+    },
+    @Request() req: any,
+  ) {
+    return this.service.updatePayment(paymentId, body, req.user.tenant_id);
+  }
+
   @Delete('payments/:paymentId')
   deletePayment(
     @Param('paymentId') paymentId: string,

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DollarSign, Loader2, Plus, ChevronDown, ChevronUp,
   Trash2, Check, Calendar, CreditCard, Copy, ExternalLink, QrCode,
-  AlertTriangle,
+  AlertTriangle, Pencil,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -604,6 +604,10 @@ function HonorarioCard({
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [showAddPayment, setShowAddPayment] = useState(false);
+  // Edicao (feature 2026-05-14): andre reportou que honorarios cadastrados
+  // nao eram editaveis. Forms inline pra editar o contrato e cada parcela.
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editingContract, setEditingContract] = useState(false);
   const [chargingId, setChargingId] = useState<string | null>(null);
   const [chargeResult, setChargeResult] = useState<{ paymentId: string; type: string; pixCopyPaste?: string; pixQrCode?: string; boletoUrl?: string; invoiceUrl?: string } | null>(null);
   const [chargeMenuId, setChargeMenuId] = useState<string | null>(null);
@@ -785,9 +789,9 @@ function HonorarioCard({
             {honorario.payments.map((p, idx) => {
               const interest = calcInterest(p);
               return (
+                <div key={p.id} className="border-b border-border/20 last:border-0">
                 <div
-                  key={p.id}
-                  className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_auto] gap-2 items-center py-2.5 border-b border-border/20 last:border-0 hover:bg-accent/10 transition-colors rounded-lg"
+                  className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_auto] gap-2 items-center py-2.5 hover:bg-accent/10 transition-colors rounded-lg"
                 >
                   <span className="text-[11px] font-mono text-muted-foreground">{idx + 1}</span>
                   <div>
@@ -836,6 +840,14 @@ function HonorarioCard({
                         </button>
                       </>
                     )}
+                    {/* Editar parcela — abre form inline abaixo (feature 2026-05-14) */}
+                    <button
+                      onClick={() => setEditingPaymentId(editingPaymentId === p.id ? null : p.id)}
+                      className={`p-1.5 rounded-lg transition-colors ${editingPaymentId === p.id ? 'bg-blue-500/20 text-blue-400' : 'hover:bg-blue-500/15 text-blue-400'}`}
+                      title="Editar parcela"
+                    >
+                      <Pencil size={12} />
+                    </button>
                     <button
                       onClick={() => handleDeletePayment(p.id)}
                       disabled={deletingPaymentId === p.id}
@@ -845,6 +857,15 @@ function HonorarioCard({
                       {deletingPaymentId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                     </button>
                   </div>
+                </div>
+                {/* Form de edicao inline (feature 2026-05-14) */}
+                {editingPaymentId === p.id && (
+                  <EditPaymentForm
+                    payment={p}
+                    onSaved={() => { setEditingPaymentId(null); onRefresh(); }}
+                    onCancel={() => setEditingPaymentId(null)}
+                  />
+                )}
                 </div>
               );
             })}
@@ -899,14 +920,31 @@ function HonorarioCard({
             </div>
           )}
 
+          {/* Form de edicao do contrato (feature 2026-05-14) */}
+          {editingContract && (
+            <EditHonorarioForm
+              honorario={honorario}
+              onSaved={() => { setEditingContract(false); onRefresh(); }}
+              onCancel={() => setEditingContract(false)}
+            />
+          )}
+
           {/* Actions footer */}
           <div className="flex items-center justify-between border-t border-border px-5 py-3">
-            <button
-              onClick={() => setShowAddPayment(!showAddPayment)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-primary hover:bg-primary/10 transition-colors"
-            >
-              <Plus size={12} /> Adicionar Parcela
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowAddPayment(!showAddPayment)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-primary hover:bg-primary/10 transition-colors"
+              >
+                <Plus size={12} /> Adicionar Parcela
+              </button>
+              <button
+                onClick={() => setEditingContract(!editingContract)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-blue-400 hover:bg-blue-500/10 transition-colors ${editingContract ? 'bg-blue-500/10' : ''}`}
+              >
+                <Pencil size={12} /> {editingContract ? 'Cancelar' : 'Editar Contrato'}
+              </button>
+            </div>
             <button
               onClick={handleDelete}
               disabled={deleting}
@@ -1001,6 +1039,200 @@ function AddPaymentForm({
         >
           {saving && <Loader2 size={12} className="animate-spin" />}
           Adicionar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── EditPaymentForm (feature 2026-05-14) ─────────────────────
+//
+// Form inline pra editar uma parcela existente: amount, due_date,
+// payment_method, notes. Backend: PATCH /honorarios/payments/:paymentId
+// (so afeta parcelas nao pagas — pra mudar status usar mark-paid).
+
+function EditPaymentForm({
+  payment,
+  onSaved,
+  onCancel,
+}: {
+  payment: HonorarioPaymentItem;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [amount, setAmount] = useState(payment.amount || '');
+  const [dueDate, setDueDate] = useState(payment.due_date ? payment.due_date.slice(0, 10) : '');
+  const [method, setMethod] = useState(payment.payment_method || '');
+  const [notes, setNotes] = useState(payment.notes || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const val = parseFloat(amount);
+    if (!val || val <= 0) {
+      showError('Informe o valor da parcela');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.patch(`/honorarios/payments/${payment.id}`, {
+        amount: val,
+        due_date: dueDate || null,
+        payment_method: method || null,
+        notes: notes || null,
+      });
+      showSuccess('Parcela atualizada');
+      onSaved();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao atualizar parcela');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-blue-500/[0.04] border-t border-blue-500/20 px-5 py-4 space-y-3">
+      <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Editar Parcela</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor</label>
+          <CurrencyInput value={amount} onChange={setAmount} autoFocus />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vencimento</label>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={e => setDueDate(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Método</label>
+          <CustomSelect value={method} onChange={setMethod} options={PAYMENT_METHODS} placeholder="Método" />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Observações</label>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          rows={2}
+          className="w-full px-3 py-2 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all resize-none"
+          placeholder="Notas internas sobre essa parcela"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="px-4 py-2 rounded-xl border border-border text-[11px] font-bold text-muted-foreground hover:bg-accent/30 transition-colors">Cancelar</button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {saving && <Loader2 size={12} className="animate-spin" />}
+          Salvar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── EditHonorarioForm (feature 2026-05-14) ──────────────────
+//
+// Form inline pra editar o contrato de honorario: type, total_value,
+// contract_date, interest_rate, notes. Backend: PATCH /honorarios/:id.
+
+function EditHonorarioForm({
+  honorario,
+  onSaved,
+  onCancel,
+}: {
+  honorario: CaseHonorarioItem;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [type, setType] = useState(honorario.type || '');
+  const [totalValue, setTotalValue] = useState(honorario.total_value || '');
+  const [contractDate, setContractDate] = useState(honorario.contract_date ? honorario.contract_date.slice(0, 10) : '');
+  const [interestRate, setInterestRate] = useState(honorario.interest_rate || '');
+  const [notes, setNotes] = useState(honorario.notes || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const val = parseFloat(totalValue);
+    if (!val || val <= 0) {
+      showError('Informe o valor total do contrato');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.patch(`/honorarios/${honorario.id}`, {
+        type: type || undefined,
+        total_value: val,
+        contract_date: contractDate || undefined,
+        interest_rate: interestRate ? parseFloat(interestRate) : undefined,
+        notes: notes !== undefined ? notes : undefined,
+      });
+      showSuccess('Contrato atualizado');
+      onSaved();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao atualizar contrato');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-blue-500/[0.04] border-t border-blue-500/20 px-5 py-4 space-y-3">
+      <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Editar Contrato</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Tipo</label>
+          <CustomSelect value={type} onChange={setType} options={HONORARIO_TYPES} placeholder="Tipo de honorário" />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor Total</label>
+          <CurrencyInput value={totalValue} onChange={setTotalValue} autoFocus />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Data do Contrato</label>
+          <input
+            type="date"
+            value={contractDate}
+            onChange={e => setContractDate(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Juros Mensal (%)</label>
+          <input
+            type="number"
+            value={interestRate}
+            onChange={e => setInterestRate(e.target.value)}
+            step="0.01"
+            placeholder="1.00"
+            className="w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Observações</label>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          rows={2}
+          className="w-full px-3 py-2 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition-all resize-none"
+          placeholder="Notas internas sobre o contrato"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="px-4 py-2 rounded-xl border border-border text-[11px] font-bold text-muted-foreground hover:bg-accent/30 transition-colors">Cancelar</button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-[11px] font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {saving && <Loader2 size={12} className="animate-spin" />}
+          Salvar
         </button>
       </div>
     </div>

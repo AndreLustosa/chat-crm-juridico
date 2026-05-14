@@ -376,6 +376,62 @@ export class HonorariosService {
     });
   }
 
+  /**
+   * Edita parcela de honorario (feature 2026-05-14 — andre reportou que
+   * nao era possivel editar honorarios cadastrados). Aceita atualizacao
+   * de amount, due_date, payment_method, notes. Nao mexe em status/paid_at
+   * — pra isso usar markPaid/markUnpaid. Recalcula status atrasado/pendente
+   * com base na nova due_date se a parcela continuar nao-paga.
+   */
+  async updatePayment(
+    paymentId: string,
+    data: {
+      amount?: number;
+      due_date?: string | null;
+      payment_method?: string | null;
+      notes?: string | null;
+    },
+    tenantId?: string,
+  ) {
+    const payment = await this.prisma.honorarioPayment.findUnique({
+      where: { id: paymentId },
+      include: { honorario: { select: { tenant_id: true } } },
+    });
+    if (!payment) throw new NotFoundException('Parcela não encontrada');
+    if (tenantId && payment.honorario.tenant_id !== tenantId) {
+      throw new ForbiddenException('Sem acesso a esta parcela');
+    }
+
+    // due_date pode ser explicitamente null pra remover. undefined = mantem.
+    let nextDueDate: Date | null | undefined = undefined;
+    if (data.due_date === null) nextDueDate = null;
+    else if (typeof data.due_date === 'string' && data.due_date.length > 0) {
+      nextDueDate = new Date(data.due_date);
+    }
+
+    // Recalcula status apenas se parcela continua nao paga
+    let nextStatus: string | undefined = undefined;
+    if (payment.status !== 'PAGO') {
+      const effectiveDueDate = nextDueDate !== undefined ? nextDueDate : payment.due_date;
+      if (effectiveDueDate && effectiveDueDate < new Date()) {
+        nextStatus = 'ATRASADO';
+      } else {
+        nextStatus = 'PENDENTE';
+      }
+    }
+
+    return this.prisma.honorarioPayment.update({
+      where: { id: paymentId },
+      data: {
+        ...(data.amount !== undefined ? { amount: data.amount } : {}),
+        ...(nextDueDate !== undefined ? { due_date: nextDueDate } : {}),
+        ...(data.payment_method !== undefined ? { payment_method: data.payment_method } : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        ...(nextStatus ? { status: nextStatus } : {}),
+      },
+    });
+  }
+
   async markPaid(
     paymentId: string,
     data: { payment_method?: string; paid_at?: string },
