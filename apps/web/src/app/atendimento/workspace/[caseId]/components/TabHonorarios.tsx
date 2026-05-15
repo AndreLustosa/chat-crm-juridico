@@ -137,8 +137,14 @@ function CurrencyInput({
 
 function formatDate(d: string | null) {
   if (!d) return '—';
+  // Bug fix 2026-05-15 (Andre reportou "mostra um dia a menos"):
+  // Datas armazenadas como UTC midnight (ex: 2026-07-01T00:00:00Z)
+  // sem timeZone='UTC' eram convertidas pra BRT local e perdiam 1 dia
+  // (vinha 30/06/2026 em vez de 01/07/2026). Agora usamos timeZone:'UTC'
+  // pra exibir a data como ela foi gravada, sem deslocamento.
   return new Date(d).toLocaleDateString('pt-BR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 
