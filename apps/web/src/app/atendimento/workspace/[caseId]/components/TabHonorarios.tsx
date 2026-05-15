@@ -776,7 +776,13 @@ function HonorarioCard({
 
           {/* Payments list */}
           <div className="px-5 pt-4 pb-2">
-            <div className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_auto] gap-2 pb-2 border-b border-border/50">
+            {/*
+              Grid 2026-05-14: ultima coluna AÇÕES agora `minmax(160px,auto)`
+              em vez de `auto` puro — antes os botoes editar/excluir podiam
+              ficar truncados em painel estreito (cliente reportou que so via
+              cobranca + check). 160px = 4 botoes × ~28px + gaps.
+            */}
+            <div className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_minmax(160px,auto)] gap-2 pb-2 border-b border-border/50">
               <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#</span>
               <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor</span>
               <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vencimento</span>
@@ -791,7 +797,7 @@ function HonorarioCard({
               return (
                 <div key={p.id} className="border-b border-border/20 last:border-0">
                 <div
-                  className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_auto] gap-2 items-center py-2.5 hover:bg-accent/10 transition-colors rounded-lg"
+                  className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_minmax(160px,auto)] gap-2 items-center py-2.5 hover:bg-accent/10 transition-colors rounded-lg"
                 >
                   <span className="text-[11px] font-mono text-muted-foreground">{idx + 1}</span>
                   <div>
@@ -810,17 +816,17 @@ function HonorarioCard({
                   <span className="text-[11px] text-muted-foreground">
                     {p.paid_at ? formatDate(p.paid_at) : '—'}
                   </span>
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="flex items-center justify-end gap-1 flex-nowrap shrink-0">
                     {p.status !== 'PAGO' && (
                       <>
                         {/* Charge dropdown */}
-                        <div className="relative" ref={chargeMenuId === p.id ? menuRef : undefined}>
+                        <div className="relative shrink-0" ref={chargeMenuId === p.id ? menuRef : undefined}>
                           <button
                             onClick={() => setChargeMenuId(chargeMenuId === p.id ? null : p.id)}
                             className="p-1.5 rounded-lg hover:bg-accent/40 text-primary transition-colors"
                             title="Gerar cobrança"
                           >
-                            {chargingId === p.id ? <Loader2 size={12} className="animate-spin" /> : <CreditCard size={12} />}
+                            {chargingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
                           </button>
                           {chargeMenuId === p.id && (
                             <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl shadow-black/20 py-1 min-w-[120px]">
@@ -833,28 +839,30 @@ function HonorarioCard({
                         <button
                           onClick={() => handleMarkPaid(p.id)}
                           disabled={markingId === p.id}
-                          className="p-1.5 rounded-lg hover:bg-emerald-500/15 text-emerald-400 transition-colors disabled:opacity-50"
+                          className="p-1.5 rounded-lg hover:bg-emerald-500/15 text-emerald-400 transition-colors disabled:opacity-50 shrink-0"
                           title="Marcar como pago"
                         >
-                          {markingId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                          {markingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                         </button>
                       </>
                     )}
-                    {/* Editar parcela — abre form inline abaixo (feature 2026-05-14) */}
+                    {/* Editar parcela — abre form inline abaixo (feature 2026-05-14).
+                        Borda visivel pra ficar evidente; antes Pencil sumia
+                        em painel estreito (cliente reportou). */}
                     <button
                       onClick={() => setEditingPaymentId(editingPaymentId === p.id ? null : p.id)}
-                      className={`p-1.5 rounded-lg transition-colors ${editingPaymentId === p.id ? 'bg-blue-500/20 text-blue-400' : 'hover:bg-blue-500/15 text-blue-400'}`}
+                      className={`p-1.5 rounded-lg border transition-colors shrink-0 ${editingPaymentId === p.id ? 'bg-blue-500/20 border-blue-500/40 text-blue-400' : 'border-blue-500/30 text-blue-400 hover:bg-blue-500/15'}`}
                       title="Editar parcela"
                     >
-                      <Pencil size={12} />
+                      <Pencil size={14} />
                     </button>
                     <button
                       onClick={() => handleDeletePayment(p.id)}
                       disabled={deletingPaymentId === p.id}
-                      className="p-1.5 rounded-lg hover:bg-red-500/15 text-red-400 transition-colors disabled:opacity-50"
+                      className="p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/15 transition-colors disabled:opacity-50 shrink-0"
                       title="Excluir parcela"
                     >
-                      {deletingPaymentId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      {deletingPaymentId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                     </button>
                   </div>
                 </div>
