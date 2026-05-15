@@ -72,14 +72,76 @@ export function ok<T>(data: T, markdown: string): ToolResponse<T> {
   };
 }
 
-export function fail(message: string): ToolResponse<never> {
+/**
+ * Resposta de erro pra tool. Mantemos `isError: true` (spec MCP) e tambem
+ * incluimos `structuredContent.error` com `kind` tipado pra que o Claude possa
+ * decidir como reagir (ex: rate limit -> esperar; auth -> avisar humano;
+ * validation -> ajustar input).
+ *
+ * Erros de PROTOCOLO (input invalido, tool nao existe) sao tratados pelo SDK
+ * MCP como JSON-RPC error proper. Estes aqui sao erros de DOMINIO (a tool
+ * rodou mas o CRM/Google falhou) — viajam dentro de uma resposta de tool ok.
+ */
+export function fail(message: string, kind: ErrorKind = 'unknown', details?: Record<string, unknown>): ToolResponse<never> {
   return {
     content: [{ type: 'text', text: message }],
+    structuredContent: { data: null as never, error: { kind, message, details } },
     isError: true,
   };
 }
 
+export type ErrorKind =
+  | 'unknown'
+  | 'auth'           // CRM 401/403 — token invalido ou permissao
+  | 'not_found'      // CRM 404
+  | 'validation'     // CRM 400 — input invalido
+  | 'rate_limit'     // 429 do CRM ou guard-rail
+  | 'guard_rail'     // bloqueado por kill-switch / cap
+  | 'upstream'       // 5xx do CRM ou Google Ads
+  | 'network'        // fetch falhou, timeout
+  | 'google_ads_quota'
+  | 'google_ads_permission';
+
+/**
+ * Erro estruturado lancado pelos services quando a chamada HTTP ao CRM falha.
+ * Inclui o status HTTP original pra mapeamento no `safe()` da tools layer.
+ */
+export class CrmError extends Error {
+  readonly kind: ErrorKind;
+  readonly status?: number;
+  readonly details?: Record<string, unknown>;
+
+  constructor(kind: ErrorKind, message: string, opts: { status?: number; details?: Record<string, unknown> } = {}) {
+    super(message);
+    this.name = 'CrmError';
+    this.kind = kind;
+    this.status = opts.status;
+    this.details = opts.details;
+  }
+}
+
+/**
+ * Mapeia HTTP status do CRM pra `ErrorKind` semantico.
+ */
+export function classifyHttpError(status: number): ErrorKind {
+  if (status === 401) return 'auth';
+  if (status === 403) return 'auth';
+  if (status === 404) return 'not_found';
+  if (status === 429) return 'rate_limit';
+  if (status >= 400 && status < 500) return 'validation';
+  if (status >= 500) return 'upstream';
+  return 'unknown';
+}
+
+/**
+ * Mensagem amigavel a partir de um Error/CrmError/qualquer coisa.
+ * Mantida pra compat com callsites existentes (formatError) — novo codigo
+ * deve preferir lancar CrmError direto.
+ */
 export function formatError(error: any): string {
+  if (error instanceof CrmError) {
+    return error.message;
+  }
   const text = String(error?.message ?? error ?? 'erro desconhecido');
   const code = error?.code ?? error?.failure?.errors?.[0]?.error_code;
   if (text.includes('invalid_grant') || text.includes('refresh token') || code === 'AUTHENTICATION_ERROR') {

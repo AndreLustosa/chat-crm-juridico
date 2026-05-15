@@ -26,6 +26,27 @@ function optional(name: string, aliases: string[] = []): string | undefined {
   return firstEnv([name, ...aliases]);
 }
 
+/**
+ * Calcula a lista final de redirect prefixes aceitos. Ordem de preferencia:
+ *   1. MCP_OAUTH_REDIRECT_PREFIXES (CSV) — controla TUDO se definido
+ *   2. MCP_OAUTH_STATIC_CLIENT_REDIRECT_PREFIX (single) — compat
+ *   3. defaults: ChatGPT + Claude.ai + Cowork
+ */
+function parseRedirectPrefixes(csv: string | undefined, single: string | undefined): string[] {
+  if (csv && csv.trim().length > 0) {
+    return csv.split(',').map((p) => p.trim()).filter((p) => p.length > 0);
+  }
+  if (single && single.trim().length > 0) {
+    return [single.trim()];
+  }
+  return [
+    'https://chatgpt.com/connector/oauth/',
+    'https://claude.ai/api/mcp/auth_callback',
+    'https://claude.com/api/mcp/auth_callback',
+    'https://cowork.anthropic.com/api/mcp/auth_callback',
+  ];
+}
+
 const crmApiUrl = optional('CRM_API_URL');
 const crmApiKey = optional('CRM_API_KEY', ['CRM_AUTH_TOKEN']);
 const runtimeMode = optional('TRAFFIC_MCP_MODE') ?? (crmApiUrl && crmApiKey ? 'crm' : 'google_ads');
@@ -42,8 +63,19 @@ export const config = {
     accessTokenTtlSeconds: Number(process.env.MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS ?? 3600),
     refreshTokenTtlSeconds: Number(process.env.MCP_OAUTH_REFRESH_TOKEN_TTL_SECONDS ?? 60 * 60 * 24 * 30),
     staticClientId: optional('MCP_OAUTH_STATIC_CLIENT_ID') ?? 'traffic-chatgpt',
-    staticClientRedirectPrefix:
-      optional('MCP_OAUTH_STATIC_CLIENT_REDIRECT_PREFIX') ?? 'https://chatgpt.com/connector/oauth/',
+    /**
+     * Lista de prefixes aceitos pra redirect do cliente estatico OAuth.
+     * Aceita CSV via MCP_OAUTH_REDIRECT_PREFIXES (preferido) ou single
+     * value via MCP_OAUTH_STATIC_CLIENT_REDIRECT_PREFIX (compat).
+     * Defaults cobrem: ChatGPT (legado), Claude.ai e Cowork (Anthropic).
+     *
+     * Cada cliente OAuth (ChatGPT, Cowork, Claude Desktop) usa um prefix
+     * diferente — o servidor precisa aceitar o conjunto inteiro.
+     */
+    staticClientRedirectPrefixes: parseRedirectPrefixes(
+      optional('MCP_OAUTH_REDIRECT_PREFIXES'),
+      optional('MCP_OAUTH_STATIC_CLIENT_REDIRECT_PREFIX'),
+    ),
     scopes: ['mcp:tools'],
   },
   runtimeMode,

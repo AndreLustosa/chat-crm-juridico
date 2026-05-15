@@ -151,6 +151,13 @@ services:
       - GOOGLE_ADS_LOGIN_CUSTOMER_ID=${GOOGLE_ADS_LOGIN_CUSTOMER_ID}
       - GOOGLE_ADS_CUSTOMER_ID=${GOOGLE_ADS_CUSTOMER_ID}
       - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-https://andrelustosaadvogados.com.br}
+      # Feature flag da IA interna do Trafego (decisions/policy/chat/optimization).
+      # Quando 'false', interceptor global em apps/api/src/common/interceptors/
+      # bloqueia esses endpoints com 503, e os crons da IA agente no worker
+      # ficam dormentes. Use 'false' quando a gestao de trafego estiver
+      # delegada ao Claude (Cowork via traffic-mcp-server).
+      # Default: 'true' (preserva comportamento atual).
+      - TRAFEGO_IA_INTERNA_ENABLED=${TRAFEGO_IA_INTERNA_ENABLED:-true}
     volumes:
       # Persiste áudios/documentos/imagens entre restarts do container.
       # Sem este volume, mídias são perdidas ao reiniciar o container.
@@ -212,6 +219,10 @@ services:
       - GOOGLE_ADS_DEVELOPER_TOKEN=${GOOGLE_ADS_DEVELOPER_TOKEN}
       - GOOGLE_ADS_LOGIN_CUSTOMER_ID=${GOOGLE_ADS_LOGIN_CUSTOMER_ID}
       - GOOGLE_ADS_CUSTOMER_ID=${GOOGLE_ADS_CUSTOMER_ID}
+      # Mesma flag do crm-api — quando false, crons da IA agente
+      # (traffic-ai-agent-cron) ficam dormentes mesmo se BullMQ estiver up.
+      # Detalhes: docs/mcp-server/fase-0-descoberta.md §10.
+      - TRAFEGO_IA_INTERNA_ENABLED=${TRAFEGO_IA_INTERNA_ENABLED:-true}
     volumes:
       # Compartilha o MESMO volume do crm-api: worker precisa ler/escrever mídia
       # (TTS cria áudio, transcrição lê áudio, etc).
@@ -266,10 +277,29 @@ services:
       - MCP_PUBLIC_BASE_URL=${TRAFFIC_MCP_PUBLIC_BASE_URL:-https://andrelustosaadvogados.com.br/traffic-mcp}
       - MCP_PUBLIC_URL=${TRAFFIC_MCP_PUBLIC_URL:-https://andrelustosaadvogados.com.br/traffic-mcp/mcp}
       - MCP_OAUTH_AUTHORIZATION_TOKEN=${TRAFFIC_MCP_OAUTH_AUTHORIZATION_TOKEN:-}
+      # Lista CSV de redirect prefixes OAuth aceitos. Defaults cobrem ChatGPT
+      # + Claude.ai + Cowork (Anthropic). Para forcar lista customizada use:
+      # MCP_OAUTH_REDIRECT_PREFIXES=https://chatgpt.com/connector/oauth/,...
+      - MCP_OAUTH_REDIRECT_PREFIXES=${TRAFFIC_MCP_OAUTH_REDIRECT_PREFIXES:-}
+      # Origins permitidos no CORS (CSV). Default cobre os mesmos clientes.
+      - MCP_CORS_ALLOWED_ORIGINS=${TRAFFIC_MCP_CORS_ALLOWED_ORIGINS:-}
       - TRAFFIC_MCP_MODE=crm
       - CRM_API_URL=${TRAFFIC_MCP_CRM_API_URL:-http://crm-api:3001}
       - CRM_API_KEY=${TRAFFIC_MCP_CRM_API_KEY:?TRAFFIC_MCP_CRM_API_KEY nao definido}
       - CACHE_TTL_MS=${TRAFFIC_MCP_CACHE_TTL_MS:-300000}
+      # ─── Guard-rails operacionais (Fase 1 — Cowork) ─────────────────────
+      # Kill switch: bloqueia TODA tool de mutate quando true. Read continua.
+      - MCP_KILL_SWITCH=${TRAFFIC_MCP_KILL_SWITCH:-false}
+      # Rate limit por janela de 1h (in-memory, per-instance).
+      - MCP_MUTATE_RATE_LIMIT_PER_HOUR=${TRAFFIC_MCP_RATE_LIMIT_PER_HOUR:-60}
+      # Hard cap absoluto em BRL/dia (rejeita budgets acima).
+      - MCP_BUDGET_DAILY_HARD_CAP_BRL=${TRAFFIC_MCP_BUDGET_HARD_CAP_BRL:-1000}
+      # Delta percentual maximo por update (rejeita acima).
+      - MCP_BUDGET_CHANGE_MAX_PERCENT=${TRAFFIC_MCP_BUDGET_DELTA_MAX_PCT:-50}
+      # Delta acima do qual exige confirm=true explicito do Claude.
+      - MCP_BUDGET_REQUIRE_CONFIRM_PERCENT=${TRAFFIC_MCP_BUDGET_CONFIRM_PCT:-30}
+      # Nivel de log estruturado JSON (debug/info/warn/error).
+      - LOG_LEVEL=${TRAFFIC_MCP_LOG_LEVEL:-info}
     networks:
       - default
       - OrionNet

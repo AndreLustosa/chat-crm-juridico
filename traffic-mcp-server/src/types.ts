@@ -20,8 +20,29 @@ export type MetricTotals = {
   conversion_rate: number;
 };
 
+export type ToolErrorKind =
+  | 'unknown'
+  | 'auth'
+  | 'not_found'
+  | 'validation'
+  | 'rate_limit'
+  | 'guard_rail'
+  | 'upstream'
+  | 'network'
+  | 'google_ads_quota'
+  | 'google_ads_permission';
+
+export type ToolStructuredContent<T> = {
+  data: T;
+  error?: {
+    kind: ToolErrorKind;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+};
+
 export type ToolResponse<T> = {
   content: Array<{ type: 'text'; text: string }>;
-  structuredContent?: { data: T };
+  structuredContent?: ToolStructuredContent<T>;
   isError?: boolean;
 };

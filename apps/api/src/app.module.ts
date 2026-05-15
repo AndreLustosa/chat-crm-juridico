@@ -64,7 +64,8 @@ import { OrganicTrafficModule } from './organic-traffic/organic-traffic.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { TrafegoIaInternaInterceptor } from './common/interceptors/trafego-ia-interna.interceptor';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
@@ -166,6 +167,14 @@ import { RolesGuard } from './auth/guards/roles.guard';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    // Bloqueia endpoints de IA interna do modulo de Trafego quando flag
+    // TRAFEGO_IA_INTERNA_ENABLED=false. Vive fora do modulo de Trafego pra
+    // honrar o principio "zero arquivos modificados em src/trafego" da spec
+    // do MCP. Mais detalhes: docs/mcp-server/fase-0-descoberta.md §11.1.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TrafegoIaInternaInterceptor,
     },
   ],
 })

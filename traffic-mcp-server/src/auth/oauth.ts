@@ -193,6 +193,13 @@ function protectedResourceMetadata() {
   };
 }
 
+function inferClientName(redirectUri: string): string {
+  if (redirectUri.startsWith('https://chatgpt.com/')) return 'ChatGPT';
+  if (redirectUri.startsWith('https://claude.ai/') || redirectUri.startsWith('https://claude.com/')) return 'Claude';
+  if (redirectUri.startsWith('https://cowork.anthropic.com/')) return 'Cowork';
+  return 'Cliente OAuth MCP';
+}
+
 function htmlEscape(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -227,14 +234,14 @@ function renderAuthorizePage(params: Record<string, string>) {
   <body>
     <main>
       <h1>Autorizar Gestor de Trafego</h1>
-      <p>O ChatGPT esta solicitando acesso as ferramentas MCP do Gestor de Trafego. Cole o token MCP gerado na tela de Integracao MCP do CRM para autorizar esta conexao.</p>
+      <p>Um cliente externo (ChatGPT, Claude, Cowork) esta solicitando acesso as ferramentas MCP do Gestor de Trafego. Cole o token MCP gerado na tela de Integracao MCP do CRM para autorizar esta conexao.</p>
       <form method="post" action="${htmlEscape(config.publicBaseUrl)}/oauth/authorize">
         ${hiddenInputs}
         <label for="authorization_token">Token MCP gerado no CRM</label>
         <input id="authorization_token" name="authorization_token" type="password" autocomplete="one-time-code" required autofocus />
-        <button type="submit">Autorizar ChatGPT</button>
+        <button type="submit">Autorizar conexao</button>
       </form>
-      <small>Use o token gerado no menu Configuracoes > Integracao MCP. O segredo interno TRAFFIC_MCP_AUTH_TOKEN continua aceito, mas nao e mais necessario para conectar o ChatGPT.</small>
+      <small>Use o token gerado no menu Configuracoes > Integracao MCP. O segredo interno TRAFFIC_MCP_AUTH_TOKEN continua aceito, mas nao e mais necessario para conectar via OAuth.</small>
     </main>
   </body>
 </html>`;
@@ -289,7 +296,8 @@ class TrafficOAuthProvider {
     if (
       typeof clientId !== 'string' ||
       clientId !== config.oauth.staticClientId ||
-      !redirectUri?.startsWith(config.oauth.staticClientRedirectPrefix)
+      !redirectUri ||
+      !config.oauth.staticClientRedirectPrefixes.some((prefix) => redirectUri.startsWith(prefix))
     ) {
       return undefined;
     }
@@ -302,6 +310,9 @@ class TrafficOAuthProvider {
       return existing;
     }
 
+    // Identifica o cliente pelo prefix pra log/debug. Nao impacta funcionamento.
+    const clientName = inferClientName(redirectUri);
+
     const client: RegisteredClient = {
       client_id: clientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
@@ -310,7 +321,7 @@ class TrafficOAuthProvider {
       token_endpoint_auth_method: 'client_secret_post',
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
-      client_name: 'ChatGPT',
+      client_name: clientName,
       scope: config.oauth.scopes.join(' '),
     };
 

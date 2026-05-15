@@ -59,8 +59,29 @@ async function buildServer() {
 
 const app = express();
 
+/**
+ * CORS dinamico — permite qualquer origin que case com prefix conhecido
+ * (ChatGPT, Claude.ai, Claude.com, Cowork). Sem isso o browser bloqueia
+ * preflight do connector OAuth durante registro e refresh de token.
+ *
+ * Override: MCP_CORS_ALLOWED_ORIGINS=https://foo,https://bar (CSV).
+ */
+const ALLOWED_ORIGINS_DEFAULT = [
+  'https://chatgpt.com',
+  'https://claude.ai',
+  'https://claude.com',
+  'https://cowork.anthropic.com',
+];
+const ALLOWED_ORIGINS = (process.env.MCP_CORS_ALLOWED_ORIGINS ?? '').trim().length > 0
+  ? process.env.MCP_CORS_ALLOWED_ORIGINS!.split(',').map((s) => s.trim()).filter(Boolean)
+  : ALLOWED_ORIGINS_DEFAULT;
+
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'https://chatgpt.com');
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',

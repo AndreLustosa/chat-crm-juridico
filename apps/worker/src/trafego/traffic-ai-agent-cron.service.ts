@@ -118,14 +118,39 @@ export class TrafficAIAgentCronService {
   }
 
   /**
+   * Feature flag global pra desligar a IA interna do trafego sem precisar
+   * remover crons. Quando false, todos os loops do agente sao no-op.
+   * Default true (preserva comportamento atual). Desliga em prod via env
+   * `TRAFEGO_IA_INTERNA_ENABLED=false` quando o Claude (Cowork via MCP)
+   * assumir a gestao.
+   * Detalhes: docs/mcp-server/fase-0-descoberta.md §10 (decisao do usuario).
+   */
+  private isIaInternaEnabled(): boolean {
+    const raw = (process.env.TRAFEGO_IA_INTERNA_ENABLED ?? '').trim().toLowerCase();
+    if (raw === '') return true;
+    return !['false', '0', 'no', 'off'].includes(raw);
+  }
+
+  /**
    * Itera contas ACTIVE com agent_enabled=true (e hourly_enabled=true se filtro
    * extra for pedido) e executa o loop. Erros são logados mas não bloqueiam.
+   *
+   * Honra `TRAFEGO_IA_INTERNA_ENABLED` — quando false, retorna sem rodar nada.
+   * Cron ainda dispara (pra nao perder agendamento se voltarmos a ativar)
+   * mas o loop interno eh skip silencioso (log informativo).
    */
   private async runForAllEnabledAccounts(
     label: string,
     runner: (accountId: string) => Promise<unknown>,
     opts: { onlyHourlyEnabled?: boolean } = {},
   ) {
+    if (!this.isIaInternaEnabled()) {
+      this.logger.log(
+        `[ai-agent-cron:${label}] IA interna desativada (TRAFEGO_IA_INTERNA_ENABLED=false) — skip`,
+      );
+      return;
+    }
+
     const accounts = await this.prisma.trafficAccount.findMany({
       where: {
         status: 'ACTIVE',
