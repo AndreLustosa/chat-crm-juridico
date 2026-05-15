@@ -15,6 +15,7 @@ import { tenantOrDefault } from '../common/constants/tenant';
 import { BusinessDaysCalc } from '@crm/shared';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import { buildTokenParam } from '../common/utils/openai-token-param.util';
 
 const CASE_WELCOME_DELAY_MS = 5 * 60 * 1000; // 5 minutos
 
@@ -518,12 +519,17 @@ export class LegalCasesService {
       include: {
         lead: true,
         conversation: { select: { instance_name: true } },
+        // Dados do caso pra IA contextualizar mensagem de arquivamento (2026-05-15)
+        lawyer: { select: { name: true } },
       },
     });
 
     if (notifyLead && legalCase.lead?.phone) {
-      const leadName = legalCase.lead.name || 'cliente';
-      const msg = `Prezado(a) ${leadName}, informamos que após análise de viabilidade jurídica, verificamos que não é possível prosseguir com o seu caso neste momento. Motivo: ${reason}. Caso tenha dúvidas, entre em contato conosco.`;
+      // Bug fix 2026-05-15 (Andre): mensagem hardcoded dizia "nao eh possivel
+      // prosseguir" mesmo quando o processo era ENCERRADO com sucesso (motivo
+      // "Processo Finalizado") — soava como negativa ao cliente. Agora a IA
+      // gera mensagem personalizada conforme o motivo + dados do caso.
+      const msg = await this.generateArchiveMessage(legalCase as any, reason);
       try {
         await this.whatsappService.sendText(
           legalCase.lead.phone,
@@ -558,6 +564,108 @@ export class LegalCasesService {
     // filtra por `where: { archived: false }` ao incluir casos no LeadProfile.
 
     return legalCase;
+  }
+
+  /**
+   * Gera mensagem personalizada de arquivamento via IA (2026-05-15).
+   *
+   * Antes: texto hardcoded "nao eh possivel prosseguir" — incorreto pra
+   * processos ENCERRADOS com sucesso (acordo, sentenca favoravel, alvara).
+   *
+   * Agora: IA recebe o motivo + dados do processo (numero, classe, area,
+   * parte contraria) e gera mensagem com tom apropriado:
+   *   - Encerramento POSITIVO ("Acordo cumprido", "Sentenca favoravel",
+   *     "Processo Finalizado", "Alvara liberado") -> agradecimento +
+   *     convite pra seguir o escritorio
+   *   - Encerramento NEGATIVO/NEUTRO ("Sem viabilidade", "Cliente desistiu",
+   *     "Inadimplencia") -> mensagem formal de encerramento
+   *
+   * Sempre inclui:
+   *   - Site: andrelustosaadvogados.com.br
+   *   - Instagram: @andrelustosaadvogados
+   *
+   * Fallback: se IA falhar, usa texto generico mas profissional.
+   */
+  private async generateArchiveMessage(legalCase: any, reason: string): Promise<string> {
+    const leadName = (legalCase.lead?.name || 'cliente').split(' ')[0];
+    const advogado = legalCase.lawyer?.name || 'André Lustosa';
+    const escritorio = 'Lustosa Advogados';
+
+    const dadosProcesso = [
+      legalCase.case_number ? `- Numero: ${legalCase.case_number}` : null,
+      legalCase.action_type ? `- Tipo: ${legalCase.action_type}` : null,
+      legalCase.legal_area ? `- Area: ${legalCase.legal_area}` : null,
+      legalCase.opposing_party ? `- Parte contraria: ${legalCase.opposing_party}` : null,
+      legalCase.tracking_stage ? `- Ultima etapa: ${legalCase.tracking_stage}` : null,
+    ].filter(Boolean).join('\n');
+
+    const systemPrompt = `Voce eh ${advogado}, advogado do escritorio ${escritorio}.
+Esta enviando uma mensagem de WhatsApp ao cliente ${legalCase.lead?.name || 'cliente'} comunicando que o processo dele(a) foi ENCERRADO/ARQUIVADO no sistema do escritorio.
+
+REGRAS ABSOLUTAS:
+1. NUNCA revele que eh IA ou mensagem automatica
+2. Tom profissional, caloroso e humano — entre 100-180 palavras
+3. Comece com saudacao curta personalizada (ex: "Ola, ${leadName}!" ou "Prezado(a) ${leadName},")
+4. Explique brevemente que o caso foi finalizado conforme o MOTIVO informado
+5. Adapte o tom AO MOTIVO:
+   - Se eh ENCERRAMENTO POSITIVO (palavras-chave: "acordo", "sentenca favoravel",
+     "ganho", "vitoria", "alvara", "finalizado", "concluido", "transitado",
+     "cumprido", "exito", "procedente") -> tom de AGRADECIMENTO + comemoracao
+     pelo bom resultado + "foi um prazer atender"
+   - Se eh ENCERRAMENTO NEGATIVO ("sem viabilidade", "improcedente", "perdemos")
+     -> tom de respeito, gratidao pela confianca + se coloca a disposicao
+     pra futuras demandas
+   - Se eh ENCERRAMENTO NEUTRO ("desistencia", "renuncia", "inadimplencia",
+     "sem retorno") -> tom formal mas cordial
+6. SEMPRE incluir no final:
+   - Site: www.andrelustosaadvogados.com.br
+   - Instagram: @andrelustosaadvogados
+7. NAO use frases burocraticas ("venho por meio desta", "informamos que apos
+   analise de viabilidade juridica")
+8. NAO invente fatos do processo que nao estejam nos DADOS abaixo
+9. Use *negrito* (com asteriscos do WhatsApp) somente em 1-2 destaques
+
+DADOS DO PROCESSO:
+${dadosProcesso || '- (sem dados especificos disponiveis)'}
+
+MOTIVO DO ENCERRAMENTO INFORMADO PELO ADVOGADO:
+"${reason}"
+
+Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
+
+    try {
+      const aiConfig = await this.settings.getAiConfig();
+      const model = aiConfig.defaultModel || 'gpt-4.1-mini';
+      const openaiKey = (await this.settings.get('OPENAI_API_KEY')) || process.env.OPENAI_API_KEY;
+      if (!openaiKey) {
+        this.logger.warn('[ARCHIVE-MSG] Sem OPENAI_API_KEY — usando fallback');
+        return this.fallbackArchiveMessage(legalCase, reason);
+      }
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [{ role: 'system', content: systemPrompt }],
+        ...buildTokenParam(model, 600),
+        temperature: 0.85,
+      });
+      const text = completion.choices[0]?.message?.content?.trim();
+      return text || this.fallbackArchiveMessage(legalCase, reason);
+    } catch (e: any) {
+      this.logger.warn(`[ARCHIVE-MSG] IA indisponivel, usando fallback: ${e.message}`);
+      return this.fallbackArchiveMessage(legalCase, reason);
+    }
+  }
+
+  /** Fallback inteligente: detecta tom positivo/negativo via regex no motivo. */
+  private fallbackArchiveMessage(legalCase: any, reason: string): string {
+    const leadName = (legalCase.lead?.name || 'cliente').split(' ')[0];
+    const isPositive = /acordo|sentenca favoravel|ganho|vit[oó]ria|alvar[aá]|finaliza|conclu[ií]|transitado|cumprido|[eê]xito|procedente/i.test(reason);
+
+    if (isPositive) {
+      return `Olá, ${leadName}! Tudo bem?\n\nGostaria de comunicar que o seu processo foi *concluído* com sucesso. Foi um prazer poder atendê-lo(a) e contar com a sua confiança ao longo dessa jornada.\n\nNosso escritório segue à disposição para qualquer demanda futura. Se possível, nos siga nas redes:\n\n🌐 www.andrelustosaadvogados.com.br\n📷 Instagram: @andrelustosaadvogados\n\nUm forte abraço!`;
+    }
+
+    return `Prezado(a) ${leadName},\n\nInformo que o seu processo foi encerrado em nosso sistema. Motivo: ${reason}.\n\nAgradecemos a confiança depositada em nosso escritório. Permanecemos à disposição para futuras demandas ou qualquer esclarecimento.\n\n🌐 www.andrelustosaadvogados.com.br\n📷 Instagram: @andrelustosaadvogados\n\nAtenciosamente,\nLustosa Advogados`;
   }
 
   async unarchive(id: string, tenantId?: string) {
