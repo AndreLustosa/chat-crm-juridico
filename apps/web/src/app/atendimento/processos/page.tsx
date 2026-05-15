@@ -2216,48 +2216,78 @@ export function ProcessoDetailPanel({
                       <p className="text-[11px] text-amber-500 font-semibold">Processo aguardando arquivamento</p>
                     </div>
                     <button
-                      onClick={() => setShowArchive(!showArchive)}
+                      onClick={() => setShowArchive(true)}
                       className="w-full py-2 text-sm text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2"
                     >
                       <Archive size={14} /> Arquivar Processo
                     </button>
+                    {/*
+                      Modal overlay (fix 2026-05-15): antes era expandido inline
+                      abaixo do botao, mas em painel longo o popup abria fora da
+                      viewport e usuario nao via — pensava que "nada acontecia".
+                      Agora usa modal centralizado z-[120] (acima do drawer
+                      lateral z-100) com backdrop pra ficar SEMPRE visivel.
+                    */}
                     {showArchive && (
-                      <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-3">
-                        <div className="flex items-center gap-2 text-amber-500 text-[12px] font-bold">
-                          <AlertTriangle size={14} /> Confirmar arquivamento
-                        </div>
-                        <textarea
-                          value={archiveReason}
-                          onChange={e => setArchiveReason(e.target.value)}
-                          rows={2}
-                          className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none"
-                          placeholder="Motivo do arquivamento..."
-                        />
-                        <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
-                          <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
-                          Notificar cliente via WhatsApp
-                        </label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={async () => {
-                              try {
-                                await api.patch(`/legal-cases/${legalCase.id}/tracking-stage`, { trackingStage: 'TRANSITADO' });
-                                onRefresh();
-                                setShowArchive(false);
-                              } catch {}
-                            }}
-                            className="flex-1 py-2 text-sm font-semibold border border-border rounded-lg hover:bg-accent transition-colors text-muted-foreground"
-                          >
-                            Reativar
-                          </button>
-                          <button
-                            onClick={handleArchive}
-                            disabled={archiving}
-                            className="flex-1 py-2 text-sm font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-                          >
-                            {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-                            Arquivar
-                          </button>
+                      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !archiving && setShowArchive(false)} />
+                        <div className="relative z-10 w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4">
+                          <div className="flex items-center gap-2 text-amber-500 text-[14px] font-bold">
+                            <AlertTriangle size={16} /> Confirmar arquivamento
+                          </div>
+                          <p className="text-[12px] text-muted-foreground">
+                            O processo de <strong className="text-foreground">{legalCase.lead?.name || 'cliente'}</strong> será arquivado e sairá da lista de processos ativos.
+                          </p>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                              Motivo do arquivamento <span className="text-red-400">*</span>
+                            </label>
+                            <textarea
+                              value={archiveReason}
+                              onChange={e => setArchiveReason(e.target.value)}
+                              rows={3}
+                              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                              placeholder="Ex: Acordo cumprido, valores quitados, alvará liberado..."
+                              autoFocus
+                            />
+                          </div>
+                          <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
+                            <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
+                            Notificar cliente via WhatsApp
+                          </label>
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              onClick={() => setShowArchive(false)}
+                              disabled={archiving}
+                              className="flex-1 py-2.5 text-sm font-semibold border border-border rounded-lg hover:bg-accent transition-colors text-muted-foreground disabled:opacity-40"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await api.patch(`/legal-cases/${legalCase.id}/tracking-stage`, { trackingStage: 'TRANSITADO' });
+                                  toast.success('Processo movido para Trânsito em Julgado');
+                                  onRefresh();
+                                  setShowArchive(false);
+                                } catch (e: any) {
+                                  toast.error(e?.response?.data?.message || 'Erro ao reativar');
+                                }
+                              }}
+                              disabled={archiving}
+                              className="flex-1 py-2.5 text-sm font-semibold border border-border rounded-lg hover:bg-accent transition-colors text-muted-foreground disabled:opacity-40"
+                            >
+                              Voltar p/ Trânsito
+                            </button>
+                            <button
+                              onClick={handleArchive}
+                              disabled={archiving}
+                              className="flex-1 py-2.5 text-sm font-bold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                              {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                              Arquivar
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2277,8 +2307,11 @@ export function ProcessoDetailPanel({
                     onClick={async () => {
                       try {
                         await api.patch(`/legal-cases/${legalCase.id}/tracking-stage`, { trackingStage: 'ENCERRADO' });
+                        toast.success('Solicitação enviada — aguarde aprovação do admin');
                         onRefresh();
-                      } catch {}
+                      } catch (e: any) {
+                        toast.error(e?.response?.data?.message || 'Erro ao solicitar encerramento');
+                      }
                     }}
                     className="w-full py-2 text-sm text-muted-foreground hover:text-amber-400 border border-border rounded-lg hover:border-amber-500/30 hover:bg-amber-500/5 transition-colors flex items-center justify-center gap-2"
                   >
@@ -2287,35 +2320,57 @@ export function ProcessoDetailPanel({
                 ) : (
                   <>
                     <button
-                      onClick={() => setShowArchive(!showArchive)}
+                      onClick={() => setShowArchive(true)}
                       className="w-full py-2 text-sm text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition-colors flex items-center justify-center gap-2"
                     >
                       <Archive size={14} /> Encerrar / Arquivar
                     </button>
+                    {/* Modal overlay (fix 2026-05-15): mesmo motivo do popup acima */}
                     {showArchive && (
-                      <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-3">
-                        <div className="flex items-center gap-2 text-amber-500 text-[12px] font-bold">
-                          <AlertTriangle size={14} /> Arquivar processo
+                      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !archiving && setShowArchive(false)} />
+                        <div className="relative z-10 w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4">
+                          <div className="flex items-center gap-2 text-amber-500 text-[14px] font-bold">
+                            <AlertTriangle size={16} /> Arquivar processo
+                          </div>
+                          <p className="text-[12px] text-muted-foreground">
+                            O processo de <strong className="text-foreground">{legalCase.lead?.name || 'cliente'}</strong> será arquivado e sairá da lista de processos ativos.
+                          </p>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                              Motivo do arquivamento <span className="text-red-400">*</span>
+                            </label>
+                            <textarea
+                              value={archiveReason}
+                              onChange={e => setArchiveReason(e.target.value)}
+                              rows={3}
+                              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                              placeholder="Ex: Acordo cumprido, valores quitados, alvará liberado..."
+                              autoFocus
+                            />
+                          </div>
+                          <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
+                            <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
+                            Notificar cliente via WhatsApp
+                          </label>
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              onClick={() => setShowArchive(false)}
+                              disabled={archiving}
+                              className="flex-1 py-2.5 text-sm font-semibold border border-border rounded-lg hover:bg-accent transition-colors text-muted-foreground disabled:opacity-40"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              onClick={handleArchive}
+                              disabled={archiving}
+                              className="flex-1 py-2.5 text-sm font-bold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                              {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
+                              Confirmar Arquivamento
+                            </button>
+                          </div>
                         </div>
-                        <textarea
-                          value={archiveReason}
-                          onChange={e => setArchiveReason(e.target.value)}
-                          rows={2}
-                          className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none"
-                          placeholder="Motivo do arquivamento..."
-                        />
-                        <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer">
-                          <input type="checkbox" checked={notifyLead} onChange={e => setNotifyLead(e.target.checked)} className="rounded" />
-                          Notificar cliente via WhatsApp
-                        </label>
-                        <button
-                          onClick={handleArchive}
-                          disabled={archiving}
-                          className="w-full py-2 text-sm font-semibold bg-amber-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                          {archiving ? <Loader2 size={14} className="animate-spin" /> : <Archive size={14} />}
-                          Confirmar Arquivamento
-                        </button>
                       </div>
                     )}
                   </>
