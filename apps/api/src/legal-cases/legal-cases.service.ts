@@ -538,16 +538,19 @@ export class LegalCasesService {
         this.logger.error('Erro ao enviar notificação de arquivamento:', e);
       }
 
-      // Feature 2026-05-15: envia logo do escritorio APOS o texto, pra
-      // reforcar marca e dar tom de despedida formal. Override via env
-      // BRANDING_LOGO_URL pra trocar imagem sem deploy. Falha aqui nao
-      // bloqueia — texto principal ja foi enviado.
+      // Feature 2026-05-15 (segunda iteracao): envia FIGURINHA (sticker)
+      // do escritorio apos o texto, em vez do logo como imagem. Sticker
+      // tem tom mais leve/cordial pra fechar conversa de arquivamento.
+      // Override via env BRANDING_STICKER_URL pra trocar sem deploy.
+      // Default aponta pra apps/web/public/branding/sticker-andre.webp
+      // (idealmente WebP transparente 512x512 — Evolution converte
+      // PNG/JPG mas WebP da melhor resultado). Falha nao bloqueia.
       try {
-        const logoUrl = process.env.BRANDING_LOGO_URL
-          || `${process.env.FRONTEND_BASE_URL || 'https://andrelustosaadvogados.com.br'}/logo_andre_lustosa.png`;
-        await this.whatsappService.sendMedia(phone, 'image', logoUrl, '', instance);
+        const stickerUrl = process.env.BRANDING_STICKER_URL
+          || `${process.env.FRONTEND_BASE_URL || 'https://andrelustosaadvogados.com.br'}/branding/sticker-andre.webp`;
+        await this.whatsappService.sendSticker(phone, stickerUrl, instance);
       } catch (e: any) {
-        this.logger.warn(`[ARCHIVE] Falha ao enviar logo apos texto: ${e?.message}`);
+        this.logger.warn(`[ARCHIVE] Falha ao enviar figurinha apos texto: ${e?.message}`);
       }
     }
 

@@ -267,6 +267,24 @@ export class WhatsappService {
     });
   }
 
+  /**
+   * Envia figurinha (sticker) via Evolution API.
+   *
+   * Aceita URL de imagem (PNG, WebP, JPG) — Evolution converte pra WebP
+   * 512x512 transparente automaticamente quando possivel. Pra melhor
+   * resultado, usar imagem WebP transparente 512x512 ja pronta.
+   *
+   * Adicionado 2026-05-15 pra envio de figurinha de despedida no fluxo
+   * de arquivamento de processo.
+   */
+  async sendSticker(number: string, stickerUrl: string, instanceName?: string) {
+    const targetInstance = instanceName || process.env.EVOLUTION_INSTANCE_NAME || 'whatsapp';
+    return this.request('POST', `message/sendSticker/${targetInstance}`, {
+      number,
+      sticker: stickerUrl,
+    });
+  }
+
   // --- MENSAGENS INTERATIVAS ---
 
   async sendList(
