@@ -21,6 +21,14 @@ export const metadata: Metadata = {
   metadataBase: new URL(appUrl),
   title: 'André Lustosa Advogados | Advocacia Especializada',
   description: 'Escritório de advocacia especializado em direito previdenciário, trabalhista e cível em Alagoas.',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon.png', type: 'image/png', sizes: '512x512' },
+    ],
+    shortcut: ['/favicon.ico'],
+    apple: [{ url: '/apple-icon.png', type: 'image/png', sizes: '180x180' }],
+  },
 };
 
 export const viewport: Viewport = {
