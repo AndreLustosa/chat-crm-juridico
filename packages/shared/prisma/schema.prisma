@@ -1492,7 +1492,12 @@ model HonorarioPayment {
   due_date       DateTime? // Opcional para alvará judicial (SUCUMBENCIA)
   paid_at        DateTime?
   payment_method String? // PIX, BOLETO, CARTAO, DINHEIRO, TRANSFERENCIA
-  status         String    @default("PENDENTE") // PENDENTE, PAGO, ATRASADO
+  status         String    @default("PENDENTE") // PENDENTE, PARCIAL, PAGO, ATRASADO
+  // Recebimento parcial (feature 2026-05-15): cliente pode pagar parte
+  // de uma parcela. paid_amount acumula o que ja foi recebido. Quando
+  // paid_amount >= amount: status='PAGO' + paid_at preenchido. Quando
+  // 0 < paid_amount < amount: status='PARCIAL'.
+  paid_amount    Decimal?
   notes          String?
   created_at     DateTime  @default(now())
 

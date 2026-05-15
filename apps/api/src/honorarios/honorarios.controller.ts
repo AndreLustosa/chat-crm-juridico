@@ -110,6 +110,19 @@ export class HonorariosController {
     return this.service.markPaid(paymentId, body, req.user.tenant_id, req.user.id);
   }
 
+  // Recebimento PARCIAL de uma parcela (feature 2026-05-15).
+  // Body: { amount: number; payment_method?: string; paid_at?: string; notes?: string }
+  // Comportamento: soma o `amount` no paid_amount existente. Se atingir o
+  // total da parcela, status vira PAGO automaticamente. Senao, fica PARCIAL.
+  @Patch('payments/:paymentId/partial-receive')
+  partialReceive(
+    @Param('paymentId') paymentId: string,
+    @Body() body: { amount: number; payment_method?: string; paid_at?: string; notes?: string },
+    @Request() req: any,
+  ) {
+    return this.service.partialReceive(paymentId, body, req.user.tenant_id, req.user.id);
+  }
+
   // PATCH parcela individual — edita amount/due_date/notes/payment_method
   // (feature 2026-05-14, andre reportou que nao era possivel editar honorarios)
   @Patch('payments/:paymentId')

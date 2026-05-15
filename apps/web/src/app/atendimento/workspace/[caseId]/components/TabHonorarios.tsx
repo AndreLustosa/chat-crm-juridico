@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DollarSign, Loader2, Plus, ChevronDown, ChevronUp,
   Trash2, Check, Calendar, CreditCard, Copy, ExternalLink, QrCode,
-  AlertTriangle, Pencil,
+  AlertTriangle, Pencil, Coins,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
@@ -14,6 +14,7 @@ import { showError, showSuccess } from '@/lib/toast';
 interface HonorarioPaymentItem {
   id: string;
   amount: string;
+  paid_amount?: string | null; // Recebimento parcial (feature 2026-05-15)
   due_date: string | null;
   paid_at: string | null;
   payment_method: string | null;
@@ -54,12 +55,14 @@ const PAYMENT_METHODS = [
 
 const STATUS_COLORS: Record<string, string> = {
   PAGO: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  PARCIAL: 'bg-blue-500/15 text-blue-400 border-blue-500/30', // Feature 2026-05-15
   PENDENTE: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   ATRASADO: 'bg-red-500/15 text-red-400 border-red-500/30',
 };
 
 const STATUS_LABEL: Record<string, string> = {
   PAGO: 'Pago',
+  PARCIAL: 'Parcial',
   PENDENTE: 'Pendente',
   ATRASADO: 'Atrasado',
 };
@@ -614,6 +617,9 @@ function HonorarioCard({
   // nao eram editaveis. Forms inline pra editar o contrato e cada parcela.
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingContract, setEditingContract] = useState(false);
+  // Recebimento parcial (feature 2026-05-15): modal pra registrar valor
+  // recebido < amount total da parcela.
+  const [partialReceiveId, setPartialReceiveId] = useState<string | null>(null);
   const [chargingId, setChargingId] = useState<string | null>(null);
   const [chargeResult, setChargeResult] = useState<{ paymentId: string; type: string; pixCopyPaste?: string; pixQrCode?: string; boletoUrl?: string; invoiceUrl?: string } | null>(null);
   const [chargeMenuId, setChargeMenuId] = useState<string | null>(null);
@@ -809,12 +815,27 @@ function HonorarioCard({
                     {interest > 0 && (
                       <span className="text-[10px] text-red-400">+ {formatCurrency(interest)} juros</span>
                     )}
+                    {/* Recebimento parcial (feature 2026-05-15): mostra "R$ X recebido" */}
+                    {p.status === 'PARCIAL' && p.paid_amount && (
+                      <span className="text-[10px] text-blue-400 font-semibold">
+                        ({formatCurrency(p.paid_amount)} recebido · saldo {formatCurrency(parseFloat(p.amount) - parseFloat(p.paid_amount))})
+                      </span>
+                    )}
                     <span className="ml-auto shrink-0">
                       <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border ${STATUS_COLORS[p.status] || 'bg-accent/30 text-muted-foreground border-border'}`}>
                         {STATUS_LABEL[p.status] || p.status}
                       </span>
                     </span>
                   </div>
+                  {/* Barra de progresso quando PARCIAL */}
+                  {p.status === 'PARCIAL' && p.paid_amount && (
+                    <div className="w-full bg-accent/30 rounded-full h-1.5 overflow-hidden mb-1.5">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all"
+                        style={{ width: `${Math.min(100, (parseFloat(p.paid_amount) / parseFloat(p.amount)) * 100)}%` }}
+                      />
+                    </div>
+                  )}
 
                   {/* Linha 2: metadados (vencimento, metodo, pago em) */}
                   <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap mb-2">
@@ -856,10 +877,19 @@ function HonorarioCard({
                           onClick={() => handleMarkPaid(p.id)}
                           disabled={markingId === p.id}
                           className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 text-[11px] font-semibold shrink-0"
-                          title="Marcar como pago"
+                          title="Marcar como pago (valor total)"
                         >
                           {markingId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                           Pago
+                        </button>
+                        {/* Recebimento parcial (feature 2026-05-15) */}
+                        <button
+                          onClick={() => setPartialReceiveId(p.id)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition-colors text-[11px] font-semibold shrink-0"
+                          title="Registrar recebimento parcial (valor menor que o total da parcela)"
+                        >
+                          <Coins size={12} />
+                          Parcial
                         </button>
                       </>
                     )}
@@ -980,6 +1010,19 @@ function HonorarioCard({
           </div>
         </div>
       )}
+
+      {/* Modal de recebimento parcial (feature 2026-05-15) */}
+      {partialReceiveId && (() => {
+        const targetPayment = honorario.payments.find(p => p.id === partialReceiveId);
+        if (!targetPayment) return null;
+        return (
+          <PartialReceiveModal
+            payment={targetPayment}
+            onSaved={() => { setPartialReceiveId(null); onRefresh(); }}
+            onCancel={() => setPartialReceiveId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -1258,6 +1301,166 @@ function EditHonorarioForm({
           {saving && <Loader2 size={12} className="animate-spin" />}
           Salvar
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── PartialReceiveModal (feature 2026-05-15) ────────────────
+//
+// Modal pra registrar recebimento PARCIAL de uma parcela. Cliente paga
+// parte do valor (ex: R$ 3.000 de R$ 7.000), operador registra esse
+// recebimento — paid_amount acumula. Quando atinge amount total, status
+// vira PAGO automaticamente. Backend: PATCH /honorarios/payments/:id/
+// partial-receive.
+
+function PartialReceiveModal({
+  payment,
+  onSaved,
+  onCancel,
+}: {
+  payment: HonorarioPaymentItem;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const totalAmount = parseFloat(payment.amount);
+  const previousPaid = parseFloat(payment.paid_amount || '0');
+  const remainingBalance = Math.max(0, totalAmount - previousPaid);
+
+  const [amount, setAmount] = useState('');
+  const [paidDate, setPaidDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState('');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const numericAmount = parseFloat(amount) || 0;
+  const willClose = numericAmount >= remainingBalance && numericAmount > 0;
+
+  const handleSave = async () => {
+    if (!numericAmount || numericAmount <= 0) {
+      showError('Informe o valor recebido');
+      return;
+    }
+    if (numericAmount > remainingBalance + 0.01) {
+      showError(`Valor excede o saldo da parcela (${formatCurrency(remainingBalance)})`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.patch(`/honorarios/payments/${payment.id}/partial-receive`, {
+        amount: numericAmount,
+        payment_method: method || undefined,
+        paid_at: paidDate || undefined,
+        notes: notes || undefined,
+      });
+      showSuccess(willClose ? 'Parcela quitada!' : 'Recebimento parcial registrado');
+      onSaved();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || 'Erro ao registrar recebimento');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !saving && onCancel()} />
+      <div className="relative z-10 w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2 text-blue-400 text-[14px] font-bold">
+          <Coins size={16} /> Recebimento parcial
+        </div>
+
+        {/* Resumo da parcela */}
+        <div className="bg-accent/30 rounded-lg p-3 space-y-1.5 text-[12px]">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Total da parcela:</span>
+            <span className="font-bold text-foreground">{formatCurrency(totalAmount)}</span>
+          </div>
+          {previousPaid > 0 && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Já recebido:</span>
+              <span className="font-semibold text-emerald-400">{formatCurrency(previousPaid)}</span>
+            </div>
+          )}
+          <div className="flex justify-between border-t border-border pt-1.5">
+            <span className="text-muted-foreground">Saldo a receber:</span>
+            <span className="font-bold text-amber-400">{formatCurrency(remainingBalance)}</span>
+          </div>
+        </div>
+
+        {/* Form */}
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              Valor recebido <span className="text-red-400">*</span>
+            </label>
+            <div className="mt-1">
+              <CurrencyInput value={amount} onChange={setAmount} placeholder="0,00" autoFocus />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                Data
+              </label>
+              <input
+                type="date"
+                value={paidDate}
+                onChange={e => setPaidDate(e.target.value)}
+                className="mt-1 w-full px-3 py-2.5 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                Método
+              </label>
+              <div className="mt-1">
+                <CustomSelect value={method} onChange={setMethod} options={PAYMENT_METHODS} placeholder="Método" />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              Observação
+            </label>
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              rows={2}
+              className="mt-1 w-full px-3 py-2 rounded-xl bg-accent/30 border border-border text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/30 resize-none"
+              placeholder="Ex: PIX confirmado, prometeu o restante até dia 25..."
+            />
+          </div>
+        </div>
+
+        {/* Aviso quando valor quita a parcela */}
+        {willClose && numericAmount > 0 && (
+          <p className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2 flex items-center gap-1.5">
+            <Check size={12} />
+            Esse valor quita a parcela — vai ser marcada como PAGO.
+          </p>
+        )}
+
+        {/* Botoes */}
+        <div className="flex gap-2 pt-2">
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            className="flex-1 py-2.5 text-sm font-semibold border border-border rounded-lg hover:bg-accent transition-colors text-muted-foreground disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !numericAmount}
+            className="flex-1 py-2.5 text-sm font-bold bg-blue-500 text-white rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Coins size={14} />}
+            {willClose ? 'Quitar parcela' : 'Registrar recebimento'}
+          </button>
+        </div>
       </div>
     </div>
   );
