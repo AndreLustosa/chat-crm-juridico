@@ -5022,18 +5022,30 @@ function ProcessosPageContent() {
   const urgentCount = cases.filter(c => c.priority === 'URGENTE').length;
 
   return (
-    // Layout 2026-05-14 (fix Andre): a pagina agora SCROLLA na janela
-    // inteira (header + filtros + KPIs sobem junto quando rola). Antes
-    // usavamos h-screen + overflow-hidden que travava o scroll da pagina
-    // — so dava pra rolar o conteudo interno (cards das colunas), o que
-    // forcava o usuario a ver SEMPRE o cabecalho gigante. Agora min-h-screen
-    // permite expansao natural; o kanban tem altura calc viewport pra
-    // manter scroll horizontal/vertical interno.
-    <div className="flex min-h-screen bg-background font-sans antialiased text-foreground">
-      <main className="flex-1 flex flex-col">
+    // Layout 2026-05-14 (terceira iteracao do fix Andre):
+    //
+    // Modelo: viewport fechada (h-screen + overflow-hidden no root) MAS
+    // com um wrapper interno scrollavel (`flex-1 overflow-y-auto`) que
+    // contem header + filtros + KPIs + kanban TODOS no mesmo flow. Quando
+    // o operador rola, todo esse conjunto sobe junto — incluindo header.
+    // O kanban dentro tem altura FIXA via `h-[700px]` pra preservar:
+    //   - scroll horizontal entre colunas (~11 colunas × 272px > viewport)
+    //   - scroll vertical interno em cada coluna (cards podem extrapolar)
+    //
+    // Tentativas anteriores:
+    // - 9a8d252: min-h-0 chain — corrigiu scroll interno mas pagina toda
+    //   ficava travada (so cards rolavam).
+    // - 9ded589: header sticky + min-h-screen — pagina rolava mas o
+    //   sticky + flex h-calc quebraram scroll horizontal (min-w-0 missing
+    //   na chain) e cortaram colunas.
+    <div className="flex h-screen bg-background font-sans antialiased text-foreground overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Header — sticky no topo pra ficar acessivel durante scroll da pagina */}
-        <header className="sticky top-0 z-30 bg-background/95 backdrop-blur px-6 py-4 border-b border-border flex items-center gap-3 flex-wrap">
+        {/* Wrapper scrollavel — contem TODO o conteudo do main pra que role como uma pagina so */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+
+        {/* Header — parte do flow normal, rola junto com a pagina */}
+        <header className="px-6 py-4 border-b border-border flex items-center gap-3 flex-wrap">
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold text-foreground tracking-tight flex items-center gap-2">
               <BookOpen size={20} className="text-primary" />
@@ -5528,20 +5540,18 @@ function ProcessosPageContent() {
           /*
            * Kanban + DJEN Panel
            *
-           * Layout 2026-05-14 (fix Andre — segunda iteracao):
-           * pagina inteira agora SCROLLA na janela (header sticky sobe
-           * junto). O kanban precisa de altura DEFINIDA pra que o scroll
-           * horizontal (colunas) e vertical interno (cards) funcionem —
-           * por isso `h-[calc(100vh-220px)]` (descontando header sticky
-           * + filtros + KPIs aproximadamente) com piso `min-h-[500px]`
-           * pra nao colapsar em viewports baixos.
+           * Container com altura FIXA (h-[700px]) — necessario pra que o
+           * scroll horizontal das colunas (~11 × 272px > viewport) e
+           * scroll vertical interno (cards) funcionem. min-w-0 na chain
+           * permite que o conteudo flex extrapole horizontalmente sem
+           * o flex-1 do pai "comer" o overflow.
            */
-          <div className="flex h-[calc(100vh-220px)] min-h-[500px] overflow-hidden">
+          <div className="flex h-[700px] overflow-hidden">
             {/* Kanban Board */}
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
               <div
                 ref={boardRef}
-                className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none"
+                className="flex-1 min-h-0 min-w-0 overflow-x-auto overflow-y-hidden px-6 py-5 cursor-grab select-none"
                 onMouseDown={handleBoardMouseDown}
                 onMouseMove={handleBoardMouseMove}
                 onMouseUp={handleBoardMouseUp}
@@ -5626,6 +5636,9 @@ function ProcessosPageContent() {
 
           </div>
         )}
+
+        </div>
+        {/* /Wrapper scrollavel — fim do scroll continuo (header + KPIs + kanban) */}
       </main>
 
       {/* Modal: Agendar Perícia (ao mover para PERICIA_AGENDADA) */}
