@@ -2690,15 +2690,32 @@ export function ProcessoDetailPanel({
                                             <button
                                               disabled={!preview.title || !preview.date || creatingDjenTask === pub.id}
                                               onClick={async () => {
+                                                // Validacao explicita pra evitar 400 silencioso
+                                                if (!preview.title?.trim()) {
+                                                  toast.error('Informe o título do evento');
+                                                  return;
+                                                }
+                                                if (!preview.date) {
+                                                  toast.error('Informe a data do evento');
+                                                  return;
+                                                }
+                                                if (!preview.time) {
+                                                  toast.error('Informe a hora do evento');
+                                                  return;
+                                                }
                                                 setCreatingDjenTask(pub.id);
                                                 try {
                                                   const [y, m, d] = preview.date.split('-').map(Number);
                                                   const [h, mi] = preview.time.split(':').map(Number);
                                                   const start = new Date(Date.UTC(y, m-1, d, h, mi, 0));
+                                                  if (Number.isNaN(start.getTime())) {
+                                                    toast.error(`Data/hora inválida: ${preview.date} ${preview.time}`);
+                                                    return;
+                                                  }
                                                   const dur = preview.type === 'AUDIENCIA' ? 60 : preview.type === 'PERICIA' ? 120 : 30;
                                                   await api.post('/calendar/events', {
                                                     type: preview.type,
-                                                    title: preview.title,
+                                                    title: preview.title.trim(),
                                                     description: preview.description || undefined,
                                                     legal_case_id: legalCase.id,
                                                     lead_id: legalCase.lead?.id || undefined,
@@ -2708,10 +2725,18 @@ export function ProcessoDetailPanel({
                                                     // Feature 2026-05-12 (pedido Andre): vincula
                                                     djen_publication_id: pub.id,
                                                   });
+                                                  toast.success('Evento criado no calendário');
                                                   setDjenTaskCreated(prev => ({ ...prev, [pub.id]: true }));
                                                   setDjenEventPreview(prev => { const n = { ...prev }; delete n[pub.id]; return n; });
                                                   fetchTasks();
-                                                } catch {} finally { setCreatingDjenTask(null); }
+                                                } catch (e: any) {
+                                                  // Bug fix 2026-05-15 (Andre reportou que botao nao funciona):
+                                                  // catch silencioso engolia 400/500. Agora toast com erro real.
+                                                  const msg = e?.response?.data?.message
+                                                    || e?.message
+                                                    || 'Erro ao criar evento. Tente novamente.';
+                                                  toast.error(Array.isArray(msg) ? msg.join('; ') : msg);
+                                                } finally { setCreatingDjenTask(null); }
                                               }}
                                               className="flex-1 py-1.5 text-xs font-semibold bg-emerald-500/80 text-white rounded-lg hover:bg-emerald-500 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
                                             >
