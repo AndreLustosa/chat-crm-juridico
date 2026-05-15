@@ -48,15 +48,22 @@ export class ConversationsService {
 
     // ─── Filtro por clientMode (modo Leads vs Clientes) ──────────────────
     // Visibilidade controlada por lead.stage e lead.is_client:
-    //   - Aba Leads (clientMode=false): is_client=false, exclui FINALIZADO e PERDIDO
+    //   - Aba Leads (clientMode=false): is_client=false, exclui ENCERRADO/FINALIZADO/PERDIDO
     //   - Aba Clientes (clientMode=true): is_client=true (todos os clientes)
-    //   - Legado (clientMode=undefined): exclui apenas PERDIDO
+    //   - Legado (clientMode=undefined): exclui ENCERRADO/FINALIZADO/PERDIDO
+    //
+    // Bug fix 2026-05-15: ENCERRADO foi adicionado a todos os notIn. Antes,
+    // leads com processo arquivado (stage='ENCERRADO' setado por
+    // legal-cases.service.ts:archive()) ficavam visiveis na aba Leads —
+    // tinham que aparecer ARQUIVADOS / OCULTOS. Andre reportou que cliente
+    // "Andreia" (processo arquivado) continuou em Leads pos-archive.
+    const HIDDEN_STAGES = ['PERDIDO', 'FINALIZADO', 'ENCERRADO'];
     if (clientMode === true) {
       where.lead = { is_client: true };
     } else if (clientMode === false) {
-      where.lead = { is_client: false, stage: { notIn: ['PERDIDO', 'FINALIZADO'] } };
+      where.lead = { is_client: false, stage: { notIn: HIDDEN_STAGES } };
     } else {
-      where.lead = { stage: { notIn: ['PERDIDO', 'FINALIZADO'] } };
+      where.lead = { stage: { notIn: HIDDEN_STAGES } };
     }
 
     // ─── Controle de acesso por role (multi-role aware) ────────────────
@@ -653,7 +660,8 @@ export class ConversationsService {
   }
 
   async countOpen(userId?: string): Promise<number> {
-    const where: any = { lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO'] }, is_client: false } };
+    // Mesmo notIn da query principal — inclui ENCERRADO (bug fix 2026-05-15)
+    const where: any = { lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] }, is_client: false } };
     if (userId) {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },

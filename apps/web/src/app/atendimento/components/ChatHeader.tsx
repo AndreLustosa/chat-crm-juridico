@@ -443,6 +443,26 @@ export function ChatHeader({
                       <span>{s.label}</span>
                     </button>
                   ))}
+                  {/*
+                    Arquivar contato (feature 2026-05-15): atalho mais explicito
+                    que mover pra "Finalizado" — Andre reportou "nao tenho como
+                    arquivar o contato". Backend filtra leads em FINALIZADO/
+                    ENCERRADO/PERDIDO da inbox, entao mover pra FINALIZADO ja
+                    arquiva visualmente. Confirmacao protege de cliques acidentais.
+                  */}
+                  <div className="border-t border-border/50 mt-1 pt-1">
+                    <button
+                      onClick={() => {
+                        if (confirm('Arquivar este contato?\n\nEle vai sair da lista de Leads/Clientes da Inbox. Se ele responder uma mensagem, a IA continua respondendo automaticamente, mas o contato permanece arquivado.')) {
+                          onChangeStage('FINALIZADO');
+                        }
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-amber-500/10 transition-colors flex items-center gap-2 text-[12px] text-amber-500 font-semibold"
+                    >
+                      <span>📦</span>
+                      <span>Arquivar contato</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

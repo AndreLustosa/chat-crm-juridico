@@ -263,9 +263,17 @@ export class EvolutionService implements OnApplicationBootstrap {
         inboxId, // isola notificacao de lead novo ao inbox do setor
       );
 
-      // 1b. Lead PERDIDO/FINALIZADO voltou a falar → reativar para QUALIFICANDO
+      // 1b. Lead PERDIDO voltou a falar → reativar para QUALIFICANDO
       // Sem isso, a conversa existe mas fica invisível no inbox (filtro de stage).
-      if (!isFromMe && ['PERDIDO', 'FINALIZADO'].includes(lead.stage)) {
+      //
+      // Bug fix 2026-05-15: FINALIZADO foi REMOVIDO desta lista. Andre quer
+      // que contatos arquivados (stage=FINALIZADO/ENCERRADO via processo
+      // arquivado OU botao "Arquivar contato") permanecam ocultos mesmo
+      // quando respondem. A IA continua respondendo via conv.ai_mode, mas o
+      // lead nao volta pra inbox ativo. Antes, qualquer cliente com processo
+      // finalizado que mandasse "obrigado" reaparecia em Leads, criando
+      // ruido visual e re-trabalho pro operador.
+      if (!isFromMe && ['PERDIDO'].includes(lead.stage)) {
         // Bug fix 2026-05-10 (Webhooks PR3 #18): preservar loss_reason
         // em LeadStageHistory ANTES de zerar. Antes informacao era
         // perdida — analise post-incidente perdia o motivo da perda
