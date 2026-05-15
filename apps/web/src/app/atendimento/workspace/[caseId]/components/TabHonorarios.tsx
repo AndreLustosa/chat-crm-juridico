@@ -243,6 +243,12 @@ export default function TabHonorarios({ caseId }: { caseId: string }) {
   };
 
   // ─── Summary ──────────────────────────────────────────
+  //
+  // Bug fix 2026-05-15 (Andre): recebimento parcial nao constava em
+  // "Recebido" — parcelas PARCIAL caiam no else e iam pra pending com
+  // valor CHEIO, sem descontar o paid_amount ja recebido. Agora soma
+  // paid_amount em received e (amount - paid_amount) no respectivo
+  // bucket (pending ou overdue).
 
   const summary = honorarios.reduce(
     (acc, h) => {
@@ -250,9 +256,21 @@ export default function TabHonorarios({ caseId }: { caseId: string }) {
       acc.contracted += total;
       h.payments.forEach(p => {
         const amount = parseFloat(p.amount);
-        if (p.status === 'PAGO') acc.received += amount;
-        else if (p.status === 'ATRASADO') acc.overdue += amount;
-        else acc.pending += amount;
+        const paidAmount = parseFloat(p.paid_amount || '0');
+        if (p.status === 'PAGO') {
+          acc.received += amount;
+        } else if (p.status === 'PARCIAL') {
+          acc.received += paidAmount;
+          acc.pending += amount - paidAmount;
+        } else if (p.status === 'ATRASADO') {
+          // Atrasada pode ter recebimento parcial tambem
+          acc.received += paidAmount;
+          acc.overdue += amount - paidAmount;
+        } else {
+          // PENDENTE — defensivo: subtrai paid_amount caso exista
+          acc.received += paidAmount;
+          acc.pending += amount - paidAmount;
+        }
       });
       return acc;
     },
@@ -661,9 +679,13 @@ function HonorarioCard({
 
   const paidCount = honorario.payments.filter(p => p.status === 'PAGO').length;
   const totalPayments = honorario.payments.length;
-  const totalPaid = honorario.payments
-    .filter(p => p.status === 'PAGO')
-    .reduce((s, p) => s + parseFloat(p.amount), 0);
+  // Bug fix 2026-05-15: somar paid_amount de parcelas PARCIAL/ATRASADO
+  // tambem (cliente reportou que recebimento parcial nao constava no
+  // progresso). Antes filtrava so PAGO.
+  const totalPaid = honorario.payments.reduce((s, p) => {
+    if (p.status === 'PAGO') return s + parseFloat(p.amount);
+    return s + parseFloat(p.paid_amount || '0');
+  }, 0);
 
   const typeLabel = HONORARIO_TYPES.find(t => t.id === honorario.type)?.label || honorario.type;
 
