@@ -530,14 +530,24 @@ export class LegalCasesService {
       // "Processo Finalizado") — soava como negativa ao cliente. Agora a IA
       // gera mensagem personalizada conforme o motivo + dados do caso.
       const msg = await this.generateArchiveMessage(legalCase as any, reason);
+      const phone = legalCase.lead.phone;
+      const instance = legalCase.conversation?.instance_name ?? undefined;
       try {
-        await this.whatsappService.sendText(
-          legalCase.lead.phone,
-          msg,
-          legalCase.conversation?.instance_name ?? undefined,
-        );
+        await this.whatsappService.sendText(phone, msg, instance);
       } catch (e) {
         this.logger.error('Erro ao enviar notificação de arquivamento:', e);
+      }
+
+      // Feature 2026-05-15: envia logo do escritorio APOS o texto, pra
+      // reforcar marca e dar tom de despedida formal. Override via env
+      // BRANDING_LOGO_URL pra trocar imagem sem deploy. Falha aqui nao
+      // bloqueia — texto principal ja foi enviado.
+      try {
+        const logoUrl = process.env.BRANDING_LOGO_URL
+          || `${process.env.FRONTEND_BASE_URL || 'https://andrelustosaadvogados.com.br'}/logo_andre_lustosa.png`;
+        await this.whatsappService.sendMedia(phone, 'image', logoUrl, '', instance);
+      } catch (e: any) {
+        this.logger.warn(`[ARCHIVE] Falha ao enviar logo apos texto: ${e?.message}`);
       }
     }
 
@@ -619,7 +629,7 @@ REGRAS ABSOLUTAS:
      "sem retorno") -> tom formal mas cordial
 6. SEMPRE incluir no final:
    - Site: www.andrelustosaadvogados.com.br
-   - Instagram: @andrelustosaadvogados
+   - Instagram: https://www.instagram.com/andrelustosaadvogados/
 7. NAO use frases burocraticas ("venho por meio desta", "informamos que apos
    analise de viabilidade juridica")
 8. NAO invente fatos do processo que nao estejam nos DADOS abaixo
@@ -662,10 +672,10 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
     const isPositive = /acordo|sentenca favoravel|ganho|vit[oó]ria|alvar[aá]|finaliza|conclu[ií]|transitado|cumprido|[eê]xito|procedente/i.test(reason);
 
     if (isPositive) {
-      return `Olá, ${leadName}! Tudo bem?\n\nGostaria de comunicar que o seu processo foi *concluído* com sucesso. Foi um prazer poder atendê-lo(a) e contar com a sua confiança ao longo dessa jornada.\n\nNosso escritório segue à disposição para qualquer demanda futura. Se possível, nos siga nas redes:\n\n🌐 www.andrelustosaadvogados.com.br\n📷 Instagram: @andrelustosaadvogados\n\nUm forte abraço!`;
+      return `Olá, ${leadName}! Tudo bem?\n\nGostaria de comunicar que o seu processo foi *concluído* com sucesso. Foi um prazer poder atendê-lo(a) e contar com a sua confiança ao longo dessa jornada.\n\nNosso escritório segue à disposição para qualquer demanda futura. Se possível, nos siga nas redes:\n\n🌐 www.andrelustosaadvogados.com.br\n📷 Instagram: https://www.instagram.com/andrelustosaadvogados/\n\nUm forte abraço!`;
     }
 
-    return `Prezado(a) ${leadName},\n\nInformo que o seu processo foi encerrado em nosso sistema. Motivo: ${reason}.\n\nAgradecemos a confiança depositada em nosso escritório. Permanecemos à disposição para futuras demandas ou qualquer esclarecimento.\n\n🌐 www.andrelustosaadvogados.com.br\n📷 Instagram: @andrelustosaadvogados\n\nAtenciosamente,\nLustosa Advogados`;
+    return `Prezado(a) ${leadName},\n\nInformo que o seu processo foi encerrado em nosso sistema. Motivo: ${reason}.\n\nAgradecemos a confiança depositada em nosso escritório. Permanecemos à disposição para futuras demandas ou qualquer esclarecimento.\n\n🌐 www.andrelustosaadvogados.com.br\n📷 Instagram: https://www.instagram.com/andrelustosaadvogados/\n\nAtenciosamente,\nLustosa Advogados`;
   }
 
   async unarchive(id: string, tenantId?: string) {
