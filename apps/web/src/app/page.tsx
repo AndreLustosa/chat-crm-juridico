@@ -56,10 +56,11 @@ const staticContent = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
-  const title = 'André Lustosa Advogados | Escritório Digital';
+  const title = 'André Lustosa Advogados | Advocacia em Arapiraca e Online';
   const description =
-    'Escritório de advocacia atuando em todo o Brasil. Direito Trabalhista, Previdenciário, Consumidor e Civil. Agende sua consulta online.';
+    'Atendimento jurídico em Arapiraca e online para casos trabalhistas, previdenciários, cíveis e do consumidor. Fale com a equipe André Lustosa Advogados.';
   const url = `${baseUrl}/`;
+  const image = `${baseUrl}/landing/Design sem nome (35).png`;
   return {
     title,
     description,
@@ -71,16 +72,24 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: 'André Lustosa Advogados',
       locale: 'pt_BR',
       type: 'website',
-      images: [{ url: '/logo_andre_lustosa.png', width: 1200, height: 630, alt: title }],
+      images: [{ url: image, width: 2048, height: 1024, alt: 'André Lustosa Advogados em escritório de advocacia' }],
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: ['/logo_andre_lustosa.png'],
+      images: [image],
       creator: '@andrelustosa',
     },
-    robots: { index: true, follow: true },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-image-preview': 'large',
+      },
+    },
   };
 }
 
@@ -101,11 +110,13 @@ const displayFont = localFont({
 
 export default function Home() {
   const url = `${baseUrl}/`;
+  const primaryImage = `${baseUrl}/landing/Design sem nome (35).png`;
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'LegalService',
     name: 'André Lustosa Advogados',
-    image: `${baseUrl}/logo_andre_lustosa.png`,
+    image: primaryImage,
+    logo: `${baseUrl}/logo_andre_lustosa.png`,
     url,
     telephone: '+5582996390799',
     priceRange: '$$$',
@@ -133,10 +144,35 @@ export default function Home() {
       name: 'Brasil',
     },
     serviceType: ['Direito Trabalhista', 'Direito Previdenciário', 'Direito do Consumidor', 'Direito Civil'],
+    founder: {
+      '@type': 'Person',
+      name: 'André Lustosa',
+      jobTitle: 'Advogado',
+      image: primaryImage,
+      url,
+    },
     sameAs: [
       'https://www.instagram.com/andrelustosaadvogados/',
       'https://www.facebook.com/andrelustosa',
     ],
+  };
+
+  const webPageJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: 'André Lustosa Advogados | Advocacia em Arapiraca e Online',
+    url,
+    primaryImageOfPage: {
+      '@type': 'ImageObject',
+      url: primaryImage,
+      width: 2048,
+      height: 1024,
+    },
+    about: {
+      '@type': 'LegalService',
+      name: 'André Lustosa Advogados',
+      url,
+    },
   };
 
   const faqJsonLd = {
@@ -197,6 +233,11 @@ export default function Home() {
         id="json-ld-faq"
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+      />
+      <Script
+        id="json-ld-webpage"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(webPageJsonLd) }}
       />
       <LPTracker />
       <HomeTemplate
