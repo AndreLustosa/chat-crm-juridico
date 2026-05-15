@@ -1320,7 +1320,9 @@ export function ProcessoDetailPanel({
   // Archive
   const [showArchive, setShowArchive] = useState(false);
   const [archiveReason, setArchiveReason] = useState('');
-  const [notifyLead, setNotifyLead] = useState(false);
+  // Default true (Andre 2026-05-15): cliente quase sempre deve ser
+  // notificado quando processo eh arquivado. Se nao quiser, desmarca antes.
+  const [notifyLead, setNotifyLead] = useState(true);
   const [archiving, setArchiving] = useState(false);
 
   // Tasks
