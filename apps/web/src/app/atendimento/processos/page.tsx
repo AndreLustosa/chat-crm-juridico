@@ -1548,21 +1548,40 @@ export function ProcessoDetailPanel({
     } catch {} finally { setSaving(false); }
   };
 
+  // Bug fix 2026-05-14: catch silencioso engolia 403 (so ADMIN pode
+  // arquivar) e qualquer outro erro do backend. Usuario via o botao
+  // virar loading e voltar sem feedback. Agora mostra toast de erro
+  // com mensagem real do servidor + valida reason vazio antes de enviar.
   const handleArchive = async () => {
+    if (!archiveReason.trim()) {
+      toast.error('Informe o motivo do arquivamento.');
+      return;
+    }
     setArchiving(true);
     try {
-      await api.patch(`/legal-cases/${legalCase.id}/archive`, { reason: archiveReason, notifyLead });
+      await api.patch(`/legal-cases/${legalCase.id}/archive`, {
+        reason: archiveReason.trim(),
+        notifyLead,
+      });
+      toast.success('Processo arquivado');
       onRefresh();
       onClose();
-    } catch {} finally { setArchiving(false); }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Erro ao arquivar processo. Verifique se você tem permissão.');
+    } finally {
+      setArchiving(false);
+    }
   };
 
   const handleUnarchive = async () => {
     try {
       await api.patch(`/legal-cases/${legalCase.id}/unarchive`);
+      toast.success('Processo reativado');
       onRefresh();
       onClose();
-    } catch {}
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Erro ao reativar processo.');
+    }
   };
 
   const handleTaskStatusChange = async (taskId: string, status: string) => {
