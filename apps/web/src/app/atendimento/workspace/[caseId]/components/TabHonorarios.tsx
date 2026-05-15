@@ -777,59 +777,69 @@ function HonorarioCard({
           {/* Payments list */}
           <div className="px-5 pt-4 pb-2">
             {/*
-              Grid 2026-05-14: ultima coluna AÇÕES agora `minmax(160px,auto)`
-              em vez de `auto` puro — antes os botoes editar/excluir podiam
-              ficar truncados em painel estreito (cliente reportou que so via
-              cobranca + check). 160px = 4 botoes × ~28px + gaps.
+              Refatoracao 2026-05-14 (terceira iteracao): painel lateral
+              eh estreito (~600px) — grid horizontal com 7 colunas + 4
+              botoes de acao nao cabia. Acoes ficavam clipadas pelo
+              overflow do drawer e o operador so via o primeiro icone
+              (cobranca). Agora cada parcela vira um CARD vertical:
+              - Linha 1: numero + valor + status (sempre visivel)
+              - Linha 2: vencimento + metodo + pago em
+              - Linha 3: SEMPRE 4 botoes de acao (cobranca / pago / editar / excluir)
+                em flex row. Garantido caber porque sao 4 botoes pequenos
+                de ~28px = 112px + gaps em ~140px no total.
             */}
-            <div className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_minmax(160px,auto)] gap-2 pb-2 border-b border-border/50">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">#</span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor</span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vencimento</span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Status</span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Método</span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pago em</span>
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider text-right">Ações</span>
-            </div>
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
+              Parcelas
+            </p>
 
             {honorario.payments.map((p, idx) => {
               const interest = calcInterest(p);
               return (
-                <div key={p.id} className="border-b border-border/20 last:border-0">
-                <div
-                  className="grid grid-cols-[32px_1fr_1fr_80px_90px_90px_minmax(160px,auto)] gap-2 items-center py-2.5 hover:bg-accent/10 transition-colors rounded-lg"
-                >
-                  <span className="text-[11px] font-mono text-muted-foreground">{idx + 1}</span>
-                  <div>
-                    <span className="text-[12px] font-bold text-foreground">{formatCurrency(p.amount)}</span>
+                <div key={p.id} className="border border-border/40 rounded-lg p-3 mb-2 hover:bg-accent/10 transition-colors">
+                  {/* Linha 1: # + valor + status */}
+                  <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                    <span className="text-[11px] font-mono text-muted-foreground shrink-0">#{idx + 1}</span>
+                    <span className="text-[13px] font-bold text-foreground shrink-0">{formatCurrency(p.amount)}</span>
                     {interest > 0 && (
-                      <span className="text-[10px] text-red-400 ml-1">+ {formatCurrency(interest)} juros</span>
+                      <span className="text-[10px] text-red-400">+ {formatCurrency(interest)} juros</span>
+                    )}
+                    <span className="ml-auto shrink-0">
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border ${STATUS_COLORS[p.status] || 'bg-accent/30 text-muted-foreground border-border'}`}>
+                        {STATUS_LABEL[p.status] || p.status}
+                      </span>
+                    </span>
+                  </div>
+
+                  {/* Linha 2: metadados (vencimento, metodo, pago em) */}
+                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap mb-2">
+                    <span className="flex items-center gap-1">
+                      <Calendar size={10} />
+                      {p.due_date ? formatDate(p.due_date) : <span className="italic">Alvará</span>}
+                    </span>
+                    {p.payment_method && (
+                      <span>Método: <span className="text-foreground">{p.payment_method}</span></span>
+                    )}
+                    {p.paid_at && (
+                      <span>Pago em: <span className="text-emerald-400">{formatDate(p.paid_at)}</span></span>
                     )}
                   </div>
-                  <span className="text-[11px] text-foreground">{p.due_date ? formatDate(p.due_date) : <span className="text-muted-foreground/50 italic">Alvará</span>}</span>
-                  <span>
-                    <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border ${STATUS_COLORS[p.status] || 'bg-accent/30 text-muted-foreground border-border'}`}>
-                      {STATUS_LABEL[p.status] || p.status}
-                    </span>
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">{p.payment_method || '—'}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {p.paid_at ? formatDate(p.paid_at) : '—'}
-                  </span>
-                  <div className="flex items-center justify-end gap-1 flex-nowrap shrink-0">
+
+                  {/* Linha 3: botoes de acao — sempre visiveis */}
+                  <div className="flex items-center gap-1.5 pt-2 border-t border-border/30">
                     {p.status !== 'PAGO' && (
                       <>
-                        {/* Charge dropdown */}
+                        {/* Cobranca: dropdown PIX/Boleto/Cartao */}
                         <div className="relative shrink-0" ref={chargeMenuId === p.id ? menuRef : undefined}>
                           <button
                             onClick={() => setChargeMenuId(chargeMenuId === p.id ? null : p.id)}
-                            className="p-1.5 rounded-lg hover:bg-accent/40 text-primary transition-colors"
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-primary/30 text-primary hover:bg-primary/10 transition-colors text-[11px] font-semibold"
                             title="Gerar cobrança"
                           >
-                            {chargingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
+                            {chargingId === p.id ? <Loader2 size={12} className="animate-spin" /> : <CreditCard size={12} />}
+                            Cobrar
                           </button>
                           {chargeMenuId === p.id && (
-                            <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl shadow-black/20 py-1 min-w-[120px]">
+                            <div className="absolute left-0 top-full mt-1 z-50 bg-card border border-border rounded-xl shadow-xl shadow-black/20 py-1 min-w-[120px]">
                               <button onClick={() => handleCreateCharge(p.id, 'PIX')} className="w-full text-left px-3 py-2 text-[11px] text-foreground hover:bg-accent/30 transition-colors">PIX</button>
                               <button onClick={() => handleCreateCharge(p.id, 'BOLETO')} className="w-full text-left px-3 py-2 text-[11px] text-foreground hover:bg-accent/30 transition-colors">Boleto</button>
                               <button onClick={() => handleCreateCharge(p.id, 'CREDIT_CARD')} className="w-full text-left px-3 py-2 text-[11px] text-foreground hover:bg-accent/30 transition-colors">Cartão</button>
@@ -839,33 +849,33 @@ function HonorarioCard({
                         <button
                           onClick={() => handleMarkPaid(p.id)}
                           disabled={markingId === p.id}
-                          className="p-1.5 rounded-lg hover:bg-emerald-500/15 text-emerald-400 transition-colors disabled:opacity-50 shrink-0"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 text-[11px] font-semibold shrink-0"
                           title="Marcar como pago"
                         >
-                          {markingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                          {markingId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                          Pago
                         </button>
                       </>
                     )}
-                    {/* Editar parcela — abre form inline abaixo (feature 2026-05-14).
-                        Borda visivel pra ficar evidente; antes Pencil sumia
-                        em painel estreito (cliente reportou). */}
+                    {/* Editar parcela — sempre visivel */}
                     <button
                       onClick={() => setEditingPaymentId(editingPaymentId === p.id ? null : p.id)}
-                      className={`p-1.5 rounded-lg border transition-colors shrink-0 ${editingPaymentId === p.id ? 'bg-blue-500/20 border-blue-500/40 text-blue-400' : 'border-blue-500/30 text-blue-400 hover:bg-blue-500/15'}`}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md border transition-colors shrink-0 text-[11px] font-semibold ${editingPaymentId === p.id ? 'bg-blue-500/20 border-blue-500/40 text-blue-400' : 'border-blue-500/30 text-blue-400 hover:bg-blue-500/10'}`}
                       title="Editar parcela"
                     >
-                      <Pencil size={14} />
+                      <Pencil size={12} />
+                      Editar
                     </button>
                     <button
                       onClick={() => handleDeletePayment(p.id)}
                       disabled={deletingPaymentId === p.id}
-                      className="p-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/15 transition-colors disabled:opacity-50 shrink-0"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50 text-[11px] font-semibold shrink-0 ml-auto"
                       title="Excluir parcela"
                     >
-                      {deletingPaymentId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {deletingPaymentId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      Excluir
                     </button>
                   </div>
-                </div>
                 {/* Form de edicao inline (feature 2026-05-14) */}
                 {editingPaymentId === p.id && (
                   <EditPaymentForm
