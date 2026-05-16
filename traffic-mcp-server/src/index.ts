@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { config } from './config.js';
 import { registerCrmTrafficTools } from './tools/crm.js';
+import { logger } from './utils/logger.js';
 import {
   authorizeHandler,
   oauthMetadataHandler,
@@ -118,6 +119,15 @@ app.post('/oauth/revoke', revokeHandler);
 app.use('/mcp', async (req, res, next) => {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
   if (!token || !(await verifyMcpBearerToken(token))) {
+    // Log explicito: ajuda a diferenciar "Claude descobrindo auth" (normal,
+    // 1x por sessao) de "cliente com token expirado tentando varias vezes"
+    // (anormal). User-agent ajuda a identificar qual cliente.
+    logger.info('mcp_unauthorized', {
+      method: req.method,
+      origin: req.headers.origin,
+      user_agent: req.headers['user-agent'],
+      has_token: Boolean(token),
+    });
     res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${protectedResourceMetadataUrl()}"`);
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -125,6 +135,15 @@ app.use('/mcp', async (req, res, next) => {
 });
 
 app.post('/mcp', async (req, res) => {
+  const startedAt = Date.now();
+  const reqId = `mcp_${startedAt.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  logger.info('mcp_request_start', {
+    request_id: reqId,
+    method_jsonrpc: req.body?.method,
+    id: req.body?.id,
+    origin: req.headers.origin,
+  });
+
   const server = await buildServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -133,8 +152,18 @@ app.post('/mcp', async (req, res) => {
   try {
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
-  } catch (error) {
-    console.error('[traffic-mcp-server] request error', error);
+    logger.info('mcp_request_end', {
+      request_id: reqId,
+      duration_ms: Date.now() - startedAt,
+      status: 'ok',
+    });
+  } catch (error: any) {
+    logger.error('mcp_request_end', {
+      request_id: reqId,
+      duration_ms: Date.now() - startedAt,
+      status: 'error',
+      error_message: String(error?.message ?? error).slice(0, 500),
+    });
     if (!res.headersSent) {
       res.status(500).json({ error: 'Erro interno no MCP Server' });
     }

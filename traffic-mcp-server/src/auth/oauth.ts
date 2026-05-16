@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { config } from '../config.js';
+import { logger } from '../utils/logger.js';
 
 type RegisteredClient = {
   client_id: string;
@@ -169,6 +170,13 @@ function metadata() {
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
+    // RFC 7591 DCR endpoint. Sem isso anunciado aqui, clientes que dependem
+    // de Dynamic Client Registration (ex: Claude.ai quando voce nao preenche
+    // client_id/secret manualmente) abortam o fluxo silenciosamente com
+    // "Couldn't reach the MCP server" — eles nao tem onde registrar e
+    // sem client_id nao seguem pra /authorize. Achado durante debug ao
+    // vivo da IA da VPS em 2026-05-16.
+    registration_endpoint: `${base}/oauth/register`,
     revocation_endpoint: `${base}/oauth/revoke`,
     response_types_supported: ['code'],
     response_modes_supported: ['query'],
@@ -452,10 +460,23 @@ export function protectedResourceMetadataHandler(_req: Request, res: Response) {
 }
 
 export function registerClientHandler(req: Request, res: Response) {
+  const origin = req.headers.origin;
+  const body = req.body ?? {};
   try {
-    const client = trafficOAuthProvider.registerClient(req.body ?? {});
+    const client = trafficOAuthProvider.registerClient(body);
+    logger.info('oauth_dcr_register', {
+      origin,
+      client_id: client.client_id,
+      client_name: client.client_name,
+      redirect_uris_count: client.redirect_uris.length,
+    });
     res.status(201).json(client);
   } catch (error) {
+    logger.warn('oauth_dcr_register_failed', {
+      origin,
+      reason: error instanceof Error ? error.message : 'unknown',
+      has_redirect_uris: Array.isArray(body.redirect_uris),
+    });
     oauthError(res, 400, 'invalid_client_metadata', error instanceof Error ? error.message : 'metadata invalida');
   }
 }
@@ -468,10 +489,26 @@ export async function authorizeHandler(req: Request, res: Response) {
     trafficOAuthProvider.getClient(input.client_id);
   const state = typeof input.state === 'string' ? input.state : undefined;
 
+  logger.info('oauth_authorize_attempt', {
+    http_method: req.method,
+    origin: req.headers.origin,
+    client_id: typeof input.client_id === 'string' ? input.client_id : null,
+    redirect_uri: redirectUri,
+    has_client: Boolean(client),
+    response_type: input.response_type,
+    has_code_challenge: typeof input.code_challenge === 'string',
+  });
+
   if (!client) {
+    logger.warn('oauth_authorize_rejected', { reason: 'invalid_client', client_id: input.client_id });
     return oauthError(res, 400, 'invalid_client', 'client_id invalido');
   }
   if (!redirectUri || !client.redirect_uris.includes(redirectUri)) {
+    logger.warn('oauth_authorize_rejected', {
+      reason: 'redirect_uri_not_registered',
+      redirect_uri: redirectUri,
+      registered_uris_count: client.redirect_uris.length,
+    });
     return oauthError(res, 400, 'invalid_request', 'redirect_uri nao registrado');
   }
   if (input.response_type !== 'code') {
@@ -508,10 +545,21 @@ export async function tokenHandler(req: Request, res: Response) {
         ? { clientId: trafficOAuthProvider.getRefreshTokenClientId(body.refresh_token), clientSecret: postedClientSecret }
         : undefined);
     const client = credentials ? trafficOAuthProvider.getClient(credentials.clientId) : undefined;
+
+    logger.info('oauth_token_attempt', {
+      origin: req.headers.origin,
+      grant_type: body.grant_type,
+      client_id: credentials?.clientId ?? null,
+      has_client: Boolean(client),
+      has_client_secret: Boolean(credentials?.clientSecret),
+    });
+
     if (!credentials || !client) {
+      logger.warn('oauth_token_rejected', { reason: 'invalid_client', client_id: credentials?.clientId ?? null });
       return oauthError(res, 401, 'invalid_client', 'client_id invalido');
     }
     if (!(await validateClientCredentials(client, credentials.clientSecret))) {
+      logger.warn('oauth_token_rejected', { reason: 'invalid_secret', client_id: credentials.clientId });
       return oauthError(res, 401, 'invalid_client', 'client_secret invalido');
     }
 
