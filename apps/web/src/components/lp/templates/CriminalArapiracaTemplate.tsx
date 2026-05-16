@@ -48,6 +48,7 @@ const practiceAreas = [
     title: "Medidas protetivas",
     description:
       "Atuação em casos ligados à Lei Maria da Penha, com análise cuidadosa dos fatos e provas.",
+    href: "/arapiraca/criminal/medidas-protetivas",
   },
   {
     icon: Fingerprint,
@@ -212,7 +213,7 @@ export function CriminalArapiracaTemplate() {
           </div>
 
           <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {practiceAreas.map(({ icon: Icon, title, description }) => (
+            {practiceAreas.map(({ icon: Icon, title, description, href }) => (
               <article
                 key={title}
                 className="rounded-lg border border-white/10 bg-[#141414] p-6 transition hover:border-[#a89048]/60 hover:bg-[#171513]"
@@ -224,6 +225,15 @@ export function CriminalArapiracaTemplate() {
                 <p className="mt-3 leading-relaxed text-[#aaa397]">
                   {description}
                 </p>
+                {href && (
+                  <a
+                    href={href}
+                    className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-[#d6bd74] transition hover:text-white"
+                  >
+                    Ver página específica
+                    <ArrowRight size={16} />
+                  </a>
+                )}
               </article>
             ))}
           </div>
