@@ -431,6 +431,146 @@ export class RemoveConversionActionDto {
   validate_only?: boolean;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 2 do backlog (2026-05-17) — Extensions/Assets + Quality Score
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cria Asset novo no Google Ads. Tool unificada — `type` define qual
+ * sub-message do Asset eh populado.
+ *
+ * Tipos suportados nesta entrega:
+ *   - SITELINK         → sitelink_asset (link_text + final_url)
+ *   - CALLOUT          → callout_asset (text)
+ *   - STRUCTURED_SNIPPET → structured_snippet_asset (header + values)
+ *   - CALL             → call_asset (phone_number + country_code) — ja existe traffic_attach_call_asset
+ *   - LOCATION         → location_asset (place_id) — limitado
+ *   - PRICE            → price_asset (type + items)
+ *   - PROMOTION        → promotion_asset (occasion + percent_off ou money_amount)
+ *   - LEAD_FORM        → lead_form_asset (business_name + call_to_action_type + form_fields)
+ *
+ * Cada tipo tem fields obrigatorios diferentes. `data` eh um JSON livre
+ * com o payload especifico do tipo. Validacao detalhada no service.
+ */
+export class CreateExtensionDto {
+  @IsString()
+  @IsIn([
+    'SITELINK',
+    'CALLOUT',
+    'STRUCTURED_SNIPPET',
+    'CALL',
+    'LOCATION',
+    'PRICE',
+    'PROMOTION',
+    'LEAD_FORM',
+  ])
+  type!: string;
+
+  /** Payload especifico do tipo (sitelink: {text, final_url, description1, description2}, etc). */
+  data!: Record<string, any>;
+
+  /**
+   * Se passado, ja anexa em conta/campanha/ad_group apos criar. Atomico
+   * (cria + attach na mesma chamada pra evitar asset orfao).
+   */
+  @IsString()
+  @IsIn(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP'])
+  @IsOptional()
+  attach_level?: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+
+  @IsString()
+  @IsOptional()
+  campaign_id?: string;
+
+  @IsString()
+  @IsOptional()
+  ad_group_id?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Anexa Asset existente a conta/campanha/ad_group. Asset precisa ja
+ * existir (foi criado via traffic_create_extension).
+ */
+export class AttachExtensionDto {
+  /** resource_name do asset OU UUID interno se cacheado localmente. */
+  @IsString()
+  asset_id!: string;
+
+  @IsString()
+  @IsIn(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP'])
+  level!: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+
+  @IsString()
+  @IsOptional()
+  campaign_id?: string;
+
+  @IsString()
+  @IsOptional()
+  ad_group_id?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Desanexa um Asset de conta/campanha/ad_group. NAO remove o asset em si
+ * — so o vinculo (CustomerAsset/CampaignAsset/AdGroupAsset eh removido).
+ * Pra remover o asset, use traffic_remove_extension.
+ */
+export class DetachExtensionDto {
+  @IsString()
+  asset_id!: string;
+
+  @IsString()
+  @IsIn(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP'])
+  level!: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+
+  @IsString()
+  @IsOptional()
+  campaign_id?: string;
+
+  @IsString()
+  @IsOptional()
+  ad_group_id?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Remove (soft-delete) um Asset propriamente. Detaches em cascata sao
+ * automaticos no Google.
+ */
+export class RemoveExtensionDto {
+  @IsString()
+  asset_id!: string;
+
+  @IsBoolean()
+  confirm!: boolean;
+
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
 /**
  * Trigger manual do cron Enhanced Conversions for Leads upload.
  * Roda fora do schedule diario (04h Maceio) — util pra processar leads

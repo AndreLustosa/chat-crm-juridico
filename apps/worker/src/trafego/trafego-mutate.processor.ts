@@ -41,6 +41,11 @@ export const MUTATE_JOBS = {
   UPDATE_RSA: 'trafego-mutate-update-rsa',
   REMOVE_AD: 'trafego-mutate-remove-ad',
   ATTACH_CALL_ASSET: 'trafego-mutate-attach-call-asset',
+  // Sprint 2 backlog (2026-05-17) — Extensions/Assets
+  CREATE_EXTENSION: 'trafego-mutate-create-extension',
+  ATTACH_EXTENSION: 'trafego-mutate-attach-extension',
+  DETACH_EXTENSION: 'trafego-mutate-detach-extension',
+  REMOVE_EXTENSION: 'trafego-mutate-remove-extension',
 } as const;
 
 /**
@@ -261,6 +266,47 @@ export type AttachCallAssetPayload = BaseMutatePayload & {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 2 backlog — Extensions / Assets Payload types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type CreateExtensionPayload = BaseMutatePayload & {
+  customerId: string;
+  type:
+    | 'SITELINK'
+    | 'CALLOUT'
+    | 'STRUCTURED_SNIPPET'
+    | 'CALL'
+    | 'LOCATION'
+    | 'PRICE'
+    | 'PROMOTION'
+    | 'LEAD_FORM';
+  data: Record<string, any>;
+  attachLevel?: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+  attachCampaignResourceName?: string;
+  attachAdGroupResourceName?: string;
+};
+
+export type AttachExtensionPayload = BaseMutatePayload & {
+  customerId: string;
+  assetResourceName: string;
+  level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+  campaignResourceName?: string;
+  adGroupResourceName?: string;
+  fieldType: string; // Resolved from asset.type — passed by service
+};
+
+export type DetachExtensionPayload = BaseMutatePayload & {
+  /** resource_name do CustomerAsset/CampaignAsset/AdGroupAsset (NAO do asset em si). */
+  assetLinkResourceName: string;
+  level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+};
+
+export type RemoveExtensionPayload = BaseMutatePayload & {
+  /** resource_name do Asset (nao do link). Soft-delete via status=REMOVED. */
+  assetResourceName: string;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 
 export type UpdateAdSchedulePayload = BaseMutatePayload & {
   /// Customer ID (sem traços) pra montar resource_names
@@ -361,6 +407,14 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.removeAd(job.data);
       case MUTATE_JOBS.ATTACH_CALL_ASSET:
         return await this.attachCallAsset(job.data);
+      case MUTATE_JOBS.CREATE_EXTENSION:
+        return await this.createExtension(job.data);
+      case MUTATE_JOBS.ATTACH_EXTENSION:
+        return await this.attachExtension(job.data);
+      case MUTATE_JOBS.DETACH_EXTENSION:
+        return await this.detachExtension(job.data);
+      case MUTATE_JOBS.REMOVE_EXTENSION:
+        return await this.removeExtension(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -1716,6 +1770,384 @@ export class TrafegoMutateProcessor extends WorkerHost {
       throw new Error(`Type de conversion action desconhecido: ${type}`);
     }
     return m;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 2 backlog (2026-05-17) — Extensions / Assets
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Cria Asset via AssetService.create. Tipo definido por p.type — popula
+   * sub-message correspondente (sitelink_asset, callout_asset, etc).
+   * Se attachLevel fornecido, encadeia create + attach atomic.
+   */
+  private async createExtension(
+    p: CreateExtensionPayload,
+  ): Promise<MutateResult> {
+    const assetOp = this.buildAssetPayload(p.type, p.data);
+
+    const createResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: { ...p.context, asset_type: p.type, step: 'create_asset' },
+      operations: [assetOp],
+    });
+
+    // Se nao tem attach pendente, ou validate_only, ou criacao falhou → retorna
+    if (
+      !p.attachLevel ||
+      p.validateOnly ||
+      createResult.status !== 'SUCCESS' ||
+      !createResult.resourceNames?.[0]
+    ) {
+      return createResult;
+    }
+
+    const assetResourceName = createResult.resourceNames[0];
+    const fieldType = this.resolveAssetFieldType(p.type);
+
+    return await this.attachExtension({
+      ...p,
+      assetResourceName,
+      level: p.attachLevel,
+      campaignResourceName: p.attachCampaignResourceName,
+      adGroupResourceName: p.attachAdGroupResourceName,
+      fieldType,
+      validateOnly: false,
+      context: {
+        ...p.context,
+        step: 'attach_after_create',
+        asset_resource_name: assetResourceName,
+      },
+    });
+  }
+
+  /**
+   * Anexa asset existente via CustomerAsset / CampaignAsset / AdGroupAsset.
+   * field_type vem do tipo do asset (ja resolvido pelo caller — ver
+   * resolveAssetFieldType).
+   */
+  private async attachExtension(
+    p: AttachExtensionPayload,
+  ): Promise<MutateResult> {
+    if (p.level === 'CAMPAIGN' && p.campaignResourceName) {
+      return await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_asset',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: p.context,
+        operations: [
+          {
+            campaign: p.campaignResourceName,
+            asset: p.assetResourceName,
+            field_type: this.assetFieldTypeEnum(p.fieldType),
+          },
+        ],
+      });
+    }
+    if (p.level === 'AD_GROUP' && p.adGroupResourceName) {
+      return await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'ad_group_asset',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: p.context,
+        operations: [
+          {
+            ad_group: p.adGroupResourceName,
+            asset: p.assetResourceName,
+            field_type: this.assetFieldTypeEnum(p.fieldType),
+          },
+        ],
+      });
+    }
+    // ACCOUNT → customer_asset
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'customer_asset',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [
+        {
+          customer: `customers/${p.customerId}`,
+          asset: p.assetResourceName,
+          field_type: this.assetFieldTypeEnum(p.fieldType),
+        },
+      ],
+    });
+  }
+
+  /**
+   * Desanexa via remove no CustomerAsset/CampaignAsset/AdGroupAsset.
+   * Passa o resource_name do LINK (nao do asset).
+   */
+  private async detachExtension(
+    p: DetachExtensionPayload,
+  ): Promise<MutateResult> {
+    const resourceType =
+      p.level === 'CAMPAIGN'
+        ? 'campaign_asset'
+        : p.level === 'AD_GROUP'
+          ? 'ad_group_asset'
+          : 'customer_asset';
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType,
+      operation: 'remove',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [p.assetLinkResourceName],
+    });
+  }
+
+  /**
+   * Remove (soft-delete) o Asset. Cascade — Google remove vinculos automatico.
+   */
+  private async removeExtension(
+    p: RemoveExtensionPayload,
+  ): Promise<MutateResult> {
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset',
+      operation: 'remove',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [p.assetResourceName],
+    });
+  }
+
+  /**
+   * Constroi payload do AssetService.create baseado em type + data livre.
+   *
+   * Cada tipo tem fields obrigatorios diferentes. Validacoes basicas aqui
+   * (campos mandatorios); Google API valida o resto (tamanho max, URL
+   * format, etc) e o decoder de GoogleAdsFailure surface o erro.
+   */
+  private buildAssetPayload(
+    type: string,
+    data: Record<string, any>,
+  ): Record<string, any> {
+    switch (type) {
+      case 'SITELINK': {
+        if (!data.link_text || !data.final_url) {
+          throw new Error(
+            'SITELINK exige data.link_text e data.final_url (string, URL).',
+          );
+        }
+        return {
+          sitelink_asset: {
+            link_text: String(data.link_text).slice(0, 25),
+            description1: data.description1
+              ? String(data.description1).slice(0, 35)
+              : undefined,
+            description2: data.description2
+              ? String(data.description2).slice(0, 35)
+              : undefined,
+          },
+          final_urls: [data.final_url],
+        };
+      }
+      case 'CALLOUT': {
+        if (!data.text) {
+          throw new Error('CALLOUT exige data.text (max 25 chars).');
+        }
+        return {
+          callout_asset: { callout_text: String(data.text).slice(0, 25) },
+        };
+      }
+      case 'STRUCTURED_SNIPPET': {
+        if (!data.header || !Array.isArray(data.values) || data.values.length < 3) {
+          throw new Error(
+            'STRUCTURED_SNIPPET exige data.header e data.values[] (3-10 itens, max 25 chars cada).',
+          );
+        }
+        return {
+          structured_snippet_asset: {
+            header: String(data.header),
+            values: data.values.slice(0, 10).map((v: any) => String(v).slice(0, 25)),
+          },
+        };
+      }
+      case 'CALL': {
+        if (!data.phone_number) {
+          throw new Error('CALL exige data.phone_number (E.164).');
+        }
+        return {
+          call_asset: {
+            phone_number: data.phone_number,
+            country_code: data.country_code || 'BR',
+            call_conversion_reporting_state: data.call_tracked
+              ? enums.CallConversionReportingState.USE_RESOURCE_LEVEL_CALL_CONVERSION_ACTION
+              : enums.CallConversionReportingState.DISABLED,
+          },
+        };
+      }
+      case 'PRICE': {
+        if (!data.type || !Array.isArray(data.items) || data.items.length === 0) {
+          throw new Error(
+            'PRICE exige data.type (BRANDS|EVENTS|LOCATIONS|...) e data.items[] (1+ itens).',
+          );
+        }
+        return {
+          price_asset: {
+            type: data.type,
+            price_qualifier: data.price_qualifier || 'UNSPECIFIED',
+            language_code: data.language_code || 'pt',
+            price_offerings: data.items.map((item: any) => ({
+              header: item.header,
+              description: item.description,
+              price: {
+                amount_micros: Math.round(
+                  Number(item.amount_brl || 0) * 1_000_000,
+                ),
+                currency_code: 'BRL',
+              },
+              unit: item.unit || 'UNSPECIFIED',
+              final_urls: item.final_url ? [item.final_url] : undefined,
+            })),
+          },
+        };
+      }
+      case 'PROMOTION': {
+        if (!data.promotion_target || !data.occasion) {
+          throw new Error(
+            'PROMOTION exige data.promotion_target (texto) e data.occasion (NEW_YEARS|MOTHERS_DAY|...).',
+          );
+        }
+        const promo: any = {
+          promotion_asset: {
+            promotion_target: String(data.promotion_target).slice(0, 20),
+            discount_modifier: data.discount_modifier || 'UNSPECIFIED',
+            occasion: data.occasion,
+            language_code: data.language_code || 'pt',
+          },
+          final_urls: data.final_url ? [data.final_url] : undefined,
+        };
+        if (data.percent_off) {
+          promo.promotion_asset.percent_off = Math.round(
+            Number(data.percent_off) * 1_000_000,
+          );
+        } else if (data.money_amount_off_brl) {
+          promo.promotion_asset.money_amount_off = {
+            amount_micros: Math.round(
+              Number(data.money_amount_off_brl) * 1_000_000,
+            ),
+            currency_code: 'BRL',
+          };
+        } else {
+          throw new Error(
+            'PROMOTION exige percent_off OU money_amount_off_brl.',
+          );
+        }
+        return promo;
+      }
+      case 'LOCATION': {
+        // Location asset eh complexo no Google Ads — geralmente vem via
+        // sync com Google Business Profile. Aqui aceitamos place_id minimo.
+        if (!data.place_id) {
+          throw new Error(
+            'LOCATION exige data.place_id (Google Place ID do GBP). Locations geralmente vem sync do Google Business Profile.',
+          );
+        }
+        return {
+          location_asset: { place_id: data.place_id },
+        };
+      }
+      case 'LEAD_FORM': {
+        if (!data.business_name || !data.call_to_action_type) {
+          throw new Error(
+            'LEAD_FORM exige data.business_name e data.call_to_action_type (LEARN_MORE|GET_QUOTE|APPLY_NOW|...).',
+          );
+        }
+        return {
+          lead_form_asset: {
+            business_name: String(data.business_name).slice(0, 25),
+            call_to_action_type: data.call_to_action_type,
+            call_to_action_text: data.call_to_action_text || 'Saiba mais',
+            headline: String(data.headline || data.business_name).slice(0, 30),
+            description: String(
+              data.description || 'Preencha o formulario',
+            ).slice(0, 200),
+            privacy_policy_url: data.privacy_policy_url,
+            fields: (data.fields || []).map((f: any) => ({
+              input_type: f.input_type,
+              single_choice_answers: f.single_choice_answers || [],
+            })),
+          },
+        };
+      }
+      default:
+        throw new Error(`Tipo de asset desconhecido: ${type}`);
+    }
+  }
+
+  /**
+   * Mapeia type do asset → AssetFieldType pra attachment.
+   */
+  private resolveAssetFieldType(type: string): string {
+    const map: Record<string, string> = {
+      SITELINK: 'SITELINK',
+      CALLOUT: 'CALLOUT',
+      STRUCTURED_SNIPPET: 'STRUCTURED_SNIPPET',
+      CALL: 'CALL',
+      LOCATION: 'LOCATION',
+      PRICE: 'PRICE',
+      PROMOTION: 'PROMOTION',
+      LEAD_FORM: 'LEAD_FORM',
+    };
+    return map[type] ?? type;
+  }
+
+  /**
+   * Resolve string → enum AssetFieldType do SDK.
+   *
+   * NB: LOCATION asset NAO eh attachable via campaign_asset/ad_group_asset
+   * com field_type=LOCATION (esse field_type nao existe no enum). Location
+   * asset eh anexado via account-level link com Google Business Profile.
+   * Pra simplicidade desta entrega, location asset CRIA mas nao da pra
+   * attach com essa tool — caller usa Google Ads UI pra anexar.
+   */
+  private assetFieldTypeEnum(fieldType: string): number {
+    const map: Record<string, number> = {
+      SITELINK: enums.AssetFieldType.SITELINK,
+      CALLOUT: enums.AssetFieldType.CALLOUT,
+      STRUCTURED_SNIPPET: enums.AssetFieldType.STRUCTURED_SNIPPET,
+      CALL: enums.AssetFieldType.CALL,
+      PRICE: enums.AssetFieldType.PRICE,
+      PROMOTION: enums.AssetFieldType.PROMOTION,
+      LEAD_FORM: enums.AssetFieldType.LEAD_FORM,
+    };
+    const v = map[fieldType];
+    if (v === undefined) {
+      throw new Error(
+        `AssetFieldType ${fieldType} nao suportado pra attach via API. ` +
+          `LOCATION asset: anexa via Google Business Profile link. ` +
+          `Use Google Ads UI pra anexar manual.`,
+      );
+    }
+    return v;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

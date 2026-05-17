@@ -638,11 +638,134 @@ export class TrafegoService {
       },
       orderBy: { last_seen_at: 'desc' },
     });
-    return items.map((i) => ({
-      ...i,
-      cpc_bid_micros: i.cpc_bid_micros?.toString() ?? null,
-      cpc_bid_brl: fromMicros(i.cpc_bid_micros),
-    }));
+    return items.map((i) => {
+      // Sprint 2 (2026-05-17): expor campos derivados do quality_info JSON
+      // pra Claude/UI nao precisar parsear. Mantemos quality_info raw tambem
+      // pra clientes que queiram tudo.
+      const qi = (i.quality_info as any) ?? {};
+      return {
+        ...i,
+        cpc_bid_micros: i.cpc_bid_micros?.toString() ?? null,
+        cpc_bid_brl: fromMicros(i.cpc_bid_micros),
+        // Campos derivados (top-level pra facilitar)
+        expected_ctr: qi.expected_clickthrough_rate ?? qi.expected_ctr ?? null,
+        ad_relevance: qi.creative_quality_score ?? qi.ad_relevance ?? null,
+        landing_page_experience:
+          qi.post_click_quality_score ?? qi.landing_page_experience ?? null,
+        // first_page_cpc / top_of_page_cpc nao estao no cache atual.
+        // Pra ter, sync precisa puxar de keyword_view.metrics.search_top_impression_share
+        // ou ad_group_criterion.first_page_cpc_micros (que requer campo novo
+        // no TrafficKeyword schema + migration). Marcado como TODO.
+        first_page_cpc_brl: null,
+        top_of_page_cpc_brl: null,
+      };
+    });
+  }
+
+  /**
+   * Sprint 2 (2026-05-17) — Quality Score history de uma keyword.
+   *
+   * Esta versao MVP retorna apenas o snapshot atual cacheado (do sync
+   * diario). Pra history real (serie temporal), seria preciso:
+   *   1. Migration nova: TrafficKeywordQualitySnapshot
+   *      (keyword_id, quality_score, expected_ctr, ad_relevance,
+   *       landing_page_experience, captured_at)
+   *   2. Sync diario que faz INSERT com captured_at=hoje
+   *   3. Esta funcao retorna findMany ordenado por captured_at desc
+   *
+   * Pra MVP, history vazio + nota explicativa. Implementar quando o
+   * gestor de trafego sentir falta da serie temporal.
+   */
+  async getKeywordQualityScoreHistory(
+    tenantId: string,
+    keywordId: string,
+    days = 30,
+  ): Promise<{
+    keyword_id: string;
+    text: string;
+    current: {
+      quality_score: number | null;
+      expected_ctr: string | null;
+      ad_relevance: string | null;
+      landing_page_experience: string | null;
+      last_seen_at: Date;
+    };
+    history: Array<{
+      captured_at: Date;
+      quality_score: number;
+      expected_ctr: string;
+      ad_relevance: string;
+      landing_page_experience: string;
+    }>;
+    note: string;
+  }> {
+    const keyword = await this.prisma.trafficKeyword.findFirst({
+      where: {
+        tenant_id: tenantId,
+        OR: [{ id: keywordId }, { google_criterion_id: keywordId }],
+      },
+    });
+    if (!keyword) {
+      throw new NotFoundException(`Keyword nao encontrada (id="${keywordId}")`);
+    }
+    const qi = (keyword.quality_info as any) ?? {};
+    return {
+      keyword_id: keyword.id,
+      text: keyword.text,
+      current: {
+        quality_score: keyword.quality_score,
+        expected_ctr: qi.expected_clickthrough_rate ?? qi.expected_ctr ?? null,
+        ad_relevance: qi.creative_quality_score ?? qi.ad_relevance ?? null,
+        landing_page_experience:
+          qi.post_click_quality_score ?? qi.landing_page_experience ?? null,
+        last_seen_at: keyword.last_seen_at,
+      },
+      history: [], // MVP — ver doc da funcao
+      note:
+        `Historico serie temporal nao implementado nesta versao. ` +
+        `Snapshot atual eh do sync mais recente (last_seen_at=${keyword.last_seen_at.toISOString()}). ` +
+        `Pra ${days}d de history real, abrir issue pedindo Sprint 2.1 (TrafficKeywordQualitySnapshot table + cron daily).`,
+    };
+  }
+
+  /**
+   * Sprint 2 (2026-05-17) — Lista extensions (assets).
+   *
+   * MVP: retorna estrutura vazia + nota explicativa. Pra implementar
+   * listagem live via GAQL precisa injetar GoogleAdsClientService no API
+   * (hoje so existe no worker module). Pra evitar dependencias circulares,
+   * essa parte fica pra Sprint 2.1.
+   *
+   * Workaround temporario: o gestor pode listar via traffic_list_mutate_logs
+   * filtrando por resource_type=asset pra ver assets criados via MCP.
+   * Pra ver assets pre-existentes (criados via UI), tem que ir no Google Ads UI direto.
+   */
+  async listExtensions(
+    tenantId: string,
+    opts: {
+      campaign_id?: string;
+      ad_group_id?: string;
+      type?: string;
+      status?: string;
+    } = {},
+  ): Promise<{
+    extensions: any[];
+    note: string;
+  }> {
+    // Garante que tenant existe (validacao de acesso)
+    await this.prisma.trafficAccount.findFirst({
+      where: { tenant_id: tenantId },
+    });
+    // No-op de opts (mantem assinatura compativel)
+    void opts;
+    return {
+      extensions: [],
+      note:
+        'MVP da Sprint 2: listagem live de extensions via GAQL ainda nao implementada ' +
+        '(precisa injetar GoogleAdsClientService no API module). Workaround: ' +
+        'use traffic_list_mutate_logs filtrando resource_type=asset pra ver assets ' +
+        'criados via MCP, ou consulte Google Ads UI diretamente. Sprint 2.1 cobre.',
+    };
   }
 
   // ─── Ads ────────────────────────────────────────────────────────────────
@@ -1301,6 +1424,133 @@ export class TrafegoService {
           adGroupResourceName,
           callTracked: raw.call_tracked ?? true,
           context: { ...base.context, level: raw.level },
+        };
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // Sprint 2 backlog (2026-05-17) — Extensions / Assets
+      // ═══════════════════════════════════════════════════════════════════
+
+      case 'trafego-mutate-create-extension': {
+        let attachCampaignResourceName: string | undefined;
+        let attachAdGroupResourceName: string | undefined;
+        if (raw.attach_level === 'CAMPAIGN') {
+          if (!raw.campaign_id) {
+            throw new HttpException(
+              'attach_level=CAMPAIGN exige campaign_id',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          const camp = await this.requireCampaign(tenantId, raw.campaign_id);
+          attachCampaignResourceName = `customers/${customerId}/campaigns/${camp.google_campaign_id}`;
+        }
+        if (raw.attach_level === 'AD_GROUP') {
+          if (!raw.ad_group_id) {
+            throw new HttpException(
+              'attach_level=AD_GROUP exige ad_group_id',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          const ag = await this.requireAdGroup(tenantId, raw.ad_group_id);
+          attachAdGroupResourceName = `customers/${customerId}/adGroups/${ag.google_ad_group_id}`;
+        }
+        return {
+          ...base,
+          customerId,
+          type: raw.type,
+          data: raw.data,
+          attachLevel: raw.attach_level,
+          attachCampaignResourceName,
+          attachAdGroupResourceName,
+          context: {
+            ...base.context,
+            asset_type: raw.type,
+            attach_level: raw.attach_level,
+          },
+        };
+      }
+
+      case 'trafego-mutate-attach-extension': {
+        let campaignResourceName: string | undefined;
+        let adGroupResourceName: string | undefined;
+        if (raw.level === 'CAMPAIGN') {
+          if (!raw.campaign_id) {
+            throw new HttpException(
+              'level=CAMPAIGN exige campaign_id',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          const camp = await this.requireCampaign(tenantId, raw.campaign_id);
+          campaignResourceName = `customers/${customerId}/campaigns/${camp.google_campaign_id}`;
+        }
+        if (raw.level === 'AD_GROUP') {
+          if (!raw.ad_group_id) {
+            throw new HttpException(
+              'level=AD_GROUP exige ad_group_id',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          const ag = await this.requireAdGroup(tenantId, raw.ad_group_id);
+          adGroupResourceName = `customers/${customerId}/adGroups/${ag.google_ad_group_id}`;
+        }
+        // asset_id pode ser resource_name (customers/X/assets/Y) ou apenas
+        // o ID numerico. Aceita ambos.
+        const assetResourceName = raw.asset_id.startsWith('customers/')
+          ? raw.asset_id
+          : `customers/${customerId}/assets/${raw.asset_id}`;
+        // Tipo do asset precisa ser resolvido pra field_type. Como nao temos
+        // cache local, exigimos que o caller passe via raw.field_type
+        // (preenchido pela tool MCP). Default SITELINK pra compat — Google
+        // valida e retorna erro estruturado se errado.
+        const fieldType = raw.field_type || raw.type || 'SITELINK';
+        return {
+          ...base,
+          customerId,
+          assetResourceName,
+          level: raw.level,
+          campaignResourceName,
+          adGroupResourceName,
+          fieldType,
+          context: {
+            ...base.context,
+            asset_id: raw.asset_id,
+            level: raw.level,
+          },
+        };
+      }
+
+      case 'trafego-mutate-detach-extension': {
+        // assetLinkResourceName eh do CustomerAsset/CampaignAsset/AdGroupAsset
+        // — formato: customers/X/{customerAssets|campaignAssets|adGroupAssets}/Y
+        // Caller passa direto via raw.asset_link_resource_name OU monta via
+        // campos individuais (asset_id + scope_id + level).
+        if (!raw.asset_link_resource_name) {
+          throw new HttpException(
+            'detach exige asset_link_resource_name (do CustomerAsset/CampaignAsset/AdGroupAsset). ' +
+              'Obtem via traffic_list_extensions.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        return {
+          ...base,
+          assetLinkResourceName: raw.asset_link_resource_name,
+          level: raw.level,
+          context: { ...base.context, level: raw.level },
+        };
+      }
+
+      case 'trafego-mutate-remove-extension': {
+        const assetResourceName = raw.asset_id.startsWith('customers/')
+          ? raw.asset_id
+          : `customers/${customerId}/assets/${raw.asset_id}`;
+        return {
+          ...base,
+          assetResourceName,
+          context: {
+            ...base.context,
+            asset_id: raw.asset_id,
+            reason: raw.reason,
+          },
         };
       }
 

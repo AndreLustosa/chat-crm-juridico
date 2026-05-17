@@ -66,6 +66,10 @@ import {
   RemoveConversionActionDto,
   EnableEnhancedConversionsDto,
   TriggerEnhancedConvUploadDto,
+  CreateExtensionDto,
+  AttachExtensionDto,
+  DetachExtensionDto,
+  RemoveExtensionDto,
   CreateAdGroupDto,
   UpdateAdGroupDto,
   UpdateRsaDto,
@@ -1218,6 +1222,71 @@ export class TrafegoController {
       req,
       'trafego-mutate-attach-call-asset',
       dto,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 2 backlog (2026-05-17) — Extensions/Assets + Quality Score
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Lista extensions (assets) anexados a conta/campanha/ad_group. */
+  @Get('extensions')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listExtensions(
+    @Req() req: any,
+    @Query('campaign_id') campaignId?: string,
+    @Query('ad_group_id') adGroupId?: string,
+    @Query('type') type?: string,
+    @Query('status') status?: string,
+  ) {
+    return await this.service.listExtensions(req.user.tenant_id, {
+      campaign_id: campaignId,
+      ad_group_id: adGroupId,
+      type,
+      status,
+    });
+  }
+
+  /** Cria asset (sitelink, callout, snippet, call, location, price, promotion, lead_form). */
+  @Post('extensions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createExtension(@Req() req: any, @Body() dto: CreateExtensionDto) {
+    return await this.enqueueMutate(req, 'trafego-mutate-create-extension', dto);
+  }
+
+  /** Anexa asset existente a conta/campanha/ad_group. */
+  @Post('extensions/attach')
+  @Roles('ADMIN', 'ADVOGADO')
+  async attachExtension(@Req() req: any, @Body() dto: AttachExtensionDto) {
+    return await this.enqueueMutate(req, 'trafego-mutate-attach-extension', dto);
+  }
+
+  /** Desanexa asset (remove vinculo CustomerAsset/CampaignAsset/AdGroupAsset). */
+  @Post('extensions/detach')
+  @Roles('ADMIN', 'ADVOGADO')
+  async detachExtension(@Req() req: any, @Body() dto: DetachExtensionDto) {
+    return await this.enqueueMutate(req, 'trafego-mutate-detach-extension', dto);
+  }
+
+  /** Remove asset propriamente (status=REMOVED, vinculos sao cascadeados pelo Google). */
+  @Post('extensions/remove')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeExtension(@Req() req: any, @Body() dto: RemoveExtensionDto) {
+    return await this.enqueueMutate(req, 'trafego-mutate-remove-extension', dto);
+  }
+
+  /** Historico de Quality Score de uma keyword (MVP: snapshot atual). */
+  @Get('keywords/:id/quality-score-history')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getKeywordQualityScoreHistory(
+    @Req() req: any,
+    @Param('id') keywordId: string,
+    @Query('days') days?: string,
+  ) {
+    return await this.service.getKeywordQualityScoreHistory(
+      req.user.tenant_id,
+      keywordId,
+      days ? parseInt(days, 10) : 30,
     );
   }
 

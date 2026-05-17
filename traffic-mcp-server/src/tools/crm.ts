@@ -52,6 +52,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerOpsMutateTools(server);
   // Sprint 1 backlog (2026-05-17): Conversion Actions, Ad Groups, RSAs
   registerSprint1Tools(server);
+  // Sprint 2 backlog (2026-05-17): Extensions/Assets + Quality Score
+  registerSprint2Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -1710,6 +1712,270 @@ function registerSprint1Tools(server: McpServer) {
           result,
           `Call Asset enfileirado para anexar em ${input.level.toLowerCase()}.`,
         );
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 2 backlog (2026-05-17) — 6 tools novas (Extensions + Quality Score)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSprint2Tools(server: McpServer) {
+  // ─── Extensions / Assets ───────────────────────────────────────────────
+  server.registerTool(
+    'traffic_list_extensions',
+    {
+      description:
+        'Lista extensions (assets) da conta — sitelinks, callouts, snippets, calls, prices, promotions, lead forms. ' +
+        'Filtra por campaign_id (so daquela campanha), ad_group_id (so daquele grupo), type, status. ' +
+        'MVP: listagem live via GAQL ainda em desenvolvimento — retorna nota explicativa. Use traffic_list_mutate_logs ' +
+        'filtrando resource_type=asset pra ver assets criados via MCP, ou consulte Google Ads UI.',
+      inputSchema: {
+        campaign_id: campaignIdSchema.optional(),
+        ad_group_id: z.string().optional(),
+        type: z
+          .enum([
+            'SITELINK',
+            'CALLOUT',
+            'STRUCTURED_SNIPPET',
+            'CALL',
+            'LOCATION',
+            'PRICE',
+            'PROMOTION',
+            'LEAD_FORM',
+          ])
+          .optional(),
+        status: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_list_extensions', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          extensions: any[];
+          note?: string;
+        }>('/trafego/extensions', input, { toolCallId });
+        const lines = [`${result?.extensions?.length ?? 0} extensions encontradas.`];
+        if (result?.note) lines.push(`Nota: ${result.note}`);
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
+    'traffic_create_extension',
+    {
+      description:
+        'Cria asset novo (sitelink, callout, snippet, call, location, price, promotion, lead_form). ' +
+        'Pode ja anexar atomico via attach_level + campaign_id/ad_group_id. ' +
+        'Cada `type` exige campos especificos em `data` (validado no backend, erro instrutivo se faltar). ' +
+        'Validacao OAB automatica nos textos quando aplicavel. ' +
+        'EXEMPLOS:\n' +
+        '  SITELINK: data={link_text, final_url, description1?, description2?}\n' +
+        '  CALLOUT: data={text} (max 25 chars)\n' +
+        '  STRUCTURED_SNIPPET: data={header, values:[]} (3-10 itens)\n' +
+        '  CALL: data={phone_number (E.164), country_code?, call_tracked?}\n' +
+        '  PRICE: data={type, items:[{header, description, amount_brl, unit?}]}\n' +
+        '  PROMOTION: data={promotion_target, occasion, percent_off OR money_amount_off_brl}\n' +
+        '  LEAD_FORM: data={business_name, call_to_action_type, headline?, fields:[]}',
+      inputSchema: {
+        type: z.enum([
+          'SITELINK',
+          'CALLOUT',
+          'STRUCTURED_SNIPPET',
+          'CALL',
+          'LOCATION',
+          'PRICE',
+          'PROMOTION',
+          'LEAD_FORM',
+        ]),
+        data: z
+          .record(z.any())
+          .describe('Payload especifico do type — ver exemplos na description.'),
+        attach_level: z
+          .enum(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP'])
+          .optional()
+          .describe('Se passado, ja anexa o asset apos criar (atomic).'),
+        campaign_id: campaignIdSchema.optional(),
+        ad_group_id: z.string().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_extension', async (toolCallId) => {
+        applyMutateGuards('traffic_create_extension');
+        const result = await crmTrafficService.post(
+          '/trafego/extensions',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Criacao de extension ${input.type}${
+            input.attach_level
+              ? ` + attach em ${input.attach_level.toLowerCase()}`
+              : ''
+          } enfileirada.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_attach_extension',
+    {
+      description:
+        'Anexa asset existente a conta/campanha/ad_group. Asset precisa ter sido criado antes ' +
+        'via traffic_create_extension. Passa asset_id (UUID local ou resource_name Google).',
+      inputSchema: {
+        asset_id: z
+          .string()
+          .describe('resource_name (customers/X/assets/Y) ou ID numerico.'),
+        level: z.enum(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP']),
+        campaign_id: campaignIdSchema.optional(),
+        ad_group_id: z.string().optional(),
+        field_type: z
+          .enum([
+            'SITELINK',
+            'CALLOUT',
+            'STRUCTURED_SNIPPET',
+            'CALL',
+            'LOCATION',
+            'PRICE',
+            'PROMOTION',
+            'LEAD_FORM',
+          ])
+          .describe('Tipo do asset — necessario pro Google saber como anexar.'),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_attach_extension', async (toolCallId) => {
+        applyMutateGuards('traffic_attach_extension');
+        const result = await crmTrafficService.post(
+          '/trafego/extensions/attach',
+          input,
+          { toolCallId },
+        );
+        return ok(result, `Attach do asset enfileirado em ${input.level.toLowerCase()}.`);
+      }),
+  );
+
+  server.registerTool(
+    'traffic_detach_extension',
+    {
+      description:
+        'Desanexa asset de conta/campanha/ad_group. NAO remove o asset — apenas o vinculo. ' +
+        'Pra remover use traffic_remove_extension. ' +
+        'EXIGE asset_link_resource_name (do CustomerAsset/CampaignAsset/AdGroupAsset, NAO do asset em si). ' +
+        'Obtem via traffic_list_extensions.',
+      inputSchema: {
+        asset_link_resource_name: z
+          .string()
+          .describe(
+            'resource_name do link (customers/X/{customerAssets|campaignAssets|adGroupAssets}/Y).',
+          ),
+        level: z.enum(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP']),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_detach_extension', async (toolCallId) => {
+        applyMutateGuards('traffic_detach_extension');
+        const result = await crmTrafficService.post(
+          '/trafego/extensions/detach',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Detach do asset enfileirado (level=${input.level.toLowerCase()}).`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_remove_extension',
+    {
+      description:
+        'Remove (soft-delete) um asset propriamente. Cascade no Google: vinculos sao removidos automatic. ' +
+        'EXIGE confirm + reason (min 3 chars). Operacao irreversivel pela UI.',
+      inputSchema: {
+        asset_id: z.string(),
+        confirm: z.boolean(),
+        reason: z.string().min(3),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_remove_extension', async (toolCallId) => {
+        applyMutateGuards('traffic_remove_extension');
+        const result = await crmTrafficService.post(
+          '/trafego/extensions/remove',
+          input,
+          { toolCallId },
+        );
+        return ok(result, `Remocao do asset ${input.asset_id} enfileirada.`);
+      }),
+  );
+
+  // ─── Quality Score Visibility ──────────────────────────────────────────
+  server.registerTool(
+    'traffic_get_quality_score_history',
+    {
+      description:
+        'Retorna Quality Score de uma keyword + sub-scores (expected_ctr, ad_relevance, ' +
+        'landing_page_experience). MVP atual: so snapshot mais recente (do sync diario). ' +
+        'Pra serie temporal historica (ultimos N dias), pedir Sprint 2.1 ' +
+        '(precisa de migration TrafficKeywordQualitySnapshot + cron daily de snapshot).',
+      inputSchema: {
+        keyword_id: z
+          .string()
+          .describe('UUID interno do CRM OR google_criterion_id.'),
+        days: z
+          .number()
+          .int()
+          .min(7)
+          .max(90)
+          .optional()
+          .describe('Janela em dias (placeholder — MVP retorna so atual).'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_get_quality_score_history', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          keyword_id: string;
+          text: string;
+          current: {
+            quality_score: number | null;
+            expected_ctr: string | null;
+            ad_relevance: string | null;
+            landing_page_experience: string | null;
+            last_seen_at: string;
+          };
+          history: any[];
+          note: string;
+        }>(
+          `/trafego/keywords/${encodeURIComponent(input.keyword_id)}/quality-score-history`,
+          { days: input.days },
+          { toolCallId },
+        );
+        const c = result?.current;
+        const lines = [
+          `Keyword "${result?.text ?? input.keyword_id}":`,
+          `  Quality Score: ${c?.quality_score ?? '—'}/10`,
+          `  Expected CTR: ${c?.expected_ctr ?? '—'}`,
+          `  Ad Relevance: ${c?.ad_relevance ?? '—'}`,
+          `  Landing Page Experience: ${c?.landing_page_experience ?? '—'}`,
+          `  Last seen: ${c?.last_seen_at ?? '—'}`,
+        ];
+        if (result?.note) lines.push(`Nota: ${result.note}`);
+        return ok(result, lines.join('\n'));
       }),
   );
 }
