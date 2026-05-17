@@ -13,22 +13,30 @@ import { TrafegoMutateProcessor } from './trafego-mutate.processor';
 import { TrafegoSyncExtendedService } from './trafego-sync-extended.service';
 import { TrafficOCIService } from './trafego-oci.service';
 import { TrafficOCIProcessor } from './trafego-oci.processor';
-import { TrafficAIAgentService } from './traffic-ai-agent.service';
-import { TrafficAIAgentCronService } from './traffic-ai-agent-cron.service';
-import { TrafficAIAgentProcessor } from './traffic-ai-agent.processor';
-import { TrafficCustomerMatchService } from './traffic-customer-match.service';
-import { TrafficCustomerMatchProcessor } from './traffic-customer-match.processor';
 import { TrafficRecommendationsService } from './traffic-recommendations.service';
 import { TrafficRecommendationsProcessor } from './traffic-recommendations.processor';
-import { TrafficReachPlannerService } from './traffic-reach-planner.service';
-import { TrafficReachPlannerProcessor } from './traffic-reach-planner.processor';
-import { TrafficLLMService } from './traffic-llm.service';
 import { TrafficBackfillService } from './traffic-backfill.service';
 import { TrafficBackfillProcessor } from './traffic-backfill.processor';
-import { TrafficChatService } from './traffic-chat.service';
-import { TrafficChatApplyService } from './traffic-chat-apply.service';
-import { TrafficChatProcessor } from './traffic-chat.processor';
 
+/**
+ * Worker do modulo de Trafego.
+ *
+ * Pos-cleanup (2026-05-17): a IA interna (ai-agent + chat + LLM wrapper +
+ * customer-match + reach-planner) foi removida — gestao de trafego agora
+ * roda via Claude (Cowork) atraves do traffic-mcp-server.
+ *
+ * Services que ficaram:
+ *   - TrafegoSyncService + Extended: sync diario com Google Ads
+ *   - GoogleAdsClient + Mutate: cliente OAuth + mutate validado (OAB)
+ *   - TrafegoAlertEvaluator + Notifier: detecta CPL alto, CTR baixo etc
+ *   - TrafegoMutateProcessor: consome fila trafego-mutate (pause, budget, RSA, etc)
+ *   - TrafficOCIService + Processor: Offline Conversion Import (Lead -> conversion)
+ *   - TrafficRecommendationsService + Processor: sync/apply do MCP
+ *   - TrafficBackfillService + Processor: historico ate 90d
+ *
+ * Filas BullMQ removidas: trafego-ai-agent, trafego-chat, trafego-customer-match,
+ * trafego-reach-planner.
+ */
 @Module({
   imports: [
     PrismaModule,
@@ -36,12 +44,8 @@ import { TrafficChatProcessor } from './traffic-chat.processor';
     BullModule.registerQueue({ name: 'trafego-sync' }),
     BullModule.registerQueue({ name: 'trafego-mutate' }),
     BullModule.registerQueue({ name: 'trafego-oci' }),
-    BullModule.registerQueue({ name: 'trafego-ai-agent' }),
-    BullModule.registerQueue({ name: 'trafego-customer-match' }),
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
-    BullModule.registerQueue({ name: 'trafego-reach-planner' }),
     BullModule.registerQueue({ name: 'trafego-backfill' }),
-    BullModule.registerQueue({ name: 'trafego-chat' }),
   ],
   providers: [
     TrafegoCryptoService,
@@ -55,32 +59,15 @@ import { TrafficChatProcessor } from './traffic-chat.processor';
     TrafegoMutateProcessor,
     TrafficOCIService,
     TrafficOCIProcessor,
-    TrafficAIAgentService,
-    TrafficAIAgentCronService,
-    TrafficAIAgentProcessor,
-    TrafficCustomerMatchService,
-    TrafficCustomerMatchProcessor,
     TrafficRecommendationsService,
     TrafficRecommendationsProcessor,
-    TrafficReachPlannerService,
-    TrafficReachPlannerProcessor,
-    TrafficLLMService,
     TrafficBackfillService,
     TrafficBackfillProcessor,
-    TrafficChatService,
-    TrafficChatApplyService,
-    TrafficChatProcessor,
   ],
   exports: [
     TrafficOCIService,
-    TrafficAIAgentService,
-    TrafficCustomerMatchService,
     TrafficRecommendationsService,
-    TrafficReachPlannerService,
-    TrafficLLMService,
     TrafficBackfillService,
-    TrafficChatService,
-    TrafficChatApplyService,
   ],
 })
 export class TrafegoModule {}

@@ -23,49 +23,30 @@ import { Public } from '../auth/decorators/public.decorator';
 import { TrafegoService } from './trafego.service';
 import { TrafegoOAuthService } from './trafego-oauth.service';
 import { TrafegoConfigService } from './trafego-config.service';
-import { TrafegoAiService } from './trafego-ai.service';
 import { TrafegoLeadFormService } from './trafego-lead-form.service';
-import { TrafegoAudiencesService } from './trafego-audiences.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
-import { TrafegoAssetGroupsService } from './trafego-asset-groups.service';
-import { TrafegoReachPlannerService } from './trafego-reach-planner.service';
-import { TrafegoChatService } from './trafego-chat.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
 import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
-import { TrafegoLandingPagesService } from './trafego-landing-pages.service';
-import { TrafegoOptimizationService } from './trafego-optimization.service';
 import { resolveInitiator } from '../common/utils/initiator.util';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
   AddNegativesDto,
-  AiDecisionFeedbackDto,
-  AiTriggerLoopDto,
   ApplyRecommendationDto,
-  CreateChatSessionDto,
-  CreateLandingPageDto,
   UpdateAdScheduleDto,
   CreateRsaDto,
   CreateSearchCampaignDto,
-  CreateUserListDto,
   DashboardQueryDto,
-  GenerateReachForecastDto,
   GenerateRsaDto,
-  RejectChatActionDto,
-  SendChatMessageDto,
   StartBackfillDto,
-  ListAiDecisionsDto,
   ListLeadFormSubmissionsDto,
   ListRecommendationsDto,
-  MapConversionActionDto,
   MutateBaseDto,
   UpdateAccountDto,
-  UpdateAiPolicyDto,
   UpdateBiddingStrategyDto,
   UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
-  UpdateLandingPageDto,
   UpdateLeadFormSettingsDto,
   UpdateSettingsDto,
 } from './trafego.dto';
@@ -77,17 +58,10 @@ export class TrafegoController {
     private readonly service: TrafegoService,
     private readonly oauth: TrafegoOAuthService,
     private readonly config: TrafegoConfigService,
-    private readonly ai: TrafegoAiService,
     private readonly leadForm: TrafegoLeadFormService,
-    private readonly audiences: TrafegoAudiencesService,
     private readonly recommendations: TrafegoRecommendationsService,
-    private readonly assetGroups: TrafegoAssetGroupsService,
-    private readonly reachPlanner: TrafegoReachPlannerService,
-    private readonly chat: TrafegoChatService,
     private readonly backfillSvc: TrafegoBackfillService,
     private readonly mappingAi: TrafegoMappingAiService,
-    private readonly landingPages: TrafegoLandingPagesService,
-    private readonly optimization: TrafegoOptimizationService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
   ) {}
@@ -225,24 +199,6 @@ export class TrafegoController {
     return this.service.listCampaigns(req.user.tenant_id, {
       includeArchived: includeArchived === 'true',
       days: Number.isFinite(daysNum) ? daysNum : undefined,
-    });
-  }
-
-  @Get('auction-insights')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async auctionInsights(
-    @Req() req: any,
-    @Query('days') days: string,
-    @Query('start_date') startDate?: string,
-    @Query('end_date') endDate?: string,
-    @Query('campaign_id') campaignId?: string,
-  ) {
-    const daysNum = days ? parseInt(days, 10) : undefined;
-    return this.service.getAuctionInsights(req.user.tenant_id, {
-      days: Number.isFinite(daysNum) ? daysNum : undefined,
-      startDate: startDate || undefined,
-      endDate: endDate || undefined,
-      campaignId: campaignId || undefined,
     });
   }
 
@@ -535,30 +491,6 @@ export class TrafegoController {
   @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
   async listConversionActions(@Req() req: any) {
     return this.service.listConversionActions(req.user.tenant_id);
-  }
-
-  /** Mapeia ConversionAction → evento CRM (lead.created, client.signed, etc). */
-  @Patch('conversion-actions/:id')
-  @Roles('ADMIN')
-  async mapConversionAction(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body() dto: MapConversionActionDto,
-  ) {
-    return this.service.mapConversionAction(req.user.tenant_id, id, dto);
-  }
-
-  /**
-   * Sugere mapeamento ConversionAction → evento CRM via Claude API.
-   * Retorna lista de sugestões (sem aplicar) — front aplica o que o admin
-   * aprovar via PATCH conversion-actions/:id.
-   *
-   * Custo: 1 chamada Claude (haiku) com prompt batch de TODAS as actions.
-   */
-  @Post('conversion-actions/ai-suggestions')
-  @Roles('ADMIN', 'ADVOGADO')
-  async suggestConversionMappings(@Req() req: any) {
-    return this.mappingAi.suggestMappings(req.user.tenant_id);
   }
 
   /**
@@ -921,58 +853,6 @@ export class TrafegoController {
     };
   }
 
-  // ─── IA Otimizadora (Sprint C) ──────────────────────────────────────────
-
-  @Get('ai/decisions')
-  @Roles('ADMIN', 'ADVOGADO')
-  async listAiDecisions(@Req() req: any, @Query() query: ListAiDecisionsDto) {
-    return this.ai.listDecisions(req.user.tenant_id, {
-      action: query.action,
-      kind: query.kind,
-      loopKind: query.loop_kind,
-      feedback: query.feedback,
-      limit: query.limit,
-    });
-  }
-
-  @Post('ai/decisions/:id/feedback')
-  @Roles('ADMIN', 'ADVOGADO')
-  async submitAiDecisionFeedback(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body() dto: AiDecisionFeedbackDto,
-  ) {
-    return this.ai.submitFeedback(
-      req.user.tenant_id,
-      id,
-      dto.feedback,
-      dto.note,
-      req.user.id,
-      { permanent: !!dto.permanent },
-    );
-  }
-
-  @Get('ai/policy')
-  @Roles('ADMIN', 'ADVOGADO')
-  async getAiPolicy(@Req() req: any) {
-    return this.ai.getPolicy(req.user.tenant_id);
-  }
-
-  @Patch('ai/policy')
-  @Roles('ADMIN')
-  async updateAiPolicy(@Req() req: any, @Body() dto: UpdateAiPolicyDto) {
-    return this.ai.updatePolicy(req.user.tenant_id, dto);
-  }
-
-  @Post('ai/trigger')
-  @Roles('ADMIN', 'ADVOGADO')
-  async triggerAiLoop(@Req() req: any, @Body() dto: AiTriggerLoopDto) {
-    return this.ai.triggerLoop(
-      req.user.tenant_id,
-      dto.loop_kind ?? 'TRIGGERED',
-    );
-  }
-
   // ─── Lead Form Asset (Sprint D) ─────────────────────────────────────────
 
   /**
@@ -1048,44 +928,6 @@ export class TrafegoController {
     return updated;
   }
 
-  // ─── Customer Match (Sprint D) ──────────────────────────────────────────
-
-  @Get('audiences')
-  @Roles('ADMIN', 'ADVOGADO')
-  async listAudiences(@Req() req: any) {
-    return this.audiences.list(req.user.tenant_id);
-  }
-
-  @Get('audiences/:id')
-  @Roles('ADMIN', 'ADVOGADO')
-  async getAudience(@Req() req: any, @Param('id') id: string) {
-    return this.audiences.get(req.user.tenant_id, id);
-  }
-
-  @Post('audiences')
-  @Roles('ADMIN')
-  async createAudience(@Req() req: any, @Body() dto: CreateUserListDto) {
-    return this.audiences.create(req.user.tenant_id, dto);
-  }
-
-  @Delete('audiences/:id')
-  @Roles('ADMIN')
-  async deleteAudience(@Req() req: any, @Param('id') id: string) {
-    return this.audiences.delete(req.user.tenant_id, id);
-  }
-
-  @Post('audiences/:id/rebuild')
-  @Roles('ADMIN', 'ADVOGADO')
-  async rebuildAudience(@Req() req: any, @Param('id') id: string) {
-    return this.audiences.enqueueRebuild(req.user.tenant_id, id);
-  }
-
-  @Post('audiences/:id/sync')
-  @Roles('ADMIN')
-  async syncAudience(@Req() req: any, @Param('id') id: string) {
-    return this.audiences.enqueueSync(req.user.tenant_id, id);
-  }
-
   // ─── Recommendations API (Sprint E) ─────────────────────────────────────
 
   @Get('recommendations')
@@ -1101,12 +943,6 @@ export class TrafegoController {
     });
   }
 
-  @Post('recommendations/sync')
-  @Roles('ADMIN', 'ADVOGADO')
-  async syncRecommendations(@Req() req: any) {
-    return this.recommendations.triggerSync(req.user.tenant_id);
-  }
-
   @Post('recommendations/:id/apply')
   @Roles('ADMIN', 'ADVOGADO')
   async applyRecommendation(
@@ -1118,62 +954,6 @@ export class TrafegoController {
       force: !!dto.force,
       resolvedBy: req.user.id,
     });
-  }
-
-  @Post('recommendations/:id/dismiss')
-  @Roles('ADMIN', 'ADVOGADO')
-  async dismissRecommendation(@Req() req: any, @Param('id') id: string) {
-    return this.recommendations.enqueueDismiss(req.user.tenant_id, id, {
-      resolvedBy: req.user.id,
-    });
-  }
-
-  // ─── Asset Groups (PMax/Demand Gen — Sprint F) ──────────────────────────
-
-  @Get('asset-groups')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async listAssetGroups(@Req() req: any, @Query('limit') limit?: string) {
-    return this.assetGroups.listAll(req.user.tenant_id, {
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
-  }
-
-  @Get('campaigns/:campaignId/asset-groups')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async listAssetGroupsForCampaign(
-    @Req() req: any,
-    @Param('campaignId') campaignId: string,
-  ) {
-    return this.assetGroups.listForCampaign(req.user.tenant_id, campaignId);
-  }
-
-  // ─── Reach Planner (Sprint F) ───────────────────────────────────────────
-
-  @Get('reach-forecasts')
-  @Roles('ADMIN', 'ADVOGADO')
-  async listReachForecasts(@Req() req: any, @Query('limit') limit?: string) {
-    return this.reachPlanner.listForecasts(req.user.tenant_id, {
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
-  }
-
-  @Get('reach-forecasts/:id')
-  @Roles('ADMIN', 'ADVOGADO')
-  async getReachForecast(@Req() req: any, @Param('id') id: string) {
-    return this.reachPlanner.getForecast(req.user.tenant_id, id);
-  }
-
-  @Post('reach-forecasts')
-  @Roles('ADMIN', 'ADVOGADO')
-  async generateReachForecast(
-    @Req() req: any,
-    @Body() dto: GenerateReachForecastDto,
-  ) {
-    return this.reachPlanner.enqueueGenerate(
-      req.user.tenant_id,
-      dto,
-      req.user.id,
-    );
   }
 
   // ─── Backfill histórico (Sprint H.1) ────────────────────────────────────
@@ -1196,178 +976,4 @@ export class TrafegoController {
     return this.backfillSvc.cancel(req.user.tenant_id);
   }
 
-  // ─── Chat com a IA (Sprint H.5) ─────────────────────────────────────────
-
-  @Post('chat/sessions')
-  @Roles('ADMIN', 'ADVOGADO')
-  async createChatSession(@Req() req: any, @Body() dto: CreateChatSessionDto) {
-    return this.chat.createSession(req.user.tenant_id, req.user.id, dto.title);
-  }
-
-  @Get('chat/sessions')
-  @Roles('ADMIN', 'ADVOGADO')
-  async listChatSessions(@Req() req: any) {
-    return this.chat.listSessions(req.user.tenant_id, req.user.id);
-  }
-
-  @Get('chat/sessions/:id')
-  @Roles('ADMIN', 'ADVOGADO')
-  async getChatSession(@Req() req: any, @Param('id') id: string) {
-    return this.chat.getSession(req.user.tenant_id, id, req.user.id);
-  }
-
-  @Get('chat/sessions/:id/messages')
-  @Roles('ADMIN', 'ADVOGADO')
-  async getChatMessages(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Query('after') after?: string,
-  ) {
-    return this.chat.getMessages(req.user.tenant_id, id, req.user.id, after);
-  }
-
-  @Post('chat/sessions/:id/messages')
-  @Roles('ADMIN', 'ADVOGADO')
-  async sendChatMessage(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body() dto: SendChatMessageDto,
-  ) {
-    return this.chat.sendMessage(req.user.tenant_id, id, req.user.id, dto.text);
-  }
-
-  @Delete('chat/sessions/:id')
-  @Roles('ADMIN', 'ADVOGADO')
-  async archiveChatSession(@Req() req: any, @Param('id') id: string) {
-    return this.chat.archiveSession(req.user.tenant_id, id, req.user.id);
-  }
-
-  @Post('chat/messages/:id/apply')
-  @Roles('ADMIN', 'ADVOGADO')
-  async applyChatAction(@Req() req: any, @Param('id') id: string) {
-    return this.chat.applyAction(req.user.tenant_id, id, req.user.id);
-  }
-
-  @Post('chat/messages/:id/reject')
-  @Roles('ADMIN', 'ADVOGADO')
-  async rejectChatAction(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body() dto: RejectChatActionDto,
-  ) {
-    return this.chat.rejectAction(
-      req.user.tenant_id,
-      id,
-      req.user.id,
-      dto.note,
-    );
-  }
-
-  // ─── Landing Pages (Fase 4f) ─────────────────────────────────────────────
-
-  /** Lista LPs do tenant com PageSpeed score + análise IA. */
-  @Get('landing-pages')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async listLandingPages(@Req() req: any) {
-    return this.landingPages.list(req.user.tenant_id);
-  }
-
-  /** Detalhes da LP (inclui pagespeed_data e analysis completos). */
-  @Get('landing-pages/:id')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async getLandingPage(@Req() req: any, @Param('id') id: string) {
-    return this.landingPages.get(req.user.tenant_id, id);
-  }
-
-  @Post('landing-pages')
-  @Roles('ADMIN', 'ADVOGADO')
-  async createLandingPage(@Req() req: any, @Body() dto: CreateLandingPageDto) {
-    return this.landingPages.create(req.user.tenant_id, {
-      url: dto.url,
-      title: dto.title,
-      description: dto.description,
-      campaign_id: dto.campaign_id,
-    });
-  }
-
-  @Patch('landing-pages/:id')
-  @Roles('ADMIN', 'ADVOGADO')
-  async updateLandingPage(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Body() dto: UpdateLandingPageDto,
-  ) {
-    return this.landingPages.update(req.user.tenant_id, id, dto);
-  }
-
-  @Delete('landing-pages/:id')
-  @Roles('ADMIN')
-  async deleteLandingPage(@Req() req: any, @Param('id') id: string) {
-    return this.landingPages.remove(req.user.tenant_id, id);
-  }
-
-  /**
-   * Roda PageSpeed Insights pro URL (mobile + desktop). Atualiza scores +
-   * Core Web Vitals. Pré-requisito: PAGESPEED_INSIGHTS_API_KEY em settings.
-   */
-  @Post('landing-pages/:id/pagespeed')
-  @Roles('ADMIN', 'ADVOGADO')
-  async refreshPageSpeed(@Req() req: any, @Param('id') id: string) {
-    return this.landingPages.refreshPageSpeed(req.user.tenant_id, id);
-  }
-
-  /**
-   * Análise IA: fetch HTML + Claude API com prompt OAB + CRO.
-   * Retorna sugestões classificadas por severidade.
-   */
-  @Post('landing-pages/:id/analyze')
-  @Roles('ADMIN', 'ADVOGADO')
-  async analyzeLandingPage(@Req() req: any, @Param('id') id: string) {
-    return this.landingPages.analyzeWithAi(req.user.tenant_id, id);
-  }
-
-  // ─── IA Otimiza (Fase 5) ─────────────────────────────────────────────────
-
-  /**
-   * Diagnóstico semanal automático — gera resumo em pt-BR comparando
-   * esta semana vs anterior. On-demand (admin clica "Gerar"). Cache não
-   * persistido — sempre gera fresh quando solicitado.
-   */
-  @Get('optimization/weekly-diagnosis')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async weeklyDiagnosis(@Req() req: any) {
-    return this.optimization.weeklyDiagnosis(req.user.tenant_id);
-  }
-
-  /**
-   * Lista termos de pesquisa caros (gasto >= R$30 default) com 0 conversões
-   * em 30d. Reusa TrafficSearchTerm como proxy. Admin pode negativar
-   * individualmente ou em batch via endpoint /trafego/ad-groups/:id/negatives
-   * existente.
-   */
-  @Get('optimization/keywords-to-pause')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async keywordsToPause(
-    @Req() req: any,
-    @Query('min_spend_brl') minSpendBrl?: string,
-    @Query('days') days?: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.optimization.keywordsToPause(req.user.tenant_id, {
-      minSpendBrl: minSpendBrl ? Number(minSpendBrl) : undefined,
-      days: days ? parseInt(days, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
-  }
-
-  /**
-   * Sugere ajuste de budget por campanha baseado em CPL atual e meta
-   * declarada em TrafficSettings.target_cpl. Limite de mudança ±20%
-   * (no service) pra evitar shock changes.
-   */
-  @Get('optimization/budget-suggestions')
-  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async budgetSuggestions(@Req() req: any) {
-    return this.optimization.budgetSuggestions(req.user.tenant_id);
-  }
 }
