@@ -1343,6 +1343,20 @@ export class OrganicTrafficService {
         target_keywords: ['advogado trabalhista arapiraca'],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias',
+        title: 'Arapiraca - Verbas Rescisorias',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'verbas rescisorias arapiraca',
+          'calcular rescisao trabalhista arapiraca',
+          'advogado verbas rescisorias arapiraca',
+          'empresa nao pagou rescisao arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',

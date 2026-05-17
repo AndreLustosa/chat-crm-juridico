@@ -29,6 +29,7 @@ const staticContent: LPTemplateContent = {
       iconName: "FileText",
       title: "Verbas Rescisórias",
       description: "Atuação para garantir o pagamento correto de férias, 13º, FGTS, aviso prévio e demais valores devidos na rescisão.",
+      href: "/arapiraca/trabalhista/verbas-rescisorias",
     },
     {
       iconName: "FileText",
