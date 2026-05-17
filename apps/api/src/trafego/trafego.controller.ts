@@ -22,7 +22,10 @@ import type { Queue, QueueEvents } from 'bullmq';
 // imports), NAO de trafego.module — senao gera circular import e o
 // decorator @Inject(TOKEN) ve TOKEN=undefined em runtime → NestJS
 // falha com UndefinedDependencyException. Bug visto em deploy 2026-05-17.
-import { TRAFEGO_MUTATE_QUEUE_EVENTS } from './trafego.tokens';
+import {
+  TRAFEGO_MUTATE_QUEUE_EVENTS,
+  TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS,
+} from './trafego.tokens';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -62,6 +65,7 @@ import {
   UpdateConversionActionDto,
   RemoveConversionActionDto,
   EnableEnhancedConversionsDto,
+  TriggerEnhancedConvUploadDto,
   CreateAdGroupDto,
   UpdateAdGroupDto,
   UpdateRsaDto,
@@ -82,8 +86,12 @@ export class TrafegoController {
     private readonly mappingAi: TrafegoMappingAiService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
+    @InjectQueue('trafego-enhanced-conv')
+    private readonly enhancedConvQueue: Queue,
     @Inject(TRAFEGO_MUTATE_QUEUE_EVENTS)
     private readonly mutateQueueEvents: QueueEvents,
+    @Inject(TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS)
+    private readonly enhancedConvQueueEvents: QueueEvents,
   ) {}
 
   // ─── Dashboard ──────────────────────────────────────────────────────────
@@ -1047,6 +1055,69 @@ export class TrafegoController {
     @Body() dto: RemoveConversionActionDto,
   ) {
     return this.removeConversionAction(req, conversionActionId, dto);
+  }
+
+  /**
+   * Trigger manual do upload Enhanced Conversions for Leads (cron equivalente).
+   * Enfileira job na queue trafego-enhanced-conv, worker processa via
+   * EnhancedConvUploadCron.triggerManual + retorna contadores.
+   *
+   * Util pra: (a) processar leads recentes apos primeira habilitacao da feature,
+   * (b) re-tentar leads que ficaram pendentes apos manutencao, (c) admin
+   * querendo forcar refresh sem esperar 04h Maceio.
+   *
+   * So roda pra tenants com enhanced_conv_for_leads_upload_enabled=true.
+   */
+  @Post('conversion-tracking/trigger-enhanced-conv-upload')
+  @Roles('ADMIN', 'ADVOGADO')
+  async triggerEnhancedConvUpload(
+    @Req() req: any,
+    @Body() dto: TriggerEnhancedConvUploadDto,
+  ) {
+    const tenantId = req.user.tenant_id;
+
+    // Confirma que tenant tem a flag ligada (defensivo — cron faria isso
+    // de qualquer jeito, mas erro mais claro pra caller MCP).
+    const settings = await this.service.getSettings(tenantId);
+    if (!(settings as any)?.enhanced_conv_for_leads_upload_enabled) {
+      throw new HttpException(
+        'Enhanced Conversions for Leads upload NAO esta habilitado pra esta conta. ' +
+          'Use traffic_enable_enhanced_conversions_for_leads(mode="API" ou "BOTH") primeiro.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const job = await this.enhancedConvQueue.add(
+      'trafego-enhanced-conv-trigger',
+      { tenantId, daysBack: dto.days_back },
+      {
+        jobId: `enhanced-conv-trigger-${tenantId}-${Date.now()}`,
+        removeOnComplete: 50,
+        removeOnFail: 20,
+        attempts: 1,
+      },
+    );
+
+    // Aguarda resultado (pode demorar — N leads x M tenants, com upload
+    // a Google Ads em cada). Timeout 90s defensivo. Pra > 90s, caller usa
+    // outro endpoint de status (nao implementado nesta iteracao — assumimos
+    // que 90s cobre uso normal).
+    try {
+      const result = await job.waitUntilFinished(
+        this.enhancedConvQueueEvents,
+        90_000,
+      );
+      return {
+        ok: true,
+        message: `Upload Enhanced Conv enfileirado e processado em ${dto.days_back ?? 14} dias retroativos.`,
+        ...result,
+      };
+    } catch (e: any) {
+      throw new HttpException(
+        `Trigger Enhanced Conv upload falhou ou demorou demais (>90s): ${e?.message ?? 'unknown'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   /**

@@ -20,3 +20,12 @@
  * imediatamente sem ver o resultado real.
  */
 export const TRAFEGO_MUTATE_QUEUE_EVENTS = 'TRAFEGO_MUTATE_QUEUE_EVENTS';
+
+/**
+ * Token DI pra QueueEvents da fila trafego-enhanced-conv. Usada pelo
+ * endpoint trigger manual de upload Enhanced Conversions for Leads
+ * (Sprint 1.5, 2026-05-17). QueueEvents eh per-queue — nao pode reusar
+ * o de mutate.
+ */
+export const TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS =
+  'TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS';

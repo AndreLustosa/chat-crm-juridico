@@ -1460,6 +1460,54 @@ function registerSprint1Tools(server: McpServer) {
   );
 
   server.registerTool(
+    'traffic_trigger_enhanced_conv_upload',
+    {
+      description:
+        'Trigger manual do cron diario de upload Enhanced Conversions for Leads. ' +
+        'So funciona se traffic_enable_enhanced_conversions_for_leads ja foi rodado com mode=API ou BOTH. ' +
+        'Processa leads dos ultimos days_back dias (default 14, max 90) — pra cada lead com email/phone, ' +
+        'sobe userIdentifiers (hashed SHA-256) via UploadClickConversions. Mesmo lead nao eh re-uploadado ' +
+        '(dedupe por conversion_action+gclid+timestamp; sem gclid, dedupe por unique no DB). ' +
+        'Util pra processar leads recentes apos primeira habilitacao da feature ou pra re-tentar ' +
+        'leads que ficaram pendentes apos manutencao do worker. Cron diario roda 04h Maceio automatico.',
+      inputSchema: {
+        days_back: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe('Janela retroativa em dias. Default 14, max 90 (limite Google Ads).'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_trigger_enhanced_conv_upload', async (toolCallId) => {
+        applyMutateGuards('traffic_trigger_enhanced_conv_upload');
+        const result = await crmTrafficService.post<{
+          ok?: boolean;
+          message?: string;
+          tenants_processed?: number;
+          leads_enqueued?: number;
+          leads_skipped?: number;
+          errors?: number;
+        }>(
+          '/trafego/conversion-tracking/trigger-enhanced-conv-upload',
+          { days_back: input.days_back },
+          { toolCallId },
+        );
+        const lines = [
+          `Upload Enhanced Conv (${input.days_back ?? 14}d retroativos) concluido.`,
+          `Tenants: ${result?.tenants_processed ?? 0}`,
+          `Leads enfileirados: ${result?.leads_enqueued ?? 0}`,
+          `Leads skipados (dedupe / sem identifier): ${result?.leads_skipped ?? 0}`,
+          `Erros: ${result?.errors ?? 0}`,
+        ];
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
     'traffic_enable_enhanced_conversions_for_leads',
     {
       description:

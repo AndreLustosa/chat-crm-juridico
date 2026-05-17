@@ -432,6 +432,20 @@ export class RemoveConversionActionDto {
 }
 
 /**
+ * Trigger manual do cron Enhanced Conversions for Leads upload.
+ * Roda fora do schedule diario (04h Maceio) — util pra processar leads
+ * recentes apos toggle inicial ou apos manutencao.
+ */
+export class TriggerEnhancedConvUploadDto {
+  /** Janela de dias retroativos pra processar. Default 14, max 90. */
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  @IsOptional()
+  days_back?: number;
+}
+
+/**
  * Habilita Enhanced Conversions for Leads na conta.
  *
  * Modo GOOGLE_TAG: flag binaria no customer.conversion_tracking_setting.

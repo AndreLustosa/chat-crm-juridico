@@ -91,14 +91,37 @@ export class TrafficOCIService {
       return { uploadId: null, reason: 'lead_not_found' };
     }
 
-    if (!lead.google_gclid && !lead.google_gbraid && !lead.google_wbraid) {
-      // Sem identifier do Google — seria preciso ECL (Enhanced Conversions for Leads)
-      // por email/phone. Pra simplificar Sprint B.3, marcamos como skip.
-      // ECL fica como follow-up (Sprint B+ ou C).
+    // Enhanced Conversions for Leads (Sprint 1.5, 2026-05-17): se a flag
+    // `enhanced_conv_for_leads_upload_enabled` esta ligada no TrafficSettings,
+    // permitimos upload mesmo sem gclid — desde que o lead tenha email OU
+    // phone (pra hash + match no Google via userIdentifiers). Cobre cookieless
+    // world. Se nem gclid nem email/phone, skip explicito.
+    const hasClickId =
+      !!lead.google_gclid || !!lead.google_gbraid || !!lead.google_wbraid;
+    if (!hasClickId) {
+      const settings = await this.prisma.trafficSettings.findUnique({
+        where: { tenant_id: input.tenantId },
+      });
+      const ecLeadsEnabled =
+        settings?.enhanced_conv_for_leads_upload_enabled ?? false;
+
+      if (!ecLeadsEnabled) {
+        this.logger.log(
+          `[OCI] Lead ${lead.id} sem gclid/gbraid/wbraid e enhanced_conv flag desligada — pulando`,
+        );
+        return { uploadId: null, reason: 'no_click_id' };
+      }
+
+      if (!lead.email && !lead.phone) {
+        this.logger.log(
+          `[OCI] Lead ${lead.id} sem gclid + sem email/phone — sem signal pra upload via Enhanced Conv`,
+        );
+        return { uploadId: null, reason: 'no_user_identifiers' };
+      }
+
       this.logger.log(
-        `[OCI] Lead ${lead.id} sem gclid/gbraid/wbraid — pulando upload OCI`,
+        `[OCI] Lead ${lead.id} sem gclid mas Enhanced Conv ligado — uploadando via userIdentifiers (${lead.email ? 'email' : ''}${lead.email && lead.phone ? '+' : ''}${lead.phone ? 'phone' : ''})`,
       );
-      return { uploadId: null, reason: 'no_click_id' };
     }
 
     // Janela de 90 dias — Google ignora gclids mais antigos
