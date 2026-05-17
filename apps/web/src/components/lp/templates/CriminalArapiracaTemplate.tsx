@@ -47,8 +47,15 @@ const practiceAreas = [
     icon: Shield,
     title: "Medidas protetivas",
     description:
-      "Atuação em casos ligados à Lei Maria da Penha, com análise cuidadosa dos fatos e provas.",
+      "Pedido e acompanhamento de proteção para mulheres em situação de violência doméstica.",
     href: "/arapiraca/criminal/medidas-protetivas",
+  },
+  {
+    icon: Scale,
+    title: "Defesa na Maria da Penha",
+    description:
+      "Defesa para homens acusados, intimados ou atingidos por medida protetiva, com foco em provas e estratégia.",
+    href: "/arapiraca/criminal/defesa-homem-lei-maria-da-penha",
   },
   {
     icon: Fingerprint,
