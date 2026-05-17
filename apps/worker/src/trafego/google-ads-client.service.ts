@@ -132,6 +132,16 @@ export class GoogleAdsClientService {
     // gRPC bruto onde mask vai sem mutacao.
     const svc = (customer as any).loadService('GoogleAdsServiceClient');
 
+    // CRITICO: bypass deve injetar headers (developer-token + login-customer-id)
+    // que o SDK normalmente injeta via interceptor. Sem isso o Google rejeita
+    // com `DEVELOPER_TOKEN_PARAMETER_MISSING` antes mesmo de validar o
+    // mask/body — todos os erros "INVALID_ARGUMENT" anteriores (db1f985,
+    // da11954, 0c2ed08, 8915341) eram esse falso positivo.
+    //
+    // Padrao copiado de google-ads-api/build/src/customer.js#430 onde o
+    // metodo de alto-nivel `mutate` faz exatamente isso.
+    const headers = (customer as any).callHeaders;
+
     const request = {
       customer_id: customerId,
       mutate_operations: [
@@ -147,39 +157,57 @@ export class GoogleAdsClientService {
     };
 
     this.logger.log(
-      `[mutate-grpc] customer=${customerId} mask=${JSON.stringify(updateMaskPaths)} validate_only=${validateOnly} body=${JSON.stringify(campaignResource, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))}`,
+      `[mutate-grpc] customer=${customerId} mask=${JSON.stringify(updateMaskPaths)} validate_only=${validateOnly} body=${JSON.stringify(campaignResource, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))} headers=${JSON.stringify(this.redactHeaders(headers))}`,
     );
 
-    return new Promise((resolve, reject) => {
-      svc.mutate(request, (err: any, response: any) => {
-        if (err) {
-          // Erros request-level (INVALID_ARGUMENT, FAILED_PRECONDITION) vem como
-          // Error gRPC nativo SEM partial_failure_error. O detalhe estruturado
-          // (field_mask_error, mutate_error, etc) fica num trailer binario.
-          // Internamente o SDK chama `getGoogleAdsError(err)` mas via gRPC
-          // bypass nao passamos por ele — temos que decodificar a mao.
-          // Padrao copiado de google-ads-api/build/src/service.js#100.
-          const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
-          this.logger.warn(
-            `[mutate-grpc] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
-          );
-          return reject(err);
-        }
-        const resourceNames = (response?.mutate_operation_responses ?? [])
-          .map((r: any) => r?.campaign_result?.resource_name)
-          .filter((rn: any): rn is string => !!rn);
-        const partial = response?.partial_failure_error;
-        this.logger.log(
-          `[mutate-grpc] SUCCESS resources=${resourceNames.length} partial=${partial ? 'YES' : 'no'} raw=${JSON.stringify(this.safeSnapshot(response))}`,
-        );
-        resolve({
-          ok: !partial,
-          raw: response,
-          resourceNames,
-          error: partial ? JSON.stringify(partial).slice(0, 500) : undefined,
-        });
+    try {
+      // google-gax retorna `[response, metadata, status]` em unary call.
+      const result = await svc.mutate(request, {
+        otherArgs: { headers },
       });
-    });
+      const response = Array.isArray(result) ? result[0] : result;
+
+      const resourceNames = (response?.mutate_operation_responses ?? [])
+        .map((r: any) => r?.campaign_result?.resource_name)
+        .filter((rn: any): rn is string => !!rn);
+      const partial = response?.partial_failure_error;
+      this.logger.log(
+        `[mutate-grpc] SUCCESS resources=${resourceNames.length} partial=${partial ? 'YES' : 'no'} raw=${JSON.stringify(this.safeSnapshot(response))}`,
+      );
+      return {
+        ok: !partial,
+        raw: response,
+        resourceNames,
+        error: partial ? JSON.stringify(partial).slice(0, 500) : undefined,
+      };
+    } catch (err: any) {
+      // Erros request-level (INVALID_ARGUMENT, FAILED_PRECONDITION) vem como
+      // Error gRPC nativo SEM partial_failure_error. O detalhe estruturado
+      // (field_mask_error, mutate_error, etc) fica num trailer binario.
+      // Internamente o SDK chama `getGoogleAdsError(err)` mas via bypass
+      // precisamos decodificar a mao. Padrao copiado de
+      // google-ads-api/build/src/service.js#100.
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[mutate-grpc] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * Redact developer-token pra log nao expor secret completo.
+   */
+  private redactHeaders(headers: Record<string, string>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers ?? {})) {
+      if (/token|secret/i.test(k) && typeof v === 'string') {
+        out[k] = v.length > 8 ? `${v.slice(0, 4)}***${v.slice(-4)}` : '***';
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
   }
 
   /**
