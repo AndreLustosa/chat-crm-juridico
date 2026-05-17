@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Inject,
   Post,
   Patch,
   Put,
@@ -16,7 +17,8 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { InjectQueue } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
+import type { Queue, QueueEvents } from 'bullmq';
+import { TRAFEGO_MUTATE_QUEUE_EVENTS } from './trafego.module';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -76,6 +78,8 @@ export class TrafegoController {
     private readonly mappingAi: TrafegoMappingAiService,
     @InjectQueue('trafego-sync') private readonly syncQueue: Queue,
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
+    @Inject(TRAFEGO_MUTATE_QUEUE_EVENTS)
+    private readonly mutateQueueEvents: QueueEvents,
   ) {}
 
   // ─── Dashboard ──────────────────────────────────────────────────────────
@@ -1170,19 +1174,57 @@ export class TrafegoController {
       validateOnly,
     );
 
-    await this.mutateQueue.add(jobName, data, {
+    // Enfileira + AGUARDA resultado real do worker.
+    // Fix 2026-05-17 (bug reportado pelo gestor de trafego): antes
+    // retornava ok:true imediatamente apos add(), sem ver o resultado.
+    // Dry-run virava inutil porque "mentia" — Google podia rejeitar
+    // (partial_failure_error) e o caller nunca via. Agora aguardamos
+    // o worker terminar via job.waitUntilFinished(queueEvents, ttl) e
+    // propagamos status/error_message do MutateResult.
+    const job = await this.mutateQueue.add(jobName, data, {
       jobId: `mutate-${jobName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       removeOnComplete: 100,
       removeOnFail: 50,
       attempts: 1, // Mutates nao retentam — caller decide se quer retry
     });
 
+    let result: any;
+    try {
+      // Timeout 30s — Google Ads costuma responder em <5s, mas dry-run +
+      // OAB validation + log persist pode levar mais. 30s eh defensivo.
+      result = await job.waitUntilFinished(this.mutateQueueEvents, 30_000);
+    } catch (err: any) {
+      // job.waitUntilFinished rejeita se o job throws no processor OU se
+      // o timeout estourar. Em ambos os casos, mensagem util ja vem no err.
+      const errorMessage =
+        err?.message || 'Falha desconhecida no worker de mutate';
+      throw new HttpException(
+        `Mutate falhou ou demorou demais (>30s): ${errorMessage}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    // result eh um MutateResult — { status: SUCCESS | PARTIAL | FAILED, ... }
+    // FAILED = erro no caminho (OAB block, API error, falta de credencial)
+    // PARTIAL = Google retornou partial_failure_error (validate_only que
+    //           Google rejeitou, ou apply com algumas operacoes falhando)
+    if (result?.status === 'FAILED' || result?.status === 'PARTIAL') {
+      throw new HttpException(
+        `Mutate ${result.status}: ${
+          result.errorMessage ?? '(sem detalhe — ver TrafficMutateLog)'
+        }`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     return {
       ok: true,
       validate_only: validateOnly,
       message: validateOnly
-        ? 'Mutate em DRY-RUN enfileirado (modo Conselheiro).'
-        : 'Mutate enfileirado. Acompanhe em /trafego/mutate-logs.',
+        ? 'Dry-run executado — Google validou o payload com sucesso.'
+        : 'Mutate aplicado com sucesso na Google Ads API.',
+      mutate_log_id: result?.logId,
+      resource_names: result?.resourceNames ?? [],
     };
   }
 

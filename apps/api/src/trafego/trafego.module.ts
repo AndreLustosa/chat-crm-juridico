@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Inject, Module, OnModuleDestroy } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { QueueEvents } from 'bullmq';
 import { SettingsModule } from '../settings/settings.module';
 import { TrafegoController } from './trafego.controller';
 import { TrafegoService } from './trafego.service';
@@ -11,6 +12,16 @@ import { TrafegoLeadFormService } from './trafego-lead-form.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
 import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
+
+/**
+ * Token DI pra QueueEvents da fila trafego-mutate. Necessario pra que o
+ * controller possa esperar `job.waitUntilFinished(queueEvents, ttl)`
+ * apos enfileirar um mutate — sem isso o controller retornaria ok:true
+ * imediatamente, sem ver o resultado real do worker (fix de 2026-05-17
+ * apos bug "dry-run mente": Google rejeitou com partial_failure_error
+ * mas o controller retornou ok porque so olhou se conseguiu enfileirar).
+ */
+export const TRAFEGO_MUTATE_QUEUE_EVENTS = 'TRAFEGO_MUTATE_QUEUE_EVENTS';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
@@ -55,6 +66,21 @@ import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
     TrafegoRecommendationsService,
     TrafegoBackfillService,
     TrafegoMappingAiService,
+    {
+      provide: TRAFEGO_MUTATE_QUEUE_EVENTS,
+      // Singleton — cria conexao Redis dedicada pra escutar eventos da
+      // fila trafego-mutate. Reusada por enqueueMutate em cada request.
+      useFactory: (): QueueEvents => {
+        return new QueueEvents('trafego-mutate', {
+          prefix: process.env.BULL_PREFIX || 'bull',
+          connection: {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+            maxRetriesPerRequest: null,
+          },
+        });
+      },
+    },
   ],
   exports: [
     TrafegoService,
@@ -68,4 +94,14 @@ import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
     TrafegoMappingAiService,
   ],
 })
-export class TrafegoModule {}
+export class TrafegoModule implements OnModuleDestroy {
+  constructor(
+    @Inject(TRAFEGO_MUTATE_QUEUE_EVENTS)
+    private readonly mutateQueueEvents: QueueEvents,
+  ) {}
+
+  async onModuleDestroy(): Promise<void> {
+    // Fecha conexao Redis do QueueEvents pra app shutdown limpo.
+    await this.mutateQueueEvents.close().catch(() => {});
+  }
+}

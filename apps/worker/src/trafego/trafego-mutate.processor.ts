@@ -426,31 +426,29 @@ export class TrafegoMutateProcessor extends WorkerHost {
   }
 
   /**
-   * Remove (soft-delete) uma campanha. Spec do gestor de trafego (2026-05-17)
-   * pede operacao UPDATE com status=REMOVED + update_mask=["status"], em vez
-   * do tradicional REMOVE operation. Equivalente server-side mas leverage o
-   * mesmo audit log dos outros mutates (payload mostra `{status: REMOVED}`).
+   * Remove (soft-delete) uma campanha.
    *
-   * Pra status (scalar enum), o auto-mask do SDK funciona corretamente
-   * (recursiveFieldMaskSearch trata scalares OK — o bug 0137f49 era so pra
-   * oneof empty messages). NAO precisa do bypass mutateCampaignWithExplicitMask.
+   * Fix 2026-05-17 (bug reportado pelo gestor de trafego): Google Ads
+   * REJEITA `update` com `status=REMOVED` (INVALID_ENUM_VALUE — "Enum
+   * value 'REMOVED' cannot be used"). O caminho correto eh a operacao
+   * `remove` (passa apenas o resource_name como string), nao `update`.
+   *
+   * Spec original do gestor pedia UPDATE+status pra leverage o audit log
+   * mostrar `{status: REMOVED}`, mas Google nao aceita esse padrao em
+   * remocao via API. A operacao REMOVE retorna SUCCESS e atualiza o status
+   * server-side equivalente.
    */
   private async removeCampaign(p: RemoveCampaignPayload): Promise<MutateResult> {
     const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'campaign',
-      operation: 'update',
+      operation: 'remove',
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
       context: p.context,
-      operations: [
-        {
-          resource_name: p.campaignResourceName,
-          status: enums.CampaignStatus.REMOVED,
-        },
-      ],
+      operations: [p.campaignResourceName],
     });
     if (result.status === 'SUCCESS' && !p.validateOnly) {
       await this.updateLocalCampaignStatus(
@@ -464,27 +462,23 @@ export class TrafegoMutateProcessor extends WorkerHost {
   }
 
   /**
-   * Remove (soft-delete) um ad_group. Mesmo padrao de removeCampaign:
-   * UPDATE com status=REMOVED + mask auto-derivado ["status"]. Cascade
-   * (ads, keywords) eh server-side — Google REMOVE em cascata
-   * automaticamente quando ad_group passa pra REMOVED.
+   * Remove (soft-delete) um ad_group.
+   *
+   * Mesmo fix de removeCampaign — usa operacao REMOVE (resource_name string).
+   * Cascade (ads, keywords) eh automatico no Google quando ad_group eh
+   * removido.
    */
   private async removeAdGroup(p: RemoveAdGroupPayload): Promise<MutateResult> {
     const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'ad_group',
-      operation: 'update',
+      operation: 'remove',
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
       context: p.context,
-      operations: [
-        {
-          resource_name: p.adGroupResourceName,
-          status: enums.AdGroupStatus.REMOVED,
-        },
-      ],
+      operations: [p.adGroupResourceName],
     });
     if (result.status === 'SUCCESS' && !p.validateOnly) {
       // Mirror local — atualiza TrafficAdGroup.status sem esperar proximo sync
@@ -1308,7 +1302,11 @@ export class TrafegoMutateProcessor extends WorkerHost {
   }
 
   /**
-   * Remove ConversionAction (soft-delete, status=REMOVED).
+   * Remove ConversionAction (soft-delete).
+   *
+   * Fix 2026-05-17 — usar operacao REMOVE (resource_name string), nao
+   * UPDATE com status=REMOVED. Google rejeita esse ultimo com
+   * INVALID_ENUM_VALUE.
    */
   private async removeConversionAction(
     p: RemoveConversionActionPayload,
@@ -1317,17 +1315,12 @@ export class TrafegoMutateProcessor extends WorkerHost {
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'conversion_action',
-      operation: 'update',
+      operation: 'remove',
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
       context: p.context,
-      operations: [
-        {
-          resource_name: p.conversionActionResourceName,
-          status: enums.ConversionActionStatus.REMOVED,
-        },
-      ],
+      operations: [p.conversionActionResourceName],
     });
   }
 
@@ -1517,46 +1510,39 @@ export class TrafegoMutateProcessor extends WorkerHost {
       return createResult;
     }
 
-    // Passo 2: remove antigo (status=REMOVED)
+    // Passo 2: remove antigo via operacao REMOVE (resource_name string).
+    // Google rejeita UPDATE+status=REMOVED com INVALID_ENUM_VALUE.
     await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'ad_group_ad',
-      operation: 'update',
+      operation: 'remove',
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: false,
       context: { ...p.context, step: 'remove_old_rsa' },
-      operations: [
-        {
-          resource_name: p.oldAdGroupAdResourceName,
-          status: enums.AdGroupAdStatus.REMOVED,
-        },
-      ],
+      operations: [p.oldAdGroupAdResourceName],
     });
 
     return createResult;
   }
 
   /**
-   * Remove um ad individual (soft-delete, status=REMOVED).
+   * Remove um ad individual (soft-delete).
+   *
+   * Fix 2026-05-17 — operacao REMOVE, nao UPDATE+status=REMOVED.
    */
   private async removeAd(p: RemoveAdPayload): Promise<MutateResult> {
     return await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'ad_group_ad',
-      operation: 'update',
+      operation: 'remove',
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
       context: p.context,
-      operations: [
-        {
-          resource_name: p.adGroupAdResourceName,
-          status: enums.AdGroupAdStatus.REMOVED,
-        },
-      ],
+      operations: [p.adGroupAdResourceName],
     });
   }
 
