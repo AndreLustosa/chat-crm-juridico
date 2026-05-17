@@ -19,79 +19,79 @@ import { trackWhatsappClick } from "../LPTracker";
 
 const whatsappNumber = "5582996390799";
 const whatsappHref = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
-  "Olá, vim da página de Medidas Protetivas em Arapiraca e preciso de orientação jurídica.",
+  "Olá, vim da página de Medida Protetiva em Arapiraca e preciso de orientação jurídica sigilosa.",
 )}`;
 
 const urgencyItems = [
-  "Recebeu ameaça, perseguição, agressão ou intimidação no ambiente familiar.",
-  "Precisa entender como pedir, acompanhar ou contestar medidas protetivas.",
-  "Tem audiência marcada ou recebeu intimação sobre Lei Maria da Penha.",
-  "Quer organizar provas, mensagens, boletins ou documentos antes de agir.",
+  "Você sofreu ameaça, agressão, perseguição, humilhação, controle financeiro ou intimidação.",
+  "O agressor insiste em ligar, mandar mensagens, aparecer na sua casa ou se aproximar dos seus filhos.",
+  "Você já registrou ocorrência, mas ainda não sabe como acompanhar o pedido de proteção.",
+  "Existe uma medida protetiva, mas houve tentativa de contato, aproximação ou descumprimento.",
 ];
 
 const services = [
   {
     icon: Shield,
-    title: "Pedido de medidas protetivas",
+    title: "Pedido de medida protetiva",
     description:
-      "Orientação jurídica para organizar fatos, documentos e próximos passos em situações de risco.",
+      "Organização dos fatos, provas e documentos para buscar proteção judicial com clareza e segurança.",
   },
   {
     icon: FileText,
-    title: "Acompanhamento do procedimento",
+    title: "Acompanhamento da vítima",
     description:
-      "Análise de boletim de ocorrência, intimações, decisões e comunicações recebidas.",
+      "Análise do boletim de ocorrência, decisões, intimações e providências depois do pedido.",
   },
   {
     icon: Scale,
-    title: "Audiências e manifestações",
+    title: "Audiências e decisões",
     description:
-      "Atuação técnica em audiências, pedidos de revisão, esclarecimentos e defesas cabíveis.",
+      "Atuação técnica em audiência e pedidos relacionados à manutenção, ampliação ou revisão da proteção.",
   },
   {
     icon: BadgeCheck,
     title: "Descumprimento de medida",
     description:
-      "Avaliação jurídica sobre descumprimento, provas, urgência e providências adequadas ao caso.",
+      "Orientação sobre como documentar o descumprimento e quais providências jurídicas podem ser adotadas.",
   },
   {
     icon: HeartHandshake,
-    title: "Atendimento sigiloso",
+    title: "Acolhimento com sigilo",
     description:
-      "Conversa reservada para entender o cenário com cuidado, respeito e objetividade.",
+      "Escuta reservada, sem julgamento e com foco em segurança, direitos e próximos passos possíveis.",
   },
   {
     icon: Clock,
-    title: "Urgência em Arapiraca",
+    title: "Resposta em situação urgente",
     description:
-      "Direcionamento rápido quando a situação exige resposta jurídica imediata.",
+      "Direcionamento rápido quando há risco atual, audiência próxima ou decisão que precisa ser acompanhada.",
   },
 ];
 
 const steps = [
   {
     num: "01",
-    title: "Contato reservado",
+    title: "Primeira conversa sigilosa",
     description:
-      "Você explica o que aconteceu pelo WhatsApp, com sigilo e sem exposição desnecessária.",
+      "Você relata a situação pelo WhatsApp, com discrição e sem exposição desnecessária.",
   },
   {
     num: "02",
-    title: "Análise da urgência",
+    title: "Análise do risco",
     description:
-      "Avaliamos risco, documentos, mensagens, boletim de ocorrência e intimações existentes.",
+      "Avaliamos ameaças, histórico, filhos envolvidos, documentos e medidas já existentes.",
   },
   {
     num: "03",
-    title: "Orientação jurídica",
+    title: "Caminho jurídico",
     description:
-      "Indicamos os caminhos possíveis para pedido, acompanhamento, revisão ou defesa.",
+      "Explicamos o que pode ser pedido e como acompanhar a proteção sem prometer resultado.",
   },
   {
     num: "04",
-    title: "Acompanhamento",
+    title: "Acompanhamento do caso",
     description:
-      "Seguimos com comunicação clara sobre prazos, audiências e providências relevantes.",
+      "Acompanhamos prazos, audiências, decisões e providências relevantes com comunicação clara.",
   },
 ];
 
@@ -101,24 +101,24 @@ const documents = [
   "Intimações, decisões ou medidas já recebidas",
   "Dados de testemunhas ou pessoas que presenciaram fatos",
   "Fotos, vídeos, relatórios ou documentos médicos, se existirem",
-  "Histórico de ameaças, perseguições ou descumprimentos",
+  "Histórico de ameaças, perseguições, controle financeiro ou descumprimentos",
 ];
 
 const faq = [
   {
     question: "Medida protetiva precisa de advogado?",
     answer:
-      "A vítima pode procurar a autoridade policial ou o Judiciário, mas a orientação de um advogado ajuda a organizar documentos, entender riscos, acompanhar decisões e adotar providências jurídicas adequadas.",
+      "A mulher pode procurar diretamente a autoridade policial, o Judiciário, a Defensoria ou o Ministério Público. A orientação de um advogado ajuda a organizar documentos, entender riscos, acompanhar decisões e adotar providências jurídicas adequadas.",
   },
   {
     question: "O escritório atende casos urgentes em Arapiraca?",
     answer:
-      "Sim. O atendimento inicial pode ser feito pelo WhatsApp para entender a urgência e orientar os próximos passos. Em risco imediato, acione a Polícia Militar pelo 190 ou procure a Delegacia.",
+      "Sim. O atendimento inicial pode ser feito pelo WhatsApp para entender a urgência e orientar os próximos passos. Em perigo imediato, acione a Polícia Militar pelo 190. Para orientação e denúncias, também existe o Ligue 180.",
   },
   {
-    question: "Também atuam para quem recebeu uma medida protetiva?",
+    question: "Que tipos de violência podem justificar proteção?",
     answer:
-      "Sim. O escritório analisa a decisão, intimações, provas e possibilidades jurídicas cabíveis, sempre com atuação técnica e responsável.",
+      "Além da agressão física, a Lei Maria da Penha abrange violência psicológica, moral, sexual e patrimonial. A análise jurídica identifica quais fatos são relevantes para o pedido ou acompanhamento da medida.",
   },
   {
     question: "O atendimento é sigiloso?",
@@ -168,35 +168,36 @@ export function MedidasProtetivasArapiracaTemplate() {
           <div className="max-w-2xl">
             <div className="mb-6 inline-flex items-center gap-2 rounded-lg border border-[#a89048]/40 bg-black/45 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-[#d6bd74] backdrop-blur">
               <MapPin size={15} />
-              Arapiraca-AL | Lei Maria da Penha
+              Arapiraca-AL | Violência doméstica
             </div>
             <h1 className="text-[clamp(2.35rem,5.9vw,5.2rem)] font-medium leading-[0.98] tracking-normal text-white">
-              Medidas protetivas em Arapiraca
+              Medida protetiva para proteger você e sua família
             </h1>
             <p className="mt-6 max-w-xl text-[clamp(1rem,1.6vw,1.22rem)] leading-relaxed text-[#d8d2c6]">
-              Orientação jurídica sigilosa para pedidos, acompanhamento,
-              descumprimento ou defesa em medidas protetivas ligadas à Lei
-              Maria da Penha.
+              Atendimento jurídico sigiloso em Arapiraca para mulheres em
+              situação de violência doméstica, ameaças, perseguição ou
+              descumprimento de medida protetiva.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={openWhatsapp}
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-[#25d366] px-6 text-base font-bold text-[#07110b] shadow-[0_18px_45px_rgba(37,211,102,0.22)] transition hover:bg-[#2ee273]"
               >
-                Falar com advogado agora
+                Quero orientação sigilosa
                 <ArrowRight size={19} />
               </button>
               <a
                 href="#como-ajudamos"
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/20 bg-white/10 px-6 text-base font-semibold text-white transition hover:border-[#a89048]/70 hover:bg-white/15"
               >
-                Entender a atuação
+                Como funciona a proteção
               </a>
             </div>
             <div className="mt-8 rounded-lg border border-red-300/20 bg-red-950/25 p-4 text-sm leading-relaxed text-[#f2d4c8] backdrop-blur">
-              <strong className="text-white">Risco imediato?</strong> Acione a
-              Polícia Militar pelo 190 ou procure a Delegacia. O atendimento
-              jurídico entra para orientar e acompanhar as providências legais.
+              <strong className="text-white">Está em perigo agora?</strong>{" "}
+              Ligue 190. Para orientação e denúncias, use também o Ligue 180.
+              O atendimento jurídico ajuda a acompanhar as providências legais
+              com sigilo.
             </div>
           </div>
         </div>
@@ -206,15 +207,15 @@ export function MedidasProtetivasArapiracaTemplate() {
         <div className="mx-auto max-w-7xl px-5 md:px-8">
           <div className="max-w-3xl">
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#a89048]">
-              Situações comuns
+              Sinais de alerta
             </p>
             <h2 className="mt-4 text-[clamp(1.9rem,4vw,3.3rem)] font-medium leading-tight text-white">
-              Quando procurar orientação sobre medidas protetivas?
+              A proteção pode ser necessária antes da violência escalar.
             </h2>
             <p className="mt-5 text-lg leading-relaxed text-[#bdb6aa]">
-              Cada caso precisa ser analisado com cuidado. A orientação jurídica
-              ajuda a organizar fatos, preservar provas e evitar decisões tomadas
-              apenas sob pressão.
+              A violência doméstica nem sempre começa com agressão física.
+              Ameaças, controle, perseguição, humilhação e isolamento também
+              precisam ser levados a sério.
             </p>
           </div>
 
@@ -236,10 +237,10 @@ export function MedidasProtetivasArapiracaTemplate() {
         <div className="mx-auto max-w-7xl px-5 md:px-8">
           <div className="max-w-3xl">
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#a89048]">
-              Como ajudamos
+              Proteção jurídica
             </p>
             <h2 className="mt-4 text-[clamp(1.9rem,4vw,3.3rem)] font-medium leading-tight text-white">
-              Atuação técnica, sigilosa e responsável em Arapiraca.
+              Cuidado no atendimento e firmeza nas providências legais.
             </h2>
           </div>
 
@@ -266,14 +267,14 @@ export function MedidasProtetivasArapiracaTemplate() {
         <div className="mx-auto grid max-w-7xl gap-10 px-5 md:px-8 lg:grid-cols-[0.92fr_1.08fr] lg:items-start">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#8b6630]">
-              Documentos e provas
+              Provas seguras
             </p>
             <h2 className="mt-4 text-[clamp(1.9rem,4vw,3.2rem)] font-medium leading-tight">
-              O que reunir antes do atendimento?
+              O que guardar para fortalecer o pedido?
             </h2>
             <p className="mt-5 text-lg leading-relaxed text-[#4a4033]">
-              Se for possível e seguro, separar informações ajuda na análise
-              inicial. Não se coloque em risco para buscar documentos.
+              Se for possível e seguro, preserve registros. Não confronte o
+              agressor e não se coloque em risco para obter provas.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -294,10 +295,10 @@ export function MedidasProtetivasArapiracaTemplate() {
         <div className="mx-auto max-w-7xl px-5 md:px-8">
           <div className="max-w-3xl">
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-[#a89048]">
-              Atendimento
+              Caminho seguro
             </p>
             <h2 className="mt-4 text-[clamp(1.9rem,4vw,3.2rem)] font-medium leading-tight text-white">
-              Um caminho claro para decidir o próximo passo.
+              Você não precisa organizar tudo sozinha.
             </h2>
           </div>
           <div className="mt-12 grid gap-4 md:grid-cols-4">
@@ -359,10 +360,11 @@ export function MedidasProtetivasArapiracaTemplate() {
               André Lustosa Advogados
             </p>
             <h2 className="mt-2 text-2xl font-semibold md:text-3xl">
-              Precisa de orientação sobre medidas protetivas?
+              Precisa de proteção jurídica com sigilo?
             </h2>
             <p className="mt-2 text-[#4a4033]">
-              Atendimento em Arapiraca-AL e online, com sigilo e cuidado.
+              Atendimento em Arapiraca-AL e online para mulheres em situação de
+              violência doméstica.
             </p>
           </div>
           <button
