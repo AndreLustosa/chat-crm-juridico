@@ -755,49 +755,41 @@ export class TrafegoMutateProcessor extends WorkerHost {
    * NÃO popula bidding_strategy_resource_name (estratégia portfolio
    * compartilhada): apenas a versão "standard" embutida na campanha.
    *
-   * Fix 2026-05-17 (BUG B reportado pelo agente externo): o SDK
-   * google-ads-api NAO auto-deduzia update_mask pra oneof fields de
-   * bidding strategy. Resultado: mutate retornava SUCCESS mas Google
-   * ignorava no-op. Solucao: popular bidding_strategy_type ENUM
-   * EXPLICITAMENTE — isso forca o SDK a incluir tanto o campo enum
-   * quanto o objeto da estrategia no update_mask, garantindo que o
-   * Google aplique a mudanca.
+   * Fix 2026-05-17 (apos 4 tentativas — ver feedback_google_ads_sdk_fieldmask.md
+   * pra cadeia completa). Padrao canonico documentado nos docs oficiais
+   * Google (developers.google.com/google-ads/api/docs/client-libs/java/field-masks):
+   *
+   *   - bidding_strategy_type eh READ-ONLY: Google ignora quando enviado.
+   *     NAO incluir no body nem no mask (era o erro das tentativas anteriores).
+   *   - Body popula o oneof field (`maximize_conversions: {}`, `target_cpa: {...}`)
+   *   - update_mask contem SUBFIELD do oneof (ex `maximize_conversions.target_cpa_micros`).
+   *     A presenca do subfield path no mask serve como signal pro Google
+   *     entender "trocar estrategia pra este oneof".
+   *   - Mask NAO pode conter so o oneof name (FIELD_HAS_SUBFIELDS).
+   *   - Mask NAO pode conter so bidding_strategy_type (no-op silencioso).
+   *
+   * Bypass via GoogleAdsServiceClient.mutate gRPC direto continua sendo
+   * necessario porque o auto-mask do SDK google-ads-api v23 nao gera
+   * subfield paths pra empty oneof messages — descende em `{}`, retorna
+   * vazio, e pula o push do parent (utils.js#recursiveFieldMaskSearch).
    */
   private async updateBiddingStrategy(
     p: UpdateBiddingStrategyPayload,
   ): Promise<MutateResult> {
     const op: any = { resource_name: p.campaignResourceName };
 
-    // bidding_strategy_type EXPLICITO — garante update_mask correto. Sem
-    // isso, o auto-mask do SDK nao detectava oneof e o Google ignorava
-    // a mudanca silenciosamente (SUCCESS sem efeito).
-    const enumMap: Record<string, number | undefined> = {
-      MAXIMIZE_CONVERSIONS: enums.BiddingStrategyType.MAXIMIZE_CONVERSIONS,
-      MAXIMIZE_CONVERSION_VALUE: enums.BiddingStrategyType.MAXIMIZE_CONVERSION_VALUE,
-      TARGET_CPA: enums.BiddingStrategyType.TARGET_CPA,
-      TARGET_ROAS: enums.BiddingStrategyType.TARGET_ROAS,
-      MAXIMIZE_CLICKS: enums.BiddingStrategyType.TARGET_SPEND, // Google: TargetSpend = MaximizeClicks novo
-      MANUAL_CPC: enums.BiddingStrategyType.MANUAL_CPC,
-      TARGET_SPEND: enums.BiddingStrategyType.TARGET_SPEND,
-      TARGET_IMPRESSION_SHARE: enums.BiddingStrategyType.TARGET_IMPRESSION_SHARE,
-    };
-    const enumValue = enumMap[p.biddingStrategy];
-    if (enumValue === undefined) {
-      throw new Error(`bidding_strategy desconhecida: ${p.biddingStrategy}`);
-    }
-    op.bidding_strategy_type = enumValue;
+    // Cada estrategia: (1) popula o oneof message no body, (2) define qual
+    // subfield path vai no mask como "marker" do oneof selecionado.
+    let updateMaskPath: string;
 
-    // Cada bidding strategy tem campo dedicado — Google espera APENAS um
-    // populado por campanha. Popular este garante que update_mask inclui o
-    // path correto.
     if (p.biddingStrategy === 'MAXIMIZE_CONVERSIONS') {
       op.maximize_conversions = {};
-    } else if (p.biddingStrategy === 'MAXIMIZE_CLICKS') {
-      // MaximizeClicks resource = TargetSpend protobuf field (legado de nome,
-      // mas Google ainda usa internamente)
-      op.target_spend = {};
-    } else if (p.biddingStrategy === 'MANUAL_CPC') {
-      op.manual_cpc = { enhanced_cpc_enabled: false };
+      // target_cpa_micros eh opcional na MaximizeConversions (0/unset = sem CPA alvo)
+      updateMaskPath = 'maximize_conversions.target_cpa_micros';
+    } else if (p.biddingStrategy === 'MAXIMIZE_CONVERSION_VALUE') {
+      op.maximize_conversion_value = {};
+      // target_roas eh opcional (0/unset = sem ROAS alvo)
+      updateMaskPath = 'maximize_conversion_value.target_roas';
     } else if (p.biddingStrategy === 'TARGET_CPA') {
       if (!p.targetCpaMicros) {
         throw new Error('TARGET_CPA exige targetCpaMicros');
@@ -808,21 +800,26 @@ export class TrafegoMutateProcessor extends WorkerHost {
             ? BigInt(p.targetCpaMicros)
             : p.targetCpaMicros,
       };
+      updateMaskPath = 'target_cpa.target_cpa_micros';
     } else if (p.biddingStrategy === 'TARGET_ROAS') {
       if (!p.targetRoas) {
         throw new Error('TARGET_ROAS exige targetRoas');
       }
       op.target_roas = { target_roas: p.targetRoas };
-    } else if (p.biddingStrategy === 'MAXIMIZE_CONVERSION_VALUE') {
-      op.maximize_conversion_value = {};
+      updateMaskPath = 'target_roas.target_roas';
+    } else if (p.biddingStrategy === 'MAXIMIZE_CLICKS') {
+      // MaximizeClicks = TargetSpend protobuf (legado de nome, Google ainda
+      // usa internamente). Subfield estavel: cpc_bid_ceiling_micros (deprecated
+      // target_spend_micros nao recomendado).
+      op.target_spend = {};
+      updateMaskPath = 'target_spend.cpc_bid_ceiling_micros';
+    } else if (p.biddingStrategy === 'MANUAL_CPC') {
+      op.manual_cpc = { enhanced_cpc_enabled: false };
+      updateMaskPath = 'manual_cpc.enhanced_cpc_enabled';
+    } else {
+      throw new Error(`bidding_strategy desconhecida: ${p.biddingStrategy}`);
     }
 
-    // updateMask EXPLICITO pro bypass do SDK auto-mask bugado. Apenas
-    // "bidding_strategy_type" no mask — RFC-correto pro Google escolher
-    // o oneof field via enum, sem cair em FIELD_HAS_SUBFIELDS (incluindo
-    // o oneof name no mask) nem no-op silencioso (mask vazio).
-    // Achado apos 3 tentativas iterativas em 2026-05-17 — ver memoria do
-    // projeto bugs_bidding_strategy.md pra cadeia completa.
     const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
@@ -831,7 +828,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
-      updateMask: ['bidding_strategy_type'],
+      updateMask: [updateMaskPath],
       context: {
         ...p.context,
         new_bidding_strategy: p.biddingStrategy,

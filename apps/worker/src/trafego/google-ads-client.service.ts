@@ -90,22 +90,32 @@ export class GoogleAdsClientService {
    * Bypass do SDK wrappers (`customer.campaigns.update`, `customer.mutateResources`)
    * pra ter controle TOTAL sobre o update_mask enviado pro Google.
    *
-   * Por que existe (achado em 2026-05-17): o SDK google-ads-api v23 chama
-   * internamente `getFieldMask(payload)` que tem dois bugs:
-   *   1. Pra oneof empty objects (`maximize_conversions: {}`), nao adiciona
-   *      o parent path → mask sem o oneof → Google ignora silenciosamente
-   *      ("SUCCESS" sem efeito).
-   *   2. Se forcarmos o parent path (via monkey-patch), Google rejeita com
-   *      FIELD_HAS_SUBFIELDS pq oneof eh message-type, nao scalar.
+   * Por que existe (achado em 2026-05-17 apos 4 iteracoes):
    *
-   * Pra mutate de bidding strategy, o caminho RFC-correto eh:
-   *   - body: { resource_name, bidding_strategy_type, <oneof>: {...} }
-   *   - mask: ["bidding_strategy_type"]  (apenas o enum scalar)
+   * (A) Bug no SDK google-ads-api v23: `utils.js#recursiveFieldMaskSearch`
+   *     descende em oneof empty objects (`maximize_conversions: {}`) e
+   *     retorna [] sem adicionar o parent path no mask. Resultado: mutate
+   *     vai com mask vazio (ou so com fields scalares laterais) e Google
+   *     ignora silenciosamente ("SUCCESS" sem efeito).
    *
-   * Google usa o enum pra escolher qual oneof field "selecionar" e o body
-   * pra popular os defaults. Mas o SDK auto-mask nao faz isso direito —
-   * passar diretamente via GoogleAdsServiceClient.mutate eh o jeito de
-   * forcar mask exato.
+   * (B) Naive fix de adicionar o oneof name no mask (`["maximize_conversions"]`)
+   *     trigga FIELD_HAS_SUBFIELDS — Google nao aceita oneof message-type
+   *     diretamente no mask. Precisa de SUBFIELD path.
+   *
+   * (C) Naive fix de usar `bidding_strategy_type` enum no body+mask falha
+   *     porque esse campo eh READ-ONLY / output_only no Campaign — Google
+   *     ignora silenciosamente (no-op).
+   *
+   * (D) RFC-correto (docs oficiais Google, client-libs/java/field-masks):
+   *     - body: { resource_name, <oneof>: {...} }  (sem bidding_strategy_type)
+   *     - mask: ["<oneof>.<subfield>"]  (subfield path do oneof)
+   *
+   *     Exemplo MaximizeConversions sem CPA alvo:
+   *       body: { resource_name, maximize_conversions: {} }
+   *       mask: ["maximize_conversions.target_cpa_micros"]
+   *
+   *     A presenca do subfield path no mask signala pro Google:
+   *     "trocar pra este oneof, com subfield no default."
    *
    * Loga response completo (sanitizado) pra debug. Sem isso, fica impossivel
    * saber por que um mutate "deu SUCCESS" mas nao aplicou.
