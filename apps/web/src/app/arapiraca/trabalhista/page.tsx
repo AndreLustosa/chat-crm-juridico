@@ -21,8 +21,9 @@ const staticContent: LPTemplateContent = {
     {
       iconName: "FileCheck",
       title: "Reconhecimento de\nVínculo de Emprego",
-      description: "Garante ao trabalhador sem registro em carteira o reconhecimento formal da relação de emprego, com todos os direitos trabalhistas.",
+      description: "Atuação para comprovar que havia emprego de fato, mesmo sem registro, contrato formal ou com rótulo de autônomo/PJ.",
       colSpan2: true,
+      href: "/arapiraca/trabalhista/sem-carteira-assinada",
     },
     {
       iconName: "FileText",

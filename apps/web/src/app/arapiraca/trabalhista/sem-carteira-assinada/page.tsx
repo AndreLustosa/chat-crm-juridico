@@ -1,26 +1,48 @@
 import { TrabalhistaTemaTemplate } from "@/components/lp/templates/TrabalhistaTemaTemplate";
+import { LPTracker } from "@/components/lp/LPTracker";
 import { LPSpecificThemeContent } from "@/types/landing-page-theme";
 import { Metadata } from "next";
+import Script from "next/script";
 
 const baseUrl = "https://andrelustosaadvogados.com.br";
+const url = `${baseUrl}/arapiraca/trabalhista/sem-carteira-assinada`;
+const image = `${baseUrl}/landing/reconhecimento-vinculo-hero.png`;
+
+const title =
+  "Reconhecimento de Vínculo em Arapiraca | Trabalho sem Carteira";
+const description =
+  "Trabalhou sem registro, como autônomo, PJ ou informal, mas cumpria horário e recebia ordens? Entenda o reconhecimento de vínculo empregatício em Arapiraca-AL.";
 
 export const metadata: Metadata = {
-  title: "Trabalhei sem carteira assinada em Arapiraca | Advogado Trabalhista",
-  description:
-    "Trabalhou sem carteira assinada? Descubra seus direitos como férias, 13º e FGTS. Escritório de advocacia trabalhista especialista em Arapiraca-AL. Fale conosco pelo WhatsApp.",
+  title,
+  description,
   keywords:
-    "trabalhei sem carteira assinada, trabalho sem registro direitos, empregado sem carteira assinada, advogado trabalhista Arapiraca, direitos de quem trabalhou sem carteira, vínculo empregatício",
+    "reconhecimento de vínculo Arapiraca, vínculo empregatício Arapiraca, trabalhei sem carteira assinada, trabalho sem registro direitos, falso autônomo, pejotização, advogado trabalhista Arapiraca",
   alternates: {
-    canonical: `${baseUrl}/arapiraca/trabalhista/sem-carteira-assinada`,
+    canonical: url,
   },
   openGraph: {
-    title: "Trabalhei sem carteira assinada em Arapiraca | Advogado Trabalhista",
-    description:
-      "Descubra se você tem dinheiro a receber. Advogados especialistas na defesa do trabalhador sem registro.",
-    url: `${baseUrl}/arapiraca/trabalhista/sem-carteira-assinada`,
+    title,
+    description,
+    url,
     siteName: "André Lustosa Advogados",
     locale: "pt_BR",
     type: "website",
+    images: [
+      {
+        url: image,
+        width: 1792,
+        height: 1024,
+        alt: "Reconhecimento de vínculo empregatício em Arapiraca",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: [image],
+    creator: "@andrelustosa",
   },
   robots: {
     index: true,
@@ -34,145 +56,187 @@ export const metadata: Metadata = {
   },
 };
 
-const semCarteiraContent: LPSpecificThemeContent = {
+const vinculoContent: LPSpecificThemeContent = {
   seo: {
-    title: "Trabalhei sem carteira assinada em Arapiraca | Advogado Trabalhista",
-    description:
-      "Trabalhou sem carteira assinada? Descubra seus direitos como férias, 13º e FGTS. Escritório de advocacia trabalhista especialista em Arapiraca-AL.",
+    title,
+    description,
     keywords:
-      "trabalhei sem carteira assinada, trabalho sem registro direitos, empregado sem carteira assinada, advogado trabalhista Arapiraca, direitos de quem trabalhou sem carteira",
+      "reconhecimento de vínculo Arapiraca, vínculo empregatício, trabalho sem carteira assinada, trabalho sem registro, falso autônomo, pejotização, advogado trabalhista Arapiraca",
   },
   city: "Arapiraca",
   state: "AL",
   hero: {
-    title: "Trabalhou sem carteira assinada?\nVocê pode ter dinheiro\na receber.",
+    title: "Reconhecimento de vínculo trabalhista em Arapiraca",
     subtitle:
-      "Não deixe a empresa lucrar às custas do seu trabalho. A lei protege quem trabalha sem registro. Descubra seus direitos agora.",
-    ctaText: "Falar com advogado no WhatsApp",
-    ctaLink: "#", // will be populated by template with whatsappNumber
-    backgroundImage: "/landing/sem_carteira_hero_bg.png",
+      "Se você tinha horário, recebia ordens, trabalhava com frequência e dependia daquele pagamento, pode existir vínculo de emprego mesmo sem carteira assinada.",
+    ctaText: "Analisar meu vínculo no WhatsApp",
+    ctaLink: "#",
+    backgroundImage: "/landing/reconhecimento-vinculo-hero.png",
+    mobileBackgroundImage: "/landing/sem_carteira_hero_bg.png",
   },
   problem: {
-    title: "Vocé pode ter direito a indenização se:",
+    title: "A empresa chamou de informal, mas a rotina parecia emprego?",
     description:
-      "O trabalho informal é uma prática comum de empresas para sonegar direitos trabalhistas básicos. Se você vive alguma das situações abaixo, a lei está do seu lado:",
+      "O nome dado ao contrato não decide tudo. A Justiça do Trabalho analisa como a relação acontecia na prática: subordinação, habitualidade, pessoalidade e pagamento.",
     items: [
-      "Trabalha ou trabalhou cumprindo horários todos os dias sem assinatura na CTPS",
-      "Recebe salário mensal, mas não tem FGTS depositado",
-      "Não recebe férias remuneradas nem 13º salário",
-      "Recebe ordens diretas de um chefe (subordinação) sem ter registro",
+      "Você cumpria horário, escala ou jornada definida pela empresa",
+      "Recebia ordens diretas de chefe, gerente, supervisor ou dono do negócio",
+      "Trabalhava de forma contínua, sem poder mandar outra pessoa no seu lugar",
+      "Recebia salário, comissão, diária, PIX ou pagamento fixo com frequência",
+      "Usava uniforme, crachá, sistema, ferramentas ou estrutura da empresa",
+      "Era tratado como funcionário, mas sem carteira, FGTS, férias ou 13º",
     ],
   },
   rights: {
-    title: "Quais são os direitos de quem trabalha sem registro?",
+    title: "O que pode ser pedido no reconhecimento de vínculo?",
     items: [
       {
         iconName: "FileCheck",
-        title: "Registro Retroativo",
+        title: "Registro retroativo",
         description:
-          "Assinatura na carteira de trabalho cobrindo todo o período trabalhado, contando para sua aposentadoria (INSS).",
+          "Pedido para reconhecer o período trabalhado como contrato de emprego, com anotação correspondente e reflexos legais.",
       },
       {
         iconName: "Briefcase",
-        title: "Férias e 13º Salário",
+        title: "Férias e 13º salário",
         description:
-          "Pagamento de todas as férias (simples e em dobro) e décimos terceiros não pagos durante o contrato.",
+          "Cobrança de férias vencidas ou proporcionais, adicional de 1/3 e décimos terceiros do período reconhecido.",
       },
       {
         iconName: "CircleDollarSign",
-        title: "FGTS + Multa de 40%",
+        title: "FGTS e multa de 40%",
         description:
-          "Depósito de todo o FGTS que deveria ter sido recolhido mês a mês, mais a multa de 40% em caso de demissão sem justa causa.",
+          "Apuração dos depósitos de FGTS que deveriam ter sido feitos e da multa rescisória quando aplicável.",
       },
       {
         iconName: "Clock",
-        title: "Horas Extras",
+        title: "Horas extras e adicionais",
         description:
-          "Pagamento com acréscimo de 50% para todas as horas trabalhadas além da jornada legal (8h/dia ou 44h/semana).",
+          "Análise de jornada, intervalos, adicional noturno, domingos, feriados, insalubridade ou periculosidade quando houver prova.",
       },
       {
         iconName: "Scale",
-        title: "Verbas Rescisórias",
+        title: "Verbas rescisórias",
         description:
-          "Aviso prévio e todas as verbas garantidas em lei na hora da sua saída.",
+          "Avaliação de aviso prévio, saldo de salário, liberação de guias e demais direitos conforme o tipo de encerramento.",
       },
       {
         iconName: "AlertTriangle",
-        title: "Seguro-Desemprego",
+        title: "Falso autônomo ou PJ",
         description:
-          "Possibilidade de receber as parcelas do seguro-desemprego, ou indenização substitutiva caso a empresa impeça o saque.",
+          "Estudo de casos em que a empresa usou contrato de autônomo, MEI ou PJ para esconder uma relação de emprego.",
       },
     ],
   },
   howHelp: {
-    title: "Como o nosso escritório pode te ajudar a resgatar seus direitos?",
+    title: "Como o escritório organiza a prova do vínculo?",
     description:
-      "Somos especialistas em processos de Reconhecimento de Vínculo Empregatício em Arapiraca. Nosso papel é provar para a Justiça que você era um funcionário de fato e obrigar a empresa a pagar tudo o que sonegou.",
+      "A atuação começa pelo entendimento da rotina real de trabalho. A partir daí, organizamos documentos, conversas, pagamentos e testemunhas para avaliar a viabilidade da ação trabalhista.",
     items: [
-      "Análise completa e gratuita do seu caso direto pelo WhatsApp",
-      "Cálculo exato de todos os valores e direitos que a empresa te deve",
-      "Ingresso rápido e seguro com a Ação Trabalhista",
-      "Acompanhamento e suporte até o final do processo",
+      "Análise inicial da sua rotina, função, jornada e forma de pagamento",
+      "Separação das provas que demonstram subordinação e frequência",
+      "Estimativa técnica dos direitos que podem ser discutidos",
+      "Estratégia para ação trabalhista sem criar duplicidade com outros pedidos",
     ],
   },
   process: {
-    title: "Como funciona nosso atendimento?",
+    title: "Como funciona o atendimento?",
     steps: [
       {
         num: "1",
-        title: "CONTATO",
+        title: "RELATO DO CASO",
         description:
-          "Você clica no botão do WhatsApp e fala diretamente com um advogado especialista.",
+          "Você explica como trabalhava, por quanto tempo, quem dava ordens e como recebia.",
       },
       {
         num: "2",
-        title: "ANÁLISE DO CASO",
+        title: "ANÁLISE DOS REQUISITOS",
         description:
-          "Auvimos sua história, tiramos suas dúvidas e fazemos uma estimativa inicial dos seus direitos.",
+          "Verificamos se há sinais de subordinação, habitualidade, pessoalidade e pagamento.",
       },
       {
         num: "3",
-        title: "ENVIO DE DOCUMENTOS",
+        title: "ORGANIZAÇÃO DAS PROVAS",
         description:
-          "Você envia pelo próprio WhatsApp as provas e documentos necessários (mensagens, recibos, etc).",
+          "Mapeamos mensagens, recibos, PIX, escalas, fotos, crachás, uniformes e testemunhas.",
       },
       {
         num: "4",
-        title: "INGRESSO DA AÇÃO",
+        title: "PLANO DE AÇÃO",
         description:
-          "Nós protocolamos a ação e lutamos por cada centavo do seu dinheiro na Justiça.",
+          "Definimos os pedidos adequados e os próximos passos para buscar seus direitos.",
       },
     ],
   },
   documents: {
-    title: "Estes documentos podem te ajudar a provar o vínculo:",
+    title: "Provas que ajudam no reconhecimento do vínculo",
     description:
-      "Para a Justiça, a verdade real importa mais do que uma carteira não assinada. Reúna tudo que comprova que você trabalhava na empresa:",
+      "Você não precisa ter tudo. O importante é preservar o que demonstra a realidade do trabalho.",
     items: [
-      "Mensagens de WhatsApp com chefes e colegas",
-      "Comprovantes de PIX ou depósitos da empresa na sua conta",
-      "Fotos suas trabalhando no local ou de uniforme",
-      "E-mails corporativos ou crachás",
-      "Testemunhas (ex-colegas de trabalho ou clientes)",
+      "Mensagens com chefes, gerentes, clientes ou colegas",
+      "Comprovantes de PIX, depósitos, recibos ou pagamentos",
+      "Escalas, controles de ponto, planilhas ou prints de sistema",
+      "Fotos trabalhando, uniforme, crachá, rota, ferramentas ou local",
+      "Contratos de autônomo, MEI ou PJ usados pela empresa",
+      "Testemunhas que conheciam sua rotina de trabalho",
     ],
   },
   finalCta: {
-    title: "Não deixe a empresa ficar com o que é seu por direito.",
-    ctaText: "DESCUBRA SE VOCÊ TEM DINHEIRO A RECEBER",
+    title: "Trabalhou como empregado, mas ficou sem registro?",
+    ctaText: "FALAR COM ADVOGADO TRABALHISTA",
     ctaLink: "#",
   },
   footer: {
-    address: "Escritório Master em Arapiraca-AL",
+    address: "Rua Francisco Rodrigues Viana, 244, Baixa Grande, Arapiraca-AL",
     phones: ["(82) 99639-0799"],
     email: "contato@andrelustosaadvogados.com.br",
   },
 };
 
 export default function SemCarteiraAssinadaPage() {
+  const legalServiceJsonLd = {
+    "@context": "https://schema.org",
+    "@type": ["LegalService", "LocalBusiness"],
+    name: "André Lustosa Advogados - Reconhecimento de Vínculo em Arapiraca",
+    description,
+    image,
+    url,
+    telephone: "+5582996390799",
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: "Rua Francisco Rodrigues Viana, 244",
+      addressLocality: "Arapiraca",
+      addressRegion: "AL",
+      postalCode: "57300-000",
+      addressCountry: "BR",
+    },
+    areaServed: [
+      {
+        "@type": "City",
+        name: "Arapiraca",
+        containedInPlace: { "@type": "State", name: "Alagoas" },
+      },
+      { "@type": "State", name: "Alagoas" },
+    ],
+    serviceType: [
+      "Reconhecimento de vínculo empregatício",
+      "Trabalho sem carteira assinada",
+      "Falso autônomo",
+      "Pejotização",
+      "Direito Trabalhista em Arapiraca",
+    ],
+  };
+
   return (
     <main>
+      <Script
+        id="json-ld-reconhecimento-vinculo-arapiraca"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(legalServiceJsonLd) }}
+      />
+      <LPTracker />
       <TrabalhistaTemaTemplate
-        content={semCarteiraContent}
+        content={vinculoContent}
         whatsappNumber="5582996390799"
         city="Arapiraca"
         state="AL"

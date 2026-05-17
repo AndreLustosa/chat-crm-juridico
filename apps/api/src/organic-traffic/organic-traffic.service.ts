@@ -1345,11 +1345,16 @@ export class OrganicTrafficService {
       {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
-        title: 'Arapiraca - Sem Carteira Assinada',
+        title: 'Arapiraca - Reconhecimento de Vinculo',
         city: 'Arapiraca',
         state: 'AL',
         practice_area: 'Trabalhista',
-        target_keywords: ['trabalhei sem carteira assinada arapiraca'],
+        target_keywords: [
+          'reconhecimento de vinculo arapiraca',
+          'trabalho sem carteira assinada arapiraca',
+          'vinculo empregaticio arapiraca',
+          'falso autonomo arapiraca',
+        ],
       },
       {
         url: `${base}/arapiraca/criminal`,

@@ -674,6 +674,24 @@ export function TrabalhistaTemplate({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {practiceAreas.map((area, idx) => {
               const Icon = iconMap[area.iconName] || Briefcase;
+              const action = area.href ? (
+                <a
+                  href={area.href}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-[#A89048] transition-colors cursor-pointer group/link"
+                >
+                  <ChevronRight className="w-4 h-4 group-hover/link:translate-x-0.5 transition-transform" />
+                  Ver página específica
+                </a>
+              ) : (
+                <button
+                  onClick={handleCtaClick}
+                  className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-[#A89048] transition-colors cursor-pointer group/link"
+                >
+                  <ChevronRight className="w-4 h-4 group-hover/link:translate-x-0.5 transition-transform" />
+                  Ler mais
+                </button>
+              );
+
               return (
                 <div
                   key={idx}
@@ -695,13 +713,7 @@ export function TrabalhistaTemplate({
                   </p>
 
                   {/* Link */}
-                  <button
-                    onClick={handleCtaClick}
-                    className="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-[#A89048] transition-colors cursor-pointer group/link"
-                  >
-                    <ChevronRight className="w-4 h-4 group-hover/link:translate-x-0.5 transition-transform" />
-                    Ler mais
-                  </button>
+                  {action}
                 </div>
               );
             })}

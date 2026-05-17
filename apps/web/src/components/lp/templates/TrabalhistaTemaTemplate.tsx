@@ -16,6 +16,7 @@ import {
   Gavel,
   FileText,
   Clock,
+  CircleDollarSign,
   MapPin,
   Phone,
   Mail,
@@ -43,6 +44,7 @@ const iconMap: Record<string, LucideIcon> = {
   Gavel,
   FileText,
   Clock,
+  CircleDollarSign,
   Shield,
   FileCheck,
 };
