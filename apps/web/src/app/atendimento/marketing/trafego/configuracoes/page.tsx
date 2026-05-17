@@ -180,6 +180,25 @@ export default function ConfiguracoesPage() {
     }
   }
 
+  /**
+   * Dispara o fluxo OAuth do Google quando admin precisa reconectar uma
+   * conta cujo refresh_token foi revogado/expirou. Sem isso, o usuario
+   * ficava sem botao na UI (ConnectGoogleAdsCard so renderiza quando
+   * account.connected === false, mas conta com erro continua connected=true).
+   */
+  async function reconnectOAuth() {
+    try {
+      const { data } = await api.get<{ authorize_url: string }>(
+        '/trafego/oauth/start',
+      );
+      window.location.href = data.authorize_url;
+    } catch (err: any) {
+      showError(
+        err?.response?.data?.message ?? 'Falha ao iniciar OAuth do Google.',
+      );
+    }
+  }
+
   if (!perms.canViewTrafego) {
     return (
       <div className="p-8">
@@ -433,6 +452,21 @@ export default function ConfiguracoesPage() {
 
             {perms.canManageTrafego && (
               <div className="flex gap-2 mt-4 flex-wrap">
+                {/* Mostra Reconectar em destaque quando ha last_error —
+                    cobre o caso de refresh_token revogado, em que a UI
+                    antiga deixava admin sem caminho de recuperacao
+                    porque ConnectGoogleAdsCard so aparece com
+                    connected=false. */}
+                {account?.account?.last_error && (
+                  <button
+                    type="button"
+                    onClick={reconnectOAuth}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-md bg-primary text-primary-foreground hover:opacity-90"
+                  >
+                    <RefreshCw size={13} />
+                    Reconectar via OAuth
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={syncNow}
