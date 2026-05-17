@@ -757,15 +757,44 @@ function registerScheduleMutateTools(server: McpServer) {
   server.registerTool(
     'traffic_update_schedule',
     {
-      description: 'Atualiza o agendamento (ad schedule) de uma campanha. Permite definir janelas de exibicao por dia/hora com bid modifier.',
+      description:
+        'Atualiza o agendamento (ad schedule) de uma campanha. Permite definir janelas de exibicao por dia/hora com bid modifier. Substituicao completa — envie todos os slots desejados (vazio = roda 24/7).',
       inputSchema: {
         campaign_id: campaignIdSchema,
-        schedule: z.array(z.object({
-          day_of_week: z.enum(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']),
-          start_hour: z.number().int().min(0).max(23),
-          end_hour: z.number().int().min(1).max(24),
-          bid_modifier: z.number().optional().describe('Multiplicador do bid (1.0 = neutro, 0.8 = -20%, 1.2 = +20%)'),
-        })).min(1).max(168),
+        schedule: z
+          .array(
+            z.object({
+              day_of_week: z.enum([
+                'MONDAY',
+                'TUESDAY',
+                'WEDNESDAY',
+                'THURSDAY',
+                'FRIDAY',
+                'SATURDAY',
+                'SUNDAY',
+              ]),
+              start_hour: z.number().int().min(0).max(23),
+              start_minute: z
+                .union([z.literal(0), z.literal(15), z.literal(30), z.literal(45)])
+                .optional()
+                .describe('Minutos do inicio (0|15|30|45). Default 0.'),
+              end_hour: z.number().int().min(0).max(24),
+              end_minute: z
+                .union([z.literal(0), z.literal(15), z.literal(30), z.literal(45)])
+                .optional()
+                .describe('Minutos do fim (0|15|30|45). Default 0.'),
+              bid_modifier: z
+                .number()
+                .min(0.1)
+                .max(10)
+                .optional()
+                .describe(
+                  'Multiplicador do bid 0.1..10.0 (1.0 = neutro, 0.8 = -20%, 1.2 = +20%)',
+                ),
+            }),
+          )
+          .min(0)
+          .max(168),
         validate_only: z.boolean().optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
@@ -773,12 +802,27 @@ function registerScheduleMutateTools(server: McpServer) {
     async (input) =>
       safe('traffic_update_schedule', async (toolCallId) => {
         applyMutateGuards('traffic_update_schedule');
+        // CRM espera o campo no formato `slots` (nao `schedule`) e cada
+        // item precisa ter start_minute/end_minute obrigatorios. Esta
+        // camada normaliza: aceita o que o Claude mandou e completa
+        // minutes=0 quando ausente. Achado durante uso real em 2026-05-16.
+        const slots = input.schedule.map((s) => ({
+          day_of_week: s.day_of_week,
+          start_hour: s.start_hour,
+          start_minute: s.start_minute ?? 0,
+          end_hour: s.end_hour,
+          end_minute: s.end_minute ?? 0,
+          ...(s.bid_modifier !== undefined && { bid_modifier: s.bid_modifier }),
+        }));
         const result = await crmTrafficService.put(
           `/trafego/campaigns/${encodeURIComponent(input.campaign_id)}/schedule`,
-          { schedule: input.schedule, validate_only: input.validate_only },
+          { slots, validate_only: input.validate_only },
           { toolCallId },
         );
-        return ok(result, `Agendamento atualizado para a campanha ${input.campaign_id} (${input.schedule.length} janelas).`);
+        return ok(
+          result,
+          `Agendamento atualizado para a campanha ${input.campaign_id} (${slots.length} janela${slots.length === 1 ? '' : 's'}).`,
+        );
       }),
   );
 }
