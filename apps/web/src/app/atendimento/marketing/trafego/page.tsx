@@ -12,7 +12,6 @@ import {
   Settings as SettingsIcon,
   Loader2,
   RefreshCw,
-  Sparkles,
   Target,
   Lightbulb,
   Tv,
@@ -34,10 +33,8 @@ import { ConfiguracoesTab } from "./components/ConfiguracoesTab";
 import { PlaceholderTab } from "./components/PlaceholderTab";
 import { RelatoriosTab } from "./components/RelatoriosTab";
 import { ConversoesTab } from "./components/ConversoesTab";
-import { IaOtimizadoraTab } from "./components/IaOtimizadoraTab";
 import { RecomendacoesTab } from "./components/RecomendacoesTab";
 import { BrandingTab } from "./components/BrandingTab";
-import { ConversarTab } from "./components/ConversarTab";
 import { LandingPagesTab } from "./components/LandingPagesTab";
 import { AuctionInsightsTab } from "./components/AuctionInsightsTab";
 
@@ -53,8 +50,6 @@ const TABS = [
   { id: "relatorios", label: "Relatórios", icon: FileText },
   { id: "alertas", label: "Alertas", icon: Bell },
   { id: "atividades", label: "Atividades", icon: Activity },
-  { id: "ia", label: "IA Otimizadora", icon: Sparkles },
-  { id: "conversar", label: "Conversar", icon: MessageSquare },
   { id: "configuracoes", label: "Configurações", icon: SettingsIcon },
 ] as const;
 
@@ -249,7 +244,6 @@ function TrafegoPageInner() {
     <div className="h-full overflow-y-auto p-6 lg:p-8">
       <Header
         onSyncNow={perms.canManageTrafego ? syncNow : null}
-        onOpenChat={account?.connected ? () => setActiveTab("conversar") : null}
         syncing={syncing}
         account={account}
       />
@@ -337,12 +331,6 @@ function TrafegoPageInner() {
           <AlertasTab canManage={perms.canManageTrafego} />
         )}
         {tab === "atividades" && account?.connected && <AtividadesTab />}
-        {tab === "ia" && account?.connected && (
-          <IaOtimizadoraTab canManage={perms.canManageTrafego} />
-        )}
-        {tab === "conversar" && account?.connected && (
-          <ConversarTab canManage={perms.canManageTrafego} />
-        )}
         {/* Configuracoes: SEMPRE acessivel — eh aqui que admin preenche
             credenciais antes de poder conectar a conta. */}
         {tab === "configuracoes" && (
@@ -357,12 +345,10 @@ function TrafegoPageInner() {
 
 function Header({
   onSyncNow,
-  onOpenChat,
   syncing,
   account,
 }: {
   onSyncNow: (() => void) | null;
-  onOpenChat: (() => void) | null;
   syncing: boolean;
   account: AccountState | null;
 }) {
@@ -391,15 +377,6 @@ function Header({
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
-        {onOpenChat && (
-          <button
-            onClick={onOpenChat}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-700 hover:bg-violet-500/15"
-          >
-            <MessageSquare size={15} />
-            Conversar com IA
-          </button>
-        )}
         <a
           href="/atendimento/marketing/trafego/termos-busca"
           className="text-xs font-semibold px-3 py-2 rounded-lg border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground"
