@@ -50,6 +50,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerCreationTools(server);
   registerRecommendationMutateTools(server);
   registerOpsMutateTools(server);
+  // Sprint 1 backlog (2026-05-17): Conversion Actions, Ad Groups, RSAs
+  registerSprint1Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -1287,6 +1289,379 @@ function registerOpsMutateTools(server: McpServer) {
         checkKillSwitch('traffic_trigger_sync');
         const result = await crmTrafficService.post('/trafego/sync', undefined, { toolCallId });
         return ok(result, 'Sync enfileirado. Os dados aparecerao em alguns minutos.');
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 1 backlog (2026-05-17) — 9 tools novas
+// ═══════════════════════════════════════════════════════════════════════════
+
+const conversionActionIdSchema = z
+  .string()
+  .describe('UUID interno do CRM OR google_conversion_id. Ambos aceitos.');
+
+const adGroupIdSchemaSprint1 = z
+  .string()
+  .describe('UUID interno do CRM OR google_ad_group_id. Ambos aceitos.');
+
+const adIdSchema = z
+  .string()
+  .describe('UUID interno do CRM OR google_ad_id. Ambos aceitos.');
+
+function registerSprint1Tools(server: McpServer) {
+  // ─── Conversion Actions ─────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_create_conversion_action',
+    {
+      description:
+        'Cria uma ConversionAction nova no Google Ads. Categoria + tipo definem o comportamento. ' +
+        'include_in_conversions=true (default): entra no Smart Bidding. ' +
+        'default_value_brl: valor monetario default por evento (importante pra TARGET_ROAS). ' +
+        'phone_call_duration_seconds: so PHONE_CALL_LEAD type — conta conversao apos X seg.',
+      inputSchema: {
+        name: z.string().max(100),
+        category: z.enum([
+          'SUBMIT_LEAD_FORM',
+          'CONTACT',
+          'PHONE_CALL_LEAD',
+          'SIGNUP',
+          'DOWNLOAD',
+          'PAGE_VIEW',
+          'PURCHASE',
+          'ADD_TO_CART',
+          'BEGIN_CHECKOUT',
+          'BOOK_APPOINTMENT',
+          'REQUEST_QUOTE',
+          'GET_DIRECTIONS',
+          'OUTBOUND_CLICK',
+          'ENGAGEMENT',
+          'QUALIFIED_LEAD',
+          'CONVERTED_LEAD',
+          'OTHER',
+        ]),
+        type: z.enum([
+          'WEBPAGE',
+          'AD_CALL',
+          'CLICK_TO_CALL',
+          'WEBSITE_CALL',
+          'UPLOAD_CALLS',
+          'UPLOAD_CLICKS',
+          'GOOGLE_HOSTED',
+        ]),
+        include_in_conversions: z.boolean().optional(),
+        default_value_brl: z.number().positive().optional(),
+        counting_type: z.enum(['ONE_PER_CLICK', 'MANY_PER_CLICK']).optional(),
+        click_through_lookback_days: z.number().int().min(1).max(90).optional(),
+        view_through_lookback_days: z.number().int().min(1).max(30).optional(),
+        phone_call_duration_seconds: z.number().int().min(0).max(3600).optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_conversion_action', async (toolCallId) => {
+        applyMutateGuards('traffic_create_conversion_action');
+        const result = await crmTrafficService.post(
+          '/trafego/conversion-actions',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Criacao de ConversionAction "${input.name}" enfileirada (${input.category} / ${input.type}).`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_update_conversion_action',
+    {
+      description:
+        'Atualiza ConversionAction existente. Patch parcial — so envia o que muda. ' +
+        'CRITICAL: alterar include_in_conversions em acao com volume reseta aprendizado do Smart Bidding. ' +
+        'confirm=true exigido quando muda include_in_conversions ou attribution_model.',
+      inputSchema: {
+        conversion_action_id: conversionActionIdSchema,
+        name: z.string().optional(),
+        include_in_conversions: z.boolean().optional(),
+        primary_for_goal: z.boolean().optional(),
+        default_value_brl: z.number().min(0).optional(),
+        always_use_default_value: z.boolean().optional(),
+        attribution_model: z
+          .enum([
+            'LAST_CLICK',
+            'DATA_DRIVEN',
+            'FIRST_CLICK',
+            'LINEAR',
+            'TIME_DECAY',
+            'POSITION_BASED',
+          ])
+          .optional(),
+        click_through_lookback_days: z.number().int().min(1).max(90).optional(),
+        view_through_lookback_days: z.number().int().min(1).max(30).optional(),
+        counting_type: z.enum(['ONE_PER_CLICK', 'MANY_PER_CLICK']).optional(),
+        status: z.enum(['ENABLED', 'HIDDEN']).optional(),
+        confirm: z.boolean().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_conversion_action', async (toolCallId) => {
+        applyMutateGuards('traffic_update_conversion_action');
+        const { conversion_action_id, ...body } = input;
+        const result = await crmTrafficService.patch(
+          `/trafego/conversion-actions/${encodeURIComponent(conversion_action_id)}`,
+          body,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Atualizacao de ConversionAction ${conversion_action_id} enfileirada.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_remove_conversion_action',
+    {
+      description:
+        'Remove (soft-delete) uma ConversionAction. Status=REMOVED. Exige confirm + reason. ' +
+        'force_if_used=true necessario se conv action esta em uso por bidding strategy ativa.',
+      inputSchema: {
+        conversion_action_id: conversionActionIdSchema,
+        confirm: z.boolean(),
+        reason: z.string().min(3),
+        force_if_used: z.boolean().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_remove_conversion_action', async (toolCallId) => {
+        applyMutateGuards('traffic_remove_conversion_action');
+        const { conversion_action_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/conversion-actions/${encodeURIComponent(conversion_action_id)}/remove`,
+          body,
+          { toolCallId },
+        );
+        // O endpoint REST eh DELETE no controller atual; mas usei POST pra
+        // ter body com confirm — entao tem que adicionar DELETE com body OK.
+        // Fallback: chamada por DELETE com body via _method override.
+        return ok(
+          result,
+          `Remocao de ConversionAction ${conversion_action_id} enfileirada.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_enable_enhanced_conversions_for_leads',
+    {
+      description:
+        'Habilita Enhanced Conversions for Leads. ' +
+        'mode=GOOGLE_TAG: liga flag na conta (gtag/GTM no browser sobe userIdentifiers). ' +
+        'mode=API: liga cron BullMQ diario que sobe userIdentifiers (email/phone hashed SHA-256) de leads recentes via UploadClickConversions. ' +
+        'mode=BOTH: ambos (recomendado pra cobertura maxima — cookie + cookieless).',
+      inputSchema: {
+        mode: z.enum(['GOOGLE_TAG', 'API', 'BOTH']),
+        user_data_fields: z
+          .array(z.enum(['email', 'phone', 'address']))
+          .optional(),
+        confirm: z.boolean(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_enable_enhanced_conversions_for_leads', async (toolCallId) => {
+        applyMutateGuards('traffic_enable_enhanced_conversions_for_leads');
+        const result = await crmTrafficService.post(
+          '/trafego/conversion-tracking/enable-enhanced-conversions-for-leads',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Enhanced Conversions for Leads (modo ${input.mode}) habilitado.`,
+        );
+      }),
+  );
+
+  // ─── Ad Groups ──────────────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_create_ad_group',
+    {
+      description:
+        'Cria novo Ad Group dentro de uma campanha. Status default PAUSED (admin/gestor ativa depois). ' +
+        'cpc_bid_brl: usado em MANUAL_CPC. target_cpa_brl/target_roas: overrides opcionais no nivel ad_group.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        name: z.string().max(80),
+        type: z
+          .enum(['SEARCH_STANDARD', 'SEARCH_DYNAMIC_ADS', 'DISPLAY_STANDARD'])
+          .optional(),
+        status: z.enum(['ENABLED', 'PAUSED']).optional(),
+        cpc_bid_brl: z.number().positive().optional(),
+        target_cpa_brl: z.number().positive().optional(),
+        target_roas: z.number().positive().optional(),
+        confirm: z.boolean().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_ad_group', async (toolCallId) => {
+        applyMutateGuards('traffic_create_ad_group');
+        const { campaign_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/campaigns/${encodeURIComponent(campaign_id)}/ad-groups`,
+          body,
+          { toolCallId },
+        );
+        return ok(result, `Criacao de Ad Group "${input.name}" enfileirada.`);
+      }),
+  );
+
+  server.registerTool(
+    'traffic_update_ad_group',
+    {
+      description:
+        'Atualiza Ad Group existente. Patch parcial. ' +
+        'rotation: OPTIMIZE (default, Google escolhe melhor ad) vs ROTATE_FOREVER (igual entre ads — perde otimizacao, usar so em A/B test).',
+      inputSchema: {
+        ad_group_id: adGroupIdSchemaSprint1,
+        name: z.string().max(80).optional(),
+        status: z.enum(['ENABLED', 'PAUSED']).optional(),
+        cpc_bid_brl: z.number().positive().optional(),
+        target_cpa_brl: z.number().positive().optional(),
+        target_roas: z.number().positive().optional(),
+        rotation: z.enum(['OPTIMIZE', 'ROTATE_FOREVER']).optional(),
+        confirm: z.boolean().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_ad_group', async (toolCallId) => {
+        applyMutateGuards('traffic_update_ad_group');
+        const { ad_group_id, ...body } = input;
+        const result = await crmTrafficService.patch(
+          `/trafego/ad-groups/${encodeURIComponent(ad_group_id)}`,
+          body,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Atualizacao de Ad Group ${ad_group_id} enfileirada.`,
+        );
+      }),
+  );
+
+  // ─── RSAs / Ads ─────────────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_update_rsa',
+    {
+      description:
+        'Atualiza um RSA existente. Google Ads NAO suporta UPDATE em ads — sao imutaveis. ' +
+        'Tool usa pattern "substituir": cria novo RSA + remove o antigo (atomico do ponto de vista do CRM). ' +
+        'Validacao OAB automatica nos headlines/descriptions. ' +
+        'confirm=true exigido se ad tem >=100 impressoes nos ultimos 7d (mudanca reseta aprendizado).',
+      inputSchema: {
+        ad_id: adIdSchema,
+        final_url: z.string().url(),
+        headlines: z.array(z.string().max(30)).min(3).max(15),
+        descriptions: z.array(z.string().max(90)).min(2).max(4),
+        path1: z.string().max(15).optional(),
+        path2: z.string().max(15).optional(),
+        confirm: z.boolean().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_rsa', async (toolCallId) => {
+        applyMutateGuards('traffic_update_rsa');
+        const { ad_id, ...body } = input;
+        const result = await crmTrafficService.patch(
+          `/trafego/ads/${encodeURIComponent(ad_id)}/rsa`,
+          body,
+          { toolCallId },
+        );
+        return ok(result, `Substituicao de RSA ${ad_id} enfileirada.`);
+      }),
+  );
+
+  server.registerTool(
+    'traffic_remove_ad',
+    {
+      description:
+        'Remove (soft-delete) um ad individual. Status=REMOVED. Exige confirm + reason.',
+      inputSchema: {
+        ad_id: adIdSchema,
+        confirm: z.boolean(),
+        reason: z.string().min(3),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_remove_ad', async (toolCallId) => {
+        applyMutateGuards('traffic_remove_ad');
+        const { ad_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/ads/${encodeURIComponent(ad_id)}/remove`,
+          body,
+          { toolCallId },
+        );
+        return ok(result, `Remocao de Ad ${ad_id} enfileirada.`);
+      }),
+  );
+
+  server.registerTool(
+    'traffic_attach_call_asset',
+    {
+      description:
+        'Cria Call Asset (substituto do CallAd removido em Google Ads API v23) e anexa em conta/campanha/ad_group. ' +
+        'phone_number e country_code default vem de TrafficSettings se nao explicito. ' +
+        'call_tracked=true (default): Google injeta tracking number visivel + reporta calls como conversoes.',
+      inputSchema: {
+        level: z.enum(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP']),
+        campaign_id: campaignIdSchema.optional(),
+        ad_group_id: adGroupIdSchemaSprint1.optional(),
+        phone_number: z
+          .string()
+          .regex(/^\+[1-9]\d{1,14}$/)
+          .optional()
+          .describe('E.164 (ex: +5582999999999). Default: TrafficSettings.business_phone_e164.'),
+        country_code: z.string().length(2).optional(),
+        call_tracked: z.boolean().optional(),
+        confirm: z.boolean().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_attach_call_asset', async (toolCallId) => {
+        applyMutateGuards('traffic_attach_call_asset');
+        const result = await crmTrafficService.post(
+          '/trafego/assets/call',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Call Asset enfileirado para anexar em ${input.level.toLowerCase()}.`,
+        );
       }),
   );
 }

@@ -51,6 +51,16 @@ import {
   UpdateCredentialsDto,
   UpdateLeadFormSettingsDto,
   UpdateSettingsDto,
+  // Sprint 1 backlog (2026-05-17)
+  CreateConversionActionDto,
+  UpdateConversionActionDto,
+  RemoveConversionActionDto,
+  EnableEnhancedConversionsDto,
+  CreateAdGroupDto,
+  UpdateAdGroupDto,
+  UpdateRsaDto,
+  RemoveAdDto,
+  AttachCallAssetDto,
 } from './trafego.dto';
 
 @Controller('trafego')
@@ -967,6 +977,169 @@ export class TrafegoController {
       keywordIds: [keywordId],
       ...dto,
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 1 backlog (2026-05-17) — Conversion Actions, Ad Groups, RSAs
+  //
+  // Padrao: controller fino + delega validacao especifica pra service
+  // (quando aplicavel) + enfileira via enqueueMutate. Audit log automatico.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Cria ConversionAction nova. */
+  @Post('conversion-actions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createConversionAction(
+    @Req() req: any,
+    @Body() dto: CreateConversionActionDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-create-conversion-action',
+      dto,
+    );
+  }
+
+  /** Atualiza ConversionAction existente. */
+  @Patch('conversion-actions/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateConversionAction(
+    @Req() req: any,
+    @Param('id') conversionActionId: string,
+    @Body() dto: UpdateConversionActionDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-conversion-action',
+      { conversionActionId, ...dto },
+    );
+  }
+
+  /** Remove (soft) ConversionAction. */
+  @Delete('conversion-actions/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeConversionAction(
+    @Req() req: any,
+    @Param('id') conversionActionId: string,
+    @Body() dto: RemoveConversionActionDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-remove-conversion-action',
+      { conversionActionId, ...dto },
+    );
+  }
+
+  /** Alias POST de remove (body em DELETE eh nao-padrao; MCP usa POST). */
+  @Post('conversion-actions/:id/remove')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeConversionActionPost(
+    @Req() req: any,
+    @Param('id') conversionActionId: string,
+    @Body() dto: RemoveConversionActionDto,
+  ) {
+    return this.removeConversionAction(req, conversionActionId, dto);
+  }
+
+  /**
+   * Habilita Enhanced Conversions for Leads.
+   * Modo API/BOTH: tambem liga toggle local TrafficSettings.enhanced_conv_for_leads_upload_enabled.
+   */
+  @Post('conversion-tracking/enable-enhanced-conversions-for-leads')
+  @Roles('ADMIN', 'ADVOGADO')
+  async enableEnhancedConversions(
+    @Req() req: any,
+    @Body() dto: EnableEnhancedConversionsDto,
+  ) {
+    const tenantId = req.user.tenant_id;
+    // Liga toggle local ANTES do mutate remoto pra evitar drift (se mutate
+    // falhar, podemos ainda reativar manual).
+    if ((dto.mode === 'API' || dto.mode === 'BOTH') && !dto.validate_only) {
+      await this.service.setEnhancedConvUploadEnabled(tenantId, true);
+    }
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-enable-enhanced-conversions',
+      dto,
+    );
+  }
+
+  /** Cria AdGroup novo dentro de uma campanha. */
+  @Post('campaigns/:id/ad-groups')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createAdGroup(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: CreateAdGroupDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-create-ad-group', {
+      campaignId,
+      ...dto,
+    });
+  }
+
+  /** Atualiza AdGroup existente. */
+  @Patch('ad-groups/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateAdGroup(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: UpdateAdGroupDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-update-ad-group', {
+      adGroupId,
+      ...dto,
+    });
+  }
+
+  /** Atualiza RSA (pattern substituir: cria novo + remove antigo). */
+  @Patch('ads/:id/rsa')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateRsa(
+    @Req() req: any,
+    @Param('id') adId: string,
+    @Body() dto: UpdateRsaDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-update-rsa', {
+      adId,
+      ...dto,
+    });
+  }
+
+  /** Remove ad individual (status=REMOVED). */
+  @Delete('ads/:id')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeAd(
+    @Req() req: any,
+    @Param('id') adId: string,
+    @Body() dto: RemoveAdDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-remove-ad', {
+      adId,
+      ...dto,
+    });
+  }
+
+  /** Alias POST de remove (body em DELETE eh nao-padrao; MCP usa POST). */
+  @Post('ads/:id/remove')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeAdPost(
+    @Req() req: any,
+    @Param('id') adId: string,
+    @Body() dto: RemoveAdDto,
+  ) {
+    return this.removeAd(req, adId, dto);
+  }
+
+  /** Cria Call Asset + anexa em conta/campanha/ad_group. */
+  @Post('assets/call')
+  @Roles('ADMIN', 'ADVOGADO')
+  async attachCallAsset(@Req() req: any, @Body() dto: AttachCallAssetDto) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-attach-call-asset',
+      dto,
+    );
   }
 
   // ─── Helper: enqueue mutate com resolucao de resource_names ─────────────

@@ -31,6 +31,16 @@ export const MUTATE_JOBS = {
   UPDATE_BIDDING_STRATEGY: 'trafego-mutate-update-bidding-strategy',
   UPDATE_AD_SCHEDULE: 'trafego-mutate-update-ad-schedule',
   REMOVE_AD_GROUP: 'trafego-mutate-remove-ad-group',
+  // Sprint 1 backlog (2026-05-17) — Conversion Actions, Ad Groups, RSAs
+  CREATE_CONVERSION_ACTION: 'trafego-mutate-create-conversion-action',
+  UPDATE_CONVERSION_ACTION: 'trafego-mutate-update-conversion-action',
+  REMOVE_CONVERSION_ACTION: 'trafego-mutate-remove-conversion-action',
+  ENABLE_ENHANCED_CONVERSIONS: 'trafego-mutate-enable-enhanced-conversions',
+  CREATE_AD_GROUP: 'trafego-mutate-create-ad-group',
+  UPDATE_AD_GROUP: 'trafego-mutate-update-ad-group',
+  UPDATE_RSA: 'trafego-mutate-update-rsa',
+  REMOVE_AD: 'trafego-mutate-remove-ad',
+  ATTACH_CALL_ASSET: 'trafego-mutate-attach-call-asset',
 } as const;
 
 /**
@@ -152,6 +162,106 @@ export type UpdateBiddingStrategyPayload = BaseMutatePayload & {
   targetRoas?: number | null;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 1 backlog — Payload types
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type CreateConversionActionPayload = BaseMutatePayload & {
+  /// Customer ID sem traços — pra montar resource_names
+  customerId: string;
+  name: string;
+  category: string;
+  type: string;
+  includeInConversions?: boolean;
+  defaultValueMicros?: bigint | string | null;
+  countingType?: 'ONE_PER_CLICK' | 'MANY_PER_CLICK';
+  clickThroughLookbackDays?: number;
+  viewThroughLookbackDays?: number;
+  phoneCallDurationSeconds?: number;
+};
+
+export type UpdateConversionActionPayload = BaseMutatePayload & {
+  /// resource_name 'customers/X/conversionActions/Y'
+  conversionActionResourceName: string;
+  /// Patch (apenas fields enviados sao alterados; mask auto-derivado)
+  patch: {
+    name?: string;
+    include_in_conversions?: boolean;
+    primary_for_goal?: boolean;
+    default_value_micros?: bigint | string | null;
+    always_use_default_value?: boolean;
+    attribution_model?: string;
+    click_through_lookback_days?: number;
+    view_through_lookback_days?: number;
+    counting_type?: 'ONE_PER_CLICK' | 'MANY_PER_CLICK';
+    status?: 'ENABLED' | 'HIDDEN';
+  };
+};
+
+export type RemoveConversionActionPayload = BaseMutatePayload & {
+  conversionActionResourceName: string;
+};
+
+export type EnableEnhancedConversionsPayload = BaseMutatePayload & {
+  /// Customer ID sem traços — necessário pro resource_name
+  customerId: string;
+  mode: 'GOOGLE_TAG' | 'API' | 'BOTH';
+};
+
+export type CreateAdGroupPayload = BaseMutatePayload & {
+  campaignResourceName: string;
+  name: string;
+  type?: 'SEARCH_STANDARD' | 'SEARCH_DYNAMIC_ADS' | 'DISPLAY_STANDARD';
+  status?: 'ENABLED' | 'PAUSED';
+  cpcBidMicros?: bigint | string | null;
+  targetCpaMicros?: bigint | string | null;
+  targetRoas?: number | null;
+};
+
+export type UpdateAdGroupPayload = BaseMutatePayload & {
+  adGroupResourceName: string;
+  patch: {
+    name?: string;
+    status?: 'ENABLED' | 'PAUSED';
+    cpc_bid_micros?: bigint | string | null;
+    target_cpa_micros?: bigint | string | null;
+    target_roas?: number | null;
+    ad_rotation_mode?: 'OPTIMIZE' | 'ROTATE_FOREVER';
+  };
+};
+
+export type UpdateRsaPayload = BaseMutatePayload & {
+  /// resource_name do ad_group_ad atual (sera REMOVED no final)
+  oldAdGroupAdResourceName: string;
+  /// ad_group resource_name pra criar o novo
+  adGroupResourceName: string;
+  /// Conteudo do novo RSA — passa por validateAd OAB
+  newAd: AdContent;
+};
+
+export type RemoveAdPayload = BaseMutatePayload & {
+  adGroupAdResourceName: string;
+};
+
+export type AttachCallAssetPayload = BaseMutatePayload & {
+  /// Customer ID sem traços
+  customerId: string;
+  /// E.164 ex: +5582999999999
+  phoneNumber: string;
+  /// ISO 3166 alpha-2 — default "BR"
+  countryCode: string;
+  /// Onde anexar
+  level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+  /// resource_name do campaign (se level=CAMPAIGN)
+  campaignResourceName?: string;
+  /// resource_name do ad_group (se level=AD_GROUP)
+  adGroupResourceName?: string;
+  /// Google injeta tracking number visivel + reporta calls como conv
+  callTracked?: boolean;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+
 export type UpdateAdSchedulePayload = BaseMutatePayload & {
   /// Customer ID (sem traços) pra montar resource_names
   customerId: string;
@@ -233,6 +343,24 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.updateAdSchedule(job.data);
       case MUTATE_JOBS.REMOVE_AD_GROUP:
         return await this.removeAdGroup(job.data);
+      case MUTATE_JOBS.CREATE_CONVERSION_ACTION:
+        return await this.createConversionAction(job.data);
+      case MUTATE_JOBS.UPDATE_CONVERSION_ACTION:
+        return await this.updateConversionAction(job.data);
+      case MUTATE_JOBS.REMOVE_CONVERSION_ACTION:
+        return await this.removeConversionAction(job.data);
+      case MUTATE_JOBS.ENABLE_ENHANCED_CONVERSIONS:
+        return await this.enableEnhancedConversions(job.data);
+      case MUTATE_JOBS.CREATE_AD_GROUP:
+        return await this.createAdGroup(job.data);
+      case MUTATE_JOBS.UPDATE_AD_GROUP:
+        return await this.updateAdGroup(job.data);
+      case MUTATE_JOBS.UPDATE_RSA:
+        return await this.updateRsa(job.data);
+      case MUTATE_JOBS.REMOVE_AD:
+        return await this.removeAd(job.data);
+      case MUTATE_JOBS.ATTACH_CALL_ASSET:
+        return await this.attachCallAsset(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -1037,6 +1165,571 @@ export class TrafegoMutateProcessor extends WorkerHost {
       },
       operations,
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 1 backlog (2026-05-17) — Conversion Actions, Ad Groups, RSAs
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Cria ConversionAction nova. Necessita name + category + type minimos;
+   * outros campos opcionais com defaults sensatos do lado do Google.
+   */
+  private async createConversionAction(
+    p: CreateConversionActionPayload,
+  ): Promise<MutateResult> {
+    const op: any = {
+      name: p.name,
+      category: this.mapConversionCategory(p.category),
+      type: this.mapConversionType(p.type),
+      status: enums.ConversionActionStatus.ENABLED,
+      include_in_conversions_metric: p.includeInConversions ?? true,
+    };
+    if (p.countingType) {
+      op.counting_type =
+        p.countingType === 'ONE_PER_CLICK'
+          ? enums.ConversionActionCountingType.ONE_PER_CLICK
+          : enums.ConversionActionCountingType.MANY_PER_CLICK;
+    }
+    if (p.clickThroughLookbackDays) {
+      op.click_through_lookback_window_days = p.clickThroughLookbackDays;
+    }
+    if (p.viewThroughLookbackDays) {
+      op.view_through_lookback_window_days = p.viewThroughLookbackDays;
+    }
+    if (p.defaultValueMicros) {
+      op.value_settings = {
+        default_value_micros:
+          typeof p.defaultValueMicros === 'string'
+            ? BigInt(p.defaultValueMicros)
+            : p.defaultValueMicros,
+        always_use_default_value: false,
+      };
+    }
+    if (
+      p.phoneCallDurationSeconds != null &&
+      p.phoneCallDurationSeconds > 0
+    ) {
+      // Phone call duration eh sub-objeto especifico de PHONE_CALL_LEAD type
+      op.phone_call_duration_seconds = p.phoneCallDurationSeconds;
+    }
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'conversion_action',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [op],
+    });
+  }
+
+  /**
+   * Atualiza ConversionAction. Patch parcial — auto-mask do SDK gera mask
+   * baseado em quais campos vem populados.
+   */
+  private async updateConversionAction(
+    p: UpdateConversionActionPayload,
+  ): Promise<MutateResult> {
+    const op: any = { resource_name: p.conversionActionResourceName };
+    if (p.patch.name !== undefined) op.name = p.patch.name;
+    if (p.patch.include_in_conversions !== undefined) {
+      op.include_in_conversions_metric = p.patch.include_in_conversions;
+    }
+    if (p.patch.primary_for_goal !== undefined) {
+      op.primary_for_goal = p.patch.primary_for_goal;
+    }
+    if (p.patch.counting_type !== undefined) {
+      op.counting_type =
+        p.patch.counting_type === 'ONE_PER_CLICK'
+          ? enums.ConversionActionCountingType.ONE_PER_CLICK
+          : enums.ConversionActionCountingType.MANY_PER_CLICK;
+    }
+    if (p.patch.click_through_lookback_days !== undefined) {
+      op.click_through_lookback_window_days = p.patch.click_through_lookback_days;
+    }
+    if (p.patch.view_through_lookback_days !== undefined) {
+      op.view_through_lookback_window_days = p.patch.view_through_lookback_days;
+    }
+    if (
+      p.patch.default_value_micros !== undefined ||
+      p.patch.always_use_default_value !== undefined
+    ) {
+      op.value_settings = {
+        ...(p.patch.default_value_micros !== undefined && {
+          default_value_micros:
+            typeof p.patch.default_value_micros === 'string'
+              ? BigInt(p.patch.default_value_micros)
+              : p.patch.default_value_micros ?? BigInt(0),
+        }),
+        ...(p.patch.always_use_default_value !== undefined && {
+          always_use_default_value: p.patch.always_use_default_value,
+        }),
+      };
+    }
+    if (p.patch.attribution_model !== undefined) {
+      // Enum names do SDK seguem padrao Google: GOOGLE_ADS_LAST_CLICK +
+      // GOOGLE_SEARCH_ATTRIBUTION_* pros outros.
+      const map: Record<string, number> = {
+        LAST_CLICK: enums.AttributionModel.GOOGLE_ADS_LAST_CLICK,
+        DATA_DRIVEN: enums.AttributionModel.GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN,
+        FIRST_CLICK: enums.AttributionModel.GOOGLE_SEARCH_ATTRIBUTION_FIRST_CLICK,
+        LINEAR: enums.AttributionModel.GOOGLE_SEARCH_ATTRIBUTION_LINEAR,
+        TIME_DECAY: enums.AttributionModel.GOOGLE_SEARCH_ATTRIBUTION_TIME_DECAY,
+        POSITION_BASED:
+          enums.AttributionModel.GOOGLE_SEARCH_ATTRIBUTION_POSITION_BASED,
+      };
+      const m = map[p.patch.attribution_model];
+      if (m !== undefined) {
+        op.attribution_model_settings = { attribution_model: m };
+      }
+    }
+    if (p.patch.status !== undefined) {
+      op.status =
+        p.patch.status === 'ENABLED'
+          ? enums.ConversionActionStatus.ENABLED
+          : enums.ConversionActionStatus.HIDDEN;
+    }
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'conversion_action',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [op],
+    });
+  }
+
+  /**
+   * Remove ConversionAction (soft-delete, status=REMOVED).
+   */
+  private async removeConversionAction(
+    p: RemoveConversionActionPayload,
+  ): Promise<MutateResult> {
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'conversion_action',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [
+        {
+          resource_name: p.conversionActionResourceName,
+          status: enums.ConversionActionStatus.REMOVED,
+        },
+      ],
+    });
+  }
+
+  /**
+   * Habilita Enhanced Conversions for Leads no customer. Modo GOOGLE_TAG /
+   * BOTH muta a flag `enhanced_conversions_for_leads_enabled` no
+   * conversion_tracking_setting. Modo API tambem liga toggle local
+   * (TrafficSettings.enhanced_conv_for_leads_upload_enabled) — feito no
+   * service layer antes do enqueue. Aqui no processor so cuidamos da flag
+   * remota via CustomerService.mutate.
+   *
+   * NB: o Google docs notam que Enhanced Conv eh auto-enabled quando comeca
+   * a receber userIdentifiers, mas setar a flag explicitamente garante o
+   * comportamento e evita drift se admin desabilitar via UI.
+   */
+  private async enableEnhancedConversions(
+    p: EnableEnhancedConversionsPayload,
+  ): Promise<MutateResult> {
+    if (p.mode === 'API') {
+      // Modo API puro nao precisa de mutate remoto — flag local controla
+      // o cron de upload. Retorna SUCCESS noop.
+      return {
+        logId: 'noop-api-only',
+        status: 'SUCCESS',
+        resourceNames: [`customers/${p.customerId}`],
+        oabViolations: [],
+        durationMs: 0,
+      };
+    }
+
+    // GOOGLE_TAG ou BOTH — muta flag no customer
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'customer' as any, // tipo nao listado em MutateResourceType ainda — passamos via cast
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: { ...p.context, mode: p.mode },
+      operations: [
+        {
+          resource_name: `customers/${p.customerId}`,
+          conversion_tracking_setting: {
+            enhanced_conversions_for_leads_enabled: true,
+          },
+        },
+      ],
+    });
+  }
+
+  /**
+   * Cria AdGroup novo dentro de uma campanha. cpc_bid_micros e target_cpa
+   * sao opcionais — Google decide defaults baseado na bidding strategy
+   * da campanha.
+   */
+  private async createAdGroup(p: CreateAdGroupPayload): Promise<MutateResult> {
+    const op: any = {
+      campaign: p.campaignResourceName,
+      name: p.name,
+      status:
+        p.status === 'ENABLED'
+          ? enums.AdGroupStatus.ENABLED
+          : enums.AdGroupStatus.PAUSED,
+      type:
+        p.type === 'SEARCH_DYNAMIC_ADS'
+          ? enums.AdGroupType.SEARCH_DYNAMIC_ADS
+          : p.type === 'DISPLAY_STANDARD'
+            ? enums.AdGroupType.DISPLAY_STANDARD
+            : enums.AdGroupType.SEARCH_STANDARD,
+    };
+    if (p.cpcBidMicros) {
+      op.cpc_bid_micros =
+        typeof p.cpcBidMicros === 'string'
+          ? BigInt(p.cpcBidMicros)
+          : p.cpcBidMicros;
+    }
+    if (p.targetCpaMicros) {
+      op.target_cpa_micros =
+        typeof p.targetCpaMicros === 'string'
+          ? BigInt(p.targetCpaMicros)
+          : p.targetCpaMicros;
+    }
+    if (p.targetRoas != null) {
+      op.target_roas = p.targetRoas;
+    }
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'ad_group',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [op],
+    });
+  }
+
+  /**
+   * Atualiza AdGroup. Patch parcial.
+   */
+  private async updateAdGroup(p: UpdateAdGroupPayload): Promise<MutateResult> {
+    const op: any = { resource_name: p.adGroupResourceName };
+    if (p.patch.name !== undefined) op.name = p.patch.name;
+    if (p.patch.status !== undefined) {
+      op.status =
+        p.patch.status === 'ENABLED'
+          ? enums.AdGroupStatus.ENABLED
+          : enums.AdGroupStatus.PAUSED;
+    }
+    if (p.patch.cpc_bid_micros !== undefined) {
+      op.cpc_bid_micros =
+        typeof p.patch.cpc_bid_micros === 'string'
+          ? BigInt(p.patch.cpc_bid_micros)
+          : p.patch.cpc_bid_micros;
+    }
+    if (p.patch.target_cpa_micros !== undefined) {
+      op.target_cpa_micros =
+        typeof p.patch.target_cpa_micros === 'string'
+          ? BigInt(p.patch.target_cpa_micros)
+          : p.patch.target_cpa_micros;
+    }
+    if (p.patch.target_roas !== undefined) {
+      op.target_roas = p.patch.target_roas;
+    }
+    if (p.patch.ad_rotation_mode !== undefined) {
+      op.ad_rotation_mode =
+        p.patch.ad_rotation_mode === 'OPTIMIZE'
+          ? enums.AdGroupAdRotationMode.OPTIMIZE
+          : enums.AdGroupAdRotationMode.ROTATE_FOREVER;
+    }
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'ad_group',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [op],
+    });
+  }
+
+  /**
+   * Atualiza RSA via padrao "substituir": cria novo + remove antigo.
+   * Atomico do ponto de vista do CRM (mesmo job, mesmo audit log).
+   *
+   * Em dry-run, valida apenas o novo (criacao do antigo nao acontece).
+   */
+  private async updateRsa(p: UpdateRsaPayload): Promise<MutateResult> {
+    // Passo 1: cria novo RSA
+    const createResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'ad_group_ad',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: { ...p.context, step: 'create_new_rsa' },
+      operations: [
+        {
+          ad_group: p.adGroupResourceName,
+          status: enums.AdGroupAdStatus.ENABLED,
+          ad: {
+            responsive_search_ad: {
+              headlines: p.newAd.headlines.map((h) => ({ text: h })),
+              descriptions: p.newAd.descriptions.map((d) => ({ text: d })),
+            },
+            final_urls: p.newAd.final_url ? [p.newAd.final_url] : [],
+          },
+        },
+      ],
+      adContent: p.newAd,
+    });
+
+    if (createResult.status !== 'SUCCESS') {
+      return createResult;
+    }
+
+    // Em dry-run, nao remove o antigo (validamos apenas o novo)
+    if (p.validateOnly) {
+      return createResult;
+    }
+
+    // Passo 2: remove antigo (status=REMOVED)
+    await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'ad_group_ad',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: false,
+      context: { ...p.context, step: 'remove_old_rsa' },
+      operations: [
+        {
+          resource_name: p.oldAdGroupAdResourceName,
+          status: enums.AdGroupAdStatus.REMOVED,
+        },
+      ],
+    });
+
+    return createResult;
+  }
+
+  /**
+   * Remove um ad individual (soft-delete, status=REMOVED).
+   */
+  private async removeAd(p: RemoveAdPayload): Promise<MutateResult> {
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'ad_group_ad',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [
+        {
+          resource_name: p.adGroupAdResourceName,
+          status: enums.AdGroupAdStatus.REMOVED,
+        },
+      ],
+    });
+  }
+
+  /**
+   * Cria Call Asset + anexa via CustomerAsset / CampaignAsset / AdGroupAsset.
+   *
+   * Pipeline:
+   *   1. Cria Asset (type=CALL com phone_number + country_code) → pega resource_name
+   *   2. Cria associacao no nivel pedido (CustomerAsset / CampaignAsset / AdGroupAsset)
+   *      com field_type=CALL
+   *
+   * Em dry-run, valida so o passo 1 (associacao nao roda).
+   */
+  private async attachCallAsset(
+    p: AttachCallAssetPayload,
+  ): Promise<MutateResult> {
+    // Passo 1: cria Asset
+    const assetResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: { ...p.context, step: 'create_call_asset' },
+      operations: [
+        {
+          call_asset: {
+            country_code: p.countryCode || 'BR',
+            phone_number: p.phoneNumber,
+            call_conversion_reporting_state: p.callTracked
+              ? enums.CallConversionReportingState.USE_RESOURCE_LEVEL_CALL_CONVERSION_ACTION
+              : enums.CallConversionReportingState.DISABLED,
+          },
+        },
+      ],
+    });
+    if (
+      assetResult.status !== 'SUCCESS' ||
+      !assetResult.resourceNames?.[0] ||
+      p.validateOnly
+    ) {
+      return assetResult;
+    }
+    const assetResourceName = assetResult.resourceNames[0];
+
+    // Passo 2: cria associacao no nivel certo
+    if (p.level === 'CAMPAIGN' && p.campaignResourceName) {
+      return await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_criterion' as any,
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: false,
+        context: {
+          ...p.context,
+          step: 'attach_to_campaign',
+          asset_resource_name: assetResourceName,
+        },
+        operations: [
+          {
+            campaign: p.campaignResourceName,
+            asset: assetResourceName,
+            field_type: enums.AssetFieldType.CALL,
+          },
+        ],
+      });
+    }
+
+    if (p.level === 'AD_GROUP' && p.adGroupResourceName) {
+      return await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'ad_group_criterion' as any,
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: false,
+        context: {
+          ...p.context,
+          step: 'attach_to_ad_group',
+          asset_resource_name: assetResourceName,
+        },
+        operations: [
+          {
+            ad_group: p.adGroupResourceName,
+            asset: assetResourceName,
+            field_type: enums.AssetFieldType.CALL,
+          },
+        ],
+      });
+    }
+
+    // Level ACCOUNT — usa customer_asset
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset' as any, // re-use; backend mapa o servico certo
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: false,
+      context: {
+        ...p.context,
+        step: 'attach_to_account',
+        asset_resource_name: assetResourceName,
+        attachment_type: 'customer_asset',
+      },
+      operations: [
+        {
+          customer: `customers/${p.customerId}`,
+          asset: assetResourceName,
+          field_type: enums.AssetFieldType.CALL,
+        },
+      ],
+    });
+  }
+
+  /**
+   * Mapeia categoria PT-BR → enum Google.
+   */
+  private mapConversionCategory(category: string): number {
+    const map: Record<string, number> = {
+      SUBMIT_LEAD_FORM: enums.ConversionActionCategory.SUBMIT_LEAD_FORM,
+      CONTACT: enums.ConversionActionCategory.CONTACT,
+      PHONE_CALL_LEAD: enums.ConversionActionCategory.PHONE_CALL_LEAD,
+      SIGNUP: enums.ConversionActionCategory.SIGNUP,
+      DOWNLOAD: enums.ConversionActionCategory.DOWNLOAD,
+      PAGE_VIEW: enums.ConversionActionCategory.PAGE_VIEW,
+      PURCHASE: enums.ConversionActionCategory.PURCHASE,
+      ADD_TO_CART: enums.ConversionActionCategory.ADD_TO_CART,
+      BEGIN_CHECKOUT: enums.ConversionActionCategory.BEGIN_CHECKOUT,
+      BOOK_APPOINTMENT: enums.ConversionActionCategory.BOOK_APPOINTMENT,
+      REQUEST_QUOTE: enums.ConversionActionCategory.REQUEST_QUOTE,
+      GET_DIRECTIONS: enums.ConversionActionCategory.GET_DIRECTIONS,
+      OUTBOUND_CLICK: enums.ConversionActionCategory.OUTBOUND_CLICK,
+      ENGAGEMENT: enums.ConversionActionCategory.ENGAGEMENT,
+      STORE_VISIT: enums.ConversionActionCategory.STORE_VISIT,
+      STORE_SALE: enums.ConversionActionCategory.STORE_SALE,
+      QUALIFIED_LEAD: enums.ConversionActionCategory.QUALIFIED_LEAD,
+      CONVERTED_LEAD: enums.ConversionActionCategory.CONVERTED_LEAD,
+      OTHER: enums.ConversionActionCategory.DEFAULT,
+    };
+    const m = map[category];
+    if (m === undefined) {
+      throw new Error(`Categoria de conversion action desconhecida: ${category}`);
+    }
+    return m;
+  }
+
+  /**
+   * Mapeia type PT-BR → enum Google.
+   */
+  private mapConversionType(type: string): number {
+    const map: Record<string, number> = {
+      WEBPAGE: enums.ConversionActionType.WEBPAGE,
+      AD_CALL: enums.ConversionActionType.AD_CALL,
+      CLICK_TO_CALL: enums.ConversionActionType.CLICK_TO_CALL,
+      WEBSITE_CALL: enums.ConversionActionType.WEBSITE_CALL,
+      UPLOAD_CALLS: enums.ConversionActionType.UPLOAD_CALLS,
+      UPLOAD_CLICKS: enums.ConversionActionType.UPLOAD_CLICKS,
+      APP_INSTALL: enums.ConversionActionType.GOOGLE_PLAY_DOWNLOAD,
+      IMPORT: enums.ConversionActionType.UPLOAD_CLICKS,
+      GOOGLE_HOSTED: enums.ConversionActionType.WEBPAGE,
+    };
+    const m = map[type];
+    if (m === undefined) {
+      throw new Error(`Type de conversion action desconhecido: ${type}`);
+    }
+    return m;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

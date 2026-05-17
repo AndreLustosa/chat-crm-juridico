@@ -1086,12 +1086,293 @@ export class TrafegoService {
           },
         };
       }
+      // ═══════════════════════════════════════════════════════════════════
+      // Sprint 1 backlog (2026-05-17) — Conversion Actions, Ad Groups, RSAs
+      // ═══════════════════════════════════════════════════════════════════
+
+      case 'trafego-mutate-create-conversion-action': {
+        return {
+          ...base,
+          customerId,
+          name: raw.name,
+          category: raw.category,
+          type: raw.type,
+          includeInConversions: raw.include_in_conversions,
+          defaultValueMicros: raw.default_value_brl
+            ? String(Math.round(raw.default_value_brl * 1_000_000))
+            : null,
+          countingType: raw.counting_type,
+          clickThroughLookbackDays: raw.click_through_lookback_days,
+          viewThroughLookbackDays: raw.view_through_lookback_days,
+          phoneCallDurationSeconds: raw.phone_call_duration_seconds,
+          context: { ...base.context, ca_name: raw.name, ca_category: raw.category },
+        };
+      }
+
+      case 'trafego-mutate-update-conversion-action': {
+        const ca = await this.requireConversionAction(tenantId, raw.conversionActionId);
+        const patch: any = {};
+        if (raw.name !== undefined) patch.name = raw.name;
+        if (raw.include_in_conversions !== undefined)
+          patch.include_in_conversions = raw.include_in_conversions;
+        if (raw.primary_for_goal !== undefined)
+          patch.primary_for_goal = raw.primary_for_goal;
+        if (raw.default_value_brl !== undefined) {
+          patch.default_value_micros = String(
+            Math.round(raw.default_value_brl * 1_000_000),
+          );
+        }
+        if (raw.always_use_default_value !== undefined)
+          patch.always_use_default_value = raw.always_use_default_value;
+        if (raw.attribution_model !== undefined)
+          patch.attribution_model = raw.attribution_model;
+        if (raw.click_through_lookback_days !== undefined)
+          patch.click_through_lookback_days = raw.click_through_lookback_days;
+        if (raw.view_through_lookback_days !== undefined)
+          patch.view_through_lookback_days = raw.view_through_lookback_days;
+        if (raw.counting_type !== undefined)
+          patch.counting_type = raw.counting_type;
+        if (raw.status !== undefined) patch.status = raw.status;
+        return {
+          ...base,
+          conversionActionResourceName: `customers/${customerId}/conversionActions/${ca.google_conversion_id}`,
+          patch,
+          context: { ...base.context, conversion_action_id_local: ca.id },
+        };
+      }
+
+      case 'trafego-mutate-remove-conversion-action': {
+        const ca = await this.requireConversionAction(tenantId, raw.conversionActionId);
+        return {
+          ...base,
+          conversionActionResourceName: `customers/${customerId}/conversionActions/${ca.google_conversion_id}`,
+          context: { ...base.context, conversion_action_id_local: ca.id, reason: raw.reason },
+        };
+      }
+
+      case 'trafego-mutate-enable-enhanced-conversions': {
+        return {
+          ...base,
+          customerId,
+          mode: raw.mode,
+          context: { ...base.context, mode: raw.mode },
+        };
+      }
+
+      case 'trafego-mutate-create-ad-group': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          name: raw.name,
+          type: raw.type,
+          status: raw.status,
+          cpcBidMicros: raw.cpc_bid_brl
+            ? String(Math.round(raw.cpc_bid_brl * 1_000_000))
+            : null,
+          targetCpaMicros: raw.target_cpa_brl
+            ? String(Math.round(raw.target_cpa_brl * 1_000_000))
+            : null,
+          targetRoas: raw.target_roas ?? null,
+          context: { ...base.context, campaign_id_local: camp.id, ag_name: raw.name },
+        };
+      }
+
+      case 'trafego-mutate-update-ad-group': {
+        const ag = await this.requireAdGroup(tenantId, raw.adGroupId);
+        const patch: any = {};
+        if (raw.name !== undefined) patch.name = raw.name;
+        if (raw.status !== undefined) patch.status = raw.status;
+        if (raw.cpc_bid_brl !== undefined) {
+          patch.cpc_bid_micros = String(Math.round(raw.cpc_bid_brl * 1_000_000));
+        }
+        if (raw.target_cpa_brl !== undefined) {
+          patch.target_cpa_micros = String(
+            Math.round(raw.target_cpa_brl * 1_000_000),
+          );
+        }
+        if (raw.target_roas !== undefined) patch.target_roas = raw.target_roas;
+        if (raw.rotation !== undefined) patch.ad_rotation_mode = raw.rotation;
+        return {
+          ...base,
+          adGroupResourceName: `customers/${customerId}/adGroups/${ag.google_ad_group_id}`,
+          patch,
+          context: { ...base.context, ad_group_id_local: ag.id },
+        };
+      }
+
+      case 'trafego-mutate-update-rsa': {
+        const oldAd = await this.requireAd(tenantId, raw.adId);
+        // Validacoes basicas
+        const headlines = (raw.headlines ?? []) as string[];
+        const descriptions = (raw.descriptions ?? []) as string[];
+        if (headlines.length < 3 || headlines.length > 15) {
+          throw new HttpException(
+            'RSA exige 3 a 15 headlines.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        if (descriptions.length < 2 || descriptions.length > 4) {
+          throw new HttpException(
+            'RSA exige 2 a 4 descriptions.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        return {
+          ...base,
+          oldAdGroupAdResourceName: `customers/${customerId}/adGroupAds/${oldAd.ad_group.google_ad_group_id}~${oldAd.google_ad_id}`,
+          adGroupResourceName: `customers/${customerId}/adGroups/${oldAd.ad_group.google_ad_group_id}`,
+          newAd: {
+            headlines,
+            descriptions,
+            final_url: raw.final_url,
+            path1: raw.path1,
+            path2: raw.path2,
+          },
+          context: {
+            ...base.context,
+            ad_id_local: oldAd.id,
+            ad_group_id_local: oldAd.ad_group_id,
+          },
+        };
+      }
+
+      case 'trafego-mutate-remove-ad': {
+        const ad = await this.requireAd(tenantId, raw.adId);
+        return {
+          ...base,
+          adGroupAdResourceName: `customers/${customerId}/adGroupAds/${ad.ad_group.google_ad_group_id}~${ad.google_ad_id}`,
+          context: {
+            ...base.context,
+            ad_id_local: ad.id,
+            reason: raw.reason,
+          },
+        };
+      }
+
+      case 'trafego-mutate-attach-call-asset': {
+        // Resolve phone do TrafficSettings se nao explicito
+        let phoneNumber: string | undefined = raw.phone_number;
+        if (!phoneNumber) {
+          const settings = await this.prisma.trafficSettings.findUnique({
+            where: { tenant_id: tenantId },
+          });
+          phoneNumber = settings?.business_phone_e164 ?? undefined;
+        }
+        if (!phoneNumber) {
+          throw new HttpException(
+            'phone_number nao informado e TrafficSettings.business_phone_e164 nao configurado.',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        const countryCode = raw.country_code ?? 'BR';
+
+        // Resolve resource_name do scope alvo
+        let campaignResourceName: string | undefined;
+        let adGroupResourceName: string | undefined;
+        if (raw.level === 'CAMPAIGN') {
+          if (!raw.campaign_id) {
+            throw new HttpException(
+              'level=CAMPAIGN exige campaign_id.',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          const camp = await this.requireCampaign(tenantId, raw.campaign_id);
+          campaignResourceName = `customers/${customerId}/campaigns/${camp.google_campaign_id}`;
+        }
+        if (raw.level === 'AD_GROUP') {
+          if (!raw.ad_group_id) {
+            throw new HttpException(
+              'level=AD_GROUP exige ad_group_id.',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+          const ag = await this.requireAdGroup(tenantId, raw.ad_group_id);
+          adGroupResourceName = `customers/${customerId}/adGroups/${ag.google_ad_group_id}`;
+        }
+
+        return {
+          ...base,
+          customerId,
+          phoneNumber,
+          countryCode,
+          level: raw.level,
+          campaignResourceName,
+          adGroupResourceName,
+          callTracked: raw.call_tracked ?? true,
+          context: { ...base.context, level: raw.level },
+        };
+      }
+
       default:
         throw new HttpException(
           `Job de mutate nao suportado: ${jobName}`,
           HttpStatus.BAD_REQUEST,
         );
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 1 backlog (2026-05-17) — helpers
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Resolve ConversionAction por UUID interno OR google_conversion_id.
+   */
+  private async requireConversionAction(tenantId: string, idOrGoogleId: string) {
+    const ca = await this.prisma.trafficConversionAction.findFirst({
+      where: {
+        tenant_id: tenantId,
+        OR: [
+          { id: idOrGoogleId },
+          { google_conversion_id: idOrGoogleId },
+        ],
+      },
+    });
+    if (!ca) {
+      throw new NotFoundException(
+        `ConversionAction nao encontrada (id="${idOrGoogleId}")`,
+      );
+    }
+    return ca;
+  }
+
+  /**
+   * Resolve Ad por UUID interno OR google_ad_id. Inclui ad_group pra
+   * formar o resource_name composto (customers/X/adGroupAds/AG~AD).
+   */
+  private async requireAd(tenantId: string, idOrGoogleId: string) {
+    const ad = await this.prisma.trafficAd.findFirst({
+      where: {
+        tenant_id: tenantId,
+        OR: [{ id: idOrGoogleId }, { google_ad_id: idOrGoogleId }],
+      },
+      include: { ad_group: true },
+    });
+    if (!ad) {
+      throw new NotFoundException(
+        `Ad nao encontrado (id="${idOrGoogleId}")`,
+      );
+    }
+    return ad;
+  }
+
+  /**
+   * Liga toggle local de upload de Enhanced Conversions for Leads via API
+   * (cron BullMQ diario sobe userIdentifiers de leads recentes).
+   */
+  async setEnhancedConvUploadEnabled(
+    tenantId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    await this.prisma.trafficSettings.upsert({
+      where: { tenant_id: tenantId },
+      update: { enhanced_conv_for_leads_upload_enabled: enabled },
+      create: {
+        tenant_id: tenantId,
+        enhanced_conv_for_leads_upload_enabled: enabled,
+      },
+    });
   }
 
   /**

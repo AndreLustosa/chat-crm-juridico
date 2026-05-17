@@ -230,6 +230,450 @@ export class UpdateBudgetDto {
   reason?: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 1 do backlog (2026-05-17) — Conversion Actions, Ad Groups, RSAs
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cria uma ConversionAction nova no Google Ads. Categoria + tipo definem o
+ * comportamento (webpage tracking, click-to-call, phone call, etc).
+ *
+ * `category` define a "semantica" da conversao (SUBMIT_LEAD_FORM, CONTACT, etc)
+ * — afeta como Google agrupa relatorios e quais bidding strategies aceitam.
+ * `type` define o mecanismo tecnico de coleta (WEBPAGE, PHONE_CALL_LEADS, etc).
+ *
+ * `include_in_conversions` (default true): entra no Smart Bidding. False =
+ * secundaria (so visualizacao em relatorios).
+ *
+ * `default_value_brl`: valor monetario default por evento (usado em OCI sem
+ * value e em bidding TARGET_ROAS / MAXIMIZE_CONVERSION_VALUE).
+ *
+ * `phone_call_duration_seconds`: se type=PHONE_CALL_LEADS, conta conversao
+ * so se ligacao durar >= X segundos.
+ */
+export class CreateConversionActionDto {
+  @IsString()
+  name!: string;
+
+  @IsString()
+  @IsIn([
+    'SUBMIT_LEAD_FORM',
+    'CONTACT',
+    'PHONE_CALL_LEAD',
+    'SIGNUP',
+    'DOWNLOAD',
+    'PAGE_VIEW',
+    'PURCHASE',
+    'ADD_TO_CART',
+    'BEGIN_CHECKOUT',
+    'BOOK_APPOINTMENT',
+    'REQUEST_QUOTE',
+    'GET_DIRECTIONS',
+    'OUTBOUND_CLICK',
+    'ENGAGEMENT',
+    'STORE_VISIT',
+    'STORE_SALE',
+    'QUALIFIED_LEAD',
+    'CONVERTED_LEAD',
+    'OTHER',
+  ])
+  category!: string;
+
+  @IsString()
+  @IsIn([
+    'WEBPAGE',
+    'AD_CALL',
+    'CLICK_TO_CALL',
+    'WEBSITE_CALL',
+    'UPLOAD_CALLS',
+    'UPLOAD_CLICKS',
+    'APP_INSTALL',
+    'IMPORT',
+    'GOOGLE_HOSTED',
+  ])
+  type!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  include_in_conversions?: boolean;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  default_value_brl?: number;
+
+  @IsString()
+  @IsIn(['ONE_PER_CLICK', 'MANY_PER_CLICK'])
+  @IsOptional()
+  counting_type?: 'ONE_PER_CLICK' | 'MANY_PER_CLICK';
+
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  @IsOptional()
+  click_through_lookback_days?: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  @IsOptional()
+  view_through_lookback_days?: number;
+
+  /** So PHONE_CALL_LEAD type: duracao minima da ligacao pra contar conversao. */
+  @IsInt()
+  @Min(0)
+  @Max(3600)
+  @IsOptional()
+  phone_call_duration_seconds?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Atualiza ConversionAction existente. Apenas campos enviados sao alterados
+ * (mask auto-derivado do payload). Mudanca de `include_in_conversions` em
+ * acao com >=50 conv/30d ou de `default_value_brl` em ROAS-using campaigns
+ * exige confirm=true (reset de aprendizado).
+ */
+export class UpdateConversionActionDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  include_in_conversions?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  primary_for_goal?: boolean;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  default_value_brl?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  always_use_default_value?: boolean;
+
+  @IsString()
+  @IsIn([
+    'LAST_CLICK',
+    'DATA_DRIVEN',
+    'FIRST_CLICK',
+    'LINEAR',
+    'TIME_DECAY',
+    'POSITION_BASED',
+  ])
+  @IsOptional()
+  attribution_model?: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  @IsOptional()
+  click_through_lookback_days?: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  @IsOptional()
+  view_through_lookback_days?: number;
+
+  @IsString()
+  @IsIn(['ONE_PER_CLICK', 'MANY_PER_CLICK'])
+  @IsOptional()
+  counting_type?: 'ONE_PER_CLICK' | 'MANY_PER_CLICK';
+
+  @IsString()
+  @IsIn(['ENABLED', 'HIDDEN'])
+  @IsOptional()
+  status?: 'ENABLED' | 'HIDDEN';
+
+  @IsBoolean()
+  @IsOptional()
+  confirm?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Remove (soft-delete) uma ConversionAction. Status=REMOVED. Bloqueia
+ * remocao de acao em uso por bidding strategy ativa sem force_if_used=true.
+ */
+export class RemoveConversionActionDto {
+  @IsBoolean()
+  confirm!: boolean;
+
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  force_if_used?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Habilita Enhanced Conversions for Leads na conta.
+ *
+ * Modo GOOGLE_TAG: flag binaria no customer.conversion_tracking_setting.
+ * Google passa a usar dados de userIdentifiers vindos do gtag/GTM no browser.
+ *
+ * Modo API: alem da flag, liga cron BullMQ daily que sobe userIdentifiers
+ * (email/phone hashed SHA-256) de leads recentes via UploadClickConversions
+ * mesmo sem gclid. Cobre cookieless world.
+ */
+export class EnableEnhancedConversionsDto {
+  @IsString()
+  @IsIn(['GOOGLE_TAG', 'API', 'BOTH'])
+  mode!: 'GOOGLE_TAG' | 'API' | 'BOTH';
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  user_data_fields?: Array<'email' | 'phone' | 'address'>;
+
+  @IsBoolean()
+  confirm!: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Cria AdGroup novo dentro de uma campanha existente.
+ *
+ * `cpc_bid_brl` aplica-se quando campanha usa MANUAL_CPC. Em Smart Bidding,
+ * usado como bid ceiling/floor opcional.
+ *
+ * `target_cpa_brl` / `target_roas` aplicam override no nivel ad_group quando
+ * campanha esta em TARGET_CPA / TARGET_ROAS (raro mas Google permite).
+ */
+export class CreateAdGroupDto {
+  @IsString()
+  name!: string;
+
+  @IsString()
+  @IsIn(['SEARCH_STANDARD', 'SEARCH_DYNAMIC_ADS', 'DISPLAY_STANDARD'])
+  @IsOptional()
+  type?: 'SEARCH_STANDARD' | 'SEARCH_DYNAMIC_ADS' | 'DISPLAY_STANDARD';
+
+  @IsString()
+  @IsIn(['ENABLED', 'PAUSED'])
+  @IsOptional()
+  status?: 'ENABLED' | 'PAUSED';
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  cpc_bid_brl?: number;
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  target_cpa_brl?: number;
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  target_roas?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  confirm?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Atualiza AdGroup existente. Apenas campos enviados sao alterados.
+ *
+ * `rotation`: OPTIMIZE = Google decide qual ad mostrar mais (default e
+ * recomendado). ROTATE_FOREVER = rotacao igual entre ads (perde optimizacao,
+ * usar so em A/B test).
+ */
+export class UpdateAdGroupDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsIn(['ENABLED', 'PAUSED'])
+  @IsOptional()
+  status?: 'ENABLED' | 'PAUSED';
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  cpc_bid_brl?: number;
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  target_cpa_brl?: number;
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  target_roas?: number;
+
+  @IsString()
+  @IsIn(['OPTIMIZE', 'ROTATE_FOREVER'])
+  @IsOptional()
+  rotation?: 'OPTIMIZE' | 'ROTATE_FOREVER';
+
+  @IsBoolean()
+  @IsOptional()
+  confirm?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Atualiza um RSA existente. Google Ads NAO suporta UPDATE em ads — eh
+ * imutavel. Implementacao usa pattern "substituir": cria novo RSA com mesmo
+ * ad_group + remove o antigo (status=REMOVED). Operacao atomica do ponto de
+ * vista do CRM (mutate_log unico cobre os 2 passos).
+ *
+ * Mesmas validacoes OAB de create_rsa rodam automaticas.
+ * `confirm=true` exigido se ad tem >=100 impressoes nos ultimos 7d (mudanca
+ * reseta aprendizado do anuncio).
+ */
+export class UpdateRsaDto {
+  /** Final URL — landing page do novo ad. Required (mesmo q copie). */
+  @IsString()
+  final_url!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  headlines!: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  descriptions!: string[];
+
+  @IsString()
+  @IsOptional()
+  path1?: string;
+
+  @IsString()
+  @IsOptional()
+  path2?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  confirm?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Remove (soft-delete) um ad individual.
+ */
+export class RemoveAdDto {
+  @IsBoolean()
+  confirm!: boolean;
+
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Cria Call Asset (substituto do CallAd que foi removido em v23) e anexa
+ * a uma campanha ou ad_group ou a toda a conta.
+ *
+ * Phone vem do TrafficSettings.business_phone_e164 se nao explicito.
+ * Business name vem do TrafficSettings.business_name se nao explicito.
+ *
+ * `call_tracked=true`: Google injeta call tracking number visivel em vez
+ * do numero real, e reporta calls como conversoes (se mapeado).
+ */
+export class AttachCallAssetDto {
+  @IsString()
+  @IsIn(['ACCOUNT', 'CAMPAIGN', 'AD_GROUP'])
+  level!: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+
+  @IsString()
+  @IsOptional()
+  campaign_id?: string;
+
+  @IsString()
+  @IsOptional()
+  ad_group_id?: string;
+
+  /** E.164: +5582999999999. Default: TrafficSettings.business_phone_e164. */
+  @IsString()
+  @IsOptional()
+  phone_number?: string;
+
+  /** ISO 3166 alpha-2. Default: "BR". */
+  @IsString()
+  @IsOptional()
+  country_code?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  call_tracked?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  confirm?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
 /**
  * Remove (soft-delete) uma campanha. Soft-delete via status=REMOVED.
  *

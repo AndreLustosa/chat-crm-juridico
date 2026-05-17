@@ -23,6 +23,10 @@ export type MutateResourceType =
   | 'ad_group_criterion'
   | 'campaign_criterion'
   | 'conversion_action'
+  | 'customer'
+  | 'customer_asset'
+  | 'campaign_asset'
+  | 'ad_group_asset'
   | 'customer_match_user_list'
   | 'asset'
   | 'remarketing_action';
@@ -340,6 +344,10 @@ export class GoogleAdsMutateService {
       ad_group_criterion: 'adGroupCriteria',
       campaign_criterion: 'campaignCriteria',
       conversion_action: 'conversionActions',
+      customer: 'customers',
+      customer_asset: 'customerAssets',
+      campaign_asset: 'campaignAssets',
+      ad_group_asset: 'adGroupAssets',
       customer_match_user_list: 'userLists',
       asset: 'assets',
       remarketing_action: 'remarketingActions',

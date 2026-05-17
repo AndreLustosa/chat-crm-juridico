@@ -2745,6 +2745,18 @@ model TrafficSettings {
   /// Stage default do Lead criado a partir de Lead Form. Ex: "INTERESSADO".
   lead_form_default_stage    String  @default("INTERESSADO")
 
+  // ─── Sprint 1 backlog gestor (2026-05-17): Call Asset defaults +
+  //     Enhanced Conversions for Leads upload toggle ─────────────────────
+  /// Telefone default em E.164 (+5582...) pra Call Asset criado via MCP.
+  /// Gestor pode override por chamada — tool aceita phone_number explicito.
+  business_phone_e164                    String?
+  /// Nome do negocio (max 25 chars) pra Call Asset / Call Ad context.
+  business_name                          String?
+  /// Liga cron BullMQ daily que sobe userIdentifiers (email/phone hashed) de
+  /// leads recentes via UploadClickConversions. Necessario pra Enhanced
+  /// Conversions for Leads funcionar quando gclid esta ausente (cookieless).
+  enhanced_conv_for_leads_upload_enabled Boolean @default(false)
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
