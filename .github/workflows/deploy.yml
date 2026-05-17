@@ -7,7 +7,50 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Pega desalinhamentos cedo: tipos do @crm/shared desatualizados em dist/,
+  # imports quebrados apos cleanups, drift entre src/.ts e dist/.d.ts dos
+  # workspaces. Sem isso, problemas como o do tenant_id em ShareTokenPayload
+  # (achado em 2026-05-17) viajam pra prod silenciosamente — runtime nao
+  # quebra porque dist/*.js esta OK, so o typecheck falha.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # npm install roda o `prepare` script do @crm/shared (prisma generate + tsc),
+      # garantindo que packages/shared/dist/ esteja em sync com src/ antes
+      # dos typechecks abaixo.
+      - name: Install dependencies (gera dist/ do @crm/shared via prepare)
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck @crm/shared
+        run: npx tsc --noEmit -p packages/shared
+
+      - name: Typecheck apps/api
+        run: npx tsc --noEmit -p apps/api
+
+      - name: Typecheck apps/worker
+        run: npx tsc --noEmit -p apps/worker
+
+      - name: Typecheck apps/web
+        run: npx tsc --noEmit -p apps/web
+
+      - name: Typecheck + tests traffic-mcp-server
+        working-directory: traffic-mcp-server
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+          npm test
+
   build-and-push:
+    needs: typecheck
     runs-on: ubuntu-latest
     strategy:
       matrix:
