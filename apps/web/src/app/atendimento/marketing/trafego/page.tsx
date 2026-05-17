@@ -6,18 +6,11 @@ import {
   TrendingUp,
   LayoutDashboard,
   Megaphone,
-  Users,
   FileText,
   Bell,
   Settings as SettingsIcon,
   Loader2,
   RefreshCw,
-  Target,
-  Lightbulb,
-  Tv,
-  MessageSquare,
-  Globe,
-  Swords,
   Activity,
 } from "lucide-react";
 import api from "@/lib/api";
@@ -30,23 +23,11 @@ import { CampanhasTab } from "./components/CampanhasTab";
 import { AlertasTab } from "./components/AlertasTab";
 import { AtividadesTab } from "./components/AtividadesTab";
 import { ConfiguracoesTab } from "./components/ConfiguracoesTab";
-import { PlaceholderTab } from "./components/PlaceholderTab";
 import { RelatoriosTab } from "./components/RelatoriosTab";
-import { ConversoesTab } from "./components/ConversoesTab";
-import { RecomendacoesTab } from "./components/RecomendacoesTab";
-import { BrandingTab } from "./components/BrandingTab";
-import { LandingPagesTab } from "./components/LandingPagesTab";
-import { AuctionInsightsTab } from "./components/AuctionInsightsTab";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "campanhas", label: "Campanhas", icon: Megaphone },
-  { id: "leilao", label: "Leilão", icon: Swords },
-  { id: "conversoes", label: "Conversões", icon: Target },
-  { id: "recomendacoes", label: "Recomendações", icon: Lightbulb },
-  { id: "branding", label: "Branding (PMax/Reach)", icon: Tv },
-  { id: "landing-pages", label: "Landing Pages", icon: Globe },
-  { id: "leads", label: "Leads", icon: Users },
   { id: "relatorios", label: "Relatórios", icon: FileText },
   { id: "alertas", label: "Alertas", icon: Bell },
   { id: "atividades", label: "Atividades", icon: Activity },
@@ -302,27 +283,6 @@ function TrafegoPageInner() {
         {tab === "dashboard" && account?.connected && <DashboardTab />}
         {tab === "campanhas" && account?.connected && (
           <CampanhasTab canManage={perms.canManageTrafego} />
-        )}
-        {tab === "leilao" && account?.connected && <AuctionInsightsTab />}
-        {tab === "conversoes" && account?.connected && (
-          <ConversoesTab canManage={perms.canManageTrafego} />
-        )}
-        {tab === "recomendacoes" && account?.connected && (
-          <RecomendacoesTab canManage={perms.canManageTrafego} />
-        )}
-        {tab === "branding" && account?.connected && (
-          <BrandingTab canManage={perms.canManageTrafego} />
-        )}
-        {tab === "landing-pages" && account?.connected && (
-          <LandingPagesTab canManage={perms.canManageTrafego} />
-        )}
-        {tab === "leads" && account?.connected && (
-          <PlaceholderTab
-            icon={Users}
-            title="Leads atribuídos a campanhas"
-            description="Em breve: cada lead vindo do Google Ads (UTM/gclid) aparecerá aqui vinculado à campanha originária, com funil até venda."
-            phase="Fase 3"
-          />
         )}
         {tab === "relatorios" && account?.connected && (
           <RelatoriosTab canManage={perms.canManageTrafego} />
