@@ -755,38 +755,36 @@ export class TrafegoMutateProcessor extends WorkerHost {
    * NÃO popula bidding_strategy_resource_name (estratégia portfolio
    * compartilhada): apenas a versão "standard" embutida na campanha.
    *
-   * Fix 2026-05-17 — TENTATIVA 6:
-   * Ver `feedback_google_ads_sdk_fieldmask.md` pra cadeia completa das 5
+   * Fix 2026-05-17 — TENTATIVA 7:
+   * Ver `feedback_google_ads_sdk_fieldmask.md` pra cadeia completa das 6
    * tentativas anteriores que falharam em prod com sintomas distintos.
    *
-   * Hipotese desta tentativa (proposta empirica do gestor da VPS apos H1 falhar):
-   *   - mask deve ser EXATAMENTE `["bidding_strategy_type"]` (e nada mais).
-   *   - body deve conter:
-   *     - resource_name
-   *     - o oneof message vazio (`maximize_conversions: {}`)
-   *     - `bidding_strategy_type` enum value (10 pra MAXIMIZE_CONVERSIONS, etc)
+   * Tentativa 6 (0c2ed08) com mask=["bidding_strategy_type"] retornou
+   * `INVALID_ARGUMENT: Request contains an invalid argument.` sem
+   * partial_failure_error — erro request-level. O bypass agora decoda
+   * o GoogleAdsFailure trailer pra obter o detalhe estruturado (ver
+   * `decodeGoogleAdsFailureFromMetadata` em google-ads-client.service.ts).
    *
-   * Logica: `bidding_strategy_type` no mask sinaliza ao Google "vou trocar
-   * a escolha do oneof". O `bidding_strategy_type: 10` no body diz qual eh
-   * a nova escolha. O `maximize_conversions: {}` no body fornece o oneof
-   * "vazio" pra ser selecionado. Sem subfield em lugar nenhum pra estrategias
-   * que nao exigem valor.
+   * Hipotese desta tentativa (workaround documentado em
+   * googleads/google-ads-java#344): mask deve conter AMBOS
+   *   - `bidding_strategy_type`           (signal de "trocar oneof")
+   *   - `<oneof>.<subfield>`              (qual subfield popular)
    *
-   * Pra TARGET_CPA / TARGET_ROAS: subfield valor obrigatorio vai no body
-   * dentro do oneof, mas o mask continua sendo APENAS `["bidding_strategy_type"]`
-   * — Google le o valor do body via o oneof selected.
+   * Body deve conter:
+   *   - resource_name
+   *   - bidding_strategy_type enum
+   *   - oneof message com o subfield populado (mesmo que default 0)
    *
-   * NB: meu commit 29a722c tinha exatamente esse padrao mas nunca foi
-   * validado empiricamente (entrou no contexto summarized sem teste). Esta
-   * eh a primeira vez que esse padrao especifico vai ser exercitado em prod.
+   * Esse eh o padrao confirmado funcionar em Java pra MANUAL_CPC com
+   * enhanced_cpc_enabled=false (issue #344). Por simetria estrutural,
+   * deveria funcionar pras outras estrategias com oneof "vazio".
    */
   private async updateBiddingStrategy(
     p: UpdateBiddingStrategyPayload,
   ): Promise<MutateResult> {
     const op: any = { resource_name: p.campaignResourceName };
 
-    // (1) bidding_strategy_type enum vai NO BODY — sinaliza qual oneof
-    //     selecionar. Mask vai apontar pra esse field (proxima etapa).
+    // (1) Enum de bidding_strategy_type no body
     const enumMap: Record<string, number> = {
       MAXIMIZE_CONVERSIONS: enums.BiddingStrategyType.MAXIMIZE_CONVERSIONS,
       MAXIMIZE_CONVERSION_VALUE: enums.BiddingStrategyType.MAXIMIZE_CONVERSION_VALUE,
@@ -801,12 +799,18 @@ export class TrafegoMutateProcessor extends WorkerHost {
     }
     op.bidding_strategy_type = enumValue;
 
-    // (2) Popula oneof message no body. Vazio pras estrategias sem valor
-    //     obrigatorio; com valor pras TARGET_*.
+    // (2) Popula oneof message com subfield (mesmo que 0 default).
+    // (3) Define o subfield path que vai no mask junto com bidding_strategy_type.
+    let oneofSubfieldPath: string;
+
     if (p.biddingStrategy === 'MAXIMIZE_CONVERSIONS') {
-      op.maximize_conversions = {};
+      // target_cpa_micros opcional (0 = sem CPA alvo)
+      op.maximize_conversions = { target_cpa_micros: 0n };
+      oneofSubfieldPath = 'maximize_conversions.target_cpa_micros';
     } else if (p.biddingStrategy === 'MAXIMIZE_CONVERSION_VALUE') {
-      op.maximize_conversion_value = {};
+      // target_roas opcional (0 = sem ROAS alvo)
+      op.maximize_conversion_value = { target_roas: 0 };
+      oneofSubfieldPath = 'maximize_conversion_value.target_roas';
     } else if (p.biddingStrategy === 'TARGET_CPA') {
       if (!p.targetCpaMicros) {
         throw new Error('TARGET_CPA exige targetCpaMicros');
@@ -817,20 +821,25 @@ export class TrafegoMutateProcessor extends WorkerHost {
             ? BigInt(p.targetCpaMicros)
             : p.targetCpaMicros,
       };
+      oneofSubfieldPath = 'target_cpa.target_cpa_micros';
     } else if (p.biddingStrategy === 'TARGET_ROAS') {
       if (!p.targetRoas) {
         throw new Error('TARGET_ROAS exige targetRoas');
       }
       op.target_roas = { target_roas: p.targetRoas };
+      oneofSubfieldPath = 'target_roas.target_roas';
     } else if (p.biddingStrategy === 'MAXIMIZE_CLICKS') {
       // MaximizeClicks = TargetSpend protobuf (legado de nome).
-      op.target_spend = {};
-    } else if (p.biddingStrategy === 'MANUAL_CPC') {
-      op.manual_cpc = {};
+      op.target_spend = { cpc_bid_ceiling_micros: 0n };
+      oneofSubfieldPath = 'target_spend.cpc_bid_ceiling_micros';
+    } else {
+      // MANUAL_CPC — enhanced_cpc_enabled vai no body como false (default).
+      // Mesmo bug do issue #344, mesma solucao: mask precisa do subfield.
+      op.manual_cpc = { enhanced_cpc_enabled: false };
+      oneofSubfieldPath = 'manual_cpc.enhanced_cpc_enabled';
     }
 
-    // (3) Mask = ["bidding_strategy_type"] SEMPRE. Google le o resto do
-    //     body via o oneof selected pelo enum.
+    // (4) Mask = [bidding_strategy_type, oneof.subfield] — workaround java#344
     const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
@@ -839,7 +848,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
-      updateMask: ['bidding_strategy_type'],
+      updateMask: ['bidding_strategy_type', oneofSubfieldPath],
       context: {
         ...p.context,
         new_bidding_strategy: p.biddingStrategy,

@@ -153,9 +153,15 @@ export class GoogleAdsClientService {
     return new Promise((resolve, reject) => {
       svc.mutate(request, (err: any, response: any) => {
         if (err) {
-          const formatted = this.formatError(err);
+          // Erros request-level (INVALID_ARGUMENT, FAILED_PRECONDITION) vem como
+          // Error gRPC nativo SEM partial_failure_error. O detalhe estruturado
+          // (field_mask_error, mutate_error, etc) fica num trailer binario.
+          // Internamente o SDK chama `getGoogleAdsError(err)` mas via gRPC
+          // bypass nao passamos por ele — temos que decodificar a mao.
+          // Padrao copiado de google-ads-api/build/src/service.js#100.
+          const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
           this.logger.warn(
-            `[mutate-grpc] FAILED kind=${formatted.kind} ${formatted.message}`,
+            `[mutate-grpc] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
           );
           return reject(err);
         }
@@ -174,6 +180,56 @@ export class GoogleAdsClientService {
         });
       });
     });
+  }
+
+  /**
+   * Extrai GoogleAdsFailure detalhada do metadata trailer de um erro gRPC.
+   *
+   * Por que existe (achado em 2026-05-17): erros request-level (ex.
+   * INVALID_ARGUMENT em mutate de bidding strategy) vem como `Error` gRPC
+   * nativo, NAO como GoogleAdsFailure tipado. O detalhe estruturado
+   * (field_mask_error.FIELD_HAS_SUBFIELDS, mutate_error, etc) fica num
+   * trailer binario `google.ads.googleads.v23.errors.googleadsfailure-bin`.
+   *
+   * O metodo de alto nivel do SDK (`customer.campaigns.update`) ja faz isso
+   * via `Service.getGoogleAdsError(err)`. Mas o bypass via
+   * `loadService('GoogleAdsServiceClient').mutate()` pula essa camada —
+   * precisamos decodificar a mao.
+   *
+   * Padrao copiado de `google-ads-api/build/src/service.js#100-111`.
+   */
+  private decodeGoogleAdsFailureFromMetadata(err: any): any {
+    if (!err?.metadata) {
+      return { reason: 'no_metadata' };
+    }
+    try {
+      const FAILURE_KEY = 'google.ads.googleads.v23.errors.googleadsfailure-bin';
+      // gRPC Metadata expoe `internalRepr` (Map<string, Buffer[]>) e tambem
+      // `get(key)`. SDK usa internalRepr direto; tentamos os dois pra
+      // robustez.
+      const internalRepr = err.metadata.internalRepr;
+      let buffers: any[] | undefined;
+      if (internalRepr && typeof internalRepr.get === 'function') {
+        buffers = internalRepr.get(FAILURE_KEY);
+      }
+      if (!buffers && typeof err.metadata.get === 'function') {
+        buffers = err.metadata.get(FAILURE_KEY);
+      }
+      if (!buffers || buffers.length === 0) {
+        // Lista chaves disponiveis pra debug
+        const availableKeys: string[] = [];
+        if (internalRepr && typeof internalRepr.keys === 'function') {
+          for (const k of internalRepr.keys()) availableKeys.push(k);
+        }
+        return { reason: 'no_failure_trailer', available_keys: availableKeys };
+      }
+      const buffer = buffers[0];
+      const failure = (errors as any).GoogleAdsFailure.decode(buffer);
+      // toJSON() devolve representacao serializavel (sem BigInt issues)
+      return failure?.toJSON?.() ?? failure;
+    } catch (e: any) {
+      return { reason: 'decode_error', error: e.message };
+    }
   }
 
   /**
