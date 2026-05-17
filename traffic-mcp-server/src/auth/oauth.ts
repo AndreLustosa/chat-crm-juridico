@@ -519,15 +519,48 @@ export async function authorizeHandler(req: Request, res: Response) {
   }
 
   if (req.method === 'GET') {
-    return res.redirect(302, issueAuthorizationRedirect(client, redirectUri, input, state));
+    // SECURITY: o GET aqui ANTES autorizava direto, sem prova de identidade
+    // humana. Combinado com DCR aberto (/oauth/register sem auth) e
+    // token_endpoint_auth_method='none' aceito, qualquer ator que descobrisse
+    // a URL publica do MCP podia conectar e usar as 29 tools — inclusive
+    // mutates (pause_campaign, update_budget, create_search_campaign).
+    //
+    // Fix (achado durante onboarding ao Claude.ai em 2026-05-16): SEMPRE
+    // renderizar o form HTML que exige o token MCP do CRM via POST.
+    // O ChatGPT e qualquer outro cliente OAuth segue o flow: GET abre form
+    // no browser do user, user cola token (gerado em Configuracoes>Integracao
+    // MCP do CRM), POST valida e so entao emite o authorization code.
+    //
+    // Single-use authorization codes + PKCE continuam protegendo contra
+    // replay; o que faltava era prova humana — agora exigida em todo GET.
+    logger.info('oauth_authorize_rendered_form', {
+      client_id: client.client_id,
+      origin: req.headers.origin,
+    });
+    const formParams: Record<string, string> = {};
+    for (const [k, v] of Object.entries(input)) {
+      if (typeof v === 'string') formParams[k] = v;
+    }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(renderAuthorizePage(formParams));
   }
 
   const providedToken = typeof input.authorization_token === 'string' ? input.authorization_token : '';
   const tokenIsValid =
     safeEqual(providedToken, config.oauth.authorizationToken) || await verifyCrmMcpToken(providedToken);
   if (!tokenIsValid) {
+    logger.warn('oauth_authorize_rejected', {
+      reason: 'invalid_authorization_token',
+      client_id: client.client_id,
+      had_token: providedToken.length > 0,
+    });
     return res.status(401).send('Token MCP invalido.');
   }
+
+  logger.info('oauth_authorize_consent_granted', {
+    client_id: client.client_id,
+    origin: req.headers.origin,
+  });
 
   return res.redirect(302, issueAuthorizationRedirect(client, redirectUri, input, state));
 }
