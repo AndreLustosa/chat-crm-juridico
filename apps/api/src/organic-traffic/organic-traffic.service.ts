@@ -306,56 +306,7 @@ export class OrganicTrafficService {
 
   async seedDefaultPages(tenantId: string) {
     const base = DEFAULT_SITE_BASE.replace(/\/$/, '');
-    const defaults = [
-      {
-        url: `${base}/`,
-        path: '/',
-        title: 'Home',
-        city: null,
-        state: null,
-        practice_area: 'Institucional',
-        target_keywords: ['advogado em alagoas', 'andre lustosa advogados'],
-      },
-      {
-        url: `${base}/geral/arapiraca`,
-        path: '/geral/arapiraca',
-        title: 'Arapiraca - Geral',
-        city: 'Arapiraca',
-        state: 'AL',
-        practice_area: 'Institucional',
-        target_keywords: ['advogado em arapiraca'],
-      },
-      {
-        url: `${base}/arapiraca/trabalhista`,
-        path: '/arapiraca/trabalhista',
-        title: 'Arapiraca - Trabalhista',
-        city: 'Arapiraca',
-        state: 'AL',
-        practice_area: 'Trabalhista',
-        target_keywords: ['advogado trabalhista arapiraca'],
-      },
-      {
-        url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
-        path: '/arapiraca/trabalhista/sem-carteira-assinada',
-        title: 'Arapiraca - Sem Carteira Assinada',
-        city: 'Arapiraca',
-        state: 'AL',
-        practice_area: 'Trabalhista',
-        target_keywords: ['trabalhei sem carteira assinada arapiraca'],
-      },
-      {
-        url: `${base}/arapiraca/criminal`,
-        path: '/arapiraca/criminal',
-        title: 'Arapiraca - Criminal',
-        city: 'Arapiraca',
-        state: 'AL',
-        practice_area: 'Criminal',
-        target_keywords: [
-          'advogado criminal arapiraca',
-          'advogado criminalista arapiraca',
-        ],
-      },
-    ];
+    const defaults = this.getDefaultLandingPages(base);
 
     let count = 0;
     for (const item of defaults) {
@@ -389,14 +340,8 @@ export class OrganicTrafficService {
   }
 
   async listPages(tenantId: string) {
-    const count = await this.prisma.organicLandingPage.count({
-      where: { tenant_id: tenantId },
-    });
-    if (count === 0) {
-      await this.seedDefaultPages(tenantId);
-    } else {
-      await this.refreshCachedMetrics(tenantId);
-    }
+    await this.ensureDefaultPages(tenantId);
+    await this.refreshCachedMetrics(tenantId);
 
     return this.prisma.organicLandingPage.findMany({
       where: { tenant_id: tenantId },
@@ -1366,5 +1311,112 @@ export class OrganicTrafficService {
 
   private formatDate(value: Date): string {
     return value.toISOString().slice(0, 10);
+  }
+
+  private getDefaultLandingPages(base: string) {
+    return [
+      {
+        url: `${base}/`,
+        path: '/',
+        title: 'Home',
+        city: null,
+        state: null,
+        practice_area: 'Institucional',
+        target_keywords: ['advogado em alagoas', 'andre lustosa advogados'],
+      },
+      {
+        url: `${base}/geral/arapiraca`,
+        path: '/geral/arapiraca',
+        title: 'Arapiraca - Geral',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Institucional',
+        target_keywords: ['advogado em arapiraca'],
+      },
+      {
+        url: `${base}/arapiraca/trabalhista`,
+        path: '/arapiraca/trabalhista',
+        title: 'Arapiraca - Trabalhista',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: ['advogado trabalhista arapiraca'],
+      },
+      {
+        url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
+        path: '/arapiraca/trabalhista/sem-carteira-assinada',
+        title: 'Arapiraca - Sem Carteira Assinada',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: ['trabalhei sem carteira assinada arapiraca'],
+      },
+      {
+        url: `${base}/arapiraca/criminal`,
+        path: '/arapiraca/criminal',
+        title: 'Arapiraca - Criminal',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Criminal',
+        target_keywords: [
+          'advogado criminal arapiraca',
+          'advogado criminalista arapiraca',
+        ],
+      },
+      {
+        url: `${base}/arapiraca/criminal/medidas-protetivas`,
+        path: '/arapiraca/criminal/medidas-protetivas',
+        title: 'Arapiraca - Medidas Protetivas',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Criminal',
+        target_keywords: [
+          'medidas protetivas arapiraca',
+          'medida protetiva arapiraca',
+          'lei maria da penha arapiraca',
+          'advogado violencia domestica arapiraca',
+        ],
+      },
+      {
+        url: `${base}/arapiraca/criminal/defesa-homem-lei-maria-da-penha`,
+        path: '/arapiraca/criminal/defesa-homem-lei-maria-da-penha',
+        title: 'Arapiraca - Defesa na Maria da Penha',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Criminal',
+        target_keywords: [
+          'defesa homem lei maria da penha arapiraca',
+          'advogado defesa lei maria da penha arapiraca',
+          'homem acusado lei maria da penha arapiraca',
+          'defesa em medida protetiva arapiraca',
+        ],
+      },
+    ];
+  }
+
+  private async ensureDefaultPages(tenantId: string) {
+    const base = DEFAULT_SITE_BASE.replace(/\/$/, '');
+    const sitemapUrl = `${base}/sitemap.xml`;
+    const defaults = this.getDefaultLandingPages(base);
+    const existing = await this.prisma.organicLandingPage.findMany({
+      where: {
+        tenant_id: tenantId,
+        url: { in: defaults.map((item) => item.url) },
+      },
+      select: { url: true },
+    });
+    const existingUrls = new Set(existing.map((item) => item.url));
+    const missing = defaults.filter((item) => !existingUrls.has(item.url));
+
+    if (missing.length === 0) return;
+
+    await this.prisma.organicLandingPage.createMany({
+      data: missing.map((item) => ({
+        tenant_id: tenantId,
+        sitemap_url: sitemapUrl,
+        ...item,
+      })),
+      skipDuplicates: true,
+    });
   }
 }
