@@ -289,6 +289,17 @@ function TrafegoPageInner() {
         </div>
       )}
 
+      {/* Banner persistente quando conta esta connected mas com erro
+          (ex: refresh_token revogado). Mostra em QUALQUER tab pra que
+          admin nao precise caçar o caminho de reconectar — clicar no
+          botao abre o fluxo OAuth do Google direto. */}
+      {account?.connected && account.account?.last_error && (
+        <ReconnectBanner
+          lastError={account.account.last_error}
+          canManage={perms.canManageTrafego}
+        />
+      )}
+
       {/* Tab content — Configuracoes sempre acessivel pra preencher credenciais */}
       <div>
         {tab === "dashboard" && account?.connected && <DashboardTab />}
@@ -415,6 +426,77 @@ function Header({
               <RefreshCw size={15} />
             )}
             Sincronizar agora
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Banner persistente que aparece em QUALQUER tab quando a conta Google
+ * Ads esta connected mas com last_error setado (tipico: refresh_token
+ * revogado/expirado). Sem isso, admin ficava sem caminho UI claro pra
+ * reconectar — precisava ir em Configuracoes > Conexao ou usar Console
+ * do DevTools.
+ *
+ * Achado durante onboarding ao Claude.ai em 2026-05-16: user reportou
+ * "nao apareceu o botao" depois que tentei mostrar so em /configuracoes.
+ */
+function ReconnectBanner({
+  lastError,
+  canManage,
+}: {
+  lastError: string;
+  canManage: boolean;
+}) {
+  const [redirecting, setRedirecting] = useState(false);
+
+  async function reconnect() {
+    if (!canManage || redirecting) return;
+    setRedirecting(true);
+    try {
+      const { data } = await api.get<{ authorize_url: string }>(
+        "/trafego/oauth/start",
+      );
+      window.location.href = data.authorize_url;
+    } catch (err: any) {
+      showError(
+        err?.response?.data?.message ?? "Falha ao iniciar OAuth do Google.",
+      );
+      setRedirecting(false);
+    }
+  }
+
+  return (
+    <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+      <div className="flex items-start gap-3 flex-wrap">
+        <Bell size={18} className="text-red-500 mt-0.5 shrink-0" />
+        <div className="flex-1 min-w-[260px]">
+          <h3 className="text-sm font-bold text-red-700 dark:text-red-400 mb-1">
+            Conexão Google Ads com problema
+          </h3>
+          <p className="text-xs text-red-700/90 dark:text-red-400/90 mb-2">
+            {lastError}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Sem reconectar, novos sincronismos vão falhar e os dados ficarão
+            congelados.
+          </p>
+        </div>
+        {canManage && (
+          <button
+            type="button"
+            onClick={reconnect}
+            disabled={redirecting}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-60"
+          >
+            {redirecting ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+            {redirecting ? "Redirecionando..." : "Reconectar via OAuth"}
           </button>
         )}
       </div>
