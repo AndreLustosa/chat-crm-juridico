@@ -584,6 +584,187 @@ function registerCampaignMutateTools(server: McpServer) {
   );
 
   server.registerTool(
+    'traffic_remove_campaign',
+    {
+      description:
+        'Remove (soft-delete) uma campanha no Google Ads. Operacao irreversivel pela UI normal — ' +
+        'a campanha sai das listagens default mas continua no historico (acessivel via include_archived=true). ' +
+        'Remove em cascata: ad groups, ads, keywords, extensions vao junto. ' +
+        'EXIGE confirm=true e reason (min 3 chars) sempre. ' +
+        'Bloqueia remocao de campanhas ENABLED sem force_if_enabled=true (salvaguarda — pause primeiro). ' +
+        'Bloqueia remocao de campanhas com historico relevante (>=10 conv lifetime, >=R$500 gastos, ' +
+        'OU ativa nos ultimos 7d) sem confirm_with_history=true. ' +
+        'NAO usa para apenas pausar — use traffic_pause_campaign.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        confirm: z
+          .boolean()
+          .describe('OBRIGATORIO. Sempre exige true. Operacao irreversivel pela UI.'),
+        reason: z
+          .string()
+          .min(3)
+          .describe('OBRIGATORIO. Justificativa da remocao (vai pro audit log permanente, min 3 chars).'),
+        force_if_enabled: z
+          .boolean()
+          .optional()
+          .describe('Required se a campanha esta ENABLED no momento. Caso false (default), tool exige pausar primeiro como salvaguarda.'),
+        confirm_with_history: z
+          .boolean()
+          .optional()
+          .describe('Required quando a campanha tem historico relevante (>=10 conv lifetime, >=R$500 gastos, OU esteve ENABLED nos ultimos 7d).'),
+        validate_only: z
+          .boolean()
+          .optional()
+          .describe('Dry-run: retorna preview do cascade (ad_groups, ads, keywords afetados) sem aplicar.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_remove_campaign', async (toolCallId) => {
+        applyMutateGuards('traffic_remove_campaign');
+
+        const result = await crmTrafficService.post<{
+          ok?: boolean;
+          validate_only?: boolean;
+          message?: string;
+          mutate_log_id?: string;
+          warnings?: string[];
+          preview?: {
+            campaign_name?: string;
+            campaign_id_local?: string;
+            google_campaign_id?: string;
+            current_status?: string;
+            lifetime_conversions?: number;
+            lifetime_spend_brl?: number;
+            enabled_recently?: boolean;
+            cascade?: {
+              ad_groups?: number;
+              ads?: number;
+              keywords?: number;
+              negative_keywords?: number;
+            };
+          };
+        }>(
+          `/trafego/campaigns/${encodeURIComponent(input.campaign_id)}/remove`,
+          {
+            confirm: input.confirm,
+            reason: input.reason,
+            force_if_enabled: input.force_if_enabled,
+            confirm_with_history: input.confirm_with_history,
+            validate_only: input.validate_only,
+          },
+          { toolCallId },
+        );
+
+        const preview = result?.preview ?? {};
+        const cascade = preview.cascade ?? {};
+        const lines: string[] = [];
+        if (input.validate_only) {
+          lines.push(
+            `DRY-RUN: Remocao validada para campanha "${preview.campaign_name ?? input.campaign_id}".`,
+          );
+        } else {
+          lines.push(
+            `Remocao enfileirada para campanha "${preview.campaign_name ?? input.campaign_id}". AVISO: operacao nao pode ser revertida pela UI normal.`,
+          );
+        }
+        lines.push(
+          `Cascade: ${cascade.ad_groups ?? 0} ad_groups, ${cascade.ads ?? 0} ads, ${cascade.keywords ?? 0} keywords positivas, ${cascade.negative_keywords ?? 0} negativas.`,
+        );
+        if (preview.lifetime_conversions != null && preview.lifetime_conversions > 0) {
+          lines.push(
+            `Historico: ${preview.lifetime_conversions.toFixed(1)} conv lifetime, R$ ${(preview.lifetime_spend_brl ?? 0).toFixed(2)} gastos.`,
+          );
+        }
+        if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+          lines.push('Avisos:');
+          for (const w of result.warnings) lines.push(`  - ${w}`);
+        }
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
+    'traffic_remove_ad_group',
+    {
+      description:
+        'Remove (soft-delete) um ad_group no Google Ads. Mesmo padrao de traffic_remove_campaign ' +
+        'mas em sub-recurso. Remove em cascata: ads + keywords (positivas e negativas) do grupo. ' +
+        'EXIGE confirm=true e reason (min 3 chars). Bloqueia se status=ENABLED sem force_if_enabled=true. ' +
+        'BLOQUEIA se for o UNICO ad group ativo da campanha (sem isso a campanha fica orfã, sem onde servir) — ' +
+        'nesse caso considere pausar ou usar traffic_remove_campaign.',
+      inputSchema: {
+        ad_group_id: z
+          .string()
+          .describe('UUID interno do CRM OU google_ad_group_id numerico. Ambos aceitos.'),
+        confirm: z.boolean().describe('OBRIGATORIO. Sempre exige true.'),
+        reason: z.string().min(3).describe('OBRIGATORIO. Min 3 chars.'),
+        force_if_enabled: z
+          .boolean()
+          .optional()
+          .describe('Required se o ad_group esta ENABLED no momento.'),
+        validate_only: z.boolean().optional().describe('Dry-run.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_remove_ad_group', async (toolCallId) => {
+        applyMutateGuards('traffic_remove_ad_group');
+
+        const result = await crmTrafficService.post<{
+          ok?: boolean;
+          validate_only?: boolean;
+          message?: string;
+          mutate_log_id?: string;
+          warnings?: string[];
+          preview?: {
+            ad_group_name?: string;
+            ad_group_id_local?: string;
+            google_ad_group_id?: string;
+            campaign_id_local?: string;
+            current_status?: string;
+            is_only_active?: boolean;
+            cascade?: {
+              ads?: number;
+              keywords?: number;
+              negative_keywords?: number;
+            };
+          };
+        }>(
+          `/trafego/ad-groups/${encodeURIComponent(input.ad_group_id)}/remove`,
+          {
+            confirm: input.confirm,
+            reason: input.reason,
+            force_if_enabled: input.force_if_enabled,
+            validate_only: input.validate_only,
+          },
+          { toolCallId },
+        );
+
+        const preview = result?.preview ?? {};
+        const cascade = preview.cascade ?? {};
+        const lines: string[] = [];
+        if (input.validate_only) {
+          lines.push(
+            `DRY-RUN: Remocao validada para ad_group "${preview.ad_group_name ?? input.ad_group_id}".`,
+          );
+        } else {
+          lines.push(
+            `Remocao enfileirada para ad_group "${preview.ad_group_name ?? input.ad_group_id}".`,
+          );
+        }
+        lines.push(
+          `Cascade: ${cascade.ads ?? 0} ads, ${cascade.keywords ?? 0} keywords positivas, ${cascade.negative_keywords ?? 0} negativas.`,
+        );
+        if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+          lines.push('Avisos:');
+          for (const w of result.warnings) lines.push(`  - ${w}`);
+        }
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
     'traffic_update_campaign_budget',
     {
       description:

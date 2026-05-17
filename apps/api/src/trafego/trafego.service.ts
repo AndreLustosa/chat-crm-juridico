@@ -886,7 +886,8 @@ export class TrafegoService {
         };
       }
       case 'trafego-mutate-pause-ad-group':
-      case 'trafego-mutate-resume-ad-group': {
+      case 'trafego-mutate-resume-ad-group':
+      case 'trafego-mutate-remove-ad-group': {
         const ag = await this.requireAdGroup(tenantId, raw.adGroupId);
         return {
           ...base,
@@ -1328,6 +1329,304 @@ export class TrafegoService {
     if (!nextIsSmart) learningPeriodDays = 0;
 
     return { blockingErrors, warnings, learningPeriodDays };
+  }
+
+  // ─── Remove (campanha + ad_group): validacao + preview ─────────────────
+
+  /**
+   * Valida remocao de campanha ANTES de enfileirar. Calcula preview do
+   * cascade (ad_groups, ads, keywords que vao junto) + metricas lifetime
+   * pra decidir se exige confirm_with_history.
+   *
+   * Retorna { blockingErrors[], warnings[], preview{} } pra controller decidir.
+   *
+   * Regras:
+   *   1. Status REMOVED (noop): bloqueia.
+   *   2. confirm != true: bloqueia (DTO ja faria mas mensagem padrao do
+   *      class-validator nao explica a operacao — repetir aqui pra mensagem clara).
+   *   3. ENABLED sem force_if_enabled: bloqueia (garante que admin pause primeiro).
+   *   4. Historico relevante (>=10 conv lifetime OR >=R$500 gasto historico OR
+   *      esteve ENABLED nos ultimos 7 dias) sem confirm_with_history: bloqueia.
+   */
+  async validateCampaignRemoval(
+    tenantId: string,
+    campaign: { id: string; name: string; status: string },
+    dto: {
+      confirm: boolean;
+      confirm_with_history?: boolean;
+      force_if_enabled?: boolean;
+      reason: string;
+    },
+  ): Promise<{
+    blockingErrors: string[];
+    warnings: string[];
+    preview: {
+      campaign_name: string;
+      campaign_id_local: string;
+      current_status: string;
+      lifetime_conversions: number;
+      lifetime_spend_brl: number;
+      enabled_recently: boolean;
+      cascade: {
+        ad_groups: number;
+        ads: number;
+        keywords: number;
+        negative_keywords: number;
+      };
+    };
+  }> {
+    const blockingErrors: string[] = [];
+    const warnings: string[] = [];
+
+    // 1. Status REMOVED — noop
+    if (campaign.status === 'REMOVED') {
+      blockingErrors.push(
+        `Campanha "${campaign.name}" ja esta em status REMOVED. Operacao noop.`,
+      );
+    }
+
+    // 2. Confirm reforco (DTO ja valida, mas mensagem aqui eh mais util)
+    if (!dto.confirm) {
+      blockingErrors.push(
+        'Remocao exige confirm=true (operacao irreversivel pela UI). Re-envie com confirm=true e reason explicando o motivo.',
+      );
+    }
+
+    // 3. ENABLED sem force_if_enabled
+    if (campaign.status === 'ENABLED' && !dto.force_if_enabled) {
+      blockingErrors.push(
+        `Campanha "${campaign.name}" esta ENABLED gastando agora. Pause primeiro (traffic_pause_campaign) ou re-envie com force_if_enabled=true.`,
+      );
+    }
+
+    // 4. Calcular metricas lifetime + atividade recente
+    const lifetime = await this.prisma.trafficMetricDaily.aggregate({
+      where: { tenant_id: tenantId, campaign_id: campaign.id },
+      _sum: { conversions: true, cost_micros: true },
+    });
+    const lifetimeConv = Number(lifetime._sum?.conversions ?? 0);
+    const lifetimeSpendMicros = BigInt(
+      (lifetime._sum?.cost_micros as bigint | null) ?? 0n,
+    );
+    const lifetimeSpendBrl =
+      Number(lifetimeSpendMicros / 1_000n) / 1_000;
+
+    // Atividade nos ultimos 7d (impressoes > 0 = esteve enabled)
+    const last7d = new Date();
+    last7d.setUTCDate(last7d.getUTCDate() - 7);
+    const recent = await this.prisma.trafficMetricDaily.aggregate({
+      where: {
+        tenant_id: tenantId,
+        campaign_id: campaign.id,
+        date: { gte: last7d },
+      },
+      _sum: { impressions: true },
+    });
+    const enabledRecently = Number(recent._sum?.impressions ?? 0) > 0;
+
+    const hasRelevantHistory =
+      lifetimeConv >= 10 || lifetimeSpendBrl >= 500 || enabledRecently;
+
+    if (hasRelevantHistory && !dto.confirm_with_history) {
+      blockingErrors.push(
+        `Campanha "${campaign.name}" tem historico relevante (${lifetimeConv.toFixed(1)} conv lifetime, R$ ${lifetimeSpendBrl.toFixed(2)} gastos${enabledRecently ? ', ativa nos ultimos 7d' : ''}). Re-envie com confirm_with_history=true se realmente quer apagar.`,
+      );
+    } else if (hasRelevantHistory) {
+      warnings.push(
+        `Historico relevante: ${lifetimeConv.toFixed(1)} conv lifetime, R$ ${lifetimeSpendBrl.toFixed(2)} gastos. Dados de aprendizado serao perdidos.`,
+      );
+    }
+
+    // 5. Cascade: count ad_groups, ads, keywords ativos
+    // Cada query agrupa por status != REMOVED pra refletir o que vai
+    // efetivamente "sumir" da operacao normal (REMOVED ja invisivel).
+    const adGroupsCount = await this.prisma.trafficAdGroup.count({
+      where: {
+        tenant_id: tenantId,
+        campaign_id: campaign.id,
+        status: { not: 'REMOVED' },
+      },
+    });
+
+    const adGroupIds = (
+      await this.prisma.trafficAdGroup.findMany({
+        where: {
+          tenant_id: tenantId,
+          campaign_id: campaign.id,
+          status: { not: 'REMOVED' },
+        },
+        select: { id: true },
+      })
+    ).map((x) => x.id);
+
+    const [adsCount, kwTotal, kwNegativeCount] = await Promise.all([
+      this.prisma.trafficAd.count({
+        where: {
+          tenant_id: tenantId,
+          ad_group_id: { in: adGroupIds },
+          status: { not: 'REMOVED' },
+        },
+      }),
+      this.prisma.trafficKeyword.count({
+        where: {
+          tenant_id: tenantId,
+          ad_group_id: { in: adGroupIds },
+          status: { not: 'REMOVED' },
+        },
+      }),
+      this.prisma.trafficKeyword.count({
+        where: {
+          tenant_id: tenantId,
+          ad_group_id: { in: adGroupIds },
+          status: { not: 'REMOVED' },
+          negative: true,
+        },
+      }),
+    ]);
+
+    return {
+      blockingErrors,
+      warnings,
+      preview: {
+        campaign_name: campaign.name,
+        campaign_id_local: campaign.id,
+        current_status: campaign.status,
+        lifetime_conversions: lifetimeConv,
+        lifetime_spend_brl: lifetimeSpendBrl,
+        enabled_recently: enabledRecently,
+        cascade: {
+          ad_groups: adGroupsCount,
+          ads: adsCount,
+          keywords: kwTotal - kwNegativeCount,
+          negative_keywords: kwNegativeCount,
+        },
+      },
+    };
+  }
+
+  /**
+   * Valida remocao de ad_group ANTES de enfileirar. Mesmo padrao da
+   * campanha mas com check adicional: bloqueia se for o UNICO ad_group
+   * ativo da campanha (sem isso a campanha fica orfã, sem onde servir).
+   */
+  async validateAdGroupRemoval(
+    tenantId: string,
+    adGroup: {
+      id: string;
+      name: string;
+      status: string;
+      campaign_id: string;
+    },
+    dto: {
+      confirm: boolean;
+      force_if_enabled?: boolean;
+      reason: string;
+    },
+  ): Promise<{
+    blockingErrors: string[];
+    warnings: string[];
+    preview: {
+      ad_group_name: string;
+      ad_group_id_local: string;
+      campaign_id_local: string;
+      current_status: string;
+      cascade: { ads: number; keywords: number; negative_keywords: number };
+      is_only_active: boolean;
+    };
+  }> {
+    const blockingErrors: string[] = [];
+    const warnings: string[] = [];
+
+    if (adGroup.status === 'REMOVED') {
+      blockingErrors.push(
+        `Ad group "${adGroup.name}" ja esta em status REMOVED. Operacao noop.`,
+      );
+    }
+
+    if (!dto.confirm) {
+      blockingErrors.push(
+        'Remocao exige confirm=true (operacao irreversivel). Re-envie com confirm=true e reason explicando o motivo.',
+      );
+    }
+
+    if (adGroup.status === 'ENABLED' && !dto.force_if_enabled) {
+      blockingErrors.push(
+        `Ad group "${adGroup.name}" esta ENABLED gastando agora. Pause primeiro (traffic_pause_ad_group) ou re-envie com force_if_enabled=true.`,
+      );
+    }
+
+    // Check: eh o unico ad_group ativo da campanha?
+    const otherActiveAdGroups = await this.prisma.trafficAdGroup.count({
+      where: {
+        tenant_id: tenantId,
+        campaign_id: adGroup.campaign_id,
+        status: { not: 'REMOVED' },
+        id: { not: adGroup.id },
+      },
+    });
+    const isOnlyActive = otherActiveAdGroups === 0;
+    if (isOnlyActive) {
+      blockingErrors.push(
+        `Este eh o unico ad group ativo da campanha. Remover deixa a campanha sem onde servir. Considere pausar ou remover a campanha inteira (traffic_remove_campaign).`,
+      );
+    }
+
+    // Cascade
+    const [adsCount, kwTotal, kwNegativeCount] = await Promise.all([
+      this.prisma.trafficAd.count({
+        where: {
+          tenant_id: tenantId,
+          ad_group_id: adGroup.id,
+          status: { not: 'REMOVED' },
+        },
+      }),
+      this.prisma.trafficKeyword.count({
+        where: {
+          tenant_id: tenantId,
+          ad_group_id: adGroup.id,
+          status: { not: 'REMOVED' },
+        },
+      }),
+      this.prisma.trafficKeyword.count({
+        where: {
+          tenant_id: tenantId,
+          ad_group_id: adGroup.id,
+          status: { not: 'REMOVED' },
+          negative: true,
+        },
+      }),
+    ]);
+
+    return {
+      blockingErrors,
+      warnings,
+      preview: {
+        ad_group_name: adGroup.name,
+        ad_group_id_local: adGroup.id,
+        campaign_id_local: adGroup.campaign_id,
+        current_status: adGroup.status,
+        cascade: {
+          ads: adsCount,
+          keywords: kwTotal - kwNegativeCount,
+          negative_keywords: kwNegativeCount,
+        },
+        is_only_active: isOnlyActive,
+      },
+    };
+  }
+
+  /**
+   * Lookup publico de ad_group (UUID ou google_ad_group_id). Espelha
+   * getCampaignByEither — retorna null em vez de throw pra controller
+   * customizar mensagem.
+   */
+  async getAdGroupByEither(tenantId: string, idOrGoogleId: string) {
+    return this.prisma.trafficAdGroup.findFirst({
+      where: {
+        tenant_id: tenantId,
+        OR: [{ id: idOrGoogleId }, { google_ad_group_id: idOrGoogleId }],
+      },
+    });
   }
 
   // ─── Settings ───────────────────────────────────────────────────────────

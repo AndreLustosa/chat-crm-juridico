@@ -30,6 +30,7 @@ export const MUTATE_JOBS = {
   CREATE_SEARCH_CAMPAIGN: 'trafego-mutate-create-search-campaign',
   UPDATE_BIDDING_STRATEGY: 'trafego-mutate-update-bidding-strategy',
   UPDATE_AD_SCHEDULE: 'trafego-mutate-update-ad-schedule',
+  REMOVE_AD_GROUP: 'trafego-mutate-remove-ad-group',
 } as const;
 
 /**
@@ -67,6 +68,8 @@ export type PauseAdGroupPayload = BaseMutatePayload & {
 };
 
 export type ResumeAdGroupPayload = PauseAdGroupPayload;
+
+export type RemoveAdGroupPayload = PauseAdGroupPayload;
 
 export type PauseAdPayload = BaseMutatePayload & {
   /// ad_group_ad resource_name
@@ -228,6 +231,8 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.updateBiddingStrategy(job.data);
       case MUTATE_JOBS.UPDATE_AD_SCHEDULE:
         return await this.updateAdSchedule(job.data);
+      case MUTATE_JOBS.REMOVE_AD_GROUP:
+        return await this.removeAdGroup(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -292,17 +297,32 @@ export class TrafegoMutateProcessor extends WorkerHost {
     return result;
   }
 
+  /**
+   * Remove (soft-delete) uma campanha. Spec do gestor de trafego (2026-05-17)
+   * pede operacao UPDATE com status=REMOVED + update_mask=["status"], em vez
+   * do tradicional REMOVE operation. Equivalente server-side mas leverage o
+   * mesmo audit log dos outros mutates (payload mostra `{status: REMOVED}`).
+   *
+   * Pra status (scalar enum), o auto-mask do SDK funciona corretamente
+   * (recursiveFieldMaskSearch trata scalares OK — o bug 0137f49 era so pra
+   * oneof empty messages). NAO precisa do bypass mutateCampaignWithExplicitMask.
+   */
   private async removeCampaign(p: RemoveCampaignPayload): Promise<MutateResult> {
     const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'campaign',
-      operation: 'remove',
+      operation: 'update',
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
       context: p.context,
-      operations: [p.campaignResourceName],
+      operations: [
+        {
+          resource_name: p.campaignResourceName,
+          status: enums.CampaignStatus.REMOVED,
+        },
+      ],
     });
     if (result.status === 'SUCCESS' && !p.validateOnly) {
       await this.updateLocalCampaignStatus(
@@ -311,6 +331,50 @@ export class TrafegoMutateProcessor extends WorkerHost {
         p.campaignResourceName,
         'REMOVED',
       );
+    }
+    return result;
+  }
+
+  /**
+   * Remove (soft-delete) um ad_group. Mesmo padrao de removeCampaign:
+   * UPDATE com status=REMOVED + mask auto-derivado ["status"]. Cascade
+   * (ads, keywords) eh server-side — Google REMOVE em cascata
+   * automaticamente quando ad_group passa pra REMOVED.
+   */
+  private async removeAdGroup(p: RemoveAdGroupPayload): Promise<MutateResult> {
+    const result = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'ad_group',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: [
+        {
+          resource_name: p.adGroupResourceName,
+          status: enums.AdGroupStatus.REMOVED,
+        },
+      ],
+    });
+    if (result.status === 'SUCCESS' && !p.validateOnly) {
+      // Mirror local — atualiza TrafficAdGroup.status sem esperar proximo sync
+      try {
+        const googleId = this.extractIdFromResourceName(p.adGroupResourceName);
+        if (googleId) {
+          await this.prisma.trafficAdGroup.updateMany({
+            where: {
+              tenant_id: p.tenantId,
+              account_id: p.accountId,
+              google_ad_group_id: googleId,
+            },
+            data: { status: 'REMOVED' },
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`[mutate] mirror remove ad_group falhou: ${e.message}`);
+      }
     }
     return result;
   }

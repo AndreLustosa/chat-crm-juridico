@@ -8,6 +8,7 @@ import {
   IsIn,
   Min,
   Max,
+  MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -227,6 +228,61 @@ export class UpdateBudgetDto {
   @IsString()
   @IsOptional()
   reason?: string;
+}
+
+/**
+ * Remove (soft-delete) uma campanha. Soft-delete via status=REMOVED.
+ *
+ * Spec: confirm obrigatorio sempre, reason obrigatorio com min 3 chars.
+ * Salvaguardas adicionais:
+ *   - force_if_enabled: required quando status=ENABLED no momento
+ *   - confirm_with_history: required quando campanha tem >=10 conv lifetime,
+ *     >=R$500 gasto historico, OU esteve ENABLED nos ultimos 7 dias
+ *
+ * Validate_only=true retorna preview do cascade (ad_groups, ads, keywords
+ * que vao junto) sem aplicar.
+ */
+export class RemoveCampaignDto {
+  @IsBoolean()
+  confirm!: boolean;
+
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  force_if_enabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  confirm_with_history?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Remove (soft-delete) um ad_group. Mesmo padrao de RemoveCampaignDto.
+ * Adicional: backend bloqueia se for o UNICO ad_group ativo da campanha
+ * (sem isso a campanha fica orfã sem onde servir).
+ */
+export class RemoveAdGroupDto {
+  @IsBoolean()
+  confirm!: boolean;
+
+  @IsString()
+  @MinLength(3)
+  reason!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  force_if_enabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
 }
 
 /**

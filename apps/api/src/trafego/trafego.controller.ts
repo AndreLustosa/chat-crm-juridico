@@ -42,6 +42,8 @@ import {
   ListLeadFormSubmissionsDto,
   ListRecommendationsDto,
   MutateBaseDto,
+  RemoveAdGroupDto,
+  RemoveCampaignDto,
   UpdateAccountDto,
   UpdateBiddingStrategyDto,
   UpdateBudgetDto,
@@ -729,7 +731,78 @@ export class TrafegoController {
     });
   }
 
-  /** Remove uma campanha no Google. */
+  /**
+   * Remove (soft-delete) uma campanha no Google Ads (status=REMOVED).
+   *
+   * Endpoint robusto com guard-rails. Substitui o DELETE legacy (mantido
+   * abaixo pra back-compat mas sem validacoes).
+   *
+   * Valida 4 categorias antes de enfileirar:
+   *   1. Existencia (404 explicito)
+   *   2. Status REMOVED (noop)
+   *   3. confirm + reason min 3 chars (DTO + double-check)
+   *   4. ENABLED sem force_if_enabled, OU historico relevante sem
+   *      confirm_with_history -> bloqueia com mensagem instrutiva
+   *
+   * Retorna preview do cascade (ad_groups, ads, keywords) + warnings
+   * (ex: aprendizado perdido se historico relevante). validate_only=true
+   * sempre passa pelo worker e loga.
+   */
+  @Post('campaigns/:id/remove')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeCampaignWithGuards(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: RemoveCampaignDto,
+  ) {
+    const tenantId = req.user.tenant_id;
+
+    const campaign = await this.service.getCampaignByEither(tenantId, campaignId);
+    if (!campaign) {
+      throw new HttpException(
+        `Campanha nao encontrada (id="${campaignId}"). Confira em traffic_list_campaigns.`,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const validation = await this.service.validateCampaignRemoval(
+      tenantId,
+      campaign,
+      dto,
+    );
+
+    if (validation.blockingErrors.length > 0) {
+      throw new HttpException(
+        validation.blockingErrors.join(' | '),
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const result = await this.enqueueMutate(
+      req,
+      'trafego-mutate-remove-campaign',
+      {
+        campaignId: campaign.id,
+        reason: dto.reason,
+        validate_only: dto.validate_only,
+      },
+    );
+
+    return {
+      ...result,
+      warnings: validation.warnings,
+      preview: {
+        ...validation.preview,
+        google_campaign_id: campaign.google_campaign_id,
+      },
+    };
+  }
+
+  /**
+   * @deprecated Use POST /campaigns/:id/remove (com confirm + reason
+   * obrigatorios + guard-rails). Mantido pra back-compat de scripts/UI
+   * que ainda usam DELETE simples.
+   */
   @Delete('campaigns/:id')
   @Roles('ADMIN', 'ADVOGADO')
   async removeCampaign(
@@ -741,6 +814,62 @@ export class TrafegoController {
       campaignId,
       ...dto,
     });
+  }
+
+  /**
+   * Remove (soft-delete) um ad_group no Google Ads (status=REMOVED).
+   * Mesmo padrao de removeCampaignWithGuards + check adicional: bloqueia
+   * se for o UNICO ad_group ativo da campanha (sem isso a campanha fica
+   * orfã sem onde servir).
+   */
+  @Post('ad-groups/:id/remove')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeAdGroupWithGuards(
+    @Req() req: any,
+    @Param('id') adGroupId: string,
+    @Body() dto: RemoveAdGroupDto,
+  ) {
+    const tenantId = req.user.tenant_id;
+
+    const adGroup = await this.service.getAdGroupByEither(tenantId, adGroupId);
+    if (!adGroup) {
+      throw new HttpException(
+        `Ad group nao encontrado (id="${adGroupId}"). Confira em traffic_list_ad_groups.`,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const validation = await this.service.validateAdGroupRemoval(
+      tenantId,
+      adGroup,
+      dto,
+    );
+
+    if (validation.blockingErrors.length > 0) {
+      throw new HttpException(
+        validation.blockingErrors.join(' | '),
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const result = await this.enqueueMutate(
+      req,
+      'trafego-mutate-remove-ad-group',
+      {
+        adGroupId: adGroup.id,
+        reason: dto.reason,
+        validate_only: dto.validate_only,
+      },
+    );
+
+    return {
+      ...result,
+      warnings: validation.warnings,
+      preview: {
+        ...validation.preview,
+        google_ad_group_id: adGroup.google_ad_group_id,
+      },
+    };
   }
 
   /** Atualiza budget diario. Recebe valor em BRL, converte pra micros. */
