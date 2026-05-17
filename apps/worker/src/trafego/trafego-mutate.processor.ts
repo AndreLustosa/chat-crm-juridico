@@ -817,6 +817,12 @@ export class TrafegoMutateProcessor extends WorkerHost {
       op.maximize_conversion_value = {};
     }
 
+    // updateMask EXPLICITO pro bypass do SDK auto-mask bugado. Apenas
+    // "bidding_strategy_type" no mask — RFC-correto pro Google escolher
+    // o oneof field via enum, sem cair em FIELD_HAS_SUBFIELDS (incluindo
+    // o oneof name no mask) nem no-op silencioso (mask vazio).
+    // Achado apos 3 tentativas iterativas em 2026-05-17 — ver memoria do
+    // projeto bugs_bidding_strategy.md pra cadeia completa.
     const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
@@ -825,6 +831,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
       initiator: p.initiator,
       confidence: p.confidence ?? null,
       validateOnly: !!p.validateOnly,
+      updateMask: ['bidding_strategy_type'],
       context: {
         ...p.context,
         new_bidding_strategy: p.biddingStrategy,

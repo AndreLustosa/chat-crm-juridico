@@ -87,6 +87,101 @@ export class GoogleAdsClientService {
   }
 
   /**
+   * Bypass do SDK wrappers (`customer.campaigns.update`, `customer.mutateResources`)
+   * pra ter controle TOTAL sobre o update_mask enviado pro Google.
+   *
+   * Por que existe (achado em 2026-05-17): o SDK google-ads-api v23 chama
+   * internamente `getFieldMask(payload)` que tem dois bugs:
+   *   1. Pra oneof empty objects (`maximize_conversions: {}`), nao adiciona
+   *      o parent path → mask sem o oneof → Google ignora silenciosamente
+   *      ("SUCCESS" sem efeito).
+   *   2. Se forcarmos o parent path (via monkey-patch), Google rejeita com
+   *      FIELD_HAS_SUBFIELDS pq oneof eh message-type, nao scalar.
+   *
+   * Pra mutate de bidding strategy, o caminho RFC-correto eh:
+   *   - body: { resource_name, bidding_strategy_type, <oneof>: {...} }
+   *   - mask: ["bidding_strategy_type"]  (apenas o enum scalar)
+   *
+   * Google usa o enum pra escolher qual oneof field "selecionar" e o body
+   * pra popular os defaults. Mas o SDK auto-mask nao faz isso direito —
+   * passar diretamente via GoogleAdsServiceClient.mutate eh o jeito de
+   * forcar mask exato.
+   *
+   * Loga response completo (sanitizado) pra debug. Sem isso, fica impossivel
+   * saber por que um mutate "deu SUCCESS" mas nao aplicou.
+   */
+  async mutateCampaignWithExplicitMask(
+    customer: Customer,
+    customerId: string,
+    campaignResource: Record<string, unknown>,
+    updateMaskPaths: string[],
+    validateOnly: boolean,
+  ): Promise<{ ok: boolean; raw: unknown; resourceNames: string[]; error?: string }> {
+    // GoogleAdsServiceClient eh acessivel via loadService (protected na
+    // classe Service, exposto via cast pra `any`). Esse eh o entry point
+    // gRPC bruto onde mask vai sem mutacao.
+    const svc = (customer as any).loadService('GoogleAdsServiceClient');
+
+    const request = {
+      customer_id: customerId,
+      mutate_operations: [
+        {
+          campaign_operation: {
+            update: campaignResource,
+            update_mask: { paths: updateMaskPaths },
+          },
+        },
+      ],
+      validate_only: validateOnly,
+      partial_failure: true,
+    };
+
+    this.logger.log(
+      `[mutate-grpc] customer=${customerId} mask=${JSON.stringify(updateMaskPaths)} validate_only=${validateOnly} body=${JSON.stringify(campaignResource, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))}`,
+    );
+
+    return new Promise((resolve, reject) => {
+      svc.mutate(request, (err: any, response: any) => {
+        if (err) {
+          const formatted = this.formatError(err);
+          this.logger.warn(
+            `[mutate-grpc] FAILED kind=${formatted.kind} ${formatted.message}`,
+          );
+          return reject(err);
+        }
+        const resourceNames = (response?.mutate_operation_responses ?? [])
+          .map((r: any) => r?.campaign_result?.resource_name)
+          .filter((rn: any): rn is string => !!rn);
+        const partial = response?.partial_failure_error;
+        this.logger.log(
+          `[mutate-grpc] SUCCESS resources=${resourceNames.length} partial=${partial ? 'YES' : 'no'} raw=${JSON.stringify(this.safeSnapshot(response))}`,
+        );
+        resolve({
+          ok: !partial,
+          raw: response,
+          resourceNames,
+          error: partial ? JSON.stringify(partial).slice(0, 500) : undefined,
+        });
+      });
+    });
+  }
+
+  /**
+   * Snapshot defensivo da response do Google pra log — converte BigInt e
+   * trunca pra evitar polluir muito o log com payloads gigantes.
+   */
+  private safeSnapshot(response: unknown): unknown {
+    try {
+      const json = JSON.stringify(response, (_k, v) =>
+        typeof v === 'bigint' ? v.toString() : v,
+      );
+      return JSON.parse(json.length > 2000 ? json.slice(0, 2000) + '...[truncated]' : json);
+    } catch {
+      return '(unserializable)';
+    }
+  }
+
+  /**
    * Helper pra detectar tipo de erro retornado pelo SDK e mapear pra
    * mensagem util no TrafficSyncLog.
    */

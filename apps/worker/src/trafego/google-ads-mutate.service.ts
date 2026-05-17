@@ -63,6 +63,12 @@ export type MutateRequest = {
   adContent?: AdContent;
   /// Texto de keyword pra validar OAB. Required se resourceType=ad_group_criterion e operation=create.
   keywordText?: string;
+  /// update_mask EXPLICITO (RFC FieldMask paths). Quando presente, callApi
+  /// usa GoogleAdsServiceClient.mutate direto (bypass do svc.update do SDK
+  /// que tem bug em auto-mask de oneof fields — ver
+  /// google-ads-client.service.ts#mutateCampaignWithExplicitMask).
+  /// Hoje so suportado pra resource_type='campaign' + operation='update'.
+  updateMask?: string[];
 };
 
 export type MutateResult = {
@@ -259,6 +265,38 @@ export class GoogleAdsMutateService {
       partial_failure: true,
       validate_only: !!req.validateOnly,
     };
+
+    // CAMINHO EXPLICITO: quando updateMask eh passado, bypassa o SDK
+    // wrappers e usa GoogleAdsServiceClient.mutate direto. Resolve bugs
+    // de auto-mask em oneof fields (ex: bidding strategy update —
+    // achado em 2026-05-17).
+    if (req.updateMask && req.updateMask.length > 0) {
+      if (req.resourceType !== 'campaign' || req.operation !== 'update') {
+        throw new Error(
+          `updateMask explicito so suportado pra resource_type=campaign + operation=update (recebi ${req.resourceType}.${req.operation})`,
+        );
+      }
+      const payload = req.operations
+        .map((x: any) => x?.update ?? x)
+        .filter((x: any) => !!x)[0];
+      if (!payload) {
+        throw new Error('updateMask explicito exige 1 operation com payload');
+      }
+      const customerId = (customer as any).customerOptions?.customer_id;
+      const result = await this.clientSvc.mutateCampaignWithExplicitMask(
+        customer,
+        customerId,
+        payload,
+        req.updateMask,
+        !!req.validateOnly,
+      );
+      // Adapta shape pra match com response do SDK alto-nivel
+      // (extractResourceNames espera .results[].resource_name)
+      return {
+        results: result.resourceNames.map((rn) => ({ resource_name: rn })),
+        partial_failure_error: result.ok ? null : { message: result.error },
+      };
+    }
 
     const svc = this.resolveCustomerSubservice(customer, req.resourceType);
     if (!svc) {
