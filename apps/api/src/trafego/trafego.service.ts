@@ -1137,6 +1137,199 @@ export class TrafegoService {
     return ag;
   }
 
+  // ─── Bidding Strategy: lookup publico + validacoes ─────────────────────
+
+  /**
+   * Versao publica do requireCampaign — retorna null em vez de throw
+   * pra que o controller possa montar mensagens de erro customizadas.
+   * Aceita UUID interno ou google_campaign_id (matching requireCampaign).
+   */
+  async getCampaignByEither(tenantId: string, idOrGoogleId: string) {
+    return this.prisma.trafficCampaign.findFirst({
+      where: {
+        tenant_id: tenantId,
+        OR: [{ id: idOrGoogleId }, { google_campaign_id: idOrGoogleId }],
+      },
+    });
+  }
+
+  /**
+   * Valida mudanca de bidding strategy ANTES de enfileirar.
+   *
+   * Retorna { blockingErrors[], warnings[], learningPeriodDays } pra o
+   * controller decidir entre 400 (blockingErrors), continuar com warnings
+   * (lista nao vazia mas sem blockers), ou seguir limpo.
+   *
+   * Regras implementadas:
+   *   1. Noop (strategy igual atual)
+   *   2. Params condicionais (TARGET_CPA exige target_cpa_brl, etc)
+   *   3. TARGET_SPEND bloqueado (a menos que env override)
+   *   4. MANUAL_CPC exige confirm
+   *   5. Smart Bidding exige >=1 conversion action ativa
+   *   6. TARGET_ROAS/MAXIMIZE_CONVERSION_VALUE exige value > 0 em
+   *      conv actions (warning soft, nao bloqueio)
+   *   7. Histórico baixo de conversoes (<15 conv/30d) -> warning
+   *   8. Valores suspeitos (target_cpa < 0.5 ou target_roas > 50)
+   *      exigem confirm
+   *   9. Sair de Smart Bidding com >=30 conv/30d exige confirm
+   */
+  async validateBiddingStrategyChange(
+    tenantId: string,
+    campaign: { id: string; bidding_strategy: string | null; name: string },
+    dto: {
+      bidding_strategy: string;
+      target_cpa_brl?: number;
+      target_roas?: number;
+      target_impression_share_pct?: number;
+      max_cpc_bid_ceiling_brl?: number;
+      confirm?: boolean;
+    },
+    opts: { allowDeprecatedTargetSpend?: boolean } = {},
+  ): Promise<{
+    blockingErrors: string[];
+    warnings: string[];
+    learningPeriodDays: number;
+  }> {
+    const blockingErrors: string[] = [];
+    const warnings: string[] = [];
+
+    const SMART_BIDDING = new Set([
+      'MAXIMIZE_CONVERSIONS',
+      'MAXIMIZE_CONVERSION_VALUE',
+      'TARGET_CPA',
+      'TARGET_ROAS',
+    ]);
+    const VALUE_BASED = new Set(['MAXIMIZE_CONVERSION_VALUE', 'TARGET_ROAS']);
+
+    // 1. Noop check
+    if (campaign.bidding_strategy === dto.bidding_strategy) {
+      blockingErrors.push(
+        `Campanha "${campaign.name}" ja esta em ${dto.bidding_strategy}. Operacao noop.`,
+      );
+    }
+
+    // 2. Params condicionais obrigatorios
+    if (dto.bidding_strategy === 'TARGET_CPA' && dto.target_cpa_brl == null) {
+      blockingErrors.push('target_cpa_brl eh obrigatorio para TARGET_CPA.');
+    }
+    if (dto.bidding_strategy === 'TARGET_ROAS' && dto.target_roas == null) {
+      blockingErrors.push('target_roas eh obrigatorio para TARGET_ROAS.');
+    }
+    if (
+      dto.bidding_strategy === 'TARGET_IMPRESSION_SHARE' &&
+      dto.target_impression_share_pct == null
+    ) {
+      blockingErrors.push(
+        'target_impression_share_pct eh obrigatorio para TARGET_IMPRESSION_SHARE.',
+      );
+    }
+
+    // 3. TARGET_SPEND deprecated
+    if (dto.bidding_strategy === 'TARGET_SPEND' && !opts.allowDeprecatedTargetSpend) {
+      blockingErrors.push(
+        'TARGET_SPEND eh depreciada pelo Google para campanhas Search. Use MAXIMIZE_CLICKS ou MAXIMIZE_CONVERSIONS.',
+      );
+    }
+
+    // 4. MANUAL_CPC exige confirm (raro hoje, geralmente erro de digitacao)
+    if (dto.bidding_strategy === 'MANUAL_CPC' && !dto.confirm) {
+      blockingErrors.push(
+        'MANUAL_CPC eh uma estrategia legada que entrega menos automacao. Re-envie com confirm=true se isso eh proposital.',
+      );
+    }
+
+    // 5. Smart Bidding exige conversion actions ativas
+    if (SMART_BIDDING.has(dto.bidding_strategy)) {
+      const activeConvActions = await this.prisma.trafficConversionAction.count({
+        where: {
+          tenant_id: tenantId,
+          status: 'ENABLED',
+          include_in_conversions: true,
+        },
+      });
+      if (activeConvActions === 0) {
+        blockingErrors.push(
+          'Smart Bidding (' +
+            dto.bidding_strategy +
+            ') requer ao menos uma ConversionAction ativa com include_in_conversions=true. Configure em Configuracoes > Tracking de Conversoes.',
+        );
+      } else if (VALUE_BASED.has(dto.bidding_strategy)) {
+        // 6. Value-based: ao menos uma conv action com value default > 0
+        // default_value_micros eh BigInt — usar literal bigint na comparacao
+        const withValue = await this.prisma.trafficConversionAction.count({
+          where: {
+            tenant_id: tenantId,
+            status: 'ENABLED',
+            include_in_conversions: true,
+            default_value_micros: { gt: BigInt(0) },
+          },
+        });
+        if (withValue === 0) {
+          warnings.push(
+            'Estrategia por valor (' +
+              dto.bidding_strategy +
+              ') configurada mas nenhuma ConversionAction tem default_value_micros > 0. Sem valor, o Google nao consegue otimizar — defina valores nas conv actions.',
+          );
+        }
+      }
+    }
+
+    // 7. Histórico de conversoes na campanha (30d) — soft signal
+    const last30d = new Date();
+    last30d.setUTCDate(last30d.getUTCDate() - 30);
+    const recentMetrics = await this.prisma.trafficMetricDaily.aggregate({
+      where: { tenant_id: tenantId, campaign_id: campaign.id, date: { gte: last30d } },
+      _sum: { conversions: true },
+    });
+    const conv30d = Number(recentMetrics._sum?.conversions ?? 0);
+    const currentIsSmart = SMART_BIDDING.has(campaign.bidding_strategy ?? '');
+    const nextIsSmart = SMART_BIDDING.has(dto.bidding_strategy);
+
+    if (nextIsSmart && conv30d < 15) {
+      warnings.push(
+        `Histórico baixo: ${conv30d} conversoes em 30d. Google recomenda >=30 pra Smart Bidding performar bem. Considere acumular mais dados antes ou usar MAXIMIZE_CLICKS por enquanto.`,
+      );
+    }
+
+    // 8. Valores suspeitos — heuristica simples (sem media CPC da conta)
+    if (
+      dto.bidding_strategy === 'TARGET_CPA' &&
+      dto.target_cpa_brl != null &&
+      dto.target_cpa_brl < 0.5 &&
+      !dto.confirm
+    ) {
+      blockingErrors.push(
+        `target_cpa_brl=${dto.target_cpa_brl} parece suspeito (< R$ 0.50). Se for proposital, re-envie com confirm=true.`,
+      );
+    }
+    if (
+      dto.bidding_strategy === 'TARGET_ROAS' &&
+      dto.target_roas != null &&
+      dto.target_roas > 50 &&
+      !dto.confirm
+    ) {
+      blockingErrors.push(
+        `target_roas=${dto.target_roas} (${dto.target_roas * 100}%) parece suspeito (> 5000%). Se for proposital, re-envie com confirm=true.`,
+      );
+    }
+
+    // 9. Sair de Smart Bidding consolidado exige confirm
+    if (currentIsSmart && !nextIsSmart && conv30d >= 30 && !dto.confirm) {
+      blockingErrors.push(
+        `Mudanca de Smart Bidding (${campaign.bidding_strategy} -> ${dto.bidding_strategy}) em campanha com aprendizado consolidado (${conv30d} conv/30d). Voce vai perder o learning. Re-envie com confirm=true se for proposital.`,
+      );
+    }
+
+    // Estimativa de learning period — heuristica do Google (7-14 dias).
+    // Mais alto se mudando ENTRE Smart Biddings, menor se saindo pra MANUAL.
+    let learningPeriodDays = 7;
+    if (nextIsSmart && !currentIsSmart) learningPeriodDays = 14;
+    if (nextIsSmart && currentIsSmart) learningPeriodDays = 10;
+    if (!nextIsSmart) learningPeriodDays = 0;
+
+    return { blockingErrors, warnings, learningPeriodDays };
+  }
+
   // ─── Settings ───────────────────────────────────────────────────────────
 
   async getSettings(tenantId: string) {

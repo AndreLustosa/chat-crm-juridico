@@ -628,7 +628,18 @@ export class TrafegoController {
     );
   }
 
-  /** Atualiza estratégia de lance da campanha (Fase 4c). */
+  /**
+   * Atualiza estratégia de lance da campanha (Fase 4c).
+   *
+   * Expandido em 2026-05-17: agora valida 9 categorias de regra antes
+   * de enfileirar — bloqueia mudancas inseguras (TARGET_SPEND deprecated,
+   * noop, params condicionais faltando) e retorna warnings pra mudancas
+   * arriscadas mas permitidas (learning period perdido, valores suspeitos).
+   *
+   * Suporta `validate_only: true` retornando preview sem mutar.
+   * Aceita `campaign_id` como UUID interno OU google_campaign_id (via
+   * requireCampaign, fix #2 de 2026-05-17).
+   */
   @Patch('campaigns/:id/bidding-strategy')
   @Roles('ADMIN', 'ADVOGADO')
   async updateBiddingStrategy(
@@ -636,11 +647,62 @@ export class TrafegoController {
     @Param('id') campaignId: string,
     @Body() dto: UpdateBiddingStrategyDto,
   ) {
-    return await this.enqueueMutate(
+    const tenantId = req.user.tenant_id;
+
+    // Resolve campanha (UUID ou google_id) — propaga 404 cedo com mensagem clara.
+    const campaign = await this.service.getCampaignByEither(tenantId, campaignId);
+    if (!campaign) {
+      throw new HttpException(
+        `Campanha nao encontrada (id="${campaignId}"). Confira em traffic_list_campaigns.`,
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const validation = await this.service.validateBiddingStrategyChange(
+      tenantId,
+      campaign,
+      dto,
+      { allowDeprecatedTargetSpend: process.env.TRAFEGO_ALLOW_TARGET_SPEND === 'true' },
+    );
+
+    if (validation.blockingErrors.length > 0) {
+      throw new HttpException(
+        validation.blockingErrors.join(' | '),
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const preview = {
+      from: campaign.bidding_strategy ?? null,
+      to: dto.bidding_strategy,
+      campaign_name: campaign.name,
+      campaign_id_local: campaign.id,
+      google_campaign_id: campaign.google_campaign_id,
+      learning_period_days_estimate: validation.learningPeriodDays,
+    };
+
+    if (dto.validate_only) {
+      return {
+        ok: true,
+        validate_only: true,
+        message: 'Mutate em DRY-RUN — payload valido, nada foi aplicado.',
+        warnings: validation.warnings,
+        preview,
+      };
+    }
+
+    // Passa UUID interno pro enqueueMutate (resolve_id ja feito acima)
+    const result = await this.enqueueMutate(
       req,
       'trafego-mutate-update-bidding-strategy',
-      { campaignId, ...dto },
+      { campaignId: campaign.id, ...dto },
     );
+
+    return {
+      ...result,
+      warnings: validation.warnings,
+      preview,
+    };
   }
 
   /** Pausa uma campanha no Google. */

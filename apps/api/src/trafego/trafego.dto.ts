@@ -586,23 +586,41 @@ export class CreateSearchCampaignDto {
   validate_only?: boolean;
 }
 
+/**
+ * DTO de atualizacao de bidding strategy.
+ *
+ * Expandido em 2026-05-17 a pedido do agente externo:
+ *   - Adicionado TARGET_IMPRESSION_SHARE e TARGET_SPEND no enum
+ *   - Novos campos: target_impression_share_pct, target_impression_share_location,
+ *     max_cpc_bid_ceiling_brl, confirm
+ *   - Mantida compat: ordem dos campos antigos preservada, defaults idem.
+ *
+ * Validacoes condicionais (TARGET_CPA exige target_cpa_brl etc) ficam no
+ * controller, antes do enqueue — pra poder retornar warnings ao usuario.
+ * Bloqueios (TARGET_SPEND deprecated, MANUAL_CPC sem confirm) tambem no
+ * controller. Ver trafego.controller.ts#updateBiddingStrategy.
+ */
 export class UpdateBiddingStrategyDto {
   @IsString()
   @IsIn([
     'MAXIMIZE_CONVERSIONS',
-    'MAXIMIZE_CLICKS',
-    'MANUAL_CPC',
+    'MAXIMIZE_CONVERSION_VALUE',
     'TARGET_CPA',
     'TARGET_ROAS',
-    'MAXIMIZE_CONVERSION_VALUE',
+    'MAXIMIZE_CLICKS',
+    'TARGET_IMPRESSION_SHARE',
+    'MANUAL_CPC',
+    'TARGET_SPEND',
   ])
   bidding_strategy!:
     | 'MAXIMIZE_CONVERSIONS'
-    | 'MAXIMIZE_CLICKS'
-    | 'MANUAL_CPC'
+    | 'MAXIMIZE_CONVERSION_VALUE'
     | 'TARGET_CPA'
     | 'TARGET_ROAS'
-    | 'MAXIMIZE_CONVERSION_VALUE';
+    | 'MAXIMIZE_CLICKS'
+    | 'TARGET_IMPRESSION_SHARE'
+    | 'MANUAL_CPC'
+    | 'TARGET_SPEND';
 
   /** Em BRL — obrigatório se TARGET_CPA. */
   @IsNumber()
@@ -615,6 +633,39 @@ export class UpdateBiddingStrategyDto {
   @Min(0)
   @IsOptional()
   target_roas?: number;
+
+  /** 0.01..1.0 — obrigatório se TARGET_IMPRESSION_SHARE. */
+  @IsNumber()
+  @Min(0.01)
+  @Max(1.0)
+  @IsOptional()
+  target_impression_share_pct?: number;
+
+  /** Default ANYWHERE_ON_PAGE quando TARGET_IMPRESSION_SHARE. */
+  @IsString()
+  @IsIn(['ANYWHERE_ON_PAGE', 'TOP_OF_PAGE', 'ABSOLUTE_TOP_OF_PAGE'])
+  @IsOptional()
+  target_impression_share_location?:
+    | 'ANYWHERE_ON_PAGE'
+    | 'TOP_OF_PAGE'
+    | 'ABSOLUTE_TOP_OF_PAGE';
+
+  /** Teto de CPC opcional pra TARGET_CPA/TARGET_ROAS/TARGET_IMPRESSION_SHARE. */
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  max_cpc_bid_ceiling_brl?: number;
+
+  /**
+   * Required em mudancas de alto risco:
+   *   - Sair de Smart Bidding com >=30 conv/30d (perde aprendizado)
+   *   - MANUAL_CPC (raro hoje em dia, geralmente erro de digitacao)
+   *   - target_cpa_brl < 0.5 BRL (suspeitamente baixo)
+   *   - target_roas > 50 (5000%, suspeito)
+   */
+  @IsBoolean()
+  @IsOptional()
+  confirm?: boolean;
 
   @IsString()
   @IsOptional()

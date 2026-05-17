@@ -625,6 +625,120 @@ function registerCampaignMutateTools(server: McpServer) {
         return ok(result, `Budget atualizado: ${money(current)} -> ${money(input.new_daily_budget_brl)}.`);
       }),
   );
+
+  server.registerTool(
+    'traffic_update_campaign_bidding_strategy',
+    {
+      description:
+        'Altera a estrategia de lance de uma campanha existente. ' +
+        'Mudanca derruba a fase de aprendizado do Smart Bidding (7-14 dias) — ' +
+        'exige confirm=true quando saindo de Smart Bidding com >=30 conv/30d. ' +
+        'TARGET_SPEND eh bloqueado por padrao (depreciada pelo Google). ' +
+        'MANUAL_CPC exige confirm. Params condicionais: TARGET_CPA exige ' +
+        'target_cpa_brl, TARGET_ROAS exige target_roas, TARGET_IMPRESSION_SHARE ' +
+        'exige target_impression_share_pct. Backend retorna warnings quando ' +
+        'historico de conversoes esta baixo ou conv actions nao tem valor monetario.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        bidding_strategy: z.enum([
+          'MAXIMIZE_CONVERSIONS',
+          'MAXIMIZE_CONVERSION_VALUE',
+          'TARGET_CPA',
+          'TARGET_ROAS',
+          'MAXIMIZE_CLICKS',
+          'TARGET_IMPRESSION_SHARE',
+          'MANUAL_CPC',
+          'TARGET_SPEND',
+        ]).describe('Nova estrategia. TARGET_SPEND eh bloqueada — use MAXIMIZE_CLICKS.'),
+        target_cpa_brl: z
+          .number()
+          .positive()
+          .optional()
+          .describe('CPA alvo em BRL. Obrigatorio se bidding_strategy=TARGET_CPA.'),
+        target_roas: z
+          .number()
+          .positive()
+          .optional()
+          .describe('ROAS alvo multiplicador (4.0 = 400%). Obrigatorio se TARGET_ROAS.'),
+        target_impression_share_pct: z
+          .number()
+          .min(0.01)
+          .max(1.0)
+          .optional()
+          .describe('% alvo de impression share (0.01-1.0). Obrigatorio se TARGET_IMPRESSION_SHARE.'),
+        target_impression_share_location: z
+          .enum(['ANYWHERE_ON_PAGE', 'TOP_OF_PAGE', 'ABSOLUTE_TOP_OF_PAGE'])
+          .optional()
+          .describe('Default ANYWHERE_ON_PAGE quando TARGET_IMPRESSION_SHARE.'),
+        max_cpc_bid_ceiling_brl: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Teto de CPC opcional pra TARGET_CPA/TARGET_ROAS/TARGET_IMPRESSION_SHARE.'),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe(
+            'Required em: MANUAL_CPC, saida de Smart Bidding com >=30 conv/30d, target_cpa_brl<0.5, target_roas>50.',
+          ),
+        reason: z.string().optional().describe('Motivo da mudanca (vai pro audit log)'),
+        validate_only: z.boolean().optional().describe('Dry-run: retorna preview + warnings sem aplicar.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_campaign_bidding_strategy', async (toolCallId) => {
+        applyMutateGuards('traffic_update_campaign_bidding_strategy');
+
+        // Backend faz: resolve campaign (UUID ou google_id) + 9 validacoes +
+        // warnings + enqueue. Tool aqui eh thin client — repassa tudo.
+        const result = await crmTrafficService.patch<{
+          ok?: boolean;
+          validate_only?: boolean;
+          message?: string;
+          mutate_log_id?: string;
+          warnings?: string[];
+          preview?: {
+            from?: string | null;
+            to?: string;
+            campaign_name?: string;
+            learning_period_days_estimate?: number;
+          };
+        }>(
+          `/trafego/campaigns/${encodeURIComponent(input.campaign_id)}/bidding-strategy`,
+          {
+            bidding_strategy: input.bidding_strategy,
+            target_cpa_brl: input.target_cpa_brl,
+            target_roas: input.target_roas,
+            target_impression_share_pct: input.target_impression_share_pct,
+            target_impression_share_location: input.target_impression_share_location,
+            max_cpc_bid_ceiling_brl: input.max_cpc_bid_ceiling_brl,
+            confirm: input.confirm,
+            reason: input.reason,
+            validate_only: input.validate_only,
+          },
+          { toolCallId },
+        );
+
+        const preview = result?.preview ?? {};
+        const lines: string[] = [];
+        if (input.validate_only) {
+          lines.push(`DRY-RUN: ${preview.from ?? '?'} -> ${preview.to ?? input.bidding_strategy}.`);
+        } else {
+          lines.push(
+            `Mudanca de estrategia enfileirada para "${preview.campaign_name ?? input.campaign_id}": ${preview.from ?? '?'} -> ${preview.to ?? input.bidding_strategy}.`,
+          );
+        }
+        if (preview.learning_period_days_estimate != null) {
+          lines.push(`Learning period estimado: ${preview.learning_period_days_estimate} dia(s).`);
+        }
+        if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+          lines.push('Avisos:');
+          for (const w of result.warnings) lines.push(`  - ${w}`);
+        }
+        return ok(result, lines.join('\n'));
+      }),
+  );
 }
 
 function registerAdGroupMutateTools(server: McpServer) {
