@@ -121,7 +121,20 @@ export class GoogleAdsClientService {
     ) {
       return {
         kind: 'TokenRevoked',
-        message: 'Refresh token invalido ou revogado. Reconecte a conta via OAuth.',
+        // Mensagem expandida em 2026-05-17 (BUG #3): o sintoma mais comum
+        // de "revogacao recorrente a cada 7 dias" eh o OAuth Consent Screen
+        // do projeto Google Cloud estar em status "Testing" — Google revoga
+        // refresh tokens automaticamente apos 7 dias nesse modo. Publicar o
+        // app ("Push to production") em https://console.cloud.google.com/apis/credentials/consent
+        // remove o limite. Causas alternativas: senha da conta Google trocada,
+        // limite de 50 refresh tokens por OAuth client estourado, acesso
+        // revogado manualmente em myaccount.google.com/permissions.
+        message:
+          'Refresh token invalido ou revogado. Reconecte a conta via OAuth. ' +
+          'Se isso esta acontecendo recorrentemente (a cada ~7 dias), o OAuth ' +
+          'Consent Screen do projeto Google Cloud provavelmente esta em ' +
+          'modo "Testing" — publique o app em ' +
+          'https://console.cloud.google.com/apis/credentials/consent.',
       };
     }
     // Generico

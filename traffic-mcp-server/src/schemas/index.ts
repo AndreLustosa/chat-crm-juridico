@@ -10,7 +10,20 @@ export const optionalDateRange = {
   date_preset: datePresetSchema.describe('Preset de periodo'),
 };
 
-export const campaignIdSchema = z.string().describe('ID numerico da campanha no Google Ads');
+/**
+ * Identificador de campanha. Aceita AMBOS:
+ *   - UUID interno do CRM (campo `id` retornado por traffic_list_campaigns)
+ *   - google_campaign_id numerico (campo `google_campaign_id` retornado por traffic_list_campaigns)
+ *
+ * Backend (requireCampaign em apps/api/src/trafego/trafego.service.ts) faz
+ * lookup por OR { id, google_campaign_id }. Atualizado em 2026-05-17 apos
+ * BUG #2 (agente externo passava google_id e recebia 404 sem dica).
+ */
+export const campaignIdSchema = z
+  .string()
+  .describe(
+    'UUID interno do CRM (campo `id` de traffic_list_campaigns) OU google_campaign_id numerico (campo `google_campaign_id`). Ambos sao aceitos.',
+  );
 
 export const matchTypeSchema = z
   .enum(['BROAD', 'PHRASE', 'EXACT'])

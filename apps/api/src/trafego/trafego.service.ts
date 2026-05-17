@@ -584,16 +584,13 @@ export class TrafegoService {
 
   async updateCampaign(
     tenantId: string,
-    campaignId: string,
+    campaignIdOrGoogleId: string,
     dto: UpdateCampaignDto,
   ) {
-    const campaign = await this.prisma.trafficCampaign.findFirst({
-      where: { id: campaignId, tenant_id: tenantId },
-    });
-    if (!campaign) throw new NotFoundException('Campanha nao encontrada');
-
+    // Aceita UUID interno OU google_campaign_id (alinhado com requireCampaign).
+    const campaign = await this.requireCampaign(tenantId, campaignIdOrGoogleId);
     return this.prisma.trafficCampaign.update({
-      where: { id: campaignId },
+      where: { id: campaign.id },
       data: dto,
     });
   }
@@ -1096,17 +1093,45 @@ export class TrafegoService {
     }
   }
 
-  private async requireCampaign(tenantId: string, campaignId: string) {
+  /**
+   * Resolve referencia a campanha aceitando AMBOS:
+   *   - UUID interno do CRM (id)
+   *   - google_campaign_id numerico
+   *
+   * Antes (ate 2026-05-17), so aceitava UUID. Mas as tools do MCP exibem o
+   * google_campaign_id na listagem (esse eh o ID natural pra quem trabalha
+   * no console Google Ads), e quando o operador/agente passava o google_id
+   * em pause/budget/etc, retornava 404 "Campanha nao encontrada" sem dica.
+   *
+   * O `listAdGroups` ja aceitava ambos via campaign_id query, entao essa
+   * mudanca alinha o comportamento das outras rotas com o que ja existia.
+   */
+  private async requireCampaign(tenantId: string, campaignIdOrGoogleId: string) {
     const camp = await this.prisma.trafficCampaign.findFirst({
-      where: { id: campaignId, tenant_id: tenantId },
+      where: {
+        tenant_id: tenantId,
+        OR: [
+          { id: campaignIdOrGoogleId },
+          { google_campaign_id: campaignIdOrGoogleId },
+        ],
+      },
     });
     if (!camp) throw new NotFoundException('Campanha nao encontrada');
     return camp;
   }
 
-  private async requireAdGroup(tenantId: string, adGroupId: string) {
+  /**
+   * Mesmo padrao do requireCampaign: aceita UUID interno OU google_ad_group_id.
+   */
+  private async requireAdGroup(tenantId: string, adGroupIdOrGoogleId: string) {
     const ag = await this.prisma.trafficAdGroup.findFirst({
-      where: { id: adGroupId, tenant_id: tenantId },
+      where: {
+        tenant_id: tenantId,
+        OR: [
+          { id: adGroupIdOrGoogleId },
+          { google_ad_group_id: adGroupIdOrGoogleId },
+        ],
+      },
     });
     if (!ag) throw new NotFoundException('Ad group nao encontrado');
     return ag;

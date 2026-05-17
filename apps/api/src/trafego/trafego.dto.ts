@@ -850,6 +850,13 @@ export class ListRecommendationsDto {
   @IsOptional()
   type?: string;
 
+  // @Type(() => Number) eh obrigatorio em query params numericos.
+  // Sem isso, "100" chega como string e @IsInt/@Min/@Max falham TODOS,
+  // produzindo mensagem confusa "limit must not be greater than 300;
+  // limit must not be less than 1; limit must be an integer number"
+  // (bug reportado pelo agente externo em 2026-05-17). NestJS sem
+  // global transform:true precisa de @Type pra coercao.
+  @Type(() => Number)
   @IsInt()
   @IsOptional()
   @Min(1)

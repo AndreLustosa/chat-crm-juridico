@@ -77,6 +77,26 @@ function toNumberSafe(
  * Sobre tipo de acesso: queries usadas funcionam em "Acesso as Analises"
  * (read-only metrics tier — nao precisa Basic Access).
  */
+/**
+ * Stringificador defensivo pra erros que nao sao Error nem GoogleAdsFailure.
+ * Tenta extrair info util sem produzir "[object Object]" no log.
+ * Usado pelo handler de auction_insights (BUG #4 — 2026-05-17).
+ */
+function safeStringifyError(err: unknown): string {
+  if (!err) return 'null';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message || err.name || 'Error sem msg';
+  try {
+    const json = JSON.stringify(
+      err,
+      (_k, v) => (typeof v === 'bigint' ? v.toString() : v),
+    );
+    return json.length > 800 ? json.slice(0, 800) + '...' : json;
+  } catch {
+    return Object.prototype.toString.call(err);
+  }
+}
+
 @Injectable()
 @Processor('trafego-sync', { concurrency: 1 })
 export class TrafegoSyncService extends WorkerHost {
@@ -443,7 +463,18 @@ export class TrafegoSyncService extends WorkerHost {
         );
         this.logger.log(`[TRAFEGO_SYNC] Auction Insights: ${auctionRows} rows`);
       } catch (auctionErr: any) {
-        const msg = `auction insights indisponivel: ${auctionErr?.message ?? auctionErr}`;
+        // BUG #4 (2026-05-17): antes virava "[object Object]" porque o SDK
+        // google-ads-api retorna GoogleAdsFailure sem .message direto — o
+        // fallback `${auctionErr}` chamava String(obj) que vira "[object Object]".
+        // Usar formatError do client service: ele extrai [error_code] message
+        // de cada item de GoogleAdsFailure.errors, ou cai num JSON.stringify
+        // raso pra outros tipos de erro.
+        const formatted = this.adsClient.formatError(auctionErr);
+        const fallback =
+          formatted.message && formatted.message !== 'sem msg'
+            ? formatted.message
+            : safeStringifyError(auctionErr);
+        const msg = `auction insights indisponivel [${formatted.kind}]: ${fallback}`;
         this.logger.warn(`[TRAFEGO_SYNC] ${msg}`);
         extendedErrors.push(msg);
       }

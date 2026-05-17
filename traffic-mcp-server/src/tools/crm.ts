@@ -482,22 +482,54 @@ function registerRecommendationReadTools(server: McpServer) {
         'Lista as recomendacoes do PROPRIO Google Ads (sincronizadas via API). Inclui tipo, impacto estimado, payload. Use como insumo pra decidir o que aplicar ou ignorar.',
       inputSchema: {
         type: z.string().optional().describe('Filtrar por tipo (KEYWORD, CALLOUT_EXTENSION, etc)'),
-        status: z.enum(['ACTIVE', 'APPLIED', 'DISMISSED']).optional(),
-        limit: z.number().int().positive().max(200).optional(),
+        // Enum corrigido em 2026-05-17 (BUG #1 reportado pelo agente externo).
+        // Backend aceita os 7 status do TrafficRecommendation: PENDING e READY
+        // sao as ativas, OAB_BLOCKED tem termo vetado, APPLIED ja foi aplicada,
+        // DISMISSED descartada, EXPIRED Google removeu, ERROR falhou ao aplicar.
+        // Quando omitido, backend filtra automaticamente as nao-ativas
+        // (mostra PENDING+READY+OAB_BLOCKED+ERROR).
+        status: z
+          .enum(['PENDING', 'READY', 'OAB_BLOCKED', 'APPLIED', 'DISMISSED', 'EXPIRED', 'ERROR'])
+          .optional()
+          .describe('Default (omitido): mostra apenas as ativas (PENDING+READY+OAB_BLOCKED+ERROR).'),
+        limit: z.number().int().positive().max(300).optional(),
       },
       annotations: { readOnlyHint: true },
     },
     async (input) =>
       safe('traffic_list_recommendations', async (toolCallId) => {
-        const recs = await crmTrafficService.get<AnyRecord[]>(
+        // Backend retorna { items, counts_by_status } — nao um array plano.
+        // Antes o handler chamava .map() em recs direto, falhando com
+        // "(recs ?? []).map is not a function". Fix em 2026-05-17 (BUG #1).
+        const response = await crmTrafficService.get<{
+          items?: AnyRecord[];
+          counts_by_status?: Record<string, number>;
+        }>(
           '/trafego/recommendations',
           { type: input.type, status: input.status, limit: input.limit },
           { toolCallId },
         );
-        return ok(recs, markdownTable(
-          ['ID', 'Tipo', 'Campanha', 'Impacto', 'Status'],
-          (recs ?? []).map((r) => [r.id ?? '-', r.recommendation_type ?? r.type ?? '-', r.campaign?.name ?? r.campaign_id ?? '-', r.impact_text ?? r.estimated_impact ?? '-', r.status ?? '-']),
-        ));
+        const items = Array.isArray(response?.items) ? response.items : [];
+        const counts = response?.counts_by_status ?? {};
+        const countsLine = Object.entries(counts)
+          .map(([s, n]) => `${s}=${n}`)
+          .join(' · ') || 'sem dados';
+        return ok(
+          { items, counts_by_status: counts },
+          [
+            `Total por status: ${countsLine}`,
+            markdownTable(
+              ['ID', 'Tipo', 'Campanha', 'Impacto', 'Status'],
+              items.map((r) => [
+                r.id ?? '-',
+                r.recommendation_type ?? r.type ?? '-',
+                r.campaign?.name ?? r.campaign_id ?? '-',
+                r.impact_text ?? r.estimated_impact ?? '-',
+                r.status ?? '-',
+              ]),
+            ),
+          ].join('\n'),
+        );
       }),
   );
 }
