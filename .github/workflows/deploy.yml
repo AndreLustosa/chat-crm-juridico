@@ -30,24 +30,79 @@ jobs:
       - name: Install dependencies (gera dist/ do @crm/shared via prepare)
         run: npm install --no-audit --no-fund
 
-      - name: Typecheck @crm/shared
-        run: npx tsc --noEmit -p packages/shared
-
-      - name: Typecheck apps/api
-        run: npx tsc --noEmit -p apps/api
-
-      - name: Typecheck apps/worker
-        run: npx tsc --noEmit -p apps/worker
-
-      - name: Typecheck apps/web
-        run: npx tsc --noEmit -p apps/web
-
-      - name: Typecheck + tests traffic-mcp-server
-        working-directory: traffic-mcp-server
+      # Paraleliza 5 alvos no mesmo runner (4 tscs do monorepo + install/tsc/test
+      # do traffic-mcp-server). Antes (sequencial): ~2min. Agora: tempo do mais
+      # lento + overhead minimo. Logs vao pra arquivos separados; report final
+      # mostra cada um em ::group:: pra facilitar debug quando falhar.
+      - name: Typecheck + tests (5 alvos em paralelo)
         run: |
-          npm install --no-audit --no-fund
-          npx tsc --noEmit
-          npm test
+          set +e  # nao aborta no primeiro erro — coleta status de todos
+
+          echo "Disparando 5 typechecks em paralelo..."
+          npx tsc --noEmit -p packages/shared > /tmp/tc-shared.log 2>&1 &
+          PID_SHARED=$!
+          npx tsc --noEmit -p apps/api > /tmp/tc-api.log 2>&1 &
+          PID_API=$!
+          npx tsc --noEmit -p apps/worker > /tmp/tc-worker.log 2>&1 &
+          PID_WORKER=$!
+          npx tsc --noEmit -p apps/web > /tmp/tc-web.log 2>&1 &
+          PID_WEB=$!
+          # MCP server tem npm install proprio (deps separadas) + tsc + vitest
+          (
+            cd traffic-mcp-server &&
+            npm install --no-audit --no-fund > /tmp/tc-mcp-install.log 2>&1 &&
+            npx tsc --noEmit > /tmp/tc-mcp-tsc.log 2>&1 &&
+            npm test > /tmp/tc-mcp-test.log 2>&1
+          ) &
+          PID_MCP=$!
+
+          # Espera todos e coleta exit codes
+          wait $PID_SHARED;  STATUS_SHARED=$?
+          wait $PID_API;     STATUS_API=$?
+          wait $PID_WORKER;  STATUS_WORKER=$?
+          wait $PID_WEB;     STATUS_WEB=$?
+          wait $PID_MCP;     STATUS_MCP=$?
+
+          # Reporta status de cada um (visivel mesmo em sucesso)
+          report() {
+            local name="$1" status="$2" log="$3"
+            if [ "$status" -eq 0 ]; then
+              echo "✅ $name"
+            else
+              echo "::group::❌ $name (exit=$status)"
+              cat "$log" 2>/dev/null || echo "(sem log)"
+              echo "::endgroup::"
+            fi
+          }
+
+          echo ""
+          echo "=== Resultado dos typechecks ==="
+          report "@crm/shared       " "$STATUS_SHARED" "/tmp/tc-shared.log"
+          report "apps/api          " "$STATUS_API"    "/tmp/tc-api.log"
+          report "apps/worker       " "$STATUS_WORKER" "/tmp/tc-worker.log"
+          report "apps/web          " "$STATUS_WEB"    "/tmp/tc-web.log"
+          if [ "$STATUS_MCP" -ne 0 ]; then
+            echo "::group::❌ traffic-mcp-server (exit=$STATUS_MCP)"
+            echo "--- npm install ---"
+            cat /tmp/tc-mcp-install.log 2>/dev/null || echo "(sem log)"
+            echo "--- tsc ---"
+            cat /tmp/tc-mcp-tsc.log 2>/dev/null || echo "(sem log)"
+            echo "--- vitest ---"
+            cat /tmp/tc-mcp-test.log 2>/dev/null || echo "(sem log)"
+            echo "::endgroup::"
+          else
+            echo "✅ traffic-mcp-server"
+          fi
+
+          # Falha se qualquer um quebrou
+          TOTAL=$((STATUS_SHARED + STATUS_API + STATUS_WORKER + STATUS_WEB + STATUS_MCP))
+          if [ "$TOTAL" -ne 0 ]; then
+            echo ""
+            echo "❌ Typecheck falhou — veja os logs acima."
+            exit 1
+          fi
+          echo ""
+          echo "✅ Todos os typechecks passaram."
 
   build-and-push:
     needs: typecheck
