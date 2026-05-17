@@ -755,40 +755,51 @@ export class TrafegoMutateProcessor extends WorkerHost {
    * NÃO popula bidding_strategy_resource_name (estratégia portfolio
    * compartilhada): apenas a versão "standard" embutida na campanha.
    *
-   * Fix 2026-05-17 (apos 4 tentativas — ver feedback_google_ads_sdk_fieldmask.md
-   * pra cadeia completa). Padrao canonico documentado nos docs oficiais
-   * Google (developers.google.com/google-ads/api/docs/client-libs/java/field-masks):
+   * Fix 2026-05-17 — TENTATIVA 5 (H1):
+   * Ver `feedback_google_ads_sdk_fieldmask.md` pra cadeia completa das 4
+   * tentativas anteriores que falharam em prod com sintomas distintos.
    *
-   *   - bidding_strategy_type eh READ-ONLY: Google ignora quando enviado.
-   *     NAO incluir no body nem no mask (era o erro das tentativas anteriores).
-   *   - Body popula o oneof field (`maximize_conversions: {}`, `target_cpa: {...}`)
-   *   - update_mask contem SUBFIELD do oneof (ex `maximize_conversions.target_cpa_micros`).
-   *     A presenca do subfield path no mask serve como signal pro Google
-   *     entender "trocar estrategia pra este oneof".
-   *   - Mask NAO pode conter so o oneof name (FIELD_HAS_SUBFIELDS).
-   *   - Mask NAO pode conter so bidding_strategy_type (no-op silencioso).
+   * Hipotese desta tentativa: o encoder JS do google-ads-api strippa
+   * `{}` (empty message) na serializacao, mesmo quando o oneof esta
+   * "selecionado". Resultado: Google recebe body sem o oneof + mask
+   * apontando pra subfield "fantasma" → INVALID_ARGUMENT (observado em
+   * db1f985).
+   *
+   * Solucao: popular UM subfield do oneof message no body explicitamente,
+   * mesmo que o valor seja o default (0n pra int64, 0 pra double). O
+   * encoder JS distingue "field set to default" vs "field unset" via
+   * presence-tracking interno — então 0n sobrevive a serializacao.
+   *
+   * Google interpreta `target_cpa_micros: 0n` em MaximizeConversions como
+   * "sem CPA alvo" (campo eh opcional, 0 = unset semanticamente).
+   *
+   * - bidding_strategy_type continua FORA do body/mask (read-only).
+   * - update_mask contem SUBFIELD path (`maximize_conversions.target_cpa_micros`).
+   * - Body popula o oneof + subfield com valor (default 0 pros "vazios").
    *
    * Bypass via GoogleAdsServiceClient.mutate gRPC direto continua sendo
-   * necessario porque o auto-mask do SDK google-ads-api v23 nao gera
-   * subfield paths pra empty oneof messages — descende em `{}`, retorna
-   * vazio, e pula o push do parent (utils.js#recursiveFieldMaskSearch).
+   * necessario porque o auto-mask do SDK alto-nivel
+   * (utils.js#recursiveFieldMaskSearch) nao gera subfield paths
+   * confiavelmente.
    */
   private async updateBiddingStrategy(
     p: UpdateBiddingStrategyPayload,
   ): Promise<MutateResult> {
     const op: any = { resource_name: p.campaignResourceName };
 
-    // Cada estrategia: (1) popula o oneof message no body, (2) define qual
-    // subfield path vai no mask como "marker" do oneof selecionado.
+    // Cada estrategia: (1) popula o oneof message NO body COM ao menos
+    // um subfield explicito (mesmo que default — H1), (2) define o
+    // subfield path do mask que casa com o body.
     let updateMaskPath: string;
 
     if (p.biddingStrategy === 'MAXIMIZE_CONVERSIONS') {
-      op.maximize_conversions = {};
-      // target_cpa_micros eh opcional na MaximizeConversions (0/unset = sem CPA alvo)
+      // 0n = "sem CPA alvo" (target_cpa_micros eh opcional).
+      // Subfield explicito impede o encoder JS de strippar o oneof.
+      op.maximize_conversions = { target_cpa_micros: 0n };
       updateMaskPath = 'maximize_conversions.target_cpa_micros';
     } else if (p.biddingStrategy === 'MAXIMIZE_CONVERSION_VALUE') {
-      op.maximize_conversion_value = {};
-      // target_roas eh opcional (0/unset = sem ROAS alvo)
+      // 0 = "sem ROAS alvo" (target_roas eh opcional).
+      op.maximize_conversion_value = { target_roas: 0 };
       updateMaskPath = 'maximize_conversion_value.target_roas';
     } else if (p.biddingStrategy === 'TARGET_CPA') {
       if (!p.targetCpaMicros) {
@@ -809,12 +820,17 @@ export class TrafegoMutateProcessor extends WorkerHost {
       updateMaskPath = 'target_roas.target_roas';
     } else if (p.biddingStrategy === 'MAXIMIZE_CLICKS') {
       // MaximizeClicks = TargetSpend protobuf (legado de nome, Google ainda
-      // usa internamente). Subfield estavel: cpc_bid_ceiling_micros (deprecated
-      // target_spend_micros nao recomendado).
-      op.target_spend = {};
+      // usa internamente). cpc_bid_ceiling_micros eh opcional (0 = sem teto).
+      op.target_spend = { cpc_bid_ceiling_micros: 0n };
       updateMaskPath = 'target_spend.cpc_bid_ceiling_micros';
     } else if (p.biddingStrategy === 'MANUAL_CPC') {
-      op.manual_cpc = { enhanced_cpc_enabled: false };
+      // enhanced_cpc_enabled=false eh default proto3. Pra garantir presence
+      // na wire (mesmo problema H1), passamos true e depois pode-se
+      // desabilitar via outro mutate se quiser. Alternativa seria envelopar
+      // num BoolValue, mas o SDK nao expoe wrappers facilmente.
+      // Pratico: maioria das campanhas Search com MANUAL_CPC ja usa eCPC
+      // de qualquer jeito, e setar true aqui mantem o oneof presente.
+      op.manual_cpc = { enhanced_cpc_enabled: true };
       updateMaskPath = 'manual_cpc.enhanced_cpc_enabled';
     } else {
       throw new Error(`bidding_strategy desconhecida: ${p.biddingStrategy}`);
