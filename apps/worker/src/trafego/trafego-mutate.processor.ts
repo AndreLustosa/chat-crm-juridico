@@ -754,18 +754,47 @@ export class TrafegoMutateProcessor extends WorkerHost {
    *
    * NÃO popula bidding_strategy_resource_name (estratégia portfolio
    * compartilhada): apenas a versão "standard" embutida na campanha.
+   *
+   * Fix 2026-05-17 (BUG B reportado pelo agente externo): o SDK
+   * google-ads-api NAO auto-deduzia update_mask pra oneof fields de
+   * bidding strategy. Resultado: mutate retornava SUCCESS mas Google
+   * ignorava no-op. Solucao: popular bidding_strategy_type ENUM
+   * EXPLICITAMENTE — isso forca o SDK a incluir tanto o campo enum
+   * quanto o objeto da estrategia no update_mask, garantindo que o
+   * Google aplique a mudanca.
    */
   private async updateBiddingStrategy(
     p: UpdateBiddingStrategyPayload,
   ): Promise<MutateResult> {
     const op: any = { resource_name: p.campaignResourceName };
 
+    // bidding_strategy_type EXPLICITO — garante update_mask correto. Sem
+    // isso, o auto-mask do SDK nao detectava oneof e o Google ignorava
+    // a mudanca silenciosamente (SUCCESS sem efeito).
+    const enumMap: Record<string, number | undefined> = {
+      MAXIMIZE_CONVERSIONS: enums.BiddingStrategyType.MAXIMIZE_CONVERSIONS,
+      MAXIMIZE_CONVERSION_VALUE: enums.BiddingStrategyType.MAXIMIZE_CONVERSION_VALUE,
+      TARGET_CPA: enums.BiddingStrategyType.TARGET_CPA,
+      TARGET_ROAS: enums.BiddingStrategyType.TARGET_ROAS,
+      MAXIMIZE_CLICKS: enums.BiddingStrategyType.TARGET_SPEND, // Google: TargetSpend = MaximizeClicks novo
+      MANUAL_CPC: enums.BiddingStrategyType.MANUAL_CPC,
+      TARGET_SPEND: enums.BiddingStrategyType.TARGET_SPEND,
+      TARGET_IMPRESSION_SHARE: enums.BiddingStrategyType.TARGET_IMPRESSION_SHARE,
+    };
+    const enumValue = enumMap[p.biddingStrategy];
+    if (enumValue === undefined) {
+      throw new Error(`bidding_strategy desconhecida: ${p.biddingStrategy}`);
+    }
+    op.bidding_strategy_type = enumValue;
+
     // Cada bidding strategy tem campo dedicado — Google espera APENAS um
-    // populado por campanha. Limpamos os outros via clearedFields no proto
-    // (o SDK trata via update_mask automaticamente).
+    // populado por campanha. Popular este garante que update_mask inclui o
+    // path correto.
     if (p.biddingStrategy === 'MAXIMIZE_CONVERSIONS') {
       op.maximize_conversions = {};
     } else if (p.biddingStrategy === 'MAXIMIZE_CLICKS') {
+      // MaximizeClicks resource = TargetSpend protobuf field (legado de nome,
+      // mas Google ainda usa internamente)
       op.target_spend = {};
     } else if (p.biddingStrategy === 'MANUAL_CPC') {
       op.manual_cpc = { enhanced_cpc_enabled: false };

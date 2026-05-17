@@ -681,17 +681,13 @@ export class TrafegoController {
       learning_period_days_estimate: validation.learningPeriodDays,
     };
 
-    if (dto.validate_only) {
-      return {
-        ok: true,
-        validate_only: true,
-        message: 'Mutate em DRY-RUN — payload valido, nada foi aplicado.',
-        warnings: validation.warnings,
-        preview,
-      };
-    }
-
-    // Passa UUID interno pro enqueueMutate (resolve_id ja feito acima)
+    // SEMPRE enfileira — incluindo validate_only=true. Antes (ate 2026-05-17)
+    // o controller fazia shortcut em validate_only=true retornando direto sem
+    // passar pelo worker. Isso causou inconsistencia com outras tools (negatives
+    // logavam validate_only; bidding_strategy nao logava). Fix: padroniza
+    // comportamento — toda chamada vira log proprio, validate_only roda no SDK
+    // Google com flag validate_only=true (Google retorna SUCCESS sem aplicar)
+    // e log fica com validate_only=true rastreavel.
     const result = await this.enqueueMutate(
       req,
       'trafego-mutate-update-bidding-strategy',
