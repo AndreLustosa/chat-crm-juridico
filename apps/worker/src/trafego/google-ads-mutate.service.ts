@@ -376,12 +376,20 @@ export class GoogleAdsMutateService {
 
   /**
    * request_id determinístico baseado em (tenant, account, resource, op,
-   * payload-hash, initiator). Mesmo input = mesmo id = idempotencia real.
+   * payload-hash, initiator, validateOnly). Mesmo input = mesmo id = idempotencia real.
    *
    * Por que determinístico? Retries (BullMQ, falha de rede, click duplo)
    * precisam reaproveitar o mesmo log e nao executar o mutate duas vezes.
    * Caller que QUER um id unico (ex: forcar reexecucao apos rollback) deve
    * passar `req.requestId` explicitamente.
+   *
+   * Por que validateOnly faz parte do hash (fix 2026-05-17)?
+   * Bug reportado pelo agente externo: dry-run + apply real com mesmo payload
+   * produziam mesmo request_id, e o segundo era deduplicado → mutate real
+   * NUNCA executava no Google. Pior, o caller pensava que tinha aplicado
+   * (recebia status SUCCESS do log antigo). Solucao: validate_only altera o
+   * hash; cada modo tem seu request_id e seu log proprio. Retries do mesmo
+   * modo continuam dedupados (idempotencia preservada).
    */
   private generateRequestId(req: MutateRequest): string {
     const payloadStr = JSON.stringify(req.operations, this.bigIntReplacer);
@@ -397,6 +405,8 @@ export class GoogleAdsMutateService {
       .update(payloadStr)
       .update('|')
       .update(req.initiator)
+      .update('|')
+      .update(req.validateOnly ? 'validate' : 'apply')
       .digest('hex')
       .slice(0, 32);
     return `mut-${hash}`;
