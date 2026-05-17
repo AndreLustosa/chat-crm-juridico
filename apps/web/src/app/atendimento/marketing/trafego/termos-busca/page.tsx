@@ -1,5 +1,9 @@
 'use client';
 
+// MODO MONITORAMENTO (2026-05-17): pagina READ-ONLY. Botoes "Negativar" /
+// "Negativar todos" removidos — operacao via gestor de trafego Claude
+// (tools traffic_add_negative_to_ad_group / traffic_add_negative_to_campaign
+// via MCP).
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -7,14 +11,12 @@ import {
   Loader2,
   Inbox,
   Search,
-  ShieldX,
   AlertTriangle,
   CheckCircle2,
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
-import { showError, showSuccess } from '@/lib/toast';
-import { AddNegativesModal } from '../components/AddNegativesModal';
+import { showError } from '@/lib/toast';
 import { Pagination } from '../components/Pagination';
 
 interface SearchTerm {
@@ -47,11 +49,11 @@ const fmtPct = (v: number) =>
   }).format(v || 0);
 
 /**
- * Página dedicada de termos de busca cross-campaign. Diferente do card
- * que existe na CampanhasTab (filtra por status/spend), aqui o foco é:
- *   1. Banner de "candidatos a negativar" (gasto > R$3 + 0 conv)
- *   2. Lista completa com coluna de Campanha visível
- *   3. Negativar em batch cross-campaign
+ * Página dedicada de termos de busca cross-campaign. Read-only — exibe:
+ *   1. Banner de "candidatos a negativar" (gasto > R$3 + 0 conv) — info
+ *      pro operador identificar oportunidades. A negativacao em si eh
+ *      delegada ao gestor de trafego Claude via MCP.
+ *   2. Lista completa filtravel com coluna de Campanha visivel.
  */
 export default function TermosBuscaPage() {
   const router = useRouter();
@@ -72,12 +74,6 @@ export default function TermosBuscaPage() {
     setPage(1);
   }, [campaignFilter, statusFilter, search]);
 
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(
-    new Set(),
-  );
-  const [negativesOpen, setNegativesOpen] = useState(false);
-  const [presetTerms, setPresetTerms] = useState<string[]>([]);
-
   async function load() {
     setLoading(true);
     try {
@@ -96,16 +92,15 @@ export default function TermosBuscaPage() {
     load();
   }, []);
 
-  // Sugestões automáticas: gasto > R$3 + 0 conv
+  // Sugestões automáticas (informativas): gasto > R$3 + 0 conv
   const suggestions = useMemo(() => {
     return terms.filter(
       (t) =>
         t.cost_brl > 3 &&
         t.conversions === 0 &&
-        !dismissedSuggestions.has(t.id) &&
         t.status !== 'EXCLUDED',
     );
-  }, [terms, dismissedSuggestions]);
+  }, [terms]);
 
   const totalWasted = suggestions.reduce((s, t) => s + t.cost_brl, 0);
 
@@ -132,41 +127,6 @@ export default function TermosBuscaPage() {
       return true;
     });
   }, [terms, campaignFilter, statusFilter, search]);
-
-  function dismissSuggestion(id: string) {
-    setDismissedSuggestions((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
-  }
-
-  function openNegativeAll() {
-    setPresetTerms(suggestions.map((s) => s.search_term));
-    setNegativesOpen(true);
-  }
-
-  async function negativeOne(t: SearchTerm) {
-    if (!perms.canManageTrafego || !t.ad_group_id) return;
-    if (
-      !confirm(
-        `Adicionar "${t.search_term}" como negativa EXACT em "${t.ad_group_name}"?`,
-      )
-    )
-      return;
-    try {
-      await api.post(`/trafego/ad-groups/${t.ad_group_id}/negatives`, {
-        scope: 'AD_GROUP',
-        negatives: [{ text: t.search_term, match_type: 'EXACT' }],
-        reason: `Negativada via /termos-busca (gasto ${fmtBRL(t.cost_brl)})`,
-      });
-      showSuccess(`"${t.search_term}" enfileirada.`);
-      dismissSuggestion(t.id);
-      setTimeout(load, 3000);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha.');
-    }
-  }
 
   if (!perms.canViewTrafego) {
     return (
@@ -206,8 +166,8 @@ export default function TermosBuscaPage() {
         </div>
       </div>
 
-      {/* Banner de sugestões de negativação automática */}
-      {suggestions.length > 0 && perms.canManageTrafego && (
+      {/* Banner informativo de candidatos a negativacao */}
+      {suggestions.length > 0 && (
         <div className="mb-6 bg-red-500/5 border border-red-500/30 rounded-xl p-5">
           <div className="flex items-start gap-3 mb-3">
             <AlertTriangle size={20} className="text-red-500 shrink-0 mt-0.5" />
@@ -222,52 +182,31 @@ export default function TermosBuscaPage() {
               </h3>
               <p className="text-xs text-muted-foreground mt-1">
                 Termos com gasto &gt; R$3 e 0 conversões nos últimos 30 dias.
-                Clique em um chip pra dispensar essa sugestão (não negativa).
+                Negativacao eh feita pelo gestor de trafego via MCP
+                (<code>traffic_add_negative_to_ad_group</code> ou{' '}
+                <code>traffic_add_negative_to_campaign</code>).
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-1.5 mb-3">
+          <div className="flex flex-wrap gap-1.5">
             {suggestions.slice(0, 24).map((s) => (
-              <button
+              <span
                 key={s.id}
-                type="button"
-                onClick={() => dismissSuggestion(s.id)}
-                className="text-[11px] font-mono px-2 py-1 bg-card border border-red-500/30 rounded hover:bg-red-500/10 text-foreground"
-                title={`${fmtBRL(s.cost_brl)} • ${s.clicks} clicks • Clique pra dispensar`}
+                className="text-[11px] font-mono px-2 py-1 bg-card border border-red-500/30 rounded text-foreground"
+                title={`${fmtBRL(s.cost_brl)} • ${s.clicks} clicks`}
               >
                 {s.search_term}
                 <span className="ml-1 text-[10px] text-muted-foreground">
                   ({fmtBRL(s.cost_brl)})
                 </span>
-              </button>
+              </span>
             ))}
             {suggestions.length > 24 && (
               <span className="text-[11px] text-muted-foreground self-center px-2">
                 +{suggestions.length - 24} mais
               </span>
             )}
-          </div>
-
-          <div className="flex gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={openNegativeAll}
-              className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm"
-            >
-              <ShieldX size={13} />
-              Negativar todos ({suggestions.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStatusFilter('NO_CONV');
-                window.scrollTo({ top: 600, behavior: 'smooth' });
-              }}
-              className="px-3 py-2 text-xs font-bold rounded-lg border border-border hover:bg-accent"
-            >
-              Revisar um a um
-            </button>
           </div>
         </div>
       )}
@@ -344,7 +283,7 @@ export default function TermosBuscaPage() {
         </div>
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-x-auto">
-          <table className="w-full text-sm min-w-[1100px]">
+          <table className="w-full text-sm min-w-[1000px]">
             <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="text-left px-3 py-2.5">Termo</th>
@@ -353,7 +292,7 @@ export default function TermosBuscaPage() {
                 <th className="text-right px-3 py-2.5">Conv</th>
                 <th className="text-right px-3 py-2.5">Gasto</th>
                 <th className="text-right px-3 py-2.5">CTR</th>
-                <th className="text-right px-3 py-2.5 w-32">Ação</th>
+                <th className="text-left px-3 py-2.5 w-28">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -362,81 +301,76 @@ export default function TermosBuscaPage() {
                 .map((t) => {
                   const offender = t.cost_brl > 5 && t.conversions === 0;
                   const winner = t.conversions > 0;
-                return (
-                  <tr
-                    key={t.id}
-                    className={`border-t border-border ${
-                      winner
-                        ? 'bg-emerald-500/5'
-                        : offender
-                          ? 'bg-red-500/5'
-                          : ''
-                    }`}
-                  >
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {winner && (
-                        <CheckCircle2
-                          size={11}
-                          className="inline text-emerald-500 mr-1"
-                        />
-                      )}
-                      {offender && (
-                        <AlertTriangle
-                          size={11}
-                          className="inline text-red-500 mr-1"
-                        />
-                      )}
-                      {t.search_term}
-                      {t.match_type && (
-                        <span className="ml-2 text-[10px] text-muted-foreground">
-                          ({t.match_type})
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      <div className="text-foreground truncate max-w-[200px]">
-                        {t.campaign_name ?? '—'}
-                      </div>
-                      <div className="text-muted-foreground truncate max-w-[200px]">
-                        {t.ad_group_name ?? '—'}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {t.clicks}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {t.conversions.toFixed(1)}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold">
-                      {fmtBRL(t.cost_brl)}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      {fmtPct(t.ctr)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {t.status === 'EXCLUDED' ? (
-                        <span className="text-[10px] text-muted-foreground">
-                          Já negativado
-                        </span>
-                      ) : t.conversions === 0 && t.ad_group_id ? (
-                        <button
-                          type="button"
-                          onClick={() => negativeOne(t)}
-                          disabled={!perms.canManageTrafego}
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-700 disabled:opacity-40"
-                        >
-                          <ShieldX size={11} /> Negativar
-                        </button>
-                      ) : winner ? (
-                        <span title="Termo convertendo">
-                          <CheckCircle2 size={14} className="text-emerald-500 inline" />
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
+                  return (
+                    <tr
+                      key={t.id}
+                      className={`border-t border-border ${
+                        winner
+                          ? 'bg-emerald-500/5'
+                          : offender
+                            ? 'bg-red-500/5'
+                            : ''
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {winner && (
+                          <CheckCircle2
+                            size={11}
+                            className="inline text-emerald-500 mr-1"
+                          />
+                        )}
+                        {offender && (
+                          <AlertTriangle
+                            size={11}
+                            className="inline text-red-500 mr-1"
+                          />
+                        )}
+                        {t.search_term}
+                        {t.match_type && (
+                          <span className="ml-2 text-[10px] text-muted-foreground">
+                            ({t.match_type})
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        <div className="text-foreground truncate max-w-[200px]">
+                          {t.campaign_name ?? '—'}
+                        </div>
+                        <div className="text-muted-foreground truncate max-w-[200px]">
+                          {t.ad_group_name ?? '—'}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {t.clicks}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {t.conversions.toFixed(1)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                        {fmtBRL(t.cost_brl)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {fmtPct(t.ctr)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {t.status === 'EXCLUDED' ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/15 text-red-600">
+                            Negativado
+                          </span>
+                        ) : winner ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">
+                            Convertendo
+                          </span>
+                        ) : offender ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600">
+                            Sem conv
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
                 })}
             </tbody>
           </table>
@@ -449,22 +383,6 @@ export default function TermosBuscaPage() {
           />
         </div>
       )}
-
-      {/* Modal de batch negativas (cross-campaign permitido) */}
-      <AddNegativesModal
-        open={negativesOpen}
-        campaignId={null}
-        campaignName="Cross-campaign"
-        defaultTerms={presetTerms}
-        allowAllCampaigns
-        onClose={() => setNegativesOpen(false)}
-        onSaved={() => {
-          for (const id of suggestions.map((s) => s.id)) {
-            dismissSuggestion(id);
-          }
-          setTimeout(load, 4000);
-        }}
-      />
     </div>
   );
 }

@@ -1,16 +1,17 @@
 'use client';
 
+// MODO MONITORAMENTO (2026-05-17): card READ-ONLY. Botao "Negativar" removido
+// — operacao via gestor de trafego (traffic_add_negative_to_ad_group via MCP).
 import { useEffect, useMemo, useState } from 'react';
 import {
   Search,
   Loader2,
   Inbox,
-  ShieldX,
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
 import api from '@/lib/api';
-import { showError, showSuccess } from '@/lib/toast';
+import { showError } from '@/lib/toast';
 import { Pagination } from './Pagination';
 
 interface SearchTerm {
@@ -47,16 +48,18 @@ const fmtPct = (v: number) =>
 /**
  * Card de Termos de Pesquisa — última camada de visibilidade do que o
  * usuário REALMENTE digitou no Google. Ordenado por gasto. Filtra por
- * "ofensores" (zero conversões + gasto > X) pra acelerar negativação.
+ * "ofensores" (zero conversões + gasto > X) pra identificar candidatos
+ * a negativação.
  *
- * "Negativar" enfileira mutate scope=AD_GROUP no Google Ads usando o
- * endpoint /trafego/ad-groups/:id/negatives existente. Match type
- * default: EXACT (mais conservador — bloqueia só o termo idêntico).
+ * Read-only: a negativação eh feita pelo gestor de trafego Claude via MCP
+ * (tool `traffic_add_negative_to_ad_group`). Esta UI eh monitoramento.
+ *
+ * Prop `canManage` mantida na assinatura pra back-compat de chamadores —
+ * nao tem efeito visivel hoje (sem botoes de mutate).
  */
-export function SearchTermsCard({ canManage }: { canManage: boolean }) {
+export function SearchTermsCard(_props: { canManage: boolean }) {
   const [terms, setTerms] = useState<SearchTerm[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actingId, setActingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'OFFENDERS' | 'ALL' | 'WINNERS'>(
     'OFFENDERS',
   );
@@ -108,35 +111,6 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
     const clicks = terms.reduce((s, t) => s + t.clicks, 0);
     return { cost, conv, clicks };
   }, [terms]);
-
-  async function negativeTerm(t: SearchTerm) {
-    if (!canManage || !t.ad_group_id) {
-      if (!t.ad_group_id)
-        showError('Termo sem ad_group local — sincronize antes.');
-      return;
-    }
-    if (
-      !confirm(
-        `Adicionar "${t.search_term}" como negativa EXACT no ad_group "${t.ad_group_name}"?`,
-      )
-    )
-      return;
-    setActingId(t.id);
-    try {
-      await api.post(`/trafego/ad-groups/${t.ad_group_id}/negatives`, {
-        scope: 'AD_GROUP',
-        negatives: [{ text: t.search_term, match_type: 'EXACT' }],
-        reason: `Negativada via Search Terms Report (gasto ${fmtBRL(t.cost_brl)}, ${t.conversions} conv)`,
-      });
-      showSuccess(`Negativa "${t.search_term}" enfileirada.`);
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ?? 'Falha ao enfileirar negativa';
-      showError(msg);
-    } finally {
-      setActingId(null);
-    }
-  }
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -229,7 +203,7 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1000px]">
+          <table className="w-full text-sm min-w-[900px]">
             <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="text-left px-3 py-2.5">Termo</th>
@@ -241,7 +215,6 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
                 <th className="text-right px-3 py-2.5">Custo</th>
                 <th className="text-right px-3 py-2.5">Conv</th>
                 <th className="text-right px-3 py-2.5">CPL</th>
-                <th className="text-right px-3 py-2.5 w-32">Ação</th>
               </tr>
             </thead>
             <tbody>
@@ -299,30 +272,6 @@ export function SearchTermsCard({ canManage }: { canManage: boolean }) {
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {t.conversions > 0 ? fmtBRL(t.cpl_brl) : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => negativeTerm(t)}
-                        disabled={
-                          !canManage ||
-                          !t.ad_group_id ||
-                          actingId === t.id
-                        }
-                        title={
-                          !t.ad_group_id
-                            ? 'Termo sem ad_group local'
-                            : 'Adicionar como negativa EXACT'
-                        }
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {actingId === t.id ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : (
-                          <ShieldX size={11} />
-                        )}
-                        Negativar
-                      </button>
                     </td>
                   </tr>
                 );

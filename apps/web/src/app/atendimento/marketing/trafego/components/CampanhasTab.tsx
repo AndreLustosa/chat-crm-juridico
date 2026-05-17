@@ -1,5 +1,13 @@
 'use client';
 
+// MODO MONITORAMENTO (2026-05-17): essa tab foi simplificada pra READ-ONLY do
+// ponto de vista do Google Ads. Todas as acoes de mutate (pause/resume/delete,
+// budget edit, bidding strategy, create campaign/RSA) foram removidas — sao
+// operadas exclusivamente pelo gestor de trafego Claude via MCP server.
+//
+// Continuam disponiveis: filtros, ordenacao, busca, favoritos (CRM-side),
+// tags (CRM-side), navegacao pra detail. Essas sao anotacoes internas do
+// escritorio, nao tocam no Google Ads.
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -7,15 +15,8 @@ import {
   Loader2,
   Inbox,
   Tag,
-  Pause,
-  Play,
-  Edit3,
-  Trash2,
   X,
   Search,
-  Plus,
-  TrendingUp,
-  FileText,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
@@ -23,12 +24,8 @@ import {
 import api from '@/lib/api';
 import { showError, showSuccess } from '@/lib/toast';
 import { SearchTermsCard } from './SearchTermsCard';
-import { CreateCampaignWizard } from './CreateCampaignWizard';
-import { BiddingStrategyModal } from './BiddingStrategyModal';
-import { CreateRsaModal } from './CreateRsaModal';
 import { ImpressionShareBar } from './ImpressionShareBar';
 import { AdStrengthBadge } from './AdStrengthBadge';
-import { EditBudgetModal } from './EditBudgetModal';
 
 interface MetricsWindow {
   days: number;
@@ -61,13 +58,6 @@ interface Campaign {
   notes: string | null;
   ad_strength: 'POOR' | 'AVERAGE' | 'GOOD' | 'EXCELLENT' | 'PENDING' | 'NO_ADS' | null;
   metrics_window?: MetricsWindow;
-}
-
-interface AdGroupOption {
-  id: string;
-  name: string;
-  campaign_id: string;
-  campaign?: { name?: string | null } | null;
 }
 
 type SortKey =
@@ -149,25 +139,18 @@ function suggestTagsFromName(name: string): string[] {
 }
 
 export function CampanhasTab({ canManage }: { canManage: boolean }) {
+  // `canManage` aqui controla apenas anotacoes INTERNAS do CRM (favoritos,
+  // tags, edicao de notas). Acoes de mutate no Google Ads (pause, resume,
+  // delete, budget, bidding) NAO sao mais expostas — operadas via MCP server
+  // pelo gestor de trafego.
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
-  const [budgetEditCampaign, setBudgetEditCampaign] = useState<Campaign | null>(
-    null,
-  );
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [tagsEditId, setTagsEditId] = useState<string | null>(null);
   const [tagsInput, setTagsInput] = useState('');
-  const [createWizardOpen, setCreateWizardOpen] = useState(false);
-  const [biddingCampaign, setBiddingCampaign] = useState<Campaign | null>(null);
-  const [rsaAdGroup, setRsaAdGroup] = useState<AdGroupOption | null>(null);
-  const [adGroupPickerCampaignId, setAdGroupPickerCampaignId] = useState<
-    string | null
-  >(null);
-  const [adGroupOptions, setAdGroupOptions] = useState<AdGroupOption[]>([]);
-  const [adGroupPickerLoading, setAdGroupPickerLoading] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('favorite');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -282,54 +265,6 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
     }
   }
 
-  async function pauseOrResume(c: Campaign) {
-    if (!canManage) return;
-    const action = c.status === 'PAUSED' ? 'resume' : 'pause';
-    const confirmMsg =
-      action === 'pause'
-        ? `Pausar a campanha "${c.name}" no Google Ads?`
-        : `Reativar a campanha "${c.name}" no Google Ads?`;
-    if (!confirm(confirmMsg)) return;
-    setActingId(c.id);
-    try {
-      await api.post(`/trafego/campaigns/${c.id}/${action}`, {});
-      showSuccess(
-        action === 'pause' ? 'Pausa enfileirada.' : 'Reativacao enfileirada.',
-      );
-      // Optimistic UI: status muda em ~5s; resync sera no proximo cron, mas o
-      // mirror local do worker ja atualiza o cache.
-      setTimeout(load, 4000);
-    } catch (err: unknown) {
-      showError(getApiErrorMessage(err, 'Falha ao executar acao.'));
-    } finally {
-      setActingId(null);
-    }
-  }
-
-  async function deleteCampaign(c: Campaign) {
-    if (!canManage || c.status === 'REMOVED') return;
-    const confirmMsg =
-      `Excluir a campanha "${c.name}" no Google Ads?\n\n` +
-      'Esta acao remove a campanha da conta e nao pode ser desfeita por esta tela.';
-    if (!confirm(confirmMsg)) return;
-    setActingId(c.id);
-    try {
-      await api.delete(`/trafego/campaigns/${c.id}`);
-      showSuccess('Exclusao enfileirada.');
-      setCampaigns((prev) => prev.filter((x) => x.id !== c.id));
-      setTimeout(load, 4000);
-    } catch (err: unknown) {
-      showError(getApiErrorMessage(err, 'Falha ao excluir campanha.'));
-    } finally {
-      setActingId(null);
-    }
-  }
-
-  function openBudgetModal(c: Campaign) {
-    if (!canManage) return;
-    setBudgetEditCampaign(c);
-  }
-
   async function toggleFavorite(c: Campaign) {
     if (!canManage) return;
     try {
@@ -374,32 +309,6 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
     }
   }
 
-  async function openRsaPicker(campaign: Campaign) {
-    if (!canManage) return;
-    setAdGroupPickerCampaignId(campaign.id);
-    setAdGroupPickerLoading(true);
-    try {
-      const { data } = await api.get<AdGroupOption[]>('/trafego/ad-groups', {
-        params: { campaign_id: campaign.id },
-      });
-      const opts = (data ?? []).map((ag) => ({
-        ...ag,
-        campaign: { name: campaign.name },
-      }));
-      setAdGroupOptions(opts);
-      if (opts.length === 1) {
-        // Atalho: campanha com 1 só ad_group abre direto o RSA modal
-        setRsaAdGroup(opts[0]);
-        setAdGroupPickerCampaignId(null);
-      }
-    } catch {
-      showError('Erro ao listar ad_groups dessa campanha.');
-      setAdGroupPickerCampaignId(null);
-    } finally {
-      setAdGroupPickerLoading(false);
-    }
-  }
-
   async function applySuggestedTags(c: Campaign) {
     if (!canManage) return;
     const suggested = suggestTagsFromName(c.name);
@@ -439,8 +348,9 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
           Nenhuma campanha ainda
         </h3>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Após o primeiro sync com a Google Ads API, as campanhas aparecem aqui
-          com métricas, status e ferramentas operacionais.
+          Após o primeiro sync com a Google Ads API, as campanhas aparecem
+          aqui com métricas e status pra monitoramento. Operacao (criar,
+          pausar, ajustar) eh feita pelo gestor de trafego via MCP.
         </p>
       </div>
     );
@@ -448,20 +358,6 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="space-y-3">
-      {/* ─── Header com action buttons ─────────────────────────────────── */}
-      {canManage && (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setCreateWizardOpen(true)}
-            className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
-          >
-            <Plus size={13} />
-            Nova campanha
-          </button>
-        </div>
-      )}
-
       {/* ─── Filtros ───────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border">
@@ -615,7 +511,6 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                 Ad Strength
               </th>
               <th className="text-left px-3 py-3">Tags</th>
-              <th className="text-right px-3 py-3 w-40">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -655,21 +550,13 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                     {c.channel_type ?? '—'}
                   </td>
                   <td className="px-3 py-3">
-                    <button
-                      type="button"
-                      onClick={() => pauseOrResume(c)}
-                      disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
-                      title={c.status === 'PAUSED' ? 'Reativar' : 'Pausar'}
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full transition-opacity ${
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                         STATUS_BADGE[c.status] ?? 'bg-muted text-muted-foreground'
-                      } ${
-                        canManage && c.status !== 'REMOVED'
-                          ? 'hover:opacity-80 cursor-pointer'
-                          : 'cursor-default'
-                      } disabled:opacity-50`}
+                      }`}
                     >
                       {STATUS_LABEL[c.status] ?? c.status}
-                    </button>
+                    </span>
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     {fmtBRL(c.daily_budget_brl)}
@@ -732,56 +619,12 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <div className="inline-flex gap-1">
-                      <button
-                        onClick={() => openBudgetModal(c)}
-                        disabled={!canManage || actingId === c.id}
-                        title="Editar orçamento"
-                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                      <button
-                        onClick={() => setBiddingCampaign(c)}
-                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
-                        title="Estratégia de lance"
-                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
-                      >
-                        <TrendingUp size={14} />
-                      </button>
-                      <button
-                        onClick={() => openRsaPicker(c)}
-                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
-                        title="Novo anúncio (RSA)"
-                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
-                      >
-                        <FileText size={14} />
-                      </button>
-                      <button
-                        onClick={() => pauseOrResume(c)}
-                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
-                        title={c.status === 'PAUSED' ? 'Reativar' : 'Pausar'}
-                        className="p-1.5 rounded hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground"
-                      >
-                        {c.status === 'PAUSED' ? <Play size={14} /> : <Pause size={14} />}
-                      </button>
-                      <button
-                        onClick={() => deleteCampaign(c)}
-                        disabled={!canManage || actingId === c.id || c.status === 'REMOVED'}
-                        title="Excluir campanha"
-                        className="p-1.5 rounded hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed text-muted-foreground hover:text-red-600 dark:hover:text-red-400"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
                 </tr>
               );
             })}
             {filteredCampaigns.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={11} className="px-3 py-8 text-center text-sm text-muted-foreground">
                   Nenhuma campanha bate com os filtros.{' '}
                   <button
                     type="button"
@@ -801,93 +644,8 @@ export function CampanhasTab({ canManage }: { canManage: boolean }) {
         </table>
       </div>
 
-      {/* Search Terms Report (Fase 4a) */}
+      {/* Search Terms Report — leitura apenas */}
       <SearchTermsCard canManage={canManage} />
-
-      {/* Wizard Criar Campanha (Fase 4b) */}
-      <CreateCampaignWizard
-        open={createWizardOpen}
-        onClose={() => setCreateWizardOpen(false)}
-        onCreated={() => setTimeout(load, 5000)}
-      />
-
-      {/* Modal Estratégia de Lance (Fase 4c) */}
-      <BiddingStrategyModal
-        campaign={biddingCampaign}
-        onClose={() => setBiddingCampaign(null)}
-        onUpdated={() => setTimeout(load, 5000)}
-      />
-
-      {/* Modal Criar RSA (Fase 4d) */}
-      <CreateRsaModal
-        adGroup={rsaAdGroup}
-        onClose={() => setRsaAdGroup(null)}
-        onCreated={() => {}}
-      />
-
-      {/* Picker de Ad Group quando campanha tem múltiplos */}
-      {adGroupPickerCampaignId && (
-        <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAdGroupPickerCampaignId(null);
-          }}
-        >
-          <div className="bg-card border border-border rounded-xl w-full max-w-md p-5">
-            <h3 className="text-base font-bold text-foreground mb-1">
-              Selecione o ad_group
-            </h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              Esta campanha tem múltiplos grupos. Escolha qual receberá o
-              novo anúncio.
-            </p>
-            {adGroupPickerLoading ? (
-              <div className="py-8 text-center">
-                <Loader2 size={24} className="animate-spin mx-auto" />
-              </div>
-            ) : adGroupOptions.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">
-                Nenhum ad_group ativo nesta campanha. Crie um primeiro no
-                Google Ads ou aguarde sync.
-              </p>
-            ) : (
-              <div className="space-y-1">
-                {adGroupOptions.map((ag) => (
-                  <button
-                    key={ag.id}
-                    type="button"
-                    onClick={() => {
-                      setRsaAdGroup(ag);
-                      setAdGroupPickerCampaignId(null);
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-md hover:bg-accent border border-border text-sm"
-                  >
-                    {ag.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setAdGroupPickerCampaignId(null)}
-                className="px-3 py-1.5 text-xs rounded-md border border-border hover:bg-accent"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <EditBudgetModal
-        open={!!budgetEditCampaign}
-        campaignId={budgetEditCampaign?.id ?? null}
-        campaignName={budgetEditCampaign?.name ?? ''}
-        currentBudgetBrl={budgetEditCampaign?.daily_budget_brl ?? null}
-        onClose={() => setBudgetEditCampaign(null)}
-        onSaved={() => setTimeout(load, 4000)}
-      />
     </div>
   );
 }

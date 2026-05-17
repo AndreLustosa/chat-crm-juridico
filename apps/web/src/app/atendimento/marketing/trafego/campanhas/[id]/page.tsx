@@ -1,23 +1,24 @@
 'use client';
 
+// MODO MONITORAMENTO (2026-05-17): detail page foi simplificada pra READ-ONLY
+// do ponto de vista do Google Ads. Removidas todas as acoes de mutate
+// (pause/resume, budget edit, bidding strategy, criar RSA, adicionar/remover
+// negativas/keywords, ad schedule). Operacao agora eh exclusivamente via MCP
+// pelo gestor de trafego Claude.
+//
+// Mantidas: visualizacao completa (KPIs, gráficos, keywords positivas/negativas,
+// search terms, ads, schedule heatmap, devices), favoritar/notes (CRM-side).
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   Loader2,
-  Pause,
-  Play,
-  Edit3,
-  TrendingUp,
-  FileText,
-  Plus,
   ShieldX,
   Star,
   Activity,
   KeyRound,
   Search,
   Megaphone,
-  Trash2,
   AlertCircle,
   Clock,
   Smartphone,
@@ -28,17 +29,12 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { useRole } from '@/lib/useRole';
-import { showError, showSuccess } from '@/lib/toast';
+import { showError } from '@/lib/toast';
 import { KpiCard } from '../../components/KpiCard';
-import { BiddingStrategyModal } from '../../components/BiddingStrategyModal';
-import { CreateRsaModal } from '../../components/CreateRsaModal';
 import { ImpressionShareSegmentedBar } from '../../components/ImpressionShareBar';
 import { AdStrengthBadge } from '../../components/AdStrengthBadge';
 import { MatchTypeBadge } from '../../components/MatchTypeBadge';
-import { AddNegativesModal } from '../../components/AddNegativesModal';
-import { EditBudgetModal } from '../../components/EditBudgetModal';
 import { Pagination } from '../../components/Pagination';
-import { EditScheduleModal } from '../../components/EditScheduleModal';
 
 interface CampaignFull {
   id: string;
@@ -255,14 +251,6 @@ function CampaignDetailPageInner() {
   const [devices, setDevices] = useState<DeviceMetrics | null>(null);
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState(false);
-  const [biddingOpen, setBiddingOpen] = useState(false);
-  const [rsaOpen, setRsaOpen] = useState<{ id: string; name: string } | null>(
-    null,
-  );
-  const [negativesModalOpen, setNegativesModalOpen] = useState(false);
-  const [budgetModalOpen, setBudgetModalOpen] = useState(false);
-  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
   // ─── Load ────────────────────────────────────────────────────────────
   async function load() {
@@ -349,27 +337,7 @@ function CampaignDetailPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // ─── Actions ─────────────────────────────────────────────────────────
-  async function pauseOrResume() {
-    if (!campaign || !perms.canManageTrafego) return;
-    const action = campaign.status === 'PAUSED' ? 'resume' : 'pause';
-    const confirmMsg =
-      action === 'pause'
-        ? `Pausar "${campaign.name}" no Google Ads?`
-        : `Reativar "${campaign.name}"?`;
-    if (!confirm(confirmMsg)) return;
-    setActing(true);
-    try {
-      await api.post(`/trafego/campaigns/${campaign.id}/${action}`);
-      showSuccess(action === 'pause' ? 'Pausa enfileirada.' : 'Reativação enfileirada.');
-      setTimeout(load, 4000);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha.');
-    } finally {
-      setActing(false);
-    }
-  }
-
+  // ─── Acao CRM-side (toggle favorito — anotacao interna, nao toca no Google) ──
   async function toggleFavorite() {
     if (!campaign || !perms.canManageTrafego) return;
     try {
@@ -382,38 +350,9 @@ function CampaignDetailPageInner() {
     }
   }
 
-  async function negativeTerm(term: SearchTerm) {
-    if (!perms.canManageTrafego || !term.ad_group_id) return;
-    if (
-      !confirm(
-        `Adicionar "${term.search_term}" como negativa EXACT em "${term.ad_group_name}"?`,
-      )
-    )
-      return;
-    try {
-      await api.post(`/trafego/ad-groups/${term.ad_group_id}/negatives`, {
-        scope: 'AD_GROUP',
-        negatives: [{ text: term.search_term, match_type: 'EXACT' }],
-        reason: `Negativada via detalhe campanha (gasto ${fmtBRL(term.cost_brl)}, ${term.conversions} conv)`,
-      });
-      showSuccess(`"${term.search_term}" enfileirada.`);
-      setTimeout(load, 3000);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao negativar.');
-    }
-  }
-
-  async function removeKeyword(kw: Keyword) {
-    if (!perms.canManageTrafego) return;
-    if (!confirm(`Remover keyword "${kw.text}" da campanha?`)) return;
-    try {
-      await api.delete(`/trafego/keywords/${kw.id}`);
-      showSuccess('Keyword removida.');
-      setTimeout(load, 3000);
-    } catch (err: any) {
-      showError(err?.response?.data?.message ?? 'Falha ao remover.');
-    }
-  }
+  // Acoes de mutate no Google Ads (pause/resume/budget/bidding/RSA/negatives
+  // /keywords/schedule) foram removidas — operadas exclusivamente pelo gestor
+  // de trafego Claude via MCP server.
 
   // ─── Permissions ─────────────────────────────────────────────────────
   if (!perms.canViewTrafego) {
@@ -504,54 +443,6 @@ function CampaignDetailPageInner() {
             </div>
           </div>
 
-          {perms.canManageTrafego && (
-            <div className="flex gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={pauseOrResume}
-                disabled={acting || campaign.status === 'REMOVED'}
-                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-border hover:bg-accent disabled:opacity-50"
-              >
-                {campaign.status === 'PAUSED' ? (
-                  <>
-                    <Play size={13} /> Reativar
-                  </>
-                ) : (
-                  <>
-                    <Pause size={13} /> Pausar
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setBudgetModalOpen(true)}
-                disabled={campaign.status === 'REMOVED'}
-                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-border hover:bg-accent disabled:opacity-50"
-              >
-                <Edit3 size={13} /> Orçamento
-              </button>
-              <button
-                type="button"
-                onClick={() => setBiddingOpen(true)}
-                disabled={campaign.status === 'REMOVED'}
-                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-border hover:bg-accent disabled:opacity-50"
-              >
-                <TrendingUp size={13} /> Lances
-              </button>
-              {adGroups.length === 1 && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setRsaOpen({ id: adGroups[0].id, name: adGroups[0].name })
-                  }
-                  disabled={campaign.status === 'REMOVED'}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50"
-                >
-                  <Plus size={13} /> Novo RSA
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -686,86 +577,18 @@ function CampaignDetailPageInner() {
         <KeywordsTab
           keywords={positiveKw}
           adGroups={adGroups}
-          canManage={perms.canManageTrafego}
-          onRemove={removeKeyword}
           searchTerms={searchTerms}
         />
       )}
-      {tab === 'search-terms' && (
-        <SearchTermsTab
-          terms={searchTerms}
-          canManage={perms.canManageTrafego}
-          onNegative={negativeTerm}
-        />
-      )}
+      {tab === 'search-terms' && <SearchTermsTab terms={searchTerms} />}
       {tab === 'ads' && <AdsTab ads={ads} adGroups={adGroups} />}
       {tab === 'schedule' && (
-        <ScheduleTab
-          data={hourly}
-          slots={scheduleSlots}
-          canManage={perms.canManageTrafego}
-          onEdit={() => setScheduleModalOpen(true)}
-        />
+        <ScheduleTab data={hourly} slots={scheduleSlots} />
       )}
       {tab === 'devices' && <DevicesTab data={devices} />}
       {tab === 'negatives' && (
-        <NegativesTab
-          negatives={negativeKw}
-          adGroups={adGroups}
-          canManage={perms.canManageTrafego}
-          onRemove={removeKeyword}
-          onAdd={() => setNegativesModalOpen(true)}
-        />
+        <NegativesTab negatives={negativeKw} adGroups={adGroups} />
       )}
-
-      {/* Modais */}
-      {biddingOpen && (
-        <BiddingStrategyModal
-          campaign={{
-            id: campaign.id,
-            name: campaign.name,
-            bidding_strategy: campaign.bidding_strategy,
-          }}
-          onClose={() => setBiddingOpen(false)}
-          onUpdated={() => setTimeout(load, 4000)}
-        />
-      )}
-      {rsaOpen && (
-        <CreateRsaModal
-          adGroup={{
-            id: rsaOpen.id,
-            name: rsaOpen.name,
-            campaign_id: campaign.id,
-            campaign: { name: campaign.name },
-          }}
-          onClose={() => setRsaOpen(null)}
-          onCreated={() => setTimeout(load, 5000)}
-        />
-      )}
-      <AddNegativesModal
-        open={negativesModalOpen}
-        campaignId={campaign.id}
-        campaignName={campaign.name}
-        defaultAdGroupId={adGroups.length === 1 ? adGroups[0].id : null}
-        onClose={() => setNegativesModalOpen(false)}
-        onSaved={() => setTimeout(load, 4000)}
-      />
-      <EditBudgetModal
-        open={budgetModalOpen}
-        campaignId={campaign.id}
-        campaignName={campaign.name}
-        currentBudgetBrl={campaign.daily_budget_brl}
-        onClose={() => setBudgetModalOpen(false)}
-        onSaved={() => setTimeout(load, 4000)}
-      />
-      <EditScheduleModal
-        open={scheduleModalOpen}
-        campaignId={campaign.id}
-        campaignName={campaign.name}
-        initialSlots={scheduleSlots}
-        onClose={() => setScheduleModalOpen(false)}
-        onSaved={() => setTimeout(load, 5000)}
-      />
     </div>
   );
 }
@@ -1223,14 +1046,10 @@ function Row({
 function KeywordsTab({
   keywords,
   adGroups,
-  canManage,
-  onRemove,
   searchTerms,
 }: {
   keywords: Keyword[];
   adGroups: AdGroup[];
-  canManage: boolean;
-  onRemove: (kw: Keyword) => void;
   searchTerms: SearchTerm[];
 }) {
   const adGroupMap = useMemo(
@@ -1366,7 +1185,6 @@ function KeywordsTab({
             <SortHead label="Conv" k="conv" align="right" />
             <th className="text-right px-3 py-2.5">CPL</th>
             <th className="text-left px-3 py-2.5">Status</th>
-            <th className="text-right px-3 py-2.5 w-20">Ação</th>
           </tr>
         </thead>
         <tbody>
@@ -1423,18 +1241,6 @@ function KeywordsTab({
                     {kw.status}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right">
-                  {canManage && (
-                    <button
-                      type="button"
-                      onClick={() => onRemove(kw)}
-                      title="Remover keyword"
-                      className="p-1 text-muted-foreground hover:text-red-500"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
-                </td>
               </tr>
               );
             })}
@@ -1481,15 +1287,7 @@ function QualityScoreBadge({ score }: { score: number | null }) {
 
 // ─── Tab: Search terms ────────────────────────────────────────────────────
 
-function SearchTermsTab({
-  terms,
-  canManage,
-  onNegative,
-}: {
-  terms: SearchTerm[];
-  canManage: boolean;
-  onNegative: (term: SearchTerm) => void;
-}) {
+function SearchTermsTab({ terms }: { terms: SearchTerm[] }) {
   const [filter, setFilter] = useState<
     'all' | 'with-conv' | 'without-conv'
   >('all');
@@ -1546,7 +1344,6 @@ function SearchTermsTab({
               <th className="text-right px-3 py-2.5">Conv.</th>
               <th className="text-right px-3 py-2.5">Gasto</th>
               <th className="text-right px-3 py-2.5">CTR</th>
-              <th className="text-right px-3 py-2.5 w-24">Ação</th>
             </tr>
           </thead>
           <tbody>
@@ -1579,24 +1376,13 @@ function SearchTermsTab({
                   <td className="px-3 py-2 text-right tabular-nums">
                     {fmtPct(t.ctr)}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    {canManage && t.conversions === 0 && t.ad_group_id && (
-                      <button
-                        type="button"
-                        onClick={() => onNegative(t)}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-700"
-                      >
-                        <ShieldX size={11} /> Negativar
-                      </button>
-                    )}
-                  </td>
                 </tr>
               );
             })}
             {visible.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={5}
                   className="px-3 py-8 text-center text-sm text-muted-foreground"
                 >
                   Nenhum termo bate com o filtro.
@@ -1623,8 +1409,8 @@ function AdsTab({ ads, adGroups }: { ads: Ad[]; adGroups: AdGroup[] }) {
       <div className="bg-card border border-border rounded-xl p-12 text-center">
         <Megaphone size={36} className="mx-auto text-muted-foreground mb-2" />
         <p className="text-sm text-muted-foreground">
-          Nenhum anúncio nesta campanha ainda. Crie via botão "Novo RSA" no
-          header.
+          Nenhum anúncio nesta campanha. Criacao de RSA eh feita pelo gestor
+          de trafego via MCP (<code>traffic_create_rsa</code>).
         </p>
       </div>
     );
@@ -1830,13 +1616,9 @@ const DOW_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 function ScheduleTab({
   data,
   slots,
-  canManage,
-  onEdit,
 }: {
   data: HourlyMetrics | null;
   slots: ScheduleSlot[];
-  canManage: boolean;
-  onEdit: () => void;
 }) {
   // Encontra max conversions pra escala de cor (defaults se sem dados)
   const cells = data?.cells ?? [];
@@ -1945,11 +1727,7 @@ function ScheduleTab({
       )}
 
       {/* Tabela do agendamento atual */}
-      <ScheduleConfigCard
-        slots={slots}
-        canManage={canManage}
-        onEdit={onEdit}
-      />
+      <ScheduleConfigCard slots={slots} />
     </div>
   );
 }
@@ -1974,15 +1752,7 @@ const DAY_ORDER: Record<string, number> = {
   SUNDAY: 6,
 };
 
-function ScheduleConfigCard({
-  slots,
-  canManage,
-  onEdit,
-}: {
-  slots: ScheduleSlot[];
-  canManage: boolean;
-  onEdit: () => void;
-}) {
+function ScheduleConfigCard({ slots }: { slots: ScheduleSlot[] }) {
   const sorted = useMemo(() => {
     return [...slots].sort((a, b) => {
       const dow = (DAY_ORDER[a.day_of_week] ?? 99) - (DAY_ORDER[b.day_of_week] ?? 99);
@@ -2004,16 +1774,6 @@ function ScheduleConfigCard({
             Quando a campanha veicula. Sem slots = roda 24/7.
           </p>
         </div>
-        {canManage && (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-700 text-white"
-          >
-            <Edit3 size={12} />
-            Editar agendamento
-          </button>
-        )}
       </div>
 
       {slots.length === 0 ? (
@@ -2311,29 +2071,52 @@ function cssColorFromBg(bg: string): string {
 function NegativesTab({
   negatives,
   adGroups,
-  canManage,
-  onRemove,
-  onAdd,
 }: {
   negatives: Keyword[];
   adGroups: AdGroup[];
-  canManage: boolean;
-  onRemove: (kw: Keyword) => void;
-  onAdd: () => void;
 }) {
   const adGroupMap = useMemo(
     () => new Map(adGroups.map((g) => [g.id, g.name])),
     [adGroups],
   );
   const [search, setSearch] = useState('');
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'campaign' | 'ad_group'>(
+    'all',
+  );
+
+  // Negativas vem com ad_group_id. Pra distinguir scope CAMPAIGN vs AD_GROUP
+  // teriamos que ter um campo `scope` no schema (nao tem hoje). Por ora, todas
+  // sao consideradas ad_group-level (que eh o caminho mais comum no nosso
+  // setup). Se o filtro `scope` aparecer no schema, basta plugar aqui.
   const filtered = useMemo(() => {
+    let arr = negatives;
+    if (scopeFilter !== 'all') {
+      // Placeholder pro filtro de scope quando o schema suportar.
+      arr = scopeFilter === 'ad_group' ? arr : [];
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return negatives;
-    return negatives.filter((n) => n.text.toLowerCase().includes(q));
-  }, [negatives, search]);
+    if (q) arr = arr.filter((n) => n.text.toLowerCase().includes(q));
+    return arr;
+  }, [negatives, search, scopeFilter]);
+
+  // Agrupa por ad_group pra navegacao rapida quando lista cresce
+  const byAdGroup = useMemo(() => {
+    const m = new Map<string, Keyword[]>();
+    for (const n of filtered) {
+      const list = m.get(n.ad_group_id) ?? [];
+      list.push(n);
+      m.set(n.ad_group_id, list);
+    }
+    return [...m.entries()].sort((a, b) => {
+      const na = adGroupMap.get(a[0]) ?? '';
+      const nb = adGroupMap.get(b[0]) ?? '';
+      return na.localeCompare(nb, 'pt-BR');
+    });
+  }, [filtered, adGroupMap]);
 
   return (
     <div className="space-y-3">
+      {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h3 className="text-sm font-bold text-foreground">
@@ -2343,11 +2126,12 @@ function NegativesTab({
             <strong className="text-foreground">{negatives.length}</strong>{' '}
             palavra{negatives.length === 1 ? '' : 's'} negativa
             {negatives.length === 1 ? '' : 's'} ativa
-            {negatives.length === 1 ? '' : 's'}
+            {negatives.length === 1 ? '' : 's'} nesta campanha. Operacao via
+            gestor de trafego (MCP).
           </p>
         </div>
-        <div className="flex gap-2 items-center">
-          {negatives.length > 0 && (
+        {negatives.length > 0 && (
+          <div className="flex gap-2 items-center">
             <input
               type="search"
               value={search}
@@ -2355,50 +2139,51 @@ function NegativesTab({
               placeholder="Filtrar..."
               className="px-3 py-1.5 text-xs bg-card border border-border rounded-lg w-48"
             />
-          )}
-          {canManage && (
-            <button
-              type="button"
-              onClick={onAdd}
-              className="flex items-center gap-2 px-3 py-2 text-xs font-bold rounded-lg bg-red-600 hover:bg-red-700 text-white"
-            >
-              <ShieldX size={13} />
-              Adicionar negativa
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {negatives.length === 0 ? (
         <div className="bg-card border border-border rounded-xl p-12 text-center">
           <ShieldX size={36} className="mx-auto text-muted-foreground mb-2" />
           <p className="text-sm text-muted-foreground">
-            Nenhuma palavra negativa configurada. Use o botão acima ou negative
-            termos via Tab "Termos de busca".
+            Nenhuma palavra negativa nesta campanha.
           </p>
         </div>
+      ) : byAdGroup.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl p-8 text-center text-sm text-muted-foreground">
+          Nenhuma negativa bate com o filtro.
+        </div>
       ) : (
-        <NegativesTable
-          rows={filtered}
-          adGroupMap={adGroupMap}
-          canManage={canManage}
-          onRemove={onRemove}
-        />
+        <div className="space-y-3">
+          {byAdGroup.map(([adGroupId, rows]) => (
+            <NegativesTable
+              key={adGroupId}
+              adGroupName={adGroupMap.get(adGroupId) ?? '(ad group desconhecido)'}
+              rows={rows}
+            />
+          ))}
+        </div>
       )}
+
+      {/* Hint */}
+      <p className="text-[11px] text-muted-foreground italic">
+        Nota: estas sao palavras-chave NEGATIVAS — buscas com esses termos
+        impedem o ad de ser exibido. Match type: EXACT (so exato), PHRASE
+        (frase contendo), BROAD (qualquer ordem). Pra adicionar ou remover
+        negativas, o gestor de trafego usa as tools <code>traffic_add_negative_to_*</code>{' '}
+        / <code>traffic_remove_keyword</code> via MCP.
+      </p>
     </div>
   );
 }
 
 function NegativesTable({
   rows,
-  adGroupMap,
-  canManage,
-  onRemove,
+  adGroupName,
 }: {
   rows: Keyword[];
-  adGroupMap: Map<string, string>;
-  canManage: boolean;
-  onRemove: (kw: Keyword) => void;
+  adGroupName: string;
 }) {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
@@ -2410,18 +2195,25 @@ function NegativesTable({
 
   return (
     <div className="bg-card border border-border rounded-xl overflow-x-auto">
-      <div className="px-4 py-2 border-b border-border bg-red-500/5 text-xs">
-        <strong>{rows.length}</strong> palavra
-        {rows.length === 1 ? '' : 's'} negativa
-        {rows.length === 1 ? '' : 's'} no filtro
+      <div className="px-4 py-2 border-b border-border bg-red-500/5 text-xs flex items-center justify-between">
+        <span>
+          <ShieldX
+            size={11}
+            className="inline mr-1 text-red-500"
+            aria-hidden="true"
+          />
+          <strong>{adGroupName}</strong>
+        </span>
+        <span className="text-muted-foreground">
+          {rows.length} negativa{rows.length === 1 ? '' : 's'}
+        </span>
       </div>
-      <table className="w-full text-sm min-w-[600px]">
+      <table className="w-full text-sm min-w-[500px]">
         <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
           <tr>
             <th className="text-left px-3 py-2.5">Palavra</th>
-            <th className="text-left px-3 py-2.5">Match</th>
-            <th className="text-left px-3 py-2.5">Ad group</th>
-            <th className="text-right px-3 py-2.5 w-20">Ação</th>
+            <th className="text-left px-3 py-2.5 w-32">Match</th>
+            <th className="text-left px-3 py-2.5 w-28">Status</th>
           </tr>
         </thead>
         <tbody>
@@ -2433,20 +2225,16 @@ function NegativesTable({
                 <td className="px-3 py-2">
                   <MatchTypeBadge type={kw.match_type} />
                 </td>
-                <td className="px-3 py-2 text-xs">
-                  {adGroupMap.get(kw.ad_group_id) ?? '—'}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {canManage && (
-                    <button
-                      type="button"
-                      onClick={() => onRemove(kw)}
-                      title="Remover negativa"
-                      className="p-1 text-muted-foreground hover:text-red-500"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
+                <td className="px-3 py-2">
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      kw.status === 'ENABLED'
+                        ? 'bg-red-500/15 text-red-600'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {kw.status}
+                  </span>
                 </td>
               </tr>
             ))}
