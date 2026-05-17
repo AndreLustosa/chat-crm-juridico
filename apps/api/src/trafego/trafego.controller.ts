@@ -34,6 +34,7 @@ import { TrafegoBackfillService } from './trafego-backfill.service';
 import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
 import { TrafegoLandingPagesService } from './trafego-landing-pages.service';
 import { TrafegoOptimizationService } from './trafego-optimization.service';
+import { resolveInitiator } from '../common/utils/initiator.util';
 import {
   AcknowledgeAlertDto,
   AddKeywordsDto,
@@ -860,7 +861,10 @@ export class TrafegoController {
       );
     }
 
-    const initiator = `user:${req.user.id}`;
+    // Le X-Initiator (sanitizado) pra distinguir Claude (via MCP) de
+    // usuario clicando no painel. Helper aceita so prefixos confiaveis
+    // (mcp:, ai_agent:); qualquer coisa fora cai no fallback user:<id>.
+    const initiator = resolveInitiator(req);
     const validateOnly = !!payload.validate_only;
 
     // Resolver IDs locais → resource_names da Google Ads API

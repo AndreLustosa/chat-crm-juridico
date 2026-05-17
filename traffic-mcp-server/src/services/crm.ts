@@ -104,6 +104,15 @@ export class CrmTrafficService {
             'Content-Type': 'application/json',
             Accept: 'application/json',
             'X-Request-Id': requestId,
+            // Marca toda chamada vinda do MCP pra que o CRM consiga
+            // distinguir mutate do Claude vs mutate de humano clicando
+            // no painel. Backend usa esse header como initiator no
+            // TrafficMutateLog (com fallback pra user:<id> se ausente).
+            // toolCallId vem do safe() wrapper das tools — permite
+            // correlacao linha-a-linha entre logs do MCP e do CRM.
+            'X-Initiator': toolCallId
+              ? `mcp:claude:${toolCallId}`
+              : 'mcp:claude:internal',
           },
           body: body === undefined ? undefined : JSON.stringify(body),
         });

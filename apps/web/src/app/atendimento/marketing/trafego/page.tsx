@@ -19,6 +19,7 @@ import {
   MessageSquare,
   Globe,
   Swords,
+  Activity,
 } from "lucide-react";
 import api from "@/lib/api";
 import { useRole } from "@/lib/useRole";
@@ -28,6 +29,7 @@ import { ConnectGoogleAdsCard } from "./components/ConnectGoogleAdsCard";
 import { DashboardTab } from "./components/DashboardTab";
 import { CampanhasTab } from "./components/CampanhasTab";
 import { AlertasTab } from "./components/AlertasTab";
+import { AtividadesTab } from "./components/AtividadesTab";
 import { ConfiguracoesTab } from "./components/ConfiguracoesTab";
 import { PlaceholderTab } from "./components/PlaceholderTab";
 import { RelatoriosTab } from "./components/RelatoriosTab";
@@ -50,6 +52,7 @@ const TABS = [
   { id: "leads", label: "Leads", icon: Users },
   { id: "relatorios", label: "Relatórios", icon: FileText },
   { id: "alertas", label: "Alertas", icon: Bell },
+  { id: "atividades", label: "Atividades", icon: Activity },
   { id: "ia", label: "IA Otimizadora", icon: Sparkles },
   { id: "conversar", label: "Conversar", icon: MessageSquare },
   { id: "configuracoes", label: "Configurações", icon: SettingsIcon },
@@ -333,6 +336,7 @@ function TrafegoPageInner() {
         {tab === "alertas" && account?.connected && (
           <AlertasTab canManage={perms.canManageTrafego} />
         )}
+        {tab === "atividades" && account?.connected && <AtividadesTab />}
         {tab === "ia" && account?.connected && (
           <IaOtimizadoraTab canManage={perms.canManageTrafego} />
         )}
