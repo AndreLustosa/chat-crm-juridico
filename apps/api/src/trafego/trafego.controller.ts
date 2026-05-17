@@ -18,7 +18,11 @@ import {
 import type { Response } from 'express';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue, QueueEvents } from 'bullmq';
-import { TRAFEGO_MUTATE_QUEUE_EVENTS } from './trafego.module';
+// IMPORTANTE: importar de trafego.tokens (arquivo dedicado sem outros
+// imports), NAO de trafego.module — senao gera circular import e o
+// decorator @Inject(TOKEN) ve TOKEN=undefined em runtime → NestJS
+// falha com UndefinedDependencyException. Bug visto em deploy 2026-05-17.
+import { TRAFEGO_MUTATE_QUEUE_EVENTS } from './trafego.tokens';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Public } from '../auth/decorators/public.decorator';

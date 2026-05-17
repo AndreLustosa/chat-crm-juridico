@@ -12,16 +12,7 @@ import { TrafegoLeadFormService } from './trafego-lead-form.service';
 import { TrafegoRecommendationsService } from './trafego-recommendations.service';
 import { TrafegoBackfillService } from './trafego-backfill.service';
 import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
-
-/**
- * Token DI pra QueueEvents da fila trafego-mutate. Necessario pra que o
- * controller possa esperar `job.waitUntilFinished(queueEvents, ttl)`
- * apos enfileirar um mutate — sem isso o controller retornaria ok:true
- * imediatamente, sem ver o resultado real do worker (fix de 2026-05-17
- * apos bug "dry-run mente": Google rejeitou com partial_failure_error
- * mas o controller retornou ok porque so olhou se conseguiu enfileirar).
- */
-export const TRAFEGO_MUTATE_QUEUE_EVENTS = 'TRAFEGO_MUTATE_QUEUE_EVENTS';
+import { TRAFEGO_MUTATE_QUEUE_EVENTS } from './trafego.tokens';
 
 /**
  * Modulo de Gestao de Trafego Google Ads.
