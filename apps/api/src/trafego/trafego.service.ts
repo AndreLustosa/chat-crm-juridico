@@ -1667,6 +1667,74 @@ export class TrafegoService {
         };
       }
 
+      case 'trafego-mutate-create-shared-negative-list': {
+        const attachCampaignResourceNames: string[] = [];
+        for (const cid of raw.attach_campaign_ids ?? []) {
+          const c = await this.requireCampaign(tenantId, cid);
+          attachCampaignResourceNames.push(
+            `customers/${customerId}/campaigns/${c.google_campaign_id}`,
+          );
+        }
+        return {
+          ...base,
+          customerId,
+          name: raw.name,
+          keywords: raw.keywords ?? [],
+          matchType: raw.match_type,
+          attachCampaignResourceNames,
+          context: {
+            ...base.context,
+            list_name: raw.name,
+            kw_count: (raw.keywords ?? []).length,
+            attach_count: attachCampaignResourceNames.length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-attach-shared-negative-list': {
+        const sharedSetResourceName = raw.shared_set_id.startsWith('customers/')
+          ? raw.shared_set_id
+          : `customers/${customerId}/sharedSets/${raw.shared_set_id}`;
+        const campaignResourceNames: string[] = [];
+        for (const cid of raw.campaign_ids ?? []) {
+          const c = await this.requireCampaign(tenantId, cid);
+          campaignResourceNames.push(
+            `customers/${customerId}/campaigns/${c.google_campaign_id}`,
+          );
+        }
+        return {
+          ...base,
+          sharedSetResourceName,
+          campaignResourceNames,
+          context: {
+            ...base.context,
+            shared_set_id: raw.shared_set_id,
+            campaign_count: campaignResourceNames.length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-update-location-bid-modifiers': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          modifiers: (raw.modifiers ?? []).map((m: any) => ({
+            geoTargetConstantResourceName: m.geo_target_id.startsWith(
+              'geoTargetConstants/',
+            )
+              ? m.geo_target_id
+              : `geoTargetConstants/${m.geo_target_id}`,
+            bidModifier: Number(m.bid_modifier),
+          })),
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            modifier_count: (raw.modifiers ?? []).length,
+          },
+        };
+      }
+
       case 'trafego-mutate-create-pmax-campaign': {
         return {
           ...base,

@@ -58,6 +58,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerSprint3Tools(server);
   // Sprint 4 backlog (2026-05-17): Tier P2 (PMax + reads + oauth)
   registerSprint4Tools(server);
+  // Sprint 3.1 backlog (2026-05-17): Shared library + Location bid
+  registerSprint3_1Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -2356,6 +2358,155 @@ function registerSprint4Tools(server: McpServer) {
         ];
         if (result?.note) lines.push(`Nota: ${result.note}`);
         return ok(result, lines.join('\n'));
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 3.1 backlog (2026-05-17) — 4 tools novas (Shared library + Location bid)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSprint3_1Tools(server: McpServer) {
+  // ─── Shared negative lists ─────────────────────────────────────────────
+  server.registerTool(
+    'traffic_list_shared_negative_lists',
+    {
+      description:
+        'Lista shared sets de negative keywords + suas attachments a campanhas. ' +
+        'Inclui member_count (quantas keywords tem na lista) e reference_count ' +
+        '(quantas campanhas usam). GAQL live via worker queue.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () =>
+      safe('traffic_list_shared_negative_lists', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          shared_sets: any[];
+          note?: string;
+        }>('/trafego/shared-negative-lists', undefined, { toolCallId });
+        return ok(
+          result,
+          `${result?.shared_sets?.length ?? 0} shared negative lists.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_create_shared_negative_list',
+    {
+      description:
+        'Cria SharedSet de negative keywords + adiciona keywords + opcionalmente anexa a N campanhas. ' +
+        'Diferenca vs traffic_bulk_add_negatives: bulk_add cria criterion separado por campanha (cada uma tem seus); ' +
+        'shared_negative_list cria UMA lista compartilhada — adicionar keyword nova depois propaga ' +
+        'pra todas as campanhas anexadas. Mais higienico pra manter quando lista cresce. ' +
+        'Operacao atomica em 3 passos: SharedSet → SharedCriterion[] → CampaignSharedSet[]. ',
+      inputSchema: {
+        name: z
+          .string()
+          .min(1)
+          .max(255)
+          .describe('Nome identificador da lista (ex: "Negativas globais").'),
+        keywords: z.array(z.string()).min(1).max(500),
+        match_type: z.enum(['EXACT', 'PHRASE', 'BROAD']),
+        attach_campaign_ids: z
+          .array(campaignIdSchema)
+          .max(100)
+          .optional()
+          .describe('Campanhas a anexar. Opcional — pode anexar depois via traffic_attach_shared_negative_list.'),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_shared_negative_list', async (toolCallId) => {
+        applyMutateGuards('traffic_create_shared_negative_list');
+        const result = await crmTrafficService.post(
+          '/trafego/shared-negative-lists',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Shared negative list "${input.name}" criada com ${input.keywords.length} keywords` +
+            (input.attach_campaign_ids?.length
+              ? ` + anexada a ${input.attach_campaign_ids.length} campanhas.`
+              : ` (sem attach inicial).`),
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_attach_shared_negative_list',
+    {
+      description:
+        'Anexa SharedSet (negative list) ja existente a N campanhas. ' +
+        'Util quando a lista ja foi criada (via UI ou create anterior) e quer aplicar a campanhas novas.',
+      inputSchema: {
+        shared_set_id: z
+          .string()
+          .describe('resource_name (customers/X/sharedSets/Y) OU ID numerico.'),
+        campaign_ids: z.array(campaignIdSchema).min(1).max(100),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_attach_shared_negative_list', async (toolCallId) => {
+        applyMutateGuards('traffic_attach_shared_negative_list');
+        const result = await crmTrafficService.post(
+          '/trafego/shared-negative-lists/attach',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Shared list ${input.shared_set_id} anexada a ${input.campaign_ids.length} campanhas.`,
+        );
+      }),
+  );
+
+  // ─── Location bid modifiers ────────────────────────────────────────────
+  server.registerTool(
+    'traffic_update_location_bid_modifiers',
+    {
+      description:
+        'Define bid modifiers por location (regiao/cidade) na campanha. Complementa ' +
+        'traffic_update_device_targeting (que cobre device). ' +
+        'modifier: 1.0=sem ajuste, 1.5=+50%, 0.5=-50% (range 0.1-10.0). ' +
+        'geo_target_id: ID numerico Google (ex: "1031620"=Maceio/AL) OU resource_name geoTargetConstants/X. ' +
+        'Pra audience_modifiers/schedule_modifiers: nao cobertos nesta entrega — audience precisa de Sprint 3.2, ' +
+        'schedule ja eh feito via traffic_update_ad_schedule com bid_modifier embedded no slot.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        modifiers: z
+          .array(
+            z.object({
+              geo_target_id: z.string(),
+              bid_modifier: z.number().min(0.1).max(10),
+            }),
+          )
+          .min(1)
+          .max(100),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_location_bid_modifiers', async (toolCallId) => {
+        applyMutateGuards('traffic_update_location_bid_modifiers');
+        const { campaign_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/campaigns/${encodeURIComponent(campaign_id)}/location-bid-modifiers`,
+          body,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Location bid modifiers atualizados pra campanha ${campaign_id} (${input.modifiers.length} locations).`,
+        );
       }),
   );
 }

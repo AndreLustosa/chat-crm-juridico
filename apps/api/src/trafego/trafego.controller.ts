@@ -77,6 +77,10 @@ import {
   UpdateDeviceTargetingDto,
   BulkAddNegativesDto,
   BulkUpdateStatusDto,
+  // Sprint 3.1
+  CreateSharedNegativeListDto,
+  AttachSharedNegativeListDto,
+  UpdateLocationBidModifiersDto,
   // Sprint 4
   CreatePmaxCampaignDto,
   GetCallHistoryDto,
@@ -1383,6 +1387,60 @@ export class TrafegoController {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 3.1 backlog (2026-05-17) — Shared library + Location bid
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Lista SharedSets de negative keywords + suas attachments. */
+  @Get('shared-negative-lists')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listSharedNegativeLists(@Req() req: any) {
+    return await this.enqueueReadJob(req, 'shared_negative_lists', {});
+  }
+
+  /** Cria SharedSet + N keywords + opcionalmente anexa a N campanhas. */
+  @Post('shared-negative-lists')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createSharedNegativeList(
+    @Req() req: any,
+    @Body() dto: CreateSharedNegativeListDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-create-shared-negative-list',
+      dto,
+    );
+  }
+
+  /** Anexa SharedSet ja existente a N campanhas. */
+  @Post('shared-negative-lists/attach')
+  @Roles('ADMIN', 'ADVOGADO')
+  async attachSharedNegativeList(
+    @Req() req: any,
+    @Body() dto: AttachSharedNegativeListDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-attach-shared-negative-list',
+      dto,
+    );
+  }
+
+  /** Define bid modifiers por location na campanha. */
+  @Post('campaigns/:id/location-bid-modifiers')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateLocationBidModifiers(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateLocationBidModifiersDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-location-bid-modifiers',
+      { campaignId, ...dto },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // Sprint 4 backlog (2026-05-17) — Tier P2 (PMax, calls, oauth, billing)
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -1434,7 +1492,11 @@ export class TrafegoController {
    */
   private async enqueueReadJob(
     req: any,
-    kind: 'call_history' | 'billing_status' | 'extensions',
+    kind:
+      | 'call_history'
+      | 'billing_status'
+      | 'extensions'
+      | 'shared_negative_lists',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

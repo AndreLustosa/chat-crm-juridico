@@ -432,6 +432,96 @@ export class RemoveConversionActionDto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 3.1 do backlog (2026-05-17) — Shared library + Location bid
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cria SharedSet de tipo NEGATIVE_KEYWORDS + adiciona N keywords + opcionalmente
+ * anexa a N campanhas (atomico em 3 passos sequenciais).
+ *
+ * Diferenca vs traffic_bulk_add_negatives:
+ *   - bulk_add_negatives: replica MESMA lista de keywords em N campanhas
+ *     (cada campanha tem suas proprias campaign_criterion negative)
+ *   - shared_negative_list: cria UMA lista compartilhada, anexa a N campanhas.
+ *     Adicionar keyword nova na lista depois propaga AUTOMATIC pra todas.
+ *     Mais higienico pra manter quando lista cresce.
+ */
+export class CreateSharedNegativeListDto {
+  @IsString()
+  name!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  keywords!: string[];
+
+  @IsString()
+  @IsIn(['EXACT', 'PHRASE', 'BROAD'])
+  match_type!: 'EXACT' | 'PHRASE' | 'BROAD';
+
+  /** IDs internos OR google_campaign_id das campanhas a anexar. Opcional. */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attach_campaign_ids?: string[];
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Anexa SharedSet (negative list) existente a N campanhas.
+ * Util quando a lista ja existe (criada via UI ou create anterior) e
+ * quer aplicar a campanhas novas.
+ */
+export class AttachSharedNegativeListDto {
+  /** resource_name do SharedSet (customers/X/sharedSets/Y) OU ID numerico. */
+  @IsString()
+  shared_set_id!: string;
+
+  /** IDs internos OR google_campaign_id das campanhas. */
+  @IsArray()
+  @IsString({ each: true })
+  campaign_ids!: string[];
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Define bid modifiers por localizacao (cidade/regiao especifica).
+ * Cria CampaignCriterion location + bid_modifier (1.0=sem ajuste,
+ * 1.5=+50%, 0.5=-50%, range 0.1-10.0).
+ *
+ * geo_target_id: IDs numericos do Google ou resource_name
+ * (geoTargetConstants/X). Lista em developers.google.com/google-ads/api/data/geotargets.
+ */
+export class UpdateLocationBidModifiersDto {
+  @IsArray()
+  modifiers!: Array<{
+    geo_target_id: string;
+    bid_modifier: number;
+  }>;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 4 do backlog (2026-05-17) — Tier P2 (PMax, calls, oauth, billing)
 // ═══════════════════════════════════════════════════════════════════════════
 

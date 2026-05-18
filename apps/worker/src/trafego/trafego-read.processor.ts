@@ -21,7 +21,11 @@ export const READ_JOB = 'trafego-read';
 export type ReadJobInput = {
   tenantId: string;
   accountId: string;
-  kind: 'call_history' | 'billing_status' | 'extensions';
+  kind:
+    | 'call_history'
+    | 'billing_status'
+    | 'extensions'
+    | 'shared_negative_lists';
   params: Record<string, any>;
 };
 
@@ -50,6 +54,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.billingStatus(customer);
       case 'extensions':
         return await this.extensions(customer, params);
+      case 'shared_negative_lists':
+        return await this.sharedNegativeLists(customer);
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
@@ -375,6 +381,95 @@ export class TrafegoReadProcessor extends WorkerHost {
       default:
         return null;
     }
+  }
+
+  /**
+   * Lista SharedSet (NEGATIVE_KEYWORDS) + suas associacoes a campanhas.
+   * Sprint 3.1 (2026-05-17).
+   *
+   * Faz 2 GAQL queries:
+   *   1. shared_set WHERE type='NEGATIVE_KEYWORDS' AND status='ENABLED'
+   *   2. campaign_shared_set pra mapear quais campanhas usam cada set
+   *
+   * Retorna estrutura com sets[] + attachments por set.
+   */
+  private async sharedNegativeLists(
+    customer: any,
+  ): Promise<{
+    shared_sets: Array<{
+      resource_name: string;
+      id: string;
+      name: string;
+      member_count: number;
+      reference_count: number;
+      status: string;
+      attached_campaigns: Array<{
+        link_resource_name: string;
+        campaign_resource_name: string;
+        status: string;
+      }>;
+    }>;
+    note?: string;
+  }> {
+    let sets: any[] = [];
+    let links: any[] = [];
+
+    try {
+      sets = (await customer.query(`
+        SELECT
+          shared_set.resource_name,
+          shared_set.id,
+          shared_set.name,
+          shared_set.type,
+          shared_set.status,
+          shared_set.member_count,
+          shared_set.reference_count
+        FROM shared_set
+        WHERE shared_set.type = 'NEGATIVE_KEYWORDS'
+        ORDER BY shared_set.name
+        LIMIT 200
+      `)) as any[];
+    } catch (e: any) {
+      throw new Error(`shared_set query falhou: ${e.message}`);
+    }
+
+    try {
+      links = (await customer.query(`
+        SELECT
+          campaign_shared_set.resource_name,
+          campaign_shared_set.shared_set,
+          campaign_shared_set.campaign,
+          campaign_shared_set.status
+        FROM campaign_shared_set
+        LIMIT 500
+      `)) as any[];
+    } catch (e: any) {
+      /* soft-fail — sets sem attachments info */
+    }
+
+    const linksBySet = new Map<string, any[]>();
+    for (const link of links) {
+      const sharedSetRn = link.campaign_shared_set?.shared_set ?? '';
+      const arr = linksBySet.get(sharedSetRn) ?? [];
+      arr.push({
+        link_resource_name: link.campaign_shared_set?.resource_name ?? '',
+        campaign_resource_name: link.campaign_shared_set?.campaign ?? '',
+        status: link.campaign_shared_set?.status ?? 'UNKNOWN',
+      });
+      linksBySet.set(sharedSetRn, arr);
+    }
+
+    return {
+      shared_sets: sets.map((r) => ({
+        resource_name: r.shared_set?.resource_name ?? '',
+        id: String(r.shared_set?.id ?? ''),
+        name: r.shared_set?.name ?? '',
+        member_count: Number(r.shared_set?.member_count ?? 0),
+        reference_count: Number(r.shared_set?.reference_count ?? 0),
+        status: r.shared_set?.status ?? 'UNKNOWN',
+        attached_campaigns: linksBySet.get(r.shared_set?.resource_name ?? '') ?? [],
+      })),
+    };
   }
 
   /**

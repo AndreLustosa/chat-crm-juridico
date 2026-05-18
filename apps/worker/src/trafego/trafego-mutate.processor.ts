@@ -54,6 +54,10 @@ export const MUTATE_JOBS = {
   BULK_UPDATE_STATUS: 'trafego-mutate-bulk-update-status',
   // Sprint 4 backlog (2026-05-17) — Tier P2
   CREATE_PMAX_CAMPAIGN: 'trafego-mutate-create-pmax-campaign',
+  // Sprint 3.1 backlog (2026-05-17) — Shared library + Location bid
+  CREATE_SHARED_NEGATIVE_LIST: 'trafego-mutate-create-shared-negative-list',
+  ATTACH_SHARED_NEGATIVE_LIST: 'trafego-mutate-attach-shared-negative-list',
+  UPDATE_LOCATION_BID_MODIFIERS: 'trafego-mutate-update-location-bid-modifiers',
 } as const;
 
 /**
@@ -271,6 +275,32 @@ export type AttachCallAssetPayload = BaseMutatePayload & {
   adGroupResourceName?: string;
   /// Google injeta tracking number visivel + reporta calls como conv
   callTracked?: boolean;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 3.1 backlog — Shared library + Location bid
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type CreateSharedNegativeListPayload = BaseMutatePayload & {
+  customerId: string;
+  name: string;
+  keywords: string[];
+  matchType: 'EXACT' | 'PHRASE' | 'BROAD';
+  /** resource_names das campanhas a anexar (opcional). */
+  attachCampaignResourceNames: string[];
+};
+
+export type AttachSharedNegativeListPayload = BaseMutatePayload & {
+  sharedSetResourceName: string;
+  campaignResourceNames: string[];
+};
+
+export type UpdateLocationBidModifiersPayload = BaseMutatePayload & {
+  campaignResourceName: string;
+  modifiers: Array<{
+    geoTargetConstantResourceName: string;
+    bidModifier: number;
+  }>;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -497,6 +527,12 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.bulkUpdateStatus(job.data);
       case MUTATE_JOBS.CREATE_PMAX_CAMPAIGN:
         return await this.createPmaxCampaign(job.data);
+      case MUTATE_JOBS.CREATE_SHARED_NEGATIVE_LIST:
+        return await this.createSharedNegativeList(job.data);
+      case MUTATE_JOBS.ATTACH_SHARED_NEGATIVE_LIST:
+        return await this.attachSharedNegativeList(job.data);
+      case MUTATE_JOBS.UPDATE_LOCATION_BID_MODIFIERS:
+        return await this.updateLocationBidModifiers(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -2659,6 +2695,173 @@ export class TrafegoMutateProcessor extends WorkerHost {
     }
 
     return campaignResult;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 3.1 backlog (2026-05-17) — Shared library + Location bid
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Cria SharedSet (type=NEGATIVE_KEYWORDS) + N SharedCriterion + N
+   * CampaignSharedSet atomico em 3 passos sequenciais.
+   *
+   * Pipeline (per Google Ads docs):
+   *   1. SharedSet.mutate create — pega resource_name retornado
+   *   2. SharedCriterion.mutate create N items apontando pro shared_set
+   *   3. CampaignSharedSet.mutate create N items vinculando shared_set
+   *      a cada campaign passada
+   *
+   * Em dry-run, so o passo 1 valida. Passos 2/3 pulam (precisam
+   * resource_name real).
+   */
+  private async createSharedNegativeList(
+    p: CreateSharedNegativeListPayload,
+  ): Promise<MutateResult> {
+    // Passo 1: cria SharedSet
+    const setResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'shared_set',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        step: 'create_shared_set',
+        list_name: p.name,
+      },
+      operations: [
+        {
+          name: p.name,
+          type: enums.SharedSetType.NEGATIVE_KEYWORDS,
+          status: enums.SharedSetStatus.ENABLED,
+        },
+      ],
+    });
+    if (
+      setResult.status !== 'SUCCESS' ||
+      !setResult.resourceNames?.[0] ||
+      p.validateOnly
+    ) {
+      return setResult;
+    }
+    const sharedSetResourceName = setResult.resourceNames[0];
+
+    // Passo 2: cria N SharedCriterion
+    const matchTypeEnum =
+      p.matchType === 'EXACT'
+        ? enums.KeywordMatchType.EXACT
+        : p.matchType === 'PHRASE'
+          ? enums.KeywordMatchType.PHRASE
+          : enums.KeywordMatchType.BROAD;
+
+    const criterionOps = p.keywords.map((kw) => ({
+      shared_set: sharedSetResourceName,
+      keyword: { text: kw, match_type: matchTypeEnum },
+    }));
+
+    if (criterionOps.length > 0) {
+      await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'shared_criterion',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: false,
+        context: {
+          ...p.context,
+          step: 'add_shared_criteria',
+          shared_set_resource_name: sharedSetResourceName,
+          kw_count: criterionOps.length,
+        },
+        operations: criterionOps,
+      });
+    }
+
+    // Passo 3: anexa a campanhas (CampaignSharedSet)
+    if (p.attachCampaignResourceNames.length > 0) {
+      const attachOps = p.attachCampaignResourceNames.map((camp) => ({
+        campaign: camp,
+        shared_set: sharedSetResourceName,
+      }));
+      await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_shared_set',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: false,
+        context: {
+          ...p.context,
+          step: 'attach_shared_set_to_campaigns',
+          shared_set_resource_name: sharedSetResourceName,
+          campaign_count: attachOps.length,
+        },
+        operations: attachOps,
+      });
+    }
+
+    return setResult;
+  }
+
+  /**
+   * Anexa SharedSet ja existente a N campanhas via CampaignSharedSet.
+   */
+  private async attachSharedNegativeList(
+    p: AttachSharedNegativeListPayload,
+  ): Promise<MutateResult> {
+    const ops = p.campaignResourceNames.map((camp) => ({
+      campaign: camp,
+      shared_set: p.sharedSetResourceName,
+    }));
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign_shared_set',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        shared_set_resource_name: p.sharedSetResourceName,
+        campaign_count: ops.length,
+      },
+      operations: ops,
+    });
+  }
+
+  /**
+   * Define bid modifiers por location via CampaignCriterion.
+   *
+   * Cada modifier vira 1 CampaignCriterion com location + bid_modifier.
+   * Range valido pelo Google: 0.1 a 10.0 (DTO ja valida).
+   *
+   * Se ja existir CampaignCriterion pra mesma location, Google atualiza
+   * via upsert deterministico baseado em criterion_id.
+   */
+  private async updateLocationBidModifiers(
+    p: UpdateLocationBidModifiersPayload,
+  ): Promise<MutateResult> {
+    const ops = p.modifiers.map((m) => ({
+      campaign: p.campaignResourceName,
+      location: { geo_target_constant: m.geoTargetConstantResourceName },
+      bid_modifier: m.bidModifier,
+    }));
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign_criterion',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: { ...p.context, modifier_count: ops.length },
+      operations: ops,
+    });
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

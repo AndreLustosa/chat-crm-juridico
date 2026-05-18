@@ -29,7 +29,11 @@ export type MutateResourceType =
   | 'ad_group_asset'
   | 'customer_match_user_list'
   | 'asset'
-  | 'remarketing_action';
+  | 'remarketing_action'
+  // Sprint 3.1 (2026-05-17) — Shared library
+  | 'shared_set'
+  | 'shared_criterion'
+  | 'campaign_shared_set';
 
 export type MutateOperation = 'create' | 'update' | 'remove';
 
@@ -351,6 +355,9 @@ export class GoogleAdsMutateService {
       customer_match_user_list: 'userLists',
       asset: 'assets',
       remarketing_action: 'remarketingActions',
+      shared_set: 'sharedSets',
+      shared_criterion: 'sharedCriteria',
+      campaign_shared_set: 'campaignSharedSets',
     };
     const prop = map[type];
     return prop ? (customer as any)[prop] : null;
