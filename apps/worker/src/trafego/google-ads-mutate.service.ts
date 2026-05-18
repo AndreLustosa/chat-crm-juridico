@@ -400,12 +400,18 @@ export class GoogleAdsMutateService {
    * Sanitiza payload removendo PII potencial (emails, phones em hashes nao,
    * mas tokens crus sim) antes de persistir no log. Conservador: snapshot
    * shallow do payload, redact campos sensiveis se presentes.
+   *
+   * Fix 2026-05-17 (BUG-D reportado pelo gestor): humaniza enum INTs
+   * conhecidos pra log nao mostrar "start_minute: 2" (que era o protobuf
+   * int de MinuteOfHour.ZERO = 00 minutos). Agora mostra
+   * "start_minute: 0 (ZERO)" — humano consegue ler.
    */
   private sanitizePayload(operations: any[]): any {
     return operations.map((op) => {
       if (typeof op === 'string') return op;
       const clone = JSON.parse(JSON.stringify(op, this.bigIntReplacer));
       this.redactDeep(clone);
+      this.humanizeEnumIntsDeep(clone);
       return clone;
     });
   }
@@ -435,6 +441,57 @@ export class GoogleAdsMutateService {
         obj[k] = '***REDACTED***';
       } else if (typeof v === 'object') {
         this.redactDeep(v);
+      }
+    }
+  }
+
+  /**
+   * Humaniza enum INTs conhecidos in-place pra audit log nao mostrar
+   * numeros crus. Ex: payload AdSchedule tem `start_minute: 2` que eh
+   * o protobuf int de MinuteOfHour.ZERO (00 min) — sem essa funcao, log
+   * confunde quem le pensando ":02".
+   *
+   * Mapeia campos -> string "0 (ZERO)" pra ficar claro: numero literal
+   * + nome do enum entre parenteses.
+   *
+   * Fix 2026-05-17 — BUG-D reportado pelo gestor de trafego.
+   */
+  private humanizeEnumIntsDeep(obj: any): void {
+    if (!obj || typeof obj !== 'object') return;
+
+    // Mapeamentos por nome de campo. Cada um: int -> label PT-BR/Google.
+    const MINUTE_OF_HOUR: Record<number, string> = {
+      0: '? (UNSPECIFIED)',
+      1: '? (UNKNOWN)',
+      2: '0 (ZERO=00min)',
+      3: '15 (FIFTEEN=15min)',
+      4: '30 (THIRTY=30min)',
+      5: '45 (FORTY_FIVE=45min)',
+    };
+    const DAY_OF_WEEK: Record<number, string> = {
+      0: '? (UNSPECIFIED)',
+      1: '? (UNKNOWN)',
+      2: 'MONDAY',
+      3: 'TUESDAY',
+      4: 'WEDNESDAY',
+      5: 'THURSDAY',
+      6: 'FRIDAY',
+      7: 'SATURDAY',
+      8: 'SUNDAY',
+    };
+    const FIELD_MAPS: Record<string, Record<number, string>> = {
+      start_minute: MINUTE_OF_HOUR,
+      end_minute: MINUTE_OF_HOUR,
+      day_of_week: DAY_OF_WEEK,
+    };
+
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (typeof v === 'number' && FIELD_MAPS[k]) {
+        const label = FIELD_MAPS[k][v];
+        if (label) obj[k] = label;
+      } else if (v && typeof v === 'object') {
+        this.humanizeEnumIntsDeep(v);
       }
     }
   }

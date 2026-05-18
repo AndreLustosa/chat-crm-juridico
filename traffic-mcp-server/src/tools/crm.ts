@@ -64,6 +64,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerSprint4_1Tools(server);
   // Sprint 4.2 backlog (2026-05-17): Experiments lifecycle completo
   registerSprint4_2Tools(server);
+  // Bug-fix batch (2026-05-17): cleanup asset orfaos
+  registerBugFixBatchTools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -3088,6 +3090,48 @@ function registerSprint4_2Tools(server: McpServer) {
         }
         if (result.note) lines.push(`Nota: ${result.note}`);
         return ok(result, lines.join('\n'));
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bug-fix batch (2026-05-17) — tools de cleanup pos-bugs
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerBugFixBatchTools(server: McpServer) {
+  server.registerTool(
+    'traffic_remove_asset',
+    {
+      description:
+        'Remove um Asset orfao da conta Google Ads. Util pra limpar assets criados ' +
+        'mas nunca anexados — ex: Call Assets criados pelo bug do traffic_attach_call_asset ' +
+        'antes do fix de 2026-05-17. Aceita asset_id como resource_name ' +
+        '(customers/X/assets/Y) OU ID numerico (auto-prefixa). ' +
+        'PRE-REQUISITO: asset deve estar SEM attachments ativos. Se ainda anexado, ' +
+        'Google rejeita com erro claro — desanexe primeiro via traffic_detach_extension ' +
+        'ou via Google Ads UI.',
+      inputSchema: {
+        asset_id: z
+          .string()
+          .min(1)
+          .describe('resource_name customers/X/assets/Y OU ID numerico do asset.'),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_remove_asset', async (toolCallId) => {
+        applyMutateGuards('traffic_remove_asset');
+        const result = await crmTrafficService.post(
+          '/trafego/assets/remove',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Asset ${input.asset_id} removido (status: ${(result as any)?.status ?? 'ok'}).`,
+        );
       }),
   );
 }

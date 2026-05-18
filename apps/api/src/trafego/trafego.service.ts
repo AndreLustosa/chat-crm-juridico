@@ -1402,10 +1402,15 @@ export class TrafegoService {
         if (operation === 'create') {
           if (context.step === 'create_assets')
             return `Criou ${context.asset_count ?? '?'} asset(s) pra ${context.asset_group_resource_name ? 'asset group PMax' : 'extensoes'}`;
+          if (context.step === 'create_call_asset')
+            return `Criou Call Asset (telefone)`;
           return `Criou asset (${payload?.[0]?.type ?? context.asset_type ?? '?'})`;
         }
-        if (operation === 'remove')
-          return `Removeu asset (extensao)`;
+        if (operation === 'remove') {
+          if (context.step === 'rollback_orphan_asset')
+            return `Rollback automatico — removeu asset orfao apos attach falhar`;
+          return `Removeu asset ${context.asset_resource_name ?? '(extensao)'}`;
+        }
         return `${verb(operation)} asset`;
       }
       case 'customer_asset':
@@ -1916,6 +1921,72 @@ export class TrafegoService {
 
       case 'trafego-mutate-update-conversion-action': {
         const ca = await this.requireConversionAction(tenantId, raw.conversionActionId);
+
+        // Fix 2026-05-17 (BUG-B reportado pelo gestor de trafego):
+        // detecta tipos imutaveis ANTES de gastar chamada API. Antes,
+        // mandavamos updates pra conversion actions tipo GOOGLE_HOSTED
+        // (Clicks to call gerenciada pelo Google) e Google rejeitava
+        // com IMMUTABLE_FIELD + MUTATE_NOT_ALLOWED — sem contexto pro
+        // gestor entender por que.
+        const IMMUTABLE_TYPES = new Set([
+          'GOOGLE_HOSTED',
+          'SMART_CAMPAIGN_TRACKED_CALLS',
+          'SMART_CAMPAIGN_AD_CLICKS_TO_CALL',
+          'SMART_CAMPAIGN_MAP_CLICKS_TO_CALL',
+          'SMART_CAMPAIGN_MAP_DIRECTIONS',
+          'ANDROID_INSTALLS_ALL_OTHER_APPS',
+          'ANDROID_APP_PRE_REGISTRATION',
+          'FIREBASE_ANDROID_FIRST_OPEN',
+          'FIREBASE_ANDROID_IN_APP_PURCHASE',
+          'FIREBASE_ANDROID_CUSTOM',
+          'FIREBASE_IOS_FIRST_OPEN',
+          'FIREBASE_IOS_IN_APP_PURCHASE',
+          'FIREBASE_IOS_CUSTOM',
+          'THIRD_PARTY_APP_ANALYTICS_ANDROID_FIRST_OPEN',
+          'THIRD_PARTY_APP_ANALYTICS_ANDROID_IN_APP_PURCHASE',
+          'THIRD_PARTY_APP_ANALYTICS_ANDROID_CUSTOM',
+          'THIRD_PARTY_APP_ANALYTICS_IOS_FIRST_OPEN',
+          'THIRD_PARTY_APP_ANALYTICS_IOS_IN_APP_PURCHASE',
+          'THIRD_PARTY_APP_ANALYTICS_IOS_CUSTOM',
+          'STORE_VISITS',
+          'STORE_SALES',
+          'STORE_SALES_DIRECT_UPLOAD',
+          'FLOODLIGHT_ACTION',
+          'FLOODLIGHT_TRANSACTION',
+          'SEARCH_ADS_360',
+          'UNIVERSAL_ANALYTICS_GOAL',
+          'UNIVERSAL_ANALYTICS_TRANSACTION',
+          'GOOGLE_ANALYTICS_4_CUSTOM',
+          'GOOGLE_ANALYTICS_4_PURCHASE',
+        ]);
+        const IMMUTABLE_FIELDS = new Set([
+          'include_in_conversions',
+          'status',
+          'attribution_model',
+        ]);
+
+        const isImmutableType =
+          ca.type && IMMUTABLE_TYPES.has(ca.type);
+        const requestedImmutableFields: string[] = [];
+        for (const field of IMMUTABLE_FIELDS) {
+          if (raw[field] !== undefined) requestedImmutableFields.push(field);
+        }
+
+        if (isImmutableType && requestedImmutableFields.length > 0) {
+          throw new HttpException(
+            `Conversion action "${ca.name}" eh do tipo ${ca.type} (gerenciada pelo Google). ` +
+              `Os campos ${requestedImmutableFields.join(', ')} sao IMUTAVEIS em conv actions ` +
+              `dos tipos: GOOGLE_HOSTED, SMART_CAMPAIGN_*, ANDROID_INSTALLS_*, ANDROID_FIRST_OPEN, ` +
+              `ANDROID_IN_APP_PURCHASE, MOBILE_APP, FIREBASE_*, THIRD_PARTY_APP_*, ` +
+              `STORE_*, FLOODLIGHT_*, SEARCH_ADS_360, UNIVERSAL_ANALYTICS_*, GOOGLE_ANALYTICS_4_*. ` +
+              `Apenas WEBPAGE, UPLOAD_CLICKS, UPLOAD_CALLS, CLICK_TO_CALL, WEBSITE_CALL, ` +
+              `AD_CALL e LEAD_FORM_SUBMIT podem ter esses campos alterados via API. ` +
+              `Pra ajustar essa conv action, use o Google Ads UI ou edite a configuracao ` +
+              `na fonte original (GA4, Firebase, etc).`,
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+
         const patch: any = {};
         if (raw.name !== undefined) patch.name = raw.name;
         if (raw.include_in_conversions !== undefined)
@@ -1942,7 +2013,11 @@ export class TrafegoService {
           ...base,
           conversionActionResourceName: `customers/${customerId}/conversionActions/${ca.google_conversion_id}`,
           patch,
-          context: { ...base.context, conversion_action_id_local: ca.id },
+          context: {
+            ...base.context,
+            conversion_action_id_local: ca.id,
+            ca_type: ca.type,
+          },
         };
       }
 
@@ -2591,6 +2666,21 @@ export class TrafegoService {
             ...base.context,
             experiment_id: raw.experiment_id,
             mapping_count: mappings.length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-remove-asset': {
+        // Bug-fix 2026-05-17 (cleanup orfaos do BUG-C)
+        const assetResourceName = raw.asset_id.startsWith('customers/')
+          ? raw.asset_id
+          : `customers/${customerId}/assets/${raw.asset_id}`;
+        return {
+          ...base,
+          assetResourceName,
+          context: {
+            ...base.context,
+            asset_id: raw.asset_id,
           },
         };
       }

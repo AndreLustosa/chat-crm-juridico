@@ -100,6 +100,8 @@ import {
   PromoteExperimentDto,
   GraduateExperimentDto,
   GetExperimentResultsDto,
+  // Bug-fix batch (2026-05-17) — cleanup orfaos
+  RemoveAssetDto,
 } from './trafego.dto';
 
 @Controller('trafego')
@@ -1630,6 +1632,17 @@ export class TrafegoController {
       'trafego-mutate-graduate-experiment',
       dto,
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Bug-fix batch (2026-05-17) — cleanup asset orfaos
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Remove um Asset orfao (sem attachments) da conta. */
+  @Post('assets/remove')
+  @Roles('ADMIN', 'ADVOGADO')
+  async removeAsset(@Req() req: any, @Body() dto: RemoveAssetDto) {
+    return await this.enqueueMutate(req, 'trafego-mutate-remove-asset', dto);
   }
 
   /** Get experiment results — metrics comparativas via GAQL live. */

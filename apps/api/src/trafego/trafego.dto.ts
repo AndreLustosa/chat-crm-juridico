@@ -818,6 +818,30 @@ export class CreateExperimentDto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Bug-fix batch (2026-05-17) — cleanup asset orfaos
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Remove um Asset da conta — pra limpeza de assets orfaos.
+ * Asset deve estar SEM attachments ativos (nem CampaignAsset, nem AdGroupAsset,
+ * nem CustomerAsset). Se ainda anexado, Google rejeita com erro claro.
+ *
+ * Aceita resource_name customers/X/assets/Y OU ID numerico (auto-prefixa).
+ */
+export class RemoveAssetDto {
+  @IsString()
+  asset_id!: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 4.2 do backlog (2026-05-17) — Experiments lifecycle
 // ═══════════════════════════════════════════════════════════════════════════
 

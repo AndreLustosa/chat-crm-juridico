@@ -195,6 +195,68 @@ export class GoogleAdsClientService {
     }
   }
 
+  /**
+   * Bug fix 2026-05-17 (BUG-A) — bypass pra Customer mutate.
+   *
+   * O metodo alto-nivel `customer.customers.update(payloads)` do SDK Opteo
+   * chama CustomerService.mutateCustomer internamente, mas com auto-mask
+   * que NAO pega nested fields como
+   * `conversion_tracking_setting.enhanced_conversions_for_leads_enabled`.
+   * Resultado: payload mal-formado, Google rejeita com
+   * "[5] Mutate operations must have 'create', 'update', or 'remove' specified."
+   *
+   * Solucao: chamar CustomerService.mutateCustomer direto via loadService,
+   * com `update_mask.paths` explicito.
+   *
+   * Padrao espelhado em mutateCampaignWithExplicitMask.
+   */
+  async mutateCustomerWithExplicitMask(
+    customer: Customer,
+    customerId: string,
+    customerResource: Record<string, unknown>,
+    updateMaskPaths: string[],
+    validateOnly: boolean,
+  ): Promise<{ ok: boolean; raw: unknown; resourceNames: string[]; error?: string }> {
+    const svc = (customer as any).loadService('CustomerServiceClient');
+    const headers = (customer as any).callHeaders;
+
+    const request = {
+      customer_id: customerId,
+      operation: {
+        update: customerResource,
+        update_mask: { paths: updateMaskPaths },
+      },
+      validate_only: validateOnly,
+    };
+
+    this.logger.log(
+      `[mutate-customer-grpc] customer=${customerId} mask=${JSON.stringify(updateMaskPaths)} validate_only=${validateOnly} body=${JSON.stringify(customerResource)} headers=${JSON.stringify(this.redactHeaders(headers))}`,
+    );
+
+    try {
+      const result = await svc.mutateCustomer(request, {
+        otherArgs: { headers },
+      });
+      const response = Array.isArray(result) ? result[0] : result;
+
+      const resourceName = response?.result?.resource_name;
+      this.logger.log(
+        `[mutate-customer-grpc] SUCCESS resource=${resourceName ?? '?'} raw=${JSON.stringify(this.safeSnapshot(response))}`,
+      );
+      return {
+        ok: true,
+        raw: response,
+        resourceNames: resourceName ? [resourceName] : [],
+      };
+    } catch (err: any) {
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[mutate-customer-grpc] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // Sprint 4.2 (2026-05-17) — Experiment lifecycle wrappers
   //

@@ -70,6 +70,8 @@ export const MUTATE_JOBS = {
   END_EXPERIMENT: 'trafego-mutate-end-experiment',
   PROMOTE_EXPERIMENT: 'trafego-mutate-promote-experiment',
   GRADUATE_EXPERIMENT: 'trafego-mutate-graduate-experiment',
+  // Bug-fix batch 2026-05-17 — cleanup asset orfaos
+  REMOVE_ASSET: 'trafego-mutate-remove-asset',
 } as const;
 
 /**
@@ -411,6 +413,15 @@ export type GraduateExperimentPayload = BaseMutatePayload & {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Bug-fix batch 2026-05-17 — cleanup asset orfaos
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type RemoveAssetPayload = BaseMutatePayload & {
+  /** resource_name customers/X/assets/Y */
+  assetResourceName: string;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 backlog — Targeting + Bulk
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -643,6 +654,8 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.promoteExperiment(job.data);
       case MUTATE_JOBS.GRADUATE_EXPERIMENT:
         return await this.graduateExperiment(job.data);
+      case MUTATE_JOBS.REMOVE_ASSET:
+        return await this.removeAsset(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -1633,25 +1646,121 @@ export class TrafegoMutateProcessor extends WorkerHost {
       };
     }
 
-    // GOOGLE_TAG ou BOTH — muta flag no customer
-    return await this.mutate.execute({
-      tenantId: p.tenantId,
-      accountId: p.accountId,
-      resourceType: 'customer' as any, // tipo nao listado em MutateResourceType ainda — passamos via cast
-      operation: 'update',
-      initiator: p.initiator,
-      confidence: p.confidence ?? null,
-      validateOnly: !!p.validateOnly,
-      context: { ...p.context, mode: p.mode },
-      operations: [
+    // GOOGLE_TAG ou BOTH — muta flag no customer.
+    //
+    // Fix 2026-05-17 (BUG-A reportado pelo gestor de trafego): a chamada
+    // mutate.execute({resourceType:'customer', operation:'update', ...})
+    // caia no customer.customers.update do SDK Opteo, cujo auto-mask NAO
+    // pega nested fields tipo conversion_tracking_setting.* — Google
+    // rejeitava com "Mutate operations must have create/update/remove".
+    //
+    // Solucao: usar bypass mutateCustomerWithExplicitMask (espelha o
+    // pattern do bidding strategy fix em 0137f49) + log manual em
+    // TrafficMutateLog pra audit equivalente.
+    const t0 = Date.now();
+    const requestId = `enable-enh-conv-${p.customerId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const log = await this.prisma.trafficMutateLog.create({
+      data: {
+        tenant_id: p.tenantId,
+        account_id: p.accountId,
+        request_id: requestId,
+        resource_type: 'customer',
+        operation: 'update',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        payload: [
+          {
+            resource_name: `customers/${p.customerId}`,
+            conversion_tracking_setting: {
+              enhanced_conversions_for_leads_enabled: true,
+            },
+          },
+        ] as any,
+        result: {} as any,
+        status: 'PENDING',
+        validate_only: !!p.validateOnly,
+        context: {
+          ...p.context,
+          mode: p.mode,
+          field: 'enhanced_conversions',
+          enabled: true,
+        } as any,
+      },
+    });
+
+    try {
+      const customer = await this.clientSvc.getCustomer(
+        p.tenantId,
+        p.accountId,
+      );
+      const result = await this.clientSvc.mutateCustomerWithExplicitMask(
+        customer,
+        p.customerId,
         {
           resource_name: `customers/${p.customerId}`,
           conversion_tracking_setting: {
             enhanced_conversions_for_leads_enabled: true,
           },
         },
-      ],
-    });
+        ['conversion_tracking_setting.enhanced_conversions_for_leads_enabled'],
+        !!p.validateOnly,
+      );
+      const durationMs = Date.now() - t0;
+
+      await this.prisma.trafficMutateLog.update({
+        where: { id: log.id },
+        data: {
+          status: result.ok ? 'SUCCESS' : 'PARTIAL',
+          duration_ms: durationMs,
+          result: {
+            ok: result.ok,
+            resource_names: result.resourceNames,
+            raw_snapshot: this.snapshotForLog(result.raw),
+          } as any,
+          error_message: result.error?.slice(0, 1500) ?? null,
+        },
+      });
+
+      this.logger.log(
+        `[enable-enhanced-conv] ${result.ok ? 'SUCCESS' : 'PARTIAL'} ${durationMs}ms`,
+      );
+
+      return {
+        logId: log.id,
+        status: result.ok ? 'SUCCESS' : 'PARTIAL',
+        resourceNames: result.resourceNames,
+        errorMessage: result.error ?? undefined,
+        oabViolations: [],
+        rawResponse: result.raw,
+        durationMs,
+      };
+    } catch (e: any) {
+      const durationMs = Date.now() - t0;
+      const errorMessage = e?.message || 'enable_enhanced_conversions falhou';
+
+      await this.prisma.trafficMutateLog.update({
+        where: { id: log.id },
+        data: {
+          status: 'FAILED',
+          duration_ms: durationMs,
+          error_message: errorMessage.slice(0, 1500),
+        },
+      });
+
+      this.logger.warn(
+        `[enable-enhanced-conv] FAILED ${durationMs}ms ${errorMessage}`,
+      );
+
+      return {
+        logId: log.id,
+        status: 'FAILED',
+        resourceNames: [],
+        errorMessage,
+        oabViolations: [],
+        durationMs,
+      };
+    }
   }
 
   /**
@@ -1872,78 +1981,147 @@ export class TrafegoMutateProcessor extends WorkerHost {
     }
     const assetResourceName = assetResult.resourceNames[0];
 
-    // Passo 2: cria associacao no nivel certo
-    if (p.level === 'CAMPAIGN' && p.campaignResourceName) {
-      return await this.mutate.execute({
-        tenantId: p.tenantId,
-        accountId: p.accountId,
-        resourceType: 'campaign_criterion' as any,
-        operation: 'create',
-        initiator: p.initiator,
-        confidence: p.confidence ?? null,
-        validateOnly: false,
-        context: {
-          ...p.context,
-          step: 'attach_to_campaign',
-          asset_resource_name: assetResourceName,
-        },
-        operations: [
-          {
-            campaign: p.campaignResourceName,
-            asset: assetResourceName,
-            field_type: enums.AssetFieldType.CALL,
+    // Passo 2: cria associacao no nivel certo.
+    //
+    // Fix 2026-05-17 (BUG-C reportado pelo gestor de trafego): antes
+    // estavamos usando resource_types ERRADOS (campaign_criterion,
+    // ad_group_criterion, asset) pra anexar Asset. CallAsset attachment
+    // usa CampaignAsset / AdGroupAsset / CustomerAsset (NAO criterion!).
+    // CampaignCriterion eh pra keywords/geo/etc, nao pra asset links.
+    //
+    // Alem disso, agora envolvemos step 2 num try-catch com ROLLBACK
+    // automatico do asset criado no step 1 — antes, se step 2 falhasse
+    // o asset ficava orfao na conta (3 assets orfaos foram criados
+    // antes do fix: 362094397446, 362094408834, 362094427521).
+    const attachLevel = p.level;
+    let attachResult: MutateResult;
+
+    try {
+      if (attachLevel === 'CAMPAIGN' && p.campaignResourceName) {
+        attachResult = await this.mutate.execute({
+          tenantId: p.tenantId,
+          accountId: p.accountId,
+          resourceType: 'campaign_asset',
+          operation: 'create',
+          initiator: p.initiator,
+          confidence: p.confidence ?? null,
+          validateOnly: false,
+          context: {
+            ...p.context,
+            step: 'attach_to_campaign',
+            asset_resource_name: assetResourceName,
+            field_type: 'CALL',
           },
-        ],
-      });
+          operations: [
+            {
+              campaign: p.campaignResourceName,
+              asset: assetResourceName,
+              field_type: enums.AssetFieldType.CALL,
+            },
+          ],
+        });
+      } else if (attachLevel === 'AD_GROUP' && p.adGroupResourceName) {
+        attachResult = await this.mutate.execute({
+          tenantId: p.tenantId,
+          accountId: p.accountId,
+          resourceType: 'ad_group_asset',
+          operation: 'create',
+          initiator: p.initiator,
+          confidence: p.confidence ?? null,
+          validateOnly: false,
+          context: {
+            ...p.context,
+            step: 'attach_to_ad_group',
+            asset_resource_name: assetResourceName,
+            field_type: 'CALL',
+          },
+          operations: [
+            {
+              ad_group: p.adGroupResourceName,
+              asset: assetResourceName,
+              field_type: enums.AssetFieldType.CALL,
+            },
+          ],
+        });
+      } else {
+        // ACCOUNT-level → customer_asset
+        attachResult = await this.mutate.execute({
+          tenantId: p.tenantId,
+          accountId: p.accountId,
+          resourceType: 'customer_asset',
+          operation: 'create',
+          initiator: p.initiator,
+          confidence: p.confidence ?? null,
+          validateOnly: false,
+          context: {
+            ...p.context,
+            step: 'attach_to_account',
+            asset_resource_name: assetResourceName,
+            field_type: 'CALL',
+          },
+          operations: [
+            {
+              customer: `customers/${p.customerId}`,
+              asset: assetResourceName,
+              field_type: enums.AssetFieldType.CALL,
+            },
+          ],
+        });
+      }
+    } catch (e: any) {
+      // Catch sincrono cobre erros de validacao (raros). Erros do Google
+      // viram MutateResult com status FAILED/PARTIAL — tratamos abaixo.
+      attachResult = {
+        logId: 'attach-exception',
+        status: 'FAILED',
+        resourceNames: [],
+        errorMessage: e?.message ?? 'erro desconhecido no attach',
+        oabViolations: [],
+        durationMs: 0,
+      };
     }
 
-    if (p.level === 'AD_GROUP' && p.adGroupResourceName) {
-      return await this.mutate.execute({
-        tenantId: p.tenantId,
-        accountId: p.accountId,
-        resourceType: 'ad_group_criterion' as any,
-        operation: 'create',
-        initiator: p.initiator,
-        confidence: p.confidence ?? null,
-        validateOnly: false,
-        context: {
-          ...p.context,
-          step: 'attach_to_ad_group',
-          asset_resource_name: assetResourceName,
-        },
-        operations: [
-          {
-            ad_group: p.adGroupResourceName,
-            asset: assetResourceName,
-            field_type: enums.AssetFieldType.CALL,
+    // Rollback transacional: se attach falhou, remove o asset orfao.
+    // Best-effort — se rollback falhar, loga mas devolve o erro original
+    // (o asset orfao pode ser limpo depois via traffic_remove_asset).
+    if (attachResult.status === 'FAILED' || attachResult.status === 'PARTIAL') {
+      this.logger.warn(
+        `[attach-call-asset] step 2 falhou (status=${attachResult.status}) — fazendo rollback do asset ${assetResourceName}`,
+      );
+      try {
+        await this.mutate.execute({
+          tenantId: p.tenantId,
+          accountId: p.accountId,
+          resourceType: 'asset',
+          operation: 'remove',
+          initiator: p.initiator,
+          confidence: null,
+          validateOnly: false,
+          context: {
+            ...p.context,
+            step: 'rollback_orphan_asset',
+            original_request_id: assetResult.logId,
           },
-        ],
-      });
+          operations: [assetResourceName],
+        });
+        this.logger.log(
+          `[attach-call-asset] rollback do asset ${assetResourceName} OK`,
+        );
+      } catch (rollbackErr: any) {
+        this.logger.warn(
+          `[attach-call-asset] rollback FALHOU pro asset ${assetResourceName}: ${rollbackErr?.message}. Asset ficou ORFAO na conta — limpe via traffic_remove_asset.`,
+        );
+      }
+      // Adiciona contexto no errorMessage pra gestor entender que asset foi rollback
+      return {
+        ...attachResult,
+        errorMessage:
+          (attachResult.errorMessage ?? 'attach falhou') +
+          ` | Rollback automatico do asset ${assetResourceName} executado.`,
+      };
     }
 
-    // Level ACCOUNT — usa customer_asset
-    return await this.mutate.execute({
-      tenantId: p.tenantId,
-      accountId: p.accountId,
-      resourceType: 'asset' as any, // re-use; backend mapa o servico certo
-      operation: 'create',
-      initiator: p.initiator,
-      confidence: p.confidence ?? null,
-      validateOnly: false,
-      context: {
-        ...p.context,
-        step: 'attach_to_account',
-        asset_resource_name: assetResourceName,
-        attachment_type: 'customer_asset',
-      },
-      operations: [
-        {
-          customer: `customers/${p.customerId}`,
-          asset: assetResourceName,
-          field_type: enums.AssetFieldType.CALL,
-        },
-      ],
-    });
+    return attachResult;
   }
 
   /**
@@ -3677,6 +3855,35 @@ export class TrafegoMutateProcessor extends WorkerHost {
         durationMs,
       };
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Bug-fix batch (2026-05-17) — cleanup asset orfaos
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Remove um Asset da conta — pra limpeza de assets orfaos (criados via
+   * attach_call_asset que falhou em step 2 antes do fix do BUG-C, ou via
+   * UI antes de anexar). Asset removido nao pode ser anexado depois.
+   *
+   * Aceita resource_name customers/X/assets/Y. Se asset ainda esta anexado
+   * a alguma campanha/grupo/conta, Google rejeita com erro claro.
+   */
+  private async removeAsset(p: RemoveAssetPayload): Promise<MutateResult> {
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset',
+      operation: 'remove',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        asset_resource_name: p.assetResourceName,
+      },
+      operations: [p.assetResourceName],
+    });
   }
 
   private snapshotForLog(raw: unknown): unknown {
