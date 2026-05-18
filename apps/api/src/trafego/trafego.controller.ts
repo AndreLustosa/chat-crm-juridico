@@ -629,11 +629,20 @@ export class TrafegoController {
   /**
    * Lista o agendamento (ad_schedule) atual da campanha. Quando vazio,
    * campanha roda 24/7. Sincronizado pelo cron via campaign_criterion.
+   *
+   * Aceita id = UUID interno OU google_campaign_id (via requireCampaign).
+   * include_history=true anexa ultimas 10 mutacoes do schedule.
    */
   @Get('campaigns/:id/schedule')
   @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
-  async getCampaignSchedule(@Req() req: any, @Param('id') id: string) {
-    return this.service.getCampaignSchedule(req.user.tenant_id, id);
+  async getCampaignSchedule(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('include_history') includeHistory?: string,
+  ) {
+    return this.service.getCampaignSchedule(req.user.tenant_id, id, {
+      includeHistory: includeHistory === 'true' || includeHistory === '1',
+    });
   }
 
   /**

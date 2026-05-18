@@ -99,7 +99,9 @@ function registerCampaignReadTools(server: McpServer) {
     'traffic_list_campaigns',
     {
       description:
-        'Lista campanhas Google Ads do CRM com metricas agregadas da janela. Use days pra controlar a janela (1-90, default 30). include_archived=true pra ver tambem as ocultas/removidas.',
+        'Lista campanhas Google Ads do CRM com metricas agregadas da janela. Use days pra controlar a janela (1-90, default 30). include_archived=true pra ver tambem as ocultas/removidas. ' +
+        'Cada campanha vem com `ad_schedule` resumido — { is_24_7, summary ("Seg-Sex 08:00-18:00" ou "24/7" etc), slots_count, has_custom_bid_modifiers, slots[] } — ' +
+        'sem precisar chamada extra. Pra detalhe completo + history use traffic_get_schedule.',
       inputSchema: {
         include_archived: z.boolean().optional().describe('Incluir campanhas arquivadas/removidas'),
         days: z.number().int().min(1).max(90).optional().describe('Janela de metricas em dias (default 30)'),
@@ -121,8 +123,16 @@ function registerCampaignReadTools(server: McpServer) {
           .filter((c) => filter === 'ALL' || c.status === filter);
         const page = paginate(filtered, input.page, input.limit);
         return ok(page, markdownTable(
-          ['ID', 'Google ID', 'Campanha', 'Status', 'Budget/dia', 'Canal'],
-          page.map((c) => [c.id, c.google_campaign_id ?? '-', c.name, c.status, money(c.budget_per_day), c.channel_type ?? '-']),
+          ['ID', 'Google ID', 'Campanha', 'Status', 'Budget/dia', 'Canal', 'Schedule'],
+          page.map((c) => [
+            c.id,
+            c.google_campaign_id ?? '-',
+            c.name,
+            c.status,
+            money(c.budget_per_day),
+            c.channel_type ?? '-',
+            (c as any).ad_schedule?.summary ?? '-',
+          ]),
         ));
       }),
   );
@@ -1093,6 +1103,67 @@ function registerKeywordMutateTools(server: McpServer) {
 }
 
 function registerScheduleMutateTools(server: McpServer) {
+  // ─── Schedule reads (companion to traffic_update_schedule) ─────────────
+  server.registerTool(
+    'traffic_get_schedule',
+    {
+      description:
+        'Retorna o ad schedule completo (dayparting) de uma campanha — slots configurados por dia/hora com bid modifiers, ' +
+        'resumo humanizado em PT-BR (ex: "Seg-Sex 08:00-18:00" ou "24/7"), indicação de 24/7, timezone da conta, ' +
+        'e warnings de freshness (se a ultima sync foi >24h atras). ' +
+        'Use ANTES de chamar traffic_update_schedule — como update faz substituicao COMPLETA dos slots, sem leitura previa ' +
+        'voce arrisca apagar slots sem querer. ' +
+        'include_history=true anexa as ultimas 10 mutacoes de schedule via TrafficMutateLog (initiator, status, changed_at). ' +
+        'campaign_id aceita UUID interno OU google_campaign_id numerico.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        include_history: z
+          .boolean()
+          .optional()
+          .describe('Inclui ultimas 10 mutacoes do schedule (audit trail).'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_get_schedule', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          campaign_id_local: string;
+          google_campaign_id: string | null;
+          campaign_name: string;
+          campaign_status: string;
+          time_zone: string | null;
+          is_24_7: boolean;
+          summary: string;
+          slots_count: number;
+          has_custom_bid_modifiers: boolean;
+          slots: any[];
+          warnings?: string[];
+          history?: any[];
+        }>(
+          `/trafego/campaigns/${encodeURIComponent(input.campaign_id)}/schedule`,
+          input.include_history ? { include_history: 'true' } : undefined,
+          { toolCallId },
+        );
+        const lines: string[] = [];
+        lines.push(
+          `Campanha "${result.campaign_name}" (status: ${result.campaign_status}, tz: ${result.time_zone ?? '-'})`,
+        );
+        lines.push(`Schedule: ${result.summary}`);
+        if (result.slots_count > 0) {
+          lines.push(`${result.slots_count} slots configurados.`);
+        }
+        if (result.warnings && result.warnings.length > 0) {
+          lines.push(`Avisos: ${result.warnings.join(' | ')}`);
+        }
+        if (result.history && result.history.length > 0) {
+          lines.push(
+            `Ultimas ${result.history.length} mutacoes — mais recente: ${result.history[0]?.changed_at} por ${result.history[0]?.initiator}`,
+          );
+        }
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
   server.registerTool(
     'traffic_update_schedule',
     {

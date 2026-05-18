@@ -101,7 +101,7 @@ export class TrafegoService {
     const windowStart = new Date(today);
     windowStart.setUTCDate(windowStart.getUTCDate() - windowDays);
 
-    const [campaigns, perCampaignAgg, perCampaignShareAvg, adStrengthAgg] =
+    const [campaigns, perCampaignAgg, perCampaignShareAvg, adStrengthAgg, allSchedules] =
       await Promise.all([
         this.prisma.trafficCampaign.findMany({
           where: {
@@ -156,12 +156,56 @@ export class TrafegoService {
             ad_group: { select: { campaign_id: true } },
           },
         }),
+        // Ad schedule (todas as campaigns) — uma unica query, agrupa
+        // depois no client. Sem isso teriamos N+1 (1 query por campaign).
+        // findMany simples + orderBy do indice (campaign_id) eh o mais
+        // eficiente — TrafficAdSchedule ja indexa por campaign_id.
+        this.prisma.trafficAdSchedule.findMany({
+          where: { tenant_id: tenantId },
+          orderBy: [{ campaign_id: 'asc' }, { day_of_week: 'asc' }, { start_hour: 'asc' }],
+          select: {
+            campaign_id: true,
+            day_of_week: true,
+            start_hour: true,
+            start_minute: true,
+            end_hour: true,
+            end_minute: true,
+            bid_modifier: true,
+          },
+        }),
       ]);
 
     const aggMap = new Map(perCampaignAgg.map((a) => [a.campaign_id, a._sum]));
     const shareMap = new Map(
       perCampaignShareAvg.map((a) => [a.campaign_id, a._avg]),
     );
+
+    // Agrupa schedules por campaign_id (mantem ordem do orderBy).
+    // Mantemos bid_modifier:null pra preservar compat com UI (mostra "Padrao"
+    // em vez de "+0%"). Helper enrich trata null como 1.0 internamente.
+    const schedulesByCampaign = new Map<
+      string,
+      Array<{
+        day_of_week: string;
+        start_hour: number;
+        start_minute: number;
+        end_hour: number;
+        end_minute: number;
+        bid_modifier: number | null;
+      }>
+    >();
+    for (const s of allSchedules) {
+      const arr = schedulesByCampaign.get(s.campaign_id) ?? [];
+      arr.push({
+        day_of_week: s.day_of_week,
+        start_hour: s.start_hour,
+        start_minute: s.start_minute,
+        end_hour: s.end_hour,
+        end_minute: s.end_minute,
+        bid_modifier: s.bid_modifier ? Number(s.bid_modifier) : null,
+      });
+      schedulesByCampaign.set(s.campaign_id, arr);
+    }
 
     // Best ad_strength por campanha (POOR=1, AVERAGE=2, GOOD=3, EXCELLENT=4)
     const STRENGTH_RANK: Record<string, number> = {
@@ -193,12 +237,20 @@ export class TrafegoService {
       const conversions = Number(agg?.conversions ?? 0);
       const clicks = Number(agg?.clicks ?? 0);
       const impressions = Number(agg?.impressions ?? 0);
+      // Ad schedule enriched (uso o helper compartilhado com getCampaignSchedule).
+      // Cache local TrafficAdSchedule eh populado pelo sync — se a campanha
+      // nao tem slots, retorna {is_24_7:true, slots:[], summary:"24/7"}.
+      const adSchedule = this.enrichScheduleData(
+        schedulesByCampaign.get(c.id) ?? [],
+      );
       return {
         ...c,
         daily_budget_micros: c.daily_budget_micros?.toString() ?? null,
         daily_budget_brl: fromMicros(c.daily_budget_micros),
         // Best ad_strength entre os ads ENABLED dessa campanha
         ad_strength: bestStrengthByCampaign.get(c.id) ?? null,
+        // Ad schedule resumido — pra UI/MCP ver dayparting sem chamada extra
+        ad_schedule: adSchedule,
         metrics_window: {
           days: windowDays,
           spend_brl: cost,
@@ -421,24 +473,223 @@ export class TrafegoService {
     };
   }
 
-  async getCampaignSchedule(tenantId: string, campaignId: string) {
-    await this.requireCampaign(tenantId, campaignId);
-    const items = await this.prisma.trafficAdSchedule.findMany({
-      where: { campaign_id: campaignId },
-      orderBy: [{ day_of_week: 'asc' }, { start_hour: 'asc' }],
-    });
+  /**
+   * Retorna o ad_schedule de uma campanha — slots brutos + summary humanizado
+   * + flags (is_24_7, has_custom_bid_modifiers) + timezone da conta +
+   * warning de freshness (se ultimo sync >24h).
+   *
+   * Aceita UUID interno OU google_campaign_id (via requireCampaign).
+   *
+   * include_history=true anexa ultimas 10 mutacoes via TrafficMutateLog
+   * filtrado por resource_type='campaign_criterion' + context.campaign_id_local.
+   */
+  async getCampaignSchedule(
+    tenantId: string,
+    campaignIdOrGoogleId: string,
+    opts: { includeHistory?: boolean } = {},
+  ) {
+    const campaign = await this.requireCampaign(tenantId, campaignIdOrGoogleId);
+
+    const [items, account] = await Promise.all([
+      this.prisma.trafficAdSchedule.findMany({
+        where: { campaign_id: campaign.id },
+        orderBy: [{ day_of_week: 'asc' }, { start_hour: 'asc' }],
+      }),
+      this.prisma.trafficAccount.findUnique({
+        where: { id: campaign.account_id },
+        select: { time_zone: true, last_sync_at: true },
+      }),
+    ]);
+
+    const slots = items.map((s) => ({
+      id: s.id,
+      google_criterion_id: s.google_criterion_id,
+      day_of_week: s.day_of_week,
+      start_hour: s.start_hour,
+      start_minute: s.start_minute,
+      end_hour: s.end_hour,
+      end_minute: s.end_minute,
+      // null = sem ajuste (padrao 1.0). Mantemos null pra UI exibir
+      // "Padrao" vs "+X%". O helper enrich trata null como 1.0 internamente.
+      bid_modifier: s.bid_modifier ? Number(s.bid_modifier) : null,
+    }));
+
+    const enriched = this.enrichScheduleData(slots);
+
+    // Freshness warning — se a conta nao sincroniza ha mais de 24h, o cache
+    // local pode estar defasado em relacao ao Google Ads.
+    const warnings: string[] = [];
+    if (account?.last_sync_at) {
+      const hoursAgo =
+        (Date.now() - account.last_sync_at.getTime()) / 3_600_000;
+      if (hoursAgo > 24) {
+        warnings.push(
+          `Schedule pode estar defasado: ultima sync da conta ha ${Math.floor(hoursAgo)}h. Considere disparar traffic_trigger_sync antes de mutar.`,
+        );
+      }
+    }
+    if (campaign.status === 'REMOVED') {
+      warnings.push(
+        'Campanha esta REMOVED — schedule mostrado eh do ultimo estado conhecido.',
+      );
+    }
+
+    // History opcional — todas as mutacoes de campaign_criterion sao
+    // logadas no TrafficMutateLog com context.campaign_id_local. Filtra
+    // por campaign_id_local + resource_type=campaign_criterion (cobre
+    // create/remove gerados pelo update_schedule, que faz substituicao).
+    let history: Array<{
+      mutate_log_id: string;
+      operation: string;
+      initiator: string;
+      changed_at: string;
+      status: string;
+    }> | undefined;
+    if (opts.includeHistory) {
+      const logs = await this.prisma.trafficMutateLog.findMany({
+        where: {
+          tenant_id: tenantId,
+          resource_type: 'campaign_criterion',
+          status: { in: ['SUCCESS', 'PARTIAL'] },
+          // Filtra por campaign_id_local dentro do JSON context
+          context: { path: ['campaign_id_local'], equals: campaign.id },
+        },
+        orderBy: { created_at: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          operation: true,
+          initiator: true,
+          status: true,
+          created_at: true,
+        },
+      });
+      history = logs.map((l) => ({
+        mutate_log_id: l.id,
+        operation: l.operation,
+        initiator: l.initiator,
+        changed_at: l.created_at.toISOString(),
+        status: l.status,
+      }));
+    }
+
     return {
-      slots: items.map((s) => ({
-        id: s.id,
-        google_criterion_id: s.google_criterion_id,
-        day_of_week: s.day_of_week,
-        start_hour: s.start_hour,
-        start_minute: s.start_minute,
-        end_hour: s.end_hour,
-        end_minute: s.end_minute,
-        bid_modifier: s.bid_modifier ? Number(s.bid_modifier) : null,
-      })),
+      campaign_id_local: campaign.id,
+      google_campaign_id: campaign.google_campaign_id,
+      campaign_name: campaign.name,
+      campaign_status: campaign.status,
+      time_zone: account?.time_zone ?? null,
+      ...enriched,
+      ...(warnings.length > 0 && { warnings }),
+      ...(history && { history }),
     };
+  }
+
+  /**
+   * Helper compartilhado — gera summary humanizado a partir dos slots.
+   * Usado por getCampaignSchedule + listCampaigns (enriquecimento).
+   *
+   * Heuristicas (em ordem):
+   *  1. slots vazios       → "24/7"
+   *  2. 7 dias mesmas horas → "Todos os dias HH:MM-HH:MM"
+   *  3. Mon-Fri so          → "Seg-Sex HH:MM-HH:MM"
+   *  4. Sat+Sun so          → "Sab-Dom HH:MM-HH:MM"
+   *  5. fallback            → "N slots customizados"
+   *
+   * Se algum slot tem bid_modifier != 1.0, sufixa " (com bid modifier)".
+   */
+  private enrichScheduleData(
+    slots: Array<{
+      day_of_week: string;
+      start_hour: number;
+      start_minute: number;
+      end_hour: number;
+      end_minute: number;
+      bid_modifier: number | null;
+    }>,
+  ) {
+    // null = padrao 1.0 (sem ajuste). So conta como "custom" se != 1.0.
+    const has_custom_bid_modifiers = slots.some((s) => {
+      if (s.bid_modifier === null || s.bid_modifier === undefined) return false;
+      return Math.abs(s.bid_modifier - 1.0) > 0.001;
+    });
+    const summary = this.buildScheduleSummary(slots, has_custom_bid_modifiers);
+    return {
+      is_24_7: slots.length === 0,
+      summary,
+      slots_count: slots.length,
+      has_custom_bid_modifiers,
+      slots,
+    };
+  }
+
+  private buildScheduleSummary(
+    slots: Array<{
+      day_of_week: string;
+      start_hour: number;
+      start_minute: number;
+      end_hour: number;
+      end_minute: number;
+      bid_modifier: number | null;
+    }>,
+    hasCustomBidModifiers: boolean,
+  ): string {
+    if (slots.length === 0) return '24/7';
+
+    const fmtTime = (h: number, m: number) =>
+      `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    const fmtWindow = (s: (typeof slots)[number]) =>
+      `${fmtTime(s.start_hour, s.start_minute)}-${fmtTime(s.end_hour, s.end_minute)}`;
+
+    const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+    const WEEKEND = ['SATURDAY', 'SUNDAY'];
+    const ALL_DAYS = [...WEEKDAYS, ...WEEKEND];
+
+    // Agrupa slots por janela (HH:MM-HH:MM). Se todos os dias em um grupo
+    // tem a MESMA janela, podemos resumir.
+    const byWindow = new Map<string, Set<string>>();
+    for (const s of slots) {
+      const w = fmtWindow(s);
+      const set = byWindow.get(w) ?? new Set<string>();
+      set.add(s.day_of_week);
+      byWindow.set(w, set);
+    }
+
+    const suffix = hasCustomBidModifiers ? ' (com bid modifier)' : '';
+
+    // Caso 1: 1 unica janela cobrindo todos os 7 dias
+    if (byWindow.size === 1) {
+      const [window, days] = [...byWindow.entries()][0];
+      const dayCount = days.size;
+      if (dayCount === 7 && ALL_DAYS.every((d) => days.has(d))) {
+        return `Todos os dias ${window}${suffix}`;
+      }
+      if (dayCount === 5 && WEEKDAYS.every((d) => days.has(d))) {
+        return `Seg-Sex ${window}${suffix}`;
+      }
+      if (dayCount === 2 && WEEKEND.every((d) => days.has(d))) {
+        return `Sab-Dom ${window}${suffix}`;
+      }
+    }
+
+    // Caso 2: 2 janelas — Mon-Fri e Sat-Sun com janelas diferentes
+    if (byWindow.size === 2) {
+      const entries = [...byWindow.entries()];
+      const weekdayEntry = entries.find(
+        ([_, days]) =>
+          days.size === 5 && WEEKDAYS.every((d) => days.has(d)),
+      );
+      const weekendEntry = entries.find(
+        ([_, days]) =>
+          days.size === 2 && WEEKEND.every((d) => days.has(d)),
+      );
+      if (weekdayEntry && weekendEntry) {
+        return `Seg-Sex ${weekdayEntry[0]} + Sab-Dom ${weekendEntry[0]}${suffix}`;
+      }
+    }
+
+    // Fallback — caso geral
+    return `${slots.length} slots customizados (use traffic_get_schedule pra detalhe)${suffix}`;
   }
 
   // ─── P2: Hourly + Device endpoints (detalhe campanha) ──────────────────
