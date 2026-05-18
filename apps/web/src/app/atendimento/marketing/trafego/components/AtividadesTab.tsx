@@ -35,11 +35,15 @@ interface MutateLog {
   resource_type: string;
   resource_id: string | null;
   initiator: string;
-  status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'VALIDATED';
+  status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'VALIDATED' | 'PARTIAL' | 'PENDING';
   validate_only: boolean;
   error_message: string | null;
   request_payload: unknown;
   response_payload: unknown;
+  // Enriquecimento backend (2026-05-17) — frases PT-BR + tradução de erro
+  summary?: string | null;
+  friendly_resource?: string | null;
+  friendly_error?: string | null;
 }
 
 type ActorKind = 'claude' | 'ai_internal' | 'human' | 'unknown';
@@ -239,16 +243,35 @@ export function AtividadesTab() {
                       <ActorBadge actor={actor} />
                     </td>
                     <td className="px-4 py-3">
-                      <code className="text-[11px] bg-muted px-1.5 py-0.5 rounded">
-                        {log.operation}
-                      </code>
-                      <span className="text-xs ml-1.5 text-muted-foreground">
-                        {log.validate_only && '· dry-run'}
-                      </span>
+                      {/* Frase humanizada em PT-BR (backend enriquece via
+                          buildMutateSummary). Fallback pro raw code se faltar. */}
+                      {log.summary ? (
+                        <p className="text-xs text-foreground/90 leading-snug max-w-md">
+                          {log.summary}
+                          {log.validate_only && (
+                            <span className="ml-1.5 text-[10px] font-semibold text-blue-700 dark:text-blue-400">
+                              (dry-run)
+                            </span>
+                          )}
+                        </p>
+                      ) : (
+                        <>
+                          <code className="text-[11px] bg-muted px-1.5 py-0.5 rounded">
+                            {log.operation}
+                          </code>
+                          <span className="text-xs ml-1.5 text-muted-foreground">
+                            {log.validate_only && '· dry-run'}
+                          </span>
+                        </>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-xs">
-                      <span className="text-foreground/80">{log.resource_type}</span>
-                      {log.resource_id && (
+                      {/* Friendly resource ("Campanha: Trabalhista Arap") em
+                          vez do raw resource_type. Fallback pro tipo cru. */}
+                      <span className="text-foreground/80">
+                        {log.friendly_resource ?? log.resource_type}
+                      </span>
+                      {log.resource_id && !log.friendly_resource && (
                         <code className="ml-1.5 text-[10px] text-muted-foreground">
                           {log.resource_id.slice(0, 14)}
                           {log.resource_id.length > 14 ? '…' : ''}
@@ -257,9 +280,12 @@ export function AtividadesTab() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={log.status} />
-                      {log.error_message && (
-                        <p className="mt-0.5 text-[11px] text-red-700 dark:text-red-400 max-w-xs truncate">
-                          {log.error_message}
+                      {(log.friendly_error || log.error_message) && (
+                        <p
+                          className="mt-1 text-[11px] text-red-700 dark:text-red-400 max-w-xs leading-snug"
+                          title={log.error_message ?? undefined}
+                        >
+                          {log.friendly_error ?? log.error_message}
                         </p>
                       )}
                     </td>
@@ -364,6 +390,11 @@ function StatusBadge({ status }: { status: MutateLog['status'] }) {
       cls: 'bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30',
       icon: <XCircle size={11} />,
     },
+    PARTIAL: {
+      label: 'Parcial',
+      cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30',
+      icon: <XCircle size={11} />,
+    },
     VALIDATED: {
       label: 'Validado',
       cls: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30',
@@ -376,6 +407,11 @@ function StatusBadge({ status }: { status: MutateLog['status'] }) {
     },
     QUEUED: {
       label: 'Na fila',
+      cls: 'bg-muted text-muted-foreground border-border',
+      icon: <Clock size={11} />,
+    },
+    PENDING: {
+      label: 'Pendente',
       cls: 'bg-muted text-muted-foreground border-border',
       icon: <Clock size={11} />,
     },
@@ -425,8 +461,21 @@ function DetailDrawer({
           </button>
         </div>
         <div className="p-4 overflow-y-auto space-y-3">
-          <Field label="Operação">
-            <code>{log.operation}</code> em <code>{log.resource_type}</code>
+          {log.summary && (
+            <Field label="O que aconteceu">
+              <p className="text-sm text-foreground/90 leading-relaxed">
+                {log.summary}
+              </p>
+            </Field>
+          )}
+          {log.friendly_resource && (
+            <Field label="Recurso">
+              {log.friendly_resource}
+            </Field>
+          )}
+          <Field label="Operação técnica">
+            <code className="text-[11px]">{log.operation}</code> em{' '}
+            <code className="text-[11px]">{log.resource_type}</code>
           </Field>
           <Field label="Initiator">
             <code>{log.initiator}</code>
@@ -439,11 +488,23 @@ function DetailDrawer({
               </span>
             )}
           </Field>
-          {log.error_message && (
+          {(log.friendly_error || log.error_message) && (
             <Field label="Erro">
-              <pre className="text-[11px] text-red-700 dark:text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2 whitespace-pre-wrap">
-                {log.error_message}
-              </pre>
+              {log.friendly_error && (
+                <p className="text-xs text-red-700 dark:text-red-400 bg-red-500/10 border border-red-500/30 rounded p-2 mb-2 leading-relaxed">
+                  {log.friendly_error}
+                </p>
+              )}
+              {log.error_message && (
+                <details className="text-[11px]">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    Erro técnico cru do Google Ads
+                  </summary>
+                  <pre className="mt-1 text-[10px] text-red-700 dark:text-red-400 bg-red-500/5 border border-red-500/20 rounded p-2 whitespace-pre-wrap overflow-x-auto">
+                    {log.error_message}
+                  </pre>
+                </details>
+              )}
             </Field>
           )}
           <Field label="Request payload">

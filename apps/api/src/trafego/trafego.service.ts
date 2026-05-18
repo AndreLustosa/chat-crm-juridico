@@ -1202,10 +1202,423 @@ export class TrafegoService {
       orderBy: { created_at: 'desc' },
       take: opts.limit ?? 50,
     });
-    return items.map((i) => ({
-      ...i,
-      confidence: i.confidence ? Number(i.confidence) : null,
-    }));
+
+    // Enriquecimento humanizado — 3 campos novos pro frontend renderizar
+    // sem expor JSON/codigos crus:
+    //   - summary: frase PT-BR ("Claude criou headline 'XXX' em ...")
+    //   - friendly_resource: rotulo legivel do recurso ("Campanha: Trabalhista Arap")
+    //   - friendly_error: tradução do error_message JSON pra PT-BR
+    //
+    // Precisa enriquecer campaign/ad_group/conversion_action names dos
+    // logs com lookup local (context.campaign_id_local + cache em map).
+    const campaignIds = new Set<string>();
+    const adGroupIds = new Set<string>();
+    const conversionIds = new Set<string>();
+    for (const log of items) {
+      const ctx = (log.context ?? {}) as any;
+      if (ctx?.campaign_id_local) campaignIds.add(ctx.campaign_id_local);
+      if (ctx?.base_campaign_id_local) campaignIds.add(ctx.base_campaign_id_local);
+      if (ctx?.trial_campaign_id_local) campaignIds.add(ctx.trial_campaign_id_local);
+      if (ctx?.ad_group_id_local) adGroupIds.add(ctx.ad_group_id_local);
+      if (ctx?.conversion_action_id_local)
+        conversionIds.add(ctx.conversion_action_id_local);
+    }
+    const [campaigns, adGroups, conversions] = await Promise.all([
+      campaignIds.size > 0
+        ? this.prisma.trafficCampaign.findMany({
+            where: { id: { in: [...campaignIds] } },
+            select: { id: true, name: true, google_campaign_id: true },
+          })
+        : Promise.resolve([]),
+      adGroupIds.size > 0
+        ? this.prisma.trafficAdGroup.findMany({
+            where: { id: { in: [...adGroupIds] } },
+            select: { id: true, name: true, google_ad_group_id: true },
+          })
+        : Promise.resolve([]),
+      conversionIds.size > 0
+        ? this.prisma.trafficConversionAction.findMany({
+            where: { id: { in: [...conversionIds] } },
+            select: { id: true, name: true, google_conversion_id: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const campaignMap = new Map(campaigns.map((c) => [c.id, c]));
+    const adGroupMap = new Map(adGroups.map((g) => [g.id, g]));
+    const conversionMap = new Map(conversions.map((c) => [c.id, c]));
+
+    return items.map((i) => {
+      const ctx = (i.context ?? {}) as any;
+      const payload = (i.payload ?? {}) as any;
+      const enriched = {
+        summary: this.buildMutateSummary(
+          i.resource_type,
+          i.operation,
+          ctx,
+          payload,
+          campaignMap,
+          adGroupMap,
+          conversionMap,
+        ),
+        friendly_resource: this.buildFriendlyResource(
+          i.resource_type,
+          ctx,
+          campaignMap,
+          adGroupMap,
+          conversionMap,
+        ),
+        friendly_error: i.error_message
+          ? this.buildFriendlyError(i.error_message)
+          : null,
+      };
+      return {
+        ...i,
+        confidence: i.confidence ? Number(i.confidence) : null,
+        ...enriched,
+      };
+    });
+  }
+
+  // ─── Mutate log humanization helpers ────────────────────────────────────
+
+  /**
+   * Gera frase PT-BR resumindo o que a mutate fez/tentou fazer.
+   *
+   * Regra geral: "<verbo> <recurso humanizado> [em <campanha/grupo>]".
+   * Cobre Sprint 1-4.2 (todos resource_types possiveis).
+   */
+  private buildMutateSummary(
+    resourceType: string,
+    operation: string,
+    context: Record<string, any>,
+    payload: any,
+    campaignMap: Map<string, { id: string; name: string }>,
+    adGroupMap: Map<string, { id: string; name: string }>,
+    conversionMap: Map<string, { id: string; name: string }>,
+  ): string {
+    const campName = (id?: string) =>
+      id && campaignMap.get(id) ? `"${campaignMap.get(id)!.name}"` : null;
+    const adGroupName = (id?: string) =>
+      id && adGroupMap.get(id) ? `"${adGroupMap.get(id)!.name}"` : null;
+    const convName = (id?: string) =>
+      id && conversionMap.get(id) ? `"${conversionMap.get(id)!.name}"` : null;
+
+    // Verbos PT-BR por operation
+    const verb = (op: string): string => {
+      const v: Record<string, string> = {
+        create: 'Criou',
+        update: 'Atualizou',
+        remove: 'Removeu',
+        // Sprint 4.2 — experiment lifecycle ops customizados
+        schedule_experiment: 'Agendou',
+        end_experiment: 'Encerrou',
+        promote_experiment: 'Promoveu',
+        graduate_experiment: 'Graduou',
+      };
+      return v[op] ?? op;
+    };
+
+    const camp = campName(context.campaign_id_local);
+    const ag = adGroupName(context.ad_group_id_local);
+
+    switch (resourceType) {
+      case 'campaign': {
+        if (operation === 'create')
+          return `Criou campanha ${context.channel_type === 'PERFORMANCE_MAX' ? 'Performance Max ' : ''}"${payload?.[0]?.name ?? context.campaign_name ?? '(sem nome)'}"`;
+        if (operation === 'update') {
+          if (context.new_bidding_strategy)
+            return `Mudou estrategia de lance da campanha ${camp ?? '?'} pra ${context.new_bidding_strategy}`;
+          if (context.new_status)
+            return `${context.new_status === 'PAUSED' ? 'Pausou' : 'Reativou'} campanha ${camp ?? '?'}`;
+          return `Atualizou campanha ${camp ?? '?'}`;
+        }
+        if (operation === 'remove') return `Removeu campanha ${camp ?? '?'}`;
+        return `${verb(operation)} campanha ${camp ?? ''}`;
+      }
+      case 'campaign_budget': {
+        if (operation === 'update' && context.new_amount_brl)
+          return `Mudou budget da campanha ${camp ?? '?'} pra R$${Number(context.new_amount_brl).toFixed(2)}/dia`;
+        if (operation === 'create')
+          return `Criou budget pra campanha "${context.campaign_name ?? '?'}"`;
+        return `${verb(operation)} budget ${camp ?? ''}`;
+      }
+      case 'ad_group': {
+        if (operation === 'create')
+          return `Criou grupo de anuncios "${payload?.[0]?.name ?? '?'}" em ${camp ?? '?'}`;
+        if (operation === 'remove') return `Removeu grupo de anuncios ${ag ?? '?'}`;
+        if (operation === 'update' && context.new_status)
+          return `${context.new_status === 'PAUSED' ? 'Pausou' : 'Reativou'} grupo ${ag ?? '?'}`;
+        return `${verb(operation)} grupo de anuncios ${ag ?? ''}`;
+      }
+      case 'ad_group_ad': {
+        if (operation === 'create')
+          return `Criou anuncio (RSA) no grupo ${ag ?? '?'}`;
+        if (operation === 'update' && context.new_status)
+          return `${context.new_status === 'PAUSED' ? 'Pausou' : 'Reativou'} anuncio em ${ag ?? '?'}`;
+        if (operation === 'remove') return `Removeu anuncio em ${ag ?? '?'}`;
+        return `${verb(operation)} anuncio ${ag ?? ''}`;
+      }
+      case 'ad_group_criterion': {
+        const kwCount = context.kw_count ?? context.keyword_count;
+        if (operation === 'create') {
+          if (context.is_negative)
+            return `Adicionou ${kwCount ?? '?'} palavra(s) negativa(s) no grupo ${ag ?? '?'}`;
+          return `Adicionou ${kwCount ?? '?'} palavra(s)-chave no grupo ${ag ?? '?'}`;
+        }
+        if (operation === 'remove')
+          return `Removeu palavra(s)-chave do grupo ${ag ?? '?'}`;
+        return `${verb(operation)} criterio no grupo ${ag ?? ''}`;
+      }
+      case 'campaign_criterion': {
+        if (context.step === 'create_pmax_criteria')
+          return `Adicionou geo + idioma na PMax "${context.campaign_name ?? '?'}"`;
+        if (context.step === 'create_geo_target' || context.target_count)
+          return `Atualizou targeting geografico da campanha ${camp ?? '?'} (${context.target_count ?? '?'} alvos)`;
+        if (context.modifier_count)
+          return `Ajustou ${context.modifier_count} modificador(es) de lance por localizacao em ${camp ?? '?'}`;
+        if (operation === 'create')
+          return `Adicionou criterio na campanha ${camp ?? '?'}`;
+        if (operation === 'remove')
+          return `Removeu criterio da campanha ${camp ?? '?'}`;
+        return `${verb(operation)} criterio na campanha ${camp ?? ''}`;
+      }
+      case 'conversion_action': {
+        if (operation === 'create')
+          return `Criou acao de conversao "${payload?.[0]?.name ?? '?'}"`;
+        if (operation === 'update')
+          return `Atualizou acao de conversao ${convName(context.conversion_action_id_local) ?? '?'}`;
+        if (operation === 'remove')
+          return `Removeu acao de conversao ${convName(context.conversion_action_id_local) ?? '?'}`;
+        return `${verb(operation)} acao de conversao`;
+      }
+      case 'customer': {
+        if (operation === 'update' && context.field === 'enhanced_conversions')
+          return `${context.enabled ? 'Ativou' : 'Desativou'} Enhanced Conversions for Leads na conta`;
+        if (operation === 'update')
+          return `Atualizou configuracao da conta`;
+        return `${verb(operation)} conta`;
+      }
+      case 'asset': {
+        if (operation === 'create') {
+          if (context.step === 'create_assets')
+            return `Criou ${context.asset_count ?? '?'} asset(s) pra ${context.asset_group_resource_name ? 'asset group PMax' : 'extensoes'}`;
+          return `Criou asset (${payload?.[0]?.type ?? context.asset_type ?? '?'})`;
+        }
+        if (operation === 'remove')
+          return `Removeu asset (extensao)`;
+        return `${verb(operation)} asset`;
+      }
+      case 'customer_asset':
+      case 'campaign_asset':
+      case 'ad_group_asset': {
+        const scope =
+          resourceType === 'customer_asset'
+            ? 'conta'
+            : resourceType === 'campaign_asset'
+              ? `campanha ${camp ?? '?'}`
+              : `grupo ${ag ?? '?'}`;
+        if (operation === 'create') {
+          if (context.field_type === 'CALL')
+            return `Anexou Call Asset (telefone) na ${scope}`;
+          return `Anexou extensao na ${scope}`;
+        }
+        if (operation === 'remove') return `Desanexou extensao da ${scope}`;
+        return `${verb(operation)} link de asset na ${scope}`;
+      }
+      case 'shared_set': {
+        if (operation === 'create')
+          return `Criou lista compartilhada de negativas "${context.list_name ?? '?'}" (${context.kw_count ?? '?'} palavras, anexada a ${context.attach_count ?? 0} campanha(s))`;
+        return `${verb(operation)} lista compartilhada`;
+      }
+      case 'shared_criterion': {
+        if (operation === 'create')
+          return `Adicionou ${context.kw_count ?? '?'} negativa(s) na lista compartilhada`;
+        return `${verb(operation)} criterio compartilhado`;
+      }
+      case 'campaign_shared_set': {
+        if (operation === 'create')
+          return `Anexou lista compartilhada a ${context.campaign_count ?? '?'} campanha(s)`;
+        if (operation === 'remove')
+          return `Desanexou lista compartilhada de campanha(s)`;
+        return `${verb(operation)} link de lista compartilhada`;
+      }
+      case 'asset_group': {
+        if (operation === 'create')
+          return `Criou asset group "${context.asset_group_name ?? '?'}" na PMax ${camp ?? '?'}`;
+        return `${verb(operation)} asset group`;
+      }
+      case 'asset_group_asset': {
+        if (operation === 'create')
+          return `Vinculou ${context.link_count ?? '?'} asset(s) ao asset group PMax`;
+        return `${verb(operation)} link de asset no asset group`;
+      }
+      case 'experiment': {
+        if (operation === 'create')
+          return `Criou experimento "${context.experiment_name ?? '?'}" (${context.experiment_type ?? 'SEARCH_CUSTOM'}) usando campanha base ${campName(context.base_campaign_id_local) ?? '?'}`;
+        if (operation === 'schedule_experiment')
+          return `Agendou experimento ${context.experiment_id ?? '?'} (SETUP -> ENABLED async)`;
+        if (operation === 'end_experiment')
+          return `Encerrou experimento ${context.experiment_id ?? '?'} (HALTED — sem promover)`;
+        if (operation === 'promote_experiment')
+          return `Promoveu experimento ${context.experiment_id ?? '?'} — treatment aplicado na base`;
+        if (operation === 'graduate_experiment')
+          return `Graduou experimento ${context.experiment_id ?? '?'} — ${context.mapping_count ?? '?'} trial(s) viraram standalone`;
+        return `${verb(operation)} experimento`;
+      }
+      case 'experiment_arm': {
+        if (operation === 'create')
+          return `Adicionou ExperimentArm "${context.arm_role ?? 'arm'}" ao experimento (traffic_split: ${context.traffic_split ?? '?'}%)`;
+        return `${verb(operation)} arm de experimento`;
+      }
+      default:
+        return `${verb(operation)} ${resourceType}`;
+    }
+  }
+
+  /**
+   * Retorna o rotulo "humano" do recurso pra coluna RECURSO da tabela.
+   * Ex: "Campanha: Trabalhista Arap" em vez de só "campaign".
+   */
+  private buildFriendlyResource(
+    resourceType: string,
+    context: Record<string, any>,
+    campaignMap: Map<string, { id: string; name: string }>,
+    adGroupMap: Map<string, { id: string; name: string }>,
+    conversionMap: Map<string, { id: string; name: string }>,
+  ): string {
+    const camp = context.campaign_id_local
+      ? campaignMap.get(context.campaign_id_local)
+      : null;
+    const ag = context.ad_group_id_local
+      ? adGroupMap.get(context.ad_group_id_local)
+      : null;
+    const conv = context.conversion_action_id_local
+      ? conversionMap.get(context.conversion_action_id_local)
+      : null;
+
+    // Labels PT-BR por resource_type
+    const LABELS: Record<string, string> = {
+      campaign: 'Campanha',
+      campaign_budget: 'Budget',
+      ad_group: 'Grupo de anuncios',
+      ad_group_ad: 'Anuncio',
+      ad_group_criterion: 'Palavra-chave',
+      campaign_criterion: 'Targeting de campanha',
+      conversion_action: 'Acao de conversao',
+      customer: 'Conta',
+      asset: 'Asset (extensao)',
+      customer_asset: 'Extensao da conta',
+      campaign_asset: 'Extensao da campanha',
+      ad_group_asset: 'Extensao do grupo',
+      shared_set: 'Lista compartilhada',
+      shared_criterion: 'Item de lista compartilhada',
+      campaign_shared_set: 'Vinculo lista-campanha',
+      asset_group: 'Asset group PMax',
+      asset_group_asset: 'Asset em PMax',
+      experiment: 'Experimento A/B',
+      experiment_arm: 'Arm de experimento',
+      customer_match_user_list: 'Customer Match list',
+      remarketing_action: 'Tag de remarketing',
+    };
+
+    const label = LABELS[resourceType] ?? resourceType;
+
+    if (camp) return `${label}: ${camp.name}`;
+    if (ag) return `${label}: ${ag.name}`;
+    if (conv) return `${label}: ${conv.name}`;
+    if (context.list_name) return `${label}: ${context.list_name}`;
+    if (context.asset_group_name) return `${label}: ${context.asset_group_name}`;
+    if (context.experiment_name)
+      return `${label}: ${context.experiment_name}`;
+    if (context.campaign_name) return `${label}: ${context.campaign_name}`;
+    return label;
+  }
+
+  /**
+   * Traduz JSON cru de error_message do Google em mensagem PT-BR util.
+   *
+   * Cobre:
+   *   - mutate_error.MUTATE_NOT_ALLOWED → "Permissao negada (provavelmente conta sem Standard access)"
+   *   - validation_error.* → mensagem original (geralmente clara)
+   *   - field_mask_error.* → "Erro no field mask: <detalhe>"
+   *   - rate_limit_error → "Cota Google Ads excedida"
+   *   - Em geral: pega 1a mensagem do array errors[]
+   *
+   * Se mensagem nao for JSON parseavel, retorna ela mesma truncada.
+   */
+  private buildFriendlyError(rawErrorMessage: string): string {
+    // Tenta parsear como JSON (formato GoogleAdsFailure)
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(rawErrorMessage);
+    } catch {
+      // Nao eh JSON — retorna direto, mas trim
+      return rawErrorMessage.length > 200
+        ? rawErrorMessage.slice(0, 200) + '...'
+        : rawErrorMessage;
+    }
+
+    const errors = parsed?.errors ?? [];
+    if (!Array.isArray(errors) || errors.length === 0) {
+      // Sem errors[] — devolve o que tiver
+      return parsed?.message ?? rawErrorMessage.slice(0, 200);
+    }
+
+    // Pega 1o erro estruturado
+    const first = errors[0];
+    const errorCode = first?.error_code ?? {};
+    const codeKey = Object.keys(errorCode)[0]; // ex: "mutate_error"
+    const codeValue = errorCode[codeKey]; // ex: "MUTATE_NOT_ALLOWED"
+
+    // Traducoes PT-BR pra codigos comuns
+    const TRANSLATIONS: Record<string, string> = {
+      'mutate_error.MUTATE_NOT_ALLOWED':
+        'Operacao nao permitida (provavelmente conta sem Standard access do Google Ads ou recurso bloqueado pelo seu nivel de developer token).',
+      'mutate_error.RESOURCE_NOT_FOUND':
+        'Recurso nao encontrado no Google Ads (pode ter sido removido por terceiro ou nunca existiu).',
+      'authentication_error.OAUTH_TOKEN_INVALID':
+        'Token OAuth invalido. Reconecte a conta Google Ads via Configuracoes.',
+      'authentication_error.OAUTH_TOKEN_EXPIRED':
+        'Token OAuth expirado. Reconecte a conta Google Ads via Configuracoes.',
+      'authorization_error.DEVELOPER_TOKEN_NOT_APPROVED':
+        'Developer token nao aprovado pra essa operacao. Verifique seu nivel de acesso.',
+      'authorization_error.USER_PERMISSION_DENIED':
+        'Sem permissao no Google Ads pra esse usuario.',
+      'quota_error.RESOURCE_EXHAUSTED':
+        'Cota da API Google Ads excedida. Tente novamente em alguns minutos.',
+      'rate_limit_error.RESOURCE_TEMPORARILY_EXHAUSTED':
+        'Limite de requisicoes excedido temporariamente. Aguarde 1 minuto.',
+      'field_error.REQUIRED':
+        'Campo obrigatorio faltando no payload.',
+      'field_error.INVALID_VALUE':
+        'Valor invalido em um dos campos.',
+      'campaign_error.DUPLICATE_CAMPAIGN_NAME':
+        'Ja existe uma campanha com esse nome.',
+      'ad_group_error.DUPLICATE_ADGROUP_NAME':
+        'Ja existe um grupo de anuncios com esse nome nessa campanha.',
+      'criterion_error.INVALID_KEYWORD_TEXT':
+        'Palavra-chave invalida (provavelmente caracteres especiais nao suportados).',
+      'criterion_error.KEYWORD_HAS_INVALID_CHARS':
+        'Palavra-chave contem caracteres invalidos.',
+      'asset_error.URL_FORMAT_NOT_ALLOWED':
+        'URL invalida — provavelmente sem https:// ou com caracteres especiais.',
+      'budget_error.INVALID_BUDGET_AMOUNT':
+        'Valor de budget invalido (minimo Google: R$1/dia).',
+      'bidding_error.BIDDING_STRATEGY_NOT_COMPATIBLE_WITH_CAMPAIGN_TYPE':
+        'Essa estrategia de lance nao eh compativel com esse tipo de campanha.',
+      'partial_failure_error':
+        'Algumas operacoes falharam dentro do batch. Ver detalhes pra cada uma.',
+    };
+
+    const fullKey = codeKey && codeValue ? `${codeKey}.${codeValue}` : codeKey;
+    const translation = TRANSLATIONS[fullKey] ?? TRANSLATIONS[codeKey];
+
+    if (translation) return translation;
+
+    // Fallback: mensagem original do Google (geralmente em ingles, mas
+    // direta)
+    const msg = first?.message ?? `Erro: ${fullKey}`;
+    return msg.length > 250 ? msg.slice(0, 250) + '...' : msg;
   }
 
   // ─── Mutate payload builder ─────────────────────────────────────────────
