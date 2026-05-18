@@ -306,21 +306,38 @@ export class TrafegoSyncExtendedService {
       const sched = row.campaign_criterion?.ad_schedule ?? {};
       const dayOfWeek =
         enumToStr(enums.DayOfWeek, sched.day_of_week, null) ?? null;
-      // Google pode retornar minutes como enum (ZERO=0, FIFTEEN=15, etc)
-      const minuteEnum: Record<string, number> = {
-        ZERO: 0,
-        FIFTEEN: 15,
-        THIRTY: 30,
-        FORTY_FIVE: 45,
+
+      // Fix 2026-05-18 (BUG-D root cause): Google retorna start_minute/end_minute
+      // como ENUM VALUE (int) do MinuteOfHourEnum.MinuteOfHour:
+      //   UNSPECIFIED=0, UNKNOWN=1, ZERO=2, FIFTEEN=3, THIRTY=4, FORTY_FIVE=5
+      // Antes salvavamos o int literal (`2`) no DB, o que fazia
+      // traffic_get_schedule mostrar "07:02" em vez de "07:00".
+      // Agora convertemos enum value → minuto literal (0/15/30/45).
+      const minuteFromGoogle = (val: any): number => {
+        // String form (REST/some endpoints): "ZERO", "FIFTEEN", etc
+        if (typeof val === 'string') {
+          const map: Record<string, number> = {
+            ZERO: 0,
+            FIFTEEN: 15,
+            THIRTY: 30,
+            FORTY_FIVE: 45,
+          };
+          return map[val] ?? 0;
+        }
+        // Int form (gRPC enum value): 2=ZERO, 3=FIFTEEN, 4=THIRTY, 5=FORTY_FIVE
+        if (typeof val === 'number') {
+          if (val === 2) return 0;
+          if (val === 3) return 15;
+          if (val === 4) return 30;
+          if (val === 5) return 45;
+          // Defensive: se Google um dia retornar minuto literal (0/15/30/45),
+          // aceita direto pra nao quebrar
+          if (val === 0 || val === 15 || val === 30 || val === 45) return val;
+        }
+        return 0; // default seguro
       };
-      const sm =
-        typeof sched.start_minute === 'number'
-          ? sched.start_minute
-          : minuteEnum[String(sched.start_minute)] ?? 0;
-      const em =
-        typeof sched.end_minute === 'number'
-          ? sched.end_minute
-          : minuteEnum[String(sched.end_minute)] ?? 0;
+      const sm = minuteFromGoogle(sched.start_minute);
+      const em = minuteFromGoogle(sched.end_minute);
       // Hour: Google retorna número direto (0-24)
       const sh = toNumberSafe(sched.start_hour, 0) ?? 0;
       // Google retorna end_hour 24 como TWENTY_FOUR enum às vezes

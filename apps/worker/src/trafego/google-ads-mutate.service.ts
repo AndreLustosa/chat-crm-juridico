@@ -321,6 +321,23 @@ export class GoogleAdsMutateService {
 
     if (req.operation === 'remove') {
       const resourceNames = req.operations.filter((x: any) => typeof x === 'string');
+      // Fix 2026-05-18 (BUG-E): nem todo subservice expoe `.remove`. SDK
+      // Opteo nao expoe pra Asset (customer.assets.remove === undefined).
+      // Fallback: usa customer.mutateResources (GoogleAdsService.mutate
+      // alto-nivel) com operations heterogeneas. Esse pattern funciona
+      // pra qualquer resource type.
+      if (typeof svc.remove !== 'function') {
+        const entityName = req.resourceType; // ex: 'asset'
+        const mutations = resourceNames.map((rn) => ({
+          entity: entityName,
+          operation: 'remove' as const,
+          resource: rn,
+        }));
+        this.logger.log(
+          `[mutate] svc.remove indisponivel pra ${entityName} — usando mutateResources fallback (${mutations.length} ops)`,
+        );
+        return await customer.mutateResources(mutations as any, opts);
+      }
       return svc.remove(resourceNames, opts);
     }
 
@@ -401,17 +418,18 @@ export class GoogleAdsMutateService {
    * mas tokens crus sim) antes de persistir no log. Conservador: snapshot
    * shallow do payload, redact campos sensiveis se presentes.
    *
-   * Fix 2026-05-17 (BUG-D reportado pelo gestor): humaniza enum INTs
-   * conhecidos pra log nao mostrar "start_minute: 2" (que era o protobuf
-   * int de MinuteOfHour.ZERO = 00 minutos). Agora mostra
-   * "start_minute: 0 (ZERO)" — humano consegue ler.
+   * Nota 2026-05-18: tive um intermediario que humanizava enum INTs pra
+   * audit log (start_minute: 2 → "0 (ZERO=00min)") porque pareciam
+   * minutos literais. Mas isso confundiu mais que ajudou — o root cause
+   * estava no SYNC que salvava o int 2 como minuto literal no DB. Removi
+   * o humanizer; agora log mostra payload raw (start_minute: 2 = enum
+   * value de MinuteOfHour.ZERO).
    */
   private sanitizePayload(operations: any[]): any {
     return operations.map((op) => {
       if (typeof op === 'string') return op;
       const clone = JSON.parse(JSON.stringify(op, this.bigIntReplacer));
       this.redactDeep(clone);
-      this.humanizeEnumIntsDeep(clone);
       return clone;
     });
   }
@@ -445,56 +463,6 @@ export class GoogleAdsMutateService {
     }
   }
 
-  /**
-   * Humaniza enum INTs conhecidos in-place pra audit log nao mostrar
-   * numeros crus. Ex: payload AdSchedule tem `start_minute: 2` que eh
-   * o protobuf int de MinuteOfHour.ZERO (00 min) — sem essa funcao, log
-   * confunde quem le pensando ":02".
-   *
-   * Mapeia campos -> string "0 (ZERO)" pra ficar claro: numero literal
-   * + nome do enum entre parenteses.
-   *
-   * Fix 2026-05-17 — BUG-D reportado pelo gestor de trafego.
-   */
-  private humanizeEnumIntsDeep(obj: any): void {
-    if (!obj || typeof obj !== 'object') return;
-
-    // Mapeamentos por nome de campo. Cada um: int -> label PT-BR/Google.
-    const MINUTE_OF_HOUR: Record<number, string> = {
-      0: '? (UNSPECIFIED)',
-      1: '? (UNKNOWN)',
-      2: '0 (ZERO=00min)',
-      3: '15 (FIFTEEN=15min)',
-      4: '30 (THIRTY=30min)',
-      5: '45 (FORTY_FIVE=45min)',
-    };
-    const DAY_OF_WEEK: Record<number, string> = {
-      0: '? (UNSPECIFIED)',
-      1: '? (UNKNOWN)',
-      2: 'MONDAY',
-      3: 'TUESDAY',
-      4: 'WEDNESDAY',
-      5: 'THURSDAY',
-      6: 'FRIDAY',
-      7: 'SATURDAY',
-      8: 'SUNDAY',
-    };
-    const FIELD_MAPS: Record<string, Record<number, string>> = {
-      start_minute: MINUTE_OF_HOUR,
-      end_minute: MINUTE_OF_HOUR,
-      day_of_week: DAY_OF_WEEK,
-    };
-
-    for (const k of Object.keys(obj)) {
-      const v = obj[k];
-      if (typeof v === 'number' && FIELD_MAPS[k]) {
-        const label = FIELD_MAPS[k][v];
-        if (label) obj[k] = label;
-      } else if (v && typeof v === 'object') {
-        this.humanizeEnumIntsDeep(v);
-      }
-    }
-  }
 
   /**
    * request_id determinístico baseado em (tenant, account, resource, op,

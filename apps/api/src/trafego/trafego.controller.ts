@@ -1285,9 +1285,24 @@ export class TrafegoController {
     @Query('type') type?: string,
     @Query('status') status?: string,
   ) {
+    // Fix 2026-05-18 (BUG-G): GAQL espera campaign.id e ad_group.id como
+    // int64 (google_campaign_id / google_ad_group_id). Se vier UUID
+    // interno do CRM, resolver pro google_id antes de enfileirar.
+    const googleCampaignId = campaignId
+      ? await this.service.resolveCampaignGoogleId(
+          req.user.tenant_id,
+          campaignId,
+        )
+      : undefined;
+    const googleAdGroupId = adGroupId
+      ? await this.service.resolveAdGroupGoogleId(
+          req.user.tenant_id,
+          adGroupId,
+        )
+      : undefined;
     return await this.enqueueReadJob(req, 'extensions', {
-      campaign_id: campaignId,
-      ad_group_id: adGroupId,
+      campaign_id: googleCampaignId,
+      ad_group_id: googleAdGroupId,
       type,
       status,
     });

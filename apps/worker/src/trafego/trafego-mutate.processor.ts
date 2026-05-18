@@ -1439,7 +1439,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
       return op;
     });
 
-    return await this.mutate.execute({
+    const createResult = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'campaign_criterion',
@@ -1454,6 +1454,125 @@ export class TrafegoMutateProcessor extends WorkerHost {
       },
       operations,
     });
+
+    // Round-trip verification (BUG-D postmortem, 2026-05-18):
+    // Apos mutate SUCCESS, re-le schedule via GAQL e compara com input.
+    // Se diverge, retorna PARTIAL com warning — caller decide se reaplica.
+    // Skipa em validate_only (sem efeito real) e em FAILED (nada a verificar).
+    if (
+      createResult.status === 'SUCCESS' &&
+      !p.validateOnly &&
+      p.newSlots.length > 0
+    ) {
+      try {
+        const customer = await this.clientSvc.getCustomer(
+          p.tenantId,
+          p.accountId,
+        );
+        const verifyQuery = `
+          SELECT
+            campaign_criterion.ad_schedule.day_of_week,
+            campaign_criterion.ad_schedule.start_hour,
+            campaign_criterion.ad_schedule.start_minute,
+            campaign_criterion.ad_schedule.end_hour,
+            campaign_criterion.ad_schedule.end_minute
+          FROM campaign_criterion
+          WHERE campaign.id = ${p.googleCampaignId}
+            AND campaign_criterion.type = 'AD_SCHEDULE'
+            AND campaign_criterion.status != 'REMOVED'
+        `;
+        const rows = (await customer.query(verifyQuery)) as any[];
+
+        // Converte enum int Google -> minuto literal pra comparar com input
+        const enumToMinute = (val: any): number => {
+          if (typeof val === 'string') {
+            const m: Record<string, number> = {
+              ZERO: 0,
+              FIFTEEN: 15,
+              THIRTY: 30,
+              FORTY_FIVE: 45,
+            };
+            return m[val] ?? 0;
+          }
+          if (val === 2) return 0;
+          if (val === 3) return 15;
+          if (val === 4) return 30;
+          if (val === 5) return 45;
+          return typeof val === 'number' ? val : 0;
+        };
+        const dayEnumToName = (val: any): string => {
+          if (typeof val === 'string') return val;
+          const m: Record<number, string> = {
+            2: 'MONDAY',
+            3: 'TUESDAY',
+            4: 'WEDNESDAY',
+            5: 'THURSDAY',
+            6: 'FRIDAY',
+            7: 'SATURDAY',
+            8: 'SUNDAY',
+          };
+          return m[val] ?? String(val);
+        };
+
+        const actualSlots = rows.map((r) => {
+          const s = r.campaign_criterion?.ad_schedule ?? {};
+          return {
+            day_of_week: dayEnumToName(s.day_of_week),
+            start_hour: Number(s.start_hour ?? 0),
+            start_minute: enumToMinute(s.start_minute),
+            end_hour: typeof s.end_hour === 'number' ? s.end_hour : 24,
+            end_minute: enumToMinute(s.end_minute),
+          };
+        });
+
+        // Compara: cada slot do input deve existir no actual
+        const matches = p.newSlots.every((expected) =>
+          actualSlots.some(
+            (actual) =>
+              actual.day_of_week === expected.dayOfWeek &&
+              actual.start_hour === expected.startHour &&
+              actual.start_minute === expected.startMinute &&
+              actual.end_minute === expected.endMinute,
+          ),
+        );
+
+        if (!matches) {
+          const expectedSummary = p.newSlots
+            .map(
+              (s) =>
+                `${s.dayOfWeek} ${String(s.startHour).padStart(2, '0')}:${String(s.startMinute).padStart(2, '0')}-${String(s.endHour).padStart(2, '0')}:${String(s.endMinute).padStart(2, '0')}`,
+            )
+            .join(', ');
+          const actualSummary = actualSlots
+            .map(
+              (s) =>
+                `${s.day_of_week} ${String(s.start_hour).padStart(2, '0')}:${String(s.start_minute).padStart(2, '0')}-${String(s.end_hour).padStart(2, '0')}:${String(s.end_minute).padStart(2, '0')}`,
+            )
+            .join(', ');
+          this.logger.warn(
+            `[update-schedule] round-trip MISMATCH: esperado=[${expectedSummary}] mas Google retornou=[${actualSummary}]`,
+          );
+          return {
+            ...createResult,
+            status: 'PARTIAL' as const,
+            errorMessage:
+              `Schedule aplicado mas round-trip verification falhou. Esperado: ${expectedSummary}. Google atual: ${actualSummary}. ` +
+              `Pode ser propagacao em atraso (re-le em 30s) OU bug — confirme via traffic_get_schedule.`,
+          };
+        }
+        this.logger.log(
+          `[update-schedule] round-trip OK — ${actualSlots.length} slots aplicados conforme input`,
+        );
+      } catch (e: any) {
+        // Round-trip eh best-effort — se falhar, nao bloqueia o mutate.
+        // Apenas loga warning e segue com SUCCESS do create.
+        this.logger.warn(
+          `[update-schedule] round-trip verification falhou (best-effort): ${e?.message ?? 'unknown'}. Mutate ainda esta SUCCESS.`,
+        );
+      }
+    }
+
+    return createResult;
   }
 
   // ═══════════════════════════════════════════════════════════════════════

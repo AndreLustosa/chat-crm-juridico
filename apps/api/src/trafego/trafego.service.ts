@@ -2833,6 +2833,35 @@ export class TrafegoService {
     return ag;
   }
 
+  /**
+   * Resolve campaign UUID interno OR google_campaign_id em google_campaign_id.
+   * Usado em reads (extensions, etc) que precisam passar pro GAQL `campaign.id`
+   * (int64). Se ja for google ID, retorna ele mesmo. Se for UUID, faz lookup.
+   * Throw 404 se nao encontrar.
+   * Fix BUG-G (2026-05-18).
+   */
+  async resolveCampaignGoogleId(
+    tenantId: string,
+    idOrGoogleId: string,
+  ): Promise<string> {
+    // Heuristica: se for inteiro puro, ja eh google_id — skip lookup
+    if (/^\d+$/.test(idOrGoogleId)) return idOrGoogleId;
+    const camp = await this.requireCampaign(tenantId, idOrGoogleId);
+    return camp.google_campaign_id;
+  }
+
+  /**
+   * Idem pra ad_group. Fix BUG-G (2026-05-18).
+   */
+  async resolveAdGroupGoogleId(
+    tenantId: string,
+    idOrGoogleId: string,
+  ): Promise<string> {
+    if (/^\d+$/.test(idOrGoogleId)) return idOrGoogleId;
+    const ag = await this.requireAdGroup(tenantId, idOrGoogleId);
+    return ag.google_ad_group_id;
+  }
+
   // ─── Bidding Strategy: lookup publico + validacoes ─────────────────────
 
   /**
