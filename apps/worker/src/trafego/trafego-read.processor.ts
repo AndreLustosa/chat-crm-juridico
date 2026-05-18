@@ -251,14 +251,22 @@ export class TrafegoReadProcessor extends WorkerHost {
     const ensureAsset = (assetRn: string, assetData: any): Ext => {
       const existing = byAsset.get(assetRn);
       if (existing) return existing;
+      // Normaliza type pra string ANTES de passar pro extractAssetPayload
+      // (que faz switch case por string).
+      const typeStr = this.formatAssetType(assetData?.type);
       const ext: Ext = {
         asset_resource_name: assetRn,
         asset_id: String(assetData?.id ?? ''),
-        type: assetData?.type ?? 'UNKNOWN',
-        status: assetData?.policy_summary?.review_status ?? 'UNKNOWN',
+        type: typeStr,
+        status: this.formatPolicyReviewStatus(
+          assetData?.policy_summary?.review_status,
+        ),
         name: assetData?.name ?? null,
         attachments: [],
-        payload: this.extractAssetPayload(assetData),
+        payload: this.extractAssetPayload({
+          ...(assetData ?? {}),
+          type: typeStr,
+        }),
       };
       byAsset.set(assetRn, ext);
       return ext;
@@ -541,7 +549,7 @@ export class TrafegoReadProcessor extends WorkerHost {
         level: link.level,
         scope_resource_name: link.scope_resource_name,
         field_type: this.formatFieldType(link.field_type),
-        status: link.status,
+        status: this.formatAssetLinkStatus(link.status),
       });
     }
 
@@ -561,13 +569,18 @@ export class TrafegoReadProcessor extends WorkerHost {
   /**
    * Formata field_type retornado pelo Google. Aceita int (enum value)
    * OR string (enum name) — sempre devolve string PT-BR/Google amigavel.
-   * Ex: 16 → "CALL", "CALL" → "CALL", null → ""
+   *
+   * Fix 2026-05-18 v5: enum completo do AssetFieldType v23 (antes faltavam
+   * PRICE=24, AD_IMAGE=26, BUSINESS_LOGO=27, BUSINESS_MESSAGE=31, etc —
+   * apareciam como "field_type_26" no audit log).
    */
   private formatFieldType(val: any): string {
     if (typeof val === 'string') return val;
     if (typeof val !== 'number') return '';
-    // AssetFieldType enum values (v23, conferido no google-ads-api SDK)
+    // AssetFieldType v23 — completo, conferido via probe SDK
     const MAP: Record<number, string> = {
+      0: 'UNSPECIFIED',
+      1: 'UNKNOWN',
       2: 'HEADLINE',
       3: 'DESCRIPTION',
       4: 'MANDATORY_AD_TEXT',
@@ -583,15 +596,107 @@ export class TrafegoReadProcessor extends WorkerHost {
       14: 'MOBILE_APP',
       15: 'HOTEL_CALLOUT',
       16: 'CALL',
-      17: 'PRICE',
-      18: 'LONG_HEADLINE',
-      19: 'BUSINESS_NAME',
-      20: 'SQUARE_MARKETING_IMAGE',
-      21: 'PORTRAIT_MARKETING_IMAGE',
-      22: 'LOGO',
-      23: 'LANDSCAPE_LOGO',
+      17: 'LONG_HEADLINE',
+      18: 'BUSINESS_NAME',
+      19: 'SQUARE_MARKETING_IMAGE',
+      20: 'PORTRAIT_MARKETING_IMAGE',
+      21: 'LOGO',
+      22: 'LANDSCAPE_LOGO',
+      23: 'VIDEO',
+      24: 'PRICE',
+      25: 'CALL_TO_ACTION_SELECTION',
+      26: 'AD_IMAGE',
+      27: 'BUSINESS_LOGO',
+      28: 'HOTEL_PROPERTY',
+      30: 'DEMAND_GEN_CAROUSEL_CARD',
+      31: 'BUSINESS_MESSAGE',
+      32: 'TALL_PORTRAIT_MARKETING_IMAGE',
+      33: 'RELATED_YOUTUBE_VIDEOS',
+      38: 'LANDING_PAGE_PREVIEW',
+      39: 'LONG_DESCRIPTION',
+      40: 'CALL_TO_ACTION',
     };
     return MAP[val] ?? `field_type_${val}`;
+  }
+
+  /**
+   * AssetType enum (v23). Diferente de AssetFieldType — eh o tipo do asset
+   * em si (TEXT/IMAGE/CALL/CALLOUT/etc), nao o slot de uso.
+   * Adicionado em 2026-05-18 v5.
+   */
+  private formatAssetType(val: any): string {
+    if (typeof val === 'string') return val;
+    if (typeof val !== 'number') return 'UNKNOWN';
+    const MAP: Record<number, string> = {
+      0: 'UNSPECIFIED',
+      1: 'UNKNOWN',
+      2: 'YOUTUBE_VIDEO',
+      3: 'MEDIA_BUNDLE',
+      4: 'IMAGE',
+      5: 'TEXT',
+      6: 'LEAD_FORM',
+      7: 'BOOK_ON_GOOGLE',
+      8: 'PROMOTION',
+      9: 'CALLOUT',
+      10: 'STRUCTURED_SNIPPET',
+      11: 'SITELINK',
+      12: 'PAGE_FEED',
+      13: 'DYNAMIC_EDUCATION',
+      14: 'MOBILE_APP',
+      15: 'HOTEL_CALLOUT',
+      16: 'CALL',
+      17: 'PRICE',
+      18: 'CALL_TO_ACTION',
+      19: 'DYNAMIC_REAL_ESTATE',
+      20: 'DYNAMIC_CUSTOM',
+      21: 'DYNAMIC_HOTELS_AND_RENTALS',
+      22: 'DYNAMIC_FLIGHTS',
+      24: 'DYNAMIC_TRAVEL',
+      25: 'DYNAMIC_LOCAL',
+      26: 'DYNAMIC_JOBS',
+      27: 'LOCATION',
+      28: 'HOTEL_PROPERTY',
+      29: 'DEMAND_GEN_CAROUSEL_CARD',
+      30: 'BUSINESS_MESSAGE',
+      31: 'APP_DEEP_LINK',
+      32: 'YOUTUBE_VIDEO_LIST',
+    };
+    return MAP[val] ?? `asset_type_${val}`;
+  }
+
+  /**
+   * AssetLinkStatus enum (v23) — usado no status do CampaignAsset/
+   * AdGroupAsset/CustomerAsset link.
+   */
+  private formatAssetLinkStatus(val: any): string {
+    if (typeof val === 'string') return val;
+    if (typeof val !== 'number') return 'UNKNOWN';
+    const MAP: Record<number, string> = {
+      0: 'UNSPECIFIED',
+      1: 'UNKNOWN',
+      2: 'ENABLED',
+      3: 'REMOVED',
+      4: 'PAUSED',
+    };
+    return MAP[val] ?? `link_status_${val}`;
+  }
+
+  /**
+   * PolicyReviewStatus enum (v23) — usado no asset.policy_summary.review_status.
+   * Diferente de AssetLinkStatus (que eh do link).
+   */
+  private formatPolicyReviewStatus(val: any): string {
+    if (typeof val === 'string') return val;
+    if (typeof val !== 'number') return 'UNKNOWN';
+    const MAP: Record<number, string> = {
+      0: 'UNSPECIFIED',
+      1: 'UNKNOWN',
+      2: 'REVIEW_IN_PROGRESS',
+      3: 'REVIEWED',
+      4: 'UNDER_APPEAL',
+      5: 'ELIGIBLE_MAY_SERVE',
+    };
+    return MAP[val] ?? `review_status_${val}`;
   }
 
   /**
