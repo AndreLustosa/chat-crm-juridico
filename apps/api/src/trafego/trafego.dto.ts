@@ -2,6 +2,7 @@ import {
   IsBoolean,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsArray,
@@ -1162,7 +1163,14 @@ export class CreateExtensionDto {
   ])
   type!: string;
 
-  /** Payload especifico do tipo (sitelink: {text, final_url, description1, description2}, etc). */
+  /** Payload especifico do tipo (sitelink: {text, final_url, description1, description2}, etc).
+   *
+   * Fix 2026-05-18 (BUG-H): sem @IsObject(), o class-validator com
+   * forbidNonWhitelisted:true global no main.ts rejeitava `data` como
+   * "property data should not exist". Schema MCP enviava certo,
+   * backend rejeitava silenciosamente. Fix: adicionar decorator.
+   */
+  @IsObject()
   data!: Record<string, any>;
 
   /**
