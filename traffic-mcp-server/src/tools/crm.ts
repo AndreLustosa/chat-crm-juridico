@@ -3100,6 +3100,60 @@ function registerSprint4_2Tools(server: McpServer) {
 
 function registerBugFixBatchTools(server: McpServer) {
   server.registerTool(
+    'traffic_diagnose_enhanced_conv',
+    {
+      description:
+        'Diagnostica Enhanced Conversions for Leads — combina (1) estado atual via GAQL live ' +
+        '(customer.conversion_tracking_setting.enhanced_conversions_for_leads_enabled), ' +
+        '(2) configuracoes locais do CRM (business_phone_e164, business_name, upload enabled), ' +
+        '(3) ultimas 5 tentativas de enable_enhanced_conv via mutate_logs (com mensagens de erro), ' +
+        '(4) overall_status (OK/NOT_ENABLED/PERMISSION_ISSUE/CONFIG_INCOMPLETE) + checklist PT-BR de proximos passos. ' +
+        'USE DEPOIS de traffic_enable_enhanced_conversions_for_leads falhar com PERMISSION_DENIED — ' +
+        'mostra exatamente o que checar no Google Cloud (developer_token tier, MCC permission) ' +
+        'e Google Ads UI. READ-ONLY — nao faz mutate.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () =>
+      safe('traffic_diagnose_enhanced_conv', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          enabled_in_google: boolean;
+          test_account: boolean;
+          account_name: string | null;
+          crm_settings: any;
+          recent_attempts: any[];
+          overall_status: string;
+          next_steps: string[];
+          google_live_state: any;
+        }>('/trafego/diagnose/enhanced-conversions', undefined, { toolCallId });
+        const lines: string[] = [];
+        lines.push(`Status: ${result.overall_status}`);
+        lines.push(`Conta: ${result.account_name ?? '?'} (test_account: ${result.test_account})`);
+        lines.push(`Enabled no Google: ${result.enabled_in_google ? 'SIM' : 'NAO'}`);
+        if (result.crm_settings) {
+          lines.push(
+            `CRM settings: phone=${result.crm_settings.business_phone_e164 ?? 'NAO SETADO'}, ` +
+              `name=${result.crm_settings.business_name ?? 'NAO SETADO'}, ` +
+              `upload_enabled=${result.crm_settings.enhanced_conv_for_leads_upload_enabled}`,
+          );
+        }
+        if (result.recent_attempts.length > 0) {
+          lines.push(
+            `Ultima tentativa: ${result.recent_attempts[0].status} em ${result.recent_attempts[0].created_at}` +
+              (result.recent_attempts[0].error_message
+                ? ` — ${result.recent_attempts[0].error_message.slice(0, 100)}...`
+                : ''),
+          );
+        }
+        if (result.next_steps.length > 0) {
+          lines.push('Proximos passos:');
+          for (const step of result.next_steps) lines.push(`  - ${step}`);
+        }
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
     'traffic_remove_asset',
     {
       description:

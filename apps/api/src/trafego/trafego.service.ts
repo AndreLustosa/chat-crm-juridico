@@ -1552,6 +1552,41 @@ export class TrafegoService {
    * Se mensagem nao for JSON parseavel, retorna ela mesma truncada.
    */
   private buildFriendlyError(rawErrorMessage: string): string {
+    // Fix BUG-F (2026-05-18): erros gRPC top-level (PERMISSION_DENIED,
+    // UNAUTHENTICATED, etc) vem como string "<code> <NAME>: <message>"
+    // sem JSON estruturado. Tradutor PT-BR pra esses primeiro.
+    const GRPC_CODE_TRANSLATIONS: Array<{ pattern: RegExp; translation: string }> = [
+      {
+        pattern: /^7 PERMISSION_DENIED|PERMISSION_DENIED.*caller does not have permission/i,
+        translation:
+          'Permissao negada pelo Google Ads. Checklist (do mais ao menos provavel):\n' +
+          '1. Developer token em Test/Basic access — Enhanced Conversions, customer-level settings e features sensiveis exigem STANDARD ACCESS. Confira em https://ads.google.com/aw/apicenter > sua tier de acesso.\n' +
+          '2. MCC (login_customer_id) sem Admin no client account — confira em https://ads.google.com/aw/accountaccess > permissoes do usuario MCC no account 4464129633.\n' +
+          '3. OAuth scope insuficiente — refresh_token precisa ter sido autorizado com scope adwords (cobre tudo). Reconecte via /trafego/oauth/reconnect-link se necessario.\n' +
+          '4. Feature especifica nao habilitada pro developer_token — algumas features (Customer Match, Enhanced Conv) exigem aprovacao adicional. Solicite via API Center.\n' +
+          'SOLUCAO TEMPORARIA: ative Enhanced Conversions for Leads direto via Google Ads UI (Tools > Conversions > Customer data) enquanto resolve permissoes.',
+      },
+      {
+        pattern: /^16 UNAUTHENTICATED|UNAUTHENTICATED|invalid_grant/i,
+        translation:
+          'Autenticacao falhou. Refresh_token OAuth provavelmente expirou OU foi revogado. Reconecte a conta via traffic_reconnect_oauth_link.',
+      },
+      {
+        pattern: /^8 RESOURCE_EXHAUSTED|quota exceeded|too many requests/i,
+        translation:
+          'Cota da Google Ads API excedida. Aguarde 1-5 minutos e tente novamente. Se persistir, considere reduzir frequencia de polling/sync.',
+      },
+      {
+        pattern: /^14 UNAVAILABLE|UNAVAILABLE|temporarily unavailable/i,
+        translation:
+          'Google Ads API temporariamente indisponivel. Retry recomendado em 30s.',
+      },
+    ];
+
+    for (const { pattern, translation } of GRPC_CODE_TRANSLATIONS) {
+      if (pattern.test(rawErrorMessage)) return translation;
+    }
+
     // Tenta parsear como JSON (formato GoogleAdsFailure)
     let parsed: any = null;
     try {
@@ -1586,9 +1621,23 @@ export class TrafegoService {
       'authentication_error.OAUTH_TOKEN_EXPIRED':
         'Token OAuth expirado. Reconecte a conta Google Ads via Configuracoes.',
       'authorization_error.DEVELOPER_TOKEN_NOT_APPROVED':
-        'Developer token nao aprovado pra essa operacao. Verifique seu nivel de acesso.',
+        'Developer token nao aprovado pra essa operacao. Confira em https://ads.google.com/aw/apicenter — recursos sensiveis (Enhanced Conversions, customer-level settings) exigem Standard access (nao Basic/Test).',
+      'authorization_error.DEVELOPER_TOKEN_PROHIBITED':
+        'Developer token proibido pra essa API/feature. Algumas features (Enhanced Conversions for Leads, Customer Match) exigem aprovacao adicional do Google. Solicite via API Center.',
       'authorization_error.USER_PERMISSION_DENIED':
-        'Sem permissao no Google Ads pra esse usuario.',
+        'Sem permissao no Google Ads pra esse usuario. Confira: (1) MCC tem Admin no client account, (2) usuario OAuth tem permissao adequada.',
+      'authorization_error.CUSTOMER_NOT_ENABLED':
+        'Conta cliente nao habilitada pra essa operacao. Pode precisar de habilitacao manual via Google Ads UI primeiro.',
+      'authorization_error.ACCESS_DENIED':
+        'Acesso negado. Confira nivel do developer_token (Standard pra mutate de customer settings) + permissao MCC (Admin no client account).',
+      'authorization_error.PROJECT_DISABLED':
+        'Projeto Google Cloud desabilitado pra Google Ads API.',
+      'customer_error.CUSTOMER_NOT_ENABLED_ENHANCED_CONVERSIONS_FOR_LEADS':
+        'Conta nao habilitada pra Enhanced Conversions for Leads. Ative primeiro via traffic_enable_enhanced_conversions_for_leads OU via Google Ads UI (Tools > Conversions > Customer data).',
+      'enhanced_conversions_error.NO_CONVERSION_ACTION_FOUND':
+        'Nenhuma conversion action encontrada pra Enhanced Conversions. Crie uma via traffic_create_conversion_action antes.',
+      'enhanced_conversions_error.INVALID_CONVERSION_ACTION_TYPE':
+        'Tipo de conversion action invalido pra Enhanced Conversions (precisa ser WEBPAGE ou LEAD_FORM_SUBMIT).',
       'quota_error.RESOURCE_EXHAUSTED':
         'Cota da API Google Ads excedida. Tente novamente em alguns minutos.',
       'rate_limit_error.RESOURCE_TEMPORARILY_EXHAUSTED':
@@ -3460,6 +3509,156 @@ export class TrafegoService {
       orderBy: { created_at: 'desc' },
       take: opts.limit ?? 50,
     });
+  }
+
+  /**
+   * BUG-F treatment (2026-05-18) — diagnose Enhanced Conversions for Leads.
+   *
+   * Combina 3 checks:
+   *   1. Estado atual via GAQL (customer.conversion_tracking_setting)
+   *   2. TrafficSettings local (user_data_fields, business_phone_e164, etc)
+   *   3. Mutate logs recentes de enable_enhanced_conv pra ver se ja tentou
+   *
+   * Retorna estrutura com status PT-BR e proximos passos sugeridos.
+   * NAO faz mutate — somente leitura + analise.
+   */
+  async diagnoseEnhancedConversions(tenantId: string): Promise<{
+    enabled_in_google: boolean;
+    test_account: boolean;
+    account_name: string | null;
+    crm_settings: {
+      enhanced_conv_for_leads_upload_enabled: boolean;
+      business_phone_e164: string | null;
+      business_name: string | null;
+    } | null;
+    recent_attempts: Array<{
+      id: string;
+      created_at: string;
+      status: string;
+      error_message: string | null;
+      validate_only: boolean;
+    }>;
+    overall_status: 'OK' | 'NOT_ENABLED' | 'PERMISSION_ISSUE' | 'CONFIG_INCOMPLETE' | 'UNKNOWN';
+    next_steps: string[];
+  }> {
+    const account = await this.getAccount(tenantId);
+    if (!account) {
+      return {
+        enabled_in_google: false,
+        test_account: false,
+        account_name: null,
+        crm_settings: null,
+        recent_attempts: [],
+        overall_status: 'CONFIG_INCOMPLETE',
+        next_steps: [
+          'Conta Google Ads nao conectada ao CRM. Conecte via /trafego/oauth/start primeiro.',
+        ],
+      };
+    }
+
+    // 1. Settings locais do CRM
+    const settings = await this.prisma.trafficSettings.findUnique({
+      where: { tenant_id: tenantId },
+      select: {
+        enhanced_conv_for_leads_upload_enabled: true,
+        business_phone_e164: true,
+        business_name: true,
+      },
+    });
+
+    // 2. Recent mutate attempts (resource_type='customer' + operation='update')
+    const attempts = await this.prisma.trafficMutateLog.findMany({
+      where: {
+        tenant_id: tenantId,
+        resource_type: 'customer',
+        operation: 'update',
+      },
+      orderBy: { created_at: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        created_at: true,
+        status: true,
+        error_message: true,
+        validate_only: true,
+      },
+    });
+
+    // 3. Estado atual via GAQL — enfileira read job (resolve via worker que
+    // tem o customer SDK)
+    // Nota: precisamos do read processor pra fazer essa query. Pra simplificar,
+    // retornamos sem o estado do Google se nao conseguir e o caller decide
+    // se vai chamar diagnose com kind=customer_settings via outra rota.
+    // Pra rota dedicada do diagnose, fazemos a chamada via enqueueReadJob
+    // (que tem o customer setup).
+    // POR ENQUANTO: monta resposta sem estado Google, deixa caller
+    // hidratar via tool MCP que chama getEnhancedConvSettings separadamente.
+    const enabledInGoogle = false; // sera populado pelo controller
+    const testAccount = false; // sera populado pelo controller
+
+    const lastAttempt = attempts[0];
+    const hasPermissionError =
+      lastAttempt?.error_message &&
+      /PERMISSION_DENIED|developer_token|not approved|access_denied/i.test(
+        lastAttempt.error_message,
+      );
+
+    // Determine overall status + next steps
+    const nextSteps: string[] = [];
+    let overallStatus:
+      | 'OK'
+      | 'NOT_ENABLED'
+      | 'PERMISSION_ISSUE'
+      | 'CONFIG_INCOMPLETE'
+      | 'UNKNOWN' = 'UNKNOWN';
+
+    if (!settings?.business_phone_e164 || !settings?.business_name) {
+      overallStatus = 'CONFIG_INCOMPLETE';
+      nextSteps.push(
+        'Preencha business_phone_e164 + business_name em TrafficSettings (use traffic_update_settings ou UI). Sem isso, attach_call_asset e enhanced_conv ficam sem defaults.',
+      );
+    }
+
+    if (hasPermissionError) {
+      overallStatus = 'PERMISSION_ISSUE';
+      nextSteps.push(
+        '1. Verifique tier do developer_token em https://ads.google.com/aw/apicenter — Enhanced Conversions for Leads exige STANDARD ACCESS (nao Test/Basic).',
+        '2. Verifique permissao do MCC (login_customer_id) no client account: precisa ser ADMIN. Acesse https://ads.google.com/aw/accountaccess via MCC e confira se o account 4464129633 (ou seu customer_id) aparece com permissao Admin.',
+        '3. Se ambos OK, refaca OAuth via /trafego/oauth/reconnect-link pra garantir scope adwords completo.',
+        '4. SOLUCAO TEMPORARIA: ative manualmente via Google Ads UI: Tools & Settings > Conversions > Customer data > Enable Enhanced Conversions for Leads. UI funciona com permissoes diferentes da API.',
+      );
+    }
+
+    if (overallStatus === 'UNKNOWN') {
+      overallStatus = 'NOT_ENABLED';
+      nextSteps.push(
+        'Tente ativar via traffic_enable_enhanced_conversions_for_leads({mode:"BOTH", user_data_fields:["email","phone"], confirm:true, validate_only:true}) primeiro.',
+        'Se validate_only retornar OK, repita sem validate_only pra ativar de verdade.',
+      );
+    }
+
+    return {
+      enabled_in_google: enabledInGoogle,
+      test_account: testAccount,
+      account_name: account.account_name ?? null,
+      crm_settings: settings
+        ? {
+            enhanced_conv_for_leads_upload_enabled:
+              settings.enhanced_conv_for_leads_upload_enabled ?? false,
+            business_phone_e164: settings.business_phone_e164 ?? null,
+            business_name: settings.business_name ?? null,
+          }
+        : null,
+      recent_attempts: attempts.map((a) => ({
+        id: a.id,
+        created_at: a.created_at.toISOString(),
+        status: a.status,
+        error_message: a.error_message,
+        validate_only: a.validate_only,
+      })),
+      overall_status: overallStatus,
+      next_steps: nextSteps,
+    };
   }
 
   async acknowledgeAlert(

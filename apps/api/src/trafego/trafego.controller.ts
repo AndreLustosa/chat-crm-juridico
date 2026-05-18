@@ -1523,6 +1523,63 @@ export class TrafegoController {
     return await this.enqueueReadJob(req, 'billing_status', {});
   }
 
+  /**
+   * BUG-F treatment (2026-05-18) — diagnose Enhanced Conversions for Leads.
+   *
+   * Combina:
+   *  1. Estado atual via GAQL (customer.conversion_tracking_setting) — live
+   *  2. TrafficSettings local (defaults, upload enabled)
+   *  3. Mutate logs recentes pra ver tentativas + erros
+   *  4. Checklist PT-BR de proximos passos baseado no diagnostico
+   *
+   * Read-only. Util DEPOIS de enable falhar com PERMISSION_DENIED — mostra
+   * exatamente o que checar no Google Cloud + Google Ads UI.
+   */
+  @Get('diagnose/enhanced-conversions')
+  @Roles('ADMIN', 'ADVOGADO')
+  async diagnoseEnhancedConversions(@Req() req: any) {
+    const tenantId = req.user.tenant_id;
+    // Pega estado base (local DB + audit logs)
+    const local = await this.service.diagnoseEnhancedConversions(tenantId);
+    // Hidrata com estado live do Google via GAQL — pode falhar se OAuth
+    // expirou (soft-fail, retorna o que tem)
+    let googleState: any = null;
+    try {
+      googleState = await this.enqueueReadJob(req, 'customer_settings', {});
+    } catch (e: any) {
+      // Soft-fail: se ate o GAQL nega, eh outro nivel de problema
+      local.next_steps.unshift(
+        `Nao consegui ler estado atual via GAQL: ${e?.message ?? 'unknown'}. ` +
+          `Provavel problema de OAuth/scope antes mesmo de tentar enable. ` +
+          `Reconecte via traffic_reconnect_oauth_link.`,
+      );
+    }
+
+    if (googleState?.conversion_tracking_setting?.enhanced_conversions_for_leads_enabled) {
+      local.enabled_in_google = true;
+      local.overall_status = 'OK';
+      local.next_steps = [
+        'Enhanced Conversions for Leads JA ESTA HABILITADA na conta Google Ads. ' +
+          'Se quiser que o cron de upload comece a rodar, confirme que ' +
+          'crm_settings.enhanced_conv_for_leads_upload_enabled = true.',
+      ];
+    } else if (googleState) {
+      local.enabled_in_google = false;
+      local.test_account = googleState.test_account ?? false;
+      if (local.overall_status === 'NOT_ENABLED') {
+        local.next_steps = [
+          'Estado atual: DESABILITADA no Google Ads.',
+          ...local.next_steps,
+        ];
+      }
+    }
+
+    return {
+      ...local,
+      google_live_state: googleState,
+    };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // Sprint 4.1 backlog (2026-05-17) — PMax asset groups + Experiments
   // ═══════════════════════════════════════════════════════════════════════
@@ -1686,7 +1743,8 @@ export class TrafegoController {
       | 'extensions'
       | 'shared_negative_lists'
       | 'pmax_asset_groups'
-      | 'experiment_results',
+      | 'experiment_results'
+      | 'customer_settings',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

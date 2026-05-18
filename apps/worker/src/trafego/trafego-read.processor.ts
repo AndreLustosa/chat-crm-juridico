@@ -29,7 +29,9 @@ export type ReadJobInput = {
     // Sprint 4.1 — PMax asset groups
     | 'pmax_asset_groups'
     // Sprint 4.2 — Experiment results comparativas
-    | 'experiment_results';
+    | 'experiment_results'
+    // BUG-F treatment (2026-05-18) — diagnostico Enhanced Conv
+    | 'customer_settings';
   params: Record<string, any>;
 };
 
@@ -64,6 +66,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.pmaxAssetGroups(customer, params);
       case 'experiment_results':
         return await this.experimentResults(customer, params as any);
+      case 'customer_settings':
+        return await this.customerSettings(customer);
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
@@ -1252,5 +1256,77 @@ export class TrafegoReadProcessor extends WorkerHost {
             ? `Experiment em status=${experiment.status} — metrics ainda nao acumularam (precisa ENABLED).`
             : undefined,
     };
+  }
+
+  /**
+   * BUG-F treatment (2026-05-18) — le configuracoes do customer relevantes
+   * pra Enhanced Conversions for Leads e outros mutates customer-level.
+   *
+   * Usado pelo traffic_diagnose_enhanced_conv pra mostrar estado atual
+   * antes de tentar enable (e detectar se ja esta enabled, evitar request
+   * desnecessario).
+   */
+  private async customerSettings(customer: any): Promise<{
+    customer_id: string;
+    descriptive_name: string | null;
+    conversion_tracking_setting: {
+      enhanced_conversions_for_leads_enabled: boolean;
+      conversion_tracking_id: string | null;
+      cross_account_conversion_tracking_id: string | null;
+    };
+    test_account: boolean;
+    auto_tagging_enabled: boolean;
+    note?: string;
+  }> {
+    try {
+      const rows = (await customer.query(`
+        SELECT
+          customer.id,
+          customer.descriptive_name,
+          customer.conversion_tracking_setting.enhanced_conversions_for_leads_enabled,
+          customer.conversion_tracking_setting.conversion_tracking_id,
+          customer.conversion_tracking_setting.cross_account_conversion_tracking_id,
+          customer.test_account,
+          customer.auto_tagging_enabled
+        FROM customer
+        LIMIT 1
+      `)) as any[];
+      const row = rows[0]?.customer;
+      if (!row) {
+        return {
+          customer_id: '',
+          descriptive_name: null,
+          conversion_tracking_setting: {
+            enhanced_conversions_for_leads_enabled: false,
+            conversion_tracking_id: null,
+            cross_account_conversion_tracking_id: null,
+          },
+          test_account: false,
+          auto_tagging_enabled: false,
+          note: 'Nenhum customer retornado — confira credenciais OAuth.',
+        };
+      }
+      return {
+        customer_id: String(row.id ?? ''),
+        descriptive_name: row.descriptive_name ?? null,
+        conversion_tracking_setting: {
+          enhanced_conversions_for_leads_enabled: Boolean(
+            row.conversion_tracking_setting?.enhanced_conversions_for_leads_enabled,
+          ),
+          conversion_tracking_id:
+            row.conversion_tracking_setting?.conversion_tracking_id
+              ? String(row.conversion_tracking_setting.conversion_tracking_id)
+              : null,
+          cross_account_conversion_tracking_id:
+            row.conversion_tracking_setting?.cross_account_conversion_tracking_id
+              ? String(row.conversion_tracking_setting.cross_account_conversion_tracking_id)
+              : null,
+        },
+        test_account: Boolean(row.test_account),
+        auto_tagging_enabled: Boolean(row.auto_tagging_enabled),
+      };
+    } catch (e: any) {
+      throw new Error(`customer settings query falhou: ${e?.message ?? 'unknown'}`);
+    }
   }
 }
