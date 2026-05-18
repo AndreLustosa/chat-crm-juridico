@@ -663,18 +663,15 @@ export class TrafegoService {
   }
 
   /**
-   * Sprint 2 (2026-05-17) — Quality Score history de uma keyword.
+   * Quality Score history de uma keyword (Sprint 2.1, 2026-05-17).
    *
-   * Esta versao MVP retorna apenas o snapshot atual cacheado (do sync
-   * diario). Pra history real (serie temporal), seria preciso:
-   *   1. Migration nova: TrafficKeywordQualitySnapshot
-   *      (keyword_id, quality_score, expected_ctr, ad_relevance,
-   *       landing_page_experience, captured_at)
-   *   2. Sync diario que faz INSERT com captured_at=hoje
-   *   3. Esta funcao retorna findMany ordenado por captured_at desc
+   * Sprint 2.1 implementou snapshot daily via QualityScoreSnapshotCron
+   * em TrafficKeywordQualitySnapshot. Agora retorna SERIE TEMPORAL real
+   * dos ultimos N dias (ate 365).
    *
-   * Pra MVP, history vazio + nota explicativa. Implementar quando o
-   * gestor de trafego sentir falta da serie temporal.
+   * `current` continua com snapshot do TrafficKeyword.quality_info pra
+   * mostrar valor mais fresco (cron roda 03h Maceio — em horarios fora
+   * disso, current pode estar 1d a frente do ultimo entry em history).
    */
   async getKeywordQualityScoreHistory(
     tenantId: string,
@@ -692,12 +689,13 @@ export class TrafegoService {
     };
     history: Array<{
       captured_at: Date;
+      captured_at_date: Date;
       quality_score: number;
-      expected_ctr: string;
-      ad_relevance: string;
-      landing_page_experience: string;
+      expected_ctr: string | null;
+      ad_relevance: string | null;
+      landing_page_experience: string | null;
     }>;
-    note: string;
+    note?: string;
   }> {
     const keyword = await this.prisma.trafficKeyword.findFirst({
       where: {
@@ -709,6 +707,26 @@ export class TrafegoService {
       throw new NotFoundException(`Keyword nao encontrada (id="${keywordId}")`);
     }
     const qi = (keyword.quality_info as any) ?? {};
+
+    // Busca snapshots dos ultimos N dias
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - Math.min(Math.max(days, 1), 365));
+    const snapshots = await this.prisma.trafficKeywordQualitySnapshot.findMany({
+      where: {
+        keyword_id: keyword.id,
+        captured_at: { gte: since },
+      },
+      orderBy: { captured_at: 'desc' },
+      select: {
+        captured_at: true,
+        captured_at_date: true,
+        quality_score: true,
+        expected_ctr: true,
+        ad_relevance: true,
+        landing_page_experience: true,
+      },
+    });
+
     return {
       keyword_id: keyword.id,
       text: keyword.text,
@@ -720,25 +738,29 @@ export class TrafegoService {
           qi.post_click_quality_score ?? qi.landing_page_experience ?? null,
         last_seen_at: keyword.last_seen_at,
       },
-      history: [], // MVP — ver doc da funcao
-      note:
-        `Historico serie temporal nao implementado nesta versao. ` +
-        `Snapshot atual eh do sync mais recente (last_seen_at=${keyword.last_seen_at.toISOString()}). ` +
-        `Pra ${days}d de history real, abrir issue pedindo Sprint 2.1 (TrafficKeywordQualitySnapshot table + cron daily).`,
+      history: snapshots,
+      ...(snapshots.length === 0 && {
+        note:
+          `Sem snapshots cacheados ainda. Cron QualityScoreSnapshotCron roda 03h Maceio diario; ` +
+          `primeiro snapshot vai aparecer na proxima execucao. Ate la, use o campo "current" ` +
+          `pra ver o valor atual (do sync principal).`,
+      }),
     };
   }
 
   /**
-   * Sprint 2 (2026-05-17) — Lista extensions (assets).
+   * Sprint 2.1 (2026-05-17) — Lista extensions (assets) live via GAQL.
    *
-   * MVP: retorna estrutura vazia + nota explicativa. Pra implementar
-   * listagem live via GAQL precisa injetar GoogleAdsClientService no API
-   * (hoje so existe no worker module). Pra evitar dependencias circulares,
-   * essa parte fica pra Sprint 2.1.
+   * Sprint 2 entregou placeholder. Agora reutiliza infra `trafego-read`
+   * queue do Sprint 4: chama TrafegoController.enqueueReadJob('extensions')
+   * que enfileira job + aguarda resultado do TrafegoReadProcessor.
    *
-   * Workaround temporario: o gestor pode listar via traffic_list_mutate_logs
-   * filtrando por resource_type=asset pra ver assets criados via MCP.
-   * Pra ver assets pre-existentes (criados via UI), tem que ir no Google Ads UI direto.
+   * Implementacao real fica no controller (acesso a Queue), aqui mantemos
+   * apenas a validacao basica de account existir. Service vira pass-through
+   * (controller chama enqueueReadJob direto agora).
+   *
+   * Deprecated: este metodo permanece pra compat de callers internos que
+   * NAO podem enfileirar (ex: testes). Retorna stub.
    */
   async listExtensions(
     tenantId: string,
@@ -752,19 +774,15 @@ export class TrafegoService {
     extensions: any[];
     note: string;
   }> {
-    // Garante que tenant existe (validacao de acesso)
     await this.prisma.trafficAccount.findFirst({
       where: { tenant_id: tenantId },
     });
-    // No-op de opts (mantem assinatura compativel)
     void opts;
     return {
       extensions: [],
       note:
-        'MVP da Sprint 2: listagem live de extensions via GAQL ainda nao implementada ' +
-        '(precisa injetar GoogleAdsClientService no API module). Workaround: ' +
-        'use traffic_list_mutate_logs filtrando resource_type=asset pra ver assets ' +
-        'criados via MCP, ou consulte Google Ads UI diretamente. Sprint 2.1 cobre.',
+        'Use o endpoint REST GET /trafego/extensions (que chama enqueueReadJob) ' +
+        'pra listagem live. Esse helper de service eh stub mantido apenas pra back-compat.',
     };
   }
 

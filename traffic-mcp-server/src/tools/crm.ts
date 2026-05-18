@@ -1731,9 +1731,10 @@ function registerSprint2Tools(server: McpServer) {
     {
       description:
         'Lista extensions (assets) da conta — sitelinks, callouts, snippets, calls, prices, promotions, lead forms. ' +
-        'Filtra por campaign_id (so daquela campanha), ad_group_id (so daquele grupo), type, status. ' +
-        'MVP: listagem live via GAQL ainda em desenvolvimento — retorna nota explicativa. Use traffic_list_mutate_logs ' +
-        'filtrando resource_type=asset pra ver assets criados via MCP, ou consulte Google Ads UI.',
+        'Filtra por campaign_id (so attachments daquela campanha), ad_group_id (so daquele grupo), type, status. ' +
+        'Quando campaign_id ou ad_group_id passados, retorna SO os assets anexados naquele scope. ' +
+        'Sem filtro: retorna todos os assets do customer (max 500) + attachments em qualquer nivel. ' +
+        'GAQL live via worker queue — pode demorar 1-3s.',
       inputSchema: {
         campaign_id: campaignIdSchema.optional(),
         ad_group_id: z.string().optional(),
@@ -1933,9 +1934,11 @@ function registerSprint2Tools(server: McpServer) {
     {
       description:
         'Retorna Quality Score de uma keyword + sub-scores (expected_ctr, ad_relevance, ' +
-        'landing_page_experience). MVP atual: so snapshot mais recente (do sync diario). ' +
-        'Pra serie temporal historica (ultimos N dias), pedir Sprint 2.1 ' +
-        '(precisa de migration TrafficKeywordQualitySnapshot + cron daily de snapshot).',
+        'landing_page_experience). Inclui SERIE TEMPORAL dos ultimos N dias ' +
+        '(snapshot diario via cron QualityScoreSnapshotCron 03h Maceio). ' +
+        'Sprint 2.1 (2026-05-17): pra keywords criadas/uploadadas recentemente, history ' +
+        'pode ter poucos pontos ate o cron rodar algumas vezes. Use `current` pra ver ' +
+        'valor mais fresco do snapshot principal.',
       inputSchema: {
         keyword_id: z
           .string()

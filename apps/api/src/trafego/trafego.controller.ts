@@ -1243,7 +1243,13 @@ export class TrafegoController {
   // Sprint 2 backlog (2026-05-17) — Extensions/Assets + Quality Score
   // ═══════════════════════════════════════════════════════════════════════
 
-  /** Lista extensions (assets) anexados a conta/campanha/ad_group. */
+  /**
+   * Lista extensions (assets) anexados a conta/campanha/ad_group.
+   *
+   * Sprint 2.1: usa infra read queue do Sprint 4 — enfileira job
+   * `kind=extensions` que faz GAQL live + retorna estrutura unificada.
+   * Antes era placeholder. Agora data real.
+   */
   @Get('extensions')
   @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
   async listExtensions(
@@ -1253,7 +1259,7 @@ export class TrafegoController {
     @Query('type') type?: string,
     @Query('status') status?: string,
   ) {
-    return await this.service.listExtensions(req.user.tenant_id, {
+    return await this.enqueueReadJob(req, 'extensions', {
       campaign_id: campaignId,
       ad_group_id: adGroupId,
       type,
@@ -1428,7 +1434,7 @@ export class TrafegoController {
    */
   private async enqueueReadJob(
     req: any,
-    kind: 'call_history' | 'billing_status',
+    kind: 'call_history' | 'billing_status' | 'extensions',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

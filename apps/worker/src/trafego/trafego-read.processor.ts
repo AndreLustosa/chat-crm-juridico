@@ -21,7 +21,7 @@ export const READ_JOB = 'trafego-read';
 export type ReadJobInput = {
   tenantId: string;
   accountId: string;
-  kind: 'call_history' | 'billing_status';
+  kind: 'call_history' | 'billing_status' | 'extensions';
   params: Record<string, any>;
 };
 
@@ -48,6 +48,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.callHistory(customer, params);
       case 'billing_status':
         return await this.billingStatus(customer);
+      case 'extensions':
+        return await this.extensions(customer, params);
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
@@ -129,6 +131,249 @@ export class TrafegoReadProcessor extends WorkerHost {
       };
     } catch (e: any) {
       throw new Error(`call_view query falhou: ${e.message}`);
+    }
+  }
+
+  /**
+   * Lista extensions (assets) — Sprint 2.1 (2026-05-17).
+   *
+   * Faz 1 query principal em `asset` (filtrado por tipos suportados) +
+   * 3 queries auxiliares em customer_asset/campaign_asset/ad_group_asset
+   * pra mapear attachments. Joina resultado pra estrutura unificada.
+   *
+   * Filtros: type (opcional, SITELINK|CALLOUT|etc), campaign_id ou
+   * ad_group_id (limita scope das attachment queries).
+   */
+  private async extensions(
+    customer: any,
+    params: {
+      type?: string;
+      campaign_id?: string;
+      ad_group_id?: string;
+      status?: string;
+    },
+  ): Promise<{
+    extensions: Array<{
+      asset_resource_name: string;
+      asset_id: string;
+      type: string;
+      status: string;
+      name: string | null;
+      attachments: Array<{
+        link_resource_name: string;
+        level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+        scope_resource_name: string;
+        field_type: string;
+        status: string;
+      }>;
+      payload: any;
+    }>;
+    note?: string;
+  }> {
+    // Query principal: assets
+    const typeFilter = params.type
+      ? `AND asset.type = '${params.type}'`
+      : '';
+
+    const assetQuery = `
+      SELECT
+        asset.resource_name,
+        asset.id,
+        asset.type,
+        asset.name,
+        asset.policy_summary.review_status,
+        asset.sitelink_asset.link_text,
+        asset.sitelink_asset.description1,
+        asset.sitelink_asset.description2,
+        asset.callout_asset.callout_text,
+        asset.structured_snippet_asset.header,
+        asset.structured_snippet_asset.values,
+        asset.call_asset.phone_number,
+        asset.call_asset.country_code,
+        asset.promotion_asset.promotion_target,
+        asset.promotion_asset.occasion,
+        asset.price_asset.type,
+        asset.price_asset.price_qualifier,
+        asset.lead_form_asset.business_name,
+        asset.lead_form_asset.headline,
+        asset.final_urls
+      FROM asset
+      WHERE asset.type IN (
+        'SITELINK', 'CALLOUT', 'STRUCTURED_SNIPPET', 'CALL',
+        'LOCATION', 'PRICE', 'PROMOTION', 'LEAD_FORM'
+      )
+      ${typeFilter}
+      LIMIT 500
+    `;
+
+    let assets: any[] = [];
+    try {
+      assets = (await customer.query(assetQuery)) as any[];
+    } catch (e: any) {
+      throw new Error(`Listagem de assets falhou: ${e.message}`);
+    }
+
+    // Queries auxiliares: links em 3 niveis (skip os que nao se aplicam
+    // ao filtro do caller — ex: se ad_group_id passado, so query ad_group_asset)
+    const linksByAsset = new Map<string, any[]>();
+
+    const addLink = (
+      assetResourceName: string,
+      link: {
+        link_resource_name: string;
+        level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+        scope_resource_name: string;
+        field_type: string;
+        status: string;
+      },
+    ) => {
+      const arr = linksByAsset.get(assetResourceName) ?? [];
+      arr.push(link);
+      linksByAsset.set(assetResourceName, arr);
+    };
+
+    // CustomerAsset (account-level) — so se nao tiver filtro de scope
+    if (!params.campaign_id && !params.ad_group_id) {
+      try {
+        const r = (await customer.query(`
+          SELECT customer_asset.resource_name, customer_asset.asset,
+                 customer_asset.field_type, customer_asset.status
+          FROM customer_asset
+          LIMIT 200
+        `)) as any[];
+        for (const row of r) {
+          addLink(row.customer_asset?.asset ?? '', {
+            link_resource_name: row.customer_asset?.resource_name ?? '',
+            level: 'ACCOUNT',
+            scope_resource_name: '',
+            field_type: row.customer_asset?.field_type ?? '',
+            status: row.customer_asset?.status ?? '',
+          });
+        }
+      } catch (e: any) {
+        /* soft-fail — continua sem account-level */
+      }
+    }
+
+    // CampaignAsset
+    if (!params.ad_group_id) {
+      try {
+        const filter = params.campaign_id
+          ? `WHERE campaign.id = ${params.campaign_id}`
+          : '';
+        const r = (await customer.query(`
+          SELECT campaign_asset.resource_name, campaign_asset.asset,
+                 campaign_asset.field_type, campaign_asset.status,
+                 campaign_asset.campaign
+          FROM campaign_asset
+          ${filter}
+          LIMIT 500
+        `)) as any[];
+        for (const row of r) {
+          addLink(row.campaign_asset?.asset ?? '', {
+            link_resource_name: row.campaign_asset?.resource_name ?? '',
+            level: 'CAMPAIGN',
+            scope_resource_name: row.campaign_asset?.campaign ?? '',
+            field_type: row.campaign_asset?.field_type ?? '',
+            status: row.campaign_asset?.status ?? '',
+          });
+        }
+      } catch (e: any) {
+        /* soft-fail */
+      }
+    }
+
+    // AdGroupAsset
+    try {
+      const filter = params.ad_group_id
+        ? `WHERE ad_group.id = ${params.ad_group_id}`
+        : '';
+      const r = (await customer.query(`
+        SELECT ad_group_asset.resource_name, ad_group_asset.asset,
+               ad_group_asset.field_type, ad_group_asset.status,
+               ad_group_asset.ad_group
+        FROM ad_group_asset
+        ${filter}
+        LIMIT 500
+      `)) as any[];
+      for (const row of r) {
+        addLink(row.ad_group_asset?.asset ?? '', {
+          link_resource_name: row.ad_group_asset?.resource_name ?? '',
+          level: 'AD_GROUP',
+          scope_resource_name: row.ad_group_asset?.ad_group ?? '',
+          field_type: row.ad_group_asset?.field_type ?? '',
+          status: row.ad_group_asset?.status ?? '',
+        });
+      }
+    } catch (e: any) {
+      /* soft-fail */
+    }
+
+    // Joina assets + attachments. Se filtro de scope foi passado, retorna
+    // SO os assets que tem pelo menos 1 attachment naquele scope (caller
+    // espera ver "o que esta anexado naquela campanha").
+    const hasScope = !!params.campaign_id || !!params.ad_group_id;
+    const extensions = assets
+      .map((row: any) => ({
+        asset_resource_name: row.asset?.resource_name ?? '',
+        asset_id: String(row.asset?.id ?? ''),
+        type: row.asset?.type ?? 'UNKNOWN',
+        status: row.asset?.policy_summary?.review_status ?? 'UNKNOWN',
+        name: row.asset?.name ?? null,
+        attachments: linksByAsset.get(row.asset?.resource_name ?? '') ?? [],
+        payload: this.extractAssetPayload(row.asset),
+      }))
+      .filter((ext) => {
+        if (params.status && ext.status !== params.status) return false;
+        if (hasScope && ext.attachments.length === 0) return false;
+        return true;
+      });
+
+    return { extensions };
+  }
+
+  /**
+   * Helper — extrai payload type-specific de um row do Asset.
+   */
+  private extractAssetPayload(asset: any): any {
+    if (!asset) return null;
+    switch (asset.type) {
+      case 'SITELINK':
+        return {
+          link_text: asset.sitelink_asset?.link_text,
+          description1: asset.sitelink_asset?.description1,
+          description2: asset.sitelink_asset?.description2,
+          final_urls: asset.final_urls,
+        };
+      case 'CALLOUT':
+        return { text: asset.callout_asset?.callout_text };
+      case 'STRUCTURED_SNIPPET':
+        return {
+          header: asset.structured_snippet_asset?.header,
+          values: asset.structured_snippet_asset?.values,
+        };
+      case 'CALL':
+        return {
+          phone_number: asset.call_asset?.phone_number,
+          country_code: asset.call_asset?.country_code,
+        };
+      case 'PROMOTION':
+        return {
+          promotion_target: asset.promotion_asset?.promotion_target,
+          occasion: asset.promotion_asset?.occasion,
+        };
+      case 'PRICE':
+        return {
+          type: asset.price_asset?.type,
+          price_qualifier: asset.price_asset?.price_qualifier,
+        };
+      case 'LEAD_FORM':
+        return {
+          business_name: asset.lead_form_asset?.business_name,
+          headline: asset.lead_form_asset?.headline,
+        };
+      default:
+        return null;
     }
   }
 

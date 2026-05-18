@@ -54,6 +54,7 @@ model Tenant {
   traffic_mutate_logs        TrafficMutateLog[]
   traffic_ad_groups          TrafficAdGroup[]
   traffic_keywords           TrafficKeyword[]
+  traffic_keyword_qs_snapshots TrafficKeywordQualitySnapshot[]
   traffic_ads                TrafficAd[]
   traffic_budgets            TrafficCampaignBudget[]
   traffic_bulk_jobs          TrafficBulkJob[]
@@ -2298,6 +2299,7 @@ model TrafficAccount {
   mutate_logs        TrafficMutateLog[]
   ad_groups          TrafficAdGroup[]
   keywords           TrafficKeyword[]
+  keyword_qs_snapshots TrafficKeywordQualitySnapshot[]
   ads                TrafficAd[]
   budgets            TrafficCampaignBudget[]
   bulk_jobs          TrafficBulkJob[]
@@ -2905,11 +2907,45 @@ model TrafficKeyword {
   tenant   Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   account  TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
   ad_group TrafficAdGroup @relation(fields: [ad_group_id], references: [id], onDelete: Cascade)
+  quality_snapshots TrafficKeywordQualitySnapshot[]
 
   @@unique([ad_group_id, google_criterion_id])
   @@index([tenant_id, negative])
   @@index([account_id, status])
   @@index([text])
+}
+
+/// Sprint 2.1 (2026-05-17) — snapshot diario de Quality Score por keyword.
+/// Sem isso, traffic_get_quality_score_history retornava apenas o snapshot
+/// atual cacheado em TrafficKeyword.quality_info. Pra serie temporal real
+/// (ultimos N dias), o cron `QualityScoreSnapshotCron` roda 03h Maceio e
+/// faz upsert por (keyword_id, captured_at_date) — se rodar 2x no mesmo
+/// dia, sobrescreve.
+///
+/// Retencao: nenhuma policy de purge ainda — ate 365 dias por keyword
+/// ocupa <10KB. Se virar bottleneck, criar cron de purge >180d.
+model TrafficKeywordQualitySnapshot {
+  id                      String   @id @default(uuid())
+  tenant_id               String
+  account_id              String
+  keyword_id              String
+  quality_score           Int
+  expected_ctr            String?
+  ad_relevance            String?
+  landing_page_experience String?
+  /// Timestamp do snapshot (quando o cron rodou)
+  captured_at             DateTime
+  /// Data do snapshot (pra dedupe diario)
+  captured_at_date        DateTime @db.Date
+  created_at              DateTime @default(now())
+
+  tenant  Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  account TrafficAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  keyword TrafficKeyword @relation(fields: [keyword_id], references: [id], onDelete: Cascade)
+
+  @@unique([keyword_id, captured_at_date])
+  @@index([keyword_id, captured_at(sort: Desc)])
+  @@index([tenant_id, captured_at(sort: Desc)])
 }
 
 /// Cache de anuncios (ad_group_ad). Inclui RSAs (Responsive Search Ads),
