@@ -432,6 +432,92 @@ export class RemoveConversionActionDto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4 do backlog (2026-05-17) — Tier P2 (PMax, calls, oauth, billing)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cria campanha Performance Max nova. MVP simplificado: cria campaign +
+ * budget + asset_group placeholder VAZIO. Pra ficar serveable, admin
+ * precisa popular o asset_group depois via Google Ads UI (5+ headlines,
+ * 5+ descriptions, 1+ logo, 1+ business name, 1+ images).
+ *
+ * Pra MVP nao recebe assets — admin completa via Google Ads UI.
+ * Sprint 4.1 implementa traffic_manage_pmax_asset_group pra automacao.
+ */
+export class CreatePmaxCampaignDto {
+  @IsString()
+  name!: string;
+
+  /** Diario em BRL (converte pra micros internamente). */
+  @IsNumber()
+  @Min(1)
+  daily_budget_brl!: number;
+
+  /** Bidding: MAXIMIZE_CONVERSIONS ou MAXIMIZE_CONVERSION_VALUE. */
+  @IsString()
+  @IsIn(['MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE'])
+  @IsOptional()
+  bidding_strategy?: 'MAXIMIZE_CONVERSIONS' | 'MAXIMIZE_CONVERSION_VALUE';
+
+  /** Target CPA em BRL (se MAXIMIZE_CONVERSIONS) — opcional. */
+  @IsNumber()
+  @Min(0.5)
+  @IsOptional()
+  target_cpa_brl?: number;
+
+  /** Target ROAS multiplier (se MAXIMIZE_CONVERSION_VALUE) — opcional. */
+  @IsNumber()
+  @Min(0.1)
+  @IsOptional()
+  target_roas?: number;
+
+  /** Final URL principal (landing page). */
+  @IsString()
+  final_url!: string;
+
+  /** IDs numericos geo_target (Default: ["1001775"]=Brasil). */
+  @IsArray()
+  @IsString({ each: true })
+  geo_target_ids!: string[];
+
+  /** IDs numericos language (Default: ["1014"]=portuguese). */
+  @IsArray()
+  @IsString({ each: true })
+  language_ids!: string[];
+
+  @IsString()
+  @IsIn(['ENABLED', 'PAUSED'])
+  @IsOptional()
+  initial_status?: 'ENABLED' | 'PAUSED';
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Lista chamadas (call_view) registradas pelo Google Ads call tracking.
+ * Filtra por janela retroativa (max 90d) e opcionalmente por campanha.
+ */
+export class GetCallHistoryDto {
+  /** Janela em dias retroativos. Default 30, max 90 (limite Google). */
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  @IsOptional()
+  days_back?: number;
+
+  /** Filtra por google_campaign_id. */
+  @IsString()
+  @IsOptional()
+  campaign_id?: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 do backlog (2026-05-17) — Targeting + Bulk ops
 // ═══════════════════════════════════════════════════════════════════════════
 

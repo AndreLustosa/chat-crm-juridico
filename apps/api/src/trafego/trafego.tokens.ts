@@ -29,3 +29,14 @@ export const TRAFEGO_MUTATE_QUEUE_EVENTS = 'TRAFEGO_MUTATE_QUEUE_EVENTS';
  */
 export const TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS =
   'TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS';
+
+/**
+ * Token DI pra QueueEvents da fila trafego-read. Usada pelos endpoints
+ * de leitura live no Google Ads (call history, billing status, etc) que
+ * enfileiram um job + aguardam resultado (Sprint 4, 2026-05-17).
+ *
+ * Read live precisa do GoogleAdsClientService que so existe no worker
+ * module. Pra evitar refactor maior (ou duplicacao do client), API
+ * delega via queue.
+ */
+export const TRAFEGO_READ_QUEUE_EVENTS = 'TRAFEGO_READ_QUEUE_EVENTS';

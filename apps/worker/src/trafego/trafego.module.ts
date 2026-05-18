@@ -19,6 +19,7 @@ import { TrafficBackfillService } from './traffic-backfill.service';
 import { TrafficBackfillProcessor } from './traffic-backfill.processor';
 import { EnhancedConvUploadCron } from './enhanced-conv-upload.cron';
 import { EnhancedConvTriggerProcessor } from './enhanced-conv-trigger.processor';
+import { TrafegoReadProcessor } from './trafego-read.processor';
 
 /**
  * Worker do modulo de Trafego.
@@ -49,6 +50,7 @@ import { EnhancedConvTriggerProcessor } from './enhanced-conv-trigger.processor'
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
     BullModule.registerQueue({ name: 'trafego-backfill' }),
     BullModule.registerQueue({ name: 'trafego-enhanced-conv' }),
+    BullModule.registerQueue({ name: 'trafego-read' }),
   ],
   providers: [
     TrafegoCryptoService,
@@ -68,6 +70,7 @@ import { EnhancedConvTriggerProcessor } from './enhanced-conv-trigger.processor'
     TrafficBackfillProcessor,
     EnhancedConvUploadCron,
     EnhancedConvTriggerProcessor,
+    TrafegoReadProcessor,
   ],
   exports: [
     TrafficOCIService,

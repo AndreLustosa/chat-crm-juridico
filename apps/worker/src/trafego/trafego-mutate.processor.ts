@@ -52,6 +52,8 @@ export const MUTATE_JOBS = {
   UPDATE_DEVICE_TARGETING: 'trafego-mutate-update-device-targeting',
   BULK_ADD_NEGATIVES: 'trafego-mutate-bulk-add-negatives',
   BULK_UPDATE_STATUS: 'trafego-mutate-bulk-update-status',
+  // Sprint 4 backlog (2026-05-17) — Tier P2
+  CREATE_PMAX_CAMPAIGN: 'trafego-mutate-create-pmax-campaign',
 } as const;
 
 /**
@@ -272,6 +274,23 @@ export type AttachCallAssetPayload = BaseMutatePayload & {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4 backlog — Tier P2
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type CreatePmaxCampaignPayload = BaseMutatePayload & {
+  customerId: string;
+  name: string;
+  dailyBudgetMicros: bigint | string;
+  biddingStrategy: 'MAXIMIZE_CONVERSIONS' | 'MAXIMIZE_CONVERSION_VALUE';
+  targetCpaMicros?: bigint | string | null;
+  targetRoas?: number | null;
+  finalUrl: string;
+  geoTargetIds: string[];
+  languageIds: string[];
+  initialStatus?: 'ENABLED' | 'PAUSED';
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 backlog — Targeting + Bulk
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -476,6 +495,8 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.bulkAddNegatives(job.data);
       case MUTATE_JOBS.BULK_UPDATE_STATUS:
         return await this.bulkUpdateStatus(job.data);
+      case MUTATE_JOBS.CREATE_PMAX_CAMPAIGN:
+        return await this.createPmaxCampaign(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -2491,6 +2512,153 @@ export class TrafegoMutateProcessor extends WorkerHost {
         durationMs: 0,
       }
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4 backlog (2026-05-17) — Performance Max
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Cria campanha Performance Max (MVP simplificado).
+   *
+   * Pipeline:
+   *   1. Cria campaign_budget dedicado
+   *   2. Cria PMax campaign (advertising_channel_type=PERFORMANCE_MAX)
+   *   3. Aplica geo + language targeting
+   *
+   * NAO cria asset_group nesta versao — pra ficar serveable, admin precisa
+   * popular asset_group via Google Ads UI (5+ headlines, 5+ descriptions,
+   * 1 logo, 1 business name, 1+ images). Sprint 4.1 implementa
+   * traffic_manage_pmax_asset_group pra automatizar.
+   *
+   * Status inicial sempre PAUSED por seguranca.
+   */
+  private async createPmaxCampaign(
+    p: CreatePmaxCampaignPayload,
+  ): Promise<MutateResult> {
+    const dailyMicros =
+      typeof p.dailyBudgetMicros === 'string'
+        ? BigInt(p.dailyBudgetMicros)
+        : p.dailyBudgetMicros;
+
+    // Passo 1: budget
+    const budgetResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign_budget',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        step: 'create_pmax_budget',
+        campaign_name: p.name,
+      },
+      operations: [
+        {
+          name: `Budget — ${p.name}`,
+          amount_micros: dailyMicros,
+          delivery_method: enums.BudgetDeliveryMethod.STANDARD,
+          explicitly_shared: false,
+        },
+      ],
+    });
+    if (
+      budgetResult.status !== 'SUCCESS' ||
+      !budgetResult.resourceNames?.[0]
+    ) {
+      return budgetResult;
+    }
+    const budgetResourceName = budgetResult.resourceNames[0];
+
+    // Passo 2: PMax campaign
+    const campaignOp: any = {
+      name: p.name,
+      advertising_channel_type: enums.AdvertisingChannelType.PERFORMANCE_MAX,
+      status:
+        p.initialStatus === 'ENABLED'
+          ? enums.CampaignStatus.ENABLED
+          : enums.CampaignStatus.PAUSED,
+      campaign_budget: budgetResourceName,
+      // Bidding — PMax suporta MAXIMIZE_CONVERSIONS e MAXIMIZE_CONVERSION_VALUE
+      ...(p.biddingStrategy === 'MAXIMIZE_CONVERSIONS' && {
+        maximize_conversions: p.targetCpaMicros
+          ? {
+              target_cpa_micros:
+                typeof p.targetCpaMicros === 'string'
+                  ? BigInt(p.targetCpaMicros)
+                  : p.targetCpaMicros,
+            }
+          : { target_cpa_micros: 0n },
+      }),
+      ...(p.biddingStrategy === 'MAXIMIZE_CONVERSION_VALUE' && {
+        maximize_conversion_value: p.targetRoas
+          ? { target_roas: p.targetRoas }
+          : { target_roas: 0 },
+      }),
+      // url_expansion_opt_out: false (default — PMax expande URLs do final_url)
+      url_expansion_opt_out: false,
+    };
+
+    const campaignResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        step: 'create_pmax_campaign',
+        budget_resource_name: budgetResourceName,
+        channel_type: 'PERFORMANCE_MAX',
+      },
+      operations: [campaignOp],
+    });
+    if (
+      campaignResult.status !== 'SUCCESS' ||
+      !campaignResult.resourceNames?.[0]
+    ) {
+      return campaignResult;
+    }
+    const campaignResourceName = campaignResult.resourceNames[0];
+
+    // Passo 3: geo + language criteria
+    const criterionOps: any[] = [];
+    for (const geoId of p.geoTargetIds) {
+      criterionOps.push({
+        campaign: campaignResourceName,
+        location: { geo_target_constant: `geoTargetConstants/${geoId}` },
+      });
+    }
+    for (const langId of p.languageIds) {
+      criterionOps.push({
+        campaign: campaignResourceName,
+        language: { language_constant: `languageConstants/${langId}` },
+      });
+    }
+    if (criterionOps.length > 0 && !p.validateOnly) {
+      await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_criterion',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: false,
+        context: {
+          ...p.context,
+          step: 'create_pmax_criteria',
+          campaign_resource_name: campaignResourceName,
+        },
+        operations: criterionOps,
+      });
+      // Nao falha o todo se criterion falhar — admin pode adicionar depois
+    }
+
+    return campaignResult;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

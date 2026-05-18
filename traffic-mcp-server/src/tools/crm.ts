@@ -56,6 +56,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerSprint2Tools(server);
   // Sprint 3 backlog (2026-05-17): Targeting + Bulk + Recommendations dismiss
   registerSprint3Tools(server);
+  // Sprint 4 backlog (2026-05-17): Tier P2 (PMax + reads + oauth)
+  registerSprint4Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -2198,6 +2200,159 @@ function registerSprint3Tools(server: McpServer) {
           result,
           `Bulk update status: ${input.targets.length} targets → ${input.status}.`,
         );
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4 backlog (2026-05-17) — 4 tools novas (Tier P2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSprint4Tools(server: McpServer) {
+  server.registerTool(
+    'traffic_create_pmax_campaign',
+    {
+      description:
+        'Cria campanha Performance Max nova. PMax otimiza automatico em todos os inventarios ' +
+        'Google (Search, Display, YouTube, Discover, Gmail, Maps). Bidding via Smart Bidding ' +
+        '(MAXIMIZE_CONVERSIONS ou MAXIMIZE_CONVERSION_VALUE). ' +
+        'MVP nesta entrega: cria campaign + budget + criteria de geo/language. ' +
+        'asset_group (assets visuais — logo, business name, headlines, descriptions, images) ' +
+        'AINDA PRECISA SER POPULADO MANUALMENTE no Google Ads UI pra campanha ficar serveable. ' +
+        'Sprint 4.1 implementa traffic_manage_pmax_asset_group pra automacao. ' +
+        'Status inicial sempre PAUSED por seguranca.',
+      inputSchema: {
+        name: z.string().max(255),
+        daily_budget_brl: z.number().positive(),
+        bidding_strategy: z
+          .enum(['MAXIMIZE_CONVERSIONS', 'MAXIMIZE_CONVERSION_VALUE'])
+          .optional(),
+        target_cpa_brl: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Pra MAXIMIZE_CONVERSIONS. Opcional.'),
+        target_roas: z
+          .number()
+          .positive()
+          .optional()
+          .describe('Pra MAXIMIZE_CONVERSION_VALUE. Opcional.'),
+        final_url: z.string().url(),
+        geo_target_ids: z
+          .array(z.string())
+          .min(1)
+          .describe('IDs numericos Google ex: ["1001775"]=Brasil.'),
+        language_ids: z
+          .array(z.string())
+          .min(1)
+          .describe('IDs numericos. Default usar ["1014"]=portuguese.'),
+        initial_status: z.enum(['ENABLED', 'PAUSED']).optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_pmax_campaign', async (toolCallId) => {
+        applyMutateGuards('traffic_create_pmax_campaign');
+        const result = await crmTrafficService.post(
+          '/trafego/campaigns/pmax',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `PMax campaign "${input.name}" criada (status: ${input.initial_status ?? 'PAUSED'}). ` +
+            `IMPORTANTE: popule o asset_group no Google Ads UI antes de ativar.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_reconnect_oauth_link',
+    {
+      description:
+        'Gera URL de OAuth pra reconectar a conta Google Ads quando refresh_token expirou. ' +
+        'Util quando se ve erros de auth ou apos rotacao manual do token. ' +
+        'Retorna `authorize_url` — usuario abre no browser pra refazer o consent. ' +
+        'Apos completar, refresh_token novo eh salvo automatic em TrafficAccount.',
+      inputSchema: {},
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async () =>
+      safe('traffic_reconnect_oauth_link', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          authorize_url: string;
+          message: string;
+        }>('/trafego/oauth/reconnect-link', undefined, { toolCallId });
+        return ok(
+          result,
+          `URL gerada — abra no browser:\n${result?.authorize_url ?? '(falha)'}`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_get_call_history',
+    {
+      description:
+        'Lista chamadas (call_view) registradas pelo Google Ads call tracking. ' +
+        'Retorna duration_seconds, status, started_at, caller_country/area, type, campaign. ' +
+        'Use pra reconciliar com leads do CRM ou auditar performance de call extensions. ' +
+        'Filtra por janela retroativa (max 90d) e opcional campaign_id. ' +
+        'GAQL live — pode demorar alguns segundos.',
+      inputSchema: {
+        days_back: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe('Default 30, max 90 (limite Google).'),
+        campaign_id: z
+          .string()
+          .optional()
+          .describe('Filtra por google_campaign_id.'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_get_call_history', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          calls: any[];
+          total: number;
+          note?: string;
+        }>('/trafego/reads/call-history', input, { toolCallId });
+        const lines = [
+          `${result?.total ?? 0} chamadas em ${input.days_back ?? 30}d.`,
+        ];
+        if (result?.note) lines.push(`Nota: ${result.note}`);
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
+    'traffic_get_billing_status',
+    {
+      description:
+        'Lista billing setups + account budgets da conta. Util pra ver status de pagamento, ' +
+        'limites, datas de aprovacao. Retorna estrutura com billing_setups[] + account_budgets[]. ' +
+        'GAQL live — pode demorar alguns segundos.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () =>
+      safe('traffic_get_billing_status', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          billing_setups: any[];
+          account_budgets: any[];
+          note?: string;
+        }>('/trafego/reads/billing-status', undefined, { toolCallId });
+        const lines = [
+          `${result?.billing_setups?.length ?? 0} billing setups, ${result?.account_budgets?.length ?? 0} account budgets.`,
+        ];
+        if (result?.note) lines.push(`Nota: ${result.note}`);
+        return ok(result, lines.join('\n'));
       }),
   );
 }

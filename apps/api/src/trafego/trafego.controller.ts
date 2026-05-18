@@ -25,6 +25,7 @@ import type { Queue, QueueEvents } from 'bullmq';
 import {
   TRAFEGO_MUTATE_QUEUE_EVENTS,
   TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS,
+  TRAFEGO_READ_QUEUE_EVENTS,
 } from './trafego.tokens';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -76,6 +77,9 @@ import {
   UpdateDeviceTargetingDto,
   BulkAddNegativesDto,
   BulkUpdateStatusDto,
+  // Sprint 4
+  CreatePmaxCampaignDto,
+  GetCallHistoryDto,
   CreateAdGroupDto,
   UpdateAdGroupDto,
   UpdateRsaDto,
@@ -98,10 +102,14 @@ export class TrafegoController {
     @InjectQueue('trafego-mutate') private readonly mutateQueue: Queue,
     @InjectQueue('trafego-enhanced-conv')
     private readonly enhancedConvQueue: Queue,
+    @InjectQueue('trafego-read')
+    private readonly readQueue: Queue,
     @Inject(TRAFEGO_MUTATE_QUEUE_EVENTS)
     private readonly mutateQueueEvents: QueueEvents,
     @Inject(TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS)
     private readonly enhancedConvQueueEvents: QueueEvents,
+    @Inject(TRAFEGO_READ_QUEUE_EVENTS)
+    private readonly readQueueEvents: QueueEvents,
   ) {}
 
   // ─── Dashboard ──────────────────────────────────────────────────────────
@@ -1366,6 +1374,95 @@ export class TrafegoController {
       'trafego-mutate-bulk-update-status',
       dto,
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4 backlog (2026-05-17) — Tier P2 (PMax, calls, oauth, billing)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Cria PMax campaign (MVP — asset_group ainda manual via UI). */
+  @Post('campaigns/pmax')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createPmaxCampaign(@Req() req: any, @Body() dto: CreatePmaxCampaignDto) {
+    return await this.enqueueMutate(req, 'trafego-mutate-create-pmax-campaign', dto);
+  }
+
+  /**
+   * Gera URL de OAuth pra reconnect — quando o refresh_token caduca,
+   * gestor chama esta tool e usuario abre a URL no browser pra refazer
+   * o consent.
+   */
+  @Get('oauth/reconnect-link')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getReconnectOAuthLink(@Req() req: any) {
+    const url = await this.oauth.buildAuthUrl(req.user.tenant_id);
+    return {
+      ok: true,
+      authorize_url: url,
+      message:
+        'Abra esta URL no browser pra refazer o consent OAuth do Google Ads. ' +
+        'Apos completar, o refresh_token sera salvo automaticamente.',
+    };
+  }
+
+  /** Lista call history via GAQL live (via worker queue). */
+  @Get('reads/call-history')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getCallHistory(@Req() req: any, @Query() query: GetCallHistoryDto) {
+    return await this.enqueueReadJob(req, 'call_history', {
+      days_back: query.days_back ?? 30,
+      campaign_id: query.campaign_id,
+    });
+  }
+
+  /** Status de billing (setups + budgets) via GAQL live. */
+  @Get('reads/billing-status')
+  @Roles('ADMIN', 'ADVOGADO')
+  async getBillingStatus(@Req() req: any) {
+    return await this.enqueueReadJob(req, 'billing_status', {});
+  }
+
+  /**
+   * Helper — enfileira read job na queue trafego-read e aguarda resultado.
+   * Pattern equivalente ao enqueueMutate mas pra reads (sem audit log).
+   */
+  private async enqueueReadJob(
+    req: any,
+    kind: 'call_history' | 'billing_status',
+    params: Record<string, any>,
+  ) {
+    const tenantId = req.user.tenant_id;
+    const account = await this.service.getAccount(tenantId);
+    if (!account) {
+      throw new HttpException(
+        'Conecte uma conta antes de fazer reads live.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const job = await this.readQueue.add(
+      'trafego-read',
+      {
+        tenantId,
+        accountId: account.id,
+        kind,
+        params,
+      },
+      {
+        jobId: `read-${kind}-${tenantId}-${Date.now()}`,
+        removeOnComplete: 50,
+        removeOnFail: 20,
+        attempts: 1,
+      },
+    );
+    try {
+      const result = await job.waitUntilFinished(this.readQueueEvents, 30_000);
+      return result;
+    } catch (e: any) {
+      throw new HttpException(
+        `Read live falhou ou demorou demais: ${e?.message ?? 'unknown'}`,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   // ─── Helper: enqueue mutate com resolucao de resource_names ─────────────

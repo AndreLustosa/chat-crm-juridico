@@ -15,6 +15,7 @@ import { TrafegoMappingAiService } from './trafego-mapping-ai.service';
 import {
   TRAFEGO_MUTATE_QUEUE_EVENTS,
   TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS,
+  TRAFEGO_READ_QUEUE_EVENTS,
 } from './trafego.tokens';
 
 /**
@@ -49,6 +50,7 @@ import {
     BullModule.registerQueue({ name: 'trafego-recommendations' }),
     BullModule.registerQueue({ name: 'trafego-backfill' }),
     BullModule.registerQueue({ name: 'trafego-enhanced-conv' }),
+    BullModule.registerQueue({ name: 'trafego-read' }),
   ],
   controllers: [TrafegoController],
   providers: [
@@ -89,6 +91,19 @@ import {
         });
       },
     },
+    {
+      provide: TRAFEGO_READ_QUEUE_EVENTS,
+      useFactory: (): QueueEvents => {
+        return new QueueEvents('trafego-read', {
+          prefix: process.env.BULL_PREFIX || 'bull',
+          connection: {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+            maxRetriesPerRequest: null,
+          },
+        });
+      },
+    },
   ],
   exports: [
     TrafegoService,
@@ -108,6 +123,8 @@ export class TrafegoModule implements OnModuleDestroy {
     private readonly mutateQueueEvents: QueueEvents,
     @Inject(TRAFEGO_ENHANCED_CONV_QUEUE_EVENTS)
     private readonly enhancedConvQueueEvents: QueueEvents,
+    @Inject(TRAFEGO_READ_QUEUE_EVENTS)
+    private readonly readQueueEvents: QueueEvents,
   ) {}
 
   async onModuleDestroy(): Promise<void> {
@@ -115,6 +132,7 @@ export class TrafegoModule implements OnModuleDestroy {
     await Promise.allSettled([
       this.mutateQueueEvents.close(),
       this.enhancedConvQueueEvents.close(),
+      this.readQueueEvents.close(),
     ]);
   }
 }

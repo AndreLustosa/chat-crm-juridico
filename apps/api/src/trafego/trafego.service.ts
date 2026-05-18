@@ -1649,6 +1649,27 @@ export class TrafegoService {
         };
       }
 
+      case 'trafego-mutate-create-pmax-campaign': {
+        return {
+          ...base,
+          customerId,
+          name: raw.name,
+          dailyBudgetMicros: String(
+            Math.round(Number(raw.daily_budget_brl) * 1_000_000),
+          ),
+          biddingStrategy: raw.bidding_strategy ?? 'MAXIMIZE_CONVERSIONS',
+          targetCpaMicros: raw.target_cpa_brl
+            ? String(Math.round(Number(raw.target_cpa_brl) * 1_000_000))
+            : null,
+          targetRoas: raw.target_roas ?? null,
+          finalUrl: raw.final_url,
+          geoTargetIds: raw.geo_target_ids ?? ['1001775'],
+          languageIds: raw.language_ids ?? ['1014'],
+          initialStatus: raw.initial_status ?? 'PAUSED',
+          context: { ...base.context, channel_type: 'PERFORMANCE_MAX' },
+        };
+      }
+
       case 'trafego-mutate-bulk-update-status': {
         const targets: Array<{
           resourceType: 'campaign' | 'ad_group';
