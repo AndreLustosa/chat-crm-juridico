@@ -2671,18 +2671,30 @@ export class TrafegoService {
       }
 
       case 'trafego-mutate-remove-asset': {
-        // Bug-fix 2026-05-17 (cleanup orfaos do BUG-C)
-        const assetResourceName = raw.asset_id.startsWith('customers/')
-          ? raw.asset_id
-          : `customers/${customerId}/assets/${raw.asset_id}`;
-        return {
-          ...base,
-          assetResourceName,
-          context: {
-            ...base.context,
-            asset_id: raw.asset_id,
-          },
-        };
+        // Fix 2026-05-18 v3 (BUG-E definitivo): Google Ads API v23 NAO PERMITE
+        // remove de Asset. AssetOperation proto so tem `create` e `update`
+        // — NAO TEM `remove` field. Asset eh imutavel uma vez criado.
+        // Pra "limpar" um asset, voce so pode remover suas ASSOCIACOES
+        // (CampaignAsset, AdGroupAsset, CustomerAsset) via traffic_detach_extension.
+        // O Asset em si fica permanente na conta.
+        //
+        // Confirmado em https://developers.google.com/google-ads/api/reference/rpc/v23/AssetOperation
+        // (proto so tem create + update, sem remove field).
+        //
+        // Tentativas anteriores de remove em rounds 1/2/3:
+        //  - round 1 (5b84fc5): svc.remove is not a function (Opteo nao expoe)
+        //  - round 2 (8109a00): OPERATION_REQUIRED (mutateResources mal-serializa)
+        //  - round 3 (aa29fa8): INVALID_ARGUMENT (proto rejeita campo remove)
+        // Todos falharam pq estavamos tentando o impossivel.
+        throw new HttpException(
+          `Google Ads API NAO permite remover Asset diretamente — proto AssetOperation so tem create e update. ` +
+            `Asset ${raw.asset_id} eh imutavel uma vez criado. ` +
+            `Pra remover apenas a ASSOCIACAO de um asset a uma campanha/grupo/conta, ` +
+            `use traffic_detach_extension passando o link_resource_name (CampaignAsset/AdGroupAsset/CustomerAsset). ` +
+            `O Asset em si fica permanente na conta (sem custo, mas vivel na lista de assets). ` +
+            `Refs: https://developers.google.com/google-ads/api/reference/rpc/v23/AssetOperation`,
+          HttpStatus.BAD_REQUEST,
+        );
       }
 
       case 'trafego-mutate-bulk-update-status': {

@@ -264,9 +264,31 @@ export class TrafegoReadProcessor extends WorkerHost {
       return ext;
     };
 
-    // Helper pra montar WHERE/AND corretamente — primeiro filtro vira WHERE,
-    // demais viram AND. typeFilter sempre eh "asset.type = X" se passado.
-    const buildWhere = (linkAlias: string, scopeClause?: string): string => {
+    // Fix 2026-05-18 v3 (BUG-G v3): SPLIT queries em vez de JOIN inline.
+    // O JOIN inline (campaign_asset + asset.*) parecia certo mas estava
+    // retornando vazio em prod. Pode ser:
+    //  - resource campaign_asset nao retornando asset.* via JOIN (GAQL
+    //    limitation que nao achei doc clara)
+    //  - asset com status diferente que filter exclui
+    //
+    // Approach v3: 1 query SO em campaign_asset (sem JOIN) + query
+    // separada em asset pra hidratar details. Logging extenso pra debug
+    // se ainda falhar.
+
+    const linkRows: Array<{
+      level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
+      link_resource_name: string;
+      asset_resource_name: string;
+      scope_resource_name: string;
+      field_type: any;
+      status: string;
+    }> = [];
+
+    // Helper de WHERE pra link (sem ASSET filters — esses vem na 2a query)
+    const buildLinkWhere = (
+      linkAlias: string,
+      scopeClause?: string,
+    ): string => {
       const clauses: string[] = [];
       if (scopeClause) clauses.push(scopeClause);
       if (params.status) {
@@ -274,119 +296,199 @@ export class TrafegoReadProcessor extends WorkerHost {
       } else {
         clauses.push(`${linkAlias}.status != 'REMOVED'`);
       }
-      if (params.type) clauses.push(`asset.type = '${params.type}'`);
       return clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     };
 
-    // ─── CampaignAsset (level CAMPAIGN) ────────────────────────────────
-    // Se filtro for ad_group_id only, skip.
+    // ─── Query 1A: CampaignAsset ────────────────────────────────────────
     if (!params.ad_group_id) {
-      const whereClause = buildWhere(
+      const whereClause = buildLinkWhere(
         'campaign_asset',
         params.campaign_id ? `campaign.id = ${params.campaign_id}` : undefined,
       );
+      const q = `
+        SELECT
+          campaign_asset.resource_name,
+          campaign_asset.asset,
+          campaign_asset.field_type,
+          campaign_asset.status,
+          campaign_asset.campaign
+        FROM campaign_asset
+        ${whereClause}
+        LIMIT 500
+      `;
       try {
-        const q = `
-          SELECT
-            campaign_asset.resource_name,
-            campaign_asset.field_type,
-            campaign_asset.status,
-            campaign_asset.campaign,
-            ${ASSET_FIELDS}
-          FROM campaign_asset
-          ${whereClause}
-          LIMIT 500
-        `;
         const rows = (await customer.query(q)) as any[];
+        this.logger.log(
+          `[extensions] campaign_asset query: ${rows.length} rows (campaign_id=${params.campaign_id ?? 'all'}, status=${params.status ?? 'not REMOVED'})`,
+        );
         for (const row of rows) {
-          const assetRn = row.asset?.resource_name ?? '';
-          if (!assetRn) continue;
-          const ext = ensureAsset(assetRn, row.asset);
-          ext.attachments.push({
-            link_resource_name: row.campaign_asset?.resource_name ?? '',
+          const ca = row.campaign_asset;
+          if (!ca?.asset) continue;
+          linkRows.push({
             level: 'CAMPAIGN',
-            scope_resource_name: row.campaign_asset?.campaign ?? '',
-            field_type: this.formatFieldType(row.campaign_asset?.field_type),
-            status: row.campaign_asset?.status ?? '',
+            link_resource_name: ca.resource_name ?? '',
+            asset_resource_name: ca.asset,
+            scope_resource_name: ca.campaign ?? '',
+            field_type: ca.field_type,
+            status: ca.status ?? '',
           });
         }
       } catch (e: any) {
-        this.logger.warn(`[extensions] campaign_asset query falhou: ${e.message}`);
+        this.logger.warn(
+          `[extensions] campaign_asset query FALHOU: ${e?.message ?? 'unknown'} | query=${q.replace(/\s+/g, ' ').trim()}`,
+        );
       }
     }
 
-    // ─── AdGroupAsset (level AD_GROUP) ─────────────────────────────────
+    // ─── Query 1B: AdGroupAsset ─────────────────────────────────────────
     {
       const scope = params.ad_group_id
         ? `ad_group.id = ${params.ad_group_id}`
         : params.campaign_id
           ? `campaign.id = ${params.campaign_id}`
           : undefined;
-      const whereClause = buildWhere('ad_group_asset', scope);
+      const whereClause = buildLinkWhere('ad_group_asset', scope);
+      const q = `
+        SELECT
+          ad_group_asset.resource_name,
+          ad_group_asset.asset,
+          ad_group_asset.field_type,
+          ad_group_asset.status,
+          ad_group_asset.ad_group
+        FROM ad_group_asset
+        ${whereClause}
+        LIMIT 500
+      `;
       try {
-        const q = `
-          SELECT
-            ad_group_asset.resource_name,
-            ad_group_asset.field_type,
-            ad_group_asset.status,
-            ad_group_asset.ad_group,
-            ${ASSET_FIELDS}
-          FROM ad_group_asset
-          ${whereClause}
-          LIMIT 500
-        `;
         const rows = (await customer.query(q)) as any[];
+        this.logger.log(
+          `[extensions] ad_group_asset query: ${rows.length} rows`,
+        );
         for (const row of rows) {
-          const assetRn = row.asset?.resource_name ?? '';
-          if (!assetRn) continue;
-          const ext = ensureAsset(assetRn, row.asset);
-          ext.attachments.push({
-            link_resource_name: row.ad_group_asset?.resource_name ?? '',
+          const aga = row.ad_group_asset;
+          if (!aga?.asset) continue;
+          linkRows.push({
             level: 'AD_GROUP',
-            scope_resource_name: row.ad_group_asset?.ad_group ?? '',
-            field_type: this.formatFieldType(row.ad_group_asset?.field_type),
-            status: row.ad_group_asset?.status ?? '',
+            link_resource_name: aga.resource_name ?? '',
+            asset_resource_name: aga.asset,
+            scope_resource_name: aga.ad_group ?? '',
+            field_type: aga.field_type,
+            status: aga.status ?? '',
           });
         }
       } catch (e: any) {
-        this.logger.warn(`[extensions] ad_group_asset query falhou: ${e.message}`);
+        this.logger.warn(
+          `[extensions] ad_group_asset query FALHOU: ${e?.message ?? 'unknown'}`,
+        );
       }
     }
 
-    // ─── CustomerAsset (level ACCOUNT) ────────────────────────────────
-    // So se nao houver filtro de scope (caller nao quer scope-specific)
+    // ─── Query 1C: CustomerAsset ────────────────────────────────────────
     if (!params.campaign_id && !params.ad_group_id) {
-      const whereClause = buildWhere('customer_asset');
+      const whereClause = buildLinkWhere('customer_asset');
+      const q = `
+        SELECT
+          customer_asset.resource_name,
+          customer_asset.asset,
+          customer_asset.field_type,
+          customer_asset.status
+        FROM customer_asset
+        ${whereClause}
+        LIMIT 200
+      `;
       try {
-        const q = `
-          SELECT
-            customer_asset.resource_name,
-            customer_asset.field_type,
-            customer_asset.status,
-            ${ASSET_FIELDS}
-          FROM customer_asset
-          ${whereClause}
-          LIMIT 200
-        `;
         const rows = (await customer.query(q)) as any[];
+        this.logger.log(
+          `[extensions] customer_asset query: ${rows.length} rows`,
+        );
         for (const row of rows) {
-          const assetRn = row.asset?.resource_name ?? '';
-          if (!assetRn) continue;
-          const ext = ensureAsset(assetRn, row.asset);
-          ext.attachments.push({
-            link_resource_name: row.customer_asset?.resource_name ?? '',
+          const ca = row.customer_asset;
+          if (!ca?.asset) continue;
+          linkRows.push({
             level: 'ACCOUNT',
+            link_resource_name: ca.resource_name ?? '',
+            asset_resource_name: ca.asset,
             scope_resource_name: '',
-            field_type: this.formatFieldType(row.customer_asset?.field_type),
-            status: row.customer_asset?.status ?? '',
+            field_type: ca.field_type,
+            status: ca.status ?? '',
           });
         }
       } catch (e: any) {
-        this.logger.warn(`[extensions] customer_asset query falhou: ${e.message}`);
+        this.logger.warn(
+          `[extensions] customer_asset query FALHOU: ${e?.message ?? 'unknown'}`,
+        );
       }
+    }
+
+    this.logger.log(
+      `[extensions] total link rows: ${linkRows.length} — asset_resource_names: ${linkRows.map((l) => l.asset_resource_name).slice(0, 5).join(', ')}${linkRows.length > 5 ? '...' : ''}`,
+    );
+
+    // ─── Query 2: Asset details pros assets que aparecem em algum link ─
+    const uniqueAssetRns = [
+      ...new Set(linkRows.map((l) => l.asset_resource_name).filter(Boolean)),
+    ];
+    if (uniqueAssetRns.length > 0) {
+      // Filtra por resource_name IN (...) - chunks de 100 pra evitar query
+      // muito grande (limit GAQL ~10kb)
+      const CHUNK = 100;
+      for (let i = 0; i < uniqueAssetRns.length; i += CHUNK) {
+        const chunk = uniqueAssetRns.slice(i, i + CHUNK);
+        const inList = chunk.map((rn) => `'${rn}'`).join(', ');
+        const typeWhere = params.type
+          ? ` AND asset.type = '${params.type}'`
+          : '';
+        const q = `
+          SELECT
+            ${ASSET_FIELDS}
+          FROM asset
+          WHERE asset.resource_name IN (${inList})
+          ${typeWhere}
+        `;
+        try {
+          const rows = (await customer.query(q)) as any[];
+          this.logger.log(
+            `[extensions] asset details query: ${rows.length}/${chunk.length} rows hidratados`,
+          );
+          for (const row of rows) {
+            const assetRn = row.asset?.resource_name ?? '';
+            if (!assetRn) continue;
+            ensureAsset(assetRn, row.asset);
+          }
+        } catch (e: any) {
+          this.logger.warn(
+            `[extensions] asset details query FALHOU: ${e?.message ?? 'unknown'}`,
+          );
+        }
+      }
+    }
+
+    // ─── Joina links + asset details ───────────────────────────────────
+    // Se algum link aponta pra asset que nao apareceu na query 2 (ex:
+    // asset.type filter excluiu), cria stub ensureAsset com type UNKNOWN
+    // pra mostrar o link MAS marcando asset como nao-hidratado.
+    for (const link of linkRows) {
+      if (!byAsset.has(link.asset_resource_name)) {
+        ensureAsset(link.asset_resource_name, {
+          resource_name: link.asset_resource_name,
+          id: null,
+          type: 'UNKNOWN',
+          name: null,
+        });
+      }
+      byAsset.get(link.asset_resource_name)!.attachments.push({
+        link_resource_name: link.link_resource_name,
+        level: link.level,
+        scope_resource_name: link.scope_resource_name,
+        field_type: this.formatFieldType(link.field_type),
+        status: link.status,
+      });
     }
 
     const extensions = [...byAsset.values()];
+    this.logger.log(
+      `[extensions] FINAL: ${extensions.length} unique assets retornando (com ${linkRows.length} attachments totais)`,
+    );
     return {
       extensions,
       note:

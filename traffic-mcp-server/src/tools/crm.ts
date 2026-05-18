@@ -3103,22 +3103,24 @@ function registerBugFixBatchTools(server: McpServer) {
     'traffic_remove_asset',
     {
       description:
-        'Remove um Asset orfao da conta Google Ads. Util pra limpar assets criados ' +
-        'mas nunca anexados — ex: Call Assets criados pelo bug do traffic_attach_call_asset ' +
-        'antes do fix de 2026-05-17. Aceita asset_id como resource_name ' +
-        '(customers/X/assets/Y) OU ID numerico (auto-prefixa). ' +
-        'PRE-REQUISITO: asset deve estar SEM attachments ativos. Se ainda anexado, ' +
-        'Google rejeita com erro claro — desanexe primeiro via traffic_detach_extension ' +
-        'ou via Google Ads UI.',
+        'IMPORTANTE: Google Ads API NAO PERMITE remover Asset diretamente. ' +
+        'O proto AssetOperation v23 so tem create + update (NAO tem remove field). ' +
+        'Asset eh imutavel uma vez criado — fica permanente na conta. ' +
+        'Pra "remover" o que voce quer eh provavelmente DESANEXAR um asset de uma ' +
+        'campanha/grupo/conta — use traffic_detach_extension passando o link_resource_name ' +
+        '(customers/X/campaignAssets/... OU adGroupAssets/... OU customerAssets/...) que voce ' +
+        'pega via traffic_list_extensions. ' +
+        'Esta tool existe so pra documentar a limitacao — retorna sempre 400 com mensagem ' +
+        'explicando. Refs: https://developers.google.com/google-ads/api/reference/rpc/v23/AssetOperation',
       inputSchema: {
         asset_id: z
           .string()
           .min(1)
-          .describe('resource_name customers/X/assets/Y OU ID numerico do asset.'),
+          .describe('Ignorado — tool retorna 400 sempre (Google nao permite remove de Asset).'),
         reason: z.string().optional(),
         validate_only: z.boolean().optional(),
       },
-      annotations: { readOnlyHint: false, destructiveHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async (input) =>
       safe('traffic_remove_asset', async (toolCallId) => {
