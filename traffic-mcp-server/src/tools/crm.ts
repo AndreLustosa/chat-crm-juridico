@@ -60,6 +60,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerSprint4Tools(server);
   // Sprint 3.1 backlog (2026-05-17): Shared library + Location bid
   registerSprint3_1Tools(server);
+  // Sprint 4.1 backlog (2026-05-17): PMax asset groups + Experiments
+  registerSprint4_1Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -2506,6 +2508,251 @@ function registerSprint3_1Tools(server: McpServer) {
         return ok(
           result,
           `Location bid modifiers atualizados pra campanha ${campaign_id} (${input.modifiers.length} locations).`,
+        );
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4.1 backlog (2026-05-17) — 4 tools novas (PMax asset groups + Experiments)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSprint4_1Tools(server: McpServer) {
+  // ─── PMax asset groups ─────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_list_pmax_asset_groups',
+    {
+      description:
+        'Lista asset_groups das campanhas PMax + counts de assets por field_type + ' +
+        'readiness_warnings (quais field_types ainda nao atingiram o minimo Google ' +
+        'pra ficar serveable: 3-5 HEADLINE, 2-5 DESCRIPTION, 1 LONG_HEADLINE, ' +
+        '1 BUSINESS_NAME, 1 LOGO, 1 MARKETING_IMAGE, 1 SQUARE_MARKETING_IMAGE). ' +
+        'Filtra por campaign_id opcional (apenas PMax campaigns sao retornadas). ' +
+        'GAQL live via worker queue.',
+      inputSchema: {
+        campaign_id: z
+          .string()
+          .optional()
+          .describe('Filtra por google_campaign_id (numerico).'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_list_pmax_asset_groups', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          asset_groups: any[];
+          note?: string;
+        }>('/trafego/pmax-asset-groups', input, { toolCallId });
+        const lines = [
+          `${result?.asset_groups?.length ?? 0} asset groups.`,
+        ];
+        const withWarnings =
+          result?.asset_groups?.filter(
+            (g: any) => (g.readiness_warnings?.length ?? 0) > 0,
+          ).length ?? 0;
+        if (withWarnings > 0) {
+          lines.push(`${withWarnings} groups com gaps de readiness — confira readiness_warnings.`);
+        }
+        if (result?.note) lines.push(`Nota: ${result.note}`);
+        return ok(result, lines.join('\n'));
+      }),
+  );
+
+  server.registerTool(
+    'traffic_create_pmax_asset_group',
+    {
+      description:
+        'Cria asset_group VAZIO numa campanha PMax existente. Asset group eh o ' +
+        '"container" que agrupa todos os assets de uma temática (uma PMax pode ter ' +
+        'múltiplos asset_groups pra públicos/produtos diferentes). ' +
+        'IMPORTANTE: status default PAUSED — pra serveable, popule com assets via ' +
+        'traffic_add_assets_to_pmax_asset_group (min 5 HEADLINE, 5 DESCRIPTION, ' +
+        '1 LONG_HEADLINE, 1 BUSINESS_NAME, 1 LOGO, 1 MARKETING_IMAGE, ' +
+        '1 SQUARE_MARKETING_IMAGE).',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        name: z.string().min(1).max(255),
+        final_urls: z.array(z.string().url()).min(1).max(20),
+        final_mobile_urls: z.array(z.string().url()).max(20).optional(),
+        path1: z
+          .string()
+          .max(15)
+          .optional()
+          .describe('Path1 do display URL.'),
+        path2: z
+          .string()
+          .max(15)
+          .optional()
+          .describe('Path2 do display URL. So tem efeito se path1 setado.'),
+        status: z.enum(['ENABLED', 'PAUSED']).optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_pmax_asset_group', async (toolCallId) => {
+        applyMutateGuards('traffic_create_pmax_asset_group');
+        const result = await crmTrafficService.post(
+          '/trafego/pmax-asset-groups',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Asset group "${input.name}" criado (status: ${input.status ?? 'PAUSED'}). ` +
+            `Popule com assets via traffic_add_assets_to_pmax_asset_group antes de ativar.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_add_assets_to_pmax_asset_group',
+    {
+      description:
+        'Adiciona assets a um asset_group de PMax. Operacao em 2 mutates sequenciais: ' +
+        '(1) cria Assets novos (text/youtube) ou usa existentes (source=existing); ' +
+        '(2) cria AssetGroupAssets vinculando ao asset_group via field_type. ' +
+        'Source types: ' +
+        '  - text: payload={text:"..."} — cria Asset novo (HEADLINE/DESCRIPTION/LONG_HEADLINE/BUSINESS_NAME). ' +
+        '  - youtube: payload={youtube_video_id:"VID",title:"..."} — cria Asset video novo. ' +
+        '  - existing: payload={asset_resource_name:"customers/X/assets/Y"} — usa Asset ja criado ' +
+        '(util pra imagens uploadeadas via UI). ' +
+        'Field types: HEADLINE (max 30 chars), DESCRIPTION (max 90), LONG_HEADLINE (max 90), ' +
+        'BUSINESS_NAME (max 25), LOGO/LANDSCAPE_LOGO (image), MARKETING_IMAGE (1.91:1), ' +
+        'SQUARE_MARKETING_IMAGE (1:1), PORTRAIT_MARKETING_IMAGE (4:5), YOUTUBE_VIDEO. ' +
+        'Use validate_only=true antes pra checar payload sem aplicar.',
+      inputSchema: {
+        asset_group_id: z
+          .string()
+          .describe('ID numerico Google OU resource_name customers/X/assetGroups/Y.'),
+        assets: z
+          .array(
+            z.object({
+              source: z.enum(['text', 'existing', 'youtube']),
+              field_type: z.enum([
+                'HEADLINE',
+                'DESCRIPTION',
+                'LONG_HEADLINE',
+                'BUSINESS_NAME',
+                'LOGO',
+                'LANDSCAPE_LOGO',
+                'MARKETING_IMAGE',
+                'SQUARE_MARKETING_IMAGE',
+                'PORTRAIT_MARKETING_IMAGE',
+                'YOUTUBE_VIDEO',
+                'CALL_TO_ACTION',
+              ]),
+              payload: z.record(z.any()),
+            }),
+          )
+          .min(1)
+          .max(50),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_add_assets_to_pmax_asset_group', async (toolCallId) => {
+        applyMutateGuards('traffic_add_assets_to_pmax_asset_group');
+        const result = await crmTrafficService.post(
+          '/trafego/pmax-asset-groups/assets',
+          input,
+          { toolCallId },
+        );
+        const byType = input.assets.reduce(
+          (acc: Record<string, number>, a: any) => {
+            acc[a.field_type] = (acc[a.field_type] ?? 0) + 1;
+            return acc;
+          },
+          {},
+        );
+        const breakdown = Object.entries(byType)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(', ');
+        return ok(
+          result,
+          `${input.assets.length} assets adicionados ao asset_group ${input.asset_group_id} (${breakdown}).`,
+        );
+      }),
+  );
+
+  // ─── Experiments ───────────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_create_experiment',
+    {
+      description:
+        'Cria Experiment (A/B test de campanha) na nova API v23 do Google Ads. ' +
+        'MVP nesta entrega: cria Experiment em estado SETUP + 1 control arm ' +
+        'apontando pra base_campaign_id. Treatment arm (variant) + scheduling + ' +
+        'promotion ainda precisam ser configurados via Google Ads UI ou Sprint 4.2 ' +
+        '(tools futuras: traffic_schedule_experiment, traffic_promote_experiment). ' +
+        'Type SEARCH_CUSTOM (default) permite A/B livre de qualquer setting da ' +
+        'campanha Search. DISPLAY_CUSTOM equivalente pra Display. ' +
+        'SEARCH_AUTOMATED_BIDDING_STRATEGY testa estrategias de lance especificas. ' +
+        'AD_VARIATION compara variacoes de RSA. ' +
+        'IMPORTANTE: Experiment em SETUP nao consome budget e nao veicula — apenas ' +
+        'apos schedule (ENABLED) o traffic split comeca.',
+      inputSchema: {
+        name: z.string().min(1).max(255),
+        base_campaign_id: campaignIdSchema,
+        type: z
+          .enum([
+            'SEARCH_CUSTOM',
+            'DISPLAY_CUSTOM',
+            'SEARCH_AUTOMATED_BIDDING_STRATEGY',
+            'DISPLAY_AUTOMATED_BIDDING_STRATEGY',
+            'AD_VARIATION',
+          ])
+          .optional(),
+        description: z.string().max(1000).optional(),
+        suffix: z
+          .string()
+          .max(64)
+          .optional()
+          .describe('Sufixo aplicado ao nome do treatment campaign. Default "[experiment]".'),
+        goals: z
+          .array(
+            z.object({
+              metric: z.enum([
+                'CLICKS',
+                'IMPRESSIONS',
+                'COST',
+                'CTR',
+                'AVERAGE_CPC',
+                'CONVERSIONS',
+                'CONVERSION_VALUE',
+                'COST_PER_CONVERSION',
+              ]),
+              direction: z.enum([
+                'INCREASE',
+                'DECREASE',
+                'NO_CHANGE',
+                'NO_CHANGE_OR_INCREASE',
+                'NO_CHANGE_OR_DECREASE',
+              ]),
+            }),
+          )
+          .max(10)
+          .optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_create_experiment', async (toolCallId) => {
+        applyMutateGuards('traffic_create_experiment');
+        const result = await crmTrafficService.post(
+          '/trafego/experiments',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Experiment "${input.name}" criado (type: ${input.type ?? 'SEARCH_CUSTOM'}, status: SETUP). ` +
+            `Configure treatment arm + schedule via Google Ads UI pra ativar A/B.`,
         );
       }),
   );

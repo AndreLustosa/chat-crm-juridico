@@ -608,6 +608,216 @@ export class GetCallHistoryDto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4.1 do backlog (2026-05-17) — PMax asset groups + Experiments
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cria asset_group VAZIO numa campanha Performance Max ja existente.
+ * Asset group eh o "container" que agrupa todos os assets de uma temática
+ * (uma PMax pode ter múltiplos asset_groups pra públicos/produtos
+ * diferentes).
+ *
+ * Pra ficar serveable, ainda precisa popular com assets via
+ * traffic_add_assets_to_pmax_asset_group (requer min: 5 headlines, 5
+ * descriptions, 1 long_headline, 1 business_name, 1 logo, 1 marketing_image,
+ * 1 square_marketing_image — total 15 assets minimos).
+ *
+ * Status default PAUSED por seguranca — admin ativa via Google Ads UI depois
+ * de validar assets.
+ */
+export class CreatePmaxAssetGroupDto {
+  /** Campanha PMax destino — google_campaign_id OU ID interno. */
+  @IsString()
+  campaign_id!: string;
+
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  /** Final URLs (landing pages). PMax expande via url_expansion por default. */
+  @IsArray()
+  @IsString({ each: true })
+  final_urls!: string[];
+
+  /** Final mobile URLs (opcional — Google usa final_urls se vazio). */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  final_mobile_urls?: string[];
+
+  /** Path1 (display URL — primeiro segmento depois do dominio, max 15 chars). */
+  @IsString()
+  @IsOptional()
+  path1?: string;
+
+  /** Path2 (display URL — segundo segmento, max 15 chars). */
+  @IsString()
+  @IsOptional()
+  path2?: string;
+
+  @IsString()
+  @IsIn(['ENABLED', 'PAUSED'])
+  @IsOptional()
+  status?: 'ENABLED' | 'PAUSED';
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Adiciona assets a um asset_group de PMax. Cada asset pode ser:
+ *   - text: cria Asset (text_asset) NOVO + vincula via AssetGroupAsset
+ *   - existing: usa asset_resource_name de Asset ja criado (ex: imagem
+ *     uploadeada via traffic_create_extension ou Google Ads UI)
+ *
+ * field_type define o "slot" do asset dentro do PMax:
+ *   - HEADLINE (max 30 chars, min 5 por group)
+ *   - DESCRIPTION (max 90 chars, min 4 por group)
+ *   - LONG_HEADLINE (max 90 chars, min 1)
+ *   - BUSINESS_NAME (max 25 chars, min 1)
+ *   - LOGO / LANDSCAPE_LOGO (image, min 1)
+ *   - MARKETING_IMAGE (1.91:1, min 1)
+ *   - SQUARE_MARKETING_IMAGE (1:1, min 1)
+ *   - PORTRAIT_MARKETING_IMAGE (4:5, opcional)
+ *   - YOUTUBE_VIDEO (video URL, opcional)
+ *   - CALL_TO_ACTION (max 30 chars, opcional)
+ *
+ * Operacao atomica: cria Asset[] novos PRIMEIRO, AssetGroupAsset[] DEPOIS,
+ * num unico mutate (segue best practice Google pra PMax: temp resource
+ * names tipo "customers/X/assets/-1" referenciados pelos AssetGroupAsset).
+ */
+export class AddAssetsToPmaxAssetGroupDto {
+  /** asset_group_id Google (numerico) OU resource_name customers/X/assetGroups/Y. */
+  @IsString()
+  asset_group_id!: string;
+
+  @IsArray()
+  assets!: Array<{
+    /**
+     * Tipo do conteudo:
+     *  - text: payload.text obrigatorio (cria Asset novo)
+     *  - existing: payload.asset_resource_name obrigatorio (vincula asset ja criado)
+     *  - youtube: payload.youtube_video_id obrigatorio (cria Asset video novo)
+     */
+    source: 'text' | 'existing' | 'youtube';
+    field_type:
+      | 'HEADLINE'
+      | 'DESCRIPTION'
+      | 'LONG_HEADLINE'
+      | 'BUSINESS_NAME'
+      | 'LOGO'
+      | 'LANDSCAPE_LOGO'
+      | 'MARKETING_IMAGE'
+      | 'SQUARE_MARKETING_IMAGE'
+      | 'PORTRAIT_MARKETING_IMAGE'
+      | 'YOUTUBE_VIDEO'
+      | 'CALL_TO_ACTION';
+    /** Payload do asset — campos diferem por source. */
+    payload: Record<string, any>;
+  }>;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Cria Experiment (A/B test de campanha) na nova API v23 (Experiment resource,
+ * NAO o CampaignExperiment legado).
+ *
+ * Pipeline (MVP — apenas cria em SETUP):
+ *   1. Cria Experiment (status=SETUP) com type=SEARCH_CUSTOM (default).
+ *   2. Cria ExperimentArm "control" apontando pra base_campaign_id.
+ *   3. (futuro) Sprint 4.2 implementa schedule + create treatment arm + promote.
+ *
+ * Após criação em SETUP, gestor de tráfego pode:
+ *   - Editar o experimento via Google Ads UI (adicionar treatment arm)
+ *   - Usar API direta pra scheduleAsync depois de configurar arms
+ *
+ * type:
+ *   - SEARCH_CUSTOM (default) — A/B livre de qualquer setting de campanha Search
+ *   - DISPLAY_CUSTOM — equivalente pra Display
+ *   - SEARCH_AUTOMATED_BIDDING_STRATEGY — compara estrategias de lance
+ *   - AD_VARIATION — testa variações de RSA
+ */
+export class CreateExperimentDto {
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  /** Campanha base — google_campaign_id OU ID interno. Sera o control arm. */
+  @IsString()
+  base_campaign_id!: string;
+
+  /** Tipo do experimento. Default SEARCH_CUSTOM. */
+  @IsString()
+  @IsIn([
+    'SEARCH_CUSTOM',
+    'DISPLAY_CUSTOM',
+    'SEARCH_AUTOMATED_BIDDING_STRATEGY',
+    'DISPLAY_AUTOMATED_BIDDING_STRATEGY',
+    'AD_VARIATION',
+  ])
+  @IsOptional()
+  type?:
+    | 'SEARCH_CUSTOM'
+    | 'DISPLAY_CUSTOM'
+    | 'SEARCH_AUTOMATED_BIDDING_STRATEGY'
+    | 'DISPLAY_AUTOMATED_BIDDING_STRATEGY'
+    | 'AD_VARIATION';
+
+  /** Descricao livre (max 255 chars). */
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  /** Sufixo aplicado ao nome do treatment campaign. Default "(experiment)". */
+  @IsString()
+  @IsOptional()
+  suffix?: string;
+
+  /** Goals — metricas otimizadas no comparativo. Opcional.
+   *  metric: nomes do enum ExperimentMetric do Google Ads v23.
+   */
+  @IsArray()
+  @IsOptional()
+  goals?: Array<{
+    metric:
+      | 'CLICKS'
+      | 'IMPRESSIONS'
+      | 'COST'
+      | 'CTR'
+      | 'AVERAGE_CPC'
+      | 'CONVERSIONS'
+      | 'CONVERSION_VALUE'
+      | 'COST_PER_CONVERSION';
+    direction:
+      | 'INCREASE'
+      | 'DECREASE'
+      | 'NO_CHANGE'
+      | 'NO_CHANGE_OR_INCREASE'
+      | 'NO_CHANGE_OR_DECREASE';
+  }>;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 do backlog (2026-05-17) — Targeting + Bulk ops
 // ═══════════════════════════════════════════════════════════════════════════
 

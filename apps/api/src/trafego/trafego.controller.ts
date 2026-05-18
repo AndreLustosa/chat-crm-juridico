@@ -89,6 +89,10 @@ import {
   UpdateRsaDto,
   RemoveAdDto,
   AttachCallAssetDto,
+  // Sprint 4.1
+  CreatePmaxAssetGroupDto,
+  AddAssetsToPmaxAssetGroupDto,
+  CreateExperimentDto,
 } from './trafego.dto';
 
 @Controller('trafego')
@@ -1486,6 +1490,61 @@ export class TrafegoController {
     return await this.enqueueReadJob(req, 'billing_status', {});
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4.1 backlog (2026-05-17) — PMax asset groups + Experiments
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Lista PMax asset groups + counts + readiness warnings. */
+  @Get('pmax-asset-groups')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async listPmaxAssetGroups(
+    @Req() req: any,
+    @Query('campaign_id') campaignId?: string,
+  ) {
+    return await this.enqueueReadJob(req, 'pmax_asset_groups', {
+      campaign_id: campaignId,
+    });
+  }
+
+  /** Cria asset_group VAZIO numa PMax campaign existente. */
+  @Post('pmax-asset-groups')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createPmaxAssetGroup(
+    @Req() req: any,
+    @Body() dto: CreatePmaxAssetGroupDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-create-pmax-asset-group',
+      dto,
+    );
+  }
+
+  /** Adiciona Assets[] + AssetGroupAssets[] em 2 mutates sequenciais. */
+  @Post('pmax-asset-groups/assets')
+  @Roles('ADMIN', 'ADVOGADO')
+  async addAssetsToPmaxAssetGroup(
+    @Req() req: any,
+    @Body() dto: AddAssetsToPmaxAssetGroupDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-add-assets-to-pmax-asset-group',
+      dto,
+    );
+  }
+
+  /** Cria Experiment (A/B test) em SETUP + control arm. */
+  @Post('experiments')
+  @Roles('ADMIN', 'ADVOGADO')
+  async createExperiment(@Req() req: any, @Body() dto: CreateExperimentDto) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-create-experiment',
+      dto,
+    );
+  }
+
   /**
    * Helper — enfileira read job na queue trafego-read e aguarda resultado.
    * Pattern equivalente ao enqueueMutate mas pra reads (sem audit log).
@@ -1496,7 +1555,8 @@ export class TrafegoController {
       | 'call_history'
       | 'billing_status'
       | 'extensions'
-      | 'shared_negative_lists',
+      | 'shared_negative_lists'
+      | 'pmax_asset_groups',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

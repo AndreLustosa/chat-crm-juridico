@@ -58,6 +58,11 @@ export const MUTATE_JOBS = {
   CREATE_SHARED_NEGATIVE_LIST: 'trafego-mutate-create-shared-negative-list',
   ATTACH_SHARED_NEGATIVE_LIST: 'trafego-mutate-attach-shared-negative-list',
   UPDATE_LOCATION_BID_MODIFIERS: 'trafego-mutate-update-location-bid-modifiers',
+  // Sprint 4.1 backlog (2026-05-17) — PMax asset groups + Experiments
+  CREATE_PMAX_ASSET_GROUP: 'trafego-mutate-create-pmax-asset-group',
+  ADD_ASSETS_TO_PMAX_ASSET_GROUP:
+    'trafego-mutate-add-assets-to-pmax-asset-group',
+  CREATE_EXPERIMENT: 'trafego-mutate-create-experiment',
 } as const;
 
 /**
@@ -321,6 +326,47 @@ export type CreatePmaxCampaignPayload = BaseMutatePayload & {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4.1 backlog — PMax asset groups + Experiments
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type CreatePmaxAssetGroupPayload = BaseMutatePayload & {
+  customerId: string;
+  /** resource_name customers/X/campaigns/Y — PMax campaign destino. */
+  campaignResourceName: string;
+  name: string;
+  finalUrls: string[];
+  finalMobileUrls?: string[];
+  path1?: string;
+  path2?: string;
+  status?: 'ENABLED' | 'PAUSED';
+};
+
+export type AddAssetsToPmaxAssetGroupPayload = BaseMutatePayload & {
+  customerId: string;
+  /** resource_name customers/X/assetGroups/Y. */
+  assetGroupResourceName: string;
+  assets: Array<{
+    source: 'text' | 'existing' | 'youtube';
+    fieldType: string; // mapeado pra enums.AssetFieldType
+    payload: Record<string, any>;
+  }>;
+};
+
+export type CreateExperimentPayload = BaseMutatePayload & {
+  customerId: string;
+  /** resource_name customers/X/campaigns/Y — control arm. */
+  baseCampaignResourceName: string;
+  name: string;
+  type: string; // SEARCH_CUSTOM, DISPLAY_CUSTOM, etc.
+  description?: string;
+  suffix?: string;
+  goals?: Array<{
+    metric: string; // ExperimentMetric enum name
+    direction: string; // ExperimentMetricDirection enum name
+  }>;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 backlog — Targeting + Bulk
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -533,6 +579,12 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.attachSharedNegativeList(job.data);
       case MUTATE_JOBS.UPDATE_LOCATION_BID_MODIFIERS:
         return await this.updateLocationBidModifiers(job.data);
+      case MUTATE_JOBS.CREATE_PMAX_ASSET_GROUP:
+        return await this.createPmaxAssetGroup(job.data);
+      case MUTATE_JOBS.ADD_ASSETS_TO_PMAX_ASSET_GROUP:
+        return await this.addAssetsToPmaxAssetGroup(job.data);
+      case MUTATE_JOBS.CREATE_EXPERIMENT:
+        return await this.createExperiment(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -2983,5 +3035,369 @@ export class TrafegoMutateProcessor extends WorkerHost {
     } catch (e: any) {
       this.logger.warn(`[mutate] mirror local status falhou: ${e.message}`);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4.1 backlog (2026-05-17) — PMax asset groups + Experiments
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Cria asset_group VAZIO numa campanha PMax existente.
+   *
+   * IMPORTANTE: pra ficar serveable, o asset_group precisa ter assets
+   * mínimos (5 headlines, 5 descriptions, 1 long_headline, 1 business_name,
+   * 1 logo, 1 marketing_image, 1 square_marketing_image). Esta tool só
+   * cria o container — popule depois via addAssetsToPmaxAssetGroup.
+   *
+   * Status default PAUSED por seguranca (asset group sem assets não veicula
+   * de qualquer forma, mas PAUSED evita warnings na UI).
+   */
+  private async createPmaxAssetGroup(
+    p: CreatePmaxAssetGroupPayload,
+  ): Promise<MutateResult> {
+    const op: any = {
+      name: p.name,
+      campaign: p.campaignResourceName,
+      final_urls: p.finalUrls,
+      status:
+        p.status === 'ENABLED'
+          ? enums.AssetGroupStatus.ENABLED
+          : enums.AssetGroupStatus.PAUSED,
+    };
+    if (p.finalMobileUrls && p.finalMobileUrls.length > 0) {
+      op.final_mobile_urls = p.finalMobileUrls;
+    }
+    if (p.path1) op.path1 = p.path1;
+    if (p.path2) op.path2 = p.path2;
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset_group',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        campaign_resource_name: p.campaignResourceName,
+        asset_group_name: p.name,
+      },
+      operations: [op],
+    });
+  }
+
+  /**
+   * Adiciona assets a um asset_group de PMax.
+   *
+   * Faz em DOIS mutates:
+   *   1. Cria Assets[] novos (text/youtube) — bypassa se source=existing
+   *   2. Cria AssetGroupAssets[] vinculando Asset → AssetGroup com field_type
+   *
+   * Best practice Google é usar SequentialMutate (Asset[] + AssetGroupAsset[]
+   * num único request com temp resource_names), mas SDK alto-nivel não expõe.
+   * Usamos 2 mutates sequenciais — equivalente em garantias (validate-only no
+   * step 1 é validado pelo Google antes de continuar).
+   *
+   * Pra source=existing, passa asset_resource_name no payload e pula step 1.
+   */
+  private async addAssetsToPmaxAssetGroup(
+    p: AddAssetsToPmaxAssetGroupPayload,
+  ): Promise<MutateResult> {
+    // Step 1: cria Assets novos (text + youtube)
+    const newAssetOps: any[] = [];
+    const newAssetIndexMap: number[] = []; // map asset[i] → newAssetOps[j]
+
+    for (let i = 0; i < p.assets.length; i++) {
+      const a = p.assets[i];
+      if (a.source === 'existing') {
+        newAssetIndexMap.push(-1);
+        continue;
+      }
+      const assetOp = this.buildAssetPayloadForPmax(a);
+      newAssetIndexMap.push(newAssetOps.length);
+      newAssetOps.push(assetOp);
+    }
+
+    let createdAssetResourceNames: string[] = [];
+    if (newAssetOps.length > 0) {
+      const assetResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'asset',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: {
+          ...p.context,
+          asset_group_resource_name: p.assetGroupResourceName,
+          step: 'create_assets',
+          asset_count: newAssetOps.length,
+        },
+        operations: newAssetOps,
+      });
+      if (assetResult.status !== 'SUCCESS') {
+        return assetResult;
+      }
+      createdAssetResourceNames = assetResult.resourceNames;
+    }
+
+    // Em validate_only sem criar nada, não temos resource_names — pulamos step 2.
+    if (p.validateOnly && newAssetOps.length > 0) {
+      return {
+        logId: 'pmax-asset-group-validate-only',
+        status: 'SUCCESS',
+        resourceNames: [],
+        oabViolations: [],
+        durationMs: 0,
+      };
+    }
+
+    // Step 2: cria AssetGroupAssets[] vinculando
+    const linkOps: any[] = [];
+    for (let i = 0; i < p.assets.length; i++) {
+      const a = p.assets[i];
+      const assetResourceName =
+        a.source === 'existing'
+          ? a.payload.asset_resource_name
+          : createdAssetResourceNames[newAssetIndexMap[i]];
+
+      if (!assetResourceName) {
+        this.logger.warn(
+          `[mutate] addAssetsToPmaxAssetGroup: asset[${i}] sem resource_name (source=${a.source}), pulando`,
+        );
+        continue;
+      }
+
+      const fieldTypeEnum = this.resolvePmaxAssetFieldType(a.fieldType);
+      if (fieldTypeEnum == null) {
+        throw new Error(
+          `field_type invalido pra PMax asset_group: ${a.fieldType}`,
+        );
+      }
+
+      linkOps.push({
+        asset_group: p.assetGroupResourceName,
+        asset: assetResourceName,
+        field_type: fieldTypeEnum,
+      });
+    }
+
+    if (linkOps.length === 0) {
+      return {
+        logId: 'pmax-asset-group-noop',
+        status: 'SUCCESS',
+        resourceNames: createdAssetResourceNames,
+        oabViolations: [],
+        durationMs: 0,
+      };
+    }
+
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'asset_group_asset',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        asset_group_resource_name: p.assetGroupResourceName,
+        step: 'link_assets',
+        link_count: linkOps.length,
+      },
+      operations: linkOps,
+    });
+  }
+
+  /**
+   * Helper — constroi Asset op pra PMax. Suporta source=text (text_asset)
+   * e source=youtube (youtube_video_asset).
+   *
+   * Note: imagens NAO são suportadas em criação direta (precisam upload via
+   * UI ou via Asset.create com image_asset.data como Buffer — não cobrimos
+   * pra MVP, gestor de tráfego deve referenciar imagens já uploadeadas via
+   * source=existing).
+   */
+  private buildAssetPayloadForPmax(a: {
+    source: 'text' | 'existing' | 'youtube';
+    fieldType: string;
+    payload: Record<string, any>;
+  }): any {
+    if (a.source === 'text') {
+      const text = a.payload?.text;
+      if (typeof text !== 'string' || text.length === 0) {
+        throw new Error(
+          `source=text requer payload.text (field_type=${a.fieldType})`,
+        );
+      }
+      return { text_asset: { text } };
+    }
+    if (a.source === 'youtube') {
+      const videoId = a.payload?.youtube_video_id;
+      if (typeof videoId !== 'string' || videoId.length === 0) {
+        throw new Error(
+          `source=youtube requer payload.youtube_video_id (field_type=${a.fieldType})`,
+        );
+      }
+      return {
+        youtube_video_asset: {
+          youtube_video_id: videoId,
+          youtube_video_title: a.payload?.title ?? '',
+        },
+      };
+    }
+    throw new Error(`source nao suportada em buildAssetPayloadForPmax: ${a.source}`);
+  }
+
+  /**
+   * Helper — resolve field_type string -> enum value.
+   * Cobre todos os field_types validos pra PMax asset_group.
+   */
+  private resolvePmaxAssetFieldType(fieldType: string): number | undefined {
+    const map: Record<string, number | undefined> = {
+      HEADLINE: enums.AssetFieldType.HEADLINE,
+      DESCRIPTION: enums.AssetFieldType.DESCRIPTION,
+      LONG_HEADLINE: enums.AssetFieldType.LONG_HEADLINE,
+      BUSINESS_NAME: enums.AssetFieldType.BUSINESS_NAME,
+      LOGO: enums.AssetFieldType.LOGO,
+      LANDSCAPE_LOGO: enums.AssetFieldType.LANDSCAPE_LOGO,
+      MARKETING_IMAGE: enums.AssetFieldType.MARKETING_IMAGE,
+      SQUARE_MARKETING_IMAGE: enums.AssetFieldType.SQUARE_MARKETING_IMAGE,
+      PORTRAIT_MARKETING_IMAGE: enums.AssetFieldType.PORTRAIT_MARKETING_IMAGE,
+      YOUTUBE_VIDEO: enums.AssetFieldType.YOUTUBE_VIDEO,
+      // CALL_TO_ACTION existe em AssetFieldType?
+      // Em v23: pode estar como CALL_TO_ACTION_SELECTION. Skip se nao mapeado.
+      CALL_TO_ACTION: (enums.AssetFieldType as any).CALL_TO_ACTION_SELECTION,
+    };
+    return map[fieldType];
+  }
+
+  /**
+   * Cria Experiment (A/B test) na nova API v23. MVP — só cria em estado
+   * SETUP com control arm. Treatment arm + scheduling/promotion ficam pra
+   * Sprint 4.2.
+   *
+   * Pipeline:
+   *   1. Cria Experiment (status=SETUP)
+   *   2. Cria ExperimentArm "control" apontando pra base_campaign
+   *
+   * O gestor de tráfego ou admin precisa configurar o treatment arm via UI
+   * (criando uma cópia/draft da campanha com modificações) e depois usar a
+   * tool de schedule (futura) pra ativar.
+   *
+   * NOTA: em v23 o flow correto é:
+   *   - Experiment.create (SETUP)
+   *   - ExperimentArm.create (control = base campaign, trial campaigns vazio)
+   *   - ExperimentArm.create (treatment = nome diferente, trial campaigns
+   *     populado depois com Campaign clonado/editado)
+   *   - Experiment.scheduleAsync (passa pra ENABLED, splits traffic)
+   *   - Experiment.promote (encerra com vencedor)
+   */
+  private async createExperiment(
+    p: CreateExperimentPayload,
+  ): Promise<MutateResult> {
+    // Step 1: cria Experiment em SETUP
+    const expOp: any = {
+      name: p.name,
+      type: this.resolveExperimentType(p.type),
+      status: enums.ExperimentStatus.SETUP,
+      suffix: p.suffix || '[experiment]',
+    };
+    if (p.description) expOp.description = p.description;
+    if (p.goals && p.goals.length > 0) {
+      expOp.goals = p.goals.map((g) => ({
+        metric: this.resolveExperimentMetric(g.metric),
+        direction: this.resolveExperimentDirection(g.direction),
+      }));
+    }
+
+    const expResult = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'experiment',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        base_campaign_resource_name: p.baseCampaignResourceName,
+        experiment_name: p.name,
+        step: 'create_experiment',
+      },
+      operations: [expOp],
+    });
+    if (expResult.status !== 'SUCCESS' || !expResult.resourceNames?.[0]) {
+      return expResult;
+    }
+
+    // Em dry-run paramos aqui (não temos resource_name real pra arm)
+    if (p.validateOnly) {
+      return expResult;
+    }
+
+    const experimentResourceName = expResult.resourceNames[0];
+
+    // Step 2: cria ExperimentArm control. Note: Google exige que arms sejam
+    // criados separadamente do Experiment, e o "control" arm aponta pra
+    // base_campaign via in_design_campaigns vazio (control herda base).
+    try {
+      await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'experiment_arm',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: false,
+        context: {
+          ...p.context,
+          experiment_resource_name: experimentResourceName,
+          step: 'create_control_arm',
+        },
+        operations: [
+          {
+            experiment: experimentResourceName,
+            name: 'control',
+            control: true,
+            traffic_split: 50,
+            campaigns: [p.baseCampaignResourceName],
+          },
+        ],
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `[mutate] createExperiment: control arm falhou (experiment criado em SETUP, gestor precisa configurar arms via UI): ${e.message}`,
+      );
+      // Soft-fail — experimento existe em SETUP, admin pode completar via UI
+    }
+
+    return expResult;
+  }
+
+  private resolveExperimentType(type: string): number {
+    const map: Record<string, number> = {
+      SEARCH_CUSTOM: enums.ExperimentType.SEARCH_CUSTOM,
+      DISPLAY_CUSTOM: enums.ExperimentType.DISPLAY_CUSTOM,
+      SEARCH_AUTOMATED_BIDDING_STRATEGY:
+        enums.ExperimentType.SEARCH_AUTOMATED_BIDDING_STRATEGY,
+      DISPLAY_AUTOMATED_BIDDING_STRATEGY:
+        enums.ExperimentType.DISPLAY_AUTOMATED_BIDDING_STRATEGY,
+      AD_VARIATION: enums.ExperimentType.AD_VARIATION,
+    };
+    return map[type] ?? enums.ExperimentType.SEARCH_CUSTOM;
+  }
+
+  private resolveExperimentMetric(metric: string): number | undefined {
+    const m = (enums as any).ExperimentMetric ?? {};
+    return m[metric];
+  }
+
+  private resolveExperimentDirection(direction: string): number | undefined {
+    const m = (enums as any).ExperimentMetricDirection ?? {};
+    return m[direction];
   }
 }

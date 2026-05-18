@@ -25,7 +25,9 @@ export type ReadJobInput = {
     | 'call_history'
     | 'billing_status'
     | 'extensions'
-    | 'shared_negative_lists';
+    | 'shared_negative_lists'
+    // Sprint 4.1 — PMax asset groups
+    | 'pmax_asset_groups';
   params: Record<string, any>;
 };
 
@@ -56,6 +58,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.extensions(customer, params);
       case 'shared_negative_lists':
         return await this.sharedNegativeLists(customer);
+      case 'pmax_asset_groups':
+        return await this.pmaxAssetGroups(customer, params);
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
@@ -532,6 +536,136 @@ export class TrafegoReadProcessor extends WorkerHost {
       note:
         billingSetups.length === 0 && accountBudgets.length === 0
           ? 'Nenhum billing_setup/account_budget retornado. Conta pode usar billing manual ou esta sem setup. Confira via Google Ads UI.'
+          : undefined,
+    };
+  }
+
+  /**
+   * Lista PMax asset groups + counts de assets por field_type.
+   * Sprint 4.1 (2026-05-17).
+   *
+   * Faz 2 GAQL queries:
+   *   1. asset_group (filtra por campaign_id opcional)
+   *   2. asset_group_asset pra contar assets agrupados por (asset_group, field_type)
+   *
+   * Retorna asset_groups[] com counts indicando quais field_types estao
+   * abaixo do minimo Google (5 headlines, 5 desc, 1 long_headline, etc) —
+   * util pro gestor de tráfego ver quais groups ainda nao estao serveable.
+   */
+  private async pmaxAssetGroups(
+    customer: any,
+    params: { campaign_id?: string },
+  ): Promise<{
+    asset_groups: Array<{
+      resource_name: string;
+      id: string;
+      name: string;
+      status: string;
+      campaign_resource_name: string;
+      final_urls: string[];
+      path1: string | null;
+      path2: string | null;
+      asset_counts: Record<string, number>;
+      readiness_warnings: string[];
+    }>;
+    note?: string;
+  }> {
+    const campaignFilter = params.campaign_id
+      ? `AND campaign.id = ${params.campaign_id}`
+      : '';
+
+    let groups: any[] = [];
+    try {
+      groups = (await customer.query(`
+        SELECT
+          asset_group.resource_name,
+          asset_group.id,
+          asset_group.name,
+          asset_group.status,
+          asset_group.final_urls,
+          asset_group.path1,
+          asset_group.path2,
+          campaign.resource_name,
+          campaign.advertising_channel_type
+        FROM asset_group
+        WHERE campaign.advertising_channel_type = 'PERFORMANCE_MAX'
+        ${campaignFilter}
+        LIMIT 200
+      `)) as any[];
+    } catch (e: any) {
+      throw new Error(`asset_group query falhou: ${e.message}`);
+    }
+
+    // Conta assets agrupados por (asset_group, field_type)
+    const countsByGroup = new Map<string, Map<string, number>>();
+    try {
+      const links = (await customer.query(`
+        SELECT
+          asset_group_asset.asset_group,
+          asset_group_asset.field_type,
+          asset_group_asset.status,
+          asset_group_asset.resource_name
+        FROM asset_group_asset
+        ${campaignFilter ? `WHERE ${campaignFilter.replace('AND', '').trim()}` : ''}
+        LIMIT 5000
+      `)) as any[];
+      for (const link of links) {
+        if (link.asset_group_asset?.status === 'REMOVED') continue;
+        const group = link.asset_group_asset?.asset_group ?? '';
+        const fieldType = link.asset_group_asset?.field_type ?? 'UNKNOWN';
+        const map = countsByGroup.get(group) ?? new Map<string, number>();
+        map.set(fieldType, (map.get(fieldType) ?? 0) + 1);
+        countsByGroup.set(group, map);
+      }
+    } catch (e: any) {
+      /* soft-fail — devolve groups sem counts */
+    }
+
+    const MIN_REQUIREMENTS: Record<string, number> = {
+      HEADLINE: 3, // Google exige 3-5 (5 recomendado)
+      DESCRIPTION: 2, // Google exige 2-5 (5 recomendado)
+      LONG_HEADLINE: 1,
+      BUSINESS_NAME: 1,
+      MARKETING_IMAGE: 1,
+      SQUARE_MARKETING_IMAGE: 1,
+      LOGO: 1,
+    };
+
+    const asset_groups = groups.map((r) => {
+      const ag = r.asset_group;
+      const counts = countsByGroup.get(ag?.resource_name ?? '') ?? new Map();
+      const countsObj: Record<string, number> = {};
+      for (const [k, v] of counts.entries()) countsObj[k] = v;
+
+      const warnings: string[] = [];
+      for (const [fieldType, minCount] of Object.entries(MIN_REQUIREMENTS)) {
+        const have = countsObj[fieldType] ?? 0;
+        if (have < minCount) {
+          warnings.push(
+            `${fieldType}: ${have}/${minCount} (faltam ${minCount - have})`,
+          );
+        }
+      }
+
+      return {
+        resource_name: ag?.resource_name ?? '',
+        id: String(ag?.id ?? ''),
+        name: ag?.name ?? '',
+        status: ag?.status ?? 'UNKNOWN',
+        campaign_resource_name: r.campaign?.resource_name ?? '',
+        final_urls: Array.isArray(ag?.final_urls) ? ag.final_urls : [],
+        path1: ag?.path1 ?? null,
+        path2: ag?.path2 ?? null,
+        asset_counts: countsObj,
+        readiness_warnings: warnings,
+      };
+    });
+
+    return {
+      asset_groups,
+      note:
+        asset_groups.length === 0
+          ? 'Nenhum asset_group encontrado. Crie via traffic_create_pmax_asset_group.'
           : undefined,
     };
   }

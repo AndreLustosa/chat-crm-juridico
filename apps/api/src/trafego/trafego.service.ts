@@ -1756,6 +1756,82 @@ export class TrafegoService {
         };
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      // Sprint 4.1 (2026-05-17) — PMax asset groups + Experiments
+      // ═══════════════════════════════════════════════════════════════════
+
+      case 'trafego-mutate-create-pmax-asset-group': {
+        const camp = await this.requireCampaign(tenantId, raw.campaign_id);
+        if (camp.channel_type && camp.channel_type !== 'PERFORMANCE_MAX') {
+          throw new HttpException(
+            `Asset group so pode ser criado em PMax. Campanha ${camp.id} eh tipo ${camp.channel_type}.`,
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        return {
+          ...base,
+          customerId,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          name: raw.name,
+          finalUrls: raw.final_urls ?? [],
+          finalMobileUrls: raw.final_mobile_urls,
+          path1: raw.path1,
+          path2: raw.path2,
+          status: raw.status ?? 'PAUSED',
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            asset_group_name: raw.name,
+          },
+        };
+      }
+
+      case 'trafego-mutate-add-assets-to-pmax-asset-group': {
+        const assetGroupResourceName = raw.asset_group_id.startsWith(
+          'customers/',
+        )
+          ? raw.asset_group_id
+          : `customers/${customerId}/assetGroups/${raw.asset_group_id}`;
+        return {
+          ...base,
+          customerId,
+          assetGroupResourceName,
+          assets: (raw.assets ?? []).map((a: any) => ({
+            source: a.source,
+            fieldType: a.field_type,
+            payload: a.payload ?? {},
+          })),
+          context: {
+            ...base.context,
+            asset_group_id: raw.asset_group_id,
+            asset_count: (raw.assets ?? []).length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-create-experiment': {
+        const baseCamp = await this.requireCampaign(
+          tenantId,
+          raw.base_campaign_id,
+        );
+        return {
+          ...base,
+          customerId,
+          baseCampaignResourceName: `customers/${customerId}/campaigns/${baseCamp.google_campaign_id}`,
+          name: raw.name,
+          type: raw.type ?? 'SEARCH_CUSTOM',
+          description: raw.description,
+          suffix: raw.suffix,
+          goals: raw.goals,
+          context: {
+            ...base.context,
+            base_campaign_id_local: baseCamp.id,
+            experiment_name: raw.name,
+            experiment_type: raw.type ?? 'SEARCH_CUSTOM',
+          },
+        };
+      }
+
       case 'trafego-mutate-bulk-update-status': {
         const targets: Array<{
           resourceType: 'campaign' | 'ad_group';

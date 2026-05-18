@@ -33,7 +33,13 @@ export type MutateResourceType =
   // Sprint 3.1 (2026-05-17) — Shared library
   | 'shared_set'
   | 'shared_criterion'
-  | 'campaign_shared_set';
+  | 'campaign_shared_set'
+  // Sprint 4.1 (2026-05-17) — PMax asset groups + Experiments
+  | 'asset_group'
+  | 'asset_group_asset'
+  | 'experiment'
+  | 'experiment_arm'
+  | 'campaign_draft';
 
 export type MutateOperation = 'create' | 'update' | 'remove';
 
@@ -358,6 +364,12 @@ export class GoogleAdsMutateService {
       shared_set: 'sharedSets',
       shared_criterion: 'sharedCriteria',
       campaign_shared_set: 'campaignSharedSets',
+      // Sprint 4.1 — PMax + Experiments
+      asset_group: 'assetGroups',
+      asset_group_asset: 'assetGroupAssets',
+      experiment: 'experiments',
+      experiment_arm: 'experimentArms',
+      campaign_draft: 'campaignDrafts',
     };
     const prop = map[type];
     return prop ? (customer as any)[prop] : null;
