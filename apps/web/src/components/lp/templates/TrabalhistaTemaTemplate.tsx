@@ -379,11 +379,11 @@ export function TrabalhistaTemaTemplate({
           <Button
             onClick={handleCtaClick}
             size="lg"
-            className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-black text-lg md:text-xl px-12 py-8 rounded-2xl shadow-[0_20px_60px_rgba(168,144,72,0.2)] uppercase tracking-widest transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+            className={`btn-premium h-auto w-full max-w-[calc(100vw-2rem)] sm:w-auto bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-black text-base sm:text-lg md:text-xl px-5 sm:px-12 py-5 sm:py-8 rounded-2xl shadow-[0_20px_60px_rgba(168,144,72,0.2)] uppercase tracking-widest text-center !whitespace-normal transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
           >
             <span className="btn-premium-glow-overlay" />
-            <span className="relative z-10 flex items-center justify-center gap-3">
-              <MessageCircle className="w-6 h-6" />
+            <span className="relative z-10 flex flex-wrap items-center justify-center gap-3 leading-tight">
+              <MessageCircle className="w-6 h-6 shrink-0" />
               {finalCta.ctaText}
             </span>
           </Button>

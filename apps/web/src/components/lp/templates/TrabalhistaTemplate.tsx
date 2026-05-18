@@ -724,12 +724,12 @@ export function TrabalhistaTemplate({
             <Button
               onClick={handleCtaClick}
               size="lg"
-              className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] px-12 py-7 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+              className={`btn-premium h-auto w-full max-w-[calc(100vw-2rem)] sm:w-auto bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] px-5 sm:px-12 py-5 sm:py-7 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest text-center !whitespace-normal transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
             >
               <span className="btn-premium-glow-overlay" />
-              <span className="relative z-10 flex items-center">
+              <span className="relative z-10 flex flex-wrap items-center justify-center gap-2 leading-tight">
                 FALAR COM ADVOGADO TRABALHISTA
-                <ChevronRight className="ml-2 w-6 h-6" />
+                <ChevronRight className="w-6 h-6 shrink-0" />
               </span>
             </Button>
           </div>

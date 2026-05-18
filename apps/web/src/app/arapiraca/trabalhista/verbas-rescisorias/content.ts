@@ -1,7 +1,7 @@
 export const baseUrl = "https://andrelustosaadvogados.com.br";
 export const pagePath = "/arapiraca/trabalhista/verbas-rescisorias";
 export const pageUrl = `${baseUrl}${pagePath}`;
-export const heroImage = `${baseUrl}/landing/carteira-trabalho-hero.webp`;
+export const heroImage = `${baseUrl}/landing/verbas-rescisorias-hero.png`;
 
 export const pageTitle =
   "Verbas Rescisórias Trabalhistas em Arapiraca | André Lustosa Advogados";

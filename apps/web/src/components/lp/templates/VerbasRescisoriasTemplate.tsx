@@ -101,7 +101,7 @@ export function VerbasRescisoriasTemplate() {
         <section className="relative min-h-[94svh] overflow-hidden pt-24">
           <div className="absolute inset-0">
             <img
-              src="/landing/carteira-trabalho-hero.webp"
+              src="/landing/verbas-rescisorias-hero.png"
               alt="Carteira de trabalho e documentos de rescisão trabalhista"
               className="h-full w-full object-cover object-center opacity-85"
             />
