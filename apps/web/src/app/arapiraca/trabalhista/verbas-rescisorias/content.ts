@@ -65,6 +65,7 @@ export const rescisionTypes = [
   },
   {
     title: "Justa causa",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/justa-causa",
     summary:
       "A penalidade é grave e reduz bastante as verbas. Quando aplicada sem prova, pode ser discutida judicialmente para tentar reversão.",
     items: [

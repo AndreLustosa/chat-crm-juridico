@@ -42,6 +42,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.88,
     },
     {
+      url: `${baseUrl}/arapiraca/trabalhista/verbas-rescisorias/justa-causa`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.88,
+    },
+    {
       url: `${baseUrl}/arapiraca/criminal`,
       lastModified: new Date(),
       changeFrequency: 'monthly',

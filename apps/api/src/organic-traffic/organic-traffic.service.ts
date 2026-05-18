@@ -1385,6 +1385,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias/justa-causa`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias/justa-causa',
+        title: 'Arapiraca - Reversao de Justa Causa',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'reversao de justa causa arapiraca',
+          'demissao por justa causa arapiraca',
+          'justa causa indevida arapiraca',
+          'advogado trabalhista justa causa arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',
