@@ -818,6 +818,137 @@ export class CreateExperimentDto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4.2 do backlog (2026-05-17) — Experiments lifecycle
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Adiciona um ExperimentArm de "treatment" (variant) a um experiment em
+ * SETUP. Cada experiment precisa de 2 arms minimos pra schedule:
+ *   - control (criado automaticamente por traffic_create_experiment)
+ *   - treatment (criado por essa tool)
+ *
+ * traffic_split: percentual (1-99) de trafego pro treatment. Control fica
+ * com (100 - traffic_split). Default 50.
+ *
+ * trial_campaign_id: ID/google_campaign_id do campaign que vai virar trial
+ * campaign do treatment. Geralmente eh um draft/clone da base_campaign
+ * com modificacoes (criado via Google Ads UI ou via traffic_create_search_campaign).
+ * Sera passado em `in_design_campaigns` (auto-materializado em trial real
+ * quando o experiment for scheduled).
+ */
+export class AddTreatmentArmDto {
+  /** resource_name customers/X/experiments/Y OR ID numerico do experiment. */
+  @IsString()
+  experiment_id!: string;
+
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  /** ID/google_campaign_id do campaign que sera o treatment (draft). */
+  @IsString()
+  trial_campaign_id!: string;
+
+  /** % de trafego pro treatment (1-99). Control herda o restante. Default 50. */
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  @IsOptional()
+  traffic_split?: number;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Schedule experiment — passa SETUP -> INITIATED (async materializa drafts)
+ * -> ENABLED. Aceita validate_only pra checar sem rodar.
+ */
+export class ScheduleExperimentDto {
+  @IsString()
+  experiment_id!: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * End experiment — encerra ENABLED -> HALTED sem promover. Trial campaigns
+ * ficam paradas; base_campaign continua como estava.
+ */
+export class EndExperimentDto {
+  @IsString()
+  experiment_id!: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Promote experiment — encerra ENABLED -> PROMOTED aplicando mudancas do
+ * treatment na base_campaign. Trial campaigns removidas.
+ */
+export class PromoteExperimentDto {
+  @IsString()
+  experiment_id!: string;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Graduate experiment — separa treatment como campanha standalone.
+ * REQUER campaign_budget_mappings: pra cada experiment_campaign, o budget
+ * a usar quando virar standalone (porque trial campaigns nao tem budget
+ * proprio durante experimento — herdam da base).
+ *
+ * mappings[i].experiment_campaign_id: ID/resource_name do experiment campaign
+ * mappings[i].campaign_budget_id: ID/resource_name do budget a usar
+ */
+export class GraduateExperimentDto {
+  @IsString()
+  experiment_id!: string;
+
+  @IsArray()
+  mappings!: Array<{
+    experiment_campaign_id: string;
+    campaign_budget_id: string;
+  }>;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+}
+
+/**
+ * Get experiment results — metrics comparativas treatment vs control via
+ * GAQL live (queue trafego-read).
+ */
+export class GetExperimentResultsDto {
+  @IsString()
+  experiment_id!: string;
+
+  /** Janela de metricas em dias. Default 30, max 90. */
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  @IsOptional()
+  days_back?: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 do backlog (2026-05-17) — Targeting + Bulk ops
 // ═══════════════════════════════════════════════════════════════════════════
 

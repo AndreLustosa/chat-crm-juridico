@@ -8,6 +8,7 @@ import {
   type MutateRequest,
   type MutateResult,
 } from './google-ads-mutate.service';
+import { GoogleAdsClientService } from './google-ads-client.service';
 import { type AdContent } from '@crm/shared';
 
 /**
@@ -63,6 +64,12 @@ export const MUTATE_JOBS = {
   ADD_ASSETS_TO_PMAX_ASSET_GROUP:
     'trafego-mutate-add-assets-to-pmax-asset-group',
   CREATE_EXPERIMENT: 'trafego-mutate-create-experiment',
+  // Sprint 4.2 backlog (2026-05-17) — Experiments lifecycle
+  ADD_TREATMENT_ARM: 'trafego-mutate-add-treatment-arm',
+  SCHEDULE_EXPERIMENT: 'trafego-mutate-schedule-experiment',
+  END_EXPERIMENT: 'trafego-mutate-end-experiment',
+  PROMOTE_EXPERIMENT: 'trafego-mutate-promote-experiment',
+  GRADUATE_EXPERIMENT: 'trafego-mutate-graduate-experiment',
 } as const;
 
 /**
@@ -367,6 +374,43 @@ export type CreateExperimentPayload = BaseMutatePayload & {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4.2 backlog — Experiments lifecycle
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type AddTreatmentArmPayload = BaseMutatePayload & {
+  customerId: string;
+  experimentResourceName: string;
+  name: string;
+  /** resource_name customers/X/campaigns/Y do trial campaign (draft/clone). */
+  trialCampaignResourceName: string;
+  trafficSplit: number;
+};
+
+export type ScheduleExperimentPayload = BaseMutatePayload & {
+  customerId: string;
+  experimentResourceName: string;
+};
+
+export type EndExperimentPayload = BaseMutatePayload & {
+  customerId: string;
+  experimentResourceName: string;
+};
+
+export type PromoteExperimentPayload = BaseMutatePayload & {
+  customerId: string;
+  experimentResourceName: string;
+};
+
+export type GraduateExperimentPayload = BaseMutatePayload & {
+  customerId: string;
+  experimentResourceName: string;
+  mappings: Array<{
+    experimentCampaignResourceName: string;
+    campaignBudgetResourceName: string;
+  }>;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 3 backlog — Targeting + Bulk
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -495,6 +539,9 @@ export class TrafegoMutateProcessor extends WorkerHost {
   constructor(
     private prisma: PrismaService,
     private mutate: GoogleAdsMutateService,
+    // Sprint 4.2 — usado pelos RPCs de experiment lifecycle (schedule/end/
+    // promote/graduate) que nao sao CRUD padrao.
+    private clientSvc: GoogleAdsClientService,
   ) {
     super();
   }
@@ -585,6 +632,17 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.addAssetsToPmaxAssetGroup(job.data);
       case MUTATE_JOBS.CREATE_EXPERIMENT:
         return await this.createExperiment(job.data);
+      // Sprint 4.2 — Experiments lifecycle
+      case MUTATE_JOBS.ADD_TREATMENT_ARM:
+        return await this.addTreatmentArm(job.data);
+      case MUTATE_JOBS.SCHEDULE_EXPERIMENT:
+        return await this.scheduleExperiment(job.data);
+      case MUTATE_JOBS.END_EXPERIMENT:
+        return await this.endExperiment(job.data);
+      case MUTATE_JOBS.PROMOTE_EXPERIMENT:
+        return await this.promoteExperiment(job.data);
+      case MUTATE_JOBS.GRADUATE_EXPERIMENT:
+        return await this.graduateExperiment(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -3399,5 +3457,236 @@ export class TrafegoMutateProcessor extends WorkerHost {
   private resolveExperimentDirection(direction: string): number | undefined {
     const m = (enums as any).ExperimentMetricDirection ?? {};
     return m[direction];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4.2 backlog (2026-05-17) — Experiments lifecycle
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Adiciona ExperimentArm de "treatment" a um experiment em SETUP.
+   *
+   * Pattern Google: treatment arm passa o trial campaign em
+   * `in_design_campaigns` (auto-materializado em trial real quando schedule
+   * rodar). Control arm ja foi criado por createExperiment com `campaigns:
+   * [base_campaign]`. Soma de traffic_split deve dar 100 (control herda
+   * 100 - treatment.traffic_split).
+   */
+  private async addTreatmentArm(
+    p: AddTreatmentArmPayload,
+  ): Promise<MutateResult> {
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'experiment_arm',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: {
+        ...p.context,
+        experiment_resource_name: p.experimentResourceName,
+        arm_role: 'treatment',
+        trial_campaign_resource_name: p.trialCampaignResourceName,
+        traffic_split: p.trafficSplit,
+      },
+      operations: [
+        {
+          experiment: p.experimentResourceName,
+          name: p.name,
+          control: false,
+          traffic_split: p.trafficSplit,
+          in_design_campaigns: [p.trialCampaignResourceName],
+        },
+      ],
+    });
+  }
+
+  /**
+   * Schedule experiment — passa SETUP -> INITIATED (async) -> ENABLED.
+   * Usa RPC custom do ExperimentService (NAO mutate CRUD). Persiste manual
+   * em TrafficMutateLog pra audit equivalente.
+   */
+  private async scheduleExperiment(
+    p: ScheduleExperimentPayload,
+  ): Promise<MutateResult> {
+    return await this.executeExperimentLifecycleAction(
+      p,
+      'schedule_experiment',
+      async (customer) =>
+        await this.clientSvc.scheduleExperiment(
+          customer,
+          p.customerId,
+          p.experimentResourceName,
+          !!p.validateOnly,
+        ),
+    );
+  }
+
+  private async endExperiment(
+    p: EndExperimentPayload,
+  ): Promise<MutateResult> {
+    return await this.executeExperimentLifecycleAction(
+      p,
+      'end_experiment',
+      async (customer) =>
+        await this.clientSvc.endExperiment(
+          customer,
+          p.customerId,
+          p.experimentResourceName,
+        ),
+    );
+  }
+
+  private async promoteExperiment(
+    p: PromoteExperimentPayload,
+  ): Promise<MutateResult> {
+    return await this.executeExperimentLifecycleAction(
+      p,
+      'promote_experiment',
+      async (customer) =>
+        await this.clientSvc.promoteExperiment(
+          customer,
+          p.customerId,
+          p.experimentResourceName,
+        ),
+    );
+  }
+
+  private async graduateExperiment(
+    p: GraduateExperimentPayload,
+  ): Promise<MutateResult> {
+    return await this.executeExperimentLifecycleAction(
+      p,
+      'graduate_experiment',
+      async (customer) =>
+        await this.clientSvc.graduateExperiment(
+          customer,
+          p.customerId,
+          p.experimentResourceName,
+          p.mappings,
+        ),
+    );
+  }
+
+  /**
+   * Helper compartilhado pra os 4 RPCs de experiment lifecycle.
+   *
+   * Faz:
+   *   1. Cria TrafficMutateLog entry (resource_type='experiment') antes de chamar
+   *   2. Chama o RPC via clientSvc
+   *   3. Atualiza log com SUCCESS ou FAILED + mensagem
+   *
+   * Retorna MutateResult compatible com o pattern dos outros mutates pro
+   * enqueueMutate funcionar igual (status, errorMessage, etc).
+   */
+  private async executeExperimentLifecycleAction(
+    p:
+      | ScheduleExperimentPayload
+      | EndExperimentPayload
+      | PromoteExperimentPayload
+      | GraduateExperimentPayload,
+    operation: string,
+    rpc: (customer: any) => Promise<{ ok: boolean; raw: unknown; error?: string }>,
+  ): Promise<MutateResult> {
+    const t0 = Date.now();
+    const requestId = `experiment-${operation}-${p.experimentResourceName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // 1. Cria log em PENDING
+    const log = await this.prisma.trafficMutateLog.create({
+      data: {
+        tenant_id: p.tenantId,
+        account_id: p.accountId,
+        request_id: requestId,
+        resource_type: 'experiment',
+        operation,
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        payload: {
+          experiment_resource_name: p.experimentResourceName,
+          ...(operation === 'graduate_experiment' && {
+            mappings: (p as GraduateExperimentPayload).mappings,
+          }),
+        } as any,
+        result: {} as any,
+        status: 'PENDING',
+        validate_only:
+          operation === 'schedule_experiment' && !!(p as any).validateOnly,
+        context: (p.context ?? {}) as any,
+      },
+    });
+
+    // 2. Chama RPC
+    try {
+      const customer = await this.clientSvc.getCustomer(
+        p.tenantId,
+        p.accountId,
+      );
+      const result = await rpc(customer);
+      const durationMs = Date.now() - t0;
+
+      await this.prisma.trafficMutateLog.update({
+        where: { id: log.id },
+        data: {
+          status: result.ok ? 'SUCCESS' : 'PARTIAL',
+          duration_ms: durationMs,
+          result: {
+            ok: result.ok,
+            raw_snapshot: this.snapshotForLog(result.raw),
+          } as any,
+          error_message: result.error?.slice(0, 1500) ?? null,
+        },
+      });
+
+      this.logger.log(
+        `[experiment-${operation}] ${result.ok ? 'SUCCESS' : 'PARTIAL'} ${durationMs}ms`,
+      );
+
+      return {
+        logId: log.id,
+        status: result.ok ? 'SUCCESS' : 'PARTIAL',
+        resourceNames: [p.experimentResourceName],
+        errorMessage: result.error ?? undefined,
+        oabViolations: [],
+        rawResponse: result.raw,
+        durationMs,
+      };
+    } catch (e: any) {
+      const durationMs = Date.now() - t0;
+      const errorMessage = e?.message || `experiment ${operation} falhou`;
+
+      await this.prisma.trafficMutateLog.update({
+        where: { id: log.id },
+        data: {
+          status: 'FAILED',
+          duration_ms: durationMs,
+          error_message: errorMessage.slice(0, 1500),
+        },
+      });
+
+      this.logger.warn(
+        `[experiment-${operation}] FAILED ${durationMs}ms ${errorMessage}`,
+      );
+
+      return {
+        logId: log.id,
+        status: 'FAILED',
+        resourceNames: [],
+        errorMessage,
+        oabViolations: [],
+        durationMs,
+      };
+    }
+  }
+
+  private snapshotForLog(raw: unknown): unknown {
+    try {
+      const json = JSON.stringify(raw, (_k, v) =>
+        typeof v === 'bigint' ? v.toString() : v,
+      );
+      return JSON.parse(json.length > 2000 ? json.slice(0, 2000) + '...[truncated]' : json);
+    } catch {
+      return '(unserializable)';
+    }
   }
 }

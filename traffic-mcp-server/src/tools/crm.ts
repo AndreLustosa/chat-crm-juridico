@@ -62,6 +62,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerSprint3_1Tools(server);
   // Sprint 4.1 backlog (2026-05-17): PMax asset groups + Experiments
   registerSprint4_1Tools(server);
+  // Sprint 4.2 backlog (2026-05-17): Experiments lifecycle completo
+  registerSprint4_2Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -2825,6 +2827,267 @@ function registerSprint4_1Tools(server: McpServer) {
           `Experiment "${input.name}" criado (type: ${input.type ?? 'SEARCH_CUSTOM'}, status: SETUP). ` +
             `Configure treatment arm + schedule via Google Ads UI pra ativar A/B.`,
         );
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 4.2 backlog (2026-05-17) — 6 tools novas (Experiments lifecycle)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSprint4_2Tools(server: McpServer) {
+  server.registerTool(
+    'traffic_add_treatment_arm',
+    {
+      description:
+        'Adiciona o ExperimentArm de TREATMENT (variant) a um experiment em SETUP. ' +
+        'Cada experiment precisa de 2 arms minimos pra schedule: control (criado automaticamente ' +
+        'por traffic_create_experiment apontando pra base_campaign) + treatment (criado aqui). ' +
+        'trial_campaign_id: ID/google_campaign_id do campaign que vira o treatment — geralmente eh ' +
+        'um draft/clone da base_campaign com modificacoes (criado via Google Ads UI ou via ' +
+        'traffic_create_search_campaign separado). Sera passado em in_design_campaigns no arm — ' +
+        'auto-materializado em trial campaign real quando o experiment for scheduled. ' +
+        'traffic_split: % de trafego pro treatment (1-99). Control herda 100-traffic_split. Default 50.',
+      inputSchema: {
+        experiment_id: z
+          .string()
+          .describe('resource_name customers/X/experiments/Y OR ID numerico.'),
+        name: z.string().min(1).max(255),
+        trial_campaign_id: campaignIdSchema.describe(
+          'ID interno OR google_campaign_id do draft/clone campaign.',
+        ),
+        traffic_split: z
+          .number()
+          .int()
+          .min(1)
+          .max(99)
+          .optional()
+          .describe('% trafego treatment. Default 50.'),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_add_treatment_arm', async (toolCallId) => {
+        applyMutateGuards('traffic_add_treatment_arm');
+        const result = await crmTrafficService.post(
+          '/trafego/experiments/treatment-arms',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Treatment arm "${input.name}" adicionado ao experiment ${input.experiment_id} (traffic_split: ${input.traffic_split ?? 50}%). ` +
+            `Agora chame traffic_schedule_experiment pra ativar o A/B.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_schedule_experiment',
+    {
+      description:
+        'Schedule experiment — passa SETUP -> INITIATED (async, Google materializa drafts em trial campaigns) ' +
+        '-> ENABLED (split traffic ativo). Apos schedule, metrics comecam a acumular em ambos arms. ' +
+        'PRE-REQUISITO: experiment precisa ter >=2 arms configurados (control + treatment). ' +
+        'Use validate_only=true pra checar se Google aceita sem rodar de fato. ' +
+        'Operacao assincrona — schedule retorna ok rapido, mas materializacao real dos drafts ' +
+        'pode levar minutos. Confira status via traffic_get_experiment_results pra ver se ja virou ENABLED.',
+      inputSchema: {
+        experiment_id: z.string(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_schedule_experiment', async (toolCallId) => {
+        applyMutateGuards('traffic_schedule_experiment');
+        const result = await crmTrafficService.post(
+          '/trafego/experiments/schedule',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Experiment ${input.experiment_id} agendado. Materializacao async pode levar minutos — verifique status via traffic_get_experiment_results.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_end_experiment',
+    {
+      description:
+        'End experiment — encerra um experiment em ENABLED (status vira HALTED). ' +
+        'NAO promove ningem — apenas para o traffic split. Trial campaigns ficam paradas, ' +
+        'base_campaign continua veiculando normal. ' +
+        'USE quando: viu que o treatment esta pior e quer parar logo de queimar budget, ' +
+        'ou quando o experimento ja rodou tempo suficiente e voce quer encerrar sem promover ' +
+        'nem graduate. Diferente de promote/graduate: end NAO aplica nada da treatment na base.',
+      inputSchema: {
+        experiment_id: z.string(),
+        reason: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_end_experiment', async (toolCallId) => {
+        applyMutateGuards('traffic_end_experiment');
+        const result = await crmTrafficService.post(
+          '/trafego/experiments/end',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Experiment ${input.experiment_id} encerrado (HALTED). Base campaign mantida; treatment paralisado.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_promote_experiment',
+    {
+      description:
+        'Promote experiment — encerra ENABLED e PROMOVE o treatment como nova versao da base_campaign ' +
+        '(aplica as mudancas do treatment de volta na base). Trial campaigns viram removidas. Status: PROMOTED. ' +
+        'USE SO se: ' +
+        '  - metrics do treatment validamente melhores (CPL menor, ou CTR maior, ou conv maior); ' +
+        '  - treatment teve traffic significativo (>=1000 impressions ou >=2 semanas exposicao); ' +
+        '  - voce confirmou via traffic_get_experiment_results que delta eh estatisticamente robusto. ' +
+        'Diferente de graduate: promote SUBSTITUI a base, graduate cria standalone paralela. ' +
+        'Async — retorna ok rapido, mas aplicacao real das mudancas pode levar alguns minutos.',
+      inputSchema: {
+        experiment_id: z.string(),
+        reason: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_promote_experiment', async (toolCallId) => {
+        applyMutateGuards('traffic_promote_experiment');
+        const result = await crmTrafficService.post(
+          '/trafego/experiments/promote',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Experiment ${input.experiment_id} promovido — treatment aplicado na base_campaign. Async, pode levar minutos.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_graduate_experiment',
+    {
+      description:
+        'Graduate experiment — separa o treatment como campanha STANDALONE (NAO aplica na base). ' +
+        'Cria nova campanha permanente partindo do treatment, em paralelo com a base. Status: GRADUATED. ' +
+        'USE quando: voce gostou do treatment MAS quer rodar paralelo (ex: treatment foca audiencia X, ' +
+        'base mantem audiencia Y); ou quando treatment e base sao ambos boas estrategias com publicos diferentes. ' +
+        'REQUER mappings: pra cada experiment_campaign, qual budget usar quando virar standalone. ' +
+        'Trial campaigns nao tem budget proprio (herdam da base no experimento), entao ao graduate ' +
+        'precisa atribuir budget novo a cada uma. ' +
+        'experiment_campaign_id: ID/resource_name do trial campaign (pega de traffic_get_experiment_results.treatment_arm.campaigns). ' +
+        'campaign_budget_id: ID/resource_name do budget existente (de traffic_list_budgets) ou crie via traffic_create_search_campaign primeiro.',
+      inputSchema: {
+        experiment_id: z.string(),
+        mappings: z
+          .array(
+            z.object({
+              experiment_campaign_id: z.string(),
+              campaign_budget_id: z.string(),
+            }),
+          )
+          .min(1)
+          .max(20),
+        reason: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (input) =>
+      safe('traffic_graduate_experiment', async (toolCallId) => {
+        applyMutateGuards('traffic_graduate_experiment');
+        const result = await crmTrafficService.post(
+          '/trafego/experiments/graduate',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Experiment ${input.experiment_id} graduated — ${input.mappings.length} trial campaign(s) agora standalone.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_get_experiment_results',
+    {
+      description:
+        'Get experiment results — metrics comparativas TREATMENT vs CONTROL. ' +
+        'Retorna experiment metadata (status, dates), ambos arms com metrics agregados ' +
+        '(spend, clicks, impressions, conversions, CPL, CTR) na janela days_back, e deltas ' +
+        '(diferenca absoluta + percentual treatment-control) pra cada metric. ' +
+        'USE pra decidir se vale promote, graduate ou end. Recomendacao: aguarde >=2 semanas + ' +
+        '>=1000 impressions em cada arm antes de decidir — deltas em <1 semana sao instaveis. ' +
+        'note vem populado se status ainda eh SETUP/INITIATED (metrics nao acumularam) ou ' +
+        'se treatment arm nao foi configurado. ' +
+        'GAQL live via worker queue (pode demorar uns segundos).',
+      inputSchema: {
+        experiment_id: z.string(),
+        days_back: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe('Janela de metricas em dias. Default 30, max 90.'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (input) =>
+      safe('traffic_get_experiment_results', async (toolCallId) => {
+        const result = await crmTrafficService.get<{
+          experiment: any;
+          control_arm: any;
+          treatment_arm: any;
+          deltas: Record<string, any>;
+          days_back: number;
+          note?: string;
+        }>(
+          `/trafego/experiments/${encodeURIComponent(input.experiment_id)}/results`,
+          input.days_back ? { days_back: String(input.days_back) } : undefined,
+          { toolCallId },
+        );
+        const exp = result.experiment;
+        const lines: string[] = [];
+        if (exp) {
+          lines.push(
+            `Experiment "${exp.name}" (status: ${exp.status}, type: ${exp.type}, janela: ${result.days_back}d)`,
+          );
+        }
+        if (result.control_arm && result.treatment_arm) {
+          const c = result.control_arm.metrics;
+          const t = result.treatment_arm.metrics;
+          lines.push(
+            `Control:    spend R$${c.spend.toFixed(2)}, clicks ${c.clicks}, conv ${c.conversions.toFixed(2)}, CPL R$${c.cpl.toFixed(2)}, CTR ${(c.ctr * 100).toFixed(2)}%`,
+          );
+          lines.push(
+            `Treatment:  spend R$${t.spend.toFixed(2)}, clicks ${t.clicks}, conv ${t.conversions.toFixed(2)}, CPL R$${t.cpl.toFixed(2)}, CTR ${(t.ctr * 100).toFixed(2)}%`,
+          );
+          const cplDelta = result.deltas.cpl;
+          if (cplDelta && cplDelta.pct !== null) {
+            const sign = cplDelta.abs <= 0 ? '✓ melhor' : '✗ pior';
+            lines.push(
+              `CPL delta: ${cplDelta.pct >= 0 ? '+' : ''}${cplDelta.pct.toFixed(1)}% (${sign})`,
+            );
+          }
+        }
+        if (result.note) lines.push(`Nota: ${result.note}`);
+        return ok(result, lines.join('\n'));
       }),
   );
 }

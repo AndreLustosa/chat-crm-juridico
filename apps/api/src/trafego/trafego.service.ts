@@ -2083,6 +2083,105 @@ export class TrafegoService {
         };
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      // Sprint 4.2 (2026-05-17) — Experiments lifecycle
+      // ═══════════════════════════════════════════════════════════════════
+
+      case 'trafego-mutate-add-treatment-arm': {
+        const trialCamp = await this.requireCampaign(
+          tenantId,
+          raw.trial_campaign_id,
+        );
+        const experimentResourceName = raw.experiment_id.startsWith(
+          'customers/',
+        )
+          ? raw.experiment_id
+          : `customers/${customerId}/experiments/${raw.experiment_id}`;
+        return {
+          ...base,
+          customerId,
+          experimentResourceName,
+          name: raw.name,
+          trialCampaignResourceName: `customers/${customerId}/campaigns/${trialCamp.google_campaign_id}`,
+          trafficSplit: raw.traffic_split ?? 50,
+          context: {
+            ...base.context,
+            experiment_id: raw.experiment_id,
+            trial_campaign_id_local: trialCamp.id,
+            traffic_split: raw.traffic_split ?? 50,
+          },
+        };
+      }
+
+      case 'trafego-mutate-schedule-experiment':
+      case 'trafego-mutate-end-experiment':
+      case 'trafego-mutate-promote-experiment': {
+        const experimentResourceName = raw.experiment_id.startsWith(
+          'customers/',
+        )
+          ? raw.experiment_id
+          : `customers/${customerId}/experiments/${raw.experiment_id}`;
+        return {
+          ...base,
+          customerId,
+          experimentResourceName,
+          context: {
+            ...base.context,
+            experiment_id: raw.experiment_id,
+          },
+        };
+      }
+
+      case 'trafego-mutate-graduate-experiment': {
+        const experimentResourceName = raw.experiment_id.startsWith(
+          'customers/',
+        )
+          ? raw.experiment_id
+          : `customers/${customerId}/experiments/${raw.experiment_id}`;
+        const mappings: Array<{
+          experimentCampaignResourceName: string;
+          campaignBudgetResourceName: string;
+        }> = [];
+        for (const m of raw.mappings ?? []) {
+          // experiment_campaign_id pode ser resource_name OR ID numerico OR
+          // ID interno do CRM (resolve via requireCampaign)
+          let expCampRn: string;
+          if (m.experiment_campaign_id.startsWith('customers/')) {
+            expCampRn = m.experiment_campaign_id;
+          } else {
+            try {
+              const camp = await this.requireCampaign(
+                tenantId,
+                m.experiment_campaign_id,
+              );
+              expCampRn = `customers/${customerId}/campaigns/${camp.google_campaign_id}`;
+            } catch {
+              // Se nao acha local, assume que eh google_campaign_id puro
+              expCampRn = `customers/${customerId}/campaigns/${m.experiment_campaign_id}`;
+            }
+          }
+          // budget_id: aceita resource_name OR google_budget_id numerico
+          const budgetRn = m.campaign_budget_id.startsWith('customers/')
+            ? m.campaign_budget_id
+            : `customers/${customerId}/campaignBudgets/${m.campaign_budget_id}`;
+          mappings.push({
+            experimentCampaignResourceName: expCampRn,
+            campaignBudgetResourceName: budgetRn,
+          });
+        }
+        return {
+          ...base,
+          customerId,
+          experimentResourceName,
+          mappings,
+          context: {
+            ...base.context,
+            experiment_id: raw.experiment_id,
+            mapping_count: mappings.length,
+          },
+        };
+      }
+
       case 'trafego-mutate-bulk-update-status': {
         const targets: Array<{
           resourceType: 'campaign' | 'ad_group';

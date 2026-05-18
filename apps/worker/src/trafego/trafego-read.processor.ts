@@ -27,7 +27,9 @@ export type ReadJobInput = {
     | 'extensions'
     | 'shared_negative_lists'
     // Sprint 4.1 — PMax asset groups
-    | 'pmax_asset_groups';
+    | 'pmax_asset_groups'
+    // Sprint 4.2 — Experiment results comparativas
+    | 'experiment_results';
   params: Record<string, any>;
 };
 
@@ -60,6 +62,8 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.sharedNegativeLists(customer);
       case 'pmax_asset_groups':
         return await this.pmaxAssetGroups(customer, params);
+      case 'experiment_results':
+        return await this.experimentResults(customer, params as any);
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
@@ -667,6 +671,209 @@ export class TrafegoReadProcessor extends WorkerHost {
         asset_groups.length === 0
           ? 'Nenhum asset_group encontrado. Crie via traffic_create_pmax_asset_group.'
           : undefined,
+    };
+  }
+
+  /**
+   * Experiment results — metrics comparativas control vs treatment.
+   * Sprint 4.2 (2026-05-17).
+   *
+   * Pipeline:
+   *   1. Query experiment (status, dates, type)
+   *   2. Query experiment_arm (control + treatment, com trial campaigns)
+   *   3. Pra cada campaign nos arms, query metrics na janela days_back
+   *   4. Calcula deltas (treatment vs control: spend, conv, cpl, ctr)
+   *
+   * Aceita experiment_id em params como:
+   *  - resource_name: "customers/X/experiments/Y"
+   *  - ID numerico: "12345" (vira customers/<from_customer_id>/experiments/12345)
+   */
+  private async experimentResults(
+    customer: any,
+    params: { experiment_id: string; days_back?: number },
+  ): Promise<{
+    experiment: any;
+    control_arm: any;
+    treatment_arm: any;
+    deltas: Record<string, { control: number; treatment: number; abs: number; pct: number | null }>;
+    days_back: number;
+    note?: string;
+  }> {
+    const daysBack = Math.min(90, Math.max(1, params.days_back ?? 30));
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - daysBack);
+    const sinceStr = since.toISOString().slice(0, 10);
+
+    const experimentRn = params.experiment_id.startsWith('customers/')
+      ? params.experiment_id
+      : `customers/${customer.customerOptions?.customer_id}/experiments/${params.experiment_id}`;
+
+    // 1. Experiment metadata
+    let experiment: any = null;
+    try {
+      const rows = (await customer.query(`
+        SELECT
+          experiment.resource_name,
+          experiment.id,
+          experiment.name,
+          experiment.type,
+          experiment.status,
+          experiment.suffix,
+          experiment.description,
+          experiment.start_date,
+          experiment.end_date
+        FROM experiment
+        WHERE experiment.resource_name = '${experimentRn}'
+        LIMIT 1
+      `)) as any[];
+      experiment = rows[0]?.experiment ?? null;
+    } catch (e: any) {
+      throw new Error(`experiment query falhou: ${e.message}`);
+    }
+
+    if (!experiment) {
+      return {
+        experiment: null,
+        control_arm: null,
+        treatment_arm: null,
+        deltas: {},
+        days_back: daysBack,
+        note: `Experiment ${experimentRn} nao encontrado.`,
+      };
+    }
+
+    // 2. ExperimentArms + suas campaigns
+    let arms: any[] = [];
+    try {
+      arms = (await customer.query(`
+        SELECT
+          experiment_arm.resource_name,
+          experiment_arm.experiment,
+          experiment_arm.name,
+          experiment_arm.control,
+          experiment_arm.traffic_split,
+          experiment_arm.campaigns,
+          experiment_arm.in_design_campaigns
+        FROM experiment_arm
+        WHERE experiment_arm.experiment = '${experimentRn}'
+        LIMIT 10
+      `)) as any[];
+    } catch (e: any) {
+      throw new Error(`experiment_arm query falhou: ${e.message}`);
+    }
+
+    const controlArm = arms.find((r) => r.experiment_arm?.control === true);
+    const treatmentArm = arms.find((r) => r.experiment_arm?.control !== true);
+
+    // 3. Metrics por campaign na janela
+    const aggregateCampaignMetrics = async (
+      campaignResourceNames: string[],
+    ): Promise<{
+      spend: number;
+      clicks: number;
+      impressions: number;
+      conversions: number;
+      cpl: number;
+      ctr: number;
+    }> => {
+      if (campaignResourceNames.length === 0) {
+        return { spend: 0, clicks: 0, impressions: 0, conversions: 0, cpl: 0, ctr: 0 };
+      }
+      const inClause = campaignResourceNames
+        .map((rn) => `'${rn}'`)
+        .join(', ');
+      const rows = (await customer.query(`
+        SELECT
+          metrics.cost_micros,
+          metrics.clicks,
+          metrics.impressions,
+          metrics.conversions
+        FROM campaign
+        WHERE campaign.resource_name IN (${inClause})
+          AND segments.date >= '${sinceStr}'
+      `)) as any[];
+      let spendMicros = 0n;
+      let clicks = 0;
+      let impressions = 0;
+      let conversions = 0;
+      for (const r of rows) {
+        spendMicros += BigInt(r.metrics?.cost_micros ?? 0);
+        clicks += Number(r.metrics?.clicks ?? 0);
+        impressions += Number(r.metrics?.impressions ?? 0);
+        conversions += Number(r.metrics?.conversions ?? 0);
+      }
+      const spend = Number(spendMicros) / 1_000_000;
+      return {
+        spend,
+        clicks,
+        impressions,
+        conversions,
+        cpl: conversions > 0 ? spend / conversions : 0,
+        ctr: impressions > 0 ? clicks / impressions : 0,
+      };
+    };
+
+    const controlCampaigns: string[] = [
+      ...(controlArm?.experiment_arm?.campaigns ?? []),
+      ...(controlArm?.experiment_arm?.in_design_campaigns ?? []),
+    ];
+    const treatmentCampaigns: string[] = [
+      ...(treatmentArm?.experiment_arm?.campaigns ?? []),
+      ...(treatmentArm?.experiment_arm?.in_design_campaigns ?? []),
+    ];
+
+    const [controlMetrics, treatmentMetrics] = await Promise.all([
+      aggregateCampaignMetrics(controlCampaigns),
+      aggregateCampaignMetrics(treatmentCampaigns),
+    ]);
+
+    // 4. Calcula deltas
+    const computeDelta = (control: number, treatment: number) => ({
+      control,
+      treatment,
+      abs: treatment - control,
+      pct: control !== 0 ? ((treatment - control) / control) * 100 : null,
+    });
+
+    const deltas = {
+      spend: computeDelta(controlMetrics.spend, treatmentMetrics.spend),
+      clicks: computeDelta(controlMetrics.clicks, treatmentMetrics.clicks),
+      impressions: computeDelta(
+        controlMetrics.impressions,
+        treatmentMetrics.impressions,
+      ),
+      conversions: computeDelta(
+        controlMetrics.conversions,
+        treatmentMetrics.conversions,
+      ),
+      cpl: computeDelta(controlMetrics.cpl, treatmentMetrics.cpl),
+      ctr: computeDelta(controlMetrics.ctr, treatmentMetrics.ctr),
+    };
+
+    return {
+      experiment,
+      control_arm: controlArm
+        ? {
+            ...controlArm.experiment_arm,
+            metrics: controlMetrics,
+            campaign_count: controlCampaigns.length,
+          }
+        : null,
+      treatment_arm: treatmentArm
+        ? {
+            ...treatmentArm.experiment_arm,
+            metrics: treatmentMetrics,
+            campaign_count: treatmentCampaigns.length,
+          }
+        : null,
+      deltas,
+      days_back: daysBack,
+      note:
+        !treatmentArm
+          ? 'Experiment sem treatment arm — adicione via traffic_add_treatment_arm + schedule.'
+          : experiment.status === 'SETUP' || experiment.status === 'INITIATED'
+            ? `Experiment em status=${experiment.status} — metrics ainda nao acumularam (precisa ENABLED).`
+            : undefined,
     };
   }
 }

@@ -93,6 +93,13 @@ import {
   CreatePmaxAssetGroupDto,
   AddAssetsToPmaxAssetGroupDto,
   CreateExperimentDto,
+  // Sprint 4.2
+  AddTreatmentArmDto,
+  ScheduleExperimentDto,
+  EndExperimentDto,
+  PromoteExperimentDto,
+  GraduateExperimentDto,
+  GetExperimentResultsDto,
 } from './trafego.dto';
 
 @Controller('trafego')
@@ -1554,6 +1561,91 @@ export class TrafegoController {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4.2 backlog (2026-05-17) — Experiments lifecycle
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Adiciona ExperimentArm de treatment a um experiment em SETUP. */
+  @Post('experiments/treatment-arms')
+  @Roles('ADMIN', 'ADVOGADO')
+  async addTreatmentArm(
+    @Req() req: any,
+    @Body() dto: AddTreatmentArmDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-add-treatment-arm',
+      dto,
+    );
+  }
+
+  /** Schedule experiment — SETUP -> INITIATED (async) -> ENABLED. */
+  @Post('experiments/schedule')
+  @Roles('ADMIN', 'ADVOGADO')
+  async scheduleExperiment(
+    @Req() req: any,
+    @Body() dto: ScheduleExperimentDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-schedule-experiment',
+      dto,
+    );
+  }
+
+  /** End experiment — encerra ENABLED -> HALTED sem promover. */
+  @Post('experiments/end')
+  @Roles('ADMIN', 'ADVOGADO')
+  async endExperiment(@Req() req: any, @Body() dto: EndExperimentDto) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-end-experiment',
+      dto,
+    );
+  }
+
+  /** Promote experiment — aplica mudancas do treatment na base_campaign. */
+  @Post('experiments/promote')
+  @Roles('ADMIN', 'ADVOGADO')
+  async promoteExperiment(
+    @Req() req: any,
+    @Body() dto: PromoteExperimentDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-promote-experiment',
+      dto,
+    );
+  }
+
+  /** Graduate experiment — separa treatment como campanha standalone. */
+  @Post('experiments/graduate')
+  @Roles('ADMIN', 'ADVOGADO')
+  async graduateExperiment(
+    @Req() req: any,
+    @Body() dto: GraduateExperimentDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-graduate-experiment',
+      dto,
+    );
+  }
+
+  /** Get experiment results — metrics comparativas via GAQL live. */
+  @Get('experiments/:id/results')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getExperimentResults(
+    @Req() req: any,
+    @Param('id') experimentId: string,
+    @Query('days_back') daysBack?: string,
+  ) {
+    return await this.enqueueReadJob(req, 'experiment_results', {
+      experiment_id: experimentId,
+      days_back: daysBack ? parseInt(daysBack, 10) : 30,
+    });
+  }
+
   /**
    * Helper — enfileira read job na queue trafego-read e aguarda resultado.
    * Pattern equivalente ao enqueueMutate mas pra reads (sem audit log).
@@ -1565,7 +1657,8 @@ export class TrafegoController {
       | 'billing_status'
       | 'extensions'
       | 'shared_negative_lists'
-      | 'pmax_asset_groups',
+      | 'pmax_asset_groups'
+      | 'experiment_results',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

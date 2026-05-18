@@ -195,6 +195,169 @@ export class GoogleAdsClientService {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 4.2 (2026-05-17) — Experiment lifecycle wrappers
+  //
+  // Experiment opera por RPC nao-CRUD (ScheduleExperiment, EndExperiment,
+  // PromoteExperiment, GraduateExperiment). NAO sao operacoes mutate
+  // padrao — sao actions assincronas que mudam o status_lifecycle
+  // (SETUP -> INITIATED -> ENABLED -> PROMOTED/HALTED/GRADUATED).
+  //
+  // Wrappers thin: pegam customer + experiment_resource_name + customer_id,
+  // chamam o metodo SDK, retornam {ok, raw, error?}. Log estruturado.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * ScheduleExperiment — passa SETUP -> INITIATED (assincrono no Google,
+   * materializa draft campaigns como trial campaigns reais). Quando
+   * conclusao async termina, status vira ENABLED.
+   *
+   * Retorna long-running operation — o caller pode polling
+   * listExperimentAsyncErrors pra ver erros, ou query experiment.status
+   * via GAQL pra ver progressao.
+   */
+  async scheduleExperiment(
+    customer: Customer,
+    customerId: string,
+    experimentResourceName: string,
+    validateOnly: boolean = false,
+  ): Promise<{ ok: boolean; raw: unknown; error?: string }> {
+    this.logger.log(
+      `[experiment-schedule] customer=${customerId} experiment=${experimentResourceName} validate_only=${validateOnly}`,
+    );
+    try {
+      const result = await customer.experiments.scheduleExperiment({
+        customer_id: customerId,
+        experiment: experimentResourceName,
+        validate_only: validateOnly,
+      } as any);
+      this.logger.log(
+        `[experiment-schedule] SUCCESS raw=${JSON.stringify(this.safeSnapshot(result))}`,
+      );
+      return { ok: true, raw: result };
+    } catch (err: any) {
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[experiment-schedule] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * EndExperiment — encerra um experiment em ENABLED. Status vira HALTED.
+   * Nao promove ningem — apenas para o traffic split e mantem control + treatment
+   * como estavam. Util quando admin viu que treatment esta pior e quer
+   * encerrar logo sem perder mais budget.
+   */
+  async endExperiment(
+    customer: Customer,
+    customerId: string,
+    experimentResourceName: string,
+  ): Promise<{ ok: boolean; raw: unknown; error?: string }> {
+    this.logger.log(
+      `[experiment-end] customer=${customerId} experiment=${experimentResourceName}`,
+    );
+    try {
+      const result = await customer.experiments.endExperiment({
+        experiment: experimentResourceName,
+      } as any);
+      this.logger.log(
+        `[experiment-end] SUCCESS raw=${JSON.stringify(this.safeSnapshot(result))}`,
+      );
+      return { ok: true, raw: result };
+    } catch (err: any) {
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[experiment-end] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * PromoteExperiment — encerra ENABLED e promove o treatment como nova
+   * versao da base_campaign (aplica as mudancas do treatment na base).
+   * Trial campaigns viram removidos. Status vira PROMOTED.
+   *
+   * Async — retorna long-running operation. Listener (futuro) pode polling
+   * pra ver quando promotion termina.
+   *
+   * USE SO se metrics do treatment estao validamente melhores (treatment
+   * tem traffic significativo + tempo suficiente — recomendado >= 2 semanas
+   * de exposicao).
+   */
+  async promoteExperiment(
+    customer: Customer,
+    customerId: string,
+    experimentResourceName: string,
+  ): Promise<{ ok: boolean; raw: unknown; error?: string }> {
+    this.logger.log(
+      `[experiment-promote] customer=${customerId} experiment=${experimentResourceName}`,
+    );
+    try {
+      const result = await customer.experiments.promoteExperiment({
+        experiment: experimentResourceName,
+      } as any);
+      this.logger.log(
+        `[experiment-promote] SUCCESS raw=${JSON.stringify(this.safeSnapshot(result))}`,
+      );
+      return { ok: true, raw: result };
+    } catch (err: any) {
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[experiment-promote] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * GraduateExperiment — encerra ENABLED e separa o treatment como
+   * campanha standalone (NAO aplica na base — cria nova campanha permanente
+   * a partir do treatment). Status vira GRADUATED.
+   *
+   * REQUER `campaign_budget_mappings`: tuplas (experimentCampaign, newBudget)
+   * porque trial campaigns nao tem budget proprio (compartilham com base).
+   * Ao graduate, cada trial campaign vira standalone e precisa de budget.
+   *
+   * USE quando voce gostou do treatment MAS quer rodar paralelo com a base
+   * em vez de substituir (ex: treatment foca em audiencia X, base mantem
+   * audiencia Y).
+   */
+  async graduateExperiment(
+    customer: Customer,
+    customerId: string,
+    experimentResourceName: string,
+    campaignBudgetMappings: Array<{
+      experimentCampaignResourceName: string;
+      campaignBudgetResourceName: string;
+    }>,
+  ): Promise<{ ok: boolean; raw: unknown; error?: string }> {
+    this.logger.log(
+      `[experiment-graduate] customer=${customerId} experiment=${experimentResourceName} mappings=${campaignBudgetMappings.length}`,
+    );
+    try {
+      const result = await customer.experiments.graduateExperiment({
+        experiment: experimentResourceName,
+        campaign_budget_mappings: campaignBudgetMappings.map((m) => ({
+          experiment_campaign: m.experimentCampaignResourceName,
+          campaign_budget: m.campaignBudgetResourceName,
+        })),
+      } as any);
+      this.logger.log(
+        `[experiment-graduate] SUCCESS raw=${JSON.stringify(this.safeSnapshot(result))}`,
+      );
+      return { ok: true, raw: result };
+    } catch (err: any) {
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[experiment-graduate] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
   /**
    * Redact developer-token pra log nao expor secret completo.
    */
