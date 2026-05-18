@@ -216,6 +216,15 @@ export function VerbasRescisoriasTemplate() {
                       </li>
                     ))}
                   </ul>
+                  {"href" in type && type.href ? (
+                    <a
+                      href={type.href}
+                      className="mt-7 inline-flex items-center gap-2 rounded-lg border border-[#b8944d]/35 px-4 py-3 text-sm font-black uppercase tracking-wide text-[#d8bd79] transition hover:border-[#d8bd79] hover:bg-[#b8944d]/10"
+                    >
+                      Ver detalhes
+                      <ArrowRight size={16} />
+                    </a>
+                  ) : null}
                 </article>
               ))}
             </div>

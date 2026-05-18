@@ -39,6 +39,7 @@ export const calculationItems = [
 export const rescisionTypes = [
   {
     title: "Dispensa sem justa causa",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/dispensa-sem-justa-causa",
     summary:
       "É a modalidade em que normalmente entram mais parcelas: aviso-prévio, férias, 13º, FGTS, multa de 40% e possibilidade de seguro-desemprego.",
     items: [
@@ -52,6 +53,7 @@ export const rescisionTypes = [
   },
   {
     title: "Pedido de demissão",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/pedido-de-demissao",
     summary:
       "O trabalhador recebe as verbas básicas, mas geralmente perde a multa de 40%, o saque integral do FGTS e o seguro-desemprego.",
     items: [
