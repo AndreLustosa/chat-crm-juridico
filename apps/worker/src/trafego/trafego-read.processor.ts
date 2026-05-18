@@ -299,12 +299,45 @@ export class TrafegoReadProcessor extends WorkerHost {
       return clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     };
 
+    // ─── Helper: extrai erro estruturado do SDK Opteo ──────────────────
+    // Fix 2026-05-18 v4 (BUG-G v4): catch handler antes era `e?.message ??
+    // 'unknown'` — escondia erros estruturados. SDK Opteo lança erros com
+    // shape { failure: { errors: [{error_code, message, location}] } } OR
+    // { errors: [...] } OR plain Error. Loga TUDO em JSON pra debug.
+    const formatGaqlError = (e: any): string => {
+      try {
+        const structured = {
+          message: e?.message,
+          code: e?.code,
+          failure_errors: e?.failure?.errors,
+          errors: e?.errors,
+          stack: e?.stack?.split('\n').slice(0, 3).join(' | '),
+        };
+        return JSON.stringify(structured).slice(0, 1500);
+      } catch {
+        return String(e).slice(0, 500);
+      }
+    };
+
+    // Resolve resource_names PRA usar em WHERE — Google Ads docs recomendam
+    // filtrar campos do link via resource_name COMPLETO (mais seguro que
+    // filtrar via implicit resource campaign.id). Pra resolver, precisamos
+    // do customer_id (no customerOptions).
+    const customerId = (customer as any).customerOptions?.customer_id;
+
     // ─── Query 1A: CampaignAsset ────────────────────────────────────────
     if (!params.ad_group_id) {
-      const whereClause = buildLinkWhere(
-        'campaign_asset',
-        params.campaign_id ? `campaign.id = ${params.campaign_id}` : undefined,
-      );
+      // Pra evitar GAQL ambiguity, filtra via campaign_asset.campaign
+      // (resource_name completo) quando campaign_id passado. Implicit
+      // resource campaign.id tambem deveria funcionar mas ja deu problema
+      // em prod (round 3).
+      const scopeClause =
+        params.campaign_id && customerId
+          ? `campaign_asset.campaign = 'customers/${customerId}/campaigns/${params.campaign_id}'`
+          : params.campaign_id
+            ? `campaign.id = ${params.campaign_id}`
+            : undefined;
+      const whereClause = buildLinkWhere('campaign_asset', scopeClause);
       const q = `
         SELECT
           campaign_asset.resource_name,
@@ -316,10 +349,13 @@ export class TrafegoReadProcessor extends WorkerHost {
         ${whereClause}
         LIMIT 500
       `;
+      this.logger.log(
+        `[extensions] campaign_asset query DISPATCH: ${q.replace(/\s+/g, ' ').trim()}`,
+      );
       try {
         const rows = (await customer.query(q)) as any[];
         this.logger.log(
-          `[extensions] campaign_asset query: ${rows.length} rows (campaign_id=${params.campaign_id ?? 'all'}, status=${params.status ?? 'not REMOVED'})`,
+          `[extensions] campaign_asset query OK: ${rows.length} rows (campaign_id=${params.campaign_id ?? 'all'}, status=${params.status ?? 'not REMOVED'})`,
         );
         for (const row of rows) {
           const ca = row.campaign_asset;
@@ -335,19 +371,21 @@ export class TrafegoReadProcessor extends WorkerHost {
         }
       } catch (e: any) {
         this.logger.warn(
-          `[extensions] campaign_asset query FALHOU: ${e?.message ?? 'unknown'} | query=${q.replace(/\s+/g, ' ').trim()}`,
+          `[extensions] campaign_asset query FALHOU: ${formatGaqlError(e)}`,
         );
       }
     }
 
     // ─── Query 1B: AdGroupAsset ─────────────────────────────────────────
     {
-      const scope = params.ad_group_id
-        ? `ad_group.id = ${params.ad_group_id}`
-        : params.campaign_id
-          ? `campaign.id = ${params.campaign_id}`
-          : undefined;
-      const whereClause = buildLinkWhere('ad_group_asset', scope);
+      const scopeClause = params.ad_group_id && customerId
+        ? `ad_group_asset.ad_group = 'customers/${customerId}/adGroups/${params.ad_group_id}'`
+        : params.ad_group_id
+          ? `ad_group.id = ${params.ad_group_id}`
+          : params.campaign_id
+            ? `campaign.id = ${params.campaign_id}`
+            : undefined;
+      const whereClause = buildLinkWhere('ad_group_asset', scopeClause);
       const q = `
         SELECT
           ad_group_asset.resource_name,
@@ -359,10 +397,13 @@ export class TrafegoReadProcessor extends WorkerHost {
         ${whereClause}
         LIMIT 500
       `;
+      this.logger.log(
+        `[extensions] ad_group_asset query DISPATCH: ${q.replace(/\s+/g, ' ').trim()}`,
+      );
       try {
         const rows = (await customer.query(q)) as any[];
         this.logger.log(
-          `[extensions] ad_group_asset query: ${rows.length} rows`,
+          `[extensions] ad_group_asset query OK: ${rows.length} rows`,
         );
         for (const row of rows) {
           const aga = row.ad_group_asset;
@@ -378,7 +419,7 @@ export class TrafegoReadProcessor extends WorkerHost {
         }
       } catch (e: any) {
         this.logger.warn(
-          `[extensions] ad_group_asset query FALHOU: ${e?.message ?? 'unknown'}`,
+          `[extensions] ad_group_asset query FALHOU: ${formatGaqlError(e)}`,
         );
       }
     }
@@ -396,10 +437,13 @@ export class TrafegoReadProcessor extends WorkerHost {
         ${whereClause}
         LIMIT 200
       `;
+      this.logger.log(
+        `[extensions] customer_asset query DISPATCH: ${q.replace(/\s+/g, ' ').trim()}`,
+      );
       try {
         const rows = (await customer.query(q)) as any[];
         this.logger.log(
-          `[extensions] customer_asset query: ${rows.length} rows`,
+          `[extensions] customer_asset query OK: ${rows.length} rows`,
         );
         for (const row of rows) {
           const ca = row.customer_asset;
@@ -415,7 +459,7 @@ export class TrafegoReadProcessor extends WorkerHost {
         }
       } catch (e: any) {
         this.logger.warn(
-          `[extensions] customer_asset query FALHOU: ${e?.message ?? 'unknown'}`,
+          `[extensions] customer_asset query FALHOU: ${formatGaqlError(e)}`,
         );
       }
     }
@@ -445,10 +489,13 @@ export class TrafegoReadProcessor extends WorkerHost {
           WHERE asset.resource_name IN (${inList})
           ${typeWhere}
         `;
+        this.logger.log(
+          `[extensions] asset details query DISPATCH: ${q.replace(/\s+/g, ' ').trim().slice(0, 300)}...`,
+        );
         try {
           const rows = (await customer.query(q)) as any[];
           this.logger.log(
-            `[extensions] asset details query: ${rows.length}/${chunk.length} rows hidratados`,
+            `[extensions] asset details query OK: ${rows.length}/${chunk.length} rows hidratados`,
           );
           for (const row of rows) {
             const assetRn = row.asset?.resource_name ?? '';
@@ -456,8 +503,21 @@ export class TrafegoReadProcessor extends WorkerHost {
             ensureAsset(assetRn, row.asset);
           }
         } catch (e: any) {
+          // Reuse formatGaqlError style
+          const errFormatted = (() => {
+            try {
+              return JSON.stringify({
+                message: e?.message,
+                code: e?.code,
+                failure_errors: e?.failure?.errors,
+                errors: e?.errors,
+              }).slice(0, 1500);
+            } catch {
+              return String(e).slice(0, 500);
+            }
+          })();
           this.logger.warn(
-            `[extensions] asset details query FALHOU: ${e?.message ?? 'unknown'}`,
+            `[extensions] asset details query FALHOU: ${errFormatted}`,
           );
         }
       }
