@@ -184,166 +184,252 @@ export class TrafegoReadProcessor extends WorkerHost {
     }>;
     note?: string;
   }> {
-    // Query principal: assets
-    const typeFilter = params.type
-      ? `AND asset.type = '${params.type}'`
-      : '';
+    // Fix 2026-05-18 (BUG-G v2): rewrite total. Antes faziamos:
+    //   1) query asset FROM asset WHERE asset.type IN (...) — perdia call
+    //      assets (asset.type pode nao ser populado quando criados via
+    //      sub-message call_asset)
+    //   2) 3 queries auxiliares de link
+    //   3) joinava client-side, filtrava por scope — devolvia [] se nada
+    //      batia
+    //
+    // Novo approach: INVERTE — query por scope (campaign_asset, customer_asset,
+    // ad_group_asset) PRIMEIRO, com asset.* via JOIN inline no SELECT. GAQL
+    // permite selecionar campos de resources relacionados via foreign key
+    // (campaign_asset.asset_field_resource_name aponta pra asset.resource_name,
+    // o que viabiliza SELECT asset.call_asset.phone_number FROM campaign_asset).
+    //
+    // Vantagens:
+    //  - NAO depende de asset.type estar populado (filtramos pelo link, nao
+    //    pelo asset)
+    //  - Garante que so retorna assets que estao ANEXADOS (que eh o que o
+    //    caller espera)
+    //  - 1 query por scope-level em vez de 4 (1 principal + 3 aux)
 
-    const assetQuery = `
-      SELECT
-        asset.resource_name,
-        asset.id,
-        asset.type,
-        asset.name,
-        asset.policy_summary.review_status,
-        asset.sitelink_asset.link_text,
-        asset.sitelink_asset.description1,
-        asset.sitelink_asset.description2,
-        asset.callout_asset.callout_text,
-        asset.structured_snippet_asset.header,
-        asset.structured_snippet_asset.values,
-        asset.call_asset.phone_number,
-        asset.call_asset.country_code,
-        asset.promotion_asset.promotion_target,
-        asset.promotion_asset.occasion,
-        asset.price_asset.type,
-        asset.price_asset.price_qualifier,
-        asset.lead_form_asset.business_name,
-        asset.lead_form_asset.headline,
-        asset.final_urls
-      FROM asset
-      WHERE asset.type IN (
-        'SITELINK', 'CALLOUT', 'STRUCTURED_SNIPPET', 'CALL',
-        'LOCATION', 'PRICE', 'PROMOTION', 'LEAD_FORM'
-      )
-      ${typeFilter}
-      LIMIT 500
+    const ASSET_FIELDS = `
+      asset.resource_name,
+      asset.id,
+      asset.type,
+      asset.name,
+      asset.policy_summary.review_status,
+      asset.sitelink_asset.link_text,
+      asset.sitelink_asset.description1,
+      asset.sitelink_asset.description2,
+      asset.callout_asset.callout_text,
+      asset.structured_snippet_asset.header,
+      asset.structured_snippet_asset.values,
+      asset.call_asset.phone_number,
+      asset.call_asset.country_code,
+      asset.promotion_asset.promotion_target,
+      asset.promotion_asset.occasion,
+      asset.price_asset.type,
+      asset.price_asset.price_qualifier,
+      asset.lead_form_asset.business_name,
+      asset.lead_form_asset.headline,
+      asset.final_urls
     `;
 
-    let assets: any[] = [];
-    try {
-      assets = (await customer.query(assetQuery)) as any[];
-    } catch (e: any) {
-      throw new Error(`Listagem de assets falhou: ${e.message}`);
-    }
-
-    // Queries auxiliares: links em 3 niveis (skip os que nao se aplicam
-    // ao filtro do caller — ex: se ad_group_id passado, so query ad_group_asset)
-    const linksByAsset = new Map<string, any[]>();
-
-    const addLink = (
-      assetResourceName: string,
-      link: {
+    type Ext = {
+      asset_resource_name: string;
+      asset_id: string;
+      type: string;
+      status: string;
+      name: string | null;
+      attachments: Array<{
         link_resource_name: string;
         level: 'ACCOUNT' | 'CAMPAIGN' | 'AD_GROUP';
         scope_resource_name: string;
         field_type: string;
         status: string;
-      },
-    ) => {
-      const arr = linksByAsset.get(assetResourceName) ?? [];
-      arr.push(link);
-      linksByAsset.set(assetResourceName, arr);
+      }>;
+      payload: any;
     };
 
-    // CustomerAsset (account-level) — so se nao tiver filtro de scope
-    if (!params.campaign_id && !params.ad_group_id) {
-      try {
-        const r = (await customer.query(`
-          SELECT customer_asset.resource_name, customer_asset.asset,
-                 customer_asset.field_type, customer_asset.status
-          FROM customer_asset
-          LIMIT 200
-        `)) as any[];
-        for (const row of r) {
-          addLink(row.customer_asset?.asset ?? '', {
-            link_resource_name: row.customer_asset?.resource_name ?? '',
-            level: 'ACCOUNT',
-            scope_resource_name: '',
-            field_type: row.customer_asset?.field_type ?? '',
-            status: row.customer_asset?.status ?? '',
-          });
-        }
-      } catch (e: any) {
-        /* soft-fail — continua sem account-level */
-      }
-    }
+    // Agrupa por asset_resource_name (1 asset pode estar em multiplos
+    // attachments, ex: mesma sitelink em 2 campanhas)
+    const byAsset = new Map<string, Ext>();
 
-    // CampaignAsset
+    const ensureAsset = (assetRn: string, assetData: any): Ext => {
+      const existing = byAsset.get(assetRn);
+      if (existing) return existing;
+      const ext: Ext = {
+        asset_resource_name: assetRn,
+        asset_id: String(assetData?.id ?? ''),
+        type: assetData?.type ?? 'UNKNOWN',
+        status: assetData?.policy_summary?.review_status ?? 'UNKNOWN',
+        name: assetData?.name ?? null,
+        attachments: [],
+        payload: this.extractAssetPayload(assetData),
+      };
+      byAsset.set(assetRn, ext);
+      return ext;
+    };
+
+    // Helper pra montar WHERE/AND corretamente — primeiro filtro vira WHERE,
+    // demais viram AND. typeFilter sempre eh "asset.type = X" se passado.
+    const buildWhere = (linkAlias: string, scopeClause?: string): string => {
+      const clauses: string[] = [];
+      if (scopeClause) clauses.push(scopeClause);
+      if (params.status) {
+        clauses.push(`${linkAlias}.status = '${params.status}'`);
+      } else {
+        clauses.push(`${linkAlias}.status != 'REMOVED'`);
+      }
+      if (params.type) clauses.push(`asset.type = '${params.type}'`);
+      return clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    };
+
+    // ─── CampaignAsset (level CAMPAIGN) ────────────────────────────────
+    // Se filtro for ad_group_id only, skip.
     if (!params.ad_group_id) {
+      const whereClause = buildWhere(
+        'campaign_asset',
+        params.campaign_id ? `campaign.id = ${params.campaign_id}` : undefined,
+      );
       try {
-        const filter = params.campaign_id
-          ? `WHERE campaign.id = ${params.campaign_id}`
-          : '';
-        const r = (await customer.query(`
-          SELECT campaign_asset.resource_name, campaign_asset.asset,
-                 campaign_asset.field_type, campaign_asset.status,
-                 campaign_asset.campaign
+        const q = `
+          SELECT
+            campaign_asset.resource_name,
+            campaign_asset.field_type,
+            campaign_asset.status,
+            campaign_asset.campaign,
+            ${ASSET_FIELDS}
           FROM campaign_asset
-          ${filter}
+          ${whereClause}
           LIMIT 500
-        `)) as any[];
-        for (const row of r) {
-          addLink(row.campaign_asset?.asset ?? '', {
+        `;
+        const rows = (await customer.query(q)) as any[];
+        for (const row of rows) {
+          const assetRn = row.asset?.resource_name ?? '';
+          if (!assetRn) continue;
+          const ext = ensureAsset(assetRn, row.asset);
+          ext.attachments.push({
             link_resource_name: row.campaign_asset?.resource_name ?? '',
             level: 'CAMPAIGN',
             scope_resource_name: row.campaign_asset?.campaign ?? '',
-            field_type: row.campaign_asset?.field_type ?? '',
+            field_type: this.formatFieldType(row.campaign_asset?.field_type),
             status: row.campaign_asset?.status ?? '',
           });
         }
       } catch (e: any) {
-        /* soft-fail */
+        this.logger.warn(`[extensions] campaign_asset query falhou: ${e.message}`);
       }
     }
 
-    // AdGroupAsset
-    try {
-      const filter = params.ad_group_id
-        ? `WHERE ad_group.id = ${params.ad_group_id}`
-        : '';
-      const r = (await customer.query(`
-        SELECT ad_group_asset.resource_name, ad_group_asset.asset,
-               ad_group_asset.field_type, ad_group_asset.status,
-               ad_group_asset.ad_group
-        FROM ad_group_asset
-        ${filter}
-        LIMIT 500
-      `)) as any[];
-      for (const row of r) {
-        addLink(row.ad_group_asset?.asset ?? '', {
-          link_resource_name: row.ad_group_asset?.resource_name ?? '',
-          level: 'AD_GROUP',
-          scope_resource_name: row.ad_group_asset?.ad_group ?? '',
-          field_type: row.ad_group_asset?.field_type ?? '',
-          status: row.ad_group_asset?.status ?? '',
-        });
+    // ─── AdGroupAsset (level AD_GROUP) ─────────────────────────────────
+    {
+      const scope = params.ad_group_id
+        ? `ad_group.id = ${params.ad_group_id}`
+        : params.campaign_id
+          ? `campaign.id = ${params.campaign_id}`
+          : undefined;
+      const whereClause = buildWhere('ad_group_asset', scope);
+      try {
+        const q = `
+          SELECT
+            ad_group_asset.resource_name,
+            ad_group_asset.field_type,
+            ad_group_asset.status,
+            ad_group_asset.ad_group,
+            ${ASSET_FIELDS}
+          FROM ad_group_asset
+          ${whereClause}
+          LIMIT 500
+        `;
+        const rows = (await customer.query(q)) as any[];
+        for (const row of rows) {
+          const assetRn = row.asset?.resource_name ?? '';
+          if (!assetRn) continue;
+          const ext = ensureAsset(assetRn, row.asset);
+          ext.attachments.push({
+            link_resource_name: row.ad_group_asset?.resource_name ?? '',
+            level: 'AD_GROUP',
+            scope_resource_name: row.ad_group_asset?.ad_group ?? '',
+            field_type: this.formatFieldType(row.ad_group_asset?.field_type),
+            status: row.ad_group_asset?.status ?? '',
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`[extensions] ad_group_asset query falhou: ${e.message}`);
       }
-    } catch (e: any) {
-      /* soft-fail */
     }
 
-    // Joina assets + attachments. Se filtro de scope foi passado, retorna
-    // SO os assets que tem pelo menos 1 attachment naquele scope (caller
-    // espera ver "o que esta anexado naquela campanha").
-    const hasScope = !!params.campaign_id || !!params.ad_group_id;
-    const extensions = assets
-      .map((row: any) => ({
-        asset_resource_name: row.asset?.resource_name ?? '',
-        asset_id: String(row.asset?.id ?? ''),
-        type: row.asset?.type ?? 'UNKNOWN',
-        status: row.asset?.policy_summary?.review_status ?? 'UNKNOWN',
-        name: row.asset?.name ?? null,
-        attachments: linksByAsset.get(row.asset?.resource_name ?? '') ?? [],
-        payload: this.extractAssetPayload(row.asset),
-      }))
-      .filter((ext) => {
-        if (params.status && ext.status !== params.status) return false;
-        if (hasScope && ext.attachments.length === 0) return false;
-        return true;
-      });
+    // ─── CustomerAsset (level ACCOUNT) ────────────────────────────────
+    // So se nao houver filtro de scope (caller nao quer scope-specific)
+    if (!params.campaign_id && !params.ad_group_id) {
+      const whereClause = buildWhere('customer_asset');
+      try {
+        const q = `
+          SELECT
+            customer_asset.resource_name,
+            customer_asset.field_type,
+            customer_asset.status,
+            ${ASSET_FIELDS}
+          FROM customer_asset
+          ${whereClause}
+          LIMIT 200
+        `;
+        const rows = (await customer.query(q)) as any[];
+        for (const row of rows) {
+          const assetRn = row.asset?.resource_name ?? '';
+          if (!assetRn) continue;
+          const ext = ensureAsset(assetRn, row.asset);
+          ext.attachments.push({
+            link_resource_name: row.customer_asset?.resource_name ?? '',
+            level: 'ACCOUNT',
+            scope_resource_name: '',
+            field_type: this.formatFieldType(row.customer_asset?.field_type),
+            status: row.customer_asset?.status ?? '',
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`[extensions] customer_asset query falhou: ${e.message}`);
+      }
+    }
 
-    return { extensions };
+    const extensions = [...byAsset.values()];
+    return {
+      extensions,
+      note:
+        extensions.length === 0 && (params.campaign_id || params.ad_group_id)
+          ? `Nenhuma extension anexada a ${params.campaign_id ? `campaign ${params.campaign_id}` : `ad_group ${params.ad_group_id}`}. Use traffic_attach_call_asset ou traffic_attach_extension pra anexar.`
+          : undefined,
+    };
+  }
+
+  /**
+   * Formata field_type retornado pelo Google. Aceita int (enum value)
+   * OR string (enum name) — sempre devolve string PT-BR/Google amigavel.
+   * Ex: 16 → "CALL", "CALL" → "CALL", null → ""
+   */
+  private formatFieldType(val: any): string {
+    if (typeof val === 'string') return val;
+    if (typeof val !== 'number') return '';
+    // AssetFieldType enum values (v23, conferido no google-ads-api SDK)
+    const MAP: Record<number, string> = {
+      2: 'HEADLINE',
+      3: 'DESCRIPTION',
+      4: 'MANDATORY_AD_TEXT',
+      5: 'MARKETING_IMAGE',
+      6: 'MEDIA_BUNDLE',
+      7: 'YOUTUBE_VIDEO',
+      8: 'BOOK_ON_GOOGLE',
+      9: 'LEAD_FORM',
+      10: 'PROMOTION',
+      11: 'CALLOUT',
+      12: 'STRUCTURED_SNIPPET',
+      13: 'SITELINK',
+      14: 'MOBILE_APP',
+      15: 'HOTEL_CALLOUT',
+      16: 'CALL',
+      17: 'PRICE',
+      18: 'LONG_HEADLINE',
+      19: 'BUSINESS_NAME',
+      20: 'SQUARE_MARKETING_IMAGE',
+      21: 'PORTRAIT_MARKETING_IMAGE',
+      22: 'LOGO',
+      23: 'LANDSCAPE_LOGO',
+    };
+    return MAP[val] ?? `field_type_${val}`;
   }
 
   /**

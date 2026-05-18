@@ -196,6 +196,100 @@ export class GoogleAdsClientService {
   }
 
   /**
+   * Bug fix 2026-05-18 (BUG-E v2) — bypass pra remove generico de qualquer
+   * resource_type, usando GoogleAdsService.mutate (alto-nivel batch) direto.
+   *
+   * Por que existe: SDK Opteo nao expoe `.remove` em todos os subservices
+   * (ex: customer.assets.remove === undefined). O wrapper alto-nivel
+   * customer.mutateResources teoricamente serve, mas no nosso teste em
+   * prod ele estava montando MutateOperation com `asset_operation` vazio
+   * (Google rejeitava com OPERATION_REQUIRED). Solucao: bypass via
+   * loadService('GoogleAdsServiceClient').mutate() com shape EXPLICITO,
+   * espelhando o pattern do mutateCampaignWithExplicitMask que funciona.
+   *
+   * resourceType: snake_case enum tipo 'asset', 'campaign_asset', etc.
+   * Internamente vira `<resource_type>_operation` no MutateOperation.
+   */
+  async removeResourcesViaGoogleAdsService(
+    customer: Customer,
+    customerId: string,
+    resourceType: string,
+    resourceNames: string[],
+    validateOnly: boolean = false,
+  ): Promise<{ ok: boolean; raw: unknown; resourceNames: string[]; error?: string }> {
+    const svc = (customer as any).loadService('GoogleAdsServiceClient');
+    const headers = (customer as any).callHeaders;
+
+    // Validacao defensiva — resource_names devem ser strings com formato
+    // customers/X/<plural>/Y. Se vier ID puro ou vazio, rejeita antes de
+    // gastar request.
+    for (const rn of resourceNames) {
+      if (typeof rn !== 'string' || rn.length === 0) {
+        throw new Error(
+          `removeResourcesViaGoogleAdsService: resource_name invalido: ${JSON.stringify(rn)}`,
+        );
+      }
+      if (!/^customers\/\d+\/[a-zA-Z]+\/.+/.test(rn)) {
+        throw new Error(
+          `removeResourcesViaGoogleAdsService: resource_name fora do formato esperado customers/X/<entity>/Y: ${rn}`,
+        );
+      }
+    }
+
+    // resource_type 'asset' vira 'asset_operation'.
+    // 'campaign_asset' vira 'campaign_asset_operation'.
+    const opKey = `${resourceType}_operation`;
+    const mutate_operations = resourceNames.map((rn) => ({
+      [opKey]: {
+        remove: rn,
+      },
+    }));
+
+    const request = {
+      customer_id: customerId,
+      mutate_operations,
+      validate_only: validateOnly,
+      partial_failure: false,
+    };
+
+    this.logger.log(
+      `[remove-grpc] customer=${customerId} resource_type=${resourceType} count=${resourceNames.length} opKey=${opKey} validate_only=${validateOnly}`,
+    );
+
+    try {
+      const result = await svc.mutate(request, {
+        otherArgs: { headers },
+      });
+      const response = Array.isArray(result) ? result[0] : result;
+
+      // Resource names dos resultados (campos sao XxxOperationResponse)
+      const responseNames: string[] = [];
+      for (const r of response?.mutate_operation_responses ?? []) {
+        // Procura qualquer campo *_result com resource_name
+        for (const k of Object.keys(r ?? {})) {
+          if (k.endsWith('_result') && r[k]?.resource_name) {
+            responseNames.push(r[k].resource_name);
+          }
+        }
+      }
+      this.logger.log(
+        `[remove-grpc] SUCCESS removed=${responseNames.length} raw=${JSON.stringify(this.safeSnapshot(response))}`,
+      );
+      return {
+        ok: true,
+        raw: response,
+        resourceNames: responseNames.length > 0 ? responseNames : resourceNames,
+      };
+    } catch (err: any) {
+      const detailed = this.decodeGoogleAdsFailureFromMetadata(err);
+      this.logger.warn(
+        `[remove-grpc] FAILED code=${err.code} msg="${err.message}" detailed=${JSON.stringify(detailed)}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
    * Bug fix 2026-05-17 (BUG-A) — bypass pra Customer mutate.
    *
    * O metodo alto-nivel `customer.customers.update(payloads)` do SDK Opteo

@@ -321,22 +321,39 @@ export class GoogleAdsMutateService {
 
     if (req.operation === 'remove') {
       const resourceNames = req.operations.filter((x: any) => typeof x === 'string');
-      // Fix 2026-05-18 (BUG-E): nem todo subservice expoe `.remove`. SDK
-      // Opteo nao expoe pra Asset (customer.assets.remove === undefined).
-      // Fallback: usa customer.mutateResources (GoogleAdsService.mutate
-      // alto-nivel) com operations heterogeneas. Esse pattern funciona
-      // pra qualquer resource type.
+      // Fix 2026-05-18 v2 (BUG-E v2): nem todo subservice expoe `.remove`.
+      // SDK Opteo nao expoe pra Asset (customer.assets.remove === undefined).
+      // O wrapper alto-nivel `customer.mutateResources` em teoria serve mas
+      // em prod estava montando MutateOperation sem o campo `remove`
+      // preenchido (OPERATION_REQUIRED). Solucao definitiva: bypass via
+      // loadService('GoogleAdsServiceClient').mutate() com shape explicito,
+      // mesmo pattern do mutateCampaignWithExplicitMask que ja funciona.
       if (typeof svc.remove !== 'function') {
-        const entityName = req.resourceType; // ex: 'asset'
-        const mutations = resourceNames.map((rn) => ({
-          entity: entityName,
-          operation: 'remove' as const,
-          resource: rn,
-        }));
+        const customerId = (customer as any).customerOptions?.customer_id;
+        if (!customerId) {
+          throw new Error(
+            `mutate-remove: customer_id nao acessivel pra bypass de ${req.resourceType}`,
+          );
+        }
         this.logger.log(
-          `[mutate] svc.remove indisponivel pra ${entityName} — usando mutateResources fallback (${mutations.length} ops)`,
+          `[mutate] svc.remove indisponivel pra ${req.resourceType} — usando bypass GoogleAdsService.mutate (${resourceNames.length} ops)`,
         );
-        return await customer.mutateResources(mutations as any, opts);
+        const bypassResult = await this.clientSvc.removeResourcesViaGoogleAdsService(
+          customer,
+          customerId,
+          req.resourceType,
+          resourceNames,
+          !!req.validateOnly,
+        );
+        // Adapta shape pra match com response do SDK alto-nivel
+        return {
+          results: bypassResult.resourceNames.map((rn) => ({
+            resource_name: rn,
+          })),
+          partial_failure_error: bypassResult.ok
+            ? null
+            : { message: bypassResult.error },
+        };
       }
       return svc.remove(resourceNames, opts);
     }
