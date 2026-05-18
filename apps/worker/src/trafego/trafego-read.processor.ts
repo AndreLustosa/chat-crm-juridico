@@ -205,6 +205,10 @@ export class TrafegoReadProcessor extends WorkerHost {
     //    caller espera)
     //  - 1 query por scope-level em vez de 4 (1 principal + 3 aux)
 
+    // Note 2026-05-18: pra CallAsset, Google as vezes nao retorna
+    // call_asset.phone_number/country_code mesmo selecionados sozinhos —
+    // adicionando call_conversion_action + call_conversion_reporting_state
+    // pra garantir hidratacao completa da sub-message.
     const ASSET_FIELDS = `
       asset.resource_name,
       asset.id,
@@ -219,6 +223,8 @@ export class TrafegoReadProcessor extends WorkerHost {
       asset.structured_snippet_asset.values,
       asset.call_asset.phone_number,
       asset.call_asset.country_code,
+      asset.call_asset.call_conversion_reporting_state,
+      asset.call_asset.call_conversion_action,
       asset.promotion_asset.promotion_target,
       asset.promotion_asset.occasion,
       asset.price_asset.type,
@@ -704,41 +710,59 @@ export class TrafegoReadProcessor extends WorkerHost {
    */
   private extractAssetPayload(asset: any): any {
     if (!asset) return null;
+    // Helper: se um objeto so tem keys com valor null/undefined/"",
+    // retorna null em vez do objeto (melhor pra display que objeto vazio).
+    const compactOrNull = (obj: Record<string, any>) => {
+      const filtered: Record<string, any> = {};
+      let hasValue = false;
+      for (const [k, v] of Object.entries(obj)) {
+        if (v !== null && v !== undefined && v !== '' &&
+            (!Array.isArray(v) || v.length > 0)) {
+          filtered[k] = v;
+          hasValue = true;
+        }
+      }
+      return hasValue ? filtered : null;
+    };
+
     switch (asset.type) {
       case 'SITELINK':
-        return {
+        return compactOrNull({
           link_text: asset.sitelink_asset?.link_text,
           description1: asset.sitelink_asset?.description1,
           description2: asset.sitelink_asset?.description2,
           final_urls: asset.final_urls,
-        };
+        });
       case 'CALLOUT':
-        return { text: asset.callout_asset?.callout_text };
+        return compactOrNull({ text: asset.callout_asset?.callout_text });
       case 'STRUCTURED_SNIPPET':
-        return {
+        return compactOrNull({
           header: asset.structured_snippet_asset?.header,
           values: asset.structured_snippet_asset?.values,
-        };
+        });
       case 'CALL':
-        return {
+        return compactOrNull({
           phone_number: asset.call_asset?.phone_number,
           country_code: asset.call_asset?.country_code,
-        };
+          call_conversion_reporting_state:
+            asset.call_asset?.call_conversion_reporting_state,
+          call_conversion_action: asset.call_asset?.call_conversion_action,
+        });
       case 'PROMOTION':
-        return {
+        return compactOrNull({
           promotion_target: asset.promotion_asset?.promotion_target,
           occasion: asset.promotion_asset?.occasion,
-        };
+        });
       case 'PRICE':
-        return {
+        return compactOrNull({
           type: asset.price_asset?.type,
           price_qualifier: asset.price_asset?.price_qualifier,
-        };
+        });
       case 'LEAD_FORM':
-        return {
+        return compactOrNull({
           business_name: asset.lead_form_asset?.business_name,
           headline: asset.lead_form_asset?.headline,
-        };
+        });
       default:
         return null;
     }
