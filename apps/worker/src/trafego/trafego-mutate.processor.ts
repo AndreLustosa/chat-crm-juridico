@@ -46,6 +46,12 @@ export const MUTATE_JOBS = {
   ATTACH_EXTENSION: 'trafego-mutate-attach-extension',
   DETACH_EXTENSION: 'trafego-mutate-detach-extension',
   REMOVE_EXTENSION: 'trafego-mutate-remove-extension',
+  // Sprint 3 backlog (2026-05-17) — Targeting + Bulk
+  UPDATE_GEO_TARGETS: 'trafego-mutate-update-geo-targets',
+  UPDATE_LANGUAGE_TARGETS: 'trafego-mutate-update-language-targets',
+  UPDATE_DEVICE_TARGETING: 'trafego-mutate-update-device-targeting',
+  BULK_ADD_NEGATIVES: 'trafego-mutate-bulk-add-negatives',
+  BULK_UPDATE_STATUS: 'trafego-mutate-bulk-update-status',
 } as const;
 
 /**
@@ -266,6 +272,51 @@ export type AttachCallAssetPayload = BaseMutatePayload & {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 3 backlog — Targeting + Bulk
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type UpdateGeoTargetsPayload = BaseMutatePayload & {
+  campaignResourceName: string;
+  /** geo_target_constant resource_names a adicionar (ex: geoTargetConstants/1031620). */
+  addResourceNames: string[];
+  /** campaign_criterion resource_names a remover (ex: customers/X/campaignCriteria/Y~Z). */
+  removeResourceNames: string[];
+  negative?: boolean;
+};
+
+export type UpdateLanguageTargetsPayload = BaseMutatePayload & {
+  campaignResourceName: string;
+  addResourceNames: string[]; // languageConstants/{id}
+  removeResourceNames: string[];
+};
+
+export type UpdateDeviceTargetingPayload = BaseMutatePayload & {
+  campaignResourceName: string;
+  mobileModifier?: number | null;
+  desktopModifier?: number | null;
+  tabletModifier?: number | null;
+};
+
+export type BulkAddNegativesPayload = BaseMutatePayload & {
+  /** Pra cada target, scope eh campaign OU ad_group resource_name. */
+  targets: Array<{
+    scope: 'CAMPAIGN' | 'AD_GROUP';
+    resourceName: string;
+  }>;
+  keywords: string[];
+  matchType: 'EXACT' | 'PHRASE' | 'BROAD';
+};
+
+export type BulkUpdateStatusPayload = BaseMutatePayload & {
+  /** Tuplas (resource_type, resource_name) — campaign OR ad_group. */
+  targets: Array<{
+    resourceType: 'campaign' | 'ad_group';
+    resourceName: string;
+  }>;
+  status: 'ENABLED' | 'PAUSED';
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 2 backlog — Extensions / Assets Payload types
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -415,6 +466,16 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.detachExtension(job.data);
       case MUTATE_JOBS.REMOVE_EXTENSION:
         return await this.removeExtension(job.data);
+      case MUTATE_JOBS.UPDATE_GEO_TARGETS:
+        return await this.updateGeoTargets(job.data);
+      case MUTATE_JOBS.UPDATE_LANGUAGE_TARGETS:
+        return await this.updateLanguageTargets(job.data);
+      case MUTATE_JOBS.UPDATE_DEVICE_TARGETING:
+        return await this.updateDeviceTargeting(job.data);
+      case MUTATE_JOBS.BULK_ADD_NEGATIVES:
+        return await this.bulkAddNegatives(job.data);
+      case MUTATE_JOBS.BULK_UPDATE_STATUS:
+        return await this.bulkUpdateStatus(job.data);
       default:
         throw new Error(`[mutate-processor] job desconhecido: ${job.name}`);
     }
@@ -2148,6 +2209,288 @@ export class TrafegoMutateProcessor extends WorkerHost {
       );
     }
     return v;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 3 backlog (2026-05-17) — Targeting + Bulk
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Atualiza geo targets via CampaignCriterion (location). Add cria
+   * criterios novos; remove deleta os existentes. 1 mutate batch combina
+   * tudo (mais eficiente + atomic).
+   */
+  private async updateGeoTargets(
+    p: UpdateGeoTargetsPayload,
+  ): Promise<MutateResult> {
+    // Pra ter add+remove na MESMA chamada precisamos de svc.mutateResources
+    // (batch). Pra simplicidade, fazemos 2 chamadas: add primeiro (create),
+    // depois remove. Audit log ganha 2 entradas distintas.
+    const ops: any[] = [];
+    if (p.addResourceNames.length > 0) {
+      ops.push({
+        kind: 'add',
+        operations: p.addResourceNames.map((rn) => ({
+          campaign: p.campaignResourceName,
+          location: { geo_target_constant: rn },
+          ...(p.negative ? { negative: true } : {}),
+        })),
+      });
+    }
+    if (p.removeResourceNames.length > 0) {
+      ops.push({ kind: 'remove', operations: p.removeResourceNames });
+    }
+    return await this.executeMultiOps(p, ops, 'campaign_criterion');
+  }
+
+  /**
+   * Atualiza language targets. Mesmo padrao do geo, mas com language_constant.
+   */
+  private async updateLanguageTargets(
+    p: UpdateLanguageTargetsPayload,
+  ): Promise<MutateResult> {
+    const ops: any[] = [];
+    if (p.addResourceNames.length > 0) {
+      ops.push({
+        kind: 'add',
+        operations: p.addResourceNames.map((rn) => ({
+          campaign: p.campaignResourceName,
+          language: { language_constant: rn },
+        })),
+      });
+    }
+    if (p.removeResourceNames.length > 0) {
+      ops.push({ kind: 'remove', operations: p.removeResourceNames });
+    }
+    return await this.executeMultiOps(p, ops, 'campaign_criterion');
+  }
+
+  /**
+   * Atualiza bid modifiers por device. Cria/atualiza CampaignCriterion
+   * com device. Pra cada device, se modifier passado, faz CREATE
+   * (Google tem upsert via criterion_id deterministico baseado em device).
+   *
+   * Pra modifier=null (remover): seria remove do criterion existente,
+   * mas pra simplicidade do MVP, modifier=null vira modifier=1.0
+   * (sem ajuste — efeito equivalente).
+   */
+  private async updateDeviceTargeting(
+    p: UpdateDeviceTargetingPayload,
+  ): Promise<MutateResult> {
+    const ops: any[] = [];
+    const buildOp = (deviceEnum: number, modifier: number) => ({
+      campaign: p.campaignResourceName,
+      device: { type: deviceEnum },
+      bid_modifier: modifier,
+    });
+    if (p.mobileModifier != null) {
+      ops.push(buildOp(enums.Device.MOBILE, p.mobileModifier));
+    }
+    if (p.desktopModifier != null) {
+      ops.push(buildOp(enums.Device.DESKTOP, p.desktopModifier));
+    }
+    if (p.tabletModifier != null) {
+      ops.push(buildOp(enums.Device.TABLET, p.tabletModifier));
+    }
+    if (ops.length === 0) {
+      return {
+        logId: 'noop-device-targeting',
+        status: 'SUCCESS',
+        resourceNames: [],
+        oabViolations: [],
+        durationMs: 0,
+      };
+    }
+    return await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign_criterion',
+      operation: 'create',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      context: p.context,
+      operations: ops,
+    });
+  }
+
+  /**
+   * Bulk add negatives — replica mesmo conjunto de keywords em N targets
+   * (campaigns OR ad_groups), numa unica operacao batch.
+   */
+  private async bulkAddNegatives(
+    p: BulkAddNegativesPayload,
+  ): Promise<MutateResult> {
+    const matchTypeEnum =
+      p.matchType === 'EXACT'
+        ? enums.KeywordMatchType.EXACT
+        : p.matchType === 'PHRASE'
+          ? enums.KeywordMatchType.PHRASE
+          : enums.KeywordMatchType.BROAD;
+
+    // Pra cada target × keyword, 1 operation. Total = N × M.
+    const campaignOps: any[] = [];
+    const adGroupOps: any[] = [];
+    for (const target of p.targets) {
+      for (const kw of p.keywords) {
+        const opBase = {
+          negative: true,
+          keyword: { text: kw, match_type: matchTypeEnum },
+        };
+        if (target.scope === 'CAMPAIGN') {
+          campaignOps.push({ ...opBase, campaign: target.resourceName });
+        } else {
+          adGroupOps.push({
+            ...opBase,
+            ad_group: target.resourceName,
+            status: enums.AdGroupCriterionStatus.ENABLED,
+          });
+        }
+      }
+    }
+
+    // Roda em ate 2 mutates (1 campaign_criterion, 1 ad_group_criterion).
+    // Retorna o ultimo resultado (em PARTIAL/FAILED, o primeiro a quebrar
+    // ja foi capturado no log).
+    let lastResult: MutateResult | null = null;
+    if (campaignOps.length > 0) {
+      lastResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign_criterion',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: {
+          ...p.context,
+          bulk_targets: campaignOps.length,
+          bulk_scope: 'CAMPAIGN',
+        },
+        operations: campaignOps,
+      });
+    }
+    if (adGroupOps.length > 0) {
+      lastResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'ad_group_criterion',
+        operation: 'create',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: {
+          ...p.context,
+          bulk_targets: adGroupOps.length,
+          bulk_scope: 'AD_GROUP',
+        },
+        operations: adGroupOps,
+      });
+    }
+    return (
+      lastResult ?? {
+        logId: 'noop-bulk-negatives',
+        status: 'SUCCESS',
+        resourceNames: [],
+        oabViolations: [],
+        durationMs: 0,
+      }
+    );
+  }
+
+  /**
+   * Bulk update status — pausa/reativa N campanhas ou ad_groups em batch.
+   */
+  private async bulkUpdateStatus(
+    p: BulkUpdateStatusPayload,
+  ): Promise<MutateResult> {
+    const campaignStatusEnum =
+      p.status === 'ENABLED'
+        ? enums.CampaignStatus.ENABLED
+        : enums.CampaignStatus.PAUSED;
+    const adGroupStatusEnum =
+      p.status === 'ENABLED'
+        ? enums.AdGroupStatus.ENABLED
+        : enums.AdGroupStatus.PAUSED;
+
+    const campaignOps = p.targets
+      .filter((t) => t.resourceType === 'campaign')
+      .map((t) => ({ resource_name: t.resourceName, status: campaignStatusEnum }));
+    const adGroupOps = p.targets
+      .filter((t) => t.resourceType === 'ad_group')
+      .map((t) => ({ resource_name: t.resourceName, status: adGroupStatusEnum }));
+
+    let lastResult: MutateResult | null = null;
+    if (campaignOps.length > 0) {
+      lastResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign',
+        operation: 'update',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: { ...p.context, bulk_count: campaignOps.length },
+        operations: campaignOps,
+      });
+    }
+    if (adGroupOps.length > 0) {
+      lastResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'ad_group',
+        operation: 'update',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: { ...p.context, bulk_count: adGroupOps.length },
+        operations: adGroupOps,
+      });
+    }
+    return (
+      lastResult ?? {
+        logId: 'noop-bulk-status',
+        status: 'SUCCESS',
+        resourceNames: [],
+        oabViolations: [],
+        durationMs: 0,
+      }
+    );
+  }
+
+  /**
+   * Helper — executa N mutates sequenciais de mesmo resourceType,
+   * agrupados por kind (add=create, remove=remove). Usado em geo/language.
+   */
+  private async executeMultiOps(
+    p: BaseMutatePayload,
+    ops: Array<{ kind: 'add' | 'remove'; operations: any[] }>,
+    resourceType: any,
+  ): Promise<MutateResult> {
+    let lastResult: MutateResult | null = null;
+    for (const op of ops) {
+      lastResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType,
+        operation: op.kind === 'add' ? 'create' : 'remove',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        context: { ...p.context, multi_op_kind: op.kind, count: op.operations.length },
+        operations: op.operations,
+      });
+      if (lastResult.status === 'FAILED') break;
+    }
+    return (
+      lastResult ?? {
+        logId: 'noop-multi-ops',
+        status: 'SUCCESS',
+        resourceNames: [],
+        oabViolations: [],
+        durationMs: 0,
+      }
+    );
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────

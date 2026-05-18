@@ -54,6 +54,8 @@ export function registerCrmTrafficTools(server: McpServer) {
   registerSprint1Tools(server);
   // Sprint 2 backlog (2026-05-17): Extensions/Assets + Quality Score
   registerSprint2Tools(server);
+  // Sprint 3 backlog (2026-05-17): Targeting + Bulk + Recommendations dismiss
+  registerSprint3Tools(server);
 }
 
 // ─── LEITURA ────────────────────────────────────────────────────────────────
@@ -1976,6 +1978,226 @@ function registerSprint2Tools(server: McpServer) {
         ];
         if (result?.note) lines.push(`Nota: ${result.note}`);
         return ok(result, lines.join('\n'));
+      }),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 3 backlog (2026-05-17) — 6 tools novas (Targeting + Bulk + Dismiss)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function registerSprint3Tools(server: McpServer) {
+  // ─── Recommendations dismiss ───────────────────────────────────────────
+  server.registerTool(
+    'traffic_dismiss_recommendation',
+    {
+      description:
+        'Marca recomendacao do Google Ads como dismissed (ignorada). Diferente de apply, ' +
+        'nao executa a acao recomendada — apenas remove da fila pra nao aparecer mais. ' +
+        'recommendation_id vem de traffic_list_recommendations.',
+      inputSchema: {
+        recommendation_id: z.string(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_dismiss_recommendation', async (toolCallId) => {
+        applyMutateGuards('traffic_dismiss_recommendation');
+        const result = await crmTrafficService.post(
+          `/trafego/recommendations/${encodeURIComponent(input.recommendation_id)}/dismiss`,
+          {},
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Recomendacao ${input.recommendation_id} dismissed.`,
+        );
+      }),
+  );
+
+  // ─── Targeting ────────────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_update_geo_targets',
+    {
+      description:
+        'Adiciona/remove geo targets de uma campanha (Search/Display/PMax). ' +
+        'add=IDs numericos do Google ou resource_names geoTargetConstants/X ' +
+        '(ex: "1031620"=Maceio/AL, "1001775"=Brasil — lista em ' +
+        'developers.google.com/google-ads/api/data/geotargets). ' +
+        'remove=resource_names dos campaign_criterion existentes (obtem via Google Ads UI ou GAQL). ' +
+        'negative=true: adiciona como EXCLUSAO (campanha NAO veicula la).',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        add: z.array(z.string()).optional(),
+        remove: z.array(z.string()).optional(),
+        negative: z.boolean().optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_geo_targets', async (toolCallId) => {
+        applyMutateGuards('traffic_update_geo_targets');
+        const { campaign_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/campaigns/${encodeURIComponent(campaign_id)}/geo-targets`,
+          body,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Update geo targets enfileirado pra campanha ${campaign_id} (+${(input.add ?? []).length}, -${(input.remove ?? []).length}).`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_update_language_targets',
+    {
+      description:
+        'Adiciona/remove language targets de uma campanha. ' +
+        'add=IDs numericos do Google ou resource_names languageConstants/X ' +
+        '(ex: "1014"=portuguese, "1000"=english).',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        add: z.array(z.string()).optional(),
+        remove: z.array(z.string()).optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_language_targets', async (toolCallId) => {
+        applyMutateGuards('traffic_update_language_targets');
+        const { campaign_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/campaigns/${encodeURIComponent(campaign_id)}/language-targets`,
+          body,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Update language targets enfileirado pra campanha ${campaign_id}.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_update_device_targeting',
+    {
+      description:
+        'Define bid modifiers por device (mobile/desktop/tablet) na campanha. ' +
+        'Valores: 1.0=sem ajuste, 0.5=-50%, 1.5=+50%, 0.1=quase nao aparece. ' +
+        'Pra MVP, omite=mantem atual. null vira 1.0. ' +
+        'AdGroup-level modifiers ficam pra Sprint 3.1 (precisa de outro endpoint).',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        mobile_modifier: z.number().min(0.1).max(10).optional(),
+        desktop_modifier: z.number().min(0.1).max(10).optional(),
+        tablet_modifier: z.number().min(0.1).max(10).optional(),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_device_targeting', async (toolCallId) => {
+        applyMutateGuards('traffic_update_device_targeting');
+        const { campaign_id, ...body } = input;
+        const result = await crmTrafficService.post(
+          `/trafego/campaigns/${encodeURIComponent(campaign_id)}/device-targeting`,
+          body,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Device bid modifiers atualizados pra campanha ${campaign_id}.`,
+        );
+      }),
+  );
+
+  // ─── Bulk operations ───────────────────────────────────────────────────
+  server.registerTool(
+    'traffic_bulk_add_negatives',
+    {
+      description:
+        'Adiciona MESMA lista de keywords negativas em N campanhas/ad_groups numa unica chamada. ' +
+        'Mais eficiente que N traffic_add_negative_to_* separados (1 mutate batch no Google). ' +
+        'targets aceita mix de campaign_id e ad_group_id (cada target = 1 scope). ' +
+        'Total operations = targets.length * keywords.length — limite Google ~5000 por mutate.',
+      inputSchema: {
+        targets: z
+          .array(
+            z.object({
+              campaign_id: campaignIdSchema.optional(),
+              ad_group_id: z.string().optional(),
+            }),
+          )
+          .min(1)
+          .max(100)
+          .describe('Lista de campaigns OR ad_groups (cada objeto: exatamente um id).'),
+        keywords: z.array(z.string()).min(1).max(50),
+        match_type: z.enum(['EXACT', 'PHRASE', 'BROAD']),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_bulk_add_negatives', async (toolCallId) => {
+        applyMutateGuards('traffic_bulk_add_negatives');
+        const result = await crmTrafficService.post(
+          '/trafego/negatives/bulk',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Bulk add negatives: ${input.keywords.length} keywords x ${input.targets.length} targets = ${input.keywords.length * input.targets.length} ops enfileiradas.`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_bulk_update_status',
+    {
+      description:
+        'Pausa ou reativa N campanhas/ad_groups numa unica chamada. ' +
+        'targets aceita mix de campaign e ad_group (cada um com seu type + id). ' +
+        'Pra remove use traffic_remove_campaign/traffic_remove_ad_group individualmente ' +
+        '(safeguards diferentes — esta tool eh so pause/resume).',
+      inputSchema: {
+        targets: z
+          .array(
+            z.object({
+              type: z.enum(['campaign', 'ad_group']),
+              id: z
+                .string()
+                .describe('UUID interno OR google_id.'),
+            }),
+          )
+          .min(1)
+          .max(100),
+        status: z.enum(['ENABLED', 'PAUSED']),
+        reason: z.string().optional(),
+        validate_only: z.boolean().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_bulk_update_status', async (toolCallId) => {
+        applyMutateGuards('traffic_bulk_update_status');
+        const result = await crmTrafficService.post(
+          '/trafego/status/bulk',
+          input,
+          { toolCallId },
+        );
+        return ok(
+          result,
+          `Bulk update status: ${input.targets.length} targets → ${input.status}.`,
+        );
       }),
   );
 }

@@ -432,6 +432,161 @@ export class RemoveConversionActionDto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Sprint 3 do backlog (2026-05-17) — Targeting + Bulk ops
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Atualiza geo targets de uma campanha. `add` cria novos CampaignCriterion
+ * com location, `remove` remove existentes via resource_name.
+ *
+ * geo_target_ids: IDs numericos do Google (ex: "1031620" = Maceio/AL,
+ * "1001775" = Brasil). Lista completa em
+ * https://developers.google.com/google-ads/api/data/geotargets.
+ *
+ * negative=true: adiciona como EXCLUSAO de geo (campanha NAO veicula la).
+ */
+export class UpdateGeoTargetsDto {
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  add?: string[];
+
+  /** resource_names dos criteria a remover (de traffic_list_campaign_criteria). */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  remove?: string[];
+
+  @IsBoolean()
+  @IsOptional()
+  negative?: boolean;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Atualiza language targets. language_ids sao IDs numericos de
+ * language_constants (ex: "1014" = portuguese, "1000" = english).
+ */
+export class UpdateLanguageTargetsDto {
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  add?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  remove?: string[];
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Atualiza device targeting (bid modifiers por device).
+ *
+ * Valores:
+ *   1.0 = sem ajuste (default)
+ *   0.5 = -50% (reduz lance pela metade)
+ *   1.5 = +50% (aumenta lance 50%)
+ *   0.1 = -90% (quase nao aparece)
+ *
+ * null = remove modifier (volta pra default 1.0).
+ */
+export class UpdateDeviceTargetingDto {
+  @IsNumber()
+  @Min(0.1)
+  @Max(10)
+  @IsOptional()
+  mobile_modifier?: number | null;
+
+  @IsNumber()
+  @Min(0.1)
+  @Max(10)
+  @IsOptional()
+  desktop_modifier?: number | null;
+
+  @IsNumber()
+  @Min(0.1)
+  @Max(10)
+  @IsOptional()
+  tablet_modifier?: number | null;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Bulk add negatives — mesma lista de keywords em N campanhas/ad_groups.
+ * Mais eficiente que N chamadas separadas (1 mutate batch no Google).
+ */
+export class BulkAddNegativesDto {
+  @IsArray()
+  targets!: Array<{
+    /** campaign_id OR ad_group_id (exatamente um). */
+    campaign_id?: string;
+    ad_group_id?: string;
+  }>;
+
+  @IsArray()
+  @IsString({ each: true })
+  keywords!: string[];
+
+  @IsString()
+  @IsIn(['EXACT', 'PHRASE', 'BROAD'])
+  match_type!: 'EXACT' | 'PHRASE' | 'BROAD';
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+/**
+ * Bulk pause/resume — N campanhas ou ad_groups numa unica chamada.
+ */
+export class BulkUpdateStatusDto {
+  @IsArray()
+  targets!: Array<{
+    /** "campaign" | "ad_group" */
+    type: 'campaign' | 'ad_group';
+    id: string; // UUID interno OR google_id
+  }>;
+
+  @IsString()
+  @IsIn(['ENABLED', 'PAUSED'])
+  status!: 'ENABLED' | 'PAUSED';
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  validate_only?: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Sprint 2 do backlog (2026-05-17) — Extensions/Assets + Quality Score
 // ═══════════════════════════════════════════════════════════════════════════
 

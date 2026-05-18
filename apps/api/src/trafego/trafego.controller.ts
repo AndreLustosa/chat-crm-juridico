@@ -70,6 +70,12 @@ import {
   AttachExtensionDto,
   DetachExtensionDto,
   RemoveExtensionDto,
+  // Sprint 3
+  UpdateGeoTargetsDto,
+  UpdateLanguageTargetsDto,
+  UpdateDeviceTargetingDto,
+  BulkAddNegativesDto,
+  BulkUpdateStatusDto,
   CreateAdGroupDto,
   UpdateAdGroupDto,
   UpdateRsaDto,
@@ -1290,6 +1296,78 @@ export class TrafegoController {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sprint 3 backlog (2026-05-17) — Targeting + Bulk
+  // ═══════════════════════════════════════════════════════════════════════
+
+  @Post('campaigns/:id/geo-targets')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateGeoTargets(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateGeoTargetsDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-geo-targets',
+      { campaignId, ...dto },
+    );
+  }
+
+  @Post('campaigns/:id/language-targets')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateLanguageTargets(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateLanguageTargetsDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-language-targets',
+      { campaignId, ...dto },
+    );
+  }
+
+  @Post('campaigns/:id/device-targeting')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateDeviceTargeting(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateDeviceTargetingDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-update-device-targeting',
+      { campaignId, ...dto },
+    );
+  }
+
+  @Post('negatives/bulk')
+  @Roles('ADMIN', 'ADVOGADO')
+  async bulkAddNegatives(
+    @Req() req: any,
+    @Body() dto: BulkAddNegativesDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-bulk-add-negatives',
+      dto,
+    );
+  }
+
+  @Post('status/bulk')
+  @Roles('ADMIN', 'ADVOGADO')
+  async bulkUpdateStatus(
+    @Req() req: any,
+    @Body() dto: BulkUpdateStatusDto,
+  ) {
+    return await this.enqueueMutate(
+      req,
+      'trafego-mutate-bulk-update-status',
+      dto,
+    );
+  }
+
   // ─── Helper: enqueue mutate com resolucao de resource_names ─────────────
   private async enqueueMutate(req: any, jobName: string, payload: any) {
     const tenantId = req.user.tenant_id;
@@ -1498,6 +1576,18 @@ export class TrafegoController {
   ) {
     return this.recommendations.enqueueApply(req.user.tenant_id, id, {
       force: !!dto.force,
+      resolvedBy: req.user.id,
+    });
+  }
+
+  /**
+   * Sprint 3 (2026-05-17) — Dismiss recommendation.
+   * Service.enqueueDismiss ja existia mas nao tinha endpoint exposto.
+   */
+  @Post('recommendations/:id/dismiss')
+  @Roles('ADMIN', 'ADVOGADO')
+  async dismissRecommendation(@Req() req: any, @Param('id') id: string) {
+    return this.recommendations.enqueueDismiss(req.user.tenant_id, id, {
       resolvedBy: req.user.id,
     });
   }

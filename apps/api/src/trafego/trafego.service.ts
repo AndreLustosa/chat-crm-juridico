@@ -1554,6 +1554,134 @@ export class TrafegoService {
         };
       }
 
+      // ═══════════════════════════════════════════════════════════════════
+      // Sprint 3 backlog (2026-05-17) — Targeting + Bulk
+      // ═══════════════════════════════════════════════════════════════════
+
+      case 'trafego-mutate-update-geo-targets': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          addResourceNames: (raw.add ?? []).map((id: string) =>
+            id.startsWith('geoTargetConstants/')
+              ? id
+              : `geoTargetConstants/${id}`,
+          ),
+          removeResourceNames: raw.remove ?? [],
+          negative: !!raw.negative,
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            add_count: (raw.add ?? []).length,
+            remove_count: (raw.remove ?? []).length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-update-language-targets': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          addResourceNames: (raw.add ?? []).map((id: string) =>
+            id.startsWith('languageConstants/')
+              ? id
+              : `languageConstants/${id}`,
+          ),
+          removeResourceNames: raw.remove ?? [],
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            add_count: (raw.add ?? []).length,
+            remove_count: (raw.remove ?? []).length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-update-device-targeting': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          mobileModifier: raw.mobile_modifier,
+          desktopModifier: raw.desktop_modifier,
+          tabletModifier: raw.tablet_modifier,
+          context: { ...base.context, campaign_id_local: camp.id },
+        };
+      }
+
+      case 'trafego-mutate-bulk-add-negatives': {
+        const targets: Array<{
+          scope: 'CAMPAIGN' | 'AD_GROUP';
+          resourceName: string;
+        }> = [];
+        for (const t of raw.targets ?? []) {
+          if (t.campaign_id) {
+            const c = await this.requireCampaign(tenantId, t.campaign_id);
+            targets.push({
+              scope: 'CAMPAIGN',
+              resourceName: `customers/${customerId}/campaigns/${c.google_campaign_id}`,
+            });
+          } else if (t.ad_group_id) {
+            const g = await this.requireAdGroup(tenantId, t.ad_group_id);
+            targets.push({
+              scope: 'AD_GROUP',
+              resourceName: `customers/${customerId}/adGroups/${g.google_ad_group_id}`,
+            });
+          } else {
+            throw new HttpException(
+              'bulk_add_negatives: cada target precisa de campaign_id OR ad_group_id',
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+        }
+        return {
+          ...base,
+          targets,
+          keywords: raw.keywords ?? [],
+          matchType: raw.match_type,
+          context: {
+            ...base.context,
+            target_count: targets.length,
+            kw_count: (raw.keywords ?? []).length,
+          },
+        };
+      }
+
+      case 'trafego-mutate-bulk-update-status': {
+        const targets: Array<{
+          resourceType: 'campaign' | 'ad_group';
+          resourceName: string;
+        }> = [];
+        for (const t of raw.targets ?? []) {
+          if (t.type === 'campaign') {
+            const c = await this.requireCampaign(tenantId, t.id);
+            targets.push({
+              resourceType: 'campaign',
+              resourceName: `customers/${customerId}/campaigns/${c.google_campaign_id}`,
+            });
+          } else if (t.type === 'ad_group') {
+            const g = await this.requireAdGroup(tenantId, t.id);
+            targets.push({
+              resourceType: 'ad_group',
+              resourceName: `customers/${customerId}/adGroups/${g.google_ad_group_id}`,
+            });
+          } else {
+            throw new HttpException(
+              `bulk_update_status: type invalido "${t.type}" (esperado campaign|ad_group)`,
+              HttpStatus.BAD_REQUEST,
+            );
+          }
+        }
+        return {
+          ...base,
+          targets,
+          status: raw.status,
+          context: { ...base.context, target_count: targets.length },
+        };
+      }
+
       default:
         throw new HttpException(
           `Job de mutate nao suportado: ${jobName}`,
