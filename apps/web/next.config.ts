@@ -110,6 +110,16 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${backendUrl}/:path*`,
       },
+      // Landing page temporária da viagem em família (HTML estático em /public/passeio).
+      // Sem o rewrite, /passeio sem barra/extensão não resolve pro index.html.
+      {
+        source: "/passeio",
+        destination: "/passeio/index.html",
+      },
+      {
+        source: "/passeio/",
+        destination: "/passeio/index.html",
+      },
     ];
   },
   async redirects() {
