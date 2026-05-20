@@ -1,4 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { Request, Response } from 'express';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
@@ -260,6 +262,95 @@ class TrafficOAuthProvider {
   private codes = new Map<string, AuthorizationCode>();
   private accessTokens = new Map<string, StoredToken>();
   private refreshTokens = new Map<string, StoredToken>();
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    // Fix 2026-05-18 — carrega tokens persistidos no boot (se MCP_OAUTH_STORE_PATH
+    // setado). Sem isso, restart do servidor (deploy) zerava todos os tokens
+    // e o Cowork precisava refazer OAuth (causa das desconexoes reportadas).
+    this.loadFromDisk();
+  }
+
+  /**
+   * Carrega clients + tokens de disco. Descarta tokens/codes expirados.
+   * No-op se storePath nao setado OU arquivo nao existe (primeira run).
+   */
+  private loadFromDisk() {
+    const path = config.oauth.storePath;
+    if (!path || !existsSync(path)) return;
+    try {
+      const raw = readFileSync(path, 'utf8');
+      const data = JSON.parse(raw) as {
+        clients?: Array<[string, RegisteredClient]>;
+        accessTokens?: Array<[string, StoredToken]>;
+        refreshTokens?: Array<[string, StoredToken]>;
+      };
+      const now = Date.now();
+      let loadedClients = 0;
+      let loadedAccess = 0;
+      let loadedRefresh = 0;
+      for (const [k, v] of data.clients ?? []) {
+        this.clients.set(k, v);
+        loadedClients++;
+      }
+      for (const [k, v] of data.accessTokens ?? []) {
+        if (v.expiresAt > now) {
+          this.accessTokens.set(k, v);
+          loadedAccess++;
+        }
+      }
+      for (const [k, v] of data.refreshTokens ?? []) {
+        if (v.expiresAt > now) {
+          this.refreshTokens.set(k, v);
+          loadedRefresh++;
+        }
+      }
+      logger.info('oauth_store_loaded', {
+        path,
+        clients: loadedClients,
+        access_tokens: loadedAccess,
+        refresh_tokens: loadedRefresh,
+      });
+    } catch (e: any) {
+      logger.error('oauth_store_load_failed', {
+        path,
+        error_message: String(e?.message ?? e).slice(0, 300),
+      });
+      // Soft-fail: segue com store vazio (in-memory). Nao quebra o boot.
+    }
+  }
+
+  /**
+   * Persiste clients + tokens em disco (debounced 1s). Escrita atomica
+   * (temp + rename) pra nao corromper o arquivo se o processo morre no meio.
+   * Skip codes — sao efemeros (5min TTL), nao vale persistir.
+   */
+  private persist() {
+    const path = config.oauth.storePath;
+    if (!path) return; // in-memory only
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = setTimeout(() => {
+      try {
+        const dir = dirname(path);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        const payload = JSON.stringify({
+          clients: [...this.clients.entries()],
+          accessTokens: [...this.accessTokens.entries()],
+          refreshTokens: [...this.refreshTokens.entries()],
+          saved_at: Date.now(),
+        });
+        const tmp = `${path}.tmp`;
+        writeFileSync(tmp, payload, 'utf8');
+        renameSync(tmp, path);
+      } catch (e: any) {
+        logger.error('oauth_store_persist_failed', {
+          path,
+          error_message: String(e?.message ?? e).slice(0, 300),
+        });
+      }
+    }, 1000);
+    this.persistTimer.unref?.();
+  }
 
   registerClient(body: Record<string, unknown>) {
     const redirectUris = Array.isArray(body.redirect_uris)
@@ -285,6 +376,7 @@ class TrafficOAuthProvider {
     };
 
     this.clients.set(client.client_id, client);
+    this.persist();
     return client;
   }
 
@@ -314,6 +406,7 @@ class TrafficOAuthProvider {
     if (existing) {
       if (!existing.redirect_uris.includes(redirectUri)) {
         existing.redirect_uris.push(redirectUri);
+        this.persist();
       }
       return existing;
     }
@@ -334,6 +427,7 @@ class TrafficOAuthProvider {
     };
 
     this.clients.set(client.client_id, client);
+    this.persist();
     return client;
   }
 
@@ -404,6 +498,7 @@ class TrafficOAuthProvider {
 
     this.accessTokens.set(accessToken, { clientId, scopes, resource, expiresAt: accessExpiresAt });
     this.refreshTokens.set(refreshToken, { clientId, scopes, resource, expiresAt: refreshExpiresAt });
+    this.persist();
 
     return {
       access_token: accessToken,
@@ -425,6 +520,7 @@ class TrafficOAuthProvider {
   revoke(token: string) {
     this.accessTokens.delete(token);
     this.refreshTokens.delete(token);
+    this.persist();
   }
 }
 

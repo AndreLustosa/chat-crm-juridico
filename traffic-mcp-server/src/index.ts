@@ -144,6 +144,17 @@ app.post('/mcp', async (req, res) => {
     origin: req.headers.origin,
   });
 
+  // Log explicito quando o CLIENTE aborta a conexao no meio (Cowork
+  // desistiu/timeout do lado dele). Distingue de erro do servidor —
+  // ajuda a debugar o padrao de "desconexao" reportado em 2026-05-18.
+  req.on('aborted', () => {
+    logger.warn('mcp_request_aborted_by_client', {
+      request_id: reqId,
+      method_jsonrpc: req.body?.method,
+      duration_ms: Date.now() - startedAt,
+    });
+  });
+
   const server = await buildServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -174,6 +185,64 @@ app.all('/mcp', (_req, res) => {
   res.status(405).json({ error: 'Method not allowed. Use POST /mcp.' });
 });
 
-app.listen(config.port, () => {
+const httpServer = app.listen(config.port, () => {
   console.log(`Traffic MCP Server running on port ${config.port}`);
+});
+
+// ─── Estabilidade de conexao (2026-05-18) ──────────────────────────────────
+// Problema reportado: MCP desconectando do Cowork client com frequencia.
+// Transport eh stateless (sessionIdGenerator undefined) — cada POST /mcp eh
+// isolado, sem stream persistente. As "desconexoes" vinham de:
+//   1. Race condition de keep-alive com o reverse proxy (Traefik). Node
+//      fecha conexao keep-alive idle em 5s (default), mas o proxy mantem
+//      o socket aberto e reusa — quando manda request numa conexao que o
+//      Node ja fechou, da connection reset → Cowork marca disconnected.
+//   2. Deploy matava requests em voo (sem graceful shutdown).
+//
+// Fix:
+//   - keepAliveTimeout = 65s (> Traefik idle default ~60s) pra o Node NUNCA
+//     fechar antes do proxy. headersTimeout deve ser > keepAliveTimeout.
+//   - Graceful shutdown em SIGTERM/SIGINT: para de aceitar novas conexoes,
+//     drena as em voo, depois sai. Reduz janela de erro no deploy.
+httpServer.keepAliveTimeout = 65_000;
+httpServer.headersTimeout = 66_000;
+
+let shuttingDown = false;
+const gracefulShutdown = (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info('mcp_shutdown_start', { signal });
+  // Para de aceitar novas conexoes; aguarda as em voo terminarem.
+  httpServer.close((err) => {
+    if (err) {
+      logger.error('mcp_shutdown_error', { error_message: String(err) });
+      process.exit(1);
+    }
+    logger.info('mcp_shutdown_done', { signal });
+    process.exit(0);
+  });
+  // Hard-timeout: se requests em voo travarem, forca saida em 10s pra nao
+  // segurar o deploy indefinidamente.
+  setTimeout(() => {
+    logger.warn('mcp_shutdown_forced', { signal, reason: 'timeout_10s' });
+    process.exit(0);
+  }, 10_000).unref();
+};
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Logs de erros nao-tratados — sem isso, um throw async derruba o processo
+// silenciosamente e o orquestrador reinicia (parece "desconexao aleatoria").
+process.on('uncaughtException', (err) => {
+  logger.error('mcp_uncaught_exception', {
+    error_message: String(err?.message ?? err).slice(0, 500),
+    stack: err?.stack?.split('\n').slice(0, 5).join(' | '),
+  });
+  // NAO sai — loga e continua. Um erro num request nao deve derrubar o
+  // server inteiro (e com isso desconectar o Cowork).
+});
+process.on('unhandledRejection', (reason: any) => {
+  logger.error('mcp_unhandled_rejection', {
+    error_message: String(reason?.message ?? reason).slice(0, 500),
+  });
 });

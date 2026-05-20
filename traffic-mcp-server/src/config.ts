@@ -77,6 +77,16 @@ export const config = {
       optional('MCP_OAUTH_STATIC_CLIENT_REDIRECT_PREFIX'),
     ),
     scopes: ['mcp:tools'],
+    /**
+     * Path pra persistir clients + tokens OAuth em disco (sobrevive restart
+     * do servidor / deploy). Fix 2026-05-18: sem isso os tokens ficavam
+     * SO em memoria — cada deploy apagava tudo e forcava re-auth do Cowork,
+     * causando as "desconexoes" reportadas. Se NAO setado, mantem
+     * comportamento in-memory (sem regressao, mas vulneravel a restart).
+     * Em prod: setar pra path num VOLUME Docker (ex: /data/oauth-store.json)
+     * pra persistir entre containers.
+     */
+    storePath: optional('MCP_OAUTH_STORE_PATH'),
   },
   runtimeMode,
   cacheTtlMs: Number(process.env.CACHE_TTL_MS ?? DEFAULT_CACHE_TTL_MS),
