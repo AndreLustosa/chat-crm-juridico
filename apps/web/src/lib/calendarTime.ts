@@ -26,3 +26,21 @@ export function isCalendarEventOverdue(iso: string | null | undefined): boolean 
   if (!iso) return false;
   return new Date(iso).getTime() < Date.now() - BRT_OFFSET_MS;
 }
+
+/**
+ * True se o evento AINDA NAO venceu mas vence dentro da janela informada
+ * (default 24h = "falta 1 dia ou menos"). Usado pra destacar cards em
+ * amarelo como aviso antecipado (feature 2026-05-21, pedido Andre).
+ *
+ * Mesma convencao UTC-naive-BRT do isCalendarEventOverdue.
+ */
+export function isCalendarEventDueSoon(
+  iso: string | null | undefined,
+  withinMs: number = 24 * 60 * 60 * 1000,
+): boolean {
+  if (!iso) return false;
+  const due = new Date(iso).getTime();
+  const nowNaiveBrt = Date.now() - BRT_OFFSET_MS;
+  const diff = due - nowNaiveBrt;
+  return diff > 0 && diff <= withinMs;
+}

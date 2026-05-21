@@ -18,7 +18,7 @@ import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
 import { useSocket, useSocketEvent } from '@/lib/SocketProvider';
-import { isCalendarEventOverdue } from '@/lib/calendarTime';
+import { isCalendarEventOverdue, isCalendarEventDueSoon } from '@/lib/calendarTime';
 import dynamic from 'next/dynamic';
 
 const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
@@ -3047,6 +3047,7 @@ export default function AdvogadoPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {pendingHearings.map((d: any) => {
                       const isOverdue = isCalendarEventOverdue(d.start_at);
+                      const isDueSoon = !isOverdue && isCalendarEventDueSoon(d.start_at);
                       const caseId = d.legal_case_id || d.legal_case?.id;
                       // Processos ja em tracking abrem no painel lateral
                       // do menu Processos. Casos ainda na triagem continuam
@@ -3087,15 +3088,15 @@ export default function AdvogadoPage() {
                           title={caseId ? 'Abrir caso' : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
-                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
+                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : isDueSoon ? 'border-amber-500/50 bg-amber-500/5' : 'border-border'}`}
                         >
                           <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-amber-500/15 text-amber-400">
                               {d.type === 'PERICIA' ? 'PERÍCIA' : 'AUDIÊNCIA'}
                             </span>
-                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : isDueSoon ? 'text-amber-500' : 'text-muted-foreground'}`}>
                               {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às {new Date(d.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
-                              {isOverdue && ' (passada)'}
+                              {isOverdue ? ' (passada)' : isDueSoon ? ' (vence em breve)' : ''}
                             </span>
                           </div>
 
@@ -3259,6 +3260,7 @@ export default function AdvogadoPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {pendingTasks.map((d: any) => {
                       const isOverdue = isCalendarEventOverdue(d.start_at);
+                      const isDueSoon = !isOverdue && isCalendarEventDueSoon(d.start_at);
                       const caseId = d.legal_case_id || d.legal_case?.id;
                       // URL pro painel lateral do menu Processos — usada pelo
                       // botao "Abrir processo" (abre em nova aba pra nao tirar
@@ -3296,15 +3298,15 @@ export default function AdvogadoPage() {
                           title={caseId ? 'Abrir caso' : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
-                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
+                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : isDueSoon ? 'border-amber-500/50 bg-amber-500/5' : 'border-border'}`}
                         >
                           <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-blue-500/15 text-blue-400">
                               TAREFA
                             </span>
-                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : isDueSoon ? 'text-amber-500' : 'text-muted-foreground'}`}>
                               {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às {new Date(d.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
-                              {isOverdue && ' (vencida)'}
+                              {isOverdue ? ' (vencida)' : isDueSoon ? ' (vence em breve)' : ''}
                             </span>
                           </div>
 
@@ -3466,6 +3468,7 @@ export default function AdvogadoPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {deadlines.map((d: any) => {
                       const isOverdue = isCalendarEventOverdue(d.start_at);
+                      const isDueSoon = !isOverdue && isCalendarEventDueSoon(d.start_at);
                       const caseId = d.legal_case_id || d.legal_case?.id;
                       // URL pro painel lateral do menu Processos — usada pelo
                       // botao "Abrir processo" (abre em nova aba pra nao tirar
@@ -3508,16 +3511,16 @@ export default function AdvogadoPage() {
                           title={caseId ? 'Abrir caso' : undefined}
                           className={`bg-card border rounded-xl p-3 transition-all group ${
                             caseId ? 'cursor-pointer hover:border-primary/40 hover:shadow-sm' : ''
-                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : 'border-border'}`}
+                          } ${isOverdue ? 'border-red-500/40 bg-red-500/5' : isDueSoon ? 'border-amber-500/50 bg-amber-500/5' : 'border-border'}`}
                         >
                           {/* Header: tipo + data */}
                           <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${d.type === 'PRAZO' ? 'bg-red-500/15 text-red-400' : 'bg-blue-500/15 text-blue-400'}`}>
                               {d.type}
                             </span>
-                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : 'text-muted-foreground'}`}>
+                            <span className={`text-[10px] font-semibold ${isOverdue ? 'text-red-400' : isDueSoon ? 'text-amber-500' : 'text-muted-foreground'}`}>
                               {new Date(d.start_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às {new Date(d.start_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
-                              {isOverdue && ' (vencido)'}
+                              {isOverdue ? ' (vencido)' : isDueSoon ? ' (vence em breve)' : ''}
                             </span>
                           </div>
 
