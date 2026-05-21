@@ -18,6 +18,7 @@ import { formatPhone } from '@/lib/utils';
 import { LEGAL_STAGES, findLegalStage } from '@/lib/legalStages';
 import { useRole } from '@/lib/useRole';
 import { useSocket, useSocketEvent } from '@/lib/SocketProvider';
+import { isCalendarEventOverdue } from '@/lib/calendarTime';
 import dynamic from 'next/dynamic';
 
 const TiptapEditor = dynamic(() => import('@/components/TiptapEditor'), { ssr: false });
@@ -3045,7 +3046,7 @@ export default function AdvogadoPage() {
                 {showHearings && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {pendingHearings.map((d: any) => {
-                      const isOverdue = new Date(d.start_at) < new Date();
+                      const isOverdue = isCalendarEventOverdue(d.start_at);
                       const caseId = d.legal_case_id || d.legal_case?.id;
                       // Processos ja em tracking abrem no painel lateral
                       // do menu Processos. Casos ainda na triagem continuam
@@ -3257,7 +3258,7 @@ export default function AdvogadoPage() {
                 {showTasks && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {pendingTasks.map((d: any) => {
-                      const isOverdue = new Date(d.start_at) < new Date();
+                      const isOverdue = isCalendarEventOverdue(d.start_at);
                       const caseId = d.legal_case_id || d.legal_case?.id;
                       // URL pro painel lateral do menu Processos — usada pelo
                       // botao "Abrir processo" (abre em nova aba pra nao tirar
@@ -3464,7 +3465,7 @@ export default function AdvogadoPage() {
                 {showDeadlines && (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                     {deadlines.map((d: any) => {
-                      const isOverdue = new Date(d.start_at) < new Date();
+                      const isOverdue = isCalendarEventOverdue(d.start_at);
                       const caseId = d.legal_case_id || d.legal_case?.id;
                       // URL pro painel lateral do menu Processos — usada pelo
                       // botao "Abrir processo" (abre em nova aba pra nao tirar

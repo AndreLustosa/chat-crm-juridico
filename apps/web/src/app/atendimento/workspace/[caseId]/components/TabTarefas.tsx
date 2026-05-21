@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { showError } from '@/lib/toast';
+import { isCalendarEventOverdue } from '@/lib/calendarTime';
 import { EventModal, EVENT_TYPES } from '@/components/EventModal';
 import { EventActionButton } from '@/components/EventActionButton';
 import type { UserOption } from '@/components/EventModal';
@@ -194,7 +195,7 @@ export default function TabTarefas({
             const isDone = ev.status === 'CONCLUIDO';
             const ti = typeInfo(ev.type);
             const statusCfg = STATUS_CONFIG[ev.status] ?? STATUS_CONFIG.AGENDADO;
-            const isOverdue = !isDone && ev.status !== 'CANCELADO' && new Date(ev.start_at) < new Date();
+            const isOverdue = !isDone && ev.status !== 'CANCELADO' && isCalendarEventOverdue(ev.start_at);
             const daysOverdue = isOverdue
               ? Math.max(0, Math.floor((Date.now() - new Date(ev.start_at).getTime()) / 86400000))
               : 0;

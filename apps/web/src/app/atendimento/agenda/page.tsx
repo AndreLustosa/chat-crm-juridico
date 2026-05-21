@@ -20,6 +20,7 @@ import api, { API_BASE_URL } from '@/lib/api';
 import { useSocket } from '@/lib/SocketProvider';
 import { showError, showSuccess } from '@/lib/toast';
 import { playNotificationSound } from '@/lib/notificationSounds';
+import { isCalendarEventOverdue } from '@/lib/calendarTime';
 import { AvailabilityPicker } from '@/components/AvailabilityPicker';
 import { TasksPanel } from './TasksPanel';
 
@@ -1143,7 +1144,7 @@ export default function AgendaPage() {
                 const d = new Date(ev.start_at);
                 const typeColor = getEventColor(ev.type);
                 const priorityColor = PRIORITY_COLORS[ev.priority] ?? '#6b7280';
-                const isOverdue = new Date(ev.start_at) < new Date() && ev.status === 'AGENDADO';
+                const isOverdue = isCalendarEventOverdue(ev.start_at) && ev.status === 'AGENDADO';
                 return (
                   <button
                     key={ev.id}
@@ -1377,7 +1378,7 @@ export default function AgendaPage() {
                     <div className="flex flex-col gap-2 flex-1 overflow-y-auto custom-scrollbar pb-4">
                       {colEvents.map(ev => {
                         const priorityColor = PRIORITY_COLORS[ev.priority] ?? '#6b7280';
-                        const isOverdue = new Date(ev.start_at) < new Date() && col.id !== 'CONCLUIDO';
+                        const isOverdue = isCalendarEventOverdue(ev.start_at) && col.id !== 'CONCLUIDO';
                         const daysOverdue = isOverdue
                           ? Math.max(0, Math.floor((Date.now() - new Date(ev.start_at).getTime()) / 86400000))
                           : 0;
