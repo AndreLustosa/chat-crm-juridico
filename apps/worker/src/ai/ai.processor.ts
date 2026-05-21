@@ -702,8 +702,17 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     }
 
     // b. Status → Lead.stage
+    //
+    // Bug fix 2026-05-21 (Andre reportou tarefas duplicadas): a IA processa
+    // CADA mensagem do lead. Se o lead ja esta em AGUARDANDO_DOCS e manda
+    // varias mensagens, a IA reconfirma status=AGUARDANDO_DOCS toda vez —
+    // antes isso disparava a automacao de "Cobrar documentos" repetidamente
+    // (6 tarefas identicas em minutos no caso reportado). Agora so disparamos
+    // a automacao quando o stage REALMENTE MUDA (stageActuallyChanged).
     let resolvedStage: string | null = null;
+    let stageActuallyChanged = false;
     if (updates.status && updates.status !== 'null') {
+      const before = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { stage: true } });
       const stageData: Record<string, any> = { stage: updates.status, stage_entered_at: new Date() };
       // Se for PERDIDO, salvar loss_reason junto
       if (updates.status === 'PERDIDO' && updates.loss_reason) {
@@ -711,7 +720,8 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
       }
       await this.prisma.lead.update({ where: { id: leadId }, data: stageData });
       resolvedStage = updates.status;
-      this.logger.log(`[AI] Lead.stage → "${updates.status}"${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
+      stageActuallyChanged = before?.stage !== updates.status;
+      this.logger.log(`[AI] Lead.stage → "${updates.status}"${stageActuallyChanged ? '' : ' (sem mudança)'}${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
     } else if (!updates.status && updates.next_step) {
       // Se a IA enviou next_step mas esqueceu o status, inferir o stage automaticamente
       const inferMap: Record<string, string> = {
@@ -725,6 +735,7 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
       };
       const inferred = inferMap[updates.next_step];
       if (inferred) {
+        const before = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { stage: true } });
         const stageData: Record<string, any> = { stage: inferred, stage_entered_at: new Date() };
         // Quando lead é perdido, salvar motivo se fornecido
         if (inferred === 'PERDIDO' && updates.loss_reason) {
@@ -732,7 +743,8 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         }
         await this.prisma.lead.update({ where: { id: leadId }, data: stageData });
         resolvedStage = inferred;
-        this.logger.log(`[AI] Stage inferido do next_step "${updates.next_step}": ${inferred}${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
+        stageActuallyChanged = before?.stage !== inferred;
+        this.logger.log(`[AI] Stage inferido do next_step "${updates.next_step}": ${inferred}${stageActuallyChanged ? '' : ' (sem mudança)'}${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
       }
     } else if (updates.status === 'PERDIDO' && updates.loss_reason) {
       // Se a IA enviou PERDIDO diretamente no status, salvar loss_reason também
@@ -740,7 +752,10 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     }
 
     // === AUTOMAÇÃO: Criar tarefas automáticas baseado no novo stage ===
-    if (resolvedStage) {
+    // Só dispara em MUDANÇA REAL de stage (stageActuallyChanged) — antes
+    // disparava em toda mensagem que reconfirmava o mesmo stage, gerando
+    // tarefas duplicadas (bug 2026-05-21).
+    if (resolvedStage && stageActuallyChanged) {
       try {
         const conv = await (this.prisma as any).conversation.findUnique({
           where: { id: convoId },
@@ -760,19 +775,40 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
               where: { id: leadId },
               select: { name: true },
             });
-            await this.createCalendarEvent({
-              type: 'TAREFA',
-              title: `${taskTitle} — ${lead?.name || 'Lead'}`,
-              description: `Tarefa automática criada pela IA ao mover lead para ${resolvedStage}`,
-              start_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
-              assigned_user_id: lawyerId,
-              lead_id: leadId,
-              conversation_id: convoId,
-              created_by_id: lawyerId,
+            const fullTitle = `${taskTitle} — ${lead?.name || 'Lead'}`;
+
+            // Dedup defensivo: nao cria se ja existe uma tarefa pendente
+            // identica pro mesmo lead (cobre re-entrancia por qualquer
+            // outro caminho alem do stageActuallyChanged).
+            const existing = await (this.prisma as any).calendarEvent.findFirst({
+              where: {
+                lead_id: leadId,
+                type: 'TAREFA',
+                title: fullTitle,
+                status: { in: ['AGENDADO', 'CONFIRMADO'] },
+              },
+              select: { id: true },
             });
-            this.logger.log(
-              `[AI] Tarefa automática criada: "${taskTitle}" para advogado ${lawyerId}`,
-            );
+
+            if (existing) {
+              this.logger.log(
+                `[AI] Tarefa "${fullTitle}" ja existe pendente (${existing.id}) — pulando duplicata`,
+              );
+            } else {
+              await this.createCalendarEvent({
+                type: 'TAREFA',
+                title: fullTitle,
+                description: `Tarefa automática criada pela IA ao mover lead para ${resolvedStage}`,
+                start_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                assigned_user_id: lawyerId,
+                lead_id: leadId,
+                conversation_id: convoId,
+                created_by_id: lawyerId,
+              });
+              this.logger.log(
+                `[AI] Tarefa automática criada: "${taskTitle}" para advogado ${lawyerId}`,
+              );
+            }
           }
         }
       } catch (e: any) {
