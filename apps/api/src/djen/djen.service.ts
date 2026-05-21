@@ -10,7 +10,7 @@ import { CronRunnerService } from '../common/cron/cron-runner.service';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { isBusinessHours } from '../common/utils/business-hours.util';
 import { toCanonicalBrPhone, phoneVariants } from '../common/utils/phone';
-import { buildTokenParam } from '../common/utils/openai-token-param.util';
+import { buildTokenParam, usesMaxCompletionTokens } from '../common/utils/openai-token-param.util';
 import { BusinessDaysCalc } from '@crm/shared';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -1710,11 +1710,18 @@ ${pub.conteudo.slice(0, 6000)}`;
         if (!openaiKey) throw new BadRequestException('OPENAI_API_KEY não configurada. Configure em Ajustes > IA.');
 
         const openai = new OpenAI({ apiKey: openaiKey });
+        // Bug fix 2026-05-21 (Andre — "Nao foi possivel gerar o resumo"):
+        // Modelos gen 5.x/o-series (gpt-5.4-mini) usam REASONING TOKENS, e
+        // max_completion_tokens eh o teto TOTAL (reasoning + saida visivel).
+        // Com 2048, intimacoes longas/juridicas consumiam tudo no reasoning
+        // e sobrava ~0 pro JSON → content vazio/truncado → fallback silencioso.
+        // Subimos pra 8000 pra modelos com reasoning; 2048 segue pros antigos
+        // (gpt-4o-mini nao tem reasoning, nao precisa de margem).
+        const tokenBudget = usesMaxCompletionTokens(configuredModel) ? 8000 : 2048;
         const completion = await openai.chat.completions.create({
           model: configuredModel,
           temperature: 0.2,
-          // Bug fix 2026-05-12: usa max_completion_tokens pra modelos gen 5.x/4.1/o-series
-          ...buildTokenParam(configuredModel, 2048),
+          ...buildTokenParam(configuredModel, tokenBudget),
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: systemPrompt },
@@ -1722,7 +1729,20 @@ ${pub.conteudo.slice(0, 6000)}`;
           ],
         });
         raw = completion.choices[0]?.message?.content || '{}';
-        this.logger.log(`[DJEN/IA] OpenAI OK pubId=${id} model=${completion.model} tokens=${completion.usage?.total_tokens || '?'}`);
+        const finishReason = completion.choices[0]?.finish_reason;
+        const reasoningTokens = (completion.usage as any)?.completion_tokens_details?.reasoning_tokens;
+        this.logger.log(
+          `[DJEN/IA] OpenAI OK pubId=${id} model=${completion.model} tokens=${completion.usage?.total_tokens || '?'} ` +
+          `finish=${finishReason || '?'} reasoning_tokens=${reasoningTokens ?? '?'} content_len=${raw.length}`,
+        );
+        // Saida truncada por limite de tokens (reasoning consumiu o budget):
+        // erro claro em vez de cair no fallback "Nao foi possivel gerar".
+        if (finishReason === 'length' && raw.trim() === '{}') {
+          throw new BadRequestException(
+            'Análise truncada: o modelo consumiu o limite de tokens no raciocínio sem gerar o resultado. ' +
+            'Tente reanalisar — se persistir, troque para um modelo sem reasoning (ex: gpt-4o-mini) em Ajustes > IA.',
+          );
+        }
       }
     } catch (llmErr: any) {
       const status = llmErr?.status || llmErr?.response?.status;
@@ -1749,7 +1769,23 @@ ${pub.conteudo.slice(0, 6000)}`;
     }
 
     let parsed: any = {};
-    try { parsed = JSON.parse(raw); } catch { parsed = {}; }
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseErr: any) {
+      // Diagnostico 2026-05-21: antes caía silenciosamente no fallback
+      // "Nao foi possivel gerar". Agora loga o raw (truncado) pra debug.
+      this.logger.error(
+        `[DJEN/IA] JSON.parse falhou pubId=${id} — raw (primeiros 300 chars): ` +
+        `${String(raw).slice(0, 300)}`,
+      );
+      parsed = {};
+    }
+    if (!parsed.resumo) {
+      this.logger.warn(
+        `[DJEN/IA] parsed.resumo vazio pubId=${id} — análise caiu no fallback. ` +
+        `raw_len=${String(raw).length}, keys=[${Object.keys(parsed).join(',')}]`,
+      );
+    }
 
     // ─── Validacao de data ISO da IA ─────────────────────────────────────────
     //
