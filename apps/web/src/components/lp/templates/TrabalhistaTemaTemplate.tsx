@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LPSpecificThemeContent } from "@/types/landing-page-theme";
-import { trackWhatsappClick } from "../LPTracker";
+import { trackWhatsappClick, appendRefToWaLink } from "../LPTracker";
 
 interface TrabalhistaTemaTemplateProps {
   content: LPSpecificThemeContent;
@@ -89,7 +89,7 @@ export function TrabalhistaTemaTemplate({
 
   const handleCtaClick = () => {
     trackWhatsappClick();
-    window.open(waLink, "_blank");
+    window.open(appendRefToWaLink(waLink), "_blank");
   };
 
   return (

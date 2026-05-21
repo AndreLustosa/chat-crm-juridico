@@ -40,7 +40,7 @@ import {
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { LPTemplateContent, LPPracticeArea } from "@/types/landing-page";
-import { trackWhatsappClick } from "../LPTracker";
+import { trackWhatsappClick, appendRefToWaLink } from "../LPTracker";
 import {
   AlertTriangle,
   AlertCircle,
@@ -235,7 +235,7 @@ export function HighConversionTemplate({
   const handleCtaClick = () => {
     trackWhatsappClick();
     if (onWhatsAppClick) onWhatsAppClick();
-    window.open(waLink, "_blank");
+    window.open(appendRefToWaLink(waLink), "_blank");
   };
 
   return (

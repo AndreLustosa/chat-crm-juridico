@@ -6,6 +6,7 @@ export class TrackEventDto {
   page_path: string;
   event_type: 'view' | 'whatsapp_click';
   visitor_id?: string;
+  ref_code?: string; // EC for Leads — chave de matching gclid→lead (2026-05-21)
   utm_source?: string;
   utm_medium?: string;
   utm_campaign?: string;

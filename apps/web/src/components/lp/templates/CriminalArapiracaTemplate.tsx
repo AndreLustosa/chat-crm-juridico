@@ -17,7 +17,7 @@ import {
   Scale,
   Shield,
 } from "lucide-react";
-import { trackWhatsappClick } from "../LPTracker";
+import { trackWhatsappClick, appendRefToWaLink } from "../LPTracker";
 
 const whatsappNumber = "5582996390799";
 const whatsappHref = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
@@ -125,7 +125,7 @@ const faq = [
 
 function openWhatsapp() {
   trackWhatsappClick();
-  window.open(whatsappHref, "_blank", "noopener,noreferrer");
+  window.open(appendRefToWaLink(whatsappHref), "_blank", "noopener,noreferrer");
 }
 
 export function CriminalArapiracaTemplate() {

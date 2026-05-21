@@ -40,7 +40,7 @@ import {
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { LPTemplateContent } from "@/types/landing-page";
-import { trackWhatsappClick } from "../LPTracker";
+import { trackWhatsappClick, appendRefToWaLink } from "../LPTracker";
 
 interface HomeTemplateProps {
   content: LPTemplateContent;
@@ -152,7 +152,7 @@ export function HomeTemplate({
   const handleCtaClick = () => {
     trackWhatsappClick();
     if (typeof window !== "undefined" && waLink) {
-      window.open(waLink, "_blank", "noopener,noreferrer");
+      window.open(appendRefToWaLink(waLink), "_blank", "noopener,noreferrer");
     }
   };
 

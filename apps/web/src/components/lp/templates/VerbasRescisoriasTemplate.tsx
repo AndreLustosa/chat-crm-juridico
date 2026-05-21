@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   WalletCards,
 } from "lucide-react";
-import { trackWhatsappClick } from "../LPTracker";
+import { trackWhatsappClick, appendRefToWaLink } from "../LPTracker";
 import {
   calculationItems,
   calculatorFields,
@@ -39,7 +39,7 @@ const whatsappHref = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
 
 function openWhatsapp() {
   trackWhatsappClick();
-  window.open(whatsappHref, "_blank", "noopener,noreferrer");
+  window.open(appendRefToWaLink(whatsappHref), "_blank", "noopener,noreferrer");
 }
 
 function PrimaryButton({ children }: { children: ReactNode }) {

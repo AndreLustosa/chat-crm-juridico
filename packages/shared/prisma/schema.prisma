@@ -678,6 +678,11 @@ model LpEvent {
   page_path    String // "/", "/geral/arapiraca", "/lp/teste"
   event_type   String // "view" | "whatsapp_click"
   visitor_id   String?
+  // Codigo de referencia curto (AL-XXXXXX) derivado do visitor_id.
+  // Embutido no texto do wa.me; a 1a mensagem do lead no WhatsApp traz
+  // esse codigo → webhook busca o LpEvent → copia gclid pro Lead.
+  // Feature Enhanced Conversions for Leads (2026-05-21).
+  ref_code     String?
   utm_source   String?
   utm_medium   String?
   utm_campaign String?
@@ -689,6 +694,8 @@ model LpEvent {
 
   @@index([page_path, created_at])
   @@index([event_type])
+  // Lookup do webhook: ref_code + gclid presente, mais recente primeiro
+  @@index([ref_code, created_at])
 }
 
 model Sector {

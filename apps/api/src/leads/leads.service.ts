@@ -84,6 +84,72 @@ export class LeadsService {
     return lead;
   }
 
+  /**
+   * Enhanced Conversions for Leads (2026-05-21): quando uma mensagem do
+   * WhatsApp traz um código de referência (AL-XXXXXX), busca o LpEvent
+   * correspondente — que carrega o gclid do clique no anúncio Google — e
+   * copia a atribuição pro Lead. Com o gclid no lead, dispara onLeadCreated
+   * que faz o upload offline pro Google Ads (UploadClickConversions),
+   * fechando o loop de atribuição que antes morria no clique do wa.me.
+   *
+   * Idempotente: só age se o lead ainda não tem gclid. Totalmente silencioso
+   * (atribuição é best-effort — nunca quebra o fluxo de mensagem).
+   */
+  async attachAttributionFromRef(
+    leadId: string,
+    refCode: string,
+    tenantId?: string | null,
+  ): Promise<void> {
+    try {
+      const lead = await this.prisma.lead.findUnique({
+        where: { id: leadId },
+        select: { id: true, tenant_id: true, google_gclid: true } as any,
+      });
+      if (!lead) return;
+      if ((lead as any).google_gclid) return; // já atribuído — não reprocessa
+
+      // LpEvent mais recente com esse ref_code que carregue gclid
+      const ev = await (this.prisma as any).lpEvent.findFirst({
+        where: { ref_code: refCode, gclid: { not: null } },
+        orderBy: { created_at: 'desc' },
+        select: {
+          gclid: true, created_at: true,
+          utm_source: true, utm_medium: true, utm_campaign: true,
+          utm_term: true, utm_content: true,
+        },
+      });
+      if (!ev?.gclid) return;
+
+      await this.prisma.lead.update({
+        where: { id: leadId },
+        data: {
+          google_gclid: ev.gclid,
+          google_click_at: ev.created_at,
+          ...(ev.utm_source ? { utm_source: ev.utm_source } : {}),
+          ...(ev.utm_medium ? { utm_medium: ev.utm_medium } : {}),
+          ...(ev.utm_campaign ? { utm_campaign: ev.utm_campaign } : {}),
+          ...(ev.utm_term ? { utm_term: ev.utm_term } : {}),
+          ...(ev.utm_content ? { utm_content: ev.utm_content } : {}),
+        } as any,
+      });
+      this.logger.log(
+        `[trafego-attrib] Lead ${leadId} atribuído via ref ${refCode} (gclid=${String(ev.gclid).slice(0, 12)}…)`,
+      );
+
+      // Agora que o lead tem gclid, dispara a conversão offline.
+      const tid = tenantId || (lead as any).tenant_id;
+      if (tid) {
+        this.trafegoEvents
+          .onLeadCreated(leadId, tid)
+          .catch((err) =>
+            this.logger.warn(`[trafego-events] onLeadCreated (ref) lead=${leadId}: ${err}`),
+          );
+      }
+    } catch (e: any) {
+      this.logger.warn(`[trafego-attrib] Falha ao atribuir lead ${leadId} via ref ${refCode}: ${e.message}`);
+    }
+  }
+
   /** Dispara notificação de novo lead: atendente vinculado > inbox > operators do tenant. */
   private notifyNewLead(lead: Lead, inboxId?: string | null): void {
     this.chatGateway.emitNewLeadNotification(

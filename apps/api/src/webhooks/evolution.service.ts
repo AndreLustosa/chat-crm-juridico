@@ -263,6 +263,19 @@ export class EvolutionService implements OnApplicationBootstrap {
         inboxId, // isola notificacao de lead novo ao inbox do setor
       );
 
+      // 1a-bis. Enhanced Conversions for Leads (2026-05-21): se a mensagem
+      // do cliente traz o código de referência da LP (Ref: AL-XXXXXX),
+      // copia o gclid do clique no anúncio Google pro lead. So mensagens
+      // inbound; o leads.service ignora se o lead ja tem gclid (idempotente).
+      if (!isFromMe && messageContent) {
+        const refMatch = messageContent.match(/\bRef:\s*(AL-[A-Z0-9]{6})\b/i);
+        if (refMatch) {
+          this.leadsService
+            .attachAttributionFromRef(lead.id, refMatch[1].toUpperCase(), inbox?.tenant_id)
+            .catch(() => { /* best-effort, nunca bloqueia a mensagem */ });
+        }
+      }
+
       // 1b. Lead PERDIDO voltou a falar → reativar para QUALIFICANDO
       // Sem isso, a conversa existe mas fica invisível no inbox (filtro de stage).
       //
