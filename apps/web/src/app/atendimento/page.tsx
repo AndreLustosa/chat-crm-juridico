@@ -931,6 +931,32 @@ export default function Dashboard() {
     fetchSpecialists(true);
   }, [fetchConversations, fetchAdiadoConversations, fetchPendingTransfers, selectedInboxId, clientMode]);
 
+  // Deep-link 2026-05-21: ?openLead=<leadId> abre direto a conversa do lead.
+  // Usado pelo botao "Chat" dos cards de tarefa/prazo/audiencia no painel
+  // Advogado — Preparacao. Resolve a conversa via API (independe da aba
+  // Leads/Clientes estar carregada). Roda 1x no mount.
+  const openLeadHandledRef = useRef(false);
+  useEffect(() => {
+    if (openLeadHandledRef.current || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const openLead = params.get('openLead');
+    if (!openLead) return;
+    openLeadHandledRef.current = true;
+    // Limpa o param da URL pra nao reabrir em refresh
+    params.delete('openLead');
+    window.history.replaceState({}, '', window.location.pathname + (params.toString() ? `?${params}` : ''));
+    api.get(`/conversations/lead/${openLead}`, { _silent401: true } as any)
+      .then(res => {
+        const convs = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+        // Mais recente primeiro (por last_message_at) — abre a conversa ativa
+        const sorted = [...convs].sort((a: any, b: any) =>
+          new Date(b.last_message_at || b.updated_at || 0).getTime() -
+          new Date(a.last_message_at || a.updated_at || 0).getTime());
+        if (sorted[0]?.id) setSelectedId(sorted[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
   // Polling de transferências pendentes (30s) — resiliência caso o socket perca o evento
   // Pula quando offline para nao gerar cascata de Network Error no console
   useEffect(() => {

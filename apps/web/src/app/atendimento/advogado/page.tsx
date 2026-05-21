@@ -3125,9 +3125,25 @@ export default function AdvogadoPage() {
                           </div>
 
                           <div
-                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
+                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30 flex-wrap"
                             onClick={e => e.stopPropagation()}
                           >
+                            {/* Chat — abre a conversa do cliente no WhatsApp
+                                (deep-link /atendimento?openLead). Feature 2026-05-21. */}
+                            {(d.lead_id || d.legal_case?.lead?.id) && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  const lid = d.lead_id || d.legal_case?.lead?.id;
+                                  if (lid) router.push(`/atendimento?openLead=${lid}`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/20 transition-colors"
+                                title="Abrir conversa no WhatsApp"
+                              >
+                                <MessageSquare size={11} />
+                                Chat
+                              </button>
+                            )}
                             {/* Abrir processo no painel lateral do menu Processos
                                 (nova aba pra nao tirar o operador da Triagem). So
                                 aparece quando o caso ja esta em tracking. */}
@@ -3335,9 +3351,25 @@ export default function AdvogadoPage() {
                           </div>
 
                           <div
-                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
+                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30 flex-wrap"
                             onClick={e => e.stopPropagation()}
                           >
+                            {/* Chat — abre a conversa do cliente no WhatsApp
+                                (deep-link /atendimento?openLead). Feature 2026-05-21. */}
+                            {(d.lead_id || d.legal_case?.lead?.id) && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  const lid = d.lead_id || d.legal_case?.lead?.id;
+                                  if (lid) router.push(`/atendimento?openLead=${lid}`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/20 transition-colors"
+                                title="Abrir conversa no WhatsApp"
+                              >
+                                <MessageSquare size={11} />
+                                Chat
+                              </button>
+                            )}
                             {processoHref && caseId && (
                               <button
                                 onClick={e => {
@@ -3668,9 +3700,25 @@ export default function AdvogadoPage() {
 
                           {/* Botoes de acao — stopPropagation pra nao disparar o onClick do card */}
                           <div
-                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30"
+                            className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/30 flex-wrap"
                             onClick={e => e.stopPropagation()}
                           >
+                            {/* Chat — abre a conversa do cliente no WhatsApp
+                                (deep-link /atendimento?openLead). Feature 2026-05-21. */}
+                            {(d.lead_id || d.legal_case?.lead?.id) && (
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  const lid = d.lead_id || d.legal_case?.lead?.id;
+                                  if (lid) router.push(`/atendimento?openLead=${lid}`);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-bold hover:bg-emerald-500/20 transition-colors"
+                                title="Abrir conversa no WhatsApp"
+                              >
+                                <MessageSquare size={11} />
+                                Chat
+                              </button>
+                            )}
                             {processoHref && caseId && (
                               <button
                                 onClick={e => {
@@ -4080,8 +4128,10 @@ export default function AdvogadoPage() {
           onRefresh={() => { setInlineProcessoCase(null); fetchCases(true); }}
           onOpenClientPanel={() => {/* Nao expomos painel do cliente aqui — fecha o painel pra evitar empilhamento */ setInlineProcessoCase(null);}}
           onOpenChat={(lc: any) => {
-            // Fluxo simples: redireciona pro inbox do lead
-            if (lc?.lead_id) router.push(`/atendimento/inbox?leadId=${lc.lead_id}`);
+            // Deep-link pro chat do lead. Fix 2026-05-21: rota correta eh
+            // /atendimento (nao /atendimento/inbox que nao existe) + param
+            // openLead resolvido pela pagina de chat.
+            if (lc?.lead_id) router.push(`/atendimento?openLead=${lc.lead_id}`);
           }}
         />
       )}
