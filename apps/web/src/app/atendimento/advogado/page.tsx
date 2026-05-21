@@ -1919,7 +1919,8 @@ export default function AdvogadoPage() {
   const reanalyzeDeadlineAi = useCallback(async (deadlineId: string, djenPubId: string) => {
     setReanalyzingDeadlineId(deadlineId);
     try {
-      const res = await api.post(`/djen/${djenPubId}/analyze`, { force: true });
+      // timeout 90s: analise IA (reasoning) pode passar dos 15s default (2026-05-21)
+      const res = await api.post(`/djen/${djenPubId}/analyze`, { force: true }, { timeout: 90000 });
       // Refetch pra pegar a publicacao atualizada via calendar
       const evRes = await api.get(`/calendar/events/${deadlineId}`);
       if (evRes.data?.djen_publication) {

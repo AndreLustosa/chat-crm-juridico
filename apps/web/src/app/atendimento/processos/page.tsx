@@ -1421,7 +1421,8 @@ export function ProcessoDetailPanel({
       return next;
     });
     try {
-      const res = await api.post(`/djen/${pubId}/analyze`, { force });
+      // timeout 90s: analise IA (reasoning) pode passar dos 15s default (2026-05-21)
+      const res = await api.post(`/djen/${pubId}/analyze`, { force }, { timeout: 90000 });
       setDjenAnalyses(prev => ({ ...prev, [pubId]: res.data }));
     } catch (err: any) {
       const msg = err?.response?.data?.message

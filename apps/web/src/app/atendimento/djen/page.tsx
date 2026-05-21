@@ -463,7 +463,9 @@ function CreateProcessModal({
     if (preloadedAnalysis) return;
     let cancelled = false;
     setAnalyzingAi(true);
-    api.post(`/djen/${pub.id}/analyze`)
+    // timeout 90s: analise IA com modelo de reasoning (gpt-5.4-mini) sobre
+    // intimacao longa pode passar dos 15s default do axios (bug 2026-05-21).
+    api.post(`/djen/${pub.id}/analyze`, {}, { timeout: 90000 })
       .then(res => {
         if (cancelled) return;
         const data: AiAnalysis = res.data;
@@ -1394,7 +1396,7 @@ function AiPanel({
     setCreatingByIdx(new Set());
     setStageMoved(false);
 
-    api.post(`/djen/${pub.id}/analyze`, { force })
+    api.post(`/djen/${pub.id}/analyze`, { force }, { timeout: 90000 })
       .then(res => setAnalysis(res.data))
       .catch((err: any) => {
         // Bug fix 2026-05-12 (DJEN IA nao funcionava):
@@ -1551,7 +1553,9 @@ function AiPanel({
     setNotifyingClient(true);
     setNotifyError(null);
     try {
-      await api.post(`/djen/${pub.id}/notify-client`, { force });
+      // timeout 90s: notify-client garante analise IA atualizada antes de
+      // enviar, entao herda a latencia do modelo de reasoning.
+      await api.post(`/djen/${pub.id}/notify-client`, { force }, { timeout: 90000 });
       setClientNotifiedNow(true);
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.message || 'Erro desconhecido';
