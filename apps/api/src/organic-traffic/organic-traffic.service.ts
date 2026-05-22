@@ -1427,6 +1427,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias/contrato-de-experiencia`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias/contrato-de-experiencia',
+        title: 'Arapiraca - Contrato de Experiencia',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'contrato de experiencia arapiraca',
+          'rescisao contrato de experiencia arapiraca',
+          'demissao antes do fim da experiencia arapiraca',
+          'art 479 clt contrato de experiencia',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',

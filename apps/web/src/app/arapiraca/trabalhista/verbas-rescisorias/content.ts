@@ -103,6 +103,7 @@ export const rescisionTypes = [
   },
   {
     title: "Contrato de experiência",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/contrato-de-experiencia",
     summary:
       "O cálculo muda conforme o contrato terminou no prazo ou foi encerrado antes pela empresa ou pelo trabalhador.",
     items: [
