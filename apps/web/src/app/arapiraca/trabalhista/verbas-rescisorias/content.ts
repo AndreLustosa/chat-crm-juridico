@@ -77,6 +77,7 @@ export const rescisionTypes = [
   },
   {
     title: "Rescisão indireta",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/rescisao-indireta",
     summary:
       "É a justa causa do empregador. Quando reconhecida, pode gerar verbas como na dispensa sem justa causa.",
     items: [
@@ -90,6 +91,7 @@ export const rescisionTypes = [
   },
   {
     title: "Rescisão por acordo",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/rescisao-por-acordo",
     summary:
       "Na rescisão consensual, há regras próprias para aviso-prévio, multa do FGTS, saque do FGTS e ausência de seguro-desemprego.",
     items: [

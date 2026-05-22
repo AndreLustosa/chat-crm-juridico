@@ -48,6 +48,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.88,
     },
     {
+      url: `${baseUrl}/arapiraca/trabalhista/verbas-rescisorias/rescisao-indireta`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.88,
+    },
+    {
+      url: `${baseUrl}/arapiraca/trabalhista/verbas-rescisorias/rescisao-por-acordo`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.88,
+    },
+    {
       url: `${baseUrl}/arapiraca/criminal`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
