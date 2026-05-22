@@ -569,3 +569,76 @@
     linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   TEMA "FUTURISTA" (aurum) — 6º tema, aplica o visual JurisFlow no
+   sistema INTEIRO via CSS vars semânticas (2026-05-22, aprovacao Andre).
+   Reversivel: e so trocar de tema. Conservador em performance — usa
+   gradientes de fundo + acentos dourados, SEM backdrop-blur global
+   (blur pesado fica so no cockpit).
+   ══════════════════════════════════════════════════════════════════ */
+@layer base {
+  [data-theme="aurum"] {
+    --bg-primary: #05070d;     /* void */
+    --bg-secondary: #0f1421;   /* surface — vira o card */
+    --bg-tertiary: #161d2d;    /* elevated */
+    --bg-elevated: #1c2438;
+    --bg-hover: #1e2738;
+
+    --accent-primary: #e6be6a;   /* aurum */
+    --accent-secondary: #f7dba0;
+
+    --text-primary: #f4f2ec;   /* ink-1 */
+    --text-secondary: #a6aec0; /* ink-2 */
+    --text-muted: #6a748a;     /* ink-3 */
+
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.10);
+  }
+}
+
+/* Atmosfera de fundo — glows dourado/jade/azure fixos atras de todo o
+   conteudo. background-attachment:fixed mantem ao rolar. Sem animacao
+   (animar background-position custa caro). */
+[data-theme="aurum"] body {
+  background-color: #05070d;
+  background-image:
+    radial-gradient(60vh 60vh at 10% 6%, rgba(230, 190, 106, 0.10), transparent 60%),
+    radial-gradient(55vh 55vh at 90% 30%, rgba(67, 224, 160, 0.065), transparent 60%),
+    radial-gradient(50vh 50vh at 50% 102%, rgba(91, 157, 255, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Scrollbar dourada */
+[data-theme="aurum"] ::-webkit-scrollbar-thumb {
+  background: rgba(230, 190, 106, 0.22);
+  border-radius: 999px;
+}
+[data-theme="aurum"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(230, 190, 106, 0.4);
+}
+
+/* Selecao de texto dourada */
+[data-theme="aurum"] ::selection {
+  background: rgba(230, 190, 106, 0.28);
+  color: #fff;
+}
+
+/* Botoes primarios (acao dourada) ganham glow sutil */
+[data-theme="aurum"] .bg-primary {
+  box-shadow: 0 6px 22px -10px rgba(230, 190, 106, 0.55);
+}
+
+/* Cards/superficies (bg-card e bg-secondary) ganham leve gradiente +
+   borda hairline pra dar profundidade glass — sem blur (performance). */
+[data-theme="aurum"] .bg-card,
+[data-theme="aurum"] .bg-secondary {
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0));
+}
+
+/* Transicoes suaves em elementos interativos (sensacao "premium") */
+[data-theme="aurum"] button,
+[data-theme="aurum"] a,
+[data-theme="aurum"] [role="button"] {
+  transition: color 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}

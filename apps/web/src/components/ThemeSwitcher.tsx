@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Palette } from 'lucide-react';
 
 export const THEMES = [
+  { id: 'aurum', name: 'Futurista', color: '#05070d', accent: '#e6be6a', dark: true },
   { id: 'escuro', name: 'Escuro', color: '#000000', accent: '#a1773d', dark: true },
   { id: 'claro', name: 'Claro', color: '#ffffff', accent: '#8b6630', dark: false },
   { id: 'rose', name: 'Rosé', color: '#fdf2f3', accent: '#c4254a', dark: false },
