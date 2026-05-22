@@ -135,16 +135,20 @@ export default function CockpitPage() {
     .map(s => ({ label: STAGE_LABEL[s.stage] || s.stage, value: s.count, color: STAGE_COLOR[s.stage] || '#A6AEC0' }));
 
   return (
-    <div className="relative min-h-full overflow-hidden bg-[#05070d] text-ink-1">
-      {/* Atmosphere — contido na area de conteudo (absolute, nao fixed) */}
-      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(120%_120%_at_50%_-10%,#0c1322_0%,#070a12_45%,#05070d_100%)]" />
-        <div className="absolute -left-[12%] -top-[18%] h-[60vh] w-[60vh] rounded-full bg-[radial-gradient(circle,rgba(230,190,106,0.16),transparent_62%)] blur-3xl animate-aurum-drift" />
-        <div className="absolute -right-[10%] top-[28%] h-[55vh] w-[55vh] rounded-full bg-[radial-gradient(circle,rgba(67,224,160,0.10),transparent_60%)] blur-3xl animate-aurum-drift-slow" />
-        <div className="absolute inset-0 aurum-grid-fade [background-size:64px_64px] [mask-image:radial-gradient(120%_90%_at_50%_0%,#000_30%,transparent_75%)]" />
-      </div>
+    // Externo rola (h-full overflow-y-auto) — o <main> pai tem overflow-hidden,
+    // entao cada pagina gerencia seu proprio scroll (padrao do dashboard).
+    // Bug fix 2026-05-22: antes era min-h-full + overflow-hidden, que travava.
+    <div className="h-full overflow-y-auto bg-[#05070d] text-ink-1">
+      <div className="relative min-h-full">
+        {/* Atmosphere — absolute dentro do wrapper que cresce com o conteudo */}
+        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(120%_120%_at_50%_-10%,#0c1322_0%,#070a12_45%,#05070d_100%)]" />
+          <div className="absolute -left-[12%] -top-[18%] h-[60vh] w-[60vh] rounded-full bg-[radial-gradient(circle,rgba(230,190,106,0.16),transparent_62%)] blur-3xl animate-aurum-drift" />
+          <div className="absolute -right-[10%] top-[28%] h-[55vh] w-[55vh] rounded-full bg-[radial-gradient(circle,rgba(67,224,160,0.10),transparent_60%)] blur-3xl animate-aurum-drift-slow" />
+          <div className="absolute inset-0 aurum-grid-fade [background-size:64px_64px] [mask-image:radial-gradient(120%_90%_at_50%_0%,#000_30%,transparent_75%)]" />
+        </div>
 
-      <div className="relative z-10 mx-auto max-w-[1400px] space-y-5 p-5 lg:p-7">
+        <div className="relative z-10 mx-auto max-w-[1400px] space-y-5 p-5 lg:p-7">
         {/* Greeting */}
         <Reveal>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -369,6 +373,7 @@ export default function CockpitPage() {
             <ShortcutCard icon={<TrendingUp className="h-4 w-4" />} label="Dashboard" sub="Métricas completas" onClick={() => router.push('/atendimento/dashboard')} />
           </div>
         </Reveal>
+        </div>
       </div>
     </div>
   );
