@@ -8,7 +8,7 @@ import {
   MessageSquare, Search, Scale, BookOpen, Calendar,
   LayoutDashboard, Gavel, Wallet, HelpCircle,
   ChevronRight, ClipboardList, Sparkles, Wrench,
-  TrendingUp,
+  TrendingUp, Gauge,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { API_BASE_URL } from '@/lib/api';
@@ -243,6 +243,13 @@ export function Sidebar() {
 
   // ─── Itens por grupo ──────────────────────────────────────────────
   const allItems: Record<string, NavItem> = {
+    cockpit: {
+      label: 'Cockpit',
+      href: '/atendimento/cockpit',
+      icon: <Gauge size={20} strokeWidth={2} />,
+      match: (p) => p.startsWith('/atendimento/cockpit'),
+      show: perms.canViewDashboard, // mesma permissao do Dashboard
+    },
     dashboard: {
       label: 'Dashboard',
       href: '/atendimento/dashboard',
@@ -366,7 +373,7 @@ export function Sidebar() {
     {
       id: 'principal',
       label: 'Principal',
-      items: [allItems.dashboard, allItems.inbox, allItems.crm, allItems.contacts, allItems.agenda].filter(i => i.show),
+      items: [allItems.cockpit, allItems.dashboard, allItems.inbox, allItems.crm, allItems.contacts, allItems.agenda].filter(i => i.show),
     },
     {
       id: 'juridico',
