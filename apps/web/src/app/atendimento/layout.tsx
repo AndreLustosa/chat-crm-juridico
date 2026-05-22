@@ -9,7 +9,7 @@ import { NewDelegationModal } from '@/components/NewDelegationModal';
 import {
   MessageSquare, Briefcase, Users, Check, FileEdit, BookOpen,
   Megaphone, Settings, Palette, LogOut, MoreHorizontal, X, Calendar,
-  LayoutDashboard, FileText, Gavel,
+  LayoutDashboard, FileText, Gavel, Sparkles,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useRole } from '@/lib/useRole';
@@ -193,6 +193,8 @@ export default function AtendimentoLayout({ children }: { children: React.ReactN
   ];
 
   const allMoreItems = [
+    // Cockpit — home "futurista" (piloto 2026-05-22). Reusa a permissao do dashboard.
+    { label: 'Cockpit', href: '/atendimento/cockpit', icon: Sparkles, match: (p: string) => p.startsWith('/atendimento/cockpit'), show: perms.canViewDashboard },
     { label: 'Dashboard', href: '/atendimento/dashboard', icon: LayoutDashboard, match: (p: string) => p.startsWith('/atendimento/dashboard'), show: perms.canViewDashboard },
     { label: 'Agenda & Tarefas', href: '/atendimento/agenda', icon: Calendar, match: (p: string) => p.startsWith('/atendimento/agenda') || p.startsWith('/atendimento/tasks'), badge: overdueCount, show: true },
     { label: 'Triagem e Peticionamento', href: '/atendimento/advogado', icon: FileEdit, match: (p: string) => p.startsWith('/atendimento/advogado'), show: perms.canViewAdvogado },

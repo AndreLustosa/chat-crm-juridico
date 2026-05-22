@@ -458,3 +458,114 @@
 [data-theme="verde"] .text-orange-600 {
   color: #9a3412 !important; /* orange-800 */
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   AURUM — Design system "futurista" (piloto 2026-05-22, ref JurisFlow)
+   Tokens + classes self-contained usados pela tela /atendimento/cockpit.
+   Aditivo: NAO altera os 5 temas existentes. As classes .glass/.glow/etc
+   sao dark-glass por natureza (a tela cockpit roda dark independente do
+   tema ativo, como experiencia premium isolada).
+   ══════════════════════════════════════════════════════════════════ */
+
+@theme {
+  --color-aurum-deep: #a87b32;
+  --color-aurum: #e6be6a;
+  --color-aurum-bright: #f7dba0;
+  --color-jade-deep: #1f7a57;
+  --color-jade: #43e0a0;
+  --color-jade-bright: #86f5c8;
+  --color-crimson-deep: #a8324a;
+  --color-crimson: #ff5c72;
+  --color-crimson-bright: #ff9aa9;
+  --color-azure: #5b9dff;
+  --color-azure-bright: #a8c9ff;
+  --color-ink-1: #f4f2ec;
+  --color-ink-2: #a6aec0;
+  --color-ink-3: #6a748a;
+  --color-ink-4: #454e62;
+
+  --animate-aurum-drift: aurum-drift 18s ease-in-out infinite;
+  --animate-aurum-drift-slow: aurum-drift-slow 24s ease-in-out infinite;
+  --animate-aurum-pulse-ring: aurum-pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-aurum-fade-up: aurum-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes aurum-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(2%, -3%, 0) scale(1.08); }
+}
+@keyframes aurum-drift-slow {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); }
+  50% { transform: translate3d(-3%, 2%, 0) scale(1); }
+}
+@keyframes aurum-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(67, 224, 160, 0.5); }
+  70% { box-shadow: 0 0 0 7px rgba(67, 224, 160, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(67, 224, 160, 0); }
+}
+@keyframes aurum-fade-up {
+  0% { opacity: 0; transform: translateY(14px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Frosted glass panel */
+.aurum-glass {
+  background: linear-gradient(160deg, rgba(22, 29, 45, 0.72) 0%, rgba(15, 20, 33, 0.62) 100%);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Hairline gold gradient border via mask */
+.aurum-ring-gold { position: relative; }
+.aurum-ring-gold::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(247, 219, 160, 0.55), rgba(230, 190, 106, 0.08) 40%, transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.aurum-stat-mono {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.aurum-text-gradient {
+  background: linear-gradient(100deg, #f7dba0, #e6be6a 45%, #a87b32);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.aurum-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #05070d;
+  transition: all 0.3s;
+  background: linear-gradient(100deg, #f7dba0, #e6be6a 55%, #cf9f48);
+  box-shadow: 0 10px 30px -10px rgba(230, 190, 106, 0.6);
+}
+.aurum-btn:hover {
+  box-shadow: 0 14px 38px -8px rgba(230, 190, 106, 0.75);
+  transform: translateY(-1px);
+}
+
+/* Grid fade background */
+.aurum-grid-fade {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+}
