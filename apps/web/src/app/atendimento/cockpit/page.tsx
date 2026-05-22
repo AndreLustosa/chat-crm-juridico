@@ -370,7 +370,7 @@ export default function CockpitPage() {
             <ShortcutCard icon={<MessageSquare className="h-4 w-4" />} label="Inbox" sub={`${data.conversations.open} abertas`} onClick={() => router.push('/atendimento')} />
             <ShortcutCard icon={<Scale className="h-4 w-4" />} label="Processos" sub={`${data.trackingCases.total} ativos`} onClick={() => router.push('/atendimento/processos')} />
             <ShortcutCard icon={<Sparkles className="h-4 w-4" />} label="Triagem" sub={`${data.tasks.pending} tarefas`} onClick={() => router.push('/atendimento/advogado')} />
-            <ShortcutCard icon={<TrendingUp className="h-4 w-4" />} label="Dashboard" sub="Métricas completas" onClick={() => router.push('/atendimento/dashboard')} />
+            <ShortcutCard icon={<TrendingUp className="h-4 w-4" />} label="Análises" sub="Métricas completas" onClick={() => router.push('/atendimento/dashboard')} />
           </div>
         </Reveal>
         </div>

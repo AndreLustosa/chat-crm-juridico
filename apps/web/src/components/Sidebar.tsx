@@ -243,15 +243,19 @@ export function Sidebar() {
 
   // ─── Itens por grupo ──────────────────────────────────────────────
   const allItems: Record<string, NavItem> = {
+    // Cockpit virou o "Dashboard" principal (2026-05-22, aprovacao Andre).
+    // O label mostra "Dashboard"; a rota continua /atendimento/cockpit.
     cockpit: {
-      label: 'Cockpit',
+      label: 'Dashboard',
       href: '/atendimento/cockpit',
       icon: <Gauge size={20} strokeWidth={2} />,
       match: (p) => p.startsWith('/atendimento/cockpit'),
-      show: perms.canViewDashboard, // mesma permissao do Dashboard
+      show: perms.canViewDashboard,
     },
+    // Dashboard analitico antigo preservado como "Análises" (team
+    // performance, comparacoes, charts, export PDF) — movido pra Gestao.
     dashboard: {
-      label: 'Dashboard',
+      label: 'Análises',
       href: '/atendimento/dashboard',
       icon: <LayoutDashboard size={20} strokeWidth={2} />,
       match: (p) => p.startsWith('/atendimento/dashboard'),
@@ -373,7 +377,7 @@ export function Sidebar() {
     {
       id: 'principal',
       label: 'Principal',
-      items: [allItems.cockpit, allItems.dashboard, allItems.inbox, allItems.crm, allItems.contacts, allItems.agenda].filter(i => i.show),
+      items: [allItems.cockpit, allItems.inbox, allItems.crm, allItems.contacts, allItems.agenda].filter(i => i.show),
     },
     {
       id: 'juridico',
@@ -383,7 +387,7 @@ export function Sidebar() {
     {
       id: 'gestao',
       label: 'Gestão',
-      items: [allItems.followup, allItems.financeiro, allItems.analytics, allItems.trafego].filter(i => i.show),
+      items: [allItems.dashboard, allItems.followup, allItems.financeiro, allItems.analytics, allItems.trafego].filter(i => i.show),
     },
     {
       id: 'ferramentas',
