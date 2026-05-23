@@ -995,16 +995,11 @@ export class DjenService {
   // ─── Helper de filtro multi-tenant ──────────────────────────────────
   // Bug fix 2026-05-08: DjenPublication ganhou tenant_id direto. Use
   // este helper em TODAS as queries pra evitar leak entre tenants.
-  // Ate completar backfill, aceita pubs com tenant_id=NULL (legadas) +
-  // pubs do tenant atual via OR.
+  // Backfill + NOT NULL aplicados (Fase 0.5b-1, 2026-05-23): toda publicação
+  // tem tenant_id, então filtramos só pelo tenant (sem mais o OR null legado).
   private tenantWhere(tenantId?: string): any {
     if (!tenantId) return {};
-    return {
-      OR: [
-        { tenant_id: tenantId },
-        { tenant_id: null }, // legadas pre-backfill — remover apos NOT NULL
-      ],
-    };
+    return { tenant_id: tenantId };
   }
 
   async findRecent(days = 7, tenantId?: string) {

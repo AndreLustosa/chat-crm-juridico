@@ -234,13 +234,13 @@ export class CalendarController {
   @Patch('appointment-types/:id')
   @Roles('ADMIN')
   updateAppointmentType(@Param('id') id: string, @Body() data: UpdateAppointmentTypeDto, @Request() req: any) {
-    return this.calendarService.updateAppointmentType(id, data, req.user?.id);
+    return this.calendarService.updateAppointmentType(id, data, req.user?.id, req.user?.tenant_id);
   }
 
   @Delete('appointment-types/:id')
   @Roles('ADMIN')
   deleteAppointmentType(@Param('id') id: string, @Request() req: any) {
-    return this.calendarService.deleteAppointmentType(id, req.user?.id);
+    return this.calendarService.deleteAppointmentType(id, req.user?.id, req.user?.tenant_id);
   }
 
   // ─── Holidays ─────────────────────────────────────────
@@ -262,13 +262,13 @@ export class CalendarController {
   @Patch('holidays/:id')
   @Roles('ADMIN')
   updateHoliday(@Param('id') id: string, @Body() data: UpdateHolidayDto, @Request() req: any) {
-    return this.calendarService.updateHoliday(id, data, req.user?.id);
+    return this.calendarService.updateHoliday(id, data, req.user?.id, req.user?.tenant_id);
   }
 
   @Delete('holidays/:id')
   @Roles('ADMIN')
   deleteHoliday(@Param('id') id: string, @Request() req: any) {
-    return this.calendarService.deleteHoliday(id, req.user?.id);
+    return this.calendarService.deleteHoliday(id, req.user?.id, req.user?.tenant_id);
   }
 
   // ─── Search ───────────────────────────────────────────

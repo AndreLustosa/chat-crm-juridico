@@ -88,13 +88,17 @@ export class FollowupService {
   async updateSequence(id: string, data: Partial<{
     name: string; description: string; category: string; active: boolean;
     auto_enroll_stages: string[]; max_attempts: number;
-  }>) {
+  }>, tenantId?: string) {
+    const existing = await this.prisma.followupSequence.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Sequência não encontrada');
     return this.prisma.followupSequence.update({ where: { id }, data,
       include: { steps: { orderBy: { position: 'asc' } } },
     });
   }
 
-  async deleteSequence(id: string) {
+  async deleteSequence(id: string, tenantId?: string) {
+    const existing = await this.prisma.followupSequence.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Sequência não encontrada');
     // Cancelar enrollments ativos antes de deletar
     await this.prisma.followupEnrollment.updateMany({
       where: { sequence_id: id, status: { in: ['ATIVO', 'PAUSADO'] } },
@@ -922,9 +926,9 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
     });
   }
 
-  async getBroadcast(id: string) {
-    const broadcast = await this.prisma.broadcastJob.findUnique({
-      where: { id },
+  async getBroadcast(id: string, tenantId?: string) {
+    const broadcast = await this.prisma.broadcastJob.findFirst({
+      where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) },
       include: {
         items: {
           orderBy: { created_at: 'asc' },
@@ -937,8 +941,8 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
     return broadcast;
   }
 
-  async cancelBroadcast(id: string) {
-    const broadcast = await this.prisma.broadcastJob.findUnique({ where: { id } });
+  async cancelBroadcast(id: string, tenantId?: string) {
+    const broadcast = await this.prisma.broadcastJob.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) } });
     if (!broadcast) throw new NotFoundException('Disparo não encontrado');
     if (broadcast.status !== 'ENVIANDO' && broadcast.status !== 'PAUSADO_AUTO') {
       throw new BadRequestException('Disparo não está em andamento');
@@ -965,9 +969,9 @@ Gere APENAS o texto da mensagem, sem introduções ou explicações.`;
    * "Retomar" no UI. Aqui re-enfileiramos os itens PENDENTE no BullMQ com
    * delay escalonado pra reconstruir a fila perdida.
    */
-  async resumeBroadcast(id: string) {
-    const broadcast = await this.prisma.broadcastJob.findUnique({
-      where: { id },
+  async resumeBroadcast(id: string, tenantId?: string) {
+    const broadcast = await this.prisma.broadcastJob.findFirst({
+      where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) },
       include: { items: { where: { status: 'PENDENTE' }, orderBy: { created_at: 'asc' } } },
     });
     if (!broadcast) throw new NotFoundException('Disparo não encontrado');

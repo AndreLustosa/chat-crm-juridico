@@ -49,12 +49,12 @@ export class FollowupController {
   createSequence(@Body() body: any) { return this.svc.createSequence(body); }
 
   @Patch('sequences/:id')
-  updateSequence(@Param('id') id: string, @Body() body: any) {
-    return this.svc.updateSequence(id, body);
+  updateSequence(@Param('id') id: string, @Body() body: any, @Request() req: any) {
+    return this.svc.updateSequence(id, body, req.user?.tenant_id);
   }
 
   @Delete('sequences/:id')
-  deleteSequence(@Param('id') id: string) { return this.svc.deleteSequence(id); }
+  deleteSequence(@Param('id') id: string, @Request() req: any) { return this.svc.deleteSequence(id, req.user?.tenant_id); }
 
   @Post('sequences/:id/steps')
   addStep(@Param('id') id: string, @Body() body: any) { return this.svc.addStep(id, body); }
@@ -119,8 +119,8 @@ export class FollowupController {
   }
 
   @Get('broadcasts/:id')
-  getBroadcast(@Param('id') id: string) {
-    return this.svc.getBroadcast(id);
+  getBroadcast(@Param('id') id: string, @Request() req: any) {
+    return this.svc.getBroadcast(id, req.user?.tenant_id);
   }
 
   @Post('broadcasts')
@@ -129,14 +129,14 @@ export class FollowupController {
   }
 
   @Patch('broadcasts/:id/cancel')
-  cancelBroadcast(@Param('id') id: string) {
-    return this.svc.cancelBroadcast(id);
+  cancelBroadcast(@Param('id') id: string, @Request() req: any) {
+    return this.svc.cancelBroadcast(id, req.user?.tenant_id);
   }
 
   // Retomar broadcast PAUSADO_AUTO (feature anti-ban 2026-05-13)
   @Patch('broadcasts/:id/resume')
-  resumeBroadcast(@Param('id') id: string) {
-    return this.svc.resumeBroadcast(id);
+  resumeBroadcast(@Param('id') id: string, @Request() req: any) {
+    return this.svc.resumeBroadcast(id, req.user?.tenant_id);
   }
 
   // ─── Seed ────────────────────────────────────────────────────────────────

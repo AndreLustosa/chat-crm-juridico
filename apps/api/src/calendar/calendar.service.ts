@@ -1170,15 +1170,17 @@ export class CalendarService implements OnApplicationBootstrap {
     return created;
   }
 
-  async updateAppointmentType(id: string, data: { name?: string; duration?: number; color?: string; active?: boolean }, actorUserId?: string) {
-    const before = await this.prisma.appointmentType.findUnique({ where: { id } });
+  async updateAppointmentType(id: string, data: { name?: string; duration?: number; color?: string; active?: boolean }, actorUserId?: string, tenantId?: string) {
+    const before = await this.prisma.appointmentType.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) } });
+    if (!before) throw new NotFoundException('Tipo de compromisso não encontrado');
     const updated = await this.prisma.appointmentType.update({ where: { id }, data });
     this.auditFireAndForget(actorUserId, 'update', 'AppointmentType', id, { before, after: data });
     return updated;
   }
 
-  async deleteAppointmentType(id: string, actorUserId?: string) {
-    const before = await this.prisma.appointmentType.findUnique({ where: { id } });
+  async deleteAppointmentType(id: string, actorUserId?: string, tenantId?: string) {
+    const before = await this.prisma.appointmentType.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) } });
+    if (!before) throw new NotFoundException('Tipo de compromisso não encontrado');
     await this.prisma.appointmentType.delete({ where: { id } });
     this.auditFireAndForget(actorUserId, 'delete', 'AppointmentType', id, { before });
     return { deleted: true };
@@ -1206,8 +1208,9 @@ export class CalendarService implements OnApplicationBootstrap {
     return created;
   }
 
-  async updateHoliday(id: string, data: { date?: string; name?: string; recurring_yearly?: boolean }, actorUserId?: string) {
-    const before = await this.prisma.holiday.findUnique({ where: { id } });
+  async updateHoliday(id: string, data: { date?: string; name?: string; recurring_yearly?: boolean }, actorUserId?: string, tenantId?: string) {
+    const before = await this.prisma.holiday.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) } });
+    if (!before) throw new NotFoundException('Feriado não encontrado');
     const updateData: any = {};
     if (data.date) updateData.date = new Date(data.date);
     if (data.name !== undefined) updateData.name = data.name;
@@ -1217,8 +1220,9 @@ export class CalendarService implements OnApplicationBootstrap {
     return updated;
   }
 
-  async deleteHoliday(id: string, actorUserId?: string) {
-    const before = await this.prisma.holiday.findUnique({ where: { id } });
+  async deleteHoliday(id: string, actorUserId?: string, tenantId?: string) {
+    const before = await this.prisma.holiday.findFirst({ where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) } });
+    if (!before) throw new NotFoundException('Feriado não encontrado');
     await this.prisma.holiday.delete({ where: { id } });
     this.auditFireAndForget(actorUserId, 'delete', 'Holiday', id, { before });
     return { deleted: true };
