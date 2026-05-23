@@ -2,6 +2,8 @@ import { AsyncLocalStorage } from 'async_hooks';
 
 export interface TenantStore {
   tenantId: string | null;
+  /** true enquanto estamos dentro de uma transação que JÁ setou a GUC. */
+  inTx?: boolean;
 }
 
 const storage = new AsyncLocalStorage<TenantStore>();
@@ -14,6 +16,21 @@ export function getTenantId(): string | null {
 /** Roda `fn` (e tudo o que for async dentro dela) com o tenant no contexto. */
 export function runWithTenant<T>(tenantId: string | null, fn: () => T): T {
   return storage.run({ tenantId }, fn);
+}
+
+/** Estamos dentro de uma transação que já aplicou o SET LOCAL app.tenant_id? */
+export function isInTenantTx(): boolean {
+  return storage.getStore()?.inTx === true;
+}
+
+/**
+ * Marca o contexto como "dentro de transação com a GUC setada". Usado pelo
+ * override de $transaction: as operações da transação NÃO devem re-embrulhar
+ * em outra transação (evita transação aninhada) — a GUC já vale na conexão.
+ */
+export function runInTenantTx<T>(fn: () => T): T {
+  const s = storage.getStore();
+  return storage.run({ tenantId: s?.tenantId ?? null, inTx: true }, fn);
 }
 
 /**
