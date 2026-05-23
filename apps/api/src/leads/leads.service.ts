@@ -202,18 +202,29 @@ export class LeadsService {
       baseWhere.is_client = isClient;
     }
 
-    // Busca server-side por nome ou telefone
+    // Busca server-side: nome (acento-insensível), telefone, email e número de
+    // processo (case_number dos legal_cases vinculados). O match de nome/email usa
+    // a MESMA expressão do índice GIN — public.f_unaccent(lower(...)) — para o
+    // planner poder usá-lo. Pré-filtro raw (escopado por tenant) devolve só os IDs;
+    // a query Prisma abaixo segue intacta (includes/filtros/paginação/role-access).
     if (search && search.trim()) {
-      const s = search.trim();
-      baseWhere.AND = [
-        {
-          OR: [
-            { name: { contains: s, mode: 'insensitive' } },
-            { phone: { contains: s } },
-            { email: { contains: s, mode: 'insensitive' } },
-          ],
-        },
-      ];
+      // Escapa curingas de LIKE (% e _) do termo digitado; \ é o escape padrão do PG.
+      const term = search.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
+      const like = `%${term}%`;
+      const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT DISTINCT l.id
+        FROM "Lead" l
+        LEFT JOIN "LegalCase" lc ON lc.lead_id = l.id
+        WHERE l.tenant_id = ${tenant_id}
+          AND (
+            public.f_unaccent(lower(l.name))     LIKE public.f_unaccent(lower(${like}))
+            OR l.phone                           LIKE ${like}
+            OR public.f_unaccent(lower(l.email)) LIKE public.f_unaccent(lower(${like}))
+            OR lc.case_number                    ILIKE ${like}
+          )
+      `;
+      // Lista vazia → nenhum resultado (comportamento correto).
+      baseWhere.AND = [{ id: { in: rows.map((r) => r.id) } }];
     }
 
     const where = inbox_id
