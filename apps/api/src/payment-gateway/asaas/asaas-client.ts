@@ -54,6 +54,21 @@ interface ListChargesParams {
   limit?: number;
 }
 
+/** Assinatura recorrente (billing SaaS — cobra o escritório mensalmente). */
+interface CreateSubscriptionData {
+  customer: string;
+  /** BOLETO | PIX | CREDIT_CARD | UNDEFINED (UNDEFINED = cliente escolhe no checkout). */
+  billingType: string;
+  value: number;
+  /** Data da 1ª cobrança (YYYY-MM-DD). */
+  nextDueDate: string;
+  /** WEEKLY | BIWEEKLY | MONTHLY | QUARTERLY | SEMIANNUALLY | YEARLY */
+  cycle: string;
+  description?: string;
+  /** Para desambiguar no webhook: usamos "saas:<tenant_id>". */
+  externalReference?: string;
+}
+
 @Injectable()
 export class AsaasClient {
   private readonly logger = new Logger(AsaasClient.name);
@@ -206,5 +221,27 @@ export class AsaasClient {
     limit?: number;
   }): Promise<any> {
     return this.request<any>('GET', '/customers', undefined, params);
+  }
+
+  // ─── Subscriptions (assinatura recorrente — billing SaaS) ──────────
+  // OBS: a MESMA conta Asaas cobra honorários (clientes do escritório) e a
+  // assinatura SaaS (o escritório). Por isso toda subscription SaaS leva
+  // externalReference="saas:<tenant_id>" — o webhook desambigua por esse prefixo.
+
+  async createSubscription(data: CreateSubscriptionData): Promise<any> {
+    return this.request<any>('POST', '/subscriptions', data);
+  }
+
+  async getSubscription(subscriptionId: string): Promise<any> {
+    return this.request<any>('GET', `/subscriptions/${subscriptionId}`);
+  }
+
+  async cancelSubscription(subscriptionId: string): Promise<any> {
+    return this.request<any>('DELETE', `/subscriptions/${subscriptionId}`);
+  }
+
+  /** Pagamentos gerados por uma assinatura — usado p/ pegar a invoiceUrl da 1ª cobrança. */
+  async listSubscriptionPayments(subscriptionId: string): Promise<any> {
+    return this.request<any>('GET', `/subscriptions/${subscriptionId}/payments`);
   }
 }

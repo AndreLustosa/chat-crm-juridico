@@ -3,6 +3,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 import * as crypto from 'crypto';
 import { Public } from '../auth/decorators/public.decorator';
 import { PaymentGatewayService } from './payment-gateway.service';
+import { SaasBillingService, isSaasWebhookEvent } from './saas-billing.service';
 import { SettingsService } from '../settings/settings.service';
 
 /**
@@ -34,6 +35,7 @@ export class PaymentGatewayWebhookController {
   constructor(
     private service: PaymentGatewayService,
     private settings: SettingsService,
+    private saasBilling: SaasBillingService,
   ) {}
 
   /** Resolve modo do guard — production fail-closed por default. */
@@ -94,7 +96,14 @@ export class PaymentGatewayWebhookController {
     );
 
     try {
-      await this.service.handleWebhook(body);
+      // Desambigua: a MESMA conta Asaas recebe honorários (clientes) e a
+      // assinatura SaaS (escritórios). Eventos "saas:" / SUBSCRIPTION_* vão pro
+      // billing SaaS; o resto segue o fluxo de honorários intacto.
+      if (isSaasWebhookEvent(body)) {
+        await this.saasBilling.handleWebhook(body);
+      } else {
+        await this.service.handleWebhook(body);
+      }
     } catch (e: any) {
       this.logger.error(`[ASAAS-WEBHOOK] Erro: ${e.message}`);
     }

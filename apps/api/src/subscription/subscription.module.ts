@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { SubscriptionController } from './subscription.controller';
 import { SubscriptionService } from './subscription.service';
 import { AuthModule } from '../auth/auth.module';
+import { PaymentGatewayModule } from '../payment-gateway/payment-gateway.module';
 
 /**
  * SaaS Fase 1 — cadastro público (trial 15d) + leitura de assinatura.
@@ -14,7 +15,7 @@ import { AuthModule } from '../auth/auth.module';
  * PrismaService é global (PrismaModule @Global).
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, PaymentGatewayModule],
   controllers: [SubscriptionController],
   providers: [SubscriptionService],
 })

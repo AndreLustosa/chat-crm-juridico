@@ -2,12 +2,25 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Post, Request } from '@nes
 import { Throttle } from '@nestjs/throttler';
 import { SubscriptionService } from './subscription.service';
 import { SignupDto } from './dto/signup.dto';
+import { CheckoutDto } from './dto/checkout.dto';
+import { listPlans } from './plans';
+import { SaasBillingService } from '../payment-gateway/saas-billing.service';
 import { Public } from '../auth/decorators/public.decorator';
 import { SubscriptionExempt } from './subscription-exempt.decorator';
 
 @Controller()
 export class SubscriptionController {
-  constructor(private readonly subscriptionService: SubscriptionService) {}
+  constructor(
+    private readonly subscriptionService: SubscriptionService,
+    private readonly saasBilling: SaasBillingService,
+  ) {}
+
+  /** Catálogo de planos (público — alimenta o seletor de assinatura no frontend). */
+  @Public()
+  @Get('plans')
+  plans() {
+    return { plans: listPlans() };
+  }
 
   /**
    * Cadastro público — cria escritório + admin + trial de 15 dias e já devolve
@@ -34,5 +47,22 @@ export class SubscriptionController {
   @Get('me/subscription')
   async mySubscription(@Request() req: any) {
     return this.subscriptionService.getForTenant(req.user?.tenant_id);
+  }
+
+  /**
+   * Inicia a assinatura do escritório logado: cria customer + subscription no
+   * Asaas e devolve a invoiceUrl (página de pagamento hospedada). ISENTO do gate
+   * — um trial vencido PRECISA conseguir pagar para reativar.
+   */
+  @SubscriptionExempt()
+  @Post('me/subscription/checkout')
+  async checkout(@Request() req: any, @Body() dto: CheckoutDto) {
+    return this.saasBilling.checkout({
+      tenantId: req.user?.tenant_id,
+      planCode: dto.planCode,
+      cpfCnpj: dto.cpfCnpj,
+      name: dto.name,
+      email: req.user?.email,
+    });
   }
 }
