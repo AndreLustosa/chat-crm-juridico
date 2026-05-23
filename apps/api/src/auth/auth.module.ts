@@ -26,5 +26,8 @@ const jwtLogger = new Logger('AuthModule');
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController],
+  // AuthService exportado para o SubscriptionModule reusar login() (auto-login
+  // pós-cadastro). JwtModule exportado caso outro módulo precise do JwtService.
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

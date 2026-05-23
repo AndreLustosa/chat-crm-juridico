@@ -61,6 +61,8 @@ import { PortalContractsModule } from './portal-contracts/portal-contracts.modul
 import { PortalSchedulingModule } from './portal-scheduling/portal-scheduling.module';
 import { TrafegoModule } from './trafego/trafego.module';
 import { OrganicTrafficModule } from './organic-traffic/organic-traffic.module';
+import { SubscriptionModule } from './subscription/subscription.module';
+import { SubscriptionGuard } from './subscription/subscription.guard';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -147,6 +149,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     PortalSchedulingModule,
     TrafegoModule,
     OrganicTrafficModule,
+    SubscriptionModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
@@ -167,6 +170,13 @@ import { RolesGuard } from './auth/guards/roles.guard';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    // Trava de assinatura (SaaS Fase 1). Roda DEPOIS do JwtAuthGuard (precisa
+    // de req.user) e do RolesGuard. Flag-gated por SAAS_GATING_ENABLED (default
+    // OFF → no-op total). Bloqueia (402) tenants com trial/assinatura vencidos.
+    {
+      provide: APP_GUARD,
+      useClass: SubscriptionGuard,
     },
     // Bloqueia endpoints de IA interna do modulo de Trafego quando flag
     // TRAFEGO_IA_INTERNA_ENABLED=false. Vive fora do modulo de Trafego pra

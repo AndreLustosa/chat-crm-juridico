@@ -10,6 +10,14 @@ datasource db {
 model Tenant {
   id                         String                           @id @default(uuid())
   name                       String
+  // ─── SaaS: assinatura/trial por escritório (Fase 1) ───────────────────────
+  is_internal                Boolean                          @default(false) // escritório do dono — nunca expira
+  subscription_status        String                           @default("ACTIVE") // ACTIVE|TRIALING|PAST_DUE|CANCELED|EXPIRED
+  trial_ends_at              DateTime?
+  current_period_end         DateTime?
+  plan                       String?
+  asaas_customer_id          String?
+  asaas_subscription_id      String?
   conversations              Conversation[]
   leads                      Lead[]
   tasks                      Task[]
