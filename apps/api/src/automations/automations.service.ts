@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,12 +31,25 @@ export class AutomationsService {
     });
   }
 
-  async update(id: string, data: { name?: string; trigger?: string; action?: string; action_value?: string; enabled?: boolean }) {
-    return this.prisma.automationRule.update({ where: { id }, data });
+  async update(
+    id: string,
+    data: { name?: string; trigger?: string; action?: string; action_value?: string; enabled?: boolean },
+    tenantId?: string,
+  ) {
+    // Escopo por tenant: updateMany aceita where composto (id + tenant_id).
+    const res = await this.prisma.automationRule.updateMany({
+      where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) },
+      data,
+    });
+    if (res.count === 0) throw new NotFoundException('Automação não encontrada');
+    return this.prisma.automationRule.findUnique({ where: { id } });
   }
 
-  async remove(id: string) {
-    await this.prisma.automationRule.delete({ where: { id } });
+  async remove(id: string, tenantId?: string) {
+    const res = await this.prisma.automationRule.deleteMany({
+      where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) },
+    });
+    if (res.count === 0) throw new NotFoundException('Automação não encontrada');
     return { ok: true };
   }
 

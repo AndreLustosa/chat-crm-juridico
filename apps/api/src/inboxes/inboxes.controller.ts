@@ -12,8 +12,8 @@ export class InboxesController {
   async findAll(@Request() req: any) {
     const userId = req.user?.id;
     const isAdmin = req.user?.roles?.includes('ADMIN');
-    // ADMINs veem todos os inboxes; outros usuários só veem os que são membros
-    return this.inboxesService.findAll(undefined, isAdmin ? undefined : userId);
+    // ADMINs veem todos os inboxes DO TENANT; outros só os que são membros.
+    return this.inboxesService.findAll(req.user?.tenant_id, isAdmin ? undefined : userId);
   }
 
   @Get('operators')
@@ -23,8 +23,8 @@ export class InboxesController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    return this.inboxesService.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req: any) {
+    return this.inboxesService.findOne(id, req.user?.tenant_id);
   }
 
   @Post()
@@ -35,28 +35,28 @@ export class InboxesController {
 
   @Put(':id')
   @Roles('ADMIN')
-  async update(@Param('id') id: string, @Body() data: { name: string }) {
-    return this.inboxesService.update(id, data);
+  async update(@Param('id') id: string, @Body() data: { name: string }, @Request() req: any) {
+    return this.inboxesService.update(id, data, req.user?.tenant_id);
   }
 
   @Delete(':id')
   @Roles('ADMIN')
-  async remove(@Param('id') id: string) {
-    return this.inboxesService.remove(id);
+  async remove(@Param('id') id: string, @Request() req: any) {
+    return this.inboxesService.remove(id, req.user?.tenant_id);
   }
 
   // --- Gestão de Usuários ---
 
   @Post(':id/users')
   @Roles('ADMIN')
-  async addUser(@Param('id') id: string, @Body() data: { userId: string }) {
-    return this.inboxesService.addUser(id, data.userId);
+  async addUser(@Param('id') id: string, @Body() data: { userId: string }, @Request() req: any) {
+    return this.inboxesService.addUser(id, data.userId, req.user?.tenant_id);
   }
 
   @Delete(':id/users/:userId')
   @Roles('ADMIN')
-  async removeUser(@Param('id') id: string, @Param('userId') userId: string) {
-    return this.inboxesService.removeUser(id, userId);
+  async removeUser(@Param('id') id: string, @Param('userId') userId: string, @Request() req: any) {
+    return this.inboxesService.removeUser(id, userId, req.user?.tenant_id);
   }
 
   // --- Gestão de Instâncias ---
@@ -65,8 +65,9 @@ export class InboxesController {
   @Roles('ADMIN')
   async addInstance(
     @Param('id') id: string,
-    @Body() data: { name: string; type: 'whatsapp' | 'instagram' }
+    @Body() data: { name: string; type: 'whatsapp' | 'instagram' },
+    @Request() req: any,
   ) {
-    return this.inboxesService.addInstance(id, data.name, data.type);
+    return this.inboxesService.addInstance(id, data.name, data.type, req.user?.tenant_id);
   }
 }

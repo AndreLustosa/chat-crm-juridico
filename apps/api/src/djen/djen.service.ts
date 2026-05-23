@@ -1172,7 +1172,9 @@ export class DjenService {
     // corretamente ao processo em mensagens ao cliente.
     clientIsAuthor: boolean = true,
   ) {
-    const pub = await this.prisma.djenPublication.findUniqueOrThrow({ where: { id } });
+    // Escopo por tenant: não permite criar processo a partir de publicação de
+    // outro escritório (usa o mesmo tenantWhere do módulo, que tolera legadas null).
+    const pub = await this.prisma.djenPublication.findFirstOrThrow({ where: { id, ...this.tenantWhere(tenantId) } });
 
     // Impede criação duplicada para a mesma publicação
     if (pub.legal_case_id) {

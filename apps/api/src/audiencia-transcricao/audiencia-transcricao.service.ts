@@ -238,9 +238,11 @@ export class AudienciaTranscricaoService {
     });
   }
 
-  async getById(id: string) {
-    const t = await (this.prisma as any).caseTranscription.findUnique({
-      where: { id },
+  async getById(id: string, tenantId?: string) {
+    // Chokepoint: todas as ops by-id passam por aqui → escopo por tenant aqui
+    // protege getById/update/updateSpeakers/retry/delete/getVideoStream/exportText.
+    const t = await (this.prisma as any).caseTranscription.findFirst({
+      where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) },
       include: { uploaded_by: { select: { id: true, name: true } } },
     });
     if (!t) throw new NotFoundException('Transcrição não encontrada');
@@ -249,24 +251,24 @@ export class AudienciaTranscricaoService {
 
   // ─── Mutations ───────────────────────────────────────────────────────────
 
-  async update(id: string, data: UpdateTranscriptionDto) {
-    await this.getById(id);
+  async update(id: string, data: UpdateTranscriptionDto, tenantId?: string) {
+    await this.getById(id, tenantId);
     return (this.prisma as any).caseTranscription.update({
       where: { id },
       data: { title: data.title },
     });
   }
 
-  async updateSpeakers(id: string, data: UpdateSpeakersDto) {
-    await this.getById(id);
+  async updateSpeakers(id: string, data: UpdateSpeakersDto, tenantId?: string) {
+    await this.getById(id, tenantId);
     return (this.prisma as any).caseTranscription.update({
       where: { id },
       data: { speakers_json: data.speakers as any },
     });
   }
 
-  async retry(id: string) {
-    const t = await this.getById(id);
+  async retry(id: string, tenantId?: string) {
+    const t = await this.getById(id, tenantId);
     if (t.status !== 'ERROR') {
       throw new BadRequestException('Só posso reprocessar transcrições com status ERROR');
     }
@@ -314,8 +316,8 @@ export class AudienciaTranscricaoService {
     };
   }
 
-  async delete(id: string) {
-    const t = await this.getById(id);
+  async delete(id: string, tenantId?: string) {
+    const t = await this.getById(id, tenantId);
     // Remove arquivos do S3 best-effort
     for (const key of [t.source_s3_key, t.video_s3_key, t.audio_s3_key].filter(Boolean)) {
       try {
@@ -330,8 +332,8 @@ export class AudienciaTranscricaoService {
 
   // ─── Stream vídeo convertido ────────────────────────────────────────────
 
-  async getVideoStream(id: string, rangeStart?: number, rangeEnd?: number) {
-    const t = await this.getById(id);
+  async getVideoStream(id: string, rangeStart?: number, rangeEnd?: number, tenantId?: string) {
+    const t = await this.getById(id, tenantId);
     if (!t.video_s3_key) {
       throw new BadRequestException('Vídeo ainda não foi convertido');
     }
@@ -340,12 +342,12 @@ export class AudienciaTranscricaoService {
 
   // ─── Export TXT / SRT / VTT ─────────────────────────────────────────────
 
-  async exportText(id: string, format: 'txt' | 'srt' | 'vtt'): Promise<{
+  async exportText(id: string, format: 'txt' | 'srt' | 'vtt', tenantId?: string): Promise<{
     content: string;
     filename: string;
     contentType: string;
   }> {
-    const t = await this.getById(id);
+    const t = await this.getById(id, tenantId);
     if (t.status !== 'DONE' || !t.text) {
       throw new BadRequestException('Transcrição ainda não está pronta');
     }

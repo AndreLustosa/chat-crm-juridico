@@ -102,9 +102,9 @@ export class InboxesService {
     });
   }
 
-  async findOne(id: string) {
-    const inbox = await this.inbox.findUnique({
-      where: { id },
+  async findOne(id: string, tenantId?: string) {
+    const inbox = await this.inbox.findFirst({
+      where: { id, ...(tenantId ? { tenant_id: tenantId } : {}) },
       include: {
         instances: true,
         users: { select: { id: true, name: true, email: true } }
@@ -128,14 +128,16 @@ export class InboxesService {
     });
   }
 
-  async update(id: string, data: { name?: string }) {
+  async update(id: string, data: { name?: string }, tenantId?: string) {
+    await this.findOne(id, tenantId); // garante que o inbox é do tenant
     return this.inbox.update({
       where: { id },
       data
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, tenantId?: string) {
+    await this.findOne(id, tenantId); // garante que o inbox é do tenant
     // Desassociar conversas e instancias antes de deletar
     // (onDelete: SetNull no schema cuida disso, mas garantimos manualmente)
     await Promise.all([
@@ -153,7 +155,8 @@ export class InboxesService {
 
   // --- Gestão de Usuários no Setor ---
 
-  async addUser(inboxId: string, userId: string) {
+  async addUser(inboxId: string, userId: string, tenantId?: string) {
+    await this.findOne(inboxId, tenantId); // garante que o inbox é do tenant
     return this.inbox.update({
       where: { id: inboxId },
       data: {
@@ -162,7 +165,8 @@ export class InboxesService {
     });
   }
 
-  async removeUser(inboxId: string, userId: string) {
+  async removeUser(inboxId: string, userId: string, tenantId?: string) {
+    await this.findOne(inboxId, tenantId); // garante que o inbox é do tenant
     return this.inbox.update({
       where: { id: inboxId },
       data: {
@@ -173,7 +177,8 @@ export class InboxesService {
 
   // --- Gestão de Instâncias ---
 
-  async addInstance(inboxId: string, instanceName: string, type: 'whatsapp' | 'instagram') {
+  async addInstance(inboxId: string, instanceName: string, type: 'whatsapp' | 'instagram', tenantId?: string) {
+    await this.findOne(inboxId, tenantId); // garante que o inbox é do tenant
     // Verifica se a instância já está vinculada a outro inbox
     const existing = await this.instance.findUnique({ where: { name: instanceName } });
     if (existing?.inbox_id && existing.inbox_id !== inboxId) {

@@ -9,13 +9,13 @@ export class AutomationsController {
   @Get()
   @Roles('ADMIN')
   findAll(@Request() req: any) {
-    return this.automationsService.findAll(req.user.tenantId);
+    return this.automationsService.findAll(req.user.tenant_id);
   }
 
   @Post()
   @Roles('ADMIN')
   create(@Request() req: any, @Body() body: { name: string; trigger: string; action: string; action_value: string }) {
-    return this.automationsService.create({ ...body, tenant_id: req.user.tenantId });
+    return this.automationsService.create({ ...body, tenant_id: req.user.tenant_id });
   }
 
   @Patch(':id')
@@ -23,13 +23,14 @@ export class AutomationsController {
   update(
     @Param('id') id: string,
     @Body() body: { name?: string; trigger?: string; action?: string; action_value?: string; enabled?: boolean },
+    @Request() req: any,
   ) {
-    return this.automationsService.update(id, body);
+    return this.automationsService.update(id, body, req.user.tenant_id);
   }
 
   @Delete(':id')
   @Roles('ADMIN')
-  remove(@Param('id') id: string) {
-    return this.automationsService.remove(id);
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.automationsService.remove(id, req.user.tenant_id);
   }
 }

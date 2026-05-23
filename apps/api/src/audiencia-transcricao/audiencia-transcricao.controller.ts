@@ -156,8 +156,8 @@ export class AudienciaTranscricaoController {
 
   /** GET /transcriptions/:id — detalhe completo (texto, segmentos, speakers) */
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.service.getById(id);
+  get(@Param('id') id: string, @Request() req: any) {
+    return this.service.getById(id, req.user?.tenant_id);
   }
 
   /** GET /transcriptions/:id/video — stream MP4 (Range requests) */
@@ -182,6 +182,7 @@ export class AudienciaTranscricaoController {
       id,
       rangeStart,
       rangeEnd,
+      req.user?.tenant_id,
     );
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Type', contentType || 'video/mp4');
@@ -195,6 +196,7 @@ export class AudienciaTranscricaoController {
   async export(
     @Param('id') id: string,
     @Param('format') format: string,
+    @Request() req: any,
     @Res() res: Response,
   ) {
     if (!['txt', 'srt', 'vtt'].includes(format)) {
@@ -203,6 +205,7 @@ export class AudienciaTranscricaoController {
     const { content, filename, contentType } = await this.service.exportText(
       id,
       format as 'txt' | 'srt' | 'vtt',
+      req.user?.tenant_id,
     );
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -211,25 +214,25 @@ export class AudienciaTranscricaoController {
 
   /** PATCH /transcriptions/:id — update metadados (ex: title) */
   @Patch(':id')
-  update(@Param('id') id: string, @Body() data: UpdateTranscriptionDto) {
-    return this.service.update(id, data);
+  update(@Param('id') id: string, @Body() data: UpdateTranscriptionDto, @Request() req: any) {
+    return this.service.update(id, data, req.user?.tenant_id);
   }
 
   /** PATCH /transcriptions/:id/speakers — renomear falantes */
   @Patch(':id/speakers')
-  updateSpeakers(@Param('id') id: string, @Body() data: UpdateSpeakersDto) {
-    return this.service.updateSpeakers(id, data);
+  updateSpeakers(@Param('id') id: string, @Body() data: UpdateSpeakersDto, @Request() req: any) {
+    return this.service.updateSpeakers(id, data, req.user?.tenant_id);
   }
 
   /** POST /transcriptions/:id/retry — reprocessa transcrição em ERROR */
   @Post(':id/retry')
-  retry(@Param('id') id: string) {
-    return this.service.retry(id);
+  retry(@Param('id') id: string, @Request() req: any) {
+    return this.service.retry(id, req.user?.tenant_id);
   }
 
   /** DELETE /transcriptions/:id */
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.service.delete(id);
+  delete(@Param('id') id: string, @Request() req: any) {
+    return this.service.delete(id, req.user?.tenant_id);
   }
 }

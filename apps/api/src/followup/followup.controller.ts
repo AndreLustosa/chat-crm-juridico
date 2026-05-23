@@ -40,8 +40,9 @@ export class FollowupController {
 
   // ─── Sequências ──────────────────────────────────────────────────────────
   @Get('sequences')
-  listSequences(@Query('tenant_id') tenantId?: string) {
-    return this.svc.listSequences(tenantId);
+  listSequences(@Request() req: any) {
+    // Escopo vem do JWT (nunca de @Query do cliente).
+    return this.svc.listSequences(req.user?.tenant_id);
   }
 
   @Post('sequences')
