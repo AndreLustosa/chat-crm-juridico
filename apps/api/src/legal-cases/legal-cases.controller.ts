@@ -36,7 +36,7 @@ export class LegalCasesController {
 
   @Get()
   @Roles('ADMIN', 'ADVOGADO', 'ESTAGIARIO')
-  findAll(
+  async findAll(
     @Request() req: any,
     @Query('stage') stage?: string,
     @Query('archived') archived?: string,
@@ -46,13 +46,32 @@ export class LegalCasesController {
     @Query('leadId') leadId?: string,
     @Query('caseNumber') caseNumber?: string,
   ) {
-    const isAdmin = req.user.roles?.includes('ADMIN');
-    const lawyerId = isAdmin ? undefined : req.user.id;
+    const roles: string[] = req.user.roles ?? [];
+    const isAdmin = roles.includes('ADMIN');
+    const isAdvogado = roles.includes('ADVOGADO');
+
+    // Escopo de advogado(s) responsável(is) pelos processos retornados:
+    //  - ADMIN: todos os processos do tenant (sem filtro de advogado).
+    //  - ADVOGADO: apenas os próprios processos (lawyer_id = self). Se o usuário
+    //    for advogado E estagiário, o papel de advogado prevalece.
+    //  - ESTAGIARIO (puro): os processos dos advogados que o supervisionam
+    //    (relação supervisors). Sem supervisores vinculados => lista vazia.
+    let lawyerScope: string | string[] | undefined;
+    if (isAdmin) {
+      lawyerScope = undefined;
+    } else if (isAdvogado) {
+      lawyerScope = req.user.id;
+    } else if (roles.includes('ESTAGIARIO')) {
+      lawyerScope = await this.service.getSupervisorLawyerIds(req.user.id, req.user?.tenant_id);
+    } else {
+      lawyerScope = req.user.id; // fallback defensivo
+    }
+
     const archivedBool = archived === 'true' ? true : archived === 'false' ? false : undefined;
     const inTrackingBool = inTracking === 'true' ? true : inTracking === 'false' ? false : undefined;
     const p = page ? parseInt(page, 10) : undefined;
     const l = limit ? parseInt(limit, 10) : undefined;
-    return this.service.findAll(lawyerId, stage, archivedBool, inTrackingBool, p, l, req.user?.tenant_id, leadId, caseNumber);
+    return this.service.findAll(lawyerScope, stage, archivedBool, inTrackingBool, p, l, req.user?.tenant_id, leadId, caseNumber);
   }
 
   @Get('encerrados-pendentes')

@@ -180,9 +180,27 @@ export class LegalCasesService {
     return legalCase;
   }
 
-  async findAll(lawyerId?: string, stage?: string, archived?: boolean, inTracking?: boolean, page?: number, limit?: number, tenantId?: string, leadId?: string, caseNumber?: string) {
+  /**
+   * IDs dos advogados que supervisionam este estagiário (relação supervisors).
+   * Usado para escopar a listagem de processos: o estagiário vê os processos
+   * dos advogados a quem está vinculado. Sem supervisores => [] (lista vazia).
+   */
+  async getSupervisorLawyerIds(userId: string, tenantId?: string): Promise<string[]> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, ...(tenantId ? { tenant_id: tenantId } : {}) },
+      select: { supervisors: { select: { id: true } } },
+    });
+    return (user?.supervisors ?? []).map((s) => s.id);
+  }
+
+  async findAll(lawyerId?: string | string[], stage?: string, archived?: boolean, inTracking?: boolean, page?: number, limit?: number, tenantId?: string, leadId?: string, caseNumber?: string) {
     const where: any = { ...this.tenantWhere(tenantId) };
-    if (lawyerId) where.lawyer_id = lawyerId;
+    // lawyerId pode ser string (advogado vê os próprios casos) ou string[]
+    // (estagiário vê os casos dos advogados supervisores => lawyer_id IN [...]).
+    // Array vazio => { in: [] } => nenhum processo (estagiário sem advogado vinculado).
+    if (lawyerId !== undefined) {
+      where.lawyer_id = Array.isArray(lawyerId) ? { in: lawyerId } : lawyerId;
+    }
     if (stage) where.stage = stage;
     if (archived !== undefined) where.archived = archived;
     if (inTracking !== undefined) where.in_tracking = inTracking;
