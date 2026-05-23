@@ -5,6 +5,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ChatGateway } from './gateway/chat.gateway';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { runWithTenant, TENANT_RLS_ENABLED } from './common/tenant-context';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as express from 'express';
@@ -52,6 +53,33 @@ async function bootstrap() {
   // Cookie parser — necessario pro ClientJwtAuthGuard ler portal_token
   // (auth do portal do cliente, fluxo httpOnly cookie). Adicionado 2026-04-26.
   app.use(cookieParser());
+
+  // RLS (Fase 0.5b-2, flag-gated): coloca o tenant da request num
+  // AsyncLocalStorage a partir do JWT, para o PrismaService aplicar
+  // SET LOCAL app.tenant_id. OFF por padrão → não roda quando
+  // TENANT_RLS_ENABLED != 'true' (zero overhead/efeito em produção).
+  if (TENANT_RLS_ENABLED) {
+    const jwtForTenant = app.get(JwtService);
+    app.use((req: any, _res: any, next: any) => {
+      let tenantId: string | null = null;
+      try {
+        const auth = req.headers?.authorization as string | undefined;
+        const token =
+          (auth && auth.startsWith('Bearer ') ? auth.slice(7) : undefined) ||
+          (req.query?.token as string | undefined) ||
+          req.cookies?.jf_crm ||
+          req.cookies?.portal_token;
+        if (token) {
+          const payload: any = jwtForTenant.verify(token);
+          tenantId = payload?.tenant_id ?? null;
+        }
+      } catch {
+        tenantId = null; // token ausente/inválido → sem tenant → fail-closed na RLS
+      }
+      runWithTenant(tenantId, () => next());
+    });
+    bootstrapLogger.log('[RLS] TENANT_RLS_ENABLED=true — middleware de tenant ativo (SET LOCAL app.tenant_id por request).');
+  }
 
   // Validacao global de DTOs via class-validator
   app.useGlobalPipes(new ValidationPipe({
