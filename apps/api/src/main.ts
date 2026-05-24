@@ -27,6 +27,24 @@ for (const envPath of possiblePaths) {
   }
 }
 
+/**
+ * Lê um cookie do header bruto do handshake do Socket.IO (sem cookie-parser,
+ * que só atua no Express). Usado para autenticar o socket do Jurisflow, cujo
+ * JWT vive num cookie httpOnly (jf_crm) que o JS do cliente não consegue ler
+ * para mandar em handshake.auth.token.
+ */
+function readHandshakeCookie(rawCookie: string | undefined, name: string): string | undefined {
+  if (!rawCookie) return undefined;
+  for (const part of rawCookie.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) {
+      return decodeURIComponent(part.slice(idx + 1).trim());
+    }
+  }
+  return undefined;
+}
+
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const port = process.env.PORT ?? 3005;
@@ -148,9 +166,14 @@ async function bootstrap() {
   // JWT authentication middleware for WebSocket connections
   const jwtService = app.get(JwtService);
   io.use((socket, next) => {
+    // Token do socket: auth.token (front clássico, via localStorage) OU header
+    // Bearer OU — para o Jurisflow, cujo JWT é cookie httpOnly (jf_crm) e o JS
+    // não consegue ler — o cookie jf_crm do handshake (mesmo domínio, enviado
+    // automaticamente com withCredentials). Mesmo payload {sub,roles,tenant_id}.
     const token =
       socket.handshake.auth?.token ||
       (socket.handshake.headers?.authorization as string)?.replace('Bearer ', '') ||
+      readHandshakeCookie(socket.handshake.headers?.cookie as string | undefined, 'jf_crm') ||
       '';
     if (!token) {
       logger.warn(`[SOCKET] Conexao rejeitada — sem token JWT`);
