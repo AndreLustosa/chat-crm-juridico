@@ -11,6 +11,7 @@ model Tenant {
   id                         String                           @id @default(uuid())
   name                       String
   cnpj                       String? // CNPJ do escritório (cadastro / menu Escritório)
+  cpf                        String? // CPF do escritório (alternativa ao CNPJ)
   phone                      String? // telefone de contato do escritório
   // ─── SaaS: assinatura/trial por escritório (Fase 1) ───────────────────────
   is_internal                Boolean                          @default(false) // escritório do dono — nunca expira

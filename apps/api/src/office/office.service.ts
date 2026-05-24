@@ -16,6 +16,7 @@ export class OfficeService {
         id: true,
         name: true,
         cnpj: true,
+        cpf: true,
         phone: true,
         is_internal: true,
         subscription_status: true,
@@ -41,6 +42,7 @@ export class OfficeService {
       id: tenant.id,
       name: tenant.name,
       cnpj: tenant.cnpj ?? null,
+      cpf: tenant.cpf ?? null,
       phone: tenant.phone ?? null,
       created_at: owner?.created_at ?? null,
       users_count: usersCount,
@@ -55,20 +57,48 @@ export class OfficeService {
     };
   }
 
-  /** Atualiza nome/CNPJ/telefone (só ADMIN). name não pode ficar vazio. */
+  /**
+   * Atualiza nome/CNPJ/CPF/telefone (só ADMIN). name não pode ficar vazio e o
+   * escritório precisa ter PELO MENOS um documento (CPF ou CNPJ).
+   */
   async update(tenantId: string | undefined, dto: UpdateOfficeDto) {
     if (!tenantId) throw new BadRequestException('Tenant não identificado.');
-    const data: { name?: string; cnpj?: string | null; phone?: string | null } = {};
+    const current = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { cnpj: true, cpf: true },
+    });
+    if (!current) throw new NotFoundException('Escritório não encontrado.');
+
+    const data: { name?: string; cnpj?: string | null; cpf?: string | null; phone?: string | null } = {};
     if (dto.name !== undefined) {
       const n = dto.name.trim();
       if (!n) throw new BadRequestException('O nome do escritório não pode ficar vazio.');
       data.name = n;
     }
-    if (dto.cnpj !== undefined) data.cnpj = dto.cnpj.trim() || null;
     if (dto.phone !== undefined) data.phone = dto.phone.trim() || null;
+    if (dto.cnpj !== undefined) data.cnpj = this.normDoc(dto.cnpj, 'CNPJ', 14);
+    if (dto.cpf !== undefined) data.cpf = this.normDoc(dto.cpf, 'CPF', 11);
+
+    // Obrigatório ter um documento: o estado final precisa ter CPF ou CNPJ.
+    const finalCnpj = data.cnpj !== undefined ? data.cnpj : current.cnpj;
+    const finalCpf = data.cpf !== undefined ? data.cpf : current.cpf;
+    if (!finalCnpj && !finalCpf) {
+      throw new BadRequestException('Informe o CPF ou o CNPJ do escritório.');
+    }
+
     if (Object.keys(data).length > 0) {
       await this.prisma.tenant.update({ where: { id: tenantId }, data });
     }
     return this.getForTenant(tenantId);
+  }
+
+  /** Valida o documento pelo nº de dígitos; "" => null (limpa). Mantém a formatação. */
+  private normDoc(value: string, label: string, digits: number): string | null {
+    const raw = (value ?? '').trim();
+    if (!raw) return null;
+    if (raw.replace(/\D/g, '').length !== digits) {
+      throw new BadRequestException(`${label} inválido — deve ter ${digits} dígitos.`);
+    }
+    return raw;
   }
 }

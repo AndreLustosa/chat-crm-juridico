@@ -17,6 +17,11 @@ export class UpdateOfficeDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(16)
+  cpf?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(32)
   phone?: string;
 }
