@@ -16,6 +16,8 @@
 /** Flags de ambiente (lidas uma vez no boot, como TENANT_RLS_ENABLED). */
 export const SAAS_SIGNUP_ENABLED = process.env.SAAS_SIGNUP_ENABLED === 'true';
 export const SAAS_GATING_ENABLED = process.env.SAAS_GATING_ENABLED === 'true';
+/** Fase 2b: aplica o limite de processos do plano. OFF (default) → sem limite. */
+export const SAAS_LIMITS_ENABLED = process.env.SAAS_LIMITS_ENABLED === 'true';
 
 /** Dias de trial gratuito (default 15). Parametrizável por env. */
 export const TRIAL_DAYS = (() => {

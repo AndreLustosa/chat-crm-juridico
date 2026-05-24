@@ -12,6 +12,8 @@ import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import { tenantOrDefault } from '../common/constants/tenant';
+import { getPlan } from '../subscription/plans';
+import { SAAS_LIMITS_ENABLED } from '../subscription/subscription.util';
 import { BusinessDaysCalc } from '@crm/shared';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -70,6 +72,33 @@ export class LegalCasesService {
     }
   }
 
+  /**
+   * Limite de processos por plano (SaaS Fase 2b). Bloqueia criar processo acima
+   * do limite do plano PAGO. Conta só ATIVOS (archived=false). Trial e escritório
+   * interno = ILIMITADO (trial é full). Flag-gated por SAAS_LIMITS_ENABLED
+   * (default OFF → no-op). Fail-open quando não há plano resolvido.
+   */
+  private async enforceProcessLimit(tenantId?: string) {
+    if (!SAAS_LIMITS_ENABLED || !tenantId) return;
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { is_internal: true, subscription_status: true, plan: true },
+    });
+    // Interno = ilimitado; limite só vale em plano PAGO (ACTIVE) — trial é full.
+    if (!tenant || tenant.is_internal || tenant.subscription_status !== 'ACTIVE') return;
+    const plan = getPlan(tenant.plan);
+    if (!plan) return; // sem plano resolvido → não bloqueia
+    const ativos = await this.prisma.legalCase.count({
+      where: { tenant_id: tenantId, archived: false },
+    });
+    if (ativos >= plan.processos_limit) {
+      throw new ForbiddenException(
+        `Limite do plano atingido: ${plan.processos_limit} processos ativos (plano "${plan.name}"). ` +
+        `Arquive processos encerrados ou faça upgrade do plano para cadastrar novos.`,
+      );
+    }
+  }
+
   // ─── CRUD ───────────────────────────────────────────────────────
 
   async create(data: {
@@ -83,6 +112,9 @@ export class LegalCasesService {
     /** URGENTE | NORMAL | BAIXA (default NORMAL) */
     priority?: string;
   }) {
+    // Limite de processos do plano (SaaS Fase 2b) — checa antes de qualquer trabalho.
+    await this.enforceProcessLimit(data.tenant_id);
+
     // Pré-preencher com dados do LeadProfile (sistema novo).
     //
     // Atualizado em 2026-04-20 (fase 2d-1): antes lia AiMemory.facts_json.
@@ -1137,6 +1169,9 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
     // Polo processual do cliente (default true = autor)
     client_is_author?: boolean;
   }) {
+    // Limite de processos do plano (SaaS Fase 2b) — checa antes de qualquer trabalho.
+    await this.enforceProcessLimit(data.tenant_id);
+
     const VALID_TRACKING = TRACKING_STAGES.map(s => s.id) as string[];
     const trackingStage = (
       data.tracking_stage && VALID_TRACKING.includes(data.tracking_stage)
