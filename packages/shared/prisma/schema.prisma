@@ -50,6 +50,7 @@ model Tenant {
   memories                   Memory[]
   lead_profiles              LeadProfile[]
   organization_profile       OrganizationProfile?
+  branding                   TenantBranding?
   monthly_goals              MonthlyGoal[]
   financial_attachments      FinancialTransactionAttachment[]
   reports                    Report[]
@@ -91,6 +92,19 @@ model Tenant {
   organic_search_metrics     OrganicSearchMetric[]
   organic_inspection_snapshots OrganicInspectionSnapshot[]
   organic_sync_logs          OrganicSyncLog[]
+}
+
+/// White-label por escritório (Jurisflow): logo (horizontal) e ícone (quadrado)
+/// como data URLs PNG base64. Tabela separada do Tenant para não pesar leituras
+/// frequentes (auth/gating). Vazio/ausente => o front usa a marca padrão.
+model TenantBranding {
+  id         String   @id @default(uuid())
+  tenant_id  String   @unique
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  logo       String?  @db.Text // data URL base64 (image/png, fundo transparente) — logo horizontal
+  icon       String?  @db.Text // data URL base64 (image/png, fundo transparente) — ícone quadrado
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 }
 
 model User {

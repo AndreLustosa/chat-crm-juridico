@@ -63,6 +63,7 @@ import { TrafegoModule } from './trafego/trafego.module';
 import { OrganicTrafficModule } from './organic-traffic/organic-traffic.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { SubscriptionGuard } from './subscription/subscription.guard';
+import { BrandingModule } from './branding/branding.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -150,6 +151,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     TrafegoModule,
     OrganicTrafficModule,
     SubscriptionModule,
+    BrandingModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
