@@ -76,6 +76,8 @@ export class SubscriptionService {
         const createdTenant = await tx.tenant.create({
           data: {
             name: officeName,
+            cnpj: dto.cnpj?.trim() || null,
+            phone,
             is_internal: false,
             subscription_status: 'TRIALING',
             trial_ends_at: trialEndsAt,
