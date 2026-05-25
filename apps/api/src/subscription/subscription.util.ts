@@ -45,6 +45,7 @@ export interface TenantSubscriptionFields {
   trial_ends_at: Date | null;
   current_period_end?: Date | null;
   plan?: string | null;
+  cancel_at_period_end?: boolean | null;
 }
 
 export interface SubscriptionEvaluation {
@@ -66,6 +67,8 @@ export interface SubscriptionEvaluation {
   days_remaining: number | null;
   /** Plano (TRIAL, etc.) ou null. */
   plan: string | null;
+  /** Cancelamento agendado p/ fim do período (acesso segue até current_period_end). */
+  cancel_at_period_end: boolean;
 }
 
 /**
@@ -87,6 +90,7 @@ export function evaluateSubscription(
     trial_ends_at: trialEndsAtIso,
     current_period_end: periodEndIso,
     plan,
+    cancel_at_period_end: !!t.cancel_at_period_end,
   };
 
   // 1) Escritório interno do dono — sempre liberado.

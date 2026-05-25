@@ -244,7 +244,7 @@ export class StripeBillingService {
         if (tenantId && s.subscription) {
           await this.prisma.tenant.update({
             where: { id: tenantId },
-            data: { stripe_subscription_id: String(s.subscription) },
+            data: { stripe_subscription_id: String(s.subscription), cancel_at_period_end: false },
           });
         }
         break;
@@ -260,6 +260,7 @@ export class StripeBillingService {
           // (proration_behavior=always_invoice), então o plano fica em dia mesmo
           // que o evento customer.subscription.updated não esteja inscrito no webhook.
           let plan: string | undefined;
+          let cancelAtPeriodEnd: boolean | undefined;
           const subId =
             typeof (inv as any).subscription === 'string'
               ? ((inv as any).subscription as string)
@@ -270,6 +271,7 @@ export class StripeBillingService {
               const sub = await stripe.subscriptions.retrieve(subId);
               const lookupKey = sub.items?.data?.[0]?.price?.lookup_key ?? undefined;
               if (lookupKey && getPlan(lookupKey)) plan = lookupKey;
+              cancelAtPeriodEnd = !!(sub as any).cancel_at_period_end;
             } catch (e: any) {
               this.logger.warn(`[STRIPE] Não consegui ler a assinatura ${subId} no ${event.type}: ${e?.message}`);
             }
@@ -280,6 +282,7 @@ export class StripeBillingService {
               subscription_status: 'ACTIVE',
               current_period_end: periodEnd ? new Date(periodEnd * 1000) : null,
               ...(plan ? { plan } : {}),
+              ...(cancelAtPeriodEnd !== undefined ? { cancel_at_period_end: cancelAtPeriodEnd } : {}),
             },
           });
           this.logger.log(`[STRIPE] Tenant ${tenantId} ATIVADO (${event.type}), plano=${plan ?? '—'}.`);
@@ -299,7 +302,10 @@ export class StripeBillingService {
         const sub = event.data.object as Stripe.Subscription;
         const tenantId = await this.tenantByCustomer(sub.customer);
         if (tenantId) {
-          await this.prisma.tenant.update({ where: { id: tenantId }, data: { subscription_status: 'CANCELED' } });
+          await this.prisma.tenant.update({
+            where: { id: tenantId },
+            data: { subscription_status: 'CANCELED', cancel_at_period_end: false },
+          });
           this.logger.log(`[STRIPE] Tenant ${tenantId} CANCELED.`);
         }
         break;
@@ -326,17 +332,20 @@ export class StripeBillingService {
           // current_period_end mudou de lugar entre versões da API — busca defensiva.
           const anySub = sub as any;
           const periodEndUnix = anySub.current_period_end ?? anySub.items?.data?.[0]?.current_period_end;
-          if (plan || status || periodEndUnix) {
-            await this.prisma.tenant.update({
-              where: { id: tenantId },
-              data: {
-                ...(plan ? { plan } : {}),
-                ...(status ? { subscription_status: status } : {}),
-                ...(periodEndUnix ? { current_period_end: new Date(periodEndUnix * 1000) } : {}),
-              },
-            });
-            this.logger.log(`[STRIPE] Tenant ${tenantId} atualizado (plano=${plan ?? '—'}, status=${status ?? '—'}).`);
-          }
+          // cancelamento agendado p/ fim do período (true) ou desfeito via "Não cancelar" (false).
+          const cancelAtPeriodEnd = !!anySub.cancel_at_period_end;
+          await this.prisma.tenant.update({
+            where: { id: tenantId },
+            data: {
+              cancel_at_period_end: cancelAtPeriodEnd,
+              ...(plan ? { plan } : {}),
+              ...(status ? { subscription_status: status } : {}),
+              ...(periodEndUnix ? { current_period_end: new Date(periodEndUnix * 1000) } : {}),
+            },
+          });
+          this.logger.log(
+            `[STRIPE] Tenant ${tenantId} atualizado (plano=${plan ?? '—'}, status=${status ?? '—'}, cancelar=${cancelAtPeriodEnd}).`,
+          );
         }
         break;
       }

@@ -24,6 +24,7 @@ export class OfficeService {
         trial_ends_at: true,
         current_period_end: true,
         plan: true,
+        cancel_at_period_end: true,
       },
     });
     if (!tenant) throw new NotFoundException('Escritório não encontrado.');
@@ -54,6 +55,7 @@ export class OfficeService {
         trial_ends_at: tenant.trial_ends_at,
         current_period_end: tenant.current_period_end,
         plan: tenant.plan,
+        cancel_at_period_end: tenant.cancel_at_period_end,
       }),
     };
   }

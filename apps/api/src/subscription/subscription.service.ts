@@ -161,6 +161,7 @@ export class SubscriptionService {
         trial_ends_at: true,
         current_period_end: true,
         plan: true,
+        cancel_at_period_end: true,
       },
     });
     if (!tenant) {

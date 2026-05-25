@@ -23,6 +23,7 @@ model Tenant {
   asaas_subscription_id      String?
   stripe_customer_id         String? // assinatura SaaS via Stripe (Fase 5); honorarios seguem no Asaas
   stripe_subscription_id     String?
+  cancel_at_period_end       Boolean                          @default(false) // Stripe: cancelamento agendado p/ fim do periodo (acesso ate current_period_end)
   // ─── SaaS Fase 3: suspensao/exclusao pelo admin master (back-office) ───────
   suspended_at               DateTime? // suspenso pelo SUPER_ADMIN (acesso cortado; reversivel)
   prev_subscription_status   String?   // status antes de suspender (para reativar ao estado correto)
