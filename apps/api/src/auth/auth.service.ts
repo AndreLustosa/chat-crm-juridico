@@ -12,7 +12,8 @@ export class AuthService {
 
   async validateUser(email: string, pass: string): Promise<any> {
     const user = await this.usersService.findOne(email);
-    if (user && await argon2.verify(user.password_hash, pass)) {
+    // password_hash null = convite pendente (ainda nao definiu a senha) → recusa login.
+    if (user && user.password_hash && await argon2.verify(user.password_hash, pass)) {
       const { password_hash, ...result } = user;
       return result;
     }

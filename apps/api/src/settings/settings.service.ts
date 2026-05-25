@@ -168,6 +168,36 @@ export class SettingsService {
     }
   }
 
+  // ─── Stripe (assinatura SaaS — Fase 5) ─────────────────────────────────────
+  async getStripeConfig() {
+    const secretKey = (await this.get('STRIPE_SECRET_KEY')) || process.env.STRIPE_SECRET_KEY || null;
+    const webhookSecret = (await this.get('STRIPE_WEBHOOK_SECRET')) || process.env.STRIPE_WEBHOOK_SECRET || null;
+    // pista do ambiente (live/test) sem expor a chave inteira
+    const mode = secretKey
+      ? (secretKey.startsWith('sk_live') ? 'live' : secretKey.startsWith('sk_test') ? 'test' : 'desconhecido')
+      : null;
+    return { secretKey, webhookSecret, isConfigured: !!secretKey, hasWebhookSecret: !!webhookSecret, mode };
+  }
+
+  async setStripeConfig(secretKey?: string, webhookSecret?: string) {
+    if (secretKey && secretKey.trim()) await this.set('STRIPE_SECRET_KEY', secretKey.trim());
+    if (webhookSecret && webhookSecret.trim()) await this.set('STRIPE_WEBHOOK_SECRET', webhookSecret.trim());
+  }
+
+  // ─── Asaas (honorários: escritório → clientes) ─────────────────────────────
+  async getAsaasConfig() {
+    const apiKey = (await this.get('asaas_api_key')) || process.env.ASAAS_API_KEY || null;
+    const webhookToken = (await this.get('asaas_webhook_token')) || process.env.ASAAS_WEBHOOK_TOKEN || null;
+    const sandbox = (await this.get('asaas_sandbox')) === 'true';
+    return { apiKey, webhookToken, sandbox, isConfigured: !!apiKey, hasWebhookToken: !!webhookToken };
+  }
+
+  async setAsaasConfig(apiKey?: string, webhookToken?: string, sandbox?: boolean) {
+    if (apiKey && apiKey.trim()) await this.set('asaas_api_key', apiKey.trim());
+    if (webhookToken && webhookToken.trim()) await this.set('asaas_webhook_token', webhookToken.trim());
+    if (typeof sandbox === 'boolean') await this.set('asaas_sandbox', sandbox ? 'true' : 'false');
+  }
+
   async getAiConfig() {
     const apiKey = await this.get('OPENAI_API_KEY');
     const adminKey = await this.get('OPENAI_ADMIN_KEY');

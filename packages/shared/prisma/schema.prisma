@@ -21,6 +21,8 @@ model Tenant {
   plan                       String?
   asaas_customer_id          String?
   asaas_subscription_id      String?
+  stripe_customer_id         String? // assinatura SaaS via Stripe (Fase 5); honorarios seguem no Asaas
+  stripe_subscription_id     String?
   // ─── SaaS Fase 3: suspensao/exclusao pelo admin master (back-office) ───────
   suspended_at               DateTime? // suspenso pelo SUPER_ADMIN (acesso cortado; reversivel)
   prev_subscription_status   String?   // status antes de suspender (para reativar ao estado correto)
@@ -138,7 +140,9 @@ model User {
   name                           String
   email                          String                           @unique
   phone                          String?
-  password_hash                  String
+  password_hash                  String? // null enquanto o convite estiver pendente (cadastro por link)
+  invite_token                   String?                          @unique // token do convite p/ definir senha; limpo ao resgatar
+  invite_expires_at              DateTime? // expiracao do convite
   roles                          String[]                         @default(["OPERADOR"])
   specialties                    String[]                         @default([])
   oab_number                     String? // Número OAB (ex: "14209")

@@ -179,6 +179,48 @@ export class SettingsController {
     return { message: 'Configurações atualizadas com sucesso' };
   }
 
+  // ─── Stripe (assinatura SaaS — Fase 5) — só SUPER_ADMIN ───────────────────
+  @Get('stripe-config')
+  @Roles('SUPER_ADMIN')
+  async getStripeConfig() {
+    const cfg = await this.settingsService.getStripeConfig();
+    return {
+      secretKey: maskApiKey(cfg.secretKey),
+      webhookSecret: maskApiKey(cfg.webhookSecret),
+      isConfigured: cfg.isConfigured,
+      hasWebhookSecret: cfg.hasWebhookSecret,
+      mode: cfg.mode,
+    };
+  }
+
+  @Post('stripe-config')
+  @Roles('SUPER_ADMIN')
+  async setStripeConfig(@Body() data: { secretKey?: string; webhookSecret?: string }) {
+    await this.settingsService.setStripeConfig(data.secretKey, data.webhookSecret);
+    return { message: 'Configurações do Stripe salvas com sucesso' };
+  }
+
+  // ─── Asaas (honorários) — só SUPER_ADMIN ──────────────────────────────────
+  @Get('asaas-config')
+  @Roles('SUPER_ADMIN')
+  async getAsaasConfig() {
+    const cfg = await this.settingsService.getAsaasConfig();
+    return {
+      apiKey: maskApiKey(cfg.apiKey),
+      webhookToken: maskApiKey(cfg.webhookToken),
+      sandbox: cfg.sandbox,
+      isConfigured: cfg.isConfigured,
+      hasWebhookToken: cfg.hasWebhookToken,
+    };
+  }
+
+  @Post('asaas-config')
+  @Roles('SUPER_ADMIN')
+  async setAsaasConfig(@Body() data: { apiKey?: string; webhookToken?: string; sandbox?: boolean }) {
+    await this.settingsService.setAsaasConfig(data.apiKey, data.webhookToken, data.sandbox);
+    return { message: 'Configurações do Asaas salvas com sucesso' };
+  }
+
   @Get('ai-config')
   @Roles('SUPER_ADMIN')
   async getAiConfig() {

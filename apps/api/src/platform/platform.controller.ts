@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Body, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Request } from '@nestjs/common';
 import { PlatformService } from './platform.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 
@@ -23,6 +23,12 @@ export class PlatformController {
   @Get('tenants')
   tenants() {
     return this.svc.listTenants();
+  }
+
+  /** Provisiona um novo escritorio + admin (convite por link). So SUPER_ADMIN. */
+  @Post('tenants')
+  createTenant(@Body() body: { officeName?: string; name?: string; email?: string; cnpj?: string; cpf?: string; phone?: string }) {
+    return this.svc.createTenant(body);
   }
 
   // ─── Gestao (Fase 3) — acoes reversiveis; a purga fisica e manual/auditada ──

@@ -5,6 +5,7 @@ import { SignupDto } from './dto/signup.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { listPlans } from './plans';
 import { SaasBillingService } from '../payment-gateway/saas-billing.service';
+import { StripeBillingService } from '../payment-gateway/stripe-billing.service';
 import { Public } from '../auth/decorators/public.decorator';
 import { SubscriptionExempt } from './subscription-exempt.decorator';
 
@@ -13,6 +14,7 @@ export class SubscriptionController {
   constructor(
     private readonly subscriptionService: SubscriptionService,
     private readonly saasBilling: SaasBillingService,
+    private readonly stripeBilling: StripeBillingService,
   ) {}
 
   /** Catálogo de planos (público — alimenta o seletor de assinatura no frontend). */
@@ -57,12 +59,19 @@ export class SubscriptionController {
   @SubscriptionExempt()
   @Post('me/subscription/checkout')
   async checkout(@Request() req: any, @Body() dto: CheckoutDto) {
-    return this.saasBilling.checkout({
+    // Fase 5: a assinatura SaaS migrou para o Stripe (Checkout Session).
+    // Os HONORÁRIOS (escritório → clientes) seguem no Asaas, intactos.
+    return this.stripeBilling.checkout({
       tenantId: req.user?.tenant_id,
       planCode: dto.planCode,
-      cpfCnpj: dto.cpfCnpj,
-      name: dto.name,
       email: req.user?.email,
     });
+  }
+
+  /** Customer Portal do Stripe — o escritório gerencia cartão/plano/cancelamento. */
+  @SubscriptionExempt()
+  @Post('me/subscription/portal')
+  async portal(@Request() req: any) {
+    return this.stripeBilling.portal(req.user?.tenant_id);
   }
 }

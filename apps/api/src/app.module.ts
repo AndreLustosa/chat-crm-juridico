@@ -68,6 +68,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { CapabilityGuard } from './permissions/capability.guard';
 import { OfficeModule } from './office/office.module';
 import { PlatformModule } from './platform/platform.module';
+import { InviteModule } from './invite/invite.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -159,6 +160,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     OfficeModule,
     PermissionsModule,
     PlatformModule,
+    InviteModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

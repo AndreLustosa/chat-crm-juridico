@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { evaluateSubscription } from '../subscription/subscription.util';
+import { evaluateSubscription, TRIAL_DAYS } from '../subscription/subscription.util';
 
 /**
  * Leitura do back-office da PLATAFORMA (SaaS), restrito ao SUPER_ADMIN.
@@ -183,5 +184,76 @@ export class PlatformService {
       data: { deletion_scheduled_at: null },
     });
     return { ok: true };
+  }
+
+  // ─── Provisionamento (Fase 4): criar escritorio + admin via CONVITE ─────────
+  private readonly INVITE_DAYS = 7;
+
+  /**
+   * Cria um novo escritorio + usuario ADMIN SEM senha, gerando um token de
+   * convite. O admin define a propria senha pelo link (o dono nunca a conhece).
+   * Sem auto-login. Trial padrao (mesma regra do signup publico).
+   */
+  async createTenant(input: {
+    officeName?: string; name?: string; email?: string; cnpj?: string; cpf?: string; phone?: string;
+  }) {
+    const officeName = (input.officeName ?? '').trim();
+    const adminName = (input.name ?? '').trim();
+    const email = (input.email ?? '').trim().toLowerCase();
+    if (!officeName || !adminName || !email) {
+      throw new BadRequestException('Preencha o escritorio, o nome do admin e o e-mail.');
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new BadRequestException('E-mail invalido.');
+    }
+
+    const existing = await (this.prisma as any).user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) throw new ConflictException('Ja existe uma conta com este e-mail.');
+
+    const inviteToken = randomBytes(24).toString('hex');
+    const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+    const inviteExpiresAt = new Date(Date.now() + this.INVITE_DAYS * 24 * 60 * 60 * 1000);
+    const phone = input.phone?.trim() || null;
+
+    try {
+      const tenant = await (this.prisma as any).$transaction(async (tx: any) => {
+        const t = await tx.tenant.create({
+          data: {
+            name: officeName,
+            cnpj: input.cnpj?.trim() || null,
+            cpf: input.cpf?.trim() || null,
+            phone,
+            is_internal: false,
+            subscription_status: 'TRIALING',
+            trial_ends_at: trialEndsAt,
+            plan: 'TRIAL',
+          },
+          select: { id: true, name: true },
+        });
+        await tx.user.create({
+          data: {
+            tenant_id: t.id,
+            name: adminName,
+            email,
+            phone,
+            password_hash: null, // sem senha ate o convite ser resgatado
+            invite_token: inviteToken,
+            invite_expires_at: inviteExpiresAt,
+            roles: ['ADMIN'],
+          },
+        });
+        return t;
+      });
+      return {
+        ok: true,
+        id: tenant.id,
+        name: tenant.name,
+        inviteToken,
+        inviteExpiresAt: inviteExpiresAt.toISOString(),
+      };
+    } catch (e: any) {
+      if (e?.code === 'P2002') throw new ConflictException('Ja existe uma conta com este e-mail.');
+      throw e;
+    }
   }
 }
