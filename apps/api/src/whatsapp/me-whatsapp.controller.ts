@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Request } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Request } from '@nestjs/common';
 import { MeWhatsappService } from './me-whatsapp.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 
@@ -29,5 +29,40 @@ export class MeWhatsappController {
   @Roles('ADMIN')
   disconnect(@Request() req: any) {
     return this.svc.disconnect(req.user?.tenant_id);
+  }
+
+  // ─── Multi-departamento (Fase 1): cada departamento = 1 Inbox + 1 número ──────
+
+  /** Lista os departamentos (inboxes) do escritório + status do WhatsApp de cada um. */
+  @Get('me/whatsapp/departments')
+  listDepartments(@Request() req: any) {
+    return this.svc.listDepartments(req.user?.tenant_id);
+  }
+
+  /** Cria um departamento (Inbox). */
+  @Post('me/whatsapp/departments')
+  @Roles('ADMIN')
+  createDepartment(@Body() body: { name: string }, @Request() req: any) {
+    return this.svc.createDepartment(req.user?.tenant_id, body?.name);
+  }
+
+  /** Conecta (QR/pairing) o número de um departamento. */
+  @Post('me/whatsapp/departments/:inboxId/connect')
+  @Roles('ADMIN')
+  connectInbox(@Param('inboxId') inboxId: string, @Request() req: any) {
+    return this.svc.connectInbox(req.user?.tenant_id, inboxId);
+  }
+
+  /** Estado da conexão do número de um departamento. */
+  @Get('me/whatsapp/departments/:inboxId/status')
+  statusInbox(@Param('inboxId') inboxId: string, @Request() req: any) {
+    return this.svc.statusInbox(req.user?.tenant_id, inboxId);
+  }
+
+  /** Desconecta (logout) o número de um departamento. */
+  @Post('me/whatsapp/departments/:inboxId/disconnect')
+  @Roles('ADMIN')
+  disconnectInbox(@Param('inboxId') inboxId: string, @Request() req: any) {
+    return this.svc.disconnectInbox(req.user?.tenant_id, inboxId);
   }
 }

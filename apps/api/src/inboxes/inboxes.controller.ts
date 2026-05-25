@@ -29,8 +29,10 @@ export class InboxesController {
 
   @Post()
   @Roles('ADMIN')
-  async create(@Body() data: { name: string }) {
-    return this.inboxesService.create(data);
+  async create(@Body() data: { name: string }, @Request() req: any) {
+    // tenant_id é OBRIGATÓRIO (multi-tenant): sem ele o create quebra (coluna
+    // NOT NULL) e o inbox não fica isolado por escritório.
+    return this.inboxesService.create({ name: data.name, tenant_id: req.user?.tenant_id });
   }
 
   @Put(':id')
