@@ -162,6 +162,8 @@ export class StripeBillingService {
    */
   async ensurePortalConfig(): Promise<string> {
     const stripe = await this.client();
+    // Versão da config do portal — incremente para forçar recriação após mudanças.
+    const CONFIG_VERSION = 'v2';
     await this.ensureCatalog(); // garante Products/Prices antes de referenciá-los
 
     // Produtos/preços que o cliente pode escolher ao trocar de plano.
@@ -185,18 +187,17 @@ export class StripeBillingService {
         subscription_update: {
           enabled: true,
           default_allowed_updates: ['price'],
-          proration_behavior: 'create_prorations',
+          proration_behavior: 'always_invoice', // cobra a diferença do upgrade na hora
           products,
         },
       },
-      metadata: { jurisflow: 'true' },
+      metadata: { jurisflow: 'true', config_version: CONFIG_VERSION },
     };
 
-    // Reusa a configuração que já criamos (metadata.jurisflow) ou cria uma nova.
-    // Para "reconfigurar" (ex.: novo plano no catálogo), basta apagar a config
-    // no painel do Stripe que ela é recriada na próxima abertura do portal.
+    // Reusa a config da versão atual (metadata.config_version) ou cria uma nova.
+    // Mudou a config? Incremente CONFIG_VERSION → a próxima abertura recria.
     const existing = await stripe.billingPortal.configurations.list({ limit: 100 });
-    const ours = existing.data.find((c) => c.metadata?.jurisflow === 'true' && c.active);
+    const ours = existing.data.find((c) => c.metadata?.config_version === CONFIG_VERSION && c.active);
     if (ours) return ours.id;
     const created = await stripe.billingPortal.configurations.create(params);
     this.logger.log(`[STRIPE] Portal config criada: ${created.id}`);
