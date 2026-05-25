@@ -155,8 +155,58 @@ export class StripeBillingService {
   }
 
   /**
+   * Garante uma configuração do Customer Portal com TROCA DE PLANO habilitada
+   * (além de cancelar, atualizar cartão, dados de cobrança e histórico de
+   * faturas). Idempotente via metadata.jurisflow — registra os 4 planos como
+   * opções de troca. Mesma filosofia do ensureCatalog: zero trabalho no painel.
+   */
+  async ensurePortalConfig(): Promise<string> {
+    const stripe = await this.client();
+    await this.ensureCatalog(); // garante Products/Prices antes de referenciá-los
+
+    // Produtos/preços que o cliente pode escolher ao trocar de plano.
+    const priceList = await stripe.prices.list({
+      lookup_keys: SAAS_PLANS.map((p) => p.code),
+      active: true,
+      limit: 100,
+    });
+    const products = priceList.data.map((pr) => ({
+      product: typeof pr.product === 'string' ? pr.product : pr.product.id,
+      prices: [pr.id],
+    }));
+
+    const params: Stripe.BillingPortal.ConfigurationCreateParams = {
+      business_profile: { headline: 'Gerencie sua assinatura do Jurisflow.' },
+      features: {
+        invoice_history: { enabled: true },
+        payment_method_update: { enabled: true },
+        customer_update: { enabled: true, allowed_updates: ['address', 'name', 'tax_id', 'email'] },
+        subscription_cancel: { enabled: true, mode: 'at_period_end' },
+        subscription_update: {
+          enabled: true,
+          default_allowed_updates: ['price'],
+          proration_behavior: 'create_prorations',
+          products,
+        },
+      },
+      metadata: { jurisflow: 'true' },
+    };
+
+    // Reusa a configuração que já criamos (metadata.jurisflow) ou cria uma nova.
+    // Para "reconfigurar" (ex.: novo plano no catálogo), basta apagar a config
+    // no painel do Stripe que ela é recriada na próxima abertura do portal.
+    const existing = await stripe.billingPortal.configurations.list({ limit: 100 });
+    const ours = existing.data.find((c) => c.metadata?.jurisflow === 'true' && c.active);
+    if (ours) return ours.id;
+    const created = await stripe.billingPortal.configurations.create(params);
+    this.logger.log(`[STRIPE] Portal config criada: ${created.id}`);
+    return created.id;
+  }
+
+  /**
    * Customer Portal (Stripe Billing): o escritório gerencia o próprio cartão,
-   * troca de plano e cancela — página hospedada do Stripe. Zero código nosso.
+   * troca de plano e cancela — página hospedada do Stripe. A configuração (com
+   * troca de plano habilitada) é provisionada por código via ensurePortalConfig.
    */
   async portal(tenantId: string): Promise<{ url: string }> {
     const tenant = await this.prisma.tenant.findUnique({
@@ -167,9 +217,11 @@ export class StripeBillingService {
       throw new BadRequestException('Escritório ainda não tem assinatura no Stripe.');
     }
     const stripe = await this.client();
+    const configuration = await this.ensurePortalConfig();
     const session = await stripe.billingPortal.sessions.create({
       customer: tenant.stripe_customer_id,
       return_url: `${this.appUrl()}/assinatura`,
+      configuration,
     });
     return { url: session.url };
   }
