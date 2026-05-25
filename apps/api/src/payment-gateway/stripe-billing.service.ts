@@ -103,42 +103,52 @@ export class StripeBillingService {
     if (!tenant) throw new NotFoundException('Escritório não encontrado.');
     if (tenant.is_internal) throw new BadRequestException('Escritório interno não assina (acesso ilimitado).');
 
-    const stripe = await this.client();
+    try {
+      const stripe = await this.client();
 
-    // 1) Customer Stripe do escritório (cria + persiste na 1ª vez).
-    let customerId = tenant.stripe_customer_id;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        name: tenant.name,
-        email: opts.email,
-        metadata: { tenant_id: tenant.id },
+      // 1) Customer Stripe do escritório (cria + persiste na 1ª vez).
+      let customerId = tenant.stripe_customer_id;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          name: tenant.name,
+          email: opts.email,
+          metadata: { tenant_id: tenant.id },
+        });
+        customerId = customer.id;
+        await this.prisma.tenant.update({ where: { id: tenant.id }, data: { stripe_customer_id: customerId } });
+      }
+
+      // 2) Preço do plano (garante no catálogo se faltar).
+      const priceId = await this.priceIdFor(plan.code);
+
+      // 3) Checkout Session (assinatura mensal).
+      const base = this.appUrl();
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer: customerId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${base}/assinatura?status=sucesso`,
+        cancel_url: `${base}/assinatura?status=cancelado`,
+        subscription_data: { metadata: { tenant_id: tenant.id, saas: 'true' } },
+        metadata: { tenant_id: tenant.id, plan: plan.code },
+        tax_id_collection: { enabled: true }, // coleta CPF/CNPJ no proprio checkout (cobranca BR)
+        customer_update: { name: 'auto' }, // EXIGIDO pelo Stripe ao usar tax_id_collection com customer existente
+        locale: 'pt-BR',
       });
-      customerId = customer.id;
-      await this.prisma.tenant.update({ where: { id: tenant.id }, data: { stripe_customer_id: customerId } });
+
+      // Grava o plano escolhido (status muda só no webhook).
+      await this.prisma.tenant.update({ where: { id: tenant.id }, data: { plan: plan.code } });
+
+      this.logger.log(`[STRIPE] Checkout tenant=${tenant.id} plano=${plan.code} session=${session.id}`);
+      return { url: session.url };
+    } catch (e: any) {
+      // Erros de validacao proprios (plano/interno/sem-config) sobem como estao.
+      if (e instanceof BadRequestException || e instanceof NotFoundException) throw e;
+      // Erro do SDK do Stripe (ex.: customer_update faltando) → loga a causa REAL
+      // e expoe a mensagem do Stripe como 400 (pra aparecer na tela, sem virar 500 generico).
+      this.logger.error(`[STRIPE] checkout falhou (tenant=${opts.tenantId}): ${e?.message}`);
+      throw new BadRequestException(`Stripe: ${e?.message || 'falha ao iniciar o checkout.'}`);
     }
-
-    // 2) Preço do plano (garante no catálogo se faltar).
-    const priceId = await this.priceIdFor(plan.code);
-
-    // 3) Checkout Session (assinatura mensal).
-    const base = this.appUrl();
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${base}/assinatura?status=sucesso`,
-      cancel_url: `${base}/assinatura?status=cancelado`,
-      subscription_data: { metadata: { tenant_id: tenant.id, saas: 'true' } },
-      metadata: { tenant_id: tenant.id, plan: plan.code },
-      tax_id_collection: { enabled: true }, // coleta CPF/CNPJ no proprio checkout (cobranca BR)
-      locale: 'pt-BR',
-    });
-
-    // Grava o plano escolhido (status muda só no webhook).
-    await this.prisma.tenant.update({ where: { id: tenant.id }, data: { plan: plan.code } });
-
-    this.logger.log(`[STRIPE] Checkout tenant=${tenant.id} plano=${plan.code} session=${session.id}`);
-    return { url: session.url };
   }
 
   /**
