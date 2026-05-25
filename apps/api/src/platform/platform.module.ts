@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PlatformBootstrapService } from './platform-bootstrap.service';
+import { PlatformService } from './platform.service';
+import { PlatformController } from './platform.controller';
 
 /**
  * Modulo da administracao da PLATAFORMA (SaaS back-office), restrito ao
@@ -7,9 +9,11 @@ import { PlatformBootstrapService } from './platform-bootstrap.service';
  * nunca toca em outros sistemas que compartilham infraestrutura.
  *
  * Fase 1: promove o(s) dono(s) via PLATFORM_OWNER_EMAIL no boot.
- * Fases seguintes: controller de escritorios (listagem, status, gestao).
+ * Fase 2: lista de escritorios (GET /platform/tenants, /platform/stats).
+ * Fase 3: gestao (suspender/excluir).
  */
 @Module({
-  providers: [PlatformBootstrapService],
+  controllers: [PlatformController],
+  providers: [PlatformBootstrapService, PlatformService],
 })
 export class PlatformModule {}
