@@ -132,7 +132,10 @@ export class StripeBillingService {
         subscription_data: { metadata: { tenant_id: tenant.id, saas: 'true' } },
         metadata: { tenant_id: tenant.id, plan: plan.code },
         tax_id_collection: { enabled: true }, // coleta CPF/CNPJ no proprio checkout (cobranca BR)
-        customer_update: { name: 'auto' }, // EXIGIDO pelo Stripe ao usar tax_id_collection com customer existente
+        // tax_id_collection exige customer_update[address]=auto: o Stripe precisa
+        // salvar o endereco (e o CPF/CNPJ) coletados no customer existente. Sem
+        // 'address' ele recusa com "could not find a valid address".
+        customer_update: { name: 'auto', address: 'auto' },
         locale: 'pt-BR',
       });
 
