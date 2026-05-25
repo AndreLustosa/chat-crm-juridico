@@ -255,14 +255,34 @@ export class StripeBillingService {
         const tenantId = await this.tenantByCustomer(inv.customer);
         if (tenantId) {
           const periodEnd = inv.lines?.data?.[0]?.period?.end;
+          // Sincroniza o PLANO a partir da assinatura. O invoice.paid sempre chega
+          // (foi o que ativou a conta) e toda troca de plano gera fatura
+          // (proration_behavior=always_invoice), então o plano fica em dia mesmo
+          // que o evento customer.subscription.updated não esteja inscrito no webhook.
+          let plan: string | undefined;
+          const subId =
+            typeof (inv as any).subscription === 'string'
+              ? ((inv as any).subscription as string)
+              : (inv as any).subscription?.id;
+          if (subId) {
+            try {
+              const stripe = await this.client();
+              const sub = await stripe.subscriptions.retrieve(subId);
+              const lookupKey = sub.items?.data?.[0]?.price?.lookup_key ?? undefined;
+              if (lookupKey && getPlan(lookupKey)) plan = lookupKey;
+            } catch (e: any) {
+              this.logger.warn(`[STRIPE] Não consegui ler a assinatura ${subId} no ${event.type}: ${e?.message}`);
+            }
+          }
           await this.prisma.tenant.update({
             where: { id: tenantId },
             data: {
               subscription_status: 'ACTIVE',
               current_period_end: periodEnd ? new Date(periodEnd * 1000) : null,
+              ...(plan ? { plan } : {}),
             },
           });
-          this.logger.log(`[STRIPE] Tenant ${tenantId} ATIVADO (${event.type}).`);
+          this.logger.log(`[STRIPE] Tenant ${tenantId} ATIVADO (${event.type}), plano=${plan ?? '—'}.`);
         }
         break;
       }
