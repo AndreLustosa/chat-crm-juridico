@@ -22,6 +22,15 @@ import {
   UpdateCategoryDto,
 } from './financeiro.dto';
 
+/**
+ * ADMIN e FINANCEIRO veem o caixa do escritorio inteiro (consolidado / qualquer
+ * advogado). Demais papeis ficam restritos ao proprio (lawyerId = req.user.id).
+ */
+function canSeeAllFinance(req: any): boolean {
+  const roles: string[] = req.user?.roles ?? [];
+  return roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+}
+
 @UseGuards(JwtAuthGuard)
 @RequireCapability('financeiro')
 @Controller('financeiro')
@@ -51,7 +60,7 @@ export class FinanceiroController {
     // Demais usuarios veem so as proprias — query param lawyerId eh
     // IGNORADO pra prevenir vazamento de receitas/despesas.
     // Bug corrigido 2026-04-24.
-    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const isAdmin = canSeeAllFinance(req);
     const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
     return this.service.findAllTransactions({
       tenantId: req.user.tenant_id,
@@ -121,7 +130,7 @@ export class FinanceiroController {
     // Bug corrigido 2026-04-24: antes qualquer autenticado podia
     // passar ?lawyerId=X e ler historico de alteracoes financeiras
     // de outro advogado.
-    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const isAdmin = canSeeAllFinance(req);
     const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
     // Bug fix 2026-05-10 (PR4 #27): tenantId obrigatorio
     return this.service.getAuditLog(
@@ -145,7 +154,7 @@ export class FinanceiroController {
   ) {
     // RBAC: apenas ADMIN pode ver summary consolidado de outro advogado.
     // Demais usuarios veem o proprio. Bug corrigido 2026-04-24.
-    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const isAdmin = canSeeAllFinance(req);
     const effectiveLawyerId = isAdmin ? lawyerId : req.user.id;
     return this.service.getSummary(req.user.tenant_id, startDate, endDate, effectiveLawyerId);
   }
@@ -209,7 +218,7 @@ export class FinanceiroController {
   // sobrescrever — demais usam o proprio req.user.id.
 
   private resolveLawyerId(requestedLawyerId: string | undefined, req: any): string {
-    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const isAdmin = canSeeAllFinance(req);
     if (requestedLawyerId && requestedLawyerId !== req.user?.id && !isAdmin) {
       throw new ForbiddenException('Apenas ADMIN pode consultar/alterar dados fiscais de outro advogado');
     }

@@ -12,6 +12,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RequireCapability } from '../permissions/require-capability.decorator';
 import { FinancialDashboardService } from './financial-dashboard.service';
 
+/** ADMIN e FINANCEIRO veem o caixa do escritorio inteiro. Demais: so o proprio. */
+function canSeeAllFinance(req: any): boolean {
+  const roles: string[] = req.user?.roles ?? [];
+  return roles.includes('ADMIN') || roles.includes('FINANCEIRO');
+}
+
 /**
  * Controller novo do dashboard financeiro (cockpit).
  * Endpoints sob /financeiro/dashboard/* — coexistem com endpoints
@@ -30,7 +36,7 @@ export class FinancialDashboardController {
 
   /** Helper de RBAC: advogado próprio vs ADMIN com filtro livre. */
   private resolveLawyerId(req: any, lawyerIdQuery?: string): string | undefined {
-    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const isAdmin = canSeeAllFinance(req);
     if (isAdmin) return lawyerIdQuery || undefined;
     return req.user.id;
   }
@@ -72,7 +78,7 @@ export class FinancialDashboardController {
     @Request() req: any,
   ) {
     // Apenas ADMIN — análise consolidada por advogado é dado sensível
-    const isAdmin = req.user?.roles?.includes('ADMIN');
+    const isAdmin = canSeeAllFinance(req);
     if (!isAdmin) {
       // Não-ADMIN: retorna só o próprio (lista com 1 item)
       return this.service.getRevenueByLawyer(req.user.tenant_id, from, to).then((data) =>
