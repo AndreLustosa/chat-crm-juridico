@@ -231,6 +231,42 @@ export class StripeBillingService {
         }
         break;
       }
+      case 'customer.subscription.updated': {
+        // Disparado quando o cliente TROCA DE PLANO (upgrade/downgrade) pelo
+        // Customer Portal. Sincroniza o campo `plan` (que governa o limite de
+        // processos e o gate de IA) com o preço atual da assinatura no Stripe.
+        const sub = event.data.object as Stripe.Subscription;
+        const tenantId = await this.tenantByCustomer(sub.customer);
+        if (tenantId) {
+          // lookup_key do price = plan.code (definido no ensureCatalog).
+          const lookupKey = sub.items?.data?.[0]?.price?.lookup_key ?? undefined;
+          const plan = lookupKey && getPlan(lookupKey) ? lookupKey : undefined;
+          // Reflete o status do Stripe na máquina de estados interna.
+          const status =
+            sub.status === 'active'
+              ? 'ACTIVE'
+              : sub.status === 'past_due' || sub.status === 'unpaid'
+                ? 'PAST_DUE'
+                : sub.status === 'canceled'
+                  ? 'CANCELED'
+                  : undefined;
+          // current_period_end mudou de lugar entre versões da API — busca defensiva.
+          const anySub = sub as any;
+          const periodEndUnix = anySub.current_period_end ?? anySub.items?.data?.[0]?.current_period_end;
+          if (plan || status || periodEndUnix) {
+            await this.prisma.tenant.update({
+              where: { id: tenantId },
+              data: {
+                ...(plan ? { plan } : {}),
+                ...(status ? { subscription_status: status } : {}),
+                ...(periodEndUnix ? { current_period_end: new Date(periodEndUnix * 1000) } : {}),
+              },
+            });
+            this.logger.log(`[STRIPE] Tenant ${tenantId} atualizado (plano=${plan ?? '—'}, status=${status ?? '—'}).`);
+          }
+        }
+        break;
+      }
       default:
         this.logger.debug(`[STRIPE] Evento ignorado: ${event.type}`);
     }
