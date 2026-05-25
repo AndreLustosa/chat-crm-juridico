@@ -21,6 +21,10 @@ model Tenant {
   plan                       String?
   asaas_customer_id          String?
   asaas_subscription_id      String?
+  // ─── SaaS Fase 3: suspensao/exclusao pelo admin master (back-office) ───────
+  suspended_at               DateTime? // suspenso pelo SUPER_ADMIN (acesso cortado; reversivel)
+  prev_subscription_status   String?   // status antes de suspender (para reativar ao estado correto)
+  deletion_scheduled_at      DateTime? // exclusao agendada; purga FISICA e manual/auditada apos a carencia
   conversations              Conversation[]
   leads                      Lead[]
   tasks                      Task[]

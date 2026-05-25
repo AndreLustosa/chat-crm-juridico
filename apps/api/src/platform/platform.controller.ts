@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Request } from '@nestjs/common';
 import { PlatformService } from './platform.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 
@@ -23,5 +23,31 @@ export class PlatformController {
   @Get('tenants')
   tenants() {
     return this.svc.listTenants();
+  }
+
+  // ─── Gestao (Fase 3) — acoes reversiveis; a purga fisica e manual/auditada ──
+
+  /** Suspende o acesso do escritorio (reversivel). */
+  @Patch('tenants/:id/suspend')
+  suspend(@Param('id') id: string, @Request() req: any) {
+    return this.svc.suspend(id, req.user?.tenant_id);
+  }
+
+  /** Reativa o escritorio (restaura status; cancela exclusao agendada). */
+  @Patch('tenants/:id/reactivate')
+  reactivate(@Param('id') id: string, @Request() req: any) {
+    return this.svc.reactivate(id, req.user?.tenant_id);
+  }
+
+  /** Agenda a exclusao (suspende + carencia). Body { confirmName } = nome exato do escritorio. */
+  @Patch('tenants/:id/schedule-deletion')
+  scheduleDeletion(@Param('id') id: string, @Body() body: { confirmName?: string }, @Request() req: any) {
+    return this.svc.scheduleDeletion(id, body?.confirmName ?? '', req.user?.tenant_id);
+  }
+
+  /** Cancela a exclusao agendada (mantem suspenso). */
+  @Patch('tenants/:id/cancel-deletion')
+  cancelDeletion(@Param('id') id: string, @Request() req: any) {
+    return this.svc.cancelDeletion(id, req.user?.tenant_id);
   }
 }

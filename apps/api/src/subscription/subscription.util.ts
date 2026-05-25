@@ -33,6 +33,7 @@ export type SubscriptionReason =
   | 'TRIAL'
   | 'TRIAL_EXPIRED'
   | 'PAST_DUE'
+  | 'SUSPENDED'
   | 'CANCELED'
   | 'EXPIRED'
   | 'UNKNOWN';
@@ -114,6 +115,7 @@ export function evaluateSubscription(
   // 4) Demais estados (PAST_DUE / CANCELED / EXPIRED / desconhecido) → bloqueado.
   let reason: SubscriptionReason = 'UNKNOWN';
   if (status === 'PAST_DUE') reason = 'PAST_DUE';
+  else if (status === 'SUSPENDED') reason = 'SUSPENDED'; // suspenso pelo admin master
   else if (status === 'CANCELED') reason = 'CANCELED';
   else if (status === 'EXPIRED') reason = 'EXPIRED';
   return { active: false, is_trial: false, reason, days_remaining: null, ...base };

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { evaluateSubscription } from '../subscription/subscription.util';
 
@@ -34,6 +34,8 @@ export class PlatformService {
         cpf: true,
         phone: true,
         ...this.subFields,
+        suspended_at: true,
+        deletion_scheduled_at: true,
         _count: { select: { users: true } },
         // Proxy de "cadastrado em": o Tenant nao tem created_at, entao usamos a
         // criacao do usuario mais antigo (o admin que abriu o escritorio).
@@ -59,6 +61,8 @@ export class PlatformService {
         days_remaining: ev.days_remaining,
         users_count: t._count?.users ?? 0,
         created_at: t.users?.[0]?.created_at ?? null,
+        suspended_at: t.suspended_at ?? null,
+        deletion_scheduled_at: t.deletion_scheduled_at ?? null,
       };
     });
   }
@@ -97,5 +101,87 @@ export class PlatformService {
     }
     s.clientes = s.total - s.internos;
     return s;
+  }
+
+  // ─── Gestão (Fase 3): suspender / reativar / agendar exclusão ──────────────
+  private readonly GRACE_DAYS = 7;
+
+  /** Carrega o tenant alvo aplicando as protecoes: nunca interno, nunca o proprio. */
+  private async loadTarget(tenantId: string, actorTenantId?: string) {
+    const t = await (this.prisma as any).tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true, name: true, is_internal: true,
+        subscription_status: true, suspended_at: true,
+        prev_subscription_status: true, deletion_scheduled_at: true,
+      },
+    });
+    if (!t) throw new NotFoundException('Escritorio nao encontrado.');
+    if (t.is_internal) throw new BadRequestException('Escritorios internos nao podem ser suspensos ou excluidos.');
+    if (actorTenantId && tenantId === actorTenantId) {
+      throw new BadRequestException('Voce nao pode suspender ou excluir o proprio escritorio.');
+    }
+    return t;
+  }
+
+  /** Suspende o acesso do escritorio (reversivel; dados intactos). */
+  async suspend(tenantId: string, actorTenantId?: string) {
+    const t = await this.loadTarget(tenantId, actorTenantId);
+    if (t.subscription_status === 'SUSPENDED') return { ok: true, already: true };
+    await (this.prisma as any).tenant.update({
+      where: { id: tenantId },
+      data: {
+        prev_subscription_status: t.subscription_status,
+        subscription_status: 'SUSPENDED',
+        suspended_at: new Date(),
+      },
+    });
+    return { ok: true };
+  }
+
+  /** Reativa (restaura o status anterior; tambem cancela qualquer exclusao agendada). */
+  async reactivate(tenantId: string, actorTenantId?: string) {
+    const t = await this.loadTarget(tenantId, actorTenantId);
+    await (this.prisma as any).tenant.update({
+      where: { id: tenantId },
+      data: {
+        subscription_status: t.prev_subscription_status || 'ACTIVE',
+        suspended_at: null,
+        prev_subscription_status: null,
+        deletion_scheduled_at: null,
+      },
+    });
+    return { ok: true };
+  }
+
+  /** Agenda a exclusao (suspende ja + marca purga apos a carencia). Exige o nome exato. */
+  async scheduleDeletion(tenantId: string, confirmName: string, actorTenantId?: string) {
+    const t = await this.loadTarget(tenantId, actorTenantId);
+    if ((confirmName || '').trim() !== t.name) {
+      throw new BadRequestException('Confirmacao invalida: digite o nome exato do escritorio.');
+    }
+    const scheduled = new Date(Date.now() + this.GRACE_DAYS * 24 * 60 * 60 * 1000);
+    const alreadySuspended = t.subscription_status === 'SUSPENDED';
+    await (this.prisma as any).tenant.update({
+      where: { id: tenantId },
+      data: {
+        deletion_scheduled_at: scheduled,
+        // agendar exclusao ja corta o acesso; preserva o status real para um eventual cancel+reativar
+        prev_subscription_status: alreadySuspended ? t.prev_subscription_status : t.subscription_status,
+        subscription_status: 'SUSPENDED',
+        suspended_at: t.suspended_at ?? new Date(),
+      },
+    });
+    return { ok: true, deletion_scheduled_at: scheduled.toISOString(), grace_days: this.GRACE_DAYS };
+  }
+
+  /** Cancela a exclusao agendada (mantem suspenso; reative a parte se quiser). */
+  async cancelDeletion(tenantId: string, actorTenantId?: string) {
+    await this.loadTarget(tenantId, actorTenantId);
+    await (this.prisma as any).tenant.update({
+      where: { id: tenantId },
+      data: { deletion_scheduled_at: null },
+    });
+    return { ok: true };
   }
 }
