@@ -67,6 +67,7 @@ import { BrandingModule } from './branding/branding.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { CapabilityGuard } from './permissions/capability.guard';
 import { OfficeModule } from './office/office.module';
+import { PlatformModule } from './platform/platform.module';
 
 import { HealthController } from './common/controllers/health.controller';
 import { PrismaExceptionFilter } from './common/filters/prisma-exception.filter';
@@ -157,6 +158,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     BrandingModule,
     OfficeModule,
     PermissionsModule,
+    PlatformModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

@@ -32,13 +32,13 @@ export class SettingsController {
   // ─── Generic Settings ─────────────────────────────────
 
   @Get()
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getAll() {
     return this.settingsService.getAll();
   }
 
   @Put()
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async upsert(@Body() data: { key: string; value: string }) {
     return this.settingsService.upsert(data.key, data.value);
   }
@@ -140,7 +140,7 @@ export class SettingsController {
   }
 
   @Get('whatsapp-config/health')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async checkHealth() {
     try {
       await this.whatsappService.listInstances();
@@ -151,14 +151,14 @@ export class SettingsController {
   }
 
   @Get('whatsapp-config')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getWhatsAppConfig() {
     const config = await this.settingsService.getWhatsAppConfig();
     return { ...config, apiKey: maskApiKey(config.apiKey) };
   }
 
   @Post('whatsapp-config')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async setWhatsAppConfig(@Body() data: { apiUrl: string; apiKey?: string; webhookUrl?: string }) {
     await this.settingsService.setWhatsAppConfig(data.apiUrl, data.apiKey, data.webhookUrl);
 
@@ -180,14 +180,14 @@ export class SettingsController {
   }
 
   @Get('ai-config')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getAiConfig() {
     const config = await this.settingsService.getAiConfig();
     return { ...config, apiKey: maskApiKey(config.apiKey) };
   }
 
   @Get('transcription-config')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getTranscriptionConfig() {
     const cfg = await this.settingsService.getTranscriptionConfig();
     return {
@@ -201,7 +201,7 @@ export class SettingsController {
   }
 
   @Post('transcription-config')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async setTranscriptionConfig(@Body() data: {
     groqApiKey?: string;
     groqModel?: string;
@@ -214,7 +214,7 @@ export class SettingsController {
   }
 
   @Post('ai-config')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async setAiConfig(@Body() data: { apiKey?: string; adminKey?: string; anthropicApiKey?: string; defaultModel?: string; djenModel?: string; djenPrompt?: string; djenNotifyTemplate?: string; adminBotEnabled?: boolean; cooldownSeconds?: number; memoryProfileModel?: string; memoryFactsModel?: string; memoryOrgFrequency?: string; memoryOrgWeekday?: number; memoryOrgHour?: number; memoryOrgRequireApproval?: boolean }) {
     if (data.apiKey)    await this.settingsService.setAiConfig(data.apiKey);
     if (data.adminKey)  await this.settingsService.setAdminKey(data.adminKey);
@@ -392,7 +392,7 @@ export class SettingsController {
   }
 
   @Get('ai-costs')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getAiCosts() {
     return this.settingsService.getAiCosts();
   }
@@ -400,7 +400,7 @@ export class SettingsController {
   // ─── Clicksign ────────────────────────────────────────
 
   @Get('clicksign')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getClicksign() {
     const cfg = await this.settingsService.getClicksignConfig();
     return {
@@ -411,7 +411,7 @@ export class SettingsController {
   }
 
   @Patch('clicksign')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async setClicksign(@Body() body: { baseUrl?: string; apiToken?: string; webhookToken?: string }) {
     await this.settingsService.setClicksignConfig(body);
     return { ok: true };
@@ -462,13 +462,13 @@ export class SettingsController {
   // ─── TTS (Text-to-Speech) ─────────────────────────────
 
   @Get('tts')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async getTtsConfig() {
     return this.settingsService.getTtsConfig();
   }
 
   @Patch('tts')
-  @Roles('ADMIN')
+  @Roles('SUPER_ADMIN')
   async setTtsConfig(@Body() body: { enabled?: boolean; googleApiKey?: string; voice?: string; language?: string }) {
     await this.settingsService.setTtsConfig(body);
     return { ok: true };

@@ -464,7 +464,10 @@ export class WhatsappService {
   }
 
   async getConnectionStatus(instanceName: string) {
-    return this.request('GET', `instance/connectionStatus/${instanceName}`);
+    // Evolution v2: o endpoint correto e connectionState (NAO connectionStatus).
+    // O nome antigo retornava 404 -> status sempre caia em 'close', e a conexao
+    // self-service nunca detectava 'open' (QR nao aparecia / estado errado).
+    return this.request('GET', `instance/connectionState/${instanceName}`);
   }
 
   async setWebhook(instanceName: string, url: string) {
