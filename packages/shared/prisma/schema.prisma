@@ -54,6 +54,7 @@ model Tenant {
   lead_profiles              LeadProfile[]
   organization_profile       OrganizationProfile?
   branding                   TenantBranding?
+  role_permissions           TenantRolePermission[]
   monthly_goals              MonthlyGoal[]
   financial_attachments      FinancialTransactionAttachment[]
   reports                    Report[]
@@ -108,6 +109,23 @@ model TenantBranding {
   icon       String?  @db.Text // data URL base64 (image/png, fundo transparente) — ícone quadrado
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+}
+
+/// Permissoes granulares por escritorio (white-label de acesso). Guarda APENAS os
+/// overrides em relacao a matriz padrao (papel x capacidade). ADMIN nunca entra
+/// aqui (tem tudo, nao editavel). Sem linha => usa o padrao do codigo.
+model TenantRolePermission {
+  id         String   @id @default(uuid())
+  tenant_id  String
+  tenant     Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  role       String // ADVOGADO | COMERCIAL | ESTAGIARIO | FINANCEIRO
+  capability String // atendimento | contatos | processos_ver | processos_editar | financeiro | analytics | configuracoes
+  allowed    Boolean
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([tenant_id, role, capability])
+  @@index([tenant_id])
 }
 
 model User {

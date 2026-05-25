@@ -64,6 +64,8 @@ import { OrganicTrafficModule } from './organic-traffic/organic-traffic.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { SubscriptionGuard } from './subscription/subscription.guard';
 import { BrandingModule } from './branding/branding.module';
+import { PermissionsModule } from './permissions/permissions.module';
+import { CapabilityGuard } from './permissions/capability.guard';
 import { OfficeModule } from './office/office.module';
 
 import { HealthController } from './common/controllers/health.controller';
@@ -154,6 +156,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     SubscriptionModule,
     BrandingModule,
     OfficeModule,
+    PermissionsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
@@ -174,6 +177,12 @@ import { RolesGuard } from './auth/guards/roles.guard';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    // Capacidades por escritorio (permissoes granulares). So atua em rotas com
+    // @RequireCapability(...). Roda depois do JwtAuthGuard (usa req.user).
+    {
+      provide: APP_GUARD,
+      useClass: CapabilityGuard,
     },
     // Trava de assinatura (SaaS Fase 1). Roda DEPOIS do JwtAuthGuard (precisa
     // de req.user) e do RolesGuard. Flag-gated por SAAS_GATING_ENABLED (default
