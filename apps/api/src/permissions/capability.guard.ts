@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { REQUIRE_CAPABILITY_KEY } from './require-capability.decorator';
-import { Capability } from './permissions.constants';
+import { Capability, normalizeRole } from './permissions.constants';
 import { PermissionsService } from './permissions.service';
 
 /**
@@ -29,6 +29,9 @@ export class CapabilityGuard implements CanActivate {
 
     const roles: string[] = user.roles ?? [];
     if (roles.some((r) => (r ?? '').toUpperCase() === 'ADMIN')) return true; // ADMIN sempre
+    // Papel fora da matriz gerenciada (ex.: ASSOCIADO) -> nao restringe aqui; esses
+    // papeis sao governados pela logica propria dos controllers (evita regressao).
+    if (roles.length > 0 && roles.some((r) => normalizeRole(r) === null)) return true;
 
     const caps = await this.perms.getUserCapabilities(user.tenant_id, roles);
     if (caps.has(cap)) return true;

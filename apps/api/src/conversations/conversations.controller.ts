@@ -1,12 +1,14 @@
 import { Controller, Get, Param, Patch, Body, Post, Query, UseGuards, Request, Req } from '@nestjs/common';
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequireCapability } from '../permissions/require-capability.decorator';
 import { TransferRequestDto, TransferToLawyerDto, ReturnToOriginDto } from './dto/transfer-request.dto';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SendPresenceDto } from './dto/presence.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 
 @UseGuards(JwtAuthGuard)
+@RequireCapability('atendimento')
 @Controller('conversations')
 export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}

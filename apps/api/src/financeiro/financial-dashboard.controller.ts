@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequireCapability } from '../permissions/require-capability.decorator';
 import { FinancialDashboardService } from './financial-dashboard.service';
 
 /**
@@ -22,6 +23,7 @@ import { FinancialDashboardService } from './financial-dashboard.service';
  *  - Endpoints de meta (goals) e by-area exigem ADMIN explicitamente
  */
 @UseGuards(JwtAuthGuard)
+@RequireCapability('financeiro')
 @Controller('financeiro/dashboard')
 export class FinancialDashboardController {
   constructor(private readonly service: FinancialDashboardService) {}

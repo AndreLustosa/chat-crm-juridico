@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { MessagesService } from './messages.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequireCapability } from '../permissions/require-capability.decorator';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ReactMessageDto } from './dto/react-message.dto';
 
@@ -33,6 +34,7 @@ const ALLOWED_DOC_TYPES = [
 ];
 
 @UseGuards(JwtAuthGuard)
+@RequireCapability('atendimento')
 @Controller('messages')
 export class MessagesController {
   constructor(private readonly messagesService: MessagesService) {}

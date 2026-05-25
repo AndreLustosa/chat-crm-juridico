@@ -14,6 +14,7 @@ import {
 import { FinanceiroService } from './financeiro.service';
 import { TaxService } from './tax.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequireCapability } from '../permissions/require-capability.decorator';
 import {
   CreateTransactionDto,
   UpdateTransactionDto,
@@ -22,6 +23,7 @@ import {
 } from './financeiro.dto';
 
 @UseGuards(JwtAuthGuard)
+@RequireCapability('financeiro')
 @Controller('financeiro')
 export class FinanceiroController {
   constructor(

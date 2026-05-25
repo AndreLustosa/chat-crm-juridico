@@ -3,6 +3,7 @@ import {
   Query, Request, UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RequireCapability } from '../permissions/require-capability.decorator';
 import { MonthlyGoalsService, GoalKind, GoalScope } from './monthly-goals.service';
 
 /**
@@ -22,6 +23,7 @@ import { MonthlyGoalsService, GoalKind, GoalScope } from './monthly-goals.servic
  *  - WRITE : apenas ADMIN/FINANCEIRO.
  */
 @UseGuards(JwtAuthGuard)
+@RequireCapability('financeiro')
 @Controller('financeiro/goals')
 export class MonthlyGoalsController {
   constructor(private readonly service: MonthlyGoalsService) {}
