@@ -23,6 +23,7 @@ export class PlatformService {
     trial_ends_at: true,
     current_period_end: true,
     plan: true,
+    cancel_at_period_end: true,
   } as const;
 
   /** Lista todos os escritorios com status de assinatura e metadados. */
@@ -60,6 +61,8 @@ export class PlatformService {
         reason: ev.reason,
         is_trial: ev.is_trial,
         days_remaining: ev.days_remaining,
+        cancel_at_period_end: ev.cancel_at_period_end,
+        current_period_end: ev.current_period_end,
         users_count: t._count?.users ?? 0,
         created_at: t.users?.[0]?.created_at ?? null,
         suspended_at: t.suspended_at ?? null,
