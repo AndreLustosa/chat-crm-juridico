@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { evaluateSubscription } from '../subscription/subscription.util';
+import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import { UpdateOfficeDto } from './dto/update-office.dto';
 
 @Injectable()
@@ -92,12 +93,21 @@ export class OfficeService {
     return this.getForTenant(tenantId);
   }
 
-  /** Valida o documento pelo nº de dígitos; "" => null (limpa). Mantém a formatação. */
+  /**
+   * Valida o documento: "" => null (limpa). Confere a quantidade de dígitos E os
+   * dígitos verificadores (módulo 11) — rejeita números fictícios como
+   * "00000000000" ou CPF/CNPJ com dígito verificador errado. Mantém a formatação.
+   */
   private normDoc(value: string, label: string, digits: number): string | null {
     const raw = (value ?? '').trim();
     if (!raw) return null;
-    if (raw.replace(/\D/g, '').length !== digits) {
+    const clean = raw.replace(/\D/g, '');
+    if (clean.length !== digits) {
       throw new BadRequestException(`${label} inválido — deve ter ${digits} dígitos.`);
+    }
+    const valido = digits === 11 ? isValidCPF(clean) : isValidCNPJ(clean);
+    if (!valido) {
+      throw new BadRequestException(`${label} inválido — confira os dígitos (número inexistente).`);
     }
     return raw;
   }

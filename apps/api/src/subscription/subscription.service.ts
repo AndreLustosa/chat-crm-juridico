@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -9,6 +10,7 @@ import { Prisma } from '@crm/shared';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import { SignupDto } from './dto/signup.dto';
 import {
   evaluateSubscription,
@@ -62,6 +64,12 @@ export class SubscriptionService {
     });
     if (existing) {
       throw new ConflictException('Já existe uma conta com este e-mail.');
+    }
+
+    // CNPJ é opcional no cadastro, mas se vier precisa ser válido (dígitos
+    // verificadores), não um número fictício.
+    if (dto.cnpj?.trim() && !isValidCNPJ(dto.cnpj)) {
+      throw new BadRequestException('CNPJ inválido — confira os dígitos.');
     }
 
     const password_hash = await argon2.hash(dto.password);
