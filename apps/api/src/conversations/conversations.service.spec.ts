@@ -63,15 +63,28 @@ describe('ConversationsService', () => {
   describe('assign', () => {
     it('deve atribuir conversa ao usuario e desativar ai_mode', async () => {
       const mockConv = { id: 'conv-1', assigned_user_id: 'user-1', ai_mode: false };
+      // Guarda multi-tenant: a conversa precisa existir (findUnique) antes do update.
+      prisma.conversation.findUnique.mockResolvedValue({ tenant_id: 'tenant-1' });
       prisma.conversation.update.mockResolvedValue(mockConv);
 
       const result = await service.assign('conv-1', 'user-1');
 
       expect(prisma.conversation.update).toHaveBeenCalledWith({
         where: { id: 'conv-1' },
-        data: { assigned_user_id: 'user-1', ai_mode: false },
+        data: expect.objectContaining({
+          assigned_user_id: 'user-1',
+          ai_mode: false,
+          ai_mode_source: 'MANUAL',
+        }),
       });
       expect(result).toEqual(mockConv);
+    });
+
+    it('deve lançar ForbiddenException se a conversa for de outro escritorio', async () => {
+      prisma.conversation.findUnique.mockResolvedValue({ tenant_id: 'tenant-A' });
+
+      await expect(service.assign('conv-1', 'user-1', 'tenant-B')).rejects.toThrow(ForbiddenException);
+      expect(prisma.conversation.update).not.toHaveBeenCalled();
     });
   });
 
@@ -240,6 +253,30 @@ describe('ConversationsService', () => {
         }),
       );
       expect(chatGateway.emitConversationsUpdate).toHaveBeenCalled();
+    });
+
+    it('deve lançar ForbiddenException se o destino for de outro escritorio', async () => {
+      prisma.$transaction.mockImplementation(async (fn: any) => {
+        const tx = {
+          conversation: {
+            findUnique: jest.fn().mockResolvedValue({
+              assigned_user_id: 'user-1',
+              pending_transfer_to_id: null,
+              tenant_id: 'tenant-A',
+            }),
+            update: jest.fn(),
+          },
+          user: {
+            // destino em OUTRO escritório → a trava barra
+            findUnique: jest.fn().mockResolvedValue({ tenant_id: 'tenant-B' }),
+          },
+        };
+        return fn(tx);
+      });
+
+      await expect(
+        service.requestTransfer('conv-1', 'target-user', 'user-1', 'motivo'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
