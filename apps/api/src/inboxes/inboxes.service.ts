@@ -14,21 +14,25 @@ export class InboxesService {
   }
 
   async findAllOperators(tenantId?: string) {
-    // SEGURANÇA multi-tenant: sem tenant não devolve ninguém — evita vazar
-    // operadores/inboxes/setores de OUTROS escritórios na lista de transferência.
+    // SEGURANÇA multi-tenant: sem tenant não devolve ninguém.
     if (!tenantId) return [];
 
     const [inboxes, sectors, allEligible, allOperators] = await Promise.all([
+      // Inboxes DO escritório. NÃO filtramos os MEMBROS pelo tenant de origem
+      // deles: membro de inbox é quem o admin adicionou pra atender aqui — pode
+      // ser de outro tenant de origem (ex.: o dono/SUPER_ADMIN que atende neste
+      // escritório). O isolamento vem de só listar inboxes DESTE tenant.
       this.inbox.findMany({
         where: { tenant_id: tenantId },
-        include: { users: { where: { tenant_id: tenantId }, select: { id: true, name: true } } },
+        include: { users: { select: { id: true, name: true } } },
       }),
+      // Sector é legado e não tem tenant_id → buscamos todos com seus membros e
+      // filtramos abaixo pelos membros RELEVANTES a este escritório.
       (this.prisma as any).sector.findMany({
-        // Sector NÃO tem tenant_id → escopa pelos usuários do tenant (some/where).
-        where: { users: { some: { tenant_id: tenantId } } },
-        include: { users: { where: { tenant_id: tenantId }, select: { id: true, name: true, roles: true } } },
+        include: { users: { select: { id: true, name: true, roles: true } } },
         orderBy: { name: 'asc' },
       }),
+      // Pool "Equipe": APENAS usuários deste tenant (aqui era o vazamento real).
       (this.prisma as any).user.findMany({
         where: { tenant_id: tenantId, roles: { hasSome: ['OPERADOR', 'ADVOGADO', 'ADMIN'] } },
         select: { id: true, name: true, roles: true },
@@ -43,6 +47,12 @@ export class InboxesService {
 
     const inboxUserIds = new Set(inboxes.flatMap((i: any) => (i.users || []).map((u: any) => u.id)));
     const operatorIds = new Set((allOperators as any[]).map((u: any) => u.id));
+    const eligibleIds = new Set((allEligible as any[]).map((u: any) => u.id));
+
+    // "Relevantes ao escritório" = membros dos inboxes do tenant + usuários do
+    // tenant. Usado pra escopar os SETORES (legado, sem tenant_id) sem vazar
+    // membros de OUTROS escritórios e sem perder o dono que atende aqui.
+    const relevantIds = new Set<string>([...inboxUserIds, ...eligibleIds, ...operatorIds]);
 
     // Operadores sem inbox → injetar no primeiro inbox (Comercial)
     const operatorsNotInInbox = (allOperators as { id: string; name: string }[]).filter(
@@ -60,8 +70,17 @@ export class InboxesService {
         : inbox.users as { id: string; name: string }[],
     }));
 
+    // Setores: só os que têm ALGUM membro relevante ao escritório; e só mostram
+    // esses membros (nunca os de outro escritório).
+    const relevantSectors = (sectors as any[])
+      .map((sector: any) => ({
+        ...sector,
+        users: (sector.users as any[]).filter((u: any) => relevantIds.has(u.id)),
+      }))
+      .filter((sector: any) => sector.users.length > 0);
+
     // Setores de advogados: remover usuários com role OPERADOR (eles já aparecem em Comercial)
-    const sectorGroups = sectors.map((sector: any) => ({
+    const sectorGroups = relevantSectors.map((sector: any) => ({
       id: sector.id,
       name: sector.name,
       type: 'SECTOR' as const,
@@ -71,7 +90,7 @@ export class InboxesService {
         : (sector.users as any[]).map((u: any) => ({ id: u.id, name: u.name })),
     }));
 
-    const sectorUserIds = new Set(sectors.flatMap((s: any) => (s.users || []).map((u: any) => u.id)));
+    const sectorUserIds = new Set(relevantSectors.flatMap((s: any) => (s.users || []).map((u: any) => u.id)));
 
     // Equipe: usuários sem inbox e sem setor (não operadores já inclusos acima)
     const ungroupedUsers = (allEligible as { id: string; name: string }[]).filter(
