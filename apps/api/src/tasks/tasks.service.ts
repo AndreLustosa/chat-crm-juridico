@@ -661,6 +661,23 @@ export class TasksService {
     });
   }
 
+  /** Todas as tarefas pendentes (A_FAZER/EM_PROGRESSO) de uma conversa, prazo mais próximo primeiro. */
+  async findAllByConversation(conversationId: string, tenantId?: string) {
+    if (tenantId) {
+      const conv = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { tenant_id: true },
+      });
+      if (conv?.tenant_id && conv.tenant_id !== tenantId) {
+        throw new ForbiddenException('Acesso negado a este recurso');
+      }
+    }
+    return this.prisma.task.findMany({
+      where: { conversation_id: conversationId, status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
+      orderBy: [{ due_at: 'asc' }, { created_at: 'desc' }],
+    });
+  }
+
   // ─── Calendar Sync ──────────────────────────────────────────────
 
   // ─── Diligencias delegadas pelo advogado ──────────────────────

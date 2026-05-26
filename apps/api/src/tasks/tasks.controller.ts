@@ -112,6 +112,11 @@ export class TasksController {
     return this.tasksService.findActiveByConversation(conversationId, req.user?.tenant_id);
   }
 
+  @Get('conversation/:conversationId')
+  findAllByConversation(@Param('conversationId') conversationId: string, @Request() req: any) {
+    return this.tasksService.findAllByConversation(conversationId, req.user?.tenant_id);
+  }
+
   @Post()
   create(@Body() data: CreateTaskDto, @Request() req: any) {
     return this.tasksService.create({
