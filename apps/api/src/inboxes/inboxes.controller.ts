@@ -17,9 +17,10 @@ export class InboxesController {
   }
 
   @Get('operators')
-  async getAllOperators() {
-    // Qualquer usuário autenticado pode listar operadores (necessário para transferências)
-    return this.inboxesService.findAllOperators();
+  async getAllOperators(@Request() req: any) {
+    // Qualquer usuário autenticado pode listar operadores (necessário para transferências),
+    // mas SEMPRE escopado ao tenant do usuário — multi-tenant: nunca vazar outros escritórios.
+    return this.inboxesService.findAllOperators(req.user?.tenant_id);
   }
 
   @Get(':id')

@@ -13,22 +13,29 @@ export class InboxesService {
     return (this.prisma as any).instance;
   }
 
-  async findAllOperators() {
+  async findAllOperators(tenantId?: string) {
+    // SEGURANÇA multi-tenant: sem tenant não devolve ninguém — evita vazar
+    // operadores/inboxes/setores de OUTROS escritórios na lista de transferência.
+    if (!tenantId) return [];
+
     const [inboxes, sectors, allEligible, allOperators] = await Promise.all([
       this.inbox.findMany({
-        include: { users: { select: { id: true, name: true } } },
+        where: { tenant_id: tenantId },
+        include: { users: { where: { tenant_id: tenantId }, select: { id: true, name: true } } },
       }),
       (this.prisma as any).sector.findMany({
-        include: { users: { select: { id: true, name: true, roles: true } } },
+        // Sector NÃO tem tenant_id → escopa pelos usuários do tenant (some/where).
+        where: { users: { some: { tenant_id: tenantId } } },
+        include: { users: { where: { tenant_id: tenantId }, select: { id: true, name: true, roles: true } } },
         orderBy: { name: 'asc' },
       }),
       (this.prisma as any).user.findMany({
-        where: { roles: { hasSome: ['OPERADOR', 'ADVOGADO', 'ADMIN'] } },
+        where: { tenant_id: tenantId, roles: { hasSome: ['OPERADOR', 'ADVOGADO', 'ADMIN'] } },
         select: { id: true, name: true, roles: true },
         orderBy: { name: 'asc' },
       }),
       (this.prisma as any).user.findMany({
-        where: { roles: { has: 'OPERADOR' } },
+        where: { tenant_id: tenantId, roles: { has: 'OPERADOR' } },
         select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
