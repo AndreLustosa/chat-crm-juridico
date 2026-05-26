@@ -400,7 +400,8 @@ export class ConversationsService {
    * Adia (snooze) a conversa: cria uma TAREFA de retorno (ligada à conversa,
    * atribuída a quem adiou, com prazo) e marca a conversa como ADIADO + guarda
    * `snooze_until`. Quando o prazo vencer, o cron `reopenSnoozed` traz a conversa
-   * de volta sozinha (status ABERTO → o front deriva ACTIVE, em "Minhas").
+   * de volta sozinha para a fila de ESPERA (status ABERTO + sem dono → WAITING),
+   * para que qualquer operador assuma e dê sequência à tarefa de retorno.
    */
   async snooze(id: string, userId: string, tenantId: string | undefined, dueAtIso: string, note?: string) {
     if (!tenantId) throw new BadRequestException('Tenant não identificado.');
@@ -440,8 +441,10 @@ export class ConversationsService {
   }
 
   /**
-   * A cada 2 min: reabre conversas adiadas cujo prazo já venceu. O update é
-   * ATÔMICO (where status=ADIADO) — só uma réplica "ganha" e cria a nota, evitando
+   * A cada 2 min: reabre conversas adiadas cujo prazo já venceu. Ao reabrir,
+   * LIBERA o dono (assigned_user_id=null) → a conversa cai na fila de Espera
+   * (WAITING); quem assumir a leva para "Minhas". O update é ATÔMICO
+   * (where status=ADIADO) — só uma réplica "ganha" e cria a nota, evitando
    * mensagem duplicada sem precisar de lock distribuído.
    */
   @Cron('*/2 * * * *')
@@ -455,7 +458,7 @@ export class ConversationsService {
     for (const c of due) {
       const res = await (this.prisma as any).conversation.updateMany({
         where: { id: c.id, status: 'ADIADO' }, // atômico: só reabre se ainda ADIADO
-        data: { status: 'ABERTO', snooze_until: null },
+        data: { status: 'ABERTO', snooze_until: null, assigned_user_id: null }, // libera o dono → cai em Espera (WAITING)
       });
       if (res.count === 0) continue; // outra réplica já reabriu
       try {
