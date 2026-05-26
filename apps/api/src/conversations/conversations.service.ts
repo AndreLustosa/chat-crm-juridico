@@ -262,7 +262,10 @@ export class ConversationsService {
     }));
   }
 
-  async setAssignedLawyer(id: string, lawyerId: string | null): Promise<Conversation> {
+  async setAssignedLawyer(id: string, lawyerId: string | null, tenantId?: string): Promise<Conversation> {
+    // Multi-tenant: a conversa e o advogado de destino têm de ser do escritório.
+    await this.assertConversationTenant(id, tenantId);
+    if (lawyerId) await this.assertSameTenantUser(lawyerId, tenantId);
     const updated = await this.prisma.conversation.update({
       where: { id },
       data: { assigned_lawyer_id: lawyerId } as any,
@@ -339,7 +342,28 @@ export class ConversationsService {
     });
   }
 
-  async assign(id: string, userId: string): Promise<Conversation> {
+  /** Anti-IDOR: a conversa precisa pertencer ao tenant do usuário. */
+  private async assertConversationTenant(id: string, tenantId?: string): Promise<void> {
+    const conv = await this.prisma.conversation.findUnique({ where: { id }, select: { tenant_id: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada.');
+    if (tenantId && conv.tenant_id && conv.tenant_id !== tenantId) {
+      throw new ForbiddenException('Acesso negado a esta conversa.');
+    }
+  }
+
+  /** Anti-vazamento: o destino (operador/advogado) tem de ser do MESMO escritório. */
+  private async assertSameTenantUser(userId: string | null | undefined, tenantId?: string): Promise<void> {
+    if (!userId || !tenantId) return;
+    const u = await this.prisma.user.findUnique({ where: { id: userId }, select: { tenant_id: true } });
+    if (!u || (u.tenant_id && u.tenant_id !== tenantId)) {
+      throw new ForbiddenException('Destino inválido: usuário de outro escritório.');
+    }
+  }
+
+  async assign(id: string, userId: string, tenantId?: string): Promise<Conversation> {
+    // Multi-tenant: a conversa e o destino têm de ser do escritório do usuário.
+    await this.assertConversationTenant(id, tenantId);
+    await this.assertSameTenantUser(userId, tenantId);
     return this.prisma.conversation.update({
       where: { id },
       data: {
@@ -404,6 +428,11 @@ export class ConversationsService {
       }
       if (existing.pending_transfer_to_id) {
         throw new BadRequestException('Esta conversa já possui uma transferência pendente.');
+      }
+      // Multi-tenant: o destino tem de ser do MESMO escritório da conversa.
+      const toUser = await tx.user.findUnique({ where: { id: toUserId }, select: { tenant_id: true } });
+      if (!toUser || (existing.tenant_id && toUser.tenant_id !== existing.tenant_id)) {
+        throw new ForbiddenException('Destino inválido: usuário de outro escritório.');
       }
 
       const [fromUser, conv] = await Promise.all([

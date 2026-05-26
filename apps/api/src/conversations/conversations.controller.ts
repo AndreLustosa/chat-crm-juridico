@@ -75,12 +75,12 @@ export class ConversationsController {
 
   @Patch(':id/assign')
   assign(@Param('id') id: string, @Request() req: any) {
-    return this.conversationsService.assign(id, req.user.id);
+    return this.conversationsService.assign(id, req.user.id, req.user?.tenant_id);
   }
 
   @Patch(':id/transfer')
-  transfer(@Param('id') id: string, @Body('userId') userId: string) {
-    return this.conversationsService.assign(id, userId);
+  transfer(@Param('id') id: string, @Body('userId') userId: string, @Request() req: any) {
+    return this.conversationsService.assign(id, userId, req.user?.tenant_id);
   }
 
   @Post(':id/transfer-request')
@@ -154,8 +154,9 @@ export class ConversationsController {
   assignLawyer(
     @Param('id') id: string,
     @Body('lawyerId') lawyerId: string | null,
+    @Request() req: any,
   ) {
-    return this.conversationsService.setAssignedLawyer(id, lawyerId ?? null);
+    return this.conversationsService.setAssignedLawyer(id, lawyerId ?? null, req.user?.tenant_id);
   }
 
   @Patch(':id/legal-area')
