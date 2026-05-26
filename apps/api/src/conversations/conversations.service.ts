@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
@@ -393,6 +394,88 @@ export class ConversationsService {
     // Broadcast: remover da lista principal e mover para Adiados
     this.chatGateway.emitConversationsUpdate((conv as any).tenant_id ?? null);
     return conv;
+  }
+
+  /**
+   * Adia (snooze) a conversa: cria uma TAREFA de retorno (ligada à conversa,
+   * atribuída a quem adiou, com prazo) e marca a conversa como ADIADO + guarda
+   * `snooze_until`. Quando o prazo vencer, o cron `reopenSnoozed` traz a conversa
+   * de volta sozinha (status ABERTO → o front deriva ACTIVE, em "Minhas").
+   */
+  async snooze(id: string, userId: string, tenantId: string | undefined, dueAtIso: string, note?: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    await this.assertConversationTenant(id, tenantId);
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id },
+      select: { lead_id: true, lead: { select: { name: true, phone: true } } },
+    });
+    if (!conv) throw new NotFoundException('Conversa não encontrada.');
+    const dueAt = new Date(dueAtIso);
+    if (isNaN(dueAt.getTime())) throw new BadRequestException('Prazo inválido.');
+    if (dueAt.getTime() <= Date.now()) throw new BadRequestException('O prazo precisa ser no futuro.');
+    const contato = conv.lead?.name || conv.lead?.phone || 'contato';
+
+    // 1) Tarefa de retorno (aparece como activeTask na conversa + na lista de Tarefas).
+    await this.prisma.task.create({
+      data: {
+        title: `Retornar conversa — ${contato}`,
+        description: note?.trim() || null,
+        conversation_id: id,
+        lead_id: conv.lead_id,
+        assigned_user_id: userId,
+        created_by_id: userId,
+        due_at: dueAt,
+        status: 'A_FAZER',
+        tenant_id: tenantId,
+      },
+    });
+
+    // 2) Adia a conversa (sai da fila ativa; volta sozinha no prazo via cron).
+    const updated = await this.prisma.conversation.update({
+      where: { id },
+      data: { status: 'ADIADO', snooze_until: dueAt, assigned_user_id: userId, ai_mode: false } as any,
+    });
+    this.chatGateway.emitConversationsUpdate((updated as any).tenant_id ?? null);
+    return { ok: true };
+  }
+
+  /**
+   * A cada 2 min: reabre conversas adiadas cujo prazo já venceu. O update é
+   * ATÔMICO (where status=ADIADO) — só uma réplica "ganha" e cria a nota, evitando
+   * mensagem duplicada sem precisar de lock distribuído.
+   */
+  @Cron('*/2 * * * *')
+  async reopenSnoozed() {
+    const now = new Date();
+    const due = await (this.prisma as any).conversation.findMany({
+      where: { status: 'ADIADO', snooze_until: { not: null, lte: now } },
+      select: { id: true, tenant_id: true },
+    });
+    if (due.length === 0) return;
+    for (const c of due) {
+      const res = await (this.prisma as any).conversation.updateMany({
+        where: { id: c.id, status: 'ADIADO' }, // atômico: só reabre se ainda ADIADO
+        data: { status: 'ABERTO', snooze_until: null },
+      });
+      if (res.count === 0) continue; // outra réplica já reabriu
+      try {
+        const msg = await this.prisma.message.create({
+          data: {
+            conversation_id: c.id,
+            direction: 'out',
+            type: 'transfer_event',
+            text: '⏰ Conversa retornada — o prazo do adiamento venceu. Hora de dar sequência à tarefa.',
+            status: 'enviado',
+            external_message_id: `snooze_reopen_${c.id}_${Date.now()}`,
+          },
+        });
+        this.chatGateway.emitNewMessage(c.id, msg);
+      } catch (e: any) {
+        this.logger.warn(`[snooze] nota de retorno falhou (${c.id}): ${e?.message ?? e}`);
+      }
+      this.chatGateway.emitConversationsUpdate(c.tenant_id ?? null);
+    }
+    this.logger.log(`[snooze] ${due.length} conversa(s) adiada(s) reaberta(s).`);
   }
 
   async findPendingTransfers(toUserId: string) {

@@ -117,6 +117,16 @@ export class ConversationsController {
     return this.conversationsService.defer(id);
   }
 
+  /** Adia (snooze) a conversa: cria tarefa de retorno + ela volta sozinha no prazo. */
+  @Post(':id/snooze')
+  snooze(
+    @Param('id') id: string,
+    @Body() body: { dueAt: string; note?: string },
+    @Request() req: any,
+  ) {
+    return this.conversationsService.snooze(id, req.user.id, req.user?.tenant_id, body.dueAt, body.note);
+  }
+
   @Post(':id/transfer-to-lawyer')
   transferToLawyer(
     @Param('id') id: string,
