@@ -499,7 +499,8 @@ export class TasksService {
     ];
     if (task.conversation_id) {
       ops.push(
-        this.prisma.conversation.update({ where: { id: task.conversation_id }, data: { status: 'ABERTO' } }),
+        // reabre a conversa e zera o timer de adiamento (sai de "Adiada" sem voltar sozinha)
+        this.prisma.conversation.update({ where: { id: task.conversation_id }, data: { status: 'ABERTO', snooze_until: null } as any }),
       );
     }
     if (note?.trim() && userId !== 'system') {
