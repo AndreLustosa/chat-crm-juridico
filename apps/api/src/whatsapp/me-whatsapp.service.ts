@@ -110,9 +110,27 @@ export class MeWhatsappService {
   // número. O inboxId vem da URL, então TODO acesso valida que o inbox é do
   // tenant logado (assertInbox) — sem IDOR.
 
-  /** Nome estável/único da instância de um departamento (inbox). */
-  private deptInstanceName(tenantId: string, inboxId: string): string {
-    return `jf_${tenantId.replace(/-/g, '').slice(0, 16)}_${inboxId.replace(/-/g, '').slice(0, 8)}`;
+  /** Slug seguro pra nome de instância (sem acento/espaço/caractere especial). */
+  private slug(s: string): string {
+    return (s || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // remove acentos
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-') // não-alfanumérico → hífen
+      .replace(/^-+|-+$/g, '') // trim hífens das pontas
+      .slice(0, 24);
+  }
+
+  /**
+   * Nome LEGÍVEL e único da instância: "<escritorio>_<departamento>_<id8>".
+   * O sufixo (8 chars do inbox.id) garante unicidade global na Evolution
+   * compartilhada. Ex.: "andre-lustosa-advogados_comercial_0edd1f2a".
+   */
+  private deptInstanceName(officeName: string, deptName: string, inboxId: string): string {
+    const office = this.slug(officeName) || 'escritorio';
+    const dept = this.slug(deptName) || 'depto';
+    const uniq = inboxId.replace(/-/g, '').slice(0, 8);
+    return `${office}_${dept}_${uniq}`;
   }
 
   /** Garante que o inbox pertence ao tenant (anti-IDOR). Devolve o inbox. */
@@ -122,15 +140,19 @@ export class MeWhatsappService {
     return inbox;
   }
 
-  /** Instância WhatsApp do departamento (reusa a existente ou define o nome novo). */
-  private async deptInstance(tenantId: string, inboxId: string): Promise<{ name: string; existing: boolean }> {
+  /** Instância WhatsApp do departamento (reusa a existente ou define o nome legível novo). */
+  private async deptInstance(
+    tenantId: string,
+    inbox: { id: string; name: string },
+  ): Promise<{ name: string; existing: boolean }> {
     const inst = await (this.prisma as any).instance.findFirst({
-      where: { tenant_id: tenantId, inbox_id: inboxId, type: 'whatsapp' },
+      where: { tenant_id: tenantId, inbox_id: inbox.id, type: 'whatsapp' },
       orderBy: { created_at: 'asc' },
       select: { name: true },
     });
     if (inst) return { name: inst.name, existing: true };
-    return { name: this.deptInstanceName(tenantId, inboxId), existing: false };
+    const tenant = await (this.prisma as any).tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+    return { name: this.deptInstanceName(tenant?.name ?? '', inbox.name, inbox.id), existing: false };
   }
 
   /** Cria um departamento (Inbox) do escritório. */
@@ -179,8 +201,8 @@ export class MeWhatsappService {
   /** Provisiona/conecta o número de um departamento e devolve o QR/pairing. */
   async connectInbox(tenantId: string | undefined, inboxId: string) {
     if (!tenantId) throw new BadRequestException('Tenant não identificado.');
-    await this.assertInbox(tenantId, inboxId);
-    const { name, existing } = await this.deptInstance(tenantId, inboxId);
+    const inbox = await this.assertInbox(tenantId, inboxId);
+    const { name, existing } = await this.deptInstance(tenantId, inbox);
 
     await (this.prisma as any).instance.upsert({
       where: { name },
