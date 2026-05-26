@@ -4,6 +4,7 @@ import { ConversationsService } from './conversations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('ConversationsService', () => {
   let service: ConversationsService;
@@ -26,6 +27,10 @@ describe('ConversationsService', () => {
       message: {
         findMany: jest.fn(),
         updateMany: jest.fn(),
+        create: jest.fn().mockResolvedValue({}),
+      },
+      conversationNote: {
+        groupBy: jest.fn().mockResolvedValue([]),
       },
       $transaction: jest.fn(),
     };
@@ -44,12 +49,17 @@ describe('ConversationsService', () => {
       sendPresence: jest.fn(),
     };
 
+    const mockNotificationsService = {
+      markByConversation: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ConversationsService,
         { provide: PrismaService, useValue: prisma },
         { provide: ChatGateway, useValue: chatGateway },
         { provide: WhatsappService, useValue: mockWhatsappService },
+        { provide: NotificationsService, useValue: mockNotificationsService },
       ],
     }).compile();
 
@@ -110,9 +120,12 @@ describe('ConversationsService', () => {
 
       await service.findAll();
 
+      // Visibilidade agora é por lead.stage (não mais conversation.status).
       expect(prisma.conversation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { status: { not: 'FECHADO' } },
+          where: expect.objectContaining({
+            lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } },
+          }),
         }),
       );
     });
@@ -125,7 +138,7 @@ describe('ConversationsService', () => {
 
       expect(prisma.conversation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { status: 'ABERTO' },
+          where: expect.objectContaining({ status: 'ABERTO' }),
         }),
       );
     });
@@ -133,7 +146,7 @@ describe('ConversationsService', () => {
     it('deve filtrar por inbox para usuarios nao-admin', async () => {
       const mockUser = {
         id: 'user1',
-        role: 'OPERATOR',
+        roles: ['OPERADOR'],
         inboxes: [{ id: 'inbox1' }, { id: 'inbox2' }],
       };
       prisma.user.findUnique.mockResolvedValue(mockUser);
@@ -142,10 +155,11 @@ describe('ConversationsService', () => {
 
       await service.findAll(undefined, 'user1');
 
+      // Não-admin: os inboxes vinculados entram via OR (assigned_user_id OU inbox).
       expect(prisma.conversation.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            inbox_id: { in: ['inbox1', 'inbox2'] },
+            OR: expect.arrayContaining([{ inbox_id: { in: ['inbox1', 'inbox2'] } }]),
           }),
         }),
       );
@@ -363,7 +377,7 @@ describe('ConversationsService', () => {
       const result = await service.countOpen();
       expect(result).toBe(5);
       expect(prisma.conversation.count).toHaveBeenCalledWith({
-        where: { status: { not: 'FECHADO' } },
+        where: { lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] }, is_client: false } },
       });
     });
   });
