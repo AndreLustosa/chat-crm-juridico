@@ -390,6 +390,31 @@ export class WhatsappService {
     return data;
   }
 
+  /**
+   * Mapa nome-da-instância → { state, number } a partir de UMA chamada
+   * fetchInstances. `number` é o dígito do ownerJid conectado (ex.: 5582...),
+   * usado pela TRAVA de número duplicado e para exibir o número no painel.
+   */
+  async getEvolutionMap(): Promise<Map<string, { state: string; number: string | null }>> {
+    const map = new Map<string, { state: string; number: string | null }>();
+    try {
+      const all = await this.listInstances();
+      if (Array.isArray(all)) {
+        for (const it of all as any[]) {
+          const nm = it.instanceName || it.name;
+          if (!nm) continue;
+          const state = it.status === 'open' ? 'open' : (it.status || 'close');
+          const jid = it.ownerJid || it.owner || it.number || '';
+          const digits = String(jid).split('@')[0].replace(/\D/g, '') || null;
+          map.set(nm, { state, number: digits });
+        }
+      }
+    } catch (e: any) {
+      this.logger.warn(`[getEvolutionMap] falhou: ${e?.message ?? e}`);
+    }
+    return map;
+  }
+
   async createInstance(instanceName: string) {
     const randomToken = crypto.randomBytes(12).toString('hex');
     const config = await this.settingsService.getWhatsAppConfig();

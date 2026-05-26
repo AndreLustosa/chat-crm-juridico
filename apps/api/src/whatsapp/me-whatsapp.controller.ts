@@ -72,4 +72,40 @@ export class MeWhatsappController {
   deleteDepartment(@Param('inboxId') inboxId: string, @Request() req: any) {
     return this.svc.deleteDepartment(req.user?.tenant_id, inboxId);
   }
+
+  // ─── Multi-número por departamento (Fase 3): cada departamento pode ter N números ─
+
+  /** Adiciona um NOVO número ao departamento (QR/pairing). */
+  @Post('me/whatsapp/departments/:inboxId/numbers')
+  @Roles('ADMIN')
+  addNumber(@Param('inboxId') inboxId: string, @Request() req: any) {
+    return this.svc.addNumber(req.user?.tenant_id, inboxId);
+  }
+
+  /** (Re)conecta um número específico (QR/pairing). */
+  @Post('me/whatsapp/instances/:instanceId/connect')
+  @Roles('ADMIN')
+  connectNumber(@Param('instanceId') instanceId: string, @Request() req: any) {
+    return this.svc.connectNumber(req.user?.tenant_id, instanceId);
+  }
+
+  /** Estado de um número (+ aplica a trava de número duplicado ao conectar). */
+  @Get('me/whatsapp/instances/:instanceId/status')
+  statusNumber(@Param('instanceId') instanceId: string, @Request() req: any) {
+    return this.svc.statusNumber(req.user?.tenant_id, instanceId);
+  }
+
+  /** Desconecta (logout) um número específico. */
+  @Post('me/whatsapp/instances/:instanceId/disconnect')
+  @Roles('ADMIN')
+  disconnectNumber(@Param('instanceId') instanceId: string, @Request() req: any) {
+    return this.svc.disconnectNumber(req.user?.tenant_id, instanceId);
+  }
+
+  /** Exclui um número do departamento (mantém o departamento). */
+  @Delete('me/whatsapp/instances/:instanceId')
+  @Roles('ADMIN')
+  deleteNumber(@Param('instanceId') instanceId: string, @Request() req: any) {
+    return this.svc.deleteNumber(req.user?.tenant_id, instanceId);
+  }
 }

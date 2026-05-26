@@ -696,6 +696,10 @@ model Instance {
   tenant_id  String
   inbox_id   String?
   name       String   @unique
+  /// Número WhatsApp efetivamente conectado (só dígitos, ex.: 5582999999999).
+  /// Preenchido quando a instância conecta (open). Usado pela TRAVA que impede
+  /// o mesmo número de ser ligado em dois departamentos do mesmo escritório.
+  number     String?
   type       String   @default("whatsapp")
   connection String   @default("evolution")
   created_at DateTime @default(now())

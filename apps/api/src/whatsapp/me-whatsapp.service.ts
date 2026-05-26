@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from './whatsapp.service';
 
@@ -163,39 +164,46 @@ export class MeWhatsappService {
     return (this.prisma as any).inbox.create({ data: { name: nome, tenant_id: tenantId } });
   }
 
-  /** Lista os departamentos (inboxes) do escritório + status do WhatsApp de cada um. */
+  /** Lista os departamentos (inboxes) do escritório + TODOS os números de cada um. */
   async listDepartments(tenantId: string | undefined) {
     if (!tenantId) return [];
     const inboxes = await (this.prisma as any).inbox.findMany({
       where: { tenant_id: tenantId },
       orderBy: { created_at: 'asc' },
       include: {
-        instances: { where: { type: 'whatsapp' }, select: { name: true }, orderBy: { created_at: 'asc' }, take: 1 },
+        instances: {
+          where: { type: 'whatsapp' },
+          select: { id: true, name: true, number: true },
+          orderBy: { created_at: 'asc' },
+        },
         _count: { select: { users: true, conversations: true } },
       },
     });
-    return Promise.all(
-      inboxes.map(async (ib: any) => {
-        const instanceName: string | null = ib.instances?.[0]?.name ?? null;
-        let state = 'none';
-        if (instanceName) {
-          try {
-            const st: any = await this.whatsapp.getConnectionStatus(instanceName);
-            state = st?.instance?.state ?? st?.state ?? 'close';
-          } catch {
-            state = 'close';
-          }
-        }
+
+    // UMA chamada à Evolution traz estado + número conectado de TODAS as instâncias.
+    const evo = await this.whatsapp.getEvolutionMap();
+
+    return inboxes.map((ib: any) => {
+      const numbers = (ib.instances ?? []).map((inst: any) => {
+        const e = evo.get(inst.name);
         return {
-          id: ib.id,
-          name: ib.name,
-          users_count: ib._count?.users ?? 0,
-          conversations_count: ib._count?.conversations ?? 0,
-          instanceName,
-          state,
+          id: inst.id,
+          instanceName: inst.name,
+          number: e?.number ?? inst.number ?? null, // número ao vivo; cai pro salvo
+          state: e?.state ?? 'close',
         };
-      }),
-    );
+      });
+      return {
+        id: ib.id,
+        name: ib.name,
+        users_count: ib._count?.users ?? 0,
+        conversations_count: ib._count?.conversations ?? 0,
+        numbers,
+        // Compat com telas antigas: "primário" = primeiro número.
+        instanceName: numbers[0]?.instanceName ?? null,
+        state: numbers[0]?.state ?? 'none',
+      };
+    });
   }
 
   /** Provisiona/conecta o número de um departamento e devolve o QR/pairing. */
@@ -287,6 +295,160 @@ export class MeWhatsappService {
     await (this.prisma as any).conversation.updateMany({ where: { inbox_id: inboxId }, data: { inbox_id: null } });
     await (this.prisma as any).instance.deleteMany({ where: { tenant_id: tenantId, inbox_id: inboxId } });
     await (this.prisma as any).inbox.delete({ where: { id: inboxId } });
+    return { ok: true };
+  }
+
+  // ─── Multi-número por departamento (Fase 3) + TRAVA de número duplicado ───────
+  //
+  // Um departamento (Inbox) pode ter VÁRIOS números (Instances). Cada número é
+  // operado pelo seu id (conectar/QR, status, desconectar, excluir). A TRAVA
+  // impede ligar o MESMO número em dois departamentos do escritório — duas
+  // sessões Baileys no mesmo número causam quedas e risco de ban.
+
+  /** Nome único de instância para um NOVO número do departamento. */
+  private buildInstanceName(officeName: string, deptName: string): string {
+    const office = this.slug(officeName) || 'escritorio';
+    const dept = this.slug(deptName) || 'depto';
+    const uniq = crypto.randomBytes(5).toString('hex'); // 10 chars hex
+    return `${office}_${dept}_${uniq}`;
+  }
+
+  /** Garante que a instância (número) pertence ao tenant (anti-IDOR). */
+  private async assertInstance(tenantId: string, instanceId: string) {
+    const inst = await (this.prisma as any).instance.findFirst({
+      where: { id: instanceId, tenant_id: tenantId, type: 'whatsapp' },
+      select: { id: true, name: true, number: true, inbox_id: true },
+    });
+    if (!inst) throw new NotFoundException('Número não encontrado.');
+    return inst as { id: string; name: string; number: string | null; inbox_id: string | null };
+  }
+
+  /**
+   * Chamado quando a instância está "open": lê o número conectado e aplica a
+   * TRAVA. Se o número já estiver ATIVO em outra instância do tenant → desconecta
+   * esta (mata a sessão duplicada) e devolve 'conflict'. Senão, salva o número.
+   */
+  private async finalizeNumber(tenantId: string, inst: { id: string; name: string; number: string | null }) {
+    // Já validado nesta sessão → caminho rápido (sem nova chamada à Evolution).
+    if (inst.number) return { state: 'open' as const, instanceName: inst.name, number: inst.number };
+
+    const evo = await this.whatsapp.getEvolutionMap();
+    const owner = evo.get(inst.name)?.number ?? null;
+    if (!owner) return { state: 'open' as const, instanceName: inst.name, number: null }; // ownerJid ainda não disponível
+
+    // Compara com os números AO VIVO das OUTRAS instâncias do escritório
+    // (pega até número legado salvo como null, pois usa o estado real da Evolution).
+    const mine = await (this.prisma as any).instance.findMany({
+      where: { tenant_id: tenantId, type: 'whatsapp', id: { not: inst.id } },
+      select: { id: true, name: true, inbox: { select: { name: true } } },
+    });
+    const clash = mine.find((o: any) => (evo.get(o.name)?.number ?? null) === owner);
+    if (clash) {
+      await this.whatsapp.logoutInstance(inst.name).catch(() => {}); // mata a sessão duplicada na hora
+      await (this.prisma as any).instance.update({ where: { id: inst.id }, data: { number: null } }).catch(() => {});
+      return {
+        state: 'conflict' as const,
+        instanceName: inst.name,
+        number: owner,
+        conflictWith: clash.inbox?.name ?? 'outro departamento',
+      };
+    }
+    await (this.prisma as any).instance.update({ where: { id: inst.id }, data: { number: owner } }).catch(() => {});
+    return { state: 'open' as const, instanceName: inst.name, number: owner };
+  }
+
+  /** Adiciona um NOVO número ao departamento e devolve o QR/pairing. */
+  async addNumber(tenantId: string | undefined, inboxId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const inbox = await this.assertInbox(tenantId, inboxId);
+    const tenant = await (this.prisma as any).tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+    const name = this.buildInstanceName(tenant?.name ?? '', inbox.name);
+
+    const created = await (this.prisma as any).instance.create({
+      data: { name, tenant_id: tenantId, inbox_id: inboxId, type: 'whatsapp', number: null },
+      select: { id: true, name: true },
+    });
+    try {
+      await this.whatsapp.createInstance(name);
+    } catch (e: any) {
+      this.logger.warn(`createInstance(${name}) — provavelmente já existe: ${e?.message ?? e}`);
+    }
+    const conn: any = await this.whatsapp.getConnectCode(name);
+    return {
+      instanceId: created.id,
+      instanceName: name,
+      alreadyConnected: false,
+      qr: conn?.base64 ?? null,
+      code: conn?.code ?? null,
+      pairingCode: conn?.pairingCode ?? null,
+    };
+  }
+
+  /** (Re)conecta um número existente: zera a validação e devolve um QR novo. */
+  async connectNumber(tenantId: string | undefined, instanceId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const inst = await this.assertInstance(tenantId, instanceId);
+
+    // Zera o número salvo → a TRAVA revalida nesta nova conexão.
+    await (this.prisma as any).instance.update({ where: { id: inst.id }, data: { number: null } }).catch(() => {});
+
+    try {
+      const st: any = await this.whatsapp.getConnectionStatus(inst.name);
+      if ((st?.instance?.state ?? st?.state) === 'open') {
+        return { instanceId: inst.id, instanceName: inst.name, alreadyConnected: true };
+      }
+    } catch {
+      // não existe na Evolution → cria abaixo
+    }
+    try {
+      await this.whatsapp.createInstance(inst.name);
+    } catch (e: any) {
+      this.logger.warn(`createInstance(${inst.name}) — provavelmente já existe: ${e?.message ?? e}`);
+    }
+    const conn: any = await this.whatsapp.getConnectCode(inst.name);
+    return {
+      instanceId: inst.id,
+      instanceName: inst.name,
+      alreadyConnected: false,
+      qr: conn?.base64 ?? null,
+      code: conn?.code ?? null,
+      pairingCode: conn?.pairingCode ?? null,
+    };
+  }
+
+  /** Estado de um número específico (+ aplica a TRAVA quando conecta). */
+  async statusNumber(tenantId: string | undefined, instanceId: string) {
+    if (!tenantId) return { state: 'none' as const };
+    const inst = await this.assertInstance(tenantId, instanceId);
+    let state = 'close';
+    try {
+      const st: any = await this.whatsapp.getConnectionStatus(inst.name);
+      state = st?.instance?.state ?? st?.state ?? 'close';
+    } catch {
+      state = 'close';
+    }
+    if (state !== 'open') return { state, instanceName: inst.name, number: inst.number ?? null };
+    return this.finalizeNumber(tenantId, inst);
+  }
+
+  /** Desconecta (logout) um número e zera o número salvo. */
+  async disconnectNumber(tenantId: string | undefined, instanceId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const inst = await this.assertInstance(tenantId, instanceId);
+    await this.whatsapp.logoutInstance(inst.name).catch(() => {});
+    await (this.prisma as any).instance.update({ where: { id: inst.id }, data: { number: null } }).catch(() => {});
+    return { ok: true };
+  }
+
+  /** Exclui um número (logout + delete na Evolution + remove o registro). Mantém o departamento. */
+  async deleteNumber(tenantId: string | undefined, instanceId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const inst = await this.assertInstance(tenantId, instanceId);
+    await this.whatsapp.logoutInstance(inst.name).catch(() => {});
+    await this.whatsapp
+      .deleteInstance(inst.name)
+      .catch((e: any) => this.logger.warn(`deleteInstance(${inst.name}) falhou: ${e?.message ?? e}`));
+    await (this.prisma as any).instance.delete({ where: { id: inst.id } });
     return { ok: true };
   }
 }
