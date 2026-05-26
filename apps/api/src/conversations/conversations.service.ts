@@ -135,6 +135,7 @@ export class ConversationsService {
             take: 1,
             select: { id: true, title: true, due_at: true, status: true, assigned_user_id: true, description: true },
           },
+          _count: { select: { tasks: { where: { status: 'A_FAZER' } } } },
         },
       }),
       this.prisma.conversation.count({ where }),
@@ -204,6 +205,7 @@ export class ConversationsService {
         postponeCount: (c as any).tasks[0].postpone_count || 0,
         note: (c as any).tasks[0].description || null,
       } : null,
+      taskCount: (c as any)._count?.tasks ?? 0,
       hasNotes: !!noteCountMap[c.id],
     }));
 
@@ -421,7 +423,8 @@ export class ConversationsService {
     //    Se já existe uma A_FAZER nesta conversa (RE-ADIAMENTO), atualiza o prazo/
     //    observação e conta +1 adiamento — em vez de criar uma tarefa duplicada.
     const existingTask = await this.prisma.task.findFirst({
-      where: { conversation_id: id, status: 'A_FAZER' },
+      // só a tarefa DE RETORNO (do adiamento) — nunca uma "Nova tarefa" comum
+      where: { conversation_id: id, status: 'A_FAZER', title: { startsWith: 'Retornar conversa' } },
       orderBy: { created_at: 'desc' },
       select: { id: true },
     });
@@ -485,7 +488,8 @@ export class ConversationsService {
       let note = '';
       try {
         const task = await (this.prisma as any).task.findFirst({
-          where: { conversation_id: c.id, status: 'A_FAZER' },
+          // só a tarefa DE RETORNO — pra mensagem mostrar a observação certa
+          where: { conversation_id: c.id, status: 'A_FAZER', title: { startsWith: 'Retornar conversa' } },
           orderBy: { created_at: 'desc' },
           select: { description: true },
         });

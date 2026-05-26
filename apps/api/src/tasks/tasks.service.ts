@@ -252,6 +252,11 @@ export class TasksService {
       },
     });
 
+    // Real-time (#1): tarefa de uma conversa atualiza a lista/tarja do chat na hora.
+    if (task.conversation_id) {
+      this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
+    }
+
     // Sync to calendar if has due_at
     if (task.due_at && data.created_by_id) {
       await this.syncTaskToCalendar(task, data.created_by_id);
