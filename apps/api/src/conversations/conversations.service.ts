@@ -133,7 +133,7 @@ export class ConversationsService {
             where: { status: 'A_FAZER' },
             orderBy: { created_at: 'desc' },
             take: 1,
-            select: { id: true, title: true, due_at: true, status: true, assigned_user_id: true },
+            select: { id: true, title: true, due_at: true, status: true, assigned_user_id: true, description: true },
           },
         },
       }),
@@ -202,6 +202,7 @@ export class ConversationsService {
         status: (c as any).tasks[0].status,
         assignedUserId: (c as any).tasks[0].assigned_user_id || null,
         postponeCount: (c as any).tasks[0].postpone_count || 0,
+        note: (c as any).tasks[0].description || null,
       } : null,
       hasNotes: !!noteCountMap[c.id],
     }));
@@ -417,19 +418,38 @@ export class ConversationsService {
     const contato = conv.lead?.name || conv.lead?.phone || 'contato';
 
     // 1) Tarefa de retorno (aparece como activeTask na conversa + na lista de Tarefas).
-    await this.prisma.task.create({
-      data: {
-        title: `Retornar conversa — ${contato}`,
-        description: note?.trim() || null,
-        conversation_id: id,
-        lead_id: conv.lead_id,
-        assigned_user_id: userId,
-        created_by_id: userId,
-        due_at: dueAt,
-        status: 'A_FAZER',
-        tenant_id: tenantId,
-      },
+    //    Se já existe uma A_FAZER nesta conversa (RE-ADIAMENTO), atualiza o prazo/
+    //    observação e conta +1 adiamento — em vez de criar uma tarefa duplicada.
+    const existingTask = await this.prisma.task.findFirst({
+      where: { conversation_id: id, status: 'A_FAZER' },
+      orderBy: { created_at: 'desc' },
+      select: { id: true },
     });
+    if (existingTask) {
+      await this.prisma.task.update({
+        where: { id: existingTask.id },
+        data: {
+          due_at: dueAt,
+          description: note?.trim() || undefined, // só troca se veio observação nova
+          assigned_user_id: userId,
+          postpone_count: { increment: 1 },
+        } as any,
+      });
+    } else {
+      await this.prisma.task.create({
+        data: {
+          title: `Retornar conversa — ${contato}`,
+          description: note?.trim() || null,
+          conversation_id: id,
+          lead_id: conv.lead_id,
+          assigned_user_id: userId,
+          created_by_id: userId,
+          due_at: dueAt,
+          status: 'A_FAZER',
+          tenant_id: tenantId,
+        },
+      });
+    }
 
     // 2) Adia a conversa (sai da fila ativa; volta sozinha no prazo via cron).
     const updated = await this.prisma.conversation.update({
@@ -461,13 +481,26 @@ export class ConversationsService {
         data: { status: 'ABERTO', snooze_until: null, assigned_user_id: null }, // libera o dono → cai em Espera (WAITING)
       });
       if (res.count === 0) continue; // outra réplica já reabriu
+      // Recupera a observação escrita ao adiar (tarefa de retorno) p/ exibir na mensagem.
+      let note = '';
+      try {
+        const task = await (this.prisma as any).task.findFirst({
+          where: { conversation_id: c.id, status: 'A_FAZER' },
+          orderBy: { created_at: 'desc' },
+          select: { description: true },
+        });
+        note = (task?.description || '').trim();
+      } catch { /* sem tarefa/descrição → usa o texto genérico */ }
+      const text = note
+        ? `⏰ Conversa retornada — o prazo do adiamento venceu.\n📋 Tarefa: ${note}`
+        : '⏰ Conversa retornada — o prazo do adiamento venceu. Hora de dar sequência à tarefa.';
       try {
         const msg = await this.prisma.message.create({
           data: {
             conversation_id: c.id,
             direction: 'out',
             type: 'transfer_event',
-            text: '⏰ Conversa retornada — o prazo do adiamento venceu. Hora de dar sequência à tarefa.',
+            text,
             status: 'enviado',
             external_message_id: `snooze_reopen_${c.id}_${Date.now()}`,
           },
