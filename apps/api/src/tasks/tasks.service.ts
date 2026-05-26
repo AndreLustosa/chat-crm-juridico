@@ -162,6 +162,48 @@ export class TasksService {
     return { data, total: data.length, page: 1, limit: data.length };
   }
 
+  // ─── Tarefas vencidas do usuario logado (aviso "tarefa vencida") ──────────
+
+  /**
+   * WHERE comum do aviso: tarefas EM ABERTO (A_FAZER/EM_PROGRESSO) com prazo
+   * ja vencido, atribuidas ao proprio usuario, dentro do tenant dele.
+   */
+  private overdueWhere(userId?: string, tenantId?: string) {
+    return {
+      ...this.tenantWhere(tenantId),
+      status: { in: ['A_FAZER', 'EM_PROGRESSO'] },
+      due_at: { not: null, lt: new Date() },
+      assigned_user_id: userId,
+    };
+  }
+
+  /** Contador de tarefas vencidas do usuario logado (badge do sino). */
+  async getOverdueCount(userId?: string, tenantId?: string): Promise<{ count: number }> {
+    if (!userId) return { count: 0 };
+    const count = await this.prisma.task.count({ where: this.overdueWhere(userId, tenantId) });
+    return { count };
+  }
+
+  /**
+   * Lista das tarefas vencidas do usuario logado (limit 20, due_at asc) com
+   * campos uteis pro popover: id, title, due_at, conversation_id, lead {name,phone}.
+   */
+  async getOverdueList(userId?: string, tenantId?: string) {
+    if (!userId) return [];
+    return this.prisma.task.findMany({
+      where: this.overdueWhere(userId, tenantId),
+      select: {
+        id: true,
+        title: true,
+        due_at: true,
+        conversation_id: true,
+        lead: { select: { name: true, phone: true } },
+      },
+      orderBy: { due_at: 'asc' },
+      take: 20,
+    });
+  }
+
   async findOne(id: string, tenantId?: string, userId?: string, roles?: string | string[]) {
     // Bug fix 2026-05-10 (PR2 #1): findOne agora exige ownership — antes
     // qualquer user do mesmo tenant lia titulo/descricao/comments/checklist

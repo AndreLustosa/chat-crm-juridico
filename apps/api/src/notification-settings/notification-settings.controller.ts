@@ -25,4 +25,27 @@ export class NotificationSettingsController {
   ) {
     return this.service.update(req.user.sub || req.user.id, body);
   }
+
+  /**
+   * Config do aviso de tarefa vencida (3 canais: whatsapp/badge/sound).
+   * Retorna o override tri-state do atendente (mine), o padrão do escritório
+   * (office), o efetivo resolvido, se é admin e se tem telefone.
+   */
+  @Get('overdue')
+  async getOverdue(@Request() req: any) {
+    return this.service.getOverdueSettings(req.user.sub || req.user.id, req.user.roles);
+  }
+
+  /**
+   * Atualiza (merge parcial) o override tri-state do atendente. Cada canal
+   * aceita boolean (forçar) ou null (voltar a herdar do escritório). Canais
+   * omitidos ficam intactos. Retorna o mesmo payload do GET.
+   */
+  @Patch('overdue')
+  async updateOverdue(
+    @Request() req: any,
+    @Body() body: { whatsapp?: boolean | null; badge?: boolean | null; sound?: boolean | null },
+  ) {
+    return this.service.updateOverdueOverride(req.user.sub || req.user.id, body || {}, req.user.roles);
+  }
 }

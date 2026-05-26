@@ -28,6 +28,8 @@ model Tenant {
   suspended_at               DateTime? // suspenso pelo SUPER_ADMIN (acesso cortado; reversivel)
   prev_subscription_status   String?   // status antes de suspender (para reativar ao estado correto)
   deletion_scheduled_at      DateTime? // exclusao agendada; purga FISICA e manual/auditada apos a carencia
+  // ─── Notificacoes: padrao do escritorio (admin define; atendente sobrescreve) ─
+  notification_defaults      Json                             @default("{}")
   conversations              Conversation[]
   leads                      Lead[]
   tasks                      Task[]
@@ -469,6 +471,8 @@ model Task {
   acknowledged_by_id     String?
   // Adiamentos
   postpone_count    Int                 @default(0)
+  // Aviso "tarefa venceu" (WhatsApp assim que vencer): timestamp do envio, pra nao repetir
+  overdue_alerted_at DateTime?
   created_by_id     String?
   assigned_user     User?               @relation(fields: [assigned_user_id], references: [id], onDelete: SetNull)
   acknowledged_by   User?               @relation("TaskAcknowledger", fields: [acknowledged_by_id], references: [id], onDelete: SetNull)

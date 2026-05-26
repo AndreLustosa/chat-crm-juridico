@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { evaluateSubscription } from '../subscription/subscription.util';
 import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import { UpdateOfficeDto } from './dto/update-office.dto';
+import { UpdateNotificationDefaultsDto } from './dto/update-notification-defaults.dto';
 
 @Injectable()
 export class OfficeService {
@@ -112,5 +113,44 @@ export class OfficeService {
       throw new BadRequestException(`${label} inválido — confira os dígitos (número inexistente).`);
     }
     return raw;
+  }
+
+  /**
+   * Padrão do escritório para o aviso de "tarefa vencida" (3 canais).
+   * Faz MERGE em Tenant.notification_defaults.taskOverdue, preservando quaisquer
+   * outras chaves já gravadas em notification_defaults. Só ADMIN (guard na rota).
+   * Retorna o objeto salvo ({ whatsapp, badge, sound }).
+   */
+  async updateNotificationDefaults(
+    tenantId: string | undefined,
+    dto: UpdateNotificationDefaultsDto,
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const tenant = await (this.prisma as any).tenant.findUnique({
+      where: { id: tenantId },
+      select: { notification_defaults: true },
+    });
+    if (!tenant) throw new NotFoundException('Escritório não encontrado.');
+
+    const current =
+      tenant.notification_defaults && typeof tenant.notification_defaults === 'object'
+        ? (tenant.notification_defaults as Record<string, any>)
+        : {};
+
+    const taskOverdue = {
+      whatsapp: dto.whatsapp,
+      badge: dto.badge,
+      sound: dto.sound,
+    };
+
+    // Merge: preserva outras chaves de notification_defaults, troca só taskOverdue.
+    const merged = { ...current, taskOverdue };
+
+    await (this.prisma as any).tenant.update({
+      where: { id: tenantId },
+      data: { notification_defaults: merged },
+    });
+
+    return taskOverdue;
   }
 }

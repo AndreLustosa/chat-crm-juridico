@@ -37,6 +37,26 @@ export class TasksController {
   }
 
   /**
+   * Contador de tarefas vencidas do usuario logado (badge do sino "tarefa
+   * vencida"). status A_FAZER/EM_PROGRESSO, due_at no passado, atribuidas a ele.
+   * IMPORTANTE: rota fixa antes de :id pra nao colidir com /:id pattern.
+   */
+  @Get('overdue-count')
+  getOverdueCount(@Request() req: any) {
+    return this.tasksService.getOverdueCount(req.user?.id, req.user?.tenant_id);
+  }
+
+  /**
+   * Lista (limit 20, due_at asc) das tarefas vencidas do usuario logado — pro
+   * popover do aviso. Mesmo filtro do count.
+   * IMPORTANTE: rota fixa antes de :id pra nao colidir com /:id pattern.
+   */
+  @Get('overdue')
+  getOverdue(@Request() req: any) {
+    return this.tasksService.getOverdueList(req.user?.id, req.user?.tenant_id);
+  }
+
+  /**
    * Batch acknowledge — botao "Visto em todas" no header das Diligencias
    * Delegadas. Filtra silenciosamente IDs que nao sao do delegante / nao
    * estao concluidas / ja foram ack'd.

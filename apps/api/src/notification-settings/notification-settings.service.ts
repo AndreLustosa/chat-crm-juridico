@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isAdmin } from '../common/utils/permissions.util';
+import {
+  resolveOverdueEffective,
+  OverdueOverride,
+  OverdueOfficeDefault,
+} from './overdue-effective.util';
 
 /** Defaults aplicados quando o usuário não tem registro ainda */
 const DEFAULT_PREFERENCES = {
@@ -88,6 +94,121 @@ export class NotificationSettingsService {
     this.cache.delete(userId);
 
     return updated;
+  }
+
+  // ─── Aviso de tarefa vencida (task_overdue): 3 canais wpp/badge/sound ──────
+
+  /** Default tri-state do override do atendente (tudo herdar). */
+  private static readonly OVERDUE_OVERRIDE_DEFAULT: OverdueOverride = {
+    whatsapp: null,
+    badge: null,
+    sound: null,
+  };
+  /** Default do escritório quando o tenant não configurou nada. */
+  private static readonly OVERDUE_OFFICE_DEFAULT: OverdueOfficeDefault = {
+    whatsapp: true,
+    badge: true,
+    sound: true,
+  };
+
+  /**
+   * Lê o override tri-state do atendente de preferences.taskOverdueOverride,
+   * normalizando para {whatsapp,badge,sound: boolean|null}. Valores ausentes
+   * ou não-booleanos viram null (= herdar).
+   */
+  private readOverdueOverride(preferences: any): OverdueOverride {
+    const raw = preferences?.taskOverdueOverride;
+    const pick = (v: any): boolean | null => (typeof v === 'boolean' ? v : null);
+    return {
+      whatsapp: pick(raw?.whatsapp),
+      badge: pick(raw?.badge),
+      sound: pick(raw?.sound),
+    };
+  }
+
+  /**
+   * Lê o padrão do escritório de Tenant.notification_defaults.taskOverdue.
+   * Valores ausentes/não-booleanos caem no default true.
+   */
+  private readOfficeDefault(notificationDefaults: any): OverdueOfficeDefault {
+    const raw = notificationDefaults?.taskOverdue;
+    const pick = (v: any): boolean =>
+      typeof v === 'boolean' ? v : true;
+    return {
+      whatsapp: pick(raw?.whatsapp),
+      badge: pick(raw?.badge),
+      sound: pick(raw?.sound),
+    };
+  }
+
+  /**
+   * Monta o payload de overdue settings do usuário: o override dele (mine),
+   * o padrão do escritório (office), o efetivo resolvido, se é admin e se tem
+   * telefone cadastrado (pra UI avisar que WhatsApp não tem pra onde ir).
+   */
+  async getOverdueSettings(userId: string, roles?: string | string[]) {
+    const setting = await this.getOrCreate(userId);
+
+    // Busca tenant_id + phone do user pra resolver office default e hasPhone.
+    const user = await (this.prisma as any).user.findUnique({
+      where: { id: userId },
+      select: { tenant_id: true, phone: true },
+    });
+
+    let officeRaw: any = {};
+    if (user?.tenant_id) {
+      const tenant = await (this.prisma as any).tenant.findUnique({
+        where: { id: user.tenant_id },
+        select: { notification_defaults: true },
+      });
+      officeRaw = tenant?.notification_defaults ?? {};
+    }
+
+    const mine = this.readOverdueOverride(setting.preferences);
+    const office = this.readOfficeDefault(officeRaw);
+    const effective = resolveOverdueEffective(mine, office);
+
+    return {
+      mine,
+      office,
+      effective,
+      isAdmin: isAdmin(roles || []),
+      hasPhone: !!user?.phone,
+    };
+  }
+
+  /**
+   * MERGE parcial do override tri-state em preferences.taskOverdueOverride.
+   * Só os canais enviados são alterados (undefined = mantém); aceita
+   * boolean|null por canal (null = voltar a herdar). Retorna o mesmo payload
+   * do GET.
+   */
+  async updateOverdueOverride(
+    userId: string,
+    patch: { whatsapp?: boolean | null; badge?: boolean | null; sound?: boolean | null },
+    roles?: string | string[],
+  ) {
+    const setting = await this.getOrCreate(userId);
+    const current = this.readOverdueOverride(setting.preferences);
+
+    const sanitize = (v: any): boolean | null =>
+      typeof v === 'boolean' ? v : v === null ? null : undefined as any;
+
+    const next: OverdueOverride = { ...current };
+    for (const ch of ['whatsapp', 'badge', 'sound'] as const) {
+      if (Object.prototype.hasOwnProperty.call(patch, ch)) {
+        const s = sanitize(patch[ch]);
+        if (s !== undefined) next[ch] = s;
+      }
+    }
+
+    // Reaproveita update() (merge de preferences) p/ persistir só a chave
+    // taskOverdueOverride, sem mexer nos outros tipos de notificação.
+    await this.update(userId, {
+      preferences: { taskOverdueOverride: next } as any,
+    });
+
+    return this.getOverdueSettings(userId, roles);
   }
 
   /**
