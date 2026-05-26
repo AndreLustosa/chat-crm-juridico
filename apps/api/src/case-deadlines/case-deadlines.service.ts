@@ -27,6 +27,47 @@ export class CaseDeadlinesService {
     private calendarService: CalendarService,
   ) {}
 
+  /**
+   * "Dias sem perder prazo" do escritório (badge do Cockpit).
+   *
+   * PERDER UM PRAZO = um CaseDeadline cujo vencimento (due_at) já passou e que
+   * NÃO foi cumprido no prazo: segue vencido em aberto (PENDENTE/ADIADO) OU foi
+   * concluído DEPOIS do vencimento. CANCELADO não conta.
+   *
+   * Retorna os dias desde o ÚLTIMO prazo perdido. Se nunca perdeu, conta desde
+   * o 1º prazo cadastrado. Sem nenhum prazo ainda → 0.
+   */
+  async deadlineStreak(tenantId: string): Promise<{ days: number; last_miss_at: string | null }> {
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    // Vencimento mais recente entre os prazos PERDIDOS (vencidos e não cumpridos no prazo).
+    const rows = (await this.prisma.$queryRaw`
+      SELECT MAX(due_at) AS last_miss
+      FROM "CaseDeadline"
+      WHERE tenant_id = ${tenantId}
+        AND due_at < NOW()
+        AND status <> 'CANCELADO'
+        AND NOT (completed = true AND completed_at IS NOT NULL AND completed_at <= due_at)
+    `) as Array<{ last_miss: Date | null }>;
+    const lastMiss = rows[0]?.last_miss ?? null;
+
+    if (lastMiss) {
+      const days = Math.max(0, Math.floor((now - new Date(lastMiss).getTime()) / MS_PER_DAY));
+      return { days, last_miss_at: new Date(lastMiss).toISOString() };
+    }
+
+    // Nunca perdeu um prazo: conta desde o 1º prazo cadastrado.
+    const first = await this.prisma.caseDeadline.findFirst({
+      where: { tenant_id: tenantId },
+      select: { created_at: true },
+      orderBy: { created_at: 'asc' },
+    });
+    if (!first) return { days: 0, last_miss_at: null };
+    const days = Math.max(0, Math.floor((now - first.created_at.getTime()) / MS_PER_DAY));
+    return { days, last_miss_at: null };
+  }
+
   // ─── Helpers ────────────────────────────────────────────
 
   private async verifyCaseAccess(caseId: string, tenantId?: string) {

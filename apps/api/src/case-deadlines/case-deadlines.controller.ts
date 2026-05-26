@@ -19,6 +19,14 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class CaseDeadlinesController {
   constructor(private readonly service: CaseDeadlinesService) {}
 
+  // "Dias sem perder prazo" do escritório (badge do Cockpit). Vem ANTES de
+  // :caseId para a rota estática não ser capturada pelo parâmetro. Aberto a
+  // todo o tenant (só leitura agregada, sem dados sensíveis).
+  @Get('streak')
+  deadlineStreak(@Request() req?: any) {
+    return this.service.deadlineStreak(req.user.tenant_id);
+  }
+
   // Listagem aberta a todos do tenant (operador precisa ver prazos)
   @Get(':caseId')
   findByCaseId(
