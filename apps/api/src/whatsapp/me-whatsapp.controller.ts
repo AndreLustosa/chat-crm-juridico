@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Request } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Request } from '@nestjs/common';
 import { MeWhatsappService } from './me-whatsapp.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 
@@ -64,5 +64,12 @@ export class MeWhatsappController {
   @Roles('ADMIN')
   disconnectInbox(@Param('inboxId') inboxId: string, @Request() req: any) {
     return this.svc.disconnectInbox(req.user?.tenant_id, inboxId);
+  }
+
+  /** Exclui o departamento (apaga a instância na Evolution + remove o Inbox). */
+  @Delete('me/whatsapp/departments/:inboxId')
+  @Roles('ADMIN')
+  deleteDepartment(@Param('inboxId') inboxId: string, @Request() req: any) {
+    return this.svc.deleteDepartment(req.user?.tenant_id, inboxId);
   }
 }

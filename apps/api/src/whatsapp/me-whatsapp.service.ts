@@ -243,4 +243,28 @@ export class MeWhatsappService {
     if (inst) await this.whatsapp.logoutInstance(inst.name).catch(() => {});
     return { ok: true };
   }
+
+  /**
+   * Exclui um departamento por completo: apaga as instâncias NA EVOLUTION
+   * (logout + delete — senão ficam órfãs lá), remove os registros locais de
+   * Instance, desvincula as conversas (não apaga) e remove o Inbox.
+   */
+  async deleteDepartment(tenantId: string | undefined, inboxId: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    await this.assertInbox(tenantId, inboxId);
+    const insts = await (this.prisma as any).instance.findMany({
+      where: { tenant_id: tenantId, inbox_id: inboxId },
+      select: { name: true },
+    });
+    for (const i of insts) {
+      await this.whatsapp.logoutInstance(i.name).catch(() => {});
+      await this.whatsapp
+        .deleteInstance(i.name)
+        .catch((e: any) => this.logger.warn(`deleteInstance(${i.name}) falhou: ${e?.message ?? e}`));
+    }
+    await (this.prisma as any).conversation.updateMany({ where: { inbox_id: inboxId }, data: { inbox_id: null } });
+    await (this.prisma as any).instance.deleteMany({ where: { tenant_id: tenantId, inbox_id: inboxId } });
+    await (this.prisma as any).inbox.delete({ where: { id: inboxId } });
+    return { ok: true };
+  }
 }
