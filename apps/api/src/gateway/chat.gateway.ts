@@ -91,6 +91,11 @@ export class ChatGateway {
         inbox_id: { in: inboxIds },
         status: { notIn: ['FECHADO'] },
         lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO'] } },
+        // NÃO auto-atribui conversas "estacionadas" por uma tarefa pendente
+        // (ex.: voltou de um adiamento e aguarda o atendente cumprir a tarefa
+        // de retorno). Elas ficam em ESPERA até alguém ASSUMIR ou CONCLUIR a
+        // tarefa — senão, só abrir o chat já as puxava para "Minhas".
+        tasks: { none: { status: { in: ['A_FAZER', 'EM_PROGRESSO'] } } },
       },
       select: { id: true, tenant_id: true, inbox_id: true },
       orderBy: { last_message_at: 'asc' }, // Mais antiga primeiro

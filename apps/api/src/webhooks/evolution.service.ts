@@ -482,21 +482,34 @@ export class EvolutionService implements OnApplicationBootstrap {
       // Quando o primeiro operador ficar online, as conversas pendentes serão atribuídas
       // automaticamente via ChatGateway.assignPendingConversations()
       if (!conv.assigned_user_id) {
-        const onlineUserIds = this.chatGateway.getOnlineUserIds();
-        const nextUserId: string | null = inboxId
-          ? await this.inboxesService.getNextAssignee(inboxId, onlineUserIds)
-          : null;
+        // Não auto-atribui conversa "estacionada" por uma tarefa pendente (voltou
+        // de um adiamento e aguarda o atendente cumprir/concluir a tarefa de
+        // retorno). Sem isto, uma resposta do cliente a puxaria pra "Minhas"
+        // antes de concluir — quebrando a regra "só sai da Espera ao concluir".
+        const hasPendingTask =
+          (await this.prisma.task.count({
+            where: { conversation_id: conv.id, status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
+          })) > 0;
 
-        if (nextUserId) {
-          conv = await this.prisma.conversation.update({
-            where: { id: conv.id },
-            data: { assigned_user_id: nextUserId },
-            // ai_mode NÃO é alterado: operador monitora, IA continua respondendo
-          });
-          this.logger.log(`[AUTO-ASSIGN] Conversa ${conv.id} → operador online ${nextUserId}`);
+        if (hasPendingTask) {
+          this.logger.log(`[AUTO-ASSIGN] Conversa ${conv.id} com tarefa pendente — mantém em Espera (não atribui)`);
         } else {
-          // Ninguém online → IA atende sozinha (ai_mode já é true por default)
-          this.logger.log(`[AUTO-ASSIGN] Nenhum operador online — IA atende conversa ${conv.id}`);
+          const onlineUserIds = this.chatGateway.getOnlineUserIds();
+          const nextUserId: string | null = inboxId
+            ? await this.inboxesService.getNextAssignee(inboxId, onlineUserIds)
+            : null;
+
+          if (nextUserId) {
+            conv = await this.prisma.conversation.update({
+              where: { id: conv.id },
+              data: { assigned_user_id: nextUserId },
+              // ai_mode NÃO é alterado: operador monitora, IA continua respondendo
+            });
+            this.logger.log(`[AUTO-ASSIGN] Conversa ${conv.id} → operador online ${nextUserId}`);
+          } else {
+            // Ninguém online → IA atende sozinha (ai_mode já é true por default)
+            this.logger.log(`[AUTO-ASSIGN] Nenhum operador online — IA atende conversa ${conv.id}`);
+          }
         }
       }
 

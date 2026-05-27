@@ -528,6 +528,19 @@ export class TasksService {
     });
     if (!task) throw new NotFoundException('Tarefa não encontrada');
 
+    // Concluir a tarefa (ex.: a de retorno) faz a conversa SAIR da Espera e ir
+    // para "Minhas" de quem concluiu — mas só se ela ainda estiver SEM dono
+    // (não rouba conversa já atribuída a outro atendente). 'system' nunca
+    // reivindica. É isto que garante "a conversa só sai da Espera ao concluir".
+    let claimUserId: string | undefined;
+    if (task.conversation_id && userId && userId !== 'system') {
+      const conv = await this.prisma.conversation.findUnique({
+        where: { id: task.conversation_id },
+        select: { assigned_user_id: true },
+      });
+      if (conv && !conv.assigned_user_id) claimUserId = userId;
+    }
+
     const ops: any[] = [
       this.prisma.task.update({
         where: { id: taskId },
@@ -541,8 +554,12 @@ export class TasksService {
     ];
     if (task.conversation_id) {
       ops.push(
-        // reabre a conversa e zera o timer de adiamento (sai de "Adiada" sem voltar sozinha)
-        this.prisma.conversation.update({ where: { id: task.conversation_id }, data: { status: 'ABERTO', snooze_until: null } as any }),
+        // reabre a conversa, zera o timer de adiamento (sai de "Adiada" sem voltar
+        // sozinha) e — se estava sem dono — atribui a quem concluiu (Espera→Minhas)
+        this.prisma.conversation.update({
+          where: { id: task.conversation_id },
+          data: { status: 'ABERTO', snooze_until: null, ...(claimUserId ? { assigned_user_id: claimUserId } : {}) } as any,
+        }),
       );
     }
     if (note?.trim() && userId !== 'system') {
