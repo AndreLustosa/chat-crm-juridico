@@ -38,6 +38,9 @@ export class SlaCronService {
   private readonly slaMinutes = Number(process.env.SLA_FIRST_RESPONSE_MINUTES || 15);
   private readonly bizStart = Number(process.env.SLA_BUSINESS_START_HOUR || 8);
   private readonly bizEnd = Number(process.env.SLA_BUSINESS_END_HOUR || 18);
+  // Nos últimos N minutos do expediente, só reativa a IA (não reatribui pra
+  // quem já está de saída). Suaviza a virada do dia.
+  private readonly reassignCutoffMin = Number(process.env.SLA_REASSIGN_CUTOFF_MINUTES || 30);
 
   constructor(
     private prisma: PrismaService,
@@ -80,14 +83,22 @@ export class SlaCronService {
     const cutoff = new Date(Date.now() - this.slaMinutes * 60 * 1000);
     const onlineUserIds = this.chatGateway.getOnlineUserIds();
 
-    // Candidatas: humano deveria atender (ai_mode=false), conversa aberta, lead
-    // ativo e a última atividade foi há mais que o SLA.
+    // "Suavizar o fim do dia": nos últimos minutos antes do fim do expediente,
+    // só reativamos a IA — não reatribuímos leads pra atendentes que já estão
+    // de saída. Fora dessa janela, reatribuição normal.
+    const brtNow = brazilRealNowToNaive();
+    const minutesUntilEnd = this.bizEnd * 60 - (brtNow.getUTCHours() * 60 + brtNow.getUTCMinutes());
+    const allowReassign = minutesUntilEnd > this.reassignCutoffMin;
+
+    // Candidatas: humano deveria atender (ai_mode=false), conversa aberta, é um
+    // LEAD ativo (clientes contratados ficam de fora — têm responsável) e a
+    // última atividade foi há mais que o SLA.
     const candidates = await this.prisma.conversation.findMany({
       where: {
         status: 'ABERTO',
         ai_mode: false,
         last_message_at: { lt: cutoff },
-        lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } },
+        lead: { is_client: false, stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } },
       },
       select: {
         id: true,
@@ -115,8 +126,9 @@ export class SlaCronService {
       }
 
       // Round-robin: próximo operador online do inbox (se houver outro diferente).
+      // No fim do expediente (allowReassign=false) não reatribui — só reativa a IA.
       let nextUserId: string | null = null;
-      if (conv.inbox_id && onlineUserIds.length > 0) {
+      if (allowReassign && conv.inbox_id && onlineUserIds.length > 0) {
         try {
           nextUserId = await this.inboxes.getNextAssignee(conv.inbox_id, onlineUserIds);
         } catch {
