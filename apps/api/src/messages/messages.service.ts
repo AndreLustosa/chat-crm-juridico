@@ -192,6 +192,22 @@ export class MessagesService {
   private async autoReassignIfNeeded(convo: any, senderId: string | undefined): Promise<void> {
     if (!senderId) return;
     if (convo.assigned_user_id === senderId) return;
+    // Regra "a conversa só sai da Espera ao concluir a tarefa": se ela está SEM
+    // dono (em Espera) e tem tarefa pendente (voltou de um adiamento e aguarda o
+    // atendente cumprir a tarefa), enviar mensagem NÃO a atribui — sai da Espera
+    // só via "Assumir" (explícito) ou ao concluir a tarefa. (Conversa já atribuída
+    // a outro continua sendo reatribuída ao remetente, e lead novo sem tarefa
+    // também — só protegemos o caso de Espera estacionada por tarefa.)
+    if (!convo.assigned_user_id) {
+      const hasPendingTask =
+        (await this.prisma.task.count({
+          where: { conversation_id: convo.id, status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
+        })) > 0;
+      if (hasPendingTask) {
+        this.logger.log(`[AutoReassign] Conversa ${convo.id} em Espera com tarefa pendente — não atribui ao enviar`);
+        return;
+      }
+    }
     await this.prisma.conversation.update({
       where: { id: convo.id },
       data: { assigned_user_id: senderId },
