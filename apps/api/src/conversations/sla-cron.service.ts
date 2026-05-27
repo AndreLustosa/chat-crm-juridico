@@ -11,13 +11,18 @@ import { brazilRealNowToNaive } from '../common/utils/timezone.util';
  *
  * Acelera a rede de segurança que já existe no AiReactivationCron (que só age
  * depois de 24h). Aqui, em MINUTOS: quando um humano deveria estar atendendo
- * (ai_mode=false) mas o cliente ficou sem resposta além do prazo de SLA, o
+ * (ai_mode=false), o cliente ficou sem resposta além do prazo de SLA E NÃO há
+ * um dono ONLINE cuidando (dono offline ou conversa sem dono na Espera), o
  * sistema, dentro do horário comercial:
  *   1) reativa a Athena (cobre o cliente na hora — mesma ação do reactivation,
  *      e isso tira a conversa da condição, evitando reprocessar em loop);
  *   2) reatribui ao próximo operador ONLINE do inbox via round-robin, pra
  *      garantir o toque humano (vira "monitor", IA ligada — igual à entrada);
  *   3) registra um evento no histórico + atualiza as listas (radar do admin).
+ *
+ * Se o operador dono está ONLINE, o cron NÃO mexe — é ele quem deve responder
+ * (não atropela quem está no meio do atendimento). A rede de 24h do
+ * AiReactivationCron segue como malha final pra esses casos.
  *
  * Fora do horário comercial não faz nada (a Athena já cobre e ninguém
  * responderia mesmo). Liga/desliga e histórico ficam no painel de crons
@@ -100,6 +105,14 @@ export class SlaCronService {
       // Só age se o ÚLTIMO a falar foi o cliente (operador não respondeu).
       const last = (conv as any).messages?.[0];
       if (!last || last.direction !== 'in') continue;
+
+      // Respeita o operador ONLINE: se o dono está online, é ele quem responde —
+      // não atropela quem pode estar no meio do atendimento (consultando processo,
+      // redigindo, etc.). O cron só age quando NÃO há um dono online cuidando:
+      // dono offline (sumiu) ou conversa sem dono (fila de Espera).
+      if (conv.assigned_user_id && onlineUserIds.includes(conv.assigned_user_id)) {
+        continue;
+      }
 
       // Round-robin: próximo operador online do inbox (se houver outro diferente).
       let nextUserId: string | null = null;
