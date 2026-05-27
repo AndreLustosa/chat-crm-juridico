@@ -111,9 +111,14 @@ export class ConversationsService {
           if (clientMode === true) {
             orConditions.push({ lead: { ...(where.lead ?? {}), cs_user_id: userId } });
           }
-          // Inboxes vinculados — APENAS para operadores no modo leads
+          // Inboxes vinculados — APENAS para operadores no modo leads.
+          // Pool de ESPERA: só leads do inbox AINDA não atribuídos. Sem o filtro
+          // assigned_user_id:null, um lead já assumido por outro operador (ex.: André)
+          // vazava para todos do mesmo inbox (ex.: Tatyane). A conversa atribuída a
+          // MIM já entra acima via { assigned_user_id: userId }; e uma transferência
+          // pendente chega pelo popup de aceite (pending_transfer_to_id), não pela lista.
           if (userInboxIds.length > 0 && clientMode !== true) {
-            orConditions.push({ inbox_id: { in: userInboxIds } });
+            orConditions.push({ inbox_id: { in: userInboxIds }, assigned_user_id: null });
           }
         }
 
@@ -144,7 +149,9 @@ export class ConversationsService {
     // Enrich with lawyer and origin-attendant names in a single query
     const lawyerIds = [...new Set(conversations.map((c: any) => c.assigned_lawyer_id).filter(Boolean))] as string[];
     const originIds = [...new Set(conversations.map((c: any) => c.origin_assigned_user_id).filter(Boolean))] as string[];
-    const allEnrichIds = [...new Set([...lawyerIds, ...originIds])];
+    // Destinatário de transferência pendente — para o remetente ver "Aguardando X aceitar".
+    const pendingToIds = [...new Set(conversations.map((c: any) => c.pending_transfer_to_id).filter(Boolean))] as string[];
+    const allEnrichIds = [...new Set([...lawyerIds, ...originIds, ...pendingToIds])];
     const enrichUsers = allEnrichIds.length
       ? await this.prisma.user.findMany({
           where: { id: { in: allEnrichIds } },
@@ -190,6 +197,9 @@ export class ConversationsService {
       assignedLawyerName: (c as any).assigned_lawyer_id ? (userNameMap[(c as any).assigned_lawyer_id] || null) : null,
       originAssignedUserId: (c as any).origin_assigned_user_id || null,
       originAssignedUserName: (c as any).origin_assigned_user_id ? (userNameMap[(c as any).origin_assigned_user_id] || null) : null,
+      // Transferência pendente (remetente vê banner "Aguardando aceitar"; some sozinho ao resolver).
+      pendingTransferToId: (c as any).pending_transfer_to_id || null,
+      pendingTransferToName: (c as any).pending_transfer_to_id ? (userNameMap[(c as any).pending_transfer_to_id] || null) : null,
       leadStage: c.lead?.stage || null,
       leadTags: (c.lead as any)?.tags || [],
       stageEnteredAt: (c.lead as any)?.stage_entered_at?.toISOString() || null,
@@ -659,7 +669,7 @@ export class ConversationsService {
     const current = await this.prisma.$transaction(async (tx) => {
       const current = await (tx as any).conversation.findUnique({
         where: { id },
-        select: { pending_transfer_from_id: true, lead: { select: { name: true, phone: true } } },
+        select: { pending_transfer_from_id: true, tenant_id: true, lead: { select: { name: true, phone: true } } },
       });
 
       await (tx as any).conversation.update({
@@ -682,6 +692,9 @@ export class ConversationsService {
         contactName: current.lead?.name || current.lead?.phone || 'Contato',
       });
     }
+    // Atualiza a lista do remetente: limpa o banner "Aguardando aceitar" mesmo que
+    // o socket transfer_response se perca (a conversa volta a ser só "Minha").
+    this.chatGateway.emitConversationsUpdate((current as any)?.tenant_id ?? null);
 
     return { success: true };
   }
