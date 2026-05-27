@@ -895,10 +895,12 @@ export class ConversationsService {
       const isAdminUser = userRoles.includes('ADMIN');
       const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
 
-      // Filtro base: tenant + exclui leads PERDIDO/FINALIZADO
+      // Filtro base: tenant + exclui leads ocultos (PERDIDO/FINALIZADO/ENCERRADO).
+      // Alinhado ao HIDDEN_STAGES da lista (findAll) — sem isto, um lead ENCERRADO
+      // com não-lida inflava o badge mas sumia da lista (badge ≠ conversas visíveis).
       const convWhere: any = {
         ...(tenantId ? { tenant_id: tenantId } : {}),
-        lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO'] } },
+        lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } },
       };
 
       const orConditions: any[] = [];
@@ -977,10 +979,11 @@ export class ConversationsService {
   }
 
   /**
-   * Resumo global de não-lidas agrupado por lead.is_client.
-   * Usado pelos badges das abas Leads/Clientes da InboxSidebar, que precisam
-   * mostrar o total de cada categoria INDEPENDENTE do clientMode ativo
-   * (a lista de conversas só traz uma aba por vez; o badge é global).
+   * Total de MENSAGENS não-lidas agrupado por lead.is_client (badge das abas
+   * Leads/Clientes — InboxSidebar legada + Jurisflow). Mostra o total de cada
+   * categoria INDEPENDENTE do clientMode ativo (a lista só traz uma aba por vez;
+   * o badge é global). Exclui leads ocultos (PERDIDO/FINALIZADO/ENCERRADO) via
+   * getUnreadCounts — alinhado ao que a lista mostra (sem mensagem "fantasma").
    */
   async getUnreadSummary(tenantId?: string, userId?: string): Promise<{ leads: number; clients: number }> {
     const counts = await this.getUnreadCounts(tenantId, userId);
