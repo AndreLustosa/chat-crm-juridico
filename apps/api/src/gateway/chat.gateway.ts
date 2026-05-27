@@ -201,6 +201,14 @@ export class ChatGateway {
         client.join(`operators:${tenantId}`);
       }
 
+      // Sala PESSOAL do usuario — recebe eventos por-usuario: conversation_read,
+      // incoming_message_notification, new_lead_notification, transfers, etc.
+      // Antes dependia do client emitir 'join_user' (handleJoinUser); o front novo
+      // (Jurisflow/useChatSocket) NAO emite isso, entao nao recebia conversation_read
+      // e o badge nao decrementava ao ler em tempo real. Auto-join aqui (sub ja
+      // autenticado pelo JWT) resolve pros dois fronts e e idempotente no reconnect.
+      client.join(`user:${userId}`);
+
       this.logger.log(
         `[SOCKET] ${client.id} rooms: ${inboxIds.length} inbox(es), operators=${joinOperators} (admin=${isAdmin}, operador=${isOperador})`,
       );
