@@ -121,10 +121,10 @@ export class ConversationsController {
   @Post(':id/snooze')
   snooze(
     @Param('id') id: string,
-    @Body() body: { dueAt: string; note?: string },
+    @Body() body: { dueAt: string; note?: string; title?: string },
     @Request() req: any,
   ) {
-    return this.conversationsService.snooze(id, req.user.id, req.user?.tenant_id, body.dueAt, body.note);
+    return this.conversationsService.snooze(id, req.user.id, req.user?.tenant_id, body.dueAt, body.note, body.title);
   }
 
   @Post(':id/transfer-to-lawyer')

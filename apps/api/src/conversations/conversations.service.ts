@@ -406,7 +406,7 @@ export class ConversationsService {
    * de volta sozinha para a fila de ESPERA (status ABERTO + sem dono → WAITING),
    * para que qualquer operador assuma e dê sequência à tarefa de retorno.
    */
-  async snooze(id: string, userId: string, tenantId: string | undefined, dueAtIso: string, note?: string) {
+  async snooze(id: string, userId: string, tenantId: string | undefined, dueAtIso: string, note?: string, title?: string) {
     if (!tenantId) throw new BadRequestException('Tenant não identificado.');
     await this.assertConversationTenant(id, tenantId);
     const conv = await this.prisma.conversation.findUnique({
@@ -419,12 +419,12 @@ export class ConversationsService {
     if (dueAt.getTime() <= Date.now()) throw new BadRequestException('O prazo precisa ser no futuro.');
     const contato = conv.lead?.name || conv.lead?.phone || 'contato';
 
-    // 1) Tarefa de retorno (aparece como activeTask na conversa + na lista de Tarefas).
-    //    Se já existe uma A_FAZER nesta conversa (RE-ADIAMENTO), atualiza o prazo/
-    //    observação e conta +1 adiamento — em vez de criar uma tarefa duplicada.
+    // 1) Tarefa da conversa (aparece como activeTask na conversa + na lista de Tarefas).
+    //    Se já existe uma A_FAZER nesta conversa (RE-ADIAMENTO/reagendar), atualiza o
+    //    prazo/observação/título e conta +1 adiamento — em vez de criar uma duplicata.
     const existingTask = await this.prisma.task.findFirst({
-      // só a tarefa DE RETORNO (do adiamento) — nunca uma "Nova tarefa" comum
-      where: { conversation_id: id, status: 'A_FAZER', title: { startsWith: 'Retornar conversa' } },
+      // a tarefa A_FAZER mais recente da conversa (qualquer título — modelo unificado)
+      where: { conversation_id: id, status: 'A_FAZER' },
       orderBy: { created_at: 'desc' },
       select: { id: true },
     });
@@ -434,6 +434,7 @@ export class ConversationsService {
         data: {
           due_at: dueAt,
           description: note?.trim() || undefined, // só troca se veio observação nova
+          title: title?.trim() || undefined, // só troca o título se veio um
           assigned_user_id: userId,
           postpone_count: { increment: 1 },
         } as any,
@@ -441,7 +442,7 @@ export class ConversationsService {
     } else {
       await this.prisma.task.create({
         data: {
-          title: `Retornar conversa — ${contato}`,
+          title: title?.trim() || `Retornar conversa — ${contato}`,
           description: note?.trim() || null,
           conversation_id: id,
           lead_id: conv.lead_id,
@@ -488,8 +489,8 @@ export class ConversationsService {
       let note = '';
       try {
         const task = await (this.prisma as any).task.findFirst({
-          // só a tarefa DE RETORNO — pra mensagem mostrar a observação certa
-          where: { conversation_id: c.id, status: 'A_FAZER', title: { startsWith: 'Retornar conversa' } },
+          // a tarefa A_FAZER mais recente da conversa — pra mensagem mostrar a observação certa
+          where: { conversation_id: c.id, status: 'A_FAZER' },
           orderBy: { created_at: 'desc' },
           select: { description: true },
         });

@@ -687,6 +687,20 @@ export class TasksService {
       } catch {}
     }
 
+    // Modelo unificado "tarefa = conversa adiada": reagendar a tarefa RE-PARQUEIA
+    // a conversa (sai da fila até o novo prazo). Ela volta sozinha pra Espera
+    // quando o prazo vencer, via cron reopenSnoozed.
+    if (task.conversation_id) {
+      try {
+        await (this.prisma as any).conversation.update({
+          where: { id: task.conversation_id },
+          data: { status: 'ADIADO', snooze_until: newDate, ai_mode: false },
+        });
+      } catch (e: any) {
+        this.logger.warn(`[postpone] re-park da conversa falhou (task ${taskId}): ${e?.message ?? e}`);
+      }
+    }
+
     this.chatGateway.emitConversationsUpdate(task.tenant_id ?? null);
     return { ok: true, conversationId: task.conversation_id };
   }
