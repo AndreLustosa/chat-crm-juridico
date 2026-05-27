@@ -218,6 +218,27 @@ export class MessagesService {
     this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
   }
 
+  /**
+   * Resposta do OPERADOR humano (envio pela UI, com senderId) → as mensagens
+   * recebidas até aqui foram "vistas": marca as inbound não-lidas como lidas
+   * (zera o badge de não-lidas). A IA (ai.processor) e as notificações
+   * (DJEN/lembrete, via whatsappService.sendText) NÃO passam por aqui — então
+   * NÃO zeram: o badge permanece pra revisão humana. Decisão do Andre:
+   *   - operador responde/abre → zera
+   *   - IA responde → NÃO zera (quero revisar o que a Athena conversou)
+   *   - notificação → NÃO zera e nem conta (é de saída)
+   */
+  private async markInboundReadOnOperatorReply(convo: any, senderId?: string): Promise<void> {
+    if (!senderId || senderId === 'system') return; // só resposta de operador real zera
+    const res = await this.prisma.message.updateMany({
+      where: { conversation_id: convo.id, direction: 'in', read_at: null },
+      data: { status: 'lido', read_at: new Date() },
+    });
+    if (res.count > 0) {
+      this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
+    }
+  }
+
   /** Enfileira job para atualizar a Long Memory após mensagem do operador.
    *  Debounce de 15s com job ID fixo para acumular mensagens rápidas. */
   private async enqueueMemoryUpdate(conversationId: string, leadId: string) {
@@ -261,6 +282,7 @@ export class MessagesService {
     }
 
     await this.autoReassignIfNeeded(convo, senderId);
+    await this.markInboundReadOnOperatorReply(convo, senderId);
 
     // Buscar nome do atendente para assinatura (ex: "*Dr. André:*\n")
     let senderName: string | null = null;
@@ -406,6 +428,7 @@ export class MessagesService {
     if (!convo || !convo.lead) throw new BadRequestException('Conversa inválida');
 
     await this.autoReassignIfNeeded(convo, senderId);
+    await this.markInboundReadOnOperatorReply(convo, senderId);
 
     // 1. Criar registro da mensagem no banco para obter o ID
     const tempExtId = `out_audio_${Date.now()}`;
@@ -511,6 +534,7 @@ export class MessagesService {
     if (!convo || !convo.lead) throw new BadRequestException('Conversa inválida');
 
     await this.autoReassignIfNeeded(convo, senderId);
+    await this.markInboundReadOnOperatorReply(convo, senderId);
 
     const mime = file.mimetype;
     let mediaType: 'image' | 'document' | 'video';
