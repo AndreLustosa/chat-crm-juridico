@@ -188,32 +188,42 @@ export class MessagesService {
     return { imported, total: rawMessages.length };
   }
 
-  /** Re-assigns the conversation to senderId if it is currently assigned to someone else. */
+  /**
+   * Operador respondeu → "assume" a conversa: atribui ao remetente (se ainda não
+   * for dele) E desliga a IA (Athena), pois quem conduz agora é o humano. Isso
+   * substitui o antigo botão "Assumir" manual — enviar a mensagem já assume.
+   * Exceção: conversa em Espera estacionada por tarefa pendente (volta de
+   * adiamento) NÃO é tocada — sai só ao concluir a tarefa. Só dispara para
+   * operador real (senderId !== 'system'); envios automáticos não assumem nada.
+   */
   private async autoReassignIfNeeded(convo: any, senderId: string | undefined): Promise<void> {
-    if (!senderId) return;
-    if (convo.assigned_user_id === senderId) return;
-    // Regra "a conversa só sai da Espera ao concluir a tarefa": se ela está SEM
-    // dono (em Espera) e tem tarefa pendente (voltou de um adiamento e aguarda o
-    // atendente cumprir a tarefa), enviar mensagem NÃO a atribui — sai da Espera
-    // só via "Assumir" (explícito) ou ao concluir a tarefa. (Conversa já atribuída
-    // a outro continua sendo reatribuída ao remetente, e lead novo sem tarefa
-    // também — só protegemos o caso de Espera estacionada por tarefa.)
+    if (!senderId || senderId === 'system') return;
+
+    // Espera estacionada por tarefa: não assume ao enviar (sai só ao concluir).
     if (!convo.assigned_user_id) {
       const hasPendingTask =
         (await this.prisma.task.count({
           where: { conversation_id: convo.id, status: { in: ['A_FAZER', 'EM_PROGRESSO'] } },
         })) > 0;
       if (hasPendingTask) {
-        this.logger.log(`[AutoReassign] Conversa ${convo.id} em Espera com tarefa pendente — não atribui ao enviar`);
+        this.logger.log(`[AutoAssign] Conversa ${convo.id} em Espera com tarefa pendente — não assume ao enviar`);
         return;
       }
     }
-    await this.prisma.conversation.update({
-      where: { id: convo.id },
-      data: { assigned_user_id: senderId },
-    });
+
+    const data: any = {};
+    if (convo.assigned_user_id !== senderId) data.assigned_user_id = senderId;
+    if (convo.ai_mode) {
+      // Humano assumiu → desliga a Athena (mesmo efeito do antigo "Assumir").
+      data.ai_mode = false;
+      data.ai_mode_disabled_at = new Date();
+      data.ai_mode_source = 'MANUAL';
+    }
+    if (Object.keys(data).length === 0) return; // já é dele e a IA já está desligada
+
+    await this.prisma.conversation.update({ where: { id: convo.id }, data });
     this.logger.log(
-      `[AutoReassign] Conversa ${convo.id}: ${convo.assigned_user_id ?? 'sem operador'} → ${senderId}`,
+      `[AutoAssign] Conversa ${convo.id}: ${convo.assigned_user_id ?? 'sem operador'} → ${senderId}${data.ai_mode === false ? ' (IA desligada)' : ''}`,
     );
     this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
   }
