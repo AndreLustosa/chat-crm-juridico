@@ -37,10 +37,11 @@ export class FollowupCronService {
       30 * 60,
       async () => {
         this.logger.log('[FOLLOWUP] Iniciando verificação...');
-        await Promise.all([
-          this.processEnrollmentsImpl(),
-          this.legacyStageFollowup(),
-        ]);
+        // NÃO chamamos processEnrollmentsImpl aqui: o cron horário (0 * * * *) já
+        // processa os enrollments — e às 9h de dia útil ambos disparavam no mesmo
+        // minuto, enfileirando o MESMO enrollment 2x (uma das causas do followup
+        // duplicado). Aqui fica só o legacy stage followup.
+        await this.legacyStageFollowup();
       },
       { description: 'Followup matinal: processa enrollments + legacy stage followup com IA', schedule: '0 9 * * 1-5' },
     );
@@ -200,6 +201,20 @@ export class FollowupCronService {
   private async sendGeneratedFollowup(lead: any, convo: any, generatedMessage: string) {
     const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
     if (!apiUrl) return;
+
+    // Trava anti-duplicidade por lead (mesma do processor): reivindica o envio
+    // de forma atômica — evita 2 disparos quase simultâneos ao mesmo lead
+    // (ex.: dois crons no mesmo minuto). Quem perde recebe count=0 e pula.
+    const cutoff = new Date(Date.now() - 2 * 60 * 1000);
+    const claim = await this.prisma.lead.updateMany({
+      where: { id: lead.id, OR: [{ last_followup_at: null }, { last_followup_at: { lt: cutoff } }] },
+      data: { last_followup_at: new Date() },
+    });
+    if (claim.count === 0) {
+      this.logger.warn(`[FOLLOWUP-IA] Disparo duplicado evitado p/ lead ${lead.id} (followup <2min)`);
+      return;
+    }
+
     const instanceName = convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
 
     const textToSend = `*Sophia:* ${generatedMessage}`;

@@ -254,6 +254,23 @@ export class FollowupProcessor extends WorkerHost {
     return count >= 2;
   }
 
+  // ─── Anti-duplicidade por LEAD (trava atômica) ──────────────────────────
+  // Bug 2026-05-17 (Lidiane): mesmo followup saiu 2x (~28ms). Causa: o mesmo
+  // enrollment enfileirado 2x (cron das 9h + cron horário no mesmo minuto) OU
+  // 2 enrollments do mesmo lead processados em paralelo. Sem trava, as duas
+  // execuções passavam pelo rate-limit (check-then-act) e disparavam.
+  // Aqui reivindicamos o envio de forma ATÔMICA: só UMA execução "ganha"
+  // (updateMany com a janela no WHERE — quem perde recebe count=0 e pula).
+  private static readonly FOLLOWUP_DEDUP_WINDOW_MS = 2 * 60 * 1000; // 2 min
+  private async claimFollowupSend(leadId: string): Promise<boolean> {
+    const cutoff = new Date(Date.now() - FollowupProcessor.FOLLOWUP_DEDUP_WINDOW_MS);
+    const res = await this.prisma.lead.updateMany({
+      where: { id: leadId, OR: [{ last_followup_at: null }, { last_followup_at: { lt: cutoff } }] },
+      data: { last_followup_at: new Date() },
+    });
+    return res.count > 0; // true = reivindicado (pode enviar); false = followup recente → pula
+  }
+
   private async processStep(enrollmentId: string) {
     const enrollment = await this.prisma.followupEnrollment.findUnique({
       where: { id: enrollmentId },
@@ -450,6 +467,12 @@ export class FollowupProcessor extends WorkerHost {
 
     const lead = await this.prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return;
+
+    // Trava anti-duplicidade: só a 1ª execução envia (evita o disparo duplicado).
+    if (!(await this.claimFollowupSend(leadId))) {
+      this.logger.warn(`[FOLLOWUP] Disparo duplicado evitado p/ lead ${leadId} (followup <2min) — msg ${msgId} não reenviada`);
+      return;
+    }
 
     const instanceName = convo?.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
 
