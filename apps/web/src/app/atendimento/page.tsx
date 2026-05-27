@@ -591,10 +591,12 @@ export default function Dashboard() {
       const items = Array.isArray(res.data) ? res.data : (res.data?.data || []);
       setConversations(items);
     } catch (e: any) {
+      // NÃO apaga a lista em erro != 401 (timeout/5xx/blip de rede — ex.: o 502
+      // momentâneo durante deploy, sob o polling pesado). Apagar fazia a lista
+      // "sumir e voltar". Mantém a lista atual; o próximo refetch (socket/poll 60s)
+      // re-sincroniza. 401 não-silencioso segue tratado pelo interceptor global.
       if (e.response?.status === 401 && !silent) {
         // Deixa o interceptor global (api.ts) tratar via evento auth:logout
-      } else if (e.response?.status !== 401) {
-        setConversations([]);
       }
     } finally {
       setLoading(false);
