@@ -485,19 +485,20 @@ export class ConversationsService {
         data: { status: 'ABERTO', snooze_until: null, assigned_user_id: null }, // libera o dono → cai em Espera (WAITING)
       });
       if (res.count === 0) continue; // outra réplica já reabriu
-      // Recupera a observação escrita ao adiar (tarefa de retorno) p/ exibir na mensagem.
-      let note = '';
+      // Recupera TÍTULO + observação da tarefa da conversa p/ exibir na mensagem.
+      let taskTitle = '';
+      let taskNote = '';
       try {
         const task = await (this.prisma as any).task.findFirst({
-          // a tarefa A_FAZER mais recente da conversa — pra mensagem mostrar a observação certa
           where: { conversation_id: c.id, status: 'A_FAZER' },
           orderBy: { created_at: 'desc' },
-          select: { description: true },
+          select: { title: true, description: true },
         });
-        note = (task?.description || '').trim();
-      } catch { /* sem tarefa/descrição → usa o texto genérico */ }
-      const text = note
-        ? `⏰ Conversa retornada — o prazo do adiamento venceu.\n📋 Tarefa: ${note}`
+        taskTitle = (task?.title || '').trim();
+        taskNote = (task?.description || '').trim();
+      } catch { /* sem tarefa → usa o texto genérico */ }
+      const text = taskTitle
+        ? `⏰ Conversa retornada — o prazo do adiamento venceu.\n📋 ${taskTitle}${taskNote ? `\n📝 ${taskNote}` : ''}`
         : '⏰ Conversa retornada — o prazo do adiamento venceu. Hora de dar sequência à tarefa.';
       try {
         const msg = await this.prisma.message.create({
