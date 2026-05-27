@@ -1732,6 +1732,31 @@ export class EvolutionService implements OnApplicationBootstrap {
   // o único jeito de recuperar as mensagens é o próprio CRM disparar o sync
   // ao voltar do ar.
 
+  /**
+   * Filtra rows `Instance` que AINDA existem na Evolution, evitando resync
+   * perpétuo (404 a cada tick) de instâncias órfãs — rows no banco sem
+   * contraparte na Evolution. Faz UMA chamada `getEvolutionMap()`.
+   *
+   * EDGE OBRIGATÓRIO: `getEvolutionMap()` engole erros e devolve Map VAZIO
+   * quando a Evolution está fora do ar. Nesse caso NÃO filtramos nada
+   * (fallback: resync de todas) — senão um outage da Evolution desligaria o
+   * resync inteiro. Só pulamos quando o Map TEM itens E o nome está ausente.
+   */
+  private async filterLiveInstances(
+    instances: { name: string }[],
+    logPrefix: string,
+  ): Promise<{ name: string }[]> {
+    const liveMap = await this.whatsappService.getEvolutionMap();
+    if (liveMap.size === 0) return instances; // Evolution indisponível → fallback (não filtra)
+    const orphans = instances.filter((i) => !liveMap.has(i.name));
+    if (orphans.length) {
+      this.logger.warn(
+        `${logPrefix} ${orphans.length} instância(s) órfã(s) sem contraparte na Evolution, ignoradas: ${orphans.map((o) => o.name).join(', ')}`,
+      );
+    }
+    return instances.filter((i) => liveMap.has(i.name));
+  }
+
   async onApplicationBootstrap(): Promise<void> {
     // Delay de 30s para garantir que Redis/Prisma/BullMQ estejam 100% prontos
     // e dar tempo da Evolution API reentregar webhooks que estavam em retry.
@@ -1753,11 +1778,17 @@ export class EvolutionService implements OnApplicationBootstrap {
           return;
         }
 
+        const liveInstances = await this.filterLiveInstances(instances, '[BOOT]');
+        if (!liveInstances.length) {
+          this.logger.log('[BOOT] Nenhuma instância com contraparte viva na Evolution — skip');
+          return;
+        }
+
         this.logger.log(
-          `[BOOT] Disparando resync de startup para ${instances.length} instância(s): ${instances.map(i => i.name).join(', ')}`,
+          `[BOOT] Disparando resync de startup para ${liveInstances.length} instância(s): ${liveInstances.map(i => i.name).join(', ')}`,
         );
 
-        for (const inst of instances) {
+        for (const inst of liveInstances) {
           try {
             const result = await this.scheduleResyncAfterReconnect(inst.name, {
               cutoffHours: 24, // recupera mensagens das últimas 24h
@@ -1798,9 +1829,12 @@ export class EvolutionService implements OnApplicationBootstrap {
 
         if (!instances.length) return;
 
-        this.logger.log(`[CRON] Resync de segurança para ${instances.length} instância(s)`);
+        const liveInstances = await this.filterLiveInstances(instances, '[CRON]');
+        if (!liveInstances.length) return;
 
-        for (const inst of instances) {
+        this.logger.log(`[CRON] Resync de segurança para ${liveInstances.length} instância(s)`);
+
+        for (const inst of liveInstances) {
           try {
             await this.scheduleResyncAfterReconnect(inst.name, {
               cutoffHours: 2, // janela curta — última fatia
