@@ -145,6 +145,27 @@ export class MessagesController {
     return this.messagesService.sendFile(conversationId, file, caption, req.user?.id);
   }
 
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @Post('send-sticker')
+  @UseInterceptors(FileInterceptor('sticker', {
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB — sticker WhatsApp típico ~100KB
+    fileFilter: (_req, file, cb) => {
+      // WhatsApp espera image/webp (formato nativo); aceita PNG (Evolution converte).
+      if (file.mimetype === 'image/webp' || file.mimetype === 'image/png') {
+        cb(null, true);
+      } else {
+        cb(new BadRequestException(`Sticker deve ser WebP ou PNG (recebido: ${file.mimetype})`) as any, false);
+      }
+    },
+  }))
+  sendSticker(
+    @Body('conversationId') conversationId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ) {
+    return this.messagesService.sendSticker(conversationId, file, req.user?.id);
+  }
+
   @Post('ai-correct')
   correctText(
     @Body('text') text: string,

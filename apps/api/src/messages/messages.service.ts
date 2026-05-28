@@ -634,6 +634,101 @@ export class MessagesService {
     return msgWithMedia;
   }
 
+  /**
+   * Envia uma figurinha (sticker) do operador. Recebe um arquivo image/webp
+   * (formato nativo do sticker WhatsApp; 512x512 recomendado) ou image/png
+   * (Evolution converte). Mesmo fluxo do sendFile mas chama o endpoint
+   * sendSticker da Evolution em vez do sendMedia. O type da mensagem é
+   * 'sticker' — o frontend renderiza com bubble menor sem caption.
+   */
+  async sendSticker(
+    conversationId: string,
+    file: Express.Multer.File,
+    senderId?: string,
+  ) {
+    const convo = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      include: { lead: true },
+    });
+    if (!convo || !convo.lead) throw new BadRequestException('Conversa inválida');
+
+    await this.autoReassignIfNeeded(convo, senderId);
+    await this.markInboundReadOnOperatorReply(convo, senderId);
+
+    const tempExtId = `out_sticker_${Date.now()}`;
+    const msg = await this.prisma.message.create({
+      data: {
+        conversation_id: convo.id,
+        direction: 'out',
+        type: 'sticker',
+        text: null,
+        external_message_id: tempExtId,
+        status: 'enviado',
+      },
+    });
+
+    const ext = mimeToExt(file.mimetype);
+    const filePath = this.fileStorage.generatePath(msg.id, ext);
+    await this.fileStorage.write(filePath, file.buffer);
+
+    await this.prisma.media.create({
+      data: {
+        message_id: msg.id,
+        file_path: filePath,
+        mime_type: file.mimetype,
+        size: file.size,
+        original_name: file.originalname || null,
+      },
+    });
+
+    const resolvedApiUrl = await this.resolvePublicApiUrl();
+    const stickerUrl = `${resolvedApiUrl}/media/${msg.id}`;
+    this.logger.log(`[STICKER] Enviando via Evolution: ${stickerUrl}`);
+    try {
+      const result = await this.whatsapp.sendSticker(
+        convo.lead.phone,
+        stickerUrl,
+        convo.instance_name || undefined,
+      );
+      if (result?.statusCode >= 400 || result?.error) {
+        this.logger.error(`Evolution API erro ao enviar sticker: ${JSON.stringify(result)}`);
+        await this.prisma.message.update({
+          where: { id: msg.id },
+          data: { status: 'erro' },
+        });
+      } else {
+        const extId = result?.key?.id;
+        if (extId) {
+          await this.prisma.message.update({
+            where: { id: msg.id },
+            data: { external_message_id: extId },
+          });
+        }
+      }
+    } catch (e) {
+      this.logger.error(`Exceção ao enviar sticker via WhatsApp: ${e.message}`);
+      await this.prisma.message.update({
+        where: { id: msg.id },
+        data: { status: 'erro' },
+      });
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: convo.id },
+      data: { last_message_at: new Date() },
+    });
+
+    const msgWithMedia = await this.prisma.message.findUnique({
+      where: { id: msg.id },
+      include: { media: true },
+    });
+
+    this.chatGateway.emitNewMessage(convo.id, msgWithMedia);
+    this.chatGateway.emitConversationsUpdate(convo.tenant_id ?? null);
+
+    return msgWithMedia;
+  }
+
   async editMessage(messageId: string, newText: string) {
     if (!newText?.trim()) throw new BadRequestException('Texto não pode ser vazio');
 
