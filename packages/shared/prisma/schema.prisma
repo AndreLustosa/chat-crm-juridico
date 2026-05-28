@@ -46,6 +46,8 @@ model Tenant {
   case_deadlines             CaseDeadline[]
   petitions                  CasePetition[]
   stickers                   Sticker[]
+  funnels                    Funnel[]
+  deals                      Deal[]
   legal_templates            LegalTemplate[]
   case_honorarios            CaseHonorario[]
   ai_chats                   AiChat[]
@@ -175,6 +177,8 @@ model User {
   tasks_completed                Task[]                           @relation("TaskCompleter")
   tasks_acknowledged             Task[]                           @relation("TaskAcknowledger")
   stickers_uploaded              Sticker[]
+  owned_deals                    Deal[]
+  deal_movements                 DealStageHistory[]
   deadlines_completed            CaseDeadline[]                   @relation("DeadlineCompleter")
   schedules                      UserSchedule[]
   calendar_event_comments        CalendarEventComment[]
@@ -271,6 +275,7 @@ model Lead {
   tenant                    Tenant?                     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   tasks                     Task[]
   legal_cases               LegalCase[]
+  deals                     Deal[]
   ficha_trabalhista         FichaTrabalhista?
   calendar_events           CalendarEvent[]
   last_followup_at          DateTime?
@@ -4218,6 +4223,157 @@ model CronConfig {
   updated_at       DateTime  @updatedAt
 
   @@index([enabled])
+}
+
+/// CRM Dinâmico — funis (pipelines) e oportunidades (deals).
+///
+/// Diferente do sistema antigo (Lead.stage string fixa), agora cada tenant
+/// configura N funis com N etapas próprias. O mesmo lead pode ter VÁRIOS
+/// deals em paralelo (ex.: captação + processo trabalhista + cobrança).
+///
+/// Variáveis pra IA:
+///  - funnel.key + stage.key: chaves imutáveis (mesmo se o usuário renomear o
+///    nome de exibição). Usadas em prompts e tools de function calling.
+///  - stage.type: enum semântico (ATIVO/GANHO/PERDIDO/ARQUIVADO) — IA raciocina
+///    sem depender do nome.
+///  - stage.ai_hint: orientação opcional injetada no system prompt quando o
+///    lead está nessa etapa.
+enum StageType {
+  ATIVO
+  GANHO
+  PERDIDO
+  ARQUIVADO
+}
+
+/// Funil (= pipeline) — um por contexto de negócio do escritório.
+/// Ex.: "Captação", "Trabalhista em andamento", "Cobrança honorários".
+model Funnel {
+  id          String         @id @default(uuid())
+  tenant_id   String
+  /// Slug imutável (snake_case) — usado pela IA. Único por tenant.
+  key         String
+  /// Nome de exibição (admin pode renomear sem afetar a key).
+  name        String
+  /// Descrição opcional (objetivo do funil).
+  description String?
+  /// Cor de display (hex ou nome de variável do theme).
+  color       String?        @default("#E6BE6A")
+  /// Área jurídica opcional — dica pra IA escolher skill quando o lead avança.
+  area        String?
+  /// Ordem de exibição na UI (menor = primeiro).
+  order       Int            @default(0)
+  /// Soft delete: false = oculto da UI mas histórico preservado.
+  active      Boolean        @default(true)
+  /// Funil "padrão" do tenant — pra onde leads novos vão automaticamente.
+  is_default  Boolean        @default(false)
+  created_at  DateTime       @default(now())
+  updated_at  DateTime       @updatedAt
+
+  tenant      Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  stages      FunnelStage[]
+  deals       Deal[]
+
+  @@unique([tenant_id, key])
+  @@index([tenant_id, active, order])
+}
+
+/// Etapa de um funil — coluna do kanban.
+model FunnelStage {
+  id               String     @id @default(uuid())
+  funnel_id        String
+  /// Slug imutável (snake_case) — usado pela IA. Único por funil.
+  key              String
+  /// Nome de exibição.
+  name             String
+  /// Tipo semântico: IA usa pra raciocinar sem depender do nome.
+  type             StageType  @default(ATIVO)
+  /// Cor de display.
+  color            String?    @default("#A8A095")
+  /// Ordem da coluna no kanban (menor = primeiro à esquerda).
+  order            Int        @default(0)
+  /// Probabilidade de conversão estimada (0-100) — opcional, pra forecast.
+  win_probability  Int?
+  /// Orientação livre que vai no system prompt da IA quando o lead estiver
+  /// nessa etapa. Ex.: "Pergunte se o lead já tem RG e CPF escaneados."
+  ai_hint          String?
+  /// Alerta SLA: se o deal ficar parado N horas, marca como atrasado.
+  sla_hours        Int?
+  created_at       DateTime   @default(now())
+  updated_at       DateTime   @updatedAt
+
+  funnel           Funnel     @relation(fields: [funnel_id], references: [id], onDelete: Cascade)
+  deals            Deal[]
+  history          DealStageHistory[]
+
+  @@unique([funnel_id, key])
+  @@index([funnel_id, order])
+}
+
+/// Oportunidade — instância de um lead num funil específico.
+/// O mesmo Lead pode ter N Deals em N funis simultaneamente.
+model Deal {
+  id                  String     @id @default(uuid())
+  tenant_id           String
+  lead_id             String
+  funnel_id           String
+  stage_id            String
+  /// Atendente/advogado responsável por mover este deal.
+  owner_user_id       String?
+  /// Honorário esperado/contratado (Decimal — serializado como string no JSON).
+  value               Decimal?   @db.Decimal(12, 2)
+  /// Data esperada de fechamento (pra forecast).
+  expected_close_at   DateTime?
+  /// Origem do deal (whatsapp / indicacao / google_ads / etc.).
+  source              String?
+  /// Anotações livres do operador sobre este deal.
+  notes               String?
+  /// Motivo da perda (quando stage.type == PERDIDO).
+  lost_reason         String?
+  /// Quando o deal entrou na etapa atual (pra calcular dias parado).
+  stage_entered_at    DateTime   @default(now())
+  /// Quando foi marcado como GANHO (denormalização do history).
+  won_at              DateTime?
+  /// Quando foi marcado como PERDIDO.
+  lost_at             DateTime?
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @updatedAt
+
+  tenant              Tenant     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  lead                Lead       @relation(fields: [lead_id], references: [id], onDelete: Cascade)
+  funnel              Funnel     @relation(fields: [funnel_id], references: [id], onDelete: Cascade)
+  stage               FunnelStage @relation(fields: [stage_id], references: [id])
+  owner               User?      @relation(fields: [owner_user_id], references: [id], onDelete: SetNull)
+  history             DealStageHistory[]
+
+  @@index([tenant_id, funnel_id, stage_id])
+  @@index([lead_id])
+  @@index([owner_user_id])
+}
+
+/// Auditoria das movimentações entre etapas de um deal.
+/// Preserva o nome da stage no momento da movimentação (snapshot) pra o
+/// histórico continuar legível mesmo se a stage for renomeada/deletada depois.
+model DealStageHistory {
+  id                String     @id @default(uuid())
+  deal_id           String
+  from_stage_id     String?
+  to_stage_id       String
+  /// Snapshots dos nomes no momento da movimentação (legibilidade futura).
+  from_stage_name   String?
+  to_stage_name     String
+  /// Quem moveu (null = sistema/IA).
+  moved_by_id       String?
+  /// Motivo/observação opcional.
+  reason            String?
+  /// "manual" | "ai" | "automation" — quem fez.
+  moved_via         String     @default("manual")
+  created_at        DateTime   @default(now())
+
+  deal              Deal       @relation(fields: [deal_id], references: [id], onDelete: Cascade)
+  to_stage          FunnelStage @relation(fields: [to_stage_id], references: [id])
+  moved_by          User?      @relation(fields: [moved_by_id], references: [id], onDelete: SetNull)
+
+  @@index([deal_id, created_at])
 }
 
 /// Biblioteca de figurinhas (stickers) do escritorio — compartilhada pela
