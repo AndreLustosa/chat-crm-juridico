@@ -21,6 +21,7 @@ import { InboxesModule } from './inboxes/inboxes.module';
 import { SectorsModule } from './sectors/sectors.module';
 import { MediaModule } from './media/media.module';
 import { StickersModule } from './stickers/stickers.module';
+import { CrmModule } from './crm/crm.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { TransferAudioModule } from './transfer-audio/transfer-audio.module';
 import { AudienciaTranscricaoModule } from './audiencia-transcricao/audiencia-transcricao.module';
@@ -117,6 +118,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     SectorsModule,
     MediaModule,
     StickersModule,
+    CrmModule,
     AnalyticsModule,
     TransferAudioModule,
     AudienciaTranscricaoModule,
