@@ -45,6 +45,7 @@ model Tenant {
   case_transcriptions        CaseTranscription[]
   case_deadlines             CaseDeadline[]
   petitions                  CasePetition[]
+  stickers                   Sticker[]
   legal_templates            LegalTemplate[]
   case_honorarios            CaseHonorario[]
   ai_chats                   AiChat[]
@@ -173,6 +174,7 @@ model User {
   calendar_events_completed      CalendarEvent[]                  @relation("EventCompleter")
   tasks_completed                Task[]                           @relation("TaskCompleter")
   tasks_acknowledged             Task[]                           @relation("TaskAcknowledger")
+  stickers_uploaded              Sticker[]
   deadlines_completed            CaseDeadline[]                   @relation("DeadlineCompleter")
   schedules                      UserSchedule[]
   calendar_event_comments        CalendarEventComment[]
@@ -4216,4 +4218,27 @@ model CronConfig {
   updated_at       DateTime  @updatedAt
 
   @@index([enabled])
+}
+
+/// Biblioteca de figurinhas (stickers) do escritorio — compartilhada pela
+/// equipe inteira. Cada tenant tem sua propria colecao. Admin/operador sobe
+/// um WebP/PNG, todos podem enviar pelos chats. Arquivo fisico no
+/// fileStorage (mesmo padrao do Media), URL publica em /stickers/:id/file.
+model Sticker {
+  id            String   @id @default(uuid())
+  tenant_id     String
+  /// Path relativo a STICKER_STORAGE_PATH (reusa MEDIA_STORAGE_PATH/stickers).
+  file_path     String
+  mime_type     String
+  size          Int
+  original_name String?
+  /// Quem subiu o sticker (pra atribuicao/auditoria; pode ser null se o user
+  /// for deletado depois).
+  created_by_id String?
+  created_at    DateTime @default(now())
+
+  tenant        Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by    User?    @relation(fields: [created_by_id], references: [id], onDelete: SetNull)
+
+  @@index([tenant_id, created_at])
 }
