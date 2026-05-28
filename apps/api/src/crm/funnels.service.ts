@@ -5,6 +5,53 @@ import { slugify, uniqueSlug } from './slug';
 import type { StageType } from '@prisma/client';
 
 /**
+ * Etapas padrao criadas automaticamente em todo funil novo. O escritorio
+ * pode renomear/excluir/reorganizar depois, mas o ponto de partida cobre
+ * o ciclo de vida basico de um lead no juridico:
+ *   1) Qualificando — lead acabou de cair, sendo triado pelo atendente/IA.
+ *   2) Finalizado   — virou cliente, segue pra triagem/peticoes (GANHO).
+ *   3) Perdido      — desqualificado, contato arquivado (PERDIDO).
+ * As `keys` sao slug fixos pra IA conseguir referenciar com seguranca em
+ * prompts e tools (funil pode ate trocar de nome, key continua).
+ */
+const DEFAULT_FUNNEL_STAGES: Array<{
+  key: string;
+  name: string;
+  type: StageType;
+  color: string;
+  order: number;
+  ai_hint: string;
+}> = [
+  {
+    key: 'qualificando',
+    name: 'Qualificando',
+    type: 'ATIVO',
+    color: '#E6BE6A', // aurum
+    order: 1,
+    ai_hint:
+      'Lead acabou de chegar. Apresente-se, descubra do que ele precisa (area juridica, urgencia), colete dados basicos (nome completo, contato) e avalie se o caso faz sentido pro escritorio. Quando estiver claro que o escritorio pode ajudar, avance para "Finalizado". Quando ficar claro que nao faz sentido (foge da area, sem condicoes, sem interesse real), mova para "Perdido".',
+  },
+  {
+    key: 'finalizado',
+    name: 'Finalizado',
+    type: 'GANHO',
+    color: '#7EB58A', // jade
+    order: 2,
+    ai_hint:
+      'Lead qualificado — o caso faz sentido pro escritorio. Encaminhe para triagem/peticoes, agradeca pela confianca e mantenha o relacionamento ativo enquanto a equipe juridica assume.',
+  },
+  {
+    key: 'perdido',
+    name: 'Perdido',
+    type: 'PERDIDO',
+    color: '#C44444', // crimson
+    order: 3,
+    ai_hint:
+      'Lead desqualificado — nao faz sentido pro escritorio ou nao demonstrou interesse real. Agradeca o contato com cordialidade, deixe a porta aberta pra retornar no futuro e arquive o contato.',
+  },
+];
+
+/**
  * CRUD de funis (pipelines) e suas etapas. Tudo scoped por tenant.
  *
  * Regras:
@@ -13,6 +60,7 @@ import type { StageType } from '@prisma/client';
  *    IA continuem funcionando.
  *  - Soft delete de Funnel via `active=false` (preserva histórico).
  *  - Hard delete de Stage só permitido se não houver Deal nela.
+ *  - Todo funil novo nasce com 3 etapas padrão (DEFAULT_FUNNEL_STAGES).
  */
 @Injectable()
 export class FunnelsService {
@@ -87,21 +135,42 @@ export class FunnelsService {
       _max: { order: true },
     });
 
-    const funnel = await this.prisma.funnel.create({
-      data: {
-        tenant_id: tenantId,
-        key,
-        name,
-        description: input.description?.trim() || null,
-        color: input.color || '#E6BE6A',
-        area: input.area?.trim() || null,
-        is_default: input.is_default ?? false,
-        order: (lastOrder._max.order ?? 0) + 1,
-        active: true,
-      },
-      include: { stages: true },
+    // Cria funil + etapas padrao numa transacao — se a criacao das etapas
+    // falhar por qualquer motivo, o funil tambem nao fica orfao no banco.
+    const funnel = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.funnel.create({
+        data: {
+          tenant_id: tenantId,
+          key,
+          name,
+          description: input.description?.trim() || null,
+          color: input.color || '#E6BE6A',
+          area: input.area?.trim() || null,
+          is_default: input.is_default ?? false,
+          order: (lastOrder._max.order ?? 0) + 1,
+          active: true,
+        },
+      });
+      await tx.funnelStage.createMany({
+        data: DEFAULT_FUNNEL_STAGES.map((s) => ({
+          funnel_id: created.id,
+          key: s.key,
+          name: s.name,
+          type: s.type,
+          color: s.color,
+          order: s.order,
+          ai_hint: s.ai_hint,
+        })),
+      });
+      // Retorna com as etapas ja carregadas, na ordem em que aparecem no kanban.
+      return tx.funnel.findUniqueOrThrow({
+        where: { id: created.id },
+        include: { stages: { orderBy: { order: 'asc' } } },
+      });
     });
-    this.logger.log(`[FUNNEL] Criado ${key} tenant=${tenantId}`);
+    this.logger.log(
+      `[FUNNEL] Criado ${key} (com ${DEFAULT_FUNNEL_STAGES.length} etapas padrao) tenant=${tenantId}`,
+    );
     this.chatGateway.emitConversationsUpdate(tenantId);
     return funnel;
   }
