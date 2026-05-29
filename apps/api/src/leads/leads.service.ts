@@ -10,6 +10,7 @@ import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
+import { closeOpenDealsAsWon } from '../common/utils/close-deals';
 import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import OpenAI from 'openai';
 import { buildTokenParam } from '../common/utils/openai-token-param.util';
@@ -834,6 +835,12 @@ export class LeadsService {
       } catch (err) {
         this.logger.warn(`Failed to auto-create LegalCase for lead ${id}: ${err}`);
       }
+    }
+
+    // Contato virou cliente → sai do funil do CRM: fecha os deals abertos dele
+    // (best-effort; nunca derruba a finalização). Ver common/utils/close-deals.
+    if (stage === 'FINALIZADO') {
+      await closeOpenDealsAsWon(this.prisma, this.chatGateway, id, tenantId, actorId);
     }
 
     return lead;

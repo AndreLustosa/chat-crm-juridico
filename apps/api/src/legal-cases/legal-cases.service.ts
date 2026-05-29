@@ -11,6 +11,7 @@ import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
+import { closeOpenDealsAsWon } from '../common/utils/close-deals';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { getPlan } from '../subscription/plans';
 import { SAAS_LIMITS_ENABLED } from '../subscription/subscription.util';
@@ -754,6 +755,11 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
       this.logger.log(`[UNARCHIVE] Lead ${legalCase.lead.id} restaurado como cliente`);
     }
 
+    // Caso reativado → contato volta a ser cliente ativo: tira do funil do CRM.
+    if (legalCase.lead?.id) {
+      await closeOpenDealsAsWon(this.prisma, this.chatGateway, legalCase.lead.id, tenantId, undefined);
+    }
+
     return legalCase;
   }
 
@@ -1418,6 +1424,16 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
       },
     });
 
+    // Virou cliente → sai do funil do CRM: fecha os deals abertos do contato
+    // (mesmo que o lead não tivesse sido finalizado antes). Best-effort.
+    await closeOpenDealsAsWon(
+      this.prisma,
+      this.chatGateway,
+      leadId,
+      data.tenant_id,
+      data.assigned_user_id ?? effectiveLawyerId,
+    );
+
     // Atribuir advogado, atendente e área jurídica nas conversas do lead
     const convUpdate: any = {
       assigned_lawyer_id: effectiveLawyerId,
@@ -1596,6 +1612,12 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
     });
 
     this.logger.log(`[SYNC-CLIENTS] ${result.count} leads promovidos para cliente`);
+
+    // Tira os recém-promovidos do funil do CRM (fecha deals abertos de cada um).
+    for (const lid of leadIds) {
+      await closeOpenDealsAsWon(this.prisma, this.chatGateway, lid, tenantId, undefined);
+    }
+
     return { updated: result.count, lead_ids: leadIds };
   }
 
