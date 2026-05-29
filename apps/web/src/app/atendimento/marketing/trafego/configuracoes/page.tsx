@@ -409,7 +409,13 @@ export default function ConfiguracoesPage() {
 
             <div className="mt-4 space-y-2 text-sm">
               <div className="flex items-center gap-2">
-                {account?.connected ? (
+                {/* BUG-I: o badge deve refletir o STATUS REAL da conta, não só
+                    se existe conta vinculada (account.connected = !!account).
+                    Com token revogado o backend marca status='ERROR' mas
+                    connected continua true — antes o badge mentia "Conectado".
+                    Agora: só 'ACTIVE' = Conectado; ERROR/REVOKED/PENDING =
+                    Desconectado (o last_error + botão Reconectar ficam abaixo). */}
+                {account?.account?.status === 'ACTIVE' ? (
                   <>
                     <CheckCircle2 size={16} className="text-emerald-500" />
                     <span className="text-foreground">
@@ -420,7 +426,11 @@ export default function ConfiguracoesPage() {
                   <>
                     <XCircle size={16} className="text-red-500" />
                     <span className="text-foreground">
-                      <strong>Desconectado</strong>
+                      <strong>
+                        {account?.account
+                          ? 'Desconectado — reconecte'
+                          : 'Desconectado'}
+                      </strong>
                     </span>
                   </>
                 )}
@@ -470,7 +480,9 @@ export default function ConfiguracoesPage() {
                 <button
                   type="button"
                   onClick={syncNow}
-                  disabled={syncing || !account?.connected}
+                  // Só sincroniza se a conta está ACTIVE — token revogado (ERROR)
+                  // faria a sync falhar; o caminho é Reconectar via OAuth.
+                  disabled={syncing || account?.account?.status !== 'ACTIVE'}
                   className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-md border border-border hover:bg-accent disabled:opacity-50"
                 >
                   {syncing ? (
