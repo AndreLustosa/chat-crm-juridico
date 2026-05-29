@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
+import axios from 'axios';
 import type { Customer } from 'google-ads-api';
 import { enums } from 'google-ads-api';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +11,7 @@ import { TrafegoAlertEvaluatorService } from './trafego-alert-evaluator.service'
 import { TrafegoAlertNotifierService } from './trafego-alert-notifier.service';
 import { TrafegoSyncExtendedService } from './trafego-sync-extended.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { SettingsService } from '../settings/settings.service';
 
 // ─── Helpers de conversao de tipos do Google Ads API → Prisma ──────────────
 //
@@ -115,6 +117,7 @@ export class TrafegoSyncService extends WorkerHost {
     private alertNotifier: TrafegoAlertNotifierService,
     private syncExtended: TrafegoSyncExtendedService,
     private cronRunner: CronRunnerService,
+    private settings: SettingsService,
   ) {
     super();
   }
@@ -714,10 +717,21 @@ export class TrafegoSyncService extends WorkerHost {
 
     // Se token revogado, marca conta como ERROR pra evitar tentativas futuras
     if (kind === 'TokenRevoked') {
+      // Transição real? (status carregado ANTES do update). O cron já pula
+      // contas ERROR, então isto roda só na 1ª falha — mas guardamos pra
+      // cobrir sync manual / re-OAuth que falhe de novo.
+      const eraTransicao = account.status !== 'ERROR';
       await this.prisma.trafficAccount.update({
         where: { id: account.id },
         data: { status: 'ERROR', last_error: message },
       });
+      // BUG-K: avisa o dono por WhatsApp na transição ACTIVE→ERROR. Best-effort
+      // — NUNCA deixa a notificação quebrar o sync (.catch).
+      if (eraTransicao) {
+        this.notifyOwnerDisconnect(account, message).catch((e) =>
+          this.logger.warn(`[TRAFEGO_SYNC] Falha ao avisar dono da desconexão: ${e?.message}`),
+        );
+      }
     } else {
       // Erro transiente — apenas anota mas mantem ACTIVE pra cron tentar amanha
       await this.prisma.trafficAccount.update({
@@ -725,5 +739,75 @@ export class TrafegoSyncService extends WorkerHost {
         data: { last_error: `[${kind}] ${message}`.slice(0, 500) },
       });
     }
+  }
+
+  /**
+   * BUG-K: avisa o dono do escritório por WhatsApp que a conta Google Ads
+   * desconectou (token revogado) e precisa reconectar. Best-effort — NUNCA
+   * lança (o sync não pode quebrar por causa do aviso). Idempotente por
+   * design: chamado só na transição ACTIVE→ERROR (o cron pula contas já em
+   * ERROR), então não spamma. Segue o mesmo padrão de envio do
+   * notification-whatsapp.processor (instância por tenant + Evolution).
+   */
+  private async notifyOwnerDisconnect(account: any, message: string) {
+    // 1) Número de destino: telefone do escritório (Tenant.phone) ou, como
+    //    fallback, o primeiro ADMIN do tenant com telefone cadastrado.
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: account.tenant_id },
+      select: { phone: true },
+    });
+    let phone = tenant?.phone?.trim() || '';
+    if (!phone) {
+      const admin = await this.prisma.user.findFirst({
+        where: { tenant_id: account.tenant_id, roles: { has: 'ADMIN' }, phone: { not: null } },
+        select: { phone: true },
+      });
+      phone = admin?.phone?.trim() || '';
+    }
+    if (!phone) {
+      this.logger.warn(
+        `[TRAFEGO_SYNC] Tenant ${account.tenant_id} sem telefone (Tenant.phone/ADMIN) — não dá pra avisar desconexão por WhatsApp`,
+      );
+      return;
+    }
+
+    // 2) Instância Evolution do tenant (fallback pro env single-tenant).
+    const inst = await (this.prisma as any).instance
+      .findFirst({
+        where: { type: 'whatsapp', tenant_id: account.tenant_id },
+        select: { name: true },
+      })
+      .catch(() => null);
+    const instanceName: string | undefined = inst?.name || process.env.EVOLUTION_INSTANCE_NAME || undefined;
+    if (!instanceName) {
+      this.logger.warn(`[TRAFEGO_SYNC] Tenant ${account.tenant_id} sem instância WhatsApp — skip aviso`);
+      return;
+    }
+
+    // 3) Credenciais Evolution.
+    const { apiUrl, apiKey } = await this.settings.getEvolutionConfig();
+    if (!apiUrl || !apiKey) {
+      this.logger.warn('[TRAFEGO_SYNC] Evolution não configurada — skip aviso de desconexão');
+      return;
+    }
+
+    // 4) Mensagem + envio.
+    const appUrl = process.env.APP_URL || 'https://andrelustosaadvogados.com.br';
+    const conta = account.account_name || account.customer_id || 'sua conta';
+    const text =
+      `⚠️ *Google Ads desconectado*\n\n` +
+      `A conexão de *${conta}* com o Google Ads caiu (token revogado) e o ` +
+      `monitoramento de tráfego parou de sincronizar.\n\n` +
+      `Reconecte para voltar a acompanhar as campanhas:\n` +
+      `${appUrl}/atendimento/marketing/trafego/configuracoes`;
+
+    await axios.post(
+      `${apiUrl}/message/sendText/${instanceName}`,
+      { number: phone, text },
+      { headers: { 'Content-Type': 'application/json', apikey: apiKey }, timeout: 15000 },
+    );
+    this.logger.log(
+      `[TRAFEGO_SYNC] Aviso de desconexão (Google Ads) enviado por WhatsApp ao tenant ${account.tenant_id}`,
+    );
   }
 }
