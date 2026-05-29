@@ -337,4 +337,43 @@ export class DealsService {
       conversion_pct: conversion,
     };
   }
+
+  /**
+   * Distribuicao por etapa (count + soma de valor) e ranking de motivos de
+   * perda — agregado direto no banco com groupBy. O painel de analytics do
+   * front consome isto em vez de baixar centenas de deals e contar no cliente
+   * (mais rapido e sem o teto de 500 que truncava funis grandes).
+   */
+  async statsByStage(tenantId: string, funnelId?: string) {
+    const where: Prisma.DealWhereInput = {
+      tenant_id: tenantId,
+      ...(funnelId ? { funnel_id: funnelId } : {}),
+    };
+
+    const [porEtapaRaw, motivosRaw] = await Promise.all([
+      this.prisma.deal.groupBy({
+        by: ['stage_id'],
+        where,
+        _count: { _all: true },
+        _sum: { value: true },
+      }),
+      this.prisma.deal.groupBy({
+        by: ['lost_reason'],
+        where: { ...where, lost_at: { not: null } },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const porEtapa = porEtapaRaw.map((g) => ({
+      stage_id: g.stage_id,
+      count: g._count._all,
+      valor: g._sum.value?.toString() ?? '0',
+    }));
+
+    const motivosPerda = motivosRaw
+      .map((g) => ({ reason: g.lost_reason?.trim() || 'Não informado', count: g._count._all }))
+      .sort((a, b) => b.count - a.count);
+
+    return { porEtapa, motivosPerda };
+  }
 }

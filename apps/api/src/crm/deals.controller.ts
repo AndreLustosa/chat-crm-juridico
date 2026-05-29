@@ -50,6 +50,14 @@ export class DealsController {
     return this.deals.stats(req.user.tenant_id, funnelId);
   }
 
+  /** Distribuicao por etapa + motivos de perda (agregado no banco). Evita o
+   *  frontend carregar centenas de deals so pra montar o painel de analytics.
+   *  DEVE vir antes de @Get(':id') pra a rota nao ser capturada pelo param. */
+  @Get('stats-detailed')
+  statsDetailed(@Req() req: any, @Query('funnelId') funnelId?: string) {
+    return this.deals.statsByStage(req.user.tenant_id, funnelId);
+  }
+
   /** Detalhe com histórico. */
   @Get(':id')
   get(@Param('id') id: string, @Req() req: any) {
