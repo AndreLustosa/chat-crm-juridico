@@ -33,7 +33,7 @@ export class TrafegoOAuthService {
   // TTL: 10 minutos.
   private readonly pendingStates = new Map<
     string,
-    { tenantId: string; createdAt: number }
+    { tenantId: string; createdAt: number; returnTo?: string }
   >();
 
   constructor(
@@ -53,8 +53,13 @@ export class TrafegoOAuthService {
     }
   }
 
-  /** Gera URL de autorizacao Google + grava state pendente. */
-  async buildAuthUrl(tenantId: string): Promise<string> {
+  /**
+   * Gera URL de autorizacao Google + grava state pendente.
+   * `returnTo` (path relativo, ex: /sistema/trafego/configuracoes) define pra
+   * onde o callback redireciona apos sucesso — o controller resolve de um
+   * conjunto FIXO de caminhos (sem open-redirect).
+   */
+  async buildAuthUrl(tenantId: string, returnTo?: string): Promise<string> {
     // Falha cedo se cripto nao tiver chave — evita usuario ir pro Google
     // e voltar pra um erro no callback.
     if (!this.crypto.isAvailable()) {
@@ -73,7 +78,7 @@ export class TrafegoOAuthService {
     }
 
     const state = this.generateState();
-    this.pendingStates.set(state, { tenantId, createdAt: Date.now() });
+    this.pendingStates.set(state, { tenantId, createdAt: Date.now(), returnTo });
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -92,7 +97,7 @@ export class TrafegoOAuthService {
   async handleCallback(
     code: string,
     state: string,
-  ): Promise<{ tenantId: string; customerId: string | null }> {
+  ): Promise<{ tenantId: string; customerId: string | null; returnTo?: string }> {
     const pending = this.pendingStates.get(state);
     if (!pending) {
       throw new BadRequestException('State invalido ou expirado');
@@ -139,7 +144,7 @@ export class TrafegoOAuthService {
       },
     });
 
-    return { tenantId: pending.tenantId, customerId };
+    return { tenantId: pending.tenantId, customerId, returnTo: pending.returnTo };
   }
 
   /** Troca refresh_token por access_token (chamado pelo worker em cada sync). */

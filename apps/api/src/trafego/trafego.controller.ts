@@ -167,8 +167,14 @@ export class TrafegoController {
 
   @Get('oauth/start')
   @Roles('ADMIN')
-  async oauthStart(@Req() req: any) {
-    const url = await this.oauth.buildAuthUrl(req.user.tenant_id);
+  async oauthStart(@Req() req: any, @Query('return') ret?: string) {
+    // Mapeamento FIXO (sem open-redirect): só caminhos conhecidos do front.
+    // ?return=jurisflow → volta pra tela nova; default → front antigo.
+    const returnTo =
+      ret === 'jurisflow'
+        ? '/sistema/trafego/configuracoes'
+        : '/atendimento/marketing/trafego';
+    const url = await this.oauth.buildAuthUrl(req.user.tenant_id, returnTo);
     return { authorize_url: url };
   }
 
@@ -203,20 +209,19 @@ export class TrafegoController {
       process.env.FRONTEND_BASE_URL ||
       (forwardedHost ? `${forwardedProto}://${forwardedHost}` : null) ||
       'http://localhost:3000';
-    const successPath = '/atendimento/marketing/trafego?oauth=success';
-    const errorPath = '/atendimento/marketing/trafego?oauth=error';
+    // Erros voltam sempre pro caminho padrão; o sucesso usa o returnTo do state.
+    const defaultPath = '/atendimento/marketing/trafego';
+    const errBase = `${webBase}${defaultPath}?oauth=error`;
 
     if (error) {
-      return res.redirect(
-        `${webBase}${errorPath}&reason=${encodeURIComponent(error)}`,
-      );
+      return res.redirect(`${errBase}&reason=${encodeURIComponent(error)}`);
     }
     if (!code || !state) {
-      return res.redirect(`${webBase}${errorPath}&reason=missing_params`);
+      return res.redirect(`${errBase}&reason=missing_params`);
     }
 
     try {
-      const { tenantId } = await this.oauth.handleCallback(code, state);
+      const { tenantId, returnTo } = await this.oauth.handleCallback(code, state);
 
       // Dispara primeiro sync logo apos OAuth — backfill 30 dias.
       // Se falhar enfileirar (Redis offline), nao trava o callback —
@@ -241,11 +246,9 @@ export class TrafegoController {
         }
       }
 
-      return res.redirect(`${webBase}${successPath}`);
+      return res.redirect(`${webBase}${returnTo || defaultPath}?oauth=success`);
     } catch (e: any) {
-      return res.redirect(
-        `${webBase}${errorPath}&reason=${encodeURIComponent(e.message ?? 'unknown')}`,
-      );
+      return res.redirect(`${errBase}&reason=${encodeURIComponent(e.message ?? 'unknown')}`);
     }
   }
 
