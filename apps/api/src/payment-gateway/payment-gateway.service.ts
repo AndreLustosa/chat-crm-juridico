@@ -1182,29 +1182,57 @@ export class PaymentGatewayService {
   async getMyAsaasConfig(tenantId: string) {
     const t = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { asaas_api_key: true, asaas_sandbox: true, is_internal: true },
+      select: { asaas_api_key: true, asaas_sandbox: true, asaas_webhook_token: true, is_internal: true },
     });
     const key = t?.asaas_api_key ? decryptValue(t.asaas_api_key) : '';
     return {
       configured: !!key,
       sandbox: !!t?.asaas_sandbox,
       apiKeyMasked: key ? this.maskAsaasKey(key) : null,
+      hasWebhookToken: !!t?.asaas_webhook_token,
       // Escritório interno (do dono) sem chave própria usa a conta da plataforma.
       usesPlatformAccount: !key && !!t?.is_internal,
     };
   }
 
-  /** Salva a config do Asaas do escritório. apiKey em branco mantém a atual. */
-  async saveMyAsaasConfig(tenantId: string, input: { apiKey?: string; sandbox?: boolean }) {
+  /** Salva a config do Asaas do escritório. Campos em branco mantêm os atuais. */
+  async saveMyAsaasConfig(tenantId: string, input: { apiKey?: string; sandbox?: boolean; webhookToken?: string }) {
     const data: any = {};
     if (typeof input.sandbox === 'boolean') data.asaas_sandbox = input.sandbox;
     if (input.apiKey && input.apiKey.trim()) {
       data.asaas_api_key = encryptValue(input.apiKey.trim()); // cifrada em repouso
     }
+    if (input.webhookToken && input.webhookToken.trim()) {
+      data.asaas_webhook_token = encryptValue(input.webhookToken.trim()); // cifrado em repouso
+    }
     if (Object.keys(data).length > 0) {
       await this.prisma.tenant.update({ where: { id: tenantId }, data });
     }
     return this.getMyAsaasConfig(tenantId);
+  }
+
+  /**
+   * Token de webhook ESPERADO para uma cobrança — resolve o tenant via
+   * external_id e devolve o token de webhook DELE (se configurado). Usado pelo
+   * controller do webhook p/ validar o asaas-access-token contra o token do
+   * PRÓPRIO escritório. Retorna null se não houver. Resiliente (nunca lança).
+   */
+  async resolveWebhookTokenForPayment(paymentExternalId: string): Promise<string | null> {
+    try {
+      if (!paymentExternalId) return null;
+      const charge = await this.prisma.paymentGatewayCharge.findFirst({
+        where: { external_id: paymentExternalId },
+        select: { tenant_id: true },
+      });
+      if (!charge?.tenant_id) return null;
+      const t = await this.prisma.tenant.findUnique({
+        where: { id: charge.tenant_id },
+        select: { asaas_webhook_token: true },
+      });
+      return t?.asaas_webhook_token ? decryptValue(t.asaas_webhook_token) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Desconecta o Asaas do escritório (volta a bloquear cobranças até reconfigurar). */

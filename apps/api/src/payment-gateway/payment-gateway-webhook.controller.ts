@@ -56,6 +56,13 @@ export class PaymentGatewayWebhookController {
     return fromEnv?.trim() || null;
   }
 
+  /** Comparação timing-safe de tokens (tamanhos diferentes → inválido). */
+  private timingSafeEq(provided: string, expected: string): boolean {
+    const a = Buffer.from(provided, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+
   @Post('asaas')
   @HttpCode(200)
   async handleAsaasWebhook(
@@ -63,29 +70,37 @@ export class PaymentGatewayWebhookController {
     @Headers('asaas-access-token') accessToken: string,
   ) {
     const mode = this.resolveMode();
-    const expectedToken = await this.getExpectedToken();
+    const globalToken = await this.getExpectedToken();
 
-    if (!expectedToken) {
+    // Multi-tenant: o token do PRÓPRIO escritório (resolvido pela cobrança via
+    // external_id) é aceito além do global. Eventos SaaS rodam sempre na conta
+    // da plataforma → só o token global. Assim cada escritório usa o seu token
+    // no webhook do Asaas dele, sem precisar conhecer o segredo da plataforma.
+    const isSaas = isSaasWebhookEvent(body);
+    const tenantToken = isSaas
+      ? null
+      : await this.service.resolveWebhookTokenForPayment(body?.payment?.id).catch(() => null);
+    const accepted = [tenantToken, globalToken].filter((t): t is string => !!t && !!t.trim());
+
+    if (accepted.length === 0) {
       if (mode === 'closed') {
         this.logger.error(
           '[ASAAS-WEBHOOK] FAIL-CLOSED: nenhum token configurado em production. ' +
-          'Configure asaas_webhook_token em Settings OU ASAAS_WEBHOOK_TOKEN no env. ' +
-          'Use ASAAS_WEBHOOK_REQUIRED=false pra desativar (NAO recomendado).',
+          'Configure o webhook do escritório (Configurações → Pagamentos), ' +
+          'OU asaas_webhook_token global, OU ASAAS_WEBHOOK_TOKEN no env.',
         );
         throw new UnauthorizedException('Asaas webhook token nao configurado');
       }
       // Mode 'open' (dev/staging) — permite com warn
       this.logger.warn('[ASAAS-WEBHOOK] Sem token configurado (mode=open dev/staging) — aceitando');
     } else {
-      // Token configurado — valida sempre
       if (!accessToken) {
         this.logger.warn(`[ASAAS-WEBHOOK] Sem header asaas-access-token — rejeitado`);
         throw new UnauthorizedException('Missing asaas-access-token header');
       }
-      // Comparacao timing-safe (buffers do mesmo tamanho — diff de tamanho ja eh sinal de invalido)
-      const sigBuf = Buffer.from(accessToken, 'utf8');
-      const expBuf = Buffer.from(expectedToken, 'utf8');
-      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      // Aceita se bater com o token do escritório OU o global (timing-safe).
+      const ok = accepted.some((tok) => this.timingSafeEq(accessToken, tok));
+      if (!ok) {
         this.logger.warn(`[ASAAS-WEBHOOK] Token invalido — rejeitado`);
         throw new UnauthorizedException('Invalid asaas-access-token');
       }
