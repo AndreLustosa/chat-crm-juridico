@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { FollowupAnalyzerService } from './followup-analyzer.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { resolveFirmIdentity } from '../ai/firm-identity';
 import axios from 'axios';
 
 interface StaleConfig {
@@ -217,7 +218,8 @@ export class FollowupCronService {
 
     const instanceName = convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
 
-    const textToSend = `*Sophia:* ${generatedMessage}`;
+    const firm = await resolveFirmIdentity(this.prisma, (lead as any)?.tenant_id);
+    const textToSend = `*${firm.aiName}:* ${generatedMessage}`;
     const sendResult = await axios.post(
       `${apiUrl}/message/sendText/${instanceName}`,
       { number: lead.phone, text: textToSend },

@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { CronRunnerService } from '../common/cron/cron-runner.service';
+import { resolveFirmIdentity } from '../ai/firm-identity';
 import axios from 'axios';
 
 /**
@@ -67,7 +68,7 @@ export class PaymentAlertsCronService {
               legal_case: {
                 select: {
                   case_number: true,
-                  lead: { select: { id: true, name: true, phone: true } },
+                  lead: { select: { id: true, name: true, phone: true, tenant_id: true } },
                 },
               },
             },
@@ -92,6 +93,7 @@ export class PaymentAlertsCronService {
         if (alreadySent) continue;
 
         const firstName = (lead.name || 'Cliente').split(' ')[0];
+        const firm = await resolveFirmIdentity(this.prisma, (lead as any).tenant_id);
         if (!payment.due_date) continue;
         const dueDate = payment.due_date.toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
         const amount = Number(payment.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -103,7 +105,7 @@ export class PaymentAlertsCronService {
           (lc?.case_number ? `📋 Processo: ${lc.case_number}\n` : '') +
           `\nPara sua comodidade, entre em contato para gerar um PIX ou boleto.\n` +
           `Qualquer dúvida, estamos à disposição.\n\n` +
-          `_André Lustosa Advogados_`;
+          `_${firm.firmName}_`;
 
         await this.sendWhatsApp(lead.phone, msg);
         await this.logReminder(payment.id, 'DUE_REMINDER', lead.id);
@@ -134,7 +136,7 @@ export class PaymentAlertsCronService {
               legal_case: {
                 select: {
                   case_number: true,
-                  lead: { select: { id: true, name: true, phone: true } },
+                  lead: { select: { id: true, name: true, phone: true, tenant_id: true } },
                 },
               },
             },
@@ -167,6 +169,7 @@ export class PaymentAlertsCronService {
 
         const { lead, payments } = group;
         const firstName = (lead.name || 'Cliente').split(' ')[0];
+        const firm = await resolveFirmIdentity(this.prisma, (lead as any).tenant_id);
         const totalOverdue = payments.reduce((s, p) => s + Number(p.amount), 0);
         const totalStr = totalOverdue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         const count = payments.length;
@@ -186,7 +189,7 @@ export class PaymentAlertsCronService {
           (count > 1 ? `*Total:* ${totalStr}\n\n` : '') +
           `Pedimos gentilmente a regularização o quanto antes para evitar encargos.\n` +
           `Responda esta mensagem para combinarmos a melhor forma de pagamento.\n\n` +
-          `_André Lustosa Advogados_`;
+          `_${firm.firmName}_`;
 
         await this.sendWhatsApp(lead.phone, msg);
         await this.logReminder(leadId, 'OVERDUE_ALERT', leadId);

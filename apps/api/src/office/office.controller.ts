@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, Put, Request } from '@nestjs/common';
 import { OfficeService } from './office.service';
 import { UpdateOfficeDto } from './dto/update-office.dto';
 import { UpdateNotificationDefaultsDto } from './dto/update-notification-defaults.dto';
+import { UpdateAiConfigDto } from './dto/update-ai-config.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 /**
@@ -34,5 +35,21 @@ export class OfficeController {
   @Roles('ADMIN')
   updateNotificationDefaults(@Request() req: any, @Body() dto: UpdateNotificationDefaultsDto) {
     return this.office.updateNotificationDefaults(req.user?.tenant_id, dto);
+  }
+
+  /**
+   * Config da IA do escritório (nome da IA + dados usados nos prompts).
+   * A IA em si — skills, modelos, chaves de API — é GLOBAL (Admin Master).
+   * Leitura: qualquer usuário do tenant. Edição: somente ADMIN.
+   */
+  @Get('me/ai-config')
+  getAiConfig(@Request() req: any) {
+    return this.office.getAiConfig(req.user?.tenant_id);
+  }
+
+  @Put('me/ai-config')
+  @Roles('ADMIN')
+  updateAiConfig(@Request() req: any, @Body() dto: UpdateAiConfigDto) {
+    return this.office.updateAiConfig(req.user?.tenant_id, dto);
   }
 }

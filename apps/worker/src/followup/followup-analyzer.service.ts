@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { buildTokenParam } from '../common/openai-token-param.util';
+import { resolveFirmIdentity, FirmIdentity } from '../ai/firm-identity';
 
 /**
  * Analisa o contexto de um lead e decide o que fazer no followup automatico.
@@ -75,6 +76,9 @@ export class FollowupAnalyzerService {
       return { action: 'SKIP', reason: 'Lead nao encontrado' };
     }
 
+    // Identidade do escritório (white-label) p/ a persona do followup.
+    const firm = await resolveFirmIdentity(this.prisma, (lead as any).tenant_id);
+
     // Sem mensagens inbound = lead novo ou so importado. Nao gera followup
     // sem contexto nenhum.
     const inboundCount = messages.filter((m) => m.direction === 'in').length;
@@ -87,7 +91,7 @@ export class FollowupAnalyzerService {
     const historyText = chronological
       .slice(-80) // Ultimas 80 para caber no context — 100 total indexada mas LLM ve 80
       .map((m) => {
-        const who = m.direction === 'in' ? 'CLIENTE' : 'SOPHIA';
+        const who = m.direction === 'in' ? 'CLIENTE' : firm.aiName.toUpperCase();
         const when = new Date(m.created_at).toLocaleString('pt-BR', {
           day: '2-digit', month: '2-digit', year: 'numeric',
           hour: '2-digit', minute: '2-digit',
@@ -121,7 +125,7 @@ export class FollowupAnalyzerService {
     }
 
     const openai = new OpenAI({ apiKey: openAiKey });
-    const systemPrompt = this.buildSystemPrompt();
+    const systemPrompt = this.buildSystemPrompt(firm);
     const userPrompt = this.buildUserPrompt(leadInfo, historyText);
 
     try {
@@ -172,14 +176,14 @@ export class FollowupAnalyzerService {
     }
   }
 
-  private buildSystemPrompt(): string {
-    return `Voce e a Sophia, atendente virtual do escritorio Andre Lustosa Advogados.
+  private buildSystemPrompt(firm: FirmIdentity): string {
+    return `Voce e a ${firm.aiName}, atendente virtual do escritorio ${firm.firmName}.
 Sua tarefa AGORA nao e responder ao cliente — e DECIDIR se vale a pena enviar
 um followup automatico pra um lead que nao conversa ha dias.
 
 Voce recebe:
   - Dados do lead (nome, stage CRM, processos)
-  - Historico COMPLETO da conversa (mensagens CLIENTE e SOPHIA)
+  - Historico COMPLETO da conversa (mensagens CLIENTE e da IA)
 
 Decida ENTRE 3 acoes:
 

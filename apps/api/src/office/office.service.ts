@@ -4,6 +4,10 @@ import { evaluateSubscription } from '../subscription/subscription.util';
 import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import { UpdateOfficeDto } from './dto/update-office.dto';
 import { UpdateNotificationDefaultsDto } from './dto/update-notification-defaults.dto';
+import { UpdateAiConfigDto } from './dto/update-ai-config.dto';
+
+/** Padrão histórico usado pela IA quando o escritório não definiu o nome. */
+const DEFAULT_AI_NAME = 'Sophia';
 
 @Injectable()
 export class OfficeService {
@@ -152,5 +156,73 @@ export class OfficeService {
     });
 
     return taskOverdue;
+  }
+
+  /**
+   * Config da IA do escritório (white-label): nome da IA + dados do escritório
+   * que preenchem os prompts globais ({{ai_name}}, {{firm_name}}, ...).
+   * `effective_ai_name` = o que a IA realmente usa hoje (com fallback "Sophia"),
+   * útil para o preview de apresentação na tela.
+   */
+  async getAiConfig(tenantId?: string | null) {
+    if (!tenantId) throw new NotFoundException('Tenant não encontrado para o usuário atual.');
+    const t = await (this.prisma as any).tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        name: true,
+        phone: true,
+        ai_assistant_name: true,
+        ai_tone: true,
+        address: true,
+        email: true,
+        oab: true,
+        site: true,
+      },
+    });
+    if (!t) throw new NotFoundException('Escritório não encontrado.');
+    return {
+      ai_assistant_name: t.ai_assistant_name ?? null,
+      ai_tone: t.ai_tone ?? null,
+      name: t.name,
+      phone: t.phone ?? null,
+      address: t.address ?? null,
+      email: t.email ?? null,
+      oab: t.oab ?? null,
+      site: t.site ?? null,
+      effective_ai_name: (t.ai_assistant_name || '').trim() || DEFAULT_AI_NAME,
+    };
+  }
+
+  /**
+   * Atualiza a config da IA (só ADMIN). Campo ausente => não altera;
+   * "" => limpa (a IA volta ao fallback). `name` não pode ficar vazio.
+   */
+  async updateAiConfig(tenantId: string | undefined, dto: UpdateAiConfigDto) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+
+    const data: Record<string, string | null> = {};
+    const setStr = (key: string, val: string | undefined, max: number) => {
+      if (val === undefined) return;
+      const s = (val ?? '').trim();
+      data[key] = s ? s.slice(0, max) : null;
+    };
+
+    if (dto.name !== undefined) {
+      const n = (dto.name ?? '').trim();
+      if (!n) throw new BadRequestException('O nome do escritório não pode ficar vazio.');
+      data.name = n.slice(0, 120);
+    }
+    setStr('ai_assistant_name', dto.ai_assistant_name, 40);
+    setStr('ai_tone', dto.ai_tone, 400);
+    setStr('phone', dto.phone, 32);
+    setStr('address', dto.address, 240);
+    setStr('email', dto.email, 160);
+    setStr('oab', dto.oab, 40);
+    setStr('site', dto.site, 160);
+
+    if (Object.keys(data).length > 0) {
+      await (this.prisma as any).tenant.update({ where: { id: tenantId }, data });
+    }
+    return this.getAiConfig(tenantId);
   }
 }

@@ -6,6 +6,7 @@ import { SettingsService } from '../settings/settings.service';
 import { FollowupService } from './followup.service';
 import { FollowupAnalyzerService } from './followup-analyzer.service';
 import { buildCaseWelcomeMessage } from './case-welcome-message.template';
+import { resolveFirmIdentity } from '../ai/firm-identity';
 import { buildTokenParam } from '../common/openai-token-param.util';
 import axios from 'axios';
 
@@ -116,7 +117,7 @@ export class FollowupProcessor extends WorkerHost {
     const convo = await this.prisma.conversation.findFirst({
       where: { lead_id: leadId, status: 'ABERTO' },
       orderBy: { last_message_at: 'desc' },
-      select: { id: true, instance_name: true },
+      select: { id: true, instance_name: true, tenant_id: true },
     });
     if (!convo) {
       this.logger.warn(`[FOLLOWUP-MANUAL] Sem conversa aberta pra lead ${leadId}`);
@@ -155,7 +156,8 @@ export class FollowupProcessor extends WorkerHost {
         return;
       }
       const instanceName = convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
-      const textToSend = `*Sophia:* ${decision.message}`;
+      const firm = await resolveFirmIdentity(this.prisma, (convo as any).tenant_id);
+      const textToSend = `*${firm.aiName}:* ${decision.message}`;
 
       const sendResult = await axios.post(
         `${apiUrl}/message/sendText/${instanceName}`,

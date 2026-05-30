@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { S3Service } from '../s3/s3.service';
 import { tenantOrDefault } from '../common/constants/tenant';
+import { resolveFirmIdentity } from './firm-identity';
 import OpenAI, { toFile } from 'openai';
 import axios from 'axios';
 // pdf-parse v1.x: import LAZY com try/catch defensivo.
@@ -1267,6 +1268,11 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
       // convo.messages — mantemos a forma esperada.
       const convo = Object.assign(convoMeta, { messages: crossConvMessages });
 
+      // IA por escritório (white-label): nome da IA + dados do escritório,
+      // resolvidos do tenant da conversa. Fallback → "Sophia" / "André Lustosa
+      // Advogados" (zero regressão p/ quem não configurou ou conversa órfã).
+      const firm = await resolveFirmIdentity(this.prisma, (convo as any).tenant_id);
+
       // 3a. Quando ai_mode=false (operador humano atende), nada a fazer aqui.
       //
       // O sistema antigo atualizava AiMemory sincronamente neste ponto. Hoje,
@@ -1380,7 +1386,7 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
             m.direction === 'in'
               ? 'Cliente'
               : m.external_message_id?.startsWith('sys_')
-                ? 'Sophia'
+                ? firm.aiName
                 : 'Operador';
           // Indica tipo de mídia quando não há texto
           const content =
@@ -1453,7 +1459,7 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
           if (routerApiKey) {
             // Últimas 5 mensagens para contexto do router
             const lastMsgs = chronological.slice(-5).map((m: any) => {
-              const sender = m.direction === 'in' ? 'Cliente' : 'Sophia';
+              const sender = m.direction === 'in' ? 'Cliente' : firm.aiName;
               return `${sender}: ${(m.text || '[mídia]').slice(0, 200)}`;
             });
 
@@ -1743,7 +1749,14 @@ IMPORTANTE: Este é um CLIENTE já contratado. NÃO faça triagem, NÃO investig
         lead_name: sanitize(convo.lead.name || 'Desconhecido', 200),
         lead_phone: convo.lead.phone || '', // numero, nao precisa sanitize
         legal_area: legalArea || 'a ser identificada',
-        firm_name: 'André Lustosa Advogados',
+        ai_name: firm.aiName,
+        firm_name: firm.firmName,
+        firm_address: firm.address,
+        firm_phone: firm.phone,
+        firm_email: firm.email,
+        firm_oab: firm.oab,
+        firm_site: firm.site,
+        ai_tone: firm.tone,
         // applyPiiMask=true em campos IA/operator-generated que podem ter CPF/RG residual
         lead_memory: sanitize(leadMemory, 2000, true),
         lead_summary: sanitize(lp?.summary || '', 3000, true),
@@ -1814,7 +1827,7 @@ PALAVRAS DE FECHO/RECONHECIMENTO (use com moderacao, NAO em toda mensagem):
 
 EVITE PREAMBULOS GENERICOS:
 - Vai DIRETO pra acao ou pergunta. Sem "Vou anotar isso pra te ajudar melhor", "Pra gente seguir...", "Antes de mais nada...".
-- Excecao: 1ª mensagem da conversa pode ter saudacao + apresentacao curta (ex: "Oi! Sou a Sophia do escritorio. Como posso te ajudar?").
+- Excecao: 1ª mensagem da conversa pode ter saudacao + apresentacao curta (ex: "Oi! Sou a {{ai_name}} do {{firm_name}}. Como posso te ajudar?").
 
 PROIBIDO REPETIR PERGUNTAS:
 - O histórico COMPLETO da conversa está nos turns acima (user/assistant). LEIA TUDO.
@@ -2049,7 +2062,7 @@ Lembre-se: cliente não conhece número CNJ de cor, mas lembra da parte contrár
           `[AI] Usando skill: "${skill.name}" (area=${skill.area}, model=${model}, tenant=${tenantIdForBH || 'null'})`,
         );
       } else {
-        const fallbackSkillPrompt = `Você é Sophia, assistente de pré-atendimento do escritório André Lustosa Advogados.
+        const fallbackSkillPrompt = `Você é ${firm.aiName}, assistente de pré-atendimento do escritório ${firm.firmName}.
 Seu objetivo é coletar informações sobre o caso do cliente para o advogado conseguir avaliar.
 
 ROTEIRO (siga na ordem, UMA pergunta por vez):
@@ -2719,8 +2732,8 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       const instanceName =
         convo.instance_name || process.env.EVOLUTION_INSTANCE_NAME || '';
 
-      // Assinatura "Sophia:" em negrito no WhatsApp (salva sem assinatura no DB)
-      const textToSend = `*Sophia:* ${finalText}`;
+      // Assinatura "{nome da IA}:" em negrito no WhatsApp (salva sem assinatura no DB)
+      const textToSend = `*${firm.aiName}:* ${finalText}`;
 
       // Exibe "digitando..." por 5s via endpoint dedicado da Evolution API.
       // Fire-and-forget (sem await): dispara o indicador e imediatamente começa
