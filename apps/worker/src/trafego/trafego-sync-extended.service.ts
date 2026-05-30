@@ -926,6 +926,7 @@ export class TrafegoSyncExtendedService {
         ad_group_criterion.keyword.match_type,
         ad_group_criterion.negative,
         ad_group_criterion.status,
+        ad_group_criterion.system_serving_status,
         ad_group_criterion.cpc_bid_micros,
         ad_group_criterion.quality_info.quality_score,
         ad_group_criterion.quality_info.creative_quality_score,
@@ -936,6 +937,32 @@ export class TrafegoSyncExtendedService {
       WHERE ad_group_criterion.type = 'KEYWORD'
         AND ad_group_criterion.status != 'REMOVED'
     `);
+
+    // Métricas por keyword (keyword_view, janela ~30d). Sem isso a IA decide
+    // às cegas — ex.: quase removeu a TOP keyword por não enxergar as conversões.
+    // Query separada porque keyword_view exige date range; merge por criterion_id.
+    const metricsByKw = new Map<string, any>();
+    try {
+      const mrows: any[] = await customer.query(`
+        SELECT
+          ad_group_criterion.criterion_id,
+          metrics.impressions,
+          metrics.clicks,
+          metrics.cost_micros,
+          metrics.conversions,
+          metrics.conversions_value
+        FROM keyword_view
+        WHERE segments.date DURING LAST_30_DAYS
+          AND ad_group_criterion.status != 'REMOVED'
+      `);
+      for (const mr of mrows) {
+        const cid = String(mr.ad_group_criterion?.criterion_id ?? '');
+        if (cid) metricsByKw.set(cid, mr.metrics ?? {});
+      }
+    } catch (e: any) {
+      this.logger.warn(`[sync] metricas de keyword indisponiveis: ${e?.message ?? e}`);
+    }
+
     let count = 0;
     for (const row of rows) {
       const googleAdGroupId = String(row.ad_group?.id);
@@ -946,6 +973,7 @@ export class TrafegoSyncExtendedService {
       if (!criterionId || !text) continue;
 
       const qualityInfo = row.ad_group_criterion?.quality_info ?? null;
+      const m = metricsByKw.get(criterionId);
 
       const data = {
         text,
@@ -962,9 +990,23 @@ export class TrafegoSyncExtendedService {
             row.ad_group_criterion?.status,
             'ENABLED',
           ) ?? 'ENABLED',
+        // Status oficial de veiculação do Google (Qualificado / Raramente exibido / etc.)
+        serving_status:
+          enumToStr(
+            (enums as any).CriterionSystemServingStatus,
+            row.ad_group_criterion?.system_serving_status,
+            undefined,
+          ) ?? null,
         cpc_bid_micros: toBigIntSafe(row.ad_group_criterion?.cpc_bid_micros),
         quality_score: toNumberSafe(qualityInfo?.quality_score),
         quality_info: qualityInfo ? (qualityInfo as any) : undefined,
+        // Métricas da janela (~30d). null quando a keyword não teve dados / é negativa.
+        impressions: m ? toNumberSafe(m.impressions) : null,
+        clicks: m ? toNumberSafe(m.clicks) : null,
+        cost_micros: m ? toBigIntSafe(m.cost_micros) : null,
+        conversions: m?.conversions != null ? Number(m.conversions) : null,
+        conversions_value: m?.conversions_value != null ? Number(m.conversions_value) : null,
+        metrics_range: m ? 'LAST_30_DAYS' : null,
         last_seen_at: new Date(),
       };
 

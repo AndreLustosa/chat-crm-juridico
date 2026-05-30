@@ -874,6 +874,30 @@ export class TrafegoService {
 
   // ─── Keywords ───────────────────────────────────────────────────────────
 
+  /** Status oficial do Google → rótulo amigável (Qualificado / Raramente exibido / etc.). */
+  private mapServingStatusLabel(
+    s: string | null | undefined,
+    qs: number | null | undefined,
+  ): string | null {
+    if (!s) return null;
+    switch (s) {
+      case 'ELIGIBLE':
+        return 'Qualificado';
+      case 'RARELY_SERVED':
+        return 'Não qualificado — raramente exibido (baixo volume)';
+      case 'LIMITED':
+        return qs != null && qs < 5 ? 'Limitado — baixa qualidade' : 'Limitado por orçamento';
+      case 'PAUSED':
+        return 'Pausado';
+      case 'REMOVED':
+        return 'Removido';
+      case 'DISAPPROVED':
+        return 'Reprovado';
+      default:
+        return s;
+    }
+  }
+
   async listKeywords(
     tenantId: string,
     adGroupId: string,
@@ -894,19 +918,34 @@ export class TrafegoService {
       // pra Claude/UI nao precisar parsear. Mantemos quality_info raw tambem
       // pra clientes que queiram tudo.
       const qi = (i.quality_info as any) ?? {};
+      const impressions = (i as any).impressions ?? null;
+      const clicks = (i as any).clicks ?? null;
+      const conversions = (i as any).conversions != null ? Number((i as any).conversions) : null;
+      const costBrl = (i as any).cost_micros != null ? fromMicros((i as any).cost_micros) : null;
       return {
         ...i,
         cpc_bid_micros: i.cpc_bid_micros?.toString() ?? null,
         cpc_bid_brl: fromMicros(i.cpc_bid_micros),
-        // Campos derivados (top-level pra facilitar)
+        // ── Status oficial do Google + label amigável (fix 2026-05-30, BUG-L) ──
+        serving_status: (i as any).serving_status ?? null,
+        serving_status_label: this.mapServingStatusLabel((i as any).serving_status, i.quality_score),
+        is_low_search_volume: (i as any).serving_status === 'RARELY_SERVED',
+        // ── Métricas da janela (~30d) — evita decisão às cegas (BUG-L) ──
+        cost_micros: (i as any).cost_micros?.toString() ?? null,
+        cost_brl: costBrl,
+        impressions,
+        clicks,
+        conversions,
+        conversions_value: (i as any).conversions_value != null ? Number((i as any).conversions_value) : null,
+        ctr: impressions && impressions > 0 ? (clicks ?? 0) / impressions : null,
+        cpc_brl: clicks && clicks > 0 && costBrl != null ? costBrl / clicks : null,
+        cpl_brl: conversions && conversions > 0 && costBrl != null ? costBrl / conversions : null,
+        conversion_rate: clicks && clicks > 0 && conversions != null ? conversions / clicks : null,
+        // Campos derivados de quality (top-level pra facilitar)
         expected_ctr: qi.expected_clickthrough_rate ?? qi.expected_ctr ?? null,
         ad_relevance: qi.creative_quality_score ?? qi.ad_relevance ?? null,
         landing_page_experience:
           qi.post_click_quality_score ?? qi.landing_page_experience ?? null,
-        // first_page_cpc / top_of_page_cpc nao estao no cache atual.
-        // Pra ter, sync precisa puxar de keyword_view.metrics.search_top_impression_share
-        // ou ad_group_criterion.first_page_cpc_micros (que requer campo novo
-        // no TrafficKeyword schema + migration). Marcado como TODO.
         first_page_cpc_brl: null,
         top_of_page_cpc_brl: null,
       };
@@ -3767,6 +3806,21 @@ export class TrafegoService {
       prevMonthStart.setUTCDate(1);
       rangeFrom = prevMonthStart;
       rangeTo = prevMonthEnd;
+    }
+
+    // BUG-M/N fix (2026-05-30): honrar date_from/date_to explícitos (MCP/compare).
+    // Sem `period`, o default caía em '7d' → KPIs idênticos pra qualquer janela
+    // (traffic_compare_periods retornava period_a == period_b). Agora a janela
+    // explícita sobrepõe o range usado nas agregações de KPI.
+    if (!_opts.period && (_opts.dateFrom || _opts.dateTo)) {
+      if (_opts.dateFrom) {
+        const f = new Date(`${_opts.dateFrom}T00:00:00.000Z`);
+        if (!Number.isNaN(f.getTime())) rangeFrom = f;
+      }
+      if (_opts.dateTo) {
+        const t = new Date(`${_opts.dateTo}T00:00:00.000Z`);
+        if (!Number.isNaN(t.getTime())) rangeTo = t;
+      }
     }
 
     // ─── Período comparativo (mesma duração imediatamente antes) ─────────

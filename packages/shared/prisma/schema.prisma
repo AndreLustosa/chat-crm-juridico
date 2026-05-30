@@ -3011,6 +3011,18 @@ model TrafficKeyword {
   added_by_ai         Boolean  @default(false)
   /// Score de confiança da IA na adicao (null se manual)
   ai_confidence       Decimal?
+  /// Status oficial de veiculação do Google (ad_group_criterion.system_serving_status):
+  /// ELIGIBLE | RARELY_SERVED | ... — base do "Qualificado / Raramente exibido" da UI.
+  serving_status      String?
+  /// Métricas de performance da última janela sincronizada (keyword_view, ~30d).
+  /// Evita decisão às cegas (ex.: remover keyword que é top performer em conversões).
+  impressions         Int?
+  clicks              Int?
+  cost_micros         BigInt?
+  conversions         Decimal?
+  conversions_value   Decimal?
+  /// Janela das métricas acima (ex.: "LAST_30_DAYS").
+  metrics_range       String?
 
   last_seen_at DateTime @default(now())
   created_at   DateTime @default(now())

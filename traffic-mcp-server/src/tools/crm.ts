@@ -302,15 +302,21 @@ function registerAdGroupAndKeywordReadTools(server: McpServer) {
           { toolCallId },
         );
         const page = paginate(keywords, input.page, input.limit);
+        // Tabela com PERFORMANCE + status oficial do Google (fix 2026-05-30):
+        // sem isso a IA decidia às cegas (ex.: quase removeu a TOP keyword por
+        // não ver as 26 conversões). Conv./Custo/CPL + Veiculação são decisivos.
         return ok(page, markdownTable(
-          ['ID', 'Texto', 'Match', 'Status', 'Negativa', 'CPC bid'],
+          ['Texto', 'Match', 'Veiculação', 'QS', 'Conv.', 'Cliques', 'Impr.', 'Custo', 'CPL'],
           page.map((k) => [
-            k.id ?? '-',
             k.text ?? k.keyword_text ?? '-',
             k.match_type ?? '-',
-            k.status ?? '-',
-            k.negative ? 'sim' : 'nao',
-            k.cpc_bid_brl ? money(k.cpc_bid_brl) : '-',
+            k.serving_status_label ?? k.serving_status ?? (k.negative ? 'negativa' : '-'),
+            k.quality_score ?? '-',
+            k.conversions != null ? Number(k.conversions).toFixed(0) : '-',
+            k.clicks ?? '-',
+            k.impressions ?? '-',
+            k.cost_brl != null ? money(k.cost_brl) : '-',
+            k.cpl_brl != null ? money(k.cpl_brl) : '-',
           ]),
         ));
       }),
