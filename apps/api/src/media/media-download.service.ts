@@ -23,6 +23,13 @@ import * as crypto from 'crypto';
 export class MediaDownloadService {
   private readonly logger = new Logger(MediaDownloadService.name);
 
+  /**
+   * Guard anti-duplicado: ids de mensagens cujo download está em andamento.
+   * Evita que vários GET /media/:id concorrentes (retries do <img>/player)
+   * disparem downloads simultâneos do mesmo arquivo (tempestade na Evolution).
+   */
+  private readonly inFlight = new Set<string>();
+
   /** Timeout para baixar mídia da Evolution API (60s cobre PDFs de 16MB) */
   private static readonly DOWNLOAD_TIMEOUT = 60_000;
 
@@ -54,35 +61,61 @@ export class MediaDownloadService {
   }): Promise<boolean> {
     const { messageId, conversationId, externalMessageId, instanceName, mediaData } = params;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const success = await this.attemptDownload({
-        messageId,
-        conversationId,
-        externalMessageId,
-        instanceName,
-        mediaData,
-        attempt,
-      });
-
-      if (success) {
-        // Emite messageUpdate com mídia pronta
-        await this.emitMessageUpdate(messageId);
-        return true;
-      }
-
-      // Aguarda backoff antes da próxima tentativa (se houver)
-      if (attempt < 3) {
-        const delay = MediaDownloadService.RETRY_DELAYS[attempt - 1];
-        this.logger.warn(`[MEDIA-SYNC] Tentativa ${attempt}/3 falhou para msg ${messageId} — retry em ${delay / 1000}s`);
-        await new Promise(r => setTimeout(r, delay));
-      }
+    // Anti-duplicado: se já há um download em andamento p/ esta msg, não
+    // dispara outro (ex.: vários GET /media/:id concorrentes do mesmo <img>).
+    if (this.inFlight.has(messageId)) {
+      this.logger.log(`[MEDIA-SYNC] Download já em andamento p/ msg ${messageId} — ignorando duplicado`);
+      return false;
     }
+    this.inFlight.add(messageId);
 
-    // Todas as tentativas falharam — ainda emite messageUpdate para frontend
-    // saber que pode mostrar botão "Recarregar" (Media record ficou null)
-    this.logger.error(`[MEDIA-SYNC] Download falhou definitivamente após 3 tentativas para msg ${messageId}`);
-    await this.emitMessageUpdate(messageId);
-    return false;
+    try {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const success = await this.attemptDownload({
+          messageId,
+          conversationId,
+          externalMessageId,
+          instanceName,
+          mediaData,
+          attempt,
+        });
+
+        if (success) {
+          // Emite messageUpdate com mídia pronta
+          await this.emitMessageUpdate(messageId);
+          return true;
+        }
+
+        // Aguarda backoff antes da próxima tentativa (se houver)
+        if (attempt < 3) {
+          const delay = MediaDownloadService.RETRY_DELAYS[attempt - 1];
+          this.logger.warn(`[MEDIA-SYNC] Tentativa ${attempt}/3 falhou para msg ${messageId} — retry em ${delay / 1000}s`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+
+      // Todas as tentativas falharam — ainda emite messageUpdate para frontend
+      // saber que pode mostrar botão "Recarregar" (Media record ficou null)
+      this.logger.error(`[MEDIA-SYNC] Download falhou definitivamente após 3 tentativas para msg ${messageId}`);
+      await this.emitMessageUpdate(messageId);
+      return false;
+    } finally {
+      this.inFlight.delete(messageId);
+    }
+  }
+
+  /**
+   * Dispara um re-download em SEGUNDO PLANO (fire-and-forget). Usado pelo
+   * GET /media/:id quando o arquivo não está no disco, para NÃO bloquear a
+   * resposta — antes o controller segurava a request até ~3min (3×60s). O
+   * front recebe messageUpdate via socket quando ficar pronto (ou clica
+   * "Recarregar"). Deduplicado pelo guard in-flight.
+   */
+  kickBackgroundDownload(messageId: string): void {
+    if (this.inFlight.has(messageId)) return;
+    this.retryDownload(messageId).catch((e) =>
+      this.logger.warn(`[MEDIA-BG] Re-download em background falhou msg=${messageId}: ${e?.message}`),
+    );
   }
 
   /**

@@ -100,33 +100,9 @@ export class MediaController {
         }
       }
 
-      // ─── 3. Re-download via Evolution API ────────────────────────
-      // Bug reportado 2026-04-23: quando o arquivo sumia do filesystem
-      // (container antigo pre-volume-persistente) e caia direto no proxy
-      // de original_url, servia conteudo CRIPTOGRAFADO da CDN do WhatsApp
-      // (.enc) — Whisper rejeitava com "400 Audio file might be corrupted".
-      //
-      // Fix: se filesystem nao tem mas existe external_message_id, tenta
-      // re-baixar via Evolution API (getBase64FromMediaMessage — entrega
-      // plaintext decriptado). Se sucesso, serve do filesystem recem-escrito.
-      if (messageId) {
-        this.logger.log(`[MediaController] Arquivo ausente msg=${messageId} — disparando re-download via Evolution`);
-        const retry = await this.mediaDownloadService.retryDownload(messageId);
-        if (retry.ok) {
-          // Re-busca a media atualizada (file_path agora preenchido com arquivo real)
-          const refreshed = await this.prisma.media.findUnique({ where: { message_id: messageId } });
-          if (refreshed?.file_path && await this.fileStorage.exists(refreshed.file_path)) {
-            await this.serveFromFilesystem(refreshed, dl, req, res);
-            return;
-          }
-        } else {
-          this.logger.warn(`[MediaController] Re-download falhou msg=${messageId}: ${retry.reason || 'unknown'}`);
-        }
-      }
-
-      // ─── 4. Ultimo recurso: proxy da Evolution CDN (apenas NAO-WhatsApp) ─
-      // URLs do WhatsApp CDN (mmg.whatsapp.net) retornam conteudo encriptado —
-      // so servimos se for outra origem (ex: midia ja processada, link publico).
+      // ─── 3. Proxy IMEDIATO da CDN (apenas NAO-WhatsApp) ──────────
+      // URLs do WhatsApp CDN (mmg.whatsapp.net) retornam conteudo encriptado
+      // (.enc) — so servimos se for outra origem (link publico ja processado).
       const isEncryptedWhatsAppUrl = media.original_url &&
         /(\.whatsapp\.net|mmg\.whatsapp)/.test(media.original_url);
       if (media.original_url && !isEncryptedWhatsAppUrl) {
@@ -135,10 +111,16 @@ export class MediaController {
         return;
       }
 
-      if (isEncryptedWhatsAppUrl) {
-        this.logger.warn(
-          `[MediaController] Arquivo ${messageId} nao disponivel — original_url eh encriptada do WhatsApp, re-download falhou`,
-        );
+      // ─── 4. Arquivo ausente: re-download em SEGUNDO PLANO + 404 imediato ─
+      // ANTES: o controller chamava retryDownload() de forma SINCRONA aqui,
+      // segurando a request por ate ~3min (3 tentativas x 60s) — era a causa
+      // do "Carregando imagem..." eterno. AGORA dispara o re-download em
+      // background (deduplicado) e responde 404 na hora. O front mostra
+      // "indisponivel/processando" e recebe messageUpdate via socket quando
+      // ficar pronto, ou o usuario clica "Recarregar".
+      if (messageId) {
+        this.logger.log(`[MediaController] Arquivo ausente msg=${messageId} — re-download em segundo plano`);
+        this.mediaDownloadService.kickBackgroundDownload(messageId);
       }
       throw new NotFoundException('Arquivo não disponível');
     } catch (e) {
