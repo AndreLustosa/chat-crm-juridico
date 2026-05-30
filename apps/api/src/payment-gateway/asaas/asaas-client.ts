@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
 import { SettingsService } from '../../settings/settings.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { decryptValue } from '../../common/utils/crypto.util';
 
 interface AsaasConfig {
   apiKey: string;
@@ -74,21 +76,53 @@ export class AsaasClient {
   private readonly logger = new Logger(AsaasClient.name);
   private readonly MAX_RETRIES = 3;
 
-  constructor(private settingsService: SettingsService) {}
+  constructor(
+    private settingsService: SettingsService,
+    private prisma: PrismaService,
+  ) {}
 
-  async getConfig(): Promise<AsaasConfig> {
+  private baseUrlFor(sandbox: boolean): string {
+    // Docs: https://docs.asaas.com/docs/authentication-2
+    return sandbox ? 'https://api-sandbox.asaas.com/v3' : 'https://api.asaas.com/v3';
+  }
+
+  /**
+   * Config do Asaas — regra multi-tenant:
+   *  1) Tenant TEM chave própria → usa a conta DELE (honorários → clientes dele).
+   *  2) Tenant é INTERNO (escritório do dono) e sem chave → usa a conta GLOBAL.
+   *  3) Tenant externo SEM chave → apiKey vazia → request() bloqueia com aviso.
+   *     NUNCA cai silenciosamente na conta da plataforma.
+   *  Sem tenantId (ex.: assinatura SaaS) → sempre a conta GLOBAL da plataforma.
+   */
+  async getConfig(tenantId?: string): Promise<AsaasConfig> {
+    if (tenantId) {
+      try {
+        const t = await this.prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: { asaas_api_key: true, asaas_sandbox: true, is_internal: true },
+        });
+        const ownKey = t?.asaas_api_key ? decryptValue(t.asaas_api_key) : '';
+        if (ownKey) {
+          const sandbox = !!t?.asaas_sandbox;
+          this.logger.debug(`[ASAAS] Config tenant=${tenantId} (conta própria), sandbox=${sandbox}`);
+          return { apiKey: ownKey, baseUrl: this.baseUrlFor(sandbox), sandbox };
+        }
+        if (!t?.is_internal) {
+          this.logger.warn(`[ASAAS] Tenant ${tenantId} sem Asaas configurado e não-interno — bloqueando.`);
+          return { apiKey: '', baseUrl: this.baseUrlFor(false), sandbox: false };
+        }
+        // Tenant interno sem chave própria → usa o global abaixo.
+      } catch (e: any) {
+        this.logger.warn(`[ASAAS] Falha lendo config do tenant ${tenantId}: ${e.message}. Usando global.`);
+      }
+    }
+
+    // Conta GLOBAL da plataforma (tenant interno, assinatura SaaS, ou fallback de erro).
     const apiKey = await this.settingsService.get('asaas_api_key');
     const sandboxStr = await this.settingsService.get('asaas_sandbox');
     const sandbox = sandboxStr === 'true';
-
-    // Docs: https://docs.asaas.com/docs/authentication-2
-    const baseUrl = sandbox
-      ? 'https://api-sandbox.asaas.com/v3'
-      : 'https://api.asaas.com/v3';
-
-    this.logger.debug(`[ASAAS] Config: sandbox=${sandbox}, baseUrl=${baseUrl}, apiKey=${apiKey ? `${apiKey.slice(0, 10)}...` : 'NAO CONFIGURADA'}`);
-
-    return { apiKey: apiKey || '', baseUrl, sandbox };
+    this.logger.debug(`[ASAAS] Config GLOBAL, sandbox=${sandbox}, apiKey=${apiKey ? `${apiKey.slice(0, 10)}...` : 'NAO CONFIGURADA'}`);
+    return { apiKey: apiKey || '', baseUrl: this.baseUrlFor(sandbox), sandbox };
   }
 
   // ─── Core HTTP wrapper ─────────────────────────────────
@@ -98,10 +132,11 @@ export class AsaasClient {
     path: string,
     data?: any,
     params?: any,
+    tenantId?: string,
   ): Promise<T> {
-    const config = await this.getConfig();
+    const config = await this.getConfig(tenantId);
     if (!config.apiKey) {
-      throw new Error('Asaas API key nao configurada. Configure "asaas_api_key" nas configuracoes.');
+      throw new Error('Asaas não configurado para este escritório. Configure em Configurações → Pagamentos.');
     }
 
     const url = `${config.baseUrl}${path}`;
@@ -165,49 +200,74 @@ export class AsaasClient {
 
   // ─── Customers ─────────────────────────────────────────
 
-  async createCustomer(data: CreateCustomerData): Promise<any> {
-    return this.request<any>('POST', '/customers', data);
+  // tenantId (opcional) roteia para a conta Asaas DO ESCRITÓRIO; sem ele,
+  // usa a conta global da plataforma (ver getConfig).
+
+  async createCustomer(data: CreateCustomerData, tenantId?: string): Promise<any> {
+    return this.request<any>('POST', '/customers', data, undefined, tenantId);
   }
 
-  async getCustomer(customerId: string): Promise<any> {
-    return this.request<any>('GET', `/customers/${customerId}`);
+  async getCustomer(customerId: string, tenantId?: string): Promise<any> {
+    return this.request<any>('GET', `/customers/${customerId}`, undefined, undefined, tenantId);
   }
 
   // ─── Charges (Payments) ────────────────────────────────
 
-  async createCharge(data: CreateChargeData): Promise<any> {
-    return this.request<any>('POST', '/payments', data);
+  async createCharge(data: CreateChargeData, tenantId?: string): Promise<any> {
+    return this.request<any>('POST', '/payments', data, undefined, tenantId);
   }
 
-  async getCharge(chargeId: string): Promise<any> {
-    return this.request<any>('GET', `/payments/${chargeId}`);
+  async getCharge(chargeId: string, tenantId?: string): Promise<any> {
+    return this.request<any>('GET', `/payments/${chargeId}`, undefined, undefined, tenantId);
   }
 
-  async getPixQrCode(chargeId: string): Promise<any> {
-    return this.request<any>('GET', `/payments/${chargeId}/pixQrCode`);
+  async getPixQrCode(chargeId: string, tenantId?: string): Promise<any> {
+    return this.request<any>('GET', `/payments/${chargeId}/pixQrCode`, undefined, undefined, tenantId);
   }
 
-  async updateCharge(chargeId: string, data: { value?: number; dueDate?: string; description?: string }): Promise<any> {
-    return this.request<any>('PUT', `/payments/${chargeId}`, data);
+  async updateCharge(chargeId: string, data: { value?: number; dueDate?: string; description?: string }, tenantId?: string): Promise<any> {
+    return this.request<any>('PUT', `/payments/${chargeId}`, data, undefined, tenantId);
   }
 
-  async getBalance(): Promise<any> {
-    return this.request<any>('GET', '/finance/balance');
+  async getBalance(tenantId?: string): Promise<any> {
+    return this.request<any>('GET', '/finance/balance', undefined, undefined, tenantId);
   }
 
-  async receiveInCash(chargeId: string, paymentDate: string, value: number): Promise<any> {
+  /**
+   * Testa uma chave Asaas AVULSA (sem salvar) — usado pelo botão "Testar
+   * conexão" quando o escritório digita a chave. Faz um GET /finance/balance
+   * direto com a chave informada. Não usa retry (feedback rápido ao usuário).
+   */
+  async testKey(apiKey: string, sandbox: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (!apiKey?.trim()) return { ok: false, error: 'Informe a chave de API.' };
+    try {
+      await axios.get(`${this.baseUrlFor(sandbox)}/finance/balance`, {
+        headers: { access_token: apiKey.trim(), 'User-Agent': 'LexCRM/1.0' },
+        timeout: 15000,
+      });
+      return { ok: true };
+    } catch (err) {
+      const e = err as AxiosError<any>;
+      const status = e.response?.status;
+      if (status === 401) return { ok: false, error: 'Chave inválida (401). Confira a chave no painel do Asaas.' };
+      const asaasMsg = e.response?.data?.errors?.[0]?.description;
+      return { ok: false, error: asaasMsg || e.message || 'Falha ao conectar no Asaas.' };
+    }
+  }
+
+  async receiveInCash(chargeId: string, paymentDate: string, value: number, tenantId?: string): Promise<any> {
     return this.request<any>('POST', `/payments/${chargeId}/receiveInCash`, {
       paymentDate,
       value,
-    });
+    }, undefined, tenantId);
   }
 
-  async deleteCharge(chargeId: string): Promise<any> {
-    return this.request<any>('DELETE', `/payments/${chargeId}`);
+  async deleteCharge(chargeId: string, tenantId?: string): Promise<any> {
+    return this.request<any>('DELETE', `/payments/${chargeId}`, undefined, undefined, tenantId);
   }
 
-  async listCharges(params?: any): Promise<any> {
-    return this.request<any>('GET', '/payments', undefined, params);
+  async listCharges(params?: any, tenantId?: string): Promise<any> {
+    return this.request<any>('GET', '/payments', undefined, params, tenantId);
   }
 
   // ─── Customers List ───────────────────────────────────────
@@ -219,8 +279,8 @@ export class AsaasClient {
     externalReference?: string;
     offset?: number;
     limit?: number;
-  }): Promise<any> {
-    return this.request<any>('GET', '/customers', undefined, params);
+  }, tenantId?: string): Promise<any> {
+    return this.request<any>('GET', '/customers', undefined, params, tenantId);
   }
 
   // ─── Subscriptions (assinatura recorrente — billing SaaS) ──────────

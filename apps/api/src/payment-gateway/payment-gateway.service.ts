@@ -10,6 +10,7 @@ import { FinanceiroService } from '../financeiro/financeiro.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { tenantOrDefault } from '../common/constants/tenant';
+import { encryptValue, decryptValue } from '../common/utils/crypto.util';
 
 // Mapeamento de status Asaas → interno
 const ASAAS_STATUS_MAP: Record<string, string> = {
@@ -84,7 +85,7 @@ export class PaymentGatewayService {
       email: lead.email || undefined,
       phone: lead.phone || undefined,
       externalReference: lead.id,
-    });
+    }, tenantId || lead.tenant_id || undefined);
 
     this.logger.log(
       `[CUSTOMER] Criado no Asaas: ${asaasCustomer.id} para lead ${leadId}`,
@@ -259,6 +260,7 @@ export class PaymentGatewayService {
     // estiver atrasada, ajusta pra hoje+1 (mantem cobranca cobravel) e loga.
     const dueDate = this.normalizeDueDateForAsaas(requestedDueDate, honorarioPaymentId);
     const dueDateStr = dueDate.toISOString().slice(0, 10); // YYYY-MM-DD
+    const txTenant = tenantId || legalCase.tenant_id || undefined; // conta Asaas do escritório
 
     const baseValue = Number(payment.amount);
     const optionalFields = this.buildAsaasOptionalFields({ ...options, value: baseValue });
@@ -271,7 +273,7 @@ export class PaymentGatewayService {
       description: `Honorario - ${legalCase.case_number || 'Processo'} ${legalCase.legal_area ? `(${legalCase.legal_area})` : ''}`.trim(),
       externalReference: honorarioPaymentId,
       ...optionalFields,
-    });
+    }, txTenant);
 
     this.logger.log(
       `[CHARGE] Criada no Asaas: ${asaasCharge.id} | ${billingType} | R$ ${baseValue} | Venc: ${dueDateStr}` +
@@ -282,7 +284,7 @@ export class PaymentGatewayService {
     let pixData: any = null;
     if ((billingType === 'PIX' || billingType === 'UNDEFINED') && asaasCharge.id) {
       try {
-        pixData = await this.asaas.getPixQrCode(asaasCharge.id);
+        pixData = await this.asaas.getPixQrCode(asaasCharge.id, txTenant);
       } catch (e: any) {
         this.logger.warn(`[CHARGE] Falha ao buscar QR Code PIX: ${e.message}`);
       }
@@ -328,7 +330,7 @@ export class PaymentGatewayService {
       // Se o rollback falhar tambem, alerta CRITICO — operador precisa
       // intervir manual no painel Asaas.
       try {
-        await this.asaas.deleteCharge(asaasCharge.id);
+        await this.asaas.deleteCharge(asaasCharge.id, txTenant);
         this.logger.warn(`[CHARGE] Rollback OK no Asaas: ${asaasCharge.id} deletada`);
       } catch (rollbackErr: any) {
         this.logger.error(
@@ -399,6 +401,7 @@ export class PaymentGatewayService {
     if (!lead?.id) throw new BadRequestException('Honorário negociado não possui lead vinculado');
 
     const honTenant = (payment as any).lead_honorario?.tenant_id;
+    const txTenant = tenantId || honTenant || undefined; // conta Asaas do escritório
     const customer = await this.ensureCustomer(lead.id, tenantId || honTenant);
 
     const requestedDueDate = options?.dueDate
@@ -422,13 +425,13 @@ export class PaymentGatewayService {
       description: `Honorário ${typeLabels[honType] || honType} - Lead ${lead.name || 'Sem nome'}`.trim(),
       externalReference: leadHonorarioPaymentId,
       ...optionalFields,
-    });
+    }, txTenant);
 
     this.logger.log(`[CHARGE] Criada para lead: ${asaasCharge.id} | ${billingType} | R$ ${baseValue} | Venc: ${dueDateStr}`);
 
     let pixData: any = null;
     if ((billingType === 'PIX' || billingType === 'UNDEFINED') && asaasCharge.id) {
-      try { pixData = await this.asaas.getPixQrCode(asaasCharge.id); }
+      try { pixData = await this.asaas.getPixQrCode(asaasCharge.id, txTenant); }
       catch (e: any) { this.logger.warn(`[CHARGE] Falha QR Code PIX: ${e.message}`); }
     }
 
@@ -501,6 +504,7 @@ export class PaymentGatewayService {
       honorario.lead.id,
       tenantId || honorario.tenant_id || undefined,
     );
+    const txTenant = tenantId || honorario.tenant_id || undefined; // conta Asaas do escritório
 
     // Bug fix 2026-05-10 (Honorarios PR3 #7+#10 — CRITICO):
     // 1. Soma em centavos pra precisao
@@ -548,13 +552,13 @@ export class PaymentGatewayService {
       externalReference: leadHonorarioId,
       installmentCount,
       installmentValue,
-    });
+    }, txTenant);
 
     this.logger.log(`[CHARGE] Parcelada criada no Asaas: ${asaasCharge.id} | ${billingType} | ${installmentCount}x R$ ${installmentValue} | Total: R$ ${totalValue}`);
 
     let pixData: any = null;
     if (billingType === 'PIX' && asaasCharge.id) {
-      try { pixData = await this.asaas.getPixQrCode(asaasCharge.id); }
+      try { pixData = await this.asaas.getPixQrCode(asaasCharge.id, txTenant); }
       catch (e: any) { this.logger.warn(`[CHARGE] Falha QR Code PIX: ${e.message}`); }
     }
 
@@ -654,7 +658,7 @@ export class PaymentGatewayService {
     // Buscar dados frescos do Asaas
     let asaasData: any = null;
     try {
-      asaasData = await this.asaas.getCharge(charge.external_id);
+      asaasData = await this.asaas.getCharge(charge.external_id, charge.tenant_id || undefined);
 
       // Atualizar status local se mudou
       const mappedStatus = ASAAS_STATUS_MAP[asaasData.status] || asaasData.status;
@@ -1087,7 +1091,7 @@ export class PaymentGatewayService {
 
     for (const charge of pendingCharges) {
       try {
-        const asaasData = await this.asaas.getCharge(charge.external_id);
+        const asaasData = await this.asaas.getCharge(charge.external_id, charge.tenant_id || undefined);
         const mappedStatus = ASAAS_STATUS_MAP[asaasData.status] || asaasData.status;
 
         if (mappedStatus !== charge.status) {
@@ -1127,14 +1131,14 @@ export class PaymentGatewayService {
     if (!charge) {
       // Sem registro local — apenas deleta no Asaas (caso de orfa)
       this.logger.warn(`[DELETE-CHARGE] external_id ${asaasChargeId} sem registro local — apenas Asaas`);
-      return this.asaas.deleteCharge(asaasChargeId);
+      return this.asaas.deleteCharge(asaasChargeId, tenantId);
     }
     if (tenantId && charge.tenant_id && charge.tenant_id !== tenantId) {
       throw new Error('Cobranca pertence a outro tenant');
     }
 
     // 1. Deleta no Asaas primeiro (operacao externa, mais propensa a falhar)
-    const asaasResult = await this.asaas.deleteCharge(asaasChargeId);
+    const asaasResult = await this.asaas.deleteCharge(asaasChargeId, charge.tenant_id || tenantId || undefined);
 
     // 2. Sincroniza local: marca charge como CANCELLED + reverte status do
     //    HonorarioPayment vinculado (se nao estiver pago)
@@ -1157,13 +1161,78 @@ export class PaymentGatewayService {
   // ─── Settings ──────────────────────────────────────────
 
   async getSettings(tenantId?: string) {
-    const config = await this.asaas.getConfig();
+    const config = await this.asaas.getConfig(tenantId);
 
     return {
       provider: 'ASAAS',
       configured: !!config.apiKey,
       sandbox: config.sandbox,
     };
+  }
+
+  // ─── Config do Asaas POR ESCRITÓRIO (cada escritório a própria conta) ──────
+
+  private maskAsaasKey(key: string): string {
+    if (!key) return '';
+    if (key.length <= 12) return '••••';
+    return `${key.slice(0, 6)}••••${key.slice(-4)}`;
+  }
+
+  /** Config do Asaas do escritório (mascarada — nunca devolve a chave crua). */
+  async getMyAsaasConfig(tenantId: string) {
+    const t = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { asaas_api_key: true, asaas_sandbox: true, is_internal: true },
+    });
+    const key = t?.asaas_api_key ? decryptValue(t.asaas_api_key) : '';
+    return {
+      configured: !!key,
+      sandbox: !!t?.asaas_sandbox,
+      apiKeyMasked: key ? this.maskAsaasKey(key) : null,
+      // Escritório interno (do dono) sem chave própria usa a conta da plataforma.
+      usesPlatformAccount: !key && !!t?.is_internal,
+    };
+  }
+
+  /** Salva a config do Asaas do escritório. apiKey em branco mantém a atual. */
+  async saveMyAsaasConfig(tenantId: string, input: { apiKey?: string; sandbox?: boolean }) {
+    const data: any = {};
+    if (typeof input.sandbox === 'boolean') data.asaas_sandbox = input.sandbox;
+    if (input.apiKey && input.apiKey.trim()) {
+      data.asaas_api_key = encryptValue(input.apiKey.trim()); // cifrada em repouso
+    }
+    if (Object.keys(data).length > 0) {
+      await this.prisma.tenant.update({ where: { id: tenantId }, data });
+    }
+    return this.getMyAsaasConfig(tenantId);
+  }
+
+  /** Desconecta o Asaas do escritório (volta a bloquear cobranças até reconfigurar). */
+  async clearMyAsaasConfig(tenantId: string) {
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { asaas_api_key: null },
+    });
+    return this.getMyAsaasConfig(tenantId);
+  }
+
+  /**
+   * Testa a conexão com o Asaas. Se uma chave for informada, testa ELA (sem
+   * salvar — botão "testar" antes de salvar); senão testa a chave já salva.
+   */
+  async testMyAsaasConfig(tenantId: string, input: { apiKey?: string; sandbox?: boolean }): Promise<{ ok: boolean; error?: string }> {
+    let apiKey = input.apiKey?.trim() || '';
+    let sandbox = !!input.sandbox;
+    if (!apiKey) {
+      const t = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { asaas_api_key: true, asaas_sandbox: true },
+      });
+      apiKey = t?.asaas_api_key ? decryptValue(t.asaas_api_key) : '';
+      sandbox = !!t?.asaas_sandbox;
+    }
+    if (!apiKey) return { ok: false, error: 'Nenhuma chave para testar — informe a chave de API.' };
+    return this.asaas.testKey(apiKey, sandbox);
   }
 
   // ─── Helpers ───────────────────────────────────────────
@@ -1184,7 +1253,7 @@ export class PaymentGatewayService {
 
     // Paginar todos os clientes do Asaas
     while (true) {
-      const page = await this.asaas.listCustomers({ offset, limit });
+      const page = await this.asaas.listCustomers({ offset, limit }, tenantId);
       const items = page?.data || [];
       allCustomers = [...allCustomers, ...items];
       if (!page?.hasMore || items.length === 0) break;

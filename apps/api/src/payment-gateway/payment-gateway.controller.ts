@@ -15,6 +15,7 @@ import { PaymentReminderService } from './payment-reminder.service';
 import { CreateChargeDto, CreateBatchChargesDto, CreateInstallmentChargeDto } from './payment-gateway.dto';
 import { AsaasClient } from './asaas/asaas-client';
 import { PrismaService } from '../prisma/prisma.service';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('payment-gateway')
 export class PaymentGatewayController {
@@ -30,14 +31,44 @@ export class PaymentGatewayController {
   // ─── ROTAS FIXAS PRIMEIRO (antes de :param) ─────────────
 
   @Get('balance')
-  async getBalance() {
-    return this.asaasClient.getBalance();
+  async getBalance(@Req() req: any) {
+    return this.asaasClient.getBalance(req.user?.tenant_id);
   }
 
   @Get('settings')
   async getSettings(@Req() req: any) {
     const tenantId = req.user?.tenant_id;
     return this.service.getSettings(tenantId);
+  }
+
+  // ─── Config do Asaas POR ESCRITÓRIO (admin/financeiro do próprio escritório) ─
+  // Tenant-scoped: o usuário só lê/edita a config do PRÓPRIO escritório
+  // (req.user.tenant_id). Chave cifrada em repouso; resposta sempre mascarada.
+
+  @Get('asaas-config')
+  @Roles('ADMIN', 'FINANCEIRO')
+  async getMyAsaasConfig(@Req() req: any) {
+    return this.service.getMyAsaasConfig(req.user?.tenant_id);
+  }
+
+  @Put('asaas-config')
+  @Roles('ADMIN', 'FINANCEIRO')
+  async saveMyAsaasConfig(@Body() body: { apiKey?: string; sandbox?: boolean }, @Req() req: any) {
+    this.logger.log(`[PUT /asaas-config] tenant=${req.user?.tenant_id}`);
+    return this.service.saveMyAsaasConfig(req.user?.tenant_id, body);
+  }
+
+  @Delete('asaas-config')
+  @Roles('ADMIN', 'FINANCEIRO')
+  async clearMyAsaasConfig(@Req() req: any) {
+    this.logger.log(`[DELETE /asaas-config] tenant=${req.user?.tenant_id}`);
+    return this.service.clearMyAsaasConfig(req.user?.tenant_id);
+  }
+
+  @Post('asaas-config/test')
+  @Roles('ADMIN', 'FINANCEIRO')
+  async testMyAsaasConfig(@Body() body: { apiKey?: string; sandbox?: boolean }, @Req() req: any) {
+    return this.service.testMyAsaasConfig(req.user?.tenant_id, body);
   }
 
   /** Lista cobranças direto da API do Asaas */
@@ -49,7 +80,9 @@ export class PaymentGatewayController {
     @Query('billingType') billingType: string | undefined,
     @Query('dateGe') dateGe: string | undefined,
     @Query('dateLe') dateLe: string | undefined,
+    @Req() req: any,
   ) {
+    const tenantId = req.user?.tenant_id;
     this.logger.log('[GET /charges/asaas] Buscando cobranças direto do Asaas...');
     try {
       const params: any = {
@@ -61,7 +94,7 @@ export class PaymentGatewayController {
       if (dateGe) params['dueDate[ge]'] = dateGe;
       if (dateLe) params['dueDate[le]'] = dateLe;
 
-      const result = await this.asaasClient.listCharges(params);
+      const result = await this.asaasClient.listCharges(params, tenantId);
 
       // Enriquecer com nomes dos clientes (cache para não repetir chamadas)
       const customerCache = new Map<string, string>();
@@ -73,7 +106,7 @@ export class PaymentGatewayController {
           continue;
         }
         try {
-          const cust = await this.asaasClient.getCustomer(charge.customer);
+          const cust = await this.asaasClient.getCustomer(charge.customer, tenantId);
           const name = cust?.name || charge.customer;
           customerCache.set(charge.customer, name);
           charge.customerName = name;
@@ -145,13 +178,14 @@ export class PaymentGatewayController {
 
   /** Detalhes completos de uma cobrança no Asaas */
   @Get('charges/asaas/detail/:chargeId')
-  async getAsaasChargeDetail(@Param('chargeId') chargeId: string) {
+  async getAsaasChargeDetail(@Param('chargeId') chargeId: string, @Req() req: any) {
+    const tenantId = req.user?.tenant_id;
     this.logger.log(`[GET /charges/asaas/detail/${chargeId}]`);
-    const charge = await this.asaasClient.getCharge(chargeId);
+    const charge = await this.asaasClient.getCharge(chargeId, tenantId);
     // Enriquecer com nome do cliente
     if (charge?.customer) {
       try {
-        const cust = await this.asaasClient.getCustomer(charge.customer);
+        const cust = await this.asaasClient.getCustomer(charge.customer, tenantId);
         charge.customerName = cust?.name;
         charge.customerEmail = cust?.email;
         charge.customerPhone = cust?.mobilePhone || cust?.phone;
@@ -161,7 +195,7 @@ export class PaymentGatewayController {
     // Se PIX, buscar QR code
     if (charge?.billingType === 'PIX' && charge?.status === 'PENDING') {
       try {
-        const pix = await this.asaasClient.getPixQrCode(chargeId);
+        const pix = await this.asaasClient.getPixQrCode(chargeId, tenantId);
         charge.pixQrCode = pix?.encodedImage;
         charge.pixCopyPaste = pix?.payload;
         charge.pixExpirationDate = pix?.expirationDate;
@@ -175,20 +209,22 @@ export class PaymentGatewayController {
   async updateAsaasCharge(
     @Param('chargeId') chargeId: string,
     @Body() body: { value?: number; dueDate?: string; description?: string },
+    @Req() req: any,
   ) {
     this.logger.log(`[PUT /charges/asaas/${chargeId}] Atualizando cobranca`);
-    return this.asaasClient.updateCharge(chargeId, body);
+    return this.asaasClient.updateCharge(chargeId, body, req.user?.tenant_id);
   }
 
   /** Confirmar recebimento em dinheiro */
   @Post('charges/asaas/:chargeId/receive-in-cash')
-  async receiveInCash(@Param('chargeId') chargeId: string) {
+  async receiveInCash(@Param('chargeId') chargeId: string, @Req() req: any) {
+    const tenantId = req.user?.tenant_id;
     this.logger.log(`[POST /charges/asaas/${chargeId}/receive-in-cash] Confirmando pagamento em dinheiro`);
     // Buscar dados da cobrança para obter o valor
-    const charge = await this.asaasClient.getCharge(chargeId);
+    const charge = await this.asaasClient.getCharge(chargeId, tenantId);
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const value = charge?.value || 1;
-    const result = await this.asaasClient.receiveInCash(chargeId, today, value);
+    const result = await this.asaasClient.receiveInCash(chargeId, today, value, tenantId);
     return result;
   }
 
@@ -377,13 +413,14 @@ export class PaymentGatewayController {
     @Query('cpfCnpj') cpfCnpj: string | undefined,
     @Query('offset') offset: string | undefined,
     @Query('limit') limit: string | undefined,
+    @Req() req: any,
   ) {
     return this.asaasClient.listCustomers({
       name: name || undefined,
       cpfCnpj: cpfCnpj || undefined,
       offset: offset ? parseInt(offset) : 0,
       limit: limit ? parseInt(limit) : 100,
-    });
+    }, req.user?.tenant_id);
   }
 
   /** Importa e vincula automaticamente (match CPF/nome) */

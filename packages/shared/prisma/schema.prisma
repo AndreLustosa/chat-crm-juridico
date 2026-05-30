@@ -21,6 +21,12 @@ model Tenant {
   plan                       String?
   asaas_customer_id          String?
   asaas_subscription_id      String?
+  // ─── Asaas POR ESCRITÓRIO (honorários → clientes do escritório). Cifradas.
+  //     Vazias = usa a conta GLOBAL da plataforma (fallback → zero regressão).
+  //     A assinatura SaaS continua sempre na conta global da plataforma. ─────
+  asaas_api_key              String? // chave de API do Asaas do escritório (cifrada)
+  asaas_sandbox              Boolean                          @default(false) // ambiente de testes do Asaas do escritório
+  asaas_webhook_token        String? // token do webhook do Asaas do escritório (cifrado)
   stripe_customer_id         String? // assinatura SaaS via Stripe (Fase 5); honorarios seguem no Asaas
   stripe_subscription_id     String?
   cancel_at_period_end       Boolean                          @default(false) // Stripe: cancelamento agendado p/ fim do periodo (acesso ate current_period_end)
