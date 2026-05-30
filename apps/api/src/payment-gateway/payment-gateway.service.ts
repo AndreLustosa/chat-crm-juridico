@@ -1182,7 +1182,7 @@ export class PaymentGatewayService {
   async getMyAsaasConfig(tenantId: string) {
     const t = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { asaas_api_key: true, asaas_sandbox: true, asaas_webhook_token: true, is_internal: true },
+      select: { asaas_api_key: true, asaas_sandbox: true, asaas_webhook_token: true },
     });
     const key = t?.asaas_api_key ? decryptValue(t.asaas_api_key) : '';
     return {
@@ -1190,8 +1190,8 @@ export class PaymentGatewayService {
       sandbox: !!t?.asaas_sandbox,
       apiKeyMasked: key ? this.maskAsaasKey(key) : null,
       hasWebhookToken: !!t?.asaas_webhook_token,
-      // Escritório interno (do dono) sem chave própria usa a conta da plataforma.
-      usesPlatformAccount: !key && !!t?.is_internal,
+      // Honorários são 100% por escritório: sem chave própria = não cobra
+      // (não há mais conta compartilhada/plataforma para honorários).
     };
   }
 

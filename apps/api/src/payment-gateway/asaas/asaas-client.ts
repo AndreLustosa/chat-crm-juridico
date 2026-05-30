@@ -87,19 +87,19 @@ export class AsaasClient {
   }
 
   /**
-   * Config do Asaas — regra multi-tenant:
-   *  1) Tenant TEM chave própria → usa a conta DELE (honorários → clientes dele).
-   *  2) Tenant é INTERNO (escritório do dono) e sem chave → usa a conta GLOBAL.
-   *  3) Tenant externo SEM chave → apiKey vazia → request() bloqueia com aviso.
-   *     NUNCA cai silenciosamente na conta da plataforma.
-   *  Sem tenantId (ex.: assinatura SaaS) → sempre a conta GLOBAL da plataforma.
+   * Config do Asaas — HONORÁRIOS são 100% POR ESCRITÓRIO:
+   *  - Tenant COM chave própria → usa a conta DELE (cobranças caem na conta dele).
+   *  - Tenant SEM chave → apiKey vazia → request() bloqueia com aviso
+   *    ("configure em Configurações → Pagamentos"). NÃO existe conta compartilhada
+   *    para honorários — dinheiro nunca cai na conta de outro escritório.
+   *  SEM tenantId (ex.: assinatura SaaS — receita do dono) → conta da plataforma.
    */
   async getConfig(tenantId?: string): Promise<AsaasConfig> {
     if (tenantId) {
       try {
         const t = await this.prisma.tenant.findUnique({
           where: { id: tenantId },
-          select: { asaas_api_key: true, asaas_sandbox: true, is_internal: true },
+          select: { asaas_api_key: true, asaas_sandbox: true },
         });
         const ownKey = t?.asaas_api_key ? decryptValue(t.asaas_api_key) : '';
         if (ownKey) {
@@ -107,21 +107,21 @@ export class AsaasClient {
           this.logger.debug(`[ASAAS] Config tenant=${tenantId} (conta própria), sandbox=${sandbox}`);
           return { apiKey: ownKey, baseUrl: this.baseUrlFor(sandbox), sandbox };
         }
-        if (!t?.is_internal) {
-          this.logger.warn(`[ASAAS] Tenant ${tenantId} sem Asaas configurado e não-interno — bloqueando.`);
-          return { apiKey: '', baseUrl: this.baseUrlFor(false), sandbox: false };
-        }
-        // Tenant interno sem chave própria → usa o global abaixo.
+        // Sem chave própria → BLOQUEADO. Honorários não usam conta compartilhada.
+        this.logger.warn(`[ASAAS] Tenant ${tenantId} sem Asaas próprio configurado — bloqueando cobrança.`);
+        return { apiKey: '', baseUrl: this.baseUrlFor(false), sandbox: false };
       } catch (e: any) {
-        this.logger.warn(`[ASAAS] Falha lendo config do tenant ${tenantId}: ${e.message}. Usando global.`);
+        // Erro de leitura NÃO cai na conta da plataforma (segurança): bloqueia.
+        this.logger.warn(`[ASAAS] Falha lendo config do tenant ${tenantId}: ${e.message} — bloqueando.`);
+        return { apiKey: '', baseUrl: this.baseUrlFor(false), sandbox: false };
       }
     }
 
-    // Conta GLOBAL da plataforma (tenant interno, assinatura SaaS, ou fallback de erro).
+    // SEM tenantId → conta da plataforma (assinatura SaaS = mensalidade dos escritórios).
     const apiKey = await this.settingsService.get('asaas_api_key');
     const sandboxStr = await this.settingsService.get('asaas_sandbox');
     const sandbox = sandboxStr === 'true';
-    this.logger.debug(`[ASAAS] Config GLOBAL, sandbox=${sandbox}, apiKey=${apiKey ? `${apiKey.slice(0, 10)}...` : 'NAO CONFIGURADA'}`);
+    this.logger.debug(`[ASAAS] Config plataforma (sem tenant), sandbox=${sandbox}, apiKey=${apiKey ? `${apiKey.slice(0, 10)}...` : 'NAO CONFIGURADA'}`);
     return { apiKey: apiKey || '', baseUrl: this.baseUrlFor(sandbox), sandbox };
   }
 
