@@ -225,4 +225,49 @@ export class OfficeService {
     }
     return this.getAiConfig(tenantId);
   }
+
+  /**
+   * Áreas de atendimento (skills GLOBAIS ativas) + o estado liga/desliga DESTE
+   * escritório. Opt-out: sem linha em TenantSkillState => ativa (enabled=true).
+   */
+  async getAiSkills(tenantId?: string | null) {
+    if (!tenantId) throw new NotFoundException('Tenant não encontrado para o usuário atual.');
+    const skills = await (this.prisma as any).promptSkill.findMany({
+      where: { active: true },
+      orderBy: [{ order: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true, area: true, description: true, skill_type: true },
+    });
+    const states = await (this.prisma as any).tenantSkillState.findMany({
+      where: { tenant_id: tenantId },
+      select: { skill_id: true, enabled: true },
+    });
+    const map = new Map<string, boolean>(states.map((s: any) => [s.skill_id, s.enabled]));
+    return skills.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      area: s.area,
+      description: s.description ?? null,
+      skill_type: s.skill_type,
+      enabled: map.get(s.id) ?? true,
+    }));
+  }
+
+  /**
+   * Liga/desliga uma área de atendimento (skill) para o escritório (só ADMIN).
+   * Upsert por (tenant, skill). A skill em si segue global (conteúdo da plataforma).
+   */
+  async setAiSkillEnabled(tenantId: string | undefined, skillId: string, enabled: boolean) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    const skill = await (this.prisma as any).promptSkill.findUnique({
+      where: { id: skillId },
+      select: { id: true },
+    });
+    if (!skill) throw new NotFoundException('Área de atendimento não encontrada.');
+    await (this.prisma as any).tenantSkillState.upsert({
+      where: { tenant_id_skill_id: { tenant_id: tenantId, skill_id: skillId } },
+      update: { enabled },
+      create: { tenant_id: tenantId, skill_id: skillId, enabled },
+    });
+    return { id: skillId, enabled };
+  }
 }

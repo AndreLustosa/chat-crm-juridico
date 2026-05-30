@@ -1402,8 +1402,9 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         })
         .join('\n');
 
-      // 8. Carregar skills ativas (com tools e assets inclusos)
-      const activeSkills = await this.settings.getActiveSkills();
+      // 8. Carregar skills ativas (com tools e assets inclusos). Passa o tenant
+      //    da conversa → remove as áreas que o escritório desativou (opt-out).
+      const activeSkills = await this.settings.getActiveSkills((convo as any).tenant_id);
 
       // 8.5 Detectar se é CLIENTE com processo ativo → forçar skill Acompanhamento
       let isActiveClient = false;

@@ -78,6 +78,7 @@ model Tenant {
   djen_ignored_processes     DjenIgnoredProcess[]
   lead_honorarios            LeadHonorario[]
   notifications              Notification[]
+  tenant_skill_states        TenantSkillState[]
   memories                   Memory[]
   lead_profiles              LeadProfile[]
   organization_profile       OrganizationProfile?
@@ -602,6 +603,25 @@ model PromptSkill {
   messages           Message[]
   tools              SkillTool[]
   assets             SkillAsset[]
+  tenant_states      TenantSkillState[]
+}
+
+/// Estado por escritório de cada skill GLOBAL: o escritório pode DESATIVAR uma
+/// área de atendimento da IA só para si (opt-out). Ausência de linha = ativa.
+/// As skills em si (prompt, modelo, tools) seguem GLOBAIS — só o liga/desliga
+/// é por tenant. getActiveSkills(tenantId) filtra as desativadas.
+model TenantSkillState {
+  id         String      @id @default(uuid())
+  tenant_id  String
+  skill_id   String
+  enabled    Boolean     @default(true)
+  created_at DateTime    @default(now())
+  updated_at DateTime    @updatedAt
+  tenant     Tenant      @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  skill      PromptSkill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, skill_id])
+  @@index([tenant_id])
 }
 
 model SkillTool {

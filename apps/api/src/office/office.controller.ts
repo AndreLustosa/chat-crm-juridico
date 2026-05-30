@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Patch, Put, Request } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, Request } from '@nestjs/common';
 import { OfficeService } from './office.service';
 import { UpdateOfficeDto } from './dto/update-office.dto';
 import { UpdateNotificationDefaultsDto } from './dto/update-notification-defaults.dto';
 import { UpdateAiConfigDto } from './dto/update-ai-config.dto';
+import { ToggleAiSkillDto } from './dto/toggle-ai-skill.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 
 /**
@@ -51,5 +52,21 @@ export class OfficeController {
   @Roles('ADMIN')
   updateAiConfig(@Request() req: any, @Body() dto: UpdateAiConfigDto) {
     return this.office.updateAiConfig(req.user?.tenant_id, dto);
+  }
+
+  /**
+   * Áreas de atendimento (skills GLOBAIS) com o estado liga/desliga DESTE
+   * escritório. Leitura: qualquer usuário do tenant. Edição: somente ADMIN.
+   * O escritório só pode ligar/desligar — o conteúdo da skill é da plataforma.
+   */
+  @Get('me/ai-skills')
+  getAiSkills(@Request() req: any) {
+    return this.office.getAiSkills(req.user?.tenant_id);
+  }
+
+  @Put('me/ai-skills/:skillId')
+  @Roles('ADMIN')
+  setAiSkill(@Request() req: any, @Param('skillId') skillId: string, @Body() dto: ToggleAiSkillDto) {
+    return this.office.setAiSkillEnabled(req.user?.tenant_id, skillId, dto.enabled);
   }
 }

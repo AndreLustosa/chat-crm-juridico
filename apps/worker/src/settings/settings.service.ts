@@ -55,12 +55,30 @@ export class SettingsService {
     return row?.value || 'gpt-4.1-mini';
   }
 
-  async getActiveSkills(): Promise<any[]> {
-    return (this.prisma as any).promptSkill.findMany({
+  /**
+   * Skills ATIVAS globalmente. Se `tenantId` for informado, remove as que o
+   * escritório DESATIVOU para si (TenantSkillState.enabled=false) — opt-out:
+   * sem linha => ativa. As skills seguem globais; só o liga/desliga é por tenant.
+   */
+  async getActiveSkills(tenantId?: string | null): Promise<any[]> {
+    const skills = await (this.prisma as any).promptSkill.findMany({
       where: { active: true },
       orderBy: [{ order: 'asc' }, { id: 'asc' }],
       include: { tools: { where: { active: true } }, assets: true },
     });
+    if (!tenantId) return skills;
+    try {
+      const disabledRows = await (this.prisma as any).tenantSkillState.findMany({
+        where: { tenant_id: tenantId, enabled: false },
+        select: { skill_id: true },
+      });
+      if (disabledRows.length === 0) return skills;
+      const disabled = new Set(disabledRows.map((r: any) => r.skill_id));
+      return skills.filter((s: any) => !disabled.has(s.id));
+    } catch {
+      // Falha ao ler estados (ex.: tabela ainda não migrada) → não bloqueia a IA.
+      return skills;
+    }
   }
 
   async getAnthropicKey(): Promise<string | null> {
