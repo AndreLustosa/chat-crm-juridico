@@ -102,6 +102,17 @@ export class FollowupCronService {
     let totalSkipped = 0;
     let totalArchived = 0;
 
+    // Gate de IA por escritório (#77): tenants com IA desligada não recebem
+    // follow-up automático (a IA é quem dispara). Uma consulta só, no início.
+    const disabledTenants = new Set<string>(
+      (
+        await (this.prisma as any).tenant.findMany({
+          where: { ai_enabled: false },
+          select: { id: true },
+        })
+      ).map((t: any) => t.id),
+    );
+
     for (const config of staleConfigs) {
       try {
         const cutoff = new Date(Date.now() - config.days * 24 * 60 * 60 * 1000);
@@ -126,6 +137,7 @@ export class FollowupCronService {
 
         for (const lead of leads) {
           if (!lead.conversations?.length) continue;
+          if (disabledTenants.has(lead.tenant_id)) continue; // IA desligada (#77)
           const convo = lead.conversations[0];
 
           // Anti-spam basico: se ultima interacao foi < 24h atras, pula sem

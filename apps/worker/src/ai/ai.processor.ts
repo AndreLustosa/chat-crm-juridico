@@ -1273,6 +1273,13 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
       // Advogados" (zero regressão p/ quem não configurou ou conversa órfã).
       const firm = await resolveFirmIdentity(this.prisma, (convo as any).tenant_id);
 
+      // Gate de IA por escritório (#77): se o master desligou a IA deste tenant
+      // (plano sem IA / desabilitado), não gera resposta. Interno/sem-tenant = on.
+      if (!firm.aiEnabled) {
+        this.logger.log(`[AI] IA desabilitada (tenant=${(convo as any).tenant_id}) — resposta pulada.`);
+        return;
+      }
+
       // 3a. Quando ai_mode=false (operador humano atende), nada a fazer aqui.
       //
       // O sistema antigo atualizava AiMemory sincronamente neste ponto. Hoje,

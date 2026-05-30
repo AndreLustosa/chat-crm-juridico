@@ -56,4 +56,10 @@ export class PlatformController {
   cancelDeletion(@Param('id') id: string, @Request() req: any) {
     return this.svc.cancelDeletion(id, req.user?.tenant_id);
   }
+
+  /** Liga/desliga a IA do escritorio (#77 — gate master por escritorio). */
+  @Patch('tenants/:id/ai')
+  setAi(@Param('id') id: string, @Body() body: { enabled?: boolean }) {
+    return this.svc.setAiEnabled(id, body?.enabled === true);
+  }
 }

@@ -35,6 +35,7 @@ export class PlatformService {
         cnpj: true,
         cpf: true,
         phone: true,
+        ai_enabled: true,
         ...this.subFields,
         suspended_at: true,
         deletion_scheduled_at: true,
@@ -67,8 +68,29 @@ export class PlatformService {
         created_at: t.users?.[0]?.created_at ?? null,
         suspended_at: t.suspended_at ?? null,
         deletion_scheduled_at: t.deletion_scheduled_at ?? null,
+        ai_enabled: t.ai_enabled !== false, // default true
       };
     });
+  }
+
+  /**
+   * Liga/desliga a IA do escritório (#77 — gate master por escritório).
+   * Escritórios internos (do dono) sempre têm IA — não podem ser desligados.
+   */
+  async setAiEnabled(tenantId: string, enabled: boolean) {
+    const t = await (this.prisma as any).tenant.findUnique({
+      where: { id: tenantId },
+      select: { id: true, is_internal: true },
+    });
+    if (!t) throw new NotFoundException('Escritorio nao encontrado.');
+    if (t.is_internal && !enabled) {
+      throw new BadRequestException('Escritorios internos sempre tem IA ativa.');
+    }
+    await (this.prisma as any).tenant.update({
+      where: { id: tenantId },
+      data: { ai_enabled: enabled },
+    });
+    return { ok: true, ai_enabled: enabled };
   }
 
   /** Contadores agregados pro cabecalho do painel. */

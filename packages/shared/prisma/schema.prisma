@@ -23,6 +23,7 @@ model Tenant {
   email                      String? // e-mail de contato do escritório
   oab                        String? // OAB do escritório / advogado responsável
   site                       String? // site do escritório
+  ai_enabled                 Boolean                          @default(true) // gate master da IA (#77): false = IA não atende este escritório. Interno sempre on.
   // ─── SaaS: assinatura/trial por escritório (Fase 1) ───────────────────────
   is_internal                Boolean                          @default(false) // escritório do dono — nunca expira
   subscription_status        String                           @default("ACTIVE") // ACTIVE|TRIALING|PAST_DUE|CANCELED|EXPIRED

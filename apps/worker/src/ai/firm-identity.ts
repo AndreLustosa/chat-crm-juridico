@@ -26,6 +26,8 @@ export interface FirmIdentity {
   site: string;
   /** Tom/persona/saudação opcional definida pelo escritório. */
   tone: string;
+  /** Gate master da IA (#77): false = a IA não deve responder a este escritório. */
+  aiEnabled: boolean;
 }
 
 /** Padrões históricos — usados como fallback quando o tenant não configurou. */
@@ -41,6 +43,7 @@ export const FIRM_IDENTITY_FALLBACK: FirmIdentity = {
   oab: '',
   site: '',
   tone: '',
+  aiEnabled: true, // sem tenant/erro → não bloqueia (comportamento atual)
 };
 
 /**
@@ -64,6 +67,7 @@ export async function resolveFirmIdentity(
         site: true,
         ai_assistant_name: true,
         ai_tone: true,
+        ai_enabled: true,
       },
     });
     if (!t) return { ...FIRM_IDENTITY_FALLBACK };
@@ -76,6 +80,7 @@ export async function resolveFirmIdentity(
       oab: t.oab || '',
       site: t.site || '',
       tone: t.ai_tone || '',
+      aiEnabled: t.ai_enabled !== false, // default true; só bloqueia se explicitamente false
     };
   } catch {
     return { ...FIRM_IDENTITY_FALLBACK };
