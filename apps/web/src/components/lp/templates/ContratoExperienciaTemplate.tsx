@@ -84,9 +84,14 @@ export function ContratoExperienciaTemplate() {
         <section className="relative min-h-[94svh] overflow-hidden pt-24">
           <div className="absolute inset-0">
             <img
-              src="/landing/contrato-experiencia-hero.png"
+              src="/landing/contrato-experiencia-hero.webp"
+              srcSet="/landing/contrato-experiencia-hero-mobile.webp 800w, /landing/contrato-experiencia-hero.webp 1600w"
+              sizes="100vw"
               alt="Contrato de experiência com carteira de trabalho e calendário"
               className="h-full w-full object-cover object-center opacity-85"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
             />
           </div>
           <div className="absolute inset-0 bg-linear-to-r from-black via-black/86 to-black/34" />

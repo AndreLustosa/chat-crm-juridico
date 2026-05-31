@@ -80,9 +80,14 @@ export function DispensaSemJustaCausaTemplate() {
         <section className="relative min-h-[94svh] overflow-hidden pt-24">
           <div className="absolute inset-0">
             <img
-              src="/landing/verbas-rescisorias-hero.png"
+              src="/landing/verbas-rescisorias-hero.webp"
+              srcSet="/landing/verbas-rescisorias-hero-mobile.webp 800w, /landing/verbas-rescisorias-hero.webp 1600w"
+              sizes="100vw"
               alt="Carteira de trabalho e documentos para dispensa sem justa causa"
               className="h-full w-full object-cover object-center opacity-85"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
             />
           </div>
           <div className="absolute inset-0 bg-linear-to-r from-black via-black/85 to-black/45" />

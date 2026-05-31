@@ -82,9 +82,14 @@ export function PedidoDemissaoTemplate() {
         <section className="relative min-h-[94svh] overflow-hidden pt-24">
           <div className="absolute inset-0">
             <img
-              src="/landing/pedido-demissao-hero.png"
+              src="/landing/pedido-demissao-hero.webp"
+              srcSet="/landing/pedido-demissao-hero-mobile.webp 800w, /landing/pedido-demissao-hero.webp 1600w"
+              sizes="100vw"
               alt="Trabalhador entregando pedido de demissão com carteira de trabalho"
               className="h-full w-full object-cover object-center opacity-85"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
             />
           </div>
           <div className="absolute inset-0 bg-linear-to-r from-black via-black/88 to-black/35" />

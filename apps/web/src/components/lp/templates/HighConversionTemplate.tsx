@@ -37,7 +37,7 @@ import {
   Zap,
   Search,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { Reveal } from "../Reveal";
 import { Button } from "@/components/ui/button";
 import { LPTemplateContent, LPPracticeArea } from "@/types/landing-page";
 import { trackWhatsappClick, appendRefToWaLink } from "../LPTracker";
@@ -664,21 +664,7 @@ export function HighConversionTemplate({
           </div>
 
           {/* Grid of Cards — Premium Elegant Style with Framer Motion Entrance */}
-          <motion.div
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16"
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true, margin: "-100px" }}
-            variants={{
-              hidden: { opacity: 0 },
-              visible: {
-                opacity: 1,
-                transition: {
-                  staggerChildren: 0.1,
-                },
-              },
-            }}
-          >
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
             {(practiceAreas
               ? practiceAreas.map((pa) => ({
                   title: pa.title,
@@ -746,16 +732,11 @@ export function HighConversionTemplate({
                 ]
             ).map((area, index) => {
               return (
-                <motion.div
+                <Reveal
                   key={index}
-                  variants={{
-                    hidden: { opacity: 0, y: 30 },
-                    visible: {
-                      opacity: 1,
-                      y: 0,
-                      transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] },
-                    },
-                  }}
+                  delay={index * 0.08}
+                  from={{ opacity: 0, transform: "translateY(30px)" }}
+                  duration={0.6}
                   className="group relative overflow-hidden rounded-xl border border-[#A89048]/20 min-h-[340px] md:min-h-[380px] flex flex-col justify-between p-5 md:p-6 transition-transform duration-500 hover:-translate-y-2 hover:border-[#A89048]/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)] cursor-pointer"
                   onClick={() => {
                     if ((area as any).href) {
@@ -807,10 +788,10 @@ export function HighConversionTemplate({
                       Explorar Direito
                     </button>
                   </div>
-                </motion.div>
+                </Reveal>
               );
             })}
-          </motion.div>
+          </div>
 
           {/* Centered Button — Reference Style */}
           <div className="flex justify-center relative z-40 mt-12 mb-10 md:mb-20">
@@ -839,15 +820,10 @@ export function HighConversionTemplate({
         <div className="absolute top-1/2 left-0 right-0 h-[4px] bg-linear-to-r from-transparent via-[#A89048]/40 to-transparent z-0 pointer-events-none hidden md:block" />
 
         <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-10">
-          <motion.div
+          <Reveal
+            from={{ opacity: 0, transform: "translateY(30px)" }}
+            duration={0.8}
             className="bg-white rounded-3xl shadow-[0_32px_64px_rgba(0,0,0,0.2)] p-[clamp(1.5rem,3vw,3rem)] flex flex-col lg:flex-row items-center gap-[clamp(1.5rem,3vw,3rem)] border-l-12 border-[#A89048] ring-1 ring-[#A89048]/15"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{
-              opacity: 1,
-              y: 0,
-              transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] },
-            }}
-            viewport={{ once: true, margin: "-100px" }}
           >
             {/* Left Title */}
             <div className="lg:w-1/3 text-center lg:text-left">
@@ -916,7 +892,7 @@ export function HighConversionTemplate({
                 </p>
               </div>
             </div>
-          </motion.div>
+          </Reveal>
         </div>
       </div>
 
@@ -1080,11 +1056,9 @@ export function HighConversionTemplate({
           <div className="grid lg:grid-cols-2 gap-[clamp(2rem,5vw,5rem)] items-center w-full">
             {/* Left Content */}
             <div className="order-1 lg:order-1 min-w-0">
-              <motion.div
-                initial={{ opacity: 0, x: -30 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.8 }}
+              <Reveal
+                from={{ opacity: 0, transform: "translateX(-30px)" }}
+                duration={0.8}
               >
                 <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-[#A89048]/10 border border-[#A89048]/20 mb-8 backdrop-blur-md mx-auto lg:mx-0">
                   <Globe size={14} className="text-[#A89048]" />
@@ -1152,7 +1126,7 @@ export function HighConversionTemplate({
                     <ChevronRight size={18} className="md:hidden" />
                   </span>
                 </Button>
-              </motion.div>
+              </Reveal>
             </div>
 
             {/* Right Content: Animated Map with Luxury Backdrop */}
@@ -1160,36 +1134,33 @@ export function HighConversionTemplate({
               {/* Radial Glow behind map */}
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full lg:w-[120%] h-full lg:h-[120%] bg-radial from-[#A89048]/15 to-transparent blur-[60px] pointer-events-none" />
 
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, rotate: -5 }}
-                whileInView={{ opacity: 1, scale: 1, rotate: 0 }}
-                viewport={{ once: true }}
-                animate={{
-                  y: [0, -20, 0],
-                  rotate: [0, 1, 0, -1, 0],
-                }}
-                transition={{
-                  y: { duration: 6, repeat: Infinity, ease: "easeInOut" },
-                  rotate: { duration: 10, repeat: Infinity, ease: "easeInOut" },
-                  default: { duration: 1.2, ease: [0.22, 1, 0.36, 1] },
-                }}
+              <Reveal
+                from={{ opacity: 0, transform: "scale(0.9)" }}
+                duration={1.2}
                 className="relative w-[95%] md:w-full max-w-2xl aspect-square drop-shadow-[0_0_50px_rgba(168,144,72,0.15)] mx-auto"
               >
-                <Image
-                  src="/landing/mapa-brasil-cobertura.webp"
-                  alt="Mapa de Cobertura Nacional André Lustosa"
-                  fill
-                  sizes="(max-width: 768px) 95vw, 50vw"
-                  loading="lazy"
-                  className="object-contain"
-                />
-              </motion.div>
+                <style>{`
+                  @keyframes float-map {
+                    0%, 100% { transform: translateY(0) rotate(0deg); }
+                    50% { transform: translateY(-20px) rotate(1deg); }
+                  }
+                `}</style>
+                <div className="absolute inset-0 animate-[float-map_8s_ease-in-out_infinite] motion-reduce:animate-none">
+                  <Image
+                    src="/landing/mapa-brasil-cobertura.webp"
+                    alt="Mapa de Cobertura Nacional André Lustosa"
+                    fill
+                    sizes="(max-width: 768px) 95vw, 50vw"
+                    loading="lazy"
+                    className="object-contain"
+                  />
+                </div>
+              </Reveal>
 
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.5, duration: 0.8 }}
+              <Reveal
+                from={{ opacity: 0, transform: "translateY(20px)" }}
+                delay={0.5}
+                duration={0.8}
                 className="mt-12 lg:-mt-24 text-center lg:text-right w-full relative z-10"
               >
                 <div className="inline-block px-6 py-3 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
@@ -1203,7 +1174,7 @@ export function HighConversionTemplate({
                     </p>
                   </div>
                 </div>
-              </motion.div>
+              </Reveal>
             </div>
           </div>
         </div>
@@ -1222,11 +1193,9 @@ export function HighConversionTemplate({
         <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-10">
           {/* Header - Centered for more impact and "middle of the page" presence */}
           <div className="flex flex-col items-center text-center mb-[clamp(3rem,5vw,5rem)] px-4 max-w-4xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8 }}
+            <Reveal
+              from={{ opacity: 0, transform: "translateY(-20px)" }}
+              duration={0.8}
               className="w-full flex flex-col items-center"
             >
               <div className="flex items-center justify-center gap-4 mb-6">
@@ -1245,12 +1214,11 @@ export function HighConversionTemplate({
                   <span className="text-[#A89048]">ADVOGADOS!</span>
                 </h2>
               )}
-            </motion.div>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.8, delay: 0.2 }}
+            </Reveal>
+            <Reveal
+              from={{ opacity: 0, transform: "translateY(20px)" }}
+              duration={0.8}
+              delay={0.2}
               className="w-full"
             >
               <p className="text-[#444444] text-[clamp(1rem,1.1vw,1.125rem)] font-medium leading-relaxed max-w-2xl mx-auto">
@@ -1259,7 +1227,7 @@ export function HighConversionTemplate({
                 agilidade do mundo moderno e a máxima proteção dos seus
                 interesses.
               </p>
-            </motion.div>
+            </Reveal>
           </div>
 
           {/* Values Grid */}
@@ -1296,19 +1264,12 @@ export function HighConversionTemplate({
                 desc: "Emergências não escolhem hora. Por isso, mantemos suporte ininterrupto via canais digitais. Estamos onde você estiver, a qualquer momento, garantindo segurança jurídica quando você mais precisa.",
               },
             ].map((value, idx) => (
-              <motion.div
+              <Reveal
                 key={idx}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: idx * 0.1 }}
-                whileHover={{
-                  scale: 1.02,
-                  backgroundColor: "#272727",
-                  borderColor: "#A89048",
-                  boxShadow: "0 25px 50px rgba(0,0,0,0.25)",
-                }}
-                className="group bg-[#EEF0F3] p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center lg:items-start transition-all duration-300 cursor-default text-center lg:text-left gap-6 overflow-hidden relative"
+                delay={idx * 0.1}
+                from={{ opacity: 0, transform: "translateY(30px)" }}
+                duration={0.6}
+                className="group bg-[#EEF0F3] p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center lg:items-start transition-all duration-300 cursor-default text-center lg:text-left gap-6 overflow-hidden relative hover:scale-[1.02] hover:bg-[#272727] hover:border-[#A89048] hover:shadow-[0_25px_50px_rgba(0,0,0,0.25)]"
               >
                 {/* Accent Line on Hover */}
                 <div className="absolute top-0 left-0 w-full h-1 bg-[#A89048] opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
@@ -1324,7 +1285,7 @@ export function HighConversionTemplate({
                     {value.desc}
                   </p>
                 </div>
-              </motion.div>
+              </Reveal>
             ))}
           </div>
         </div>
@@ -1459,11 +1420,7 @@ export function HighConversionTemplate({
 
             <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-10">
               <div className="flex flex-col items-center text-center mb-[clamp(4rem,6vw,6rem)]">
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                >
+                <Reveal from={{ opacity: 0, transform: "translateY(20px)" }}>
                   <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-slate-200 border border-slate-300 mb-6 shadow-sm">
                     <Lightbulb size={14} className="text-[#A89048]" />
                     <span className="text-slate-600 text-[10px] font-black uppercase tracking-widest">
@@ -1478,7 +1435,7 @@ export function HighConversionTemplate({
                     perguntas para entender como atuamos na{" "}
                     <span className="text-slate-800">sua defesa</span>.
                   </p>
-                </motion.div>
+                </Reveal>
               </div>
 
               <div className="max-w-4xl mx-auto">
@@ -1493,11 +1450,9 @@ export function HighConversionTemplate({
                   ))}
                 </div>
 
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  whileInView={{ opacity: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: 0.5 }}
+                <Reveal
+                  from={{ opacity: 0 }}
+                  delay={0.5}
                   className="mt-16 p-8 rounded-3xl bg-white border border-slate-100 shadow-xl shadow-slate-200/50 flex flex-col md:flex-row items-center justify-between gap-8"
                 >
                   <div className="flex items-center gap-6">
@@ -1521,7 +1476,7 @@ export function HighConversionTemplate({
                     <span>Falar com Advogado Agora</span>
                     <ChevronRight size={18} />
                   </Button>
-                </motion.div>
+                </Reveal>
               </div>
             </div>
       </section>
@@ -1654,11 +1609,9 @@ function FaqItem({
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      transition={{ delay: index * 0.05 }}
+    <Reveal
+      from={{ opacity: 0, transform: "translateY(10px)" }}
+      delay={index * 0.05}
       className={`group rounded-[1.25rem] transition-all duration-300 ${
         isOpen
           ? "bg-white border-transparent shadow-2xl shadow-[#A89048]/10"
@@ -1691,12 +1644,12 @@ function FaqItem({
           <ChevronDown size={20} />
         </div>
       </button>
-      <motion.div
-        initial={false}
-        animate={{ height: isOpen ? "auto" : 0, opacity: isOpen ? 1 : 0 }}
-        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="overflow-hidden"
+      <div
+        className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-[400ms] ease-[cubic-bezier(0.22,1,0.36,1)] ${
+          isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+        }`}
       >
+        <div className="min-h-0 overflow-hidden">
         <div className="px-6 md:px-8 pb-8 pt-2">
           <div className="flex gap-4 md:gap-6">
             <div className="w-px bg-linear-to-b from-[#A89048] to-transparent ml-[15px] md:ml-[23px] shrink-0" />
@@ -1705,7 +1658,8 @@ function FaqItem({
             </p>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+        </div>
+      </div>
+    </Reveal>
   );
 }

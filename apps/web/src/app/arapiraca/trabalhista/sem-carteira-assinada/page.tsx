@@ -71,8 +71,8 @@ const vinculoContent: LPSpecificThemeContent = {
       "Se você tinha horário, recebia ordens, trabalhava com frequência e dependia daquele pagamento, pode existir vínculo de emprego mesmo sem carteira assinada.",
     ctaText: "Analisar meu vínculo no WhatsApp",
     ctaLink: "#",
-    backgroundImage: "/landing/reconhecimento-vinculo-hero.png",
-    mobileBackgroundImage: "/landing/sem_carteira_hero_bg.png",
+    backgroundImage: "/landing/reconhecimento-vinculo-hero.webp",
+    mobileBackgroundImage: "/landing/sem_carteira_hero_bg.webp",
   },
   problem: {
     title: "A empresa chamou de informal, mas a rotina parecia emprego?",

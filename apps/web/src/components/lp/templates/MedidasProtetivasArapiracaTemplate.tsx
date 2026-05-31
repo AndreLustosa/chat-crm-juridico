@@ -136,14 +136,28 @@ export function MedidasProtetivasArapiracaTemplate() {
   return (
     <div className="min-h-screen bg-[#080808] text-[#f7f3ea]">
       <section className="relative min-h-[94svh] overflow-hidden border-b border-[#a89048]/30">
-        <Image
-          src="/landing/medidas-protetivas-arapiraca-hero.png"
-          alt="Medidas protetivas em Arapiraca - orientação jurídica sigilosa"
-          fill
-          priority
-          sizes="100vw"
-          className="object-cover object-[68%_center]"
-        />
+        {/* Hero desktop (webp ~37KB) */}
+        <div className="hidden md:block absolute inset-0">
+          <Image
+            src="/landing/medidas-protetivas-arapiraca-hero.webp"
+            alt="Medidas protetivas em Arapiraca - orientação jurídica sigilosa"
+            fill
+            sizes="(min-width: 768px) 100vw, 0px"
+            className="object-cover object-[68%_center]"
+            loading="eager"
+          />
+        </div>
+        {/* Hero mobile (webp ~14KB, LCP) */}
+        <div className="md:hidden absolute inset-0">
+          <Image
+            src="/landing/medidas-protetivas-arapiraca-hero-mobile.webp"
+            alt="Medidas protetivas em Arapiraca - orientação jurídica sigilosa"
+            fill
+            priority
+            sizes="(max-width: 767px) 100vw, 0px"
+            className="object-cover object-[68%_center]"
+          />
+        </div>
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,5,5,0.98)_0%,rgba(8,8,8,0.88)_34%,rgba(8,8,8,0.38)_66%,rgba(8,8,8,0.18)_100%)]" />
         <div className="absolute inset-x-0 top-0 z-20">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 md:px-8">

@@ -132,14 +132,28 @@ export function CriminalArapiracaTemplate() {
   return (
     <div className="min-h-screen bg-[#080808] text-[#f7f3ea]">
       <section className="relative min-h-[92svh] overflow-hidden border-b border-[#a89048]/30">
-        <Image
-          src="/landing/criminal-hero-andre-lustosa.png"
-          alt="André Lustosa Advogados - Direito Criminal em Arapiraca"
-          fill
-          priority
-          sizes="100vw"
-          className="object-cover object-[64%_center]"
-        />
+        {/* Hero desktop (webp ~33KB) */}
+        <div className="hidden md:block absolute inset-0">
+          <Image
+            src="/landing/criminal-hero-andre-lustosa.webp"
+            alt="André Lustosa Advogados - Direito Criminal em Arapiraca"
+            fill
+            sizes="(min-width: 768px) 100vw, 0px"
+            className="object-cover object-[64%_center]"
+            loading="eager"
+          />
+        </div>
+        {/* Hero mobile (webp ~13KB, LCP) */}
+        <div className="md:hidden absolute inset-0">
+          <Image
+            src="/landing/criminal-hero-andre-lustosa-mobile.webp"
+            alt="André Lustosa Advogados - Direito Criminal em Arapiraca"
+            fill
+            priority
+            sizes="(max-width: 767px) 100vw, 0px"
+            className="object-cover object-[64%_center]"
+          />
+        </div>
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(5,5,5,0.96)_0%,rgba(8,8,8,0.82)_31%,rgba(8,8,8,0.28)_61%,rgba(8,8,8,0.2)_100%)]" />
         <div className="absolute inset-x-0 top-0 z-20">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 md:px-8">

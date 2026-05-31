@@ -84,9 +84,14 @@ export function RescisaoPorAcordoTemplate() {
         <section className="relative min-h-[94svh] overflow-hidden pt-24">
           <div className="absolute inset-0">
             <img
-              src="/landing/rescisao-por-acordo-hero.png"
+              src="/landing/rescisao-por-acordo-hero.webp"
+              srcSet="/landing/rescisao-por-acordo-hero-mobile.webp 800w, /landing/rescisao-por-acordo-hero.webp 1600w"
+              sizes="100vw"
               alt="Trabalhador negociando rescisão por acordo com documentos e carteira de trabalho"
               className="h-full w-full object-cover object-center opacity-85"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
             />
           </div>
           <div className="absolute inset-0 bg-linear-to-r from-black via-black/86 to-black/34" />
