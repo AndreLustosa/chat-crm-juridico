@@ -430,7 +430,7 @@ export function HighConversionTemplate({
         {/* Content Container - Senior Fluid Strategy */}
         <div className="mx-auto w-[90vw] lg:w-[min(90rem,80vw)] px-4 sm:px-6 lg:px-8 relative z-20 grid lg:grid-cols-12 gap-8 items-center h-full">
           {/* TEXT BLOCK (7 Cols) - Anchored to Bottom on Mobile */}
-          <div className="lg:col-span-7 xl:col-span-6 flex flex-col items-center lg:items-start text-center lg:text-left gap-4 animate-in fade-in slide-in-from-bottom duration-1000 max-w-[52rem] lg:mx-0 py-8 min-w-0 h-full justify-end pb-24 lg:pb-0 lg:justify-center">
+          <div className="lg:col-span-7 xl:col-span-6 flex flex-col items-center lg:items-start text-center lg:text-left gap-4 max-w-[52rem] lg:mx-0 py-8 min-w-0 h-full justify-end pb-24 lg:pb-0 lg:justify-center">
             {/* MOBILE ONLY: Trust Badges (Excelência & Segurança) positioned at the top */}
             <div className="flex lg:hidden flex-wrap justify-center gap-3 mb-6">
               <div className="flex items-center gap-2 bg-slate-900/40 backdrop-blur-xl border border-[#A89048]/30 rounded-lg px-4 py-2">
@@ -528,7 +528,7 @@ export function HighConversionTemplate({
           {/* IMAGE BLOCK (5 Cols) - Absolute on Mobile to allow text to slide down */}
           <div className="absolute inset-x-0 bottom-0 h-[70vh] lg:relative lg:h-full lg:col-span-5 xl:col-span-6 flex items-end justify-center lg:justify-end pointer-events-none z-10 lg:z-20">
             {/* Badge Competência - Desktop Only */}
-            <div className="hidden lg:flex absolute top-[25%] left-[5%] z-20 pointer-events-auto animate-in fade-in slide-in-from-left duration-1000 delay-500">
+            <div className="hidden lg:flex absolute top-[25%] left-[5%] z-20 pointer-events-auto">
               <div className="flex items-center gap-3 bg-slate-900/40 backdrop-blur-xl border border-[#A89048]/30 rounded-lg px-6 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-all duration-500 hover:scale-105 hover:border-[#A89048]/60 hover:shadow-[0_0_20px_rgba(168,144,72,0.2)] group cursor-default">
                 <div className="bg-[#A89048]/10 p-2 rounded-full">
                   <Scale size={18} className="text-[#A89048]" />
@@ -545,7 +545,7 @@ export function HighConversionTemplate({
             </div>
 
             {/* Badge Segurança - Desktop Only */}
-            <div className="hidden lg:flex absolute bottom-[25%] right-[5%] z-20 pointer-events-auto animate-in fade-in slide-in-from-right duration-1000 delay-700">
+            <div className="hidden lg:flex absolute bottom-[25%] right-[5%] z-20 pointer-events-auto">
               <div className="flex items-center gap-3 bg-slate-900/40 backdrop-blur-xl border border-[#A89048]/30 rounded-lg px-6 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.4)] transition-all duration-500 hover:scale-105 hover:border-[#A89048]/60 hover:shadow-[0_0_20px_rgba(168,144,72,0.2)] group cursor-default">
                 <div className="bg-[#A89048]/10 p-2 rounded-full">
                   <Shield size={18} className="text-[#A89048]" />
