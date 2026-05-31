@@ -963,6 +963,9 @@ export class TrafegoSyncExtendedService {
       this.logger.warn(`[sync] metricas de keyword indisponiveis: ${e?.message ?? e}`);
     }
 
+    // Instante do sync — keywords não revistas neste pull (removidas no Google)
+    // ficam com last_seen_at anterior e são "tombstoned" depois do loop.
+    const syncStart = new Date();
     let count = 0;
     for (const row of rows) {
       const googleAdGroupId = String(row.ad_group?.id);
@@ -1028,6 +1031,25 @@ export class TrafegoSyncExtendedService {
       });
       count++;
     }
+
+    // Tombstone (reconciliação de cache): keywords que sumiram do pull — ou seja,
+    // removidas/arquivadas no Google — não foram tocadas neste sync
+    // (last_seen_at < syncStart). Marca REMOVED pra não aparecerem mais como
+    // ENABLED no cache. Só roda se o pull trouxe dados (evita zerar num pull vazio).
+    if (rows.length > 0) {
+      const tomb = await this.prisma.trafficKeyword.updateMany({
+        where: {
+          account_id: accountId,
+          status: { not: 'REMOVED' },
+          last_seen_at: { lt: syncStart },
+        },
+        data: { status: 'REMOVED' },
+      });
+      if (tomb.count > 0) {
+        this.logger.log(`[sync] keywords tombstoned (sumiram do Google): ${tomb.count}`);
+      }
+    }
+
     return count;
   }
 
