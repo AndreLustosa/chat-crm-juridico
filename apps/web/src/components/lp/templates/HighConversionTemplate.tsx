@@ -71,7 +71,6 @@ export function HighConversionTemplate({
 }: HighConversionTemplateProps) {
   const { hero, steps = [], faq = [], footer, practiceAreas, sectionLabels } = content;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isShining, setIsShining] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -126,9 +125,9 @@ export function HighConversionTemplate({
       icon: <ShieldCheck size={48} />,
     },
     {
-      title: "Execução e Recebimento Garantido",
+      title: "Execução e Acompanhamento do Recebimento",
       description:
-        "Após a vitória, nossa força-tarefa atua na fase de execução para assegurar que o pagamento chegue à sua conta no menor tempo possível.",
+        "Após decisão favorável, nossa equipe atua na fase de execução acompanhando o processo para buscar o recebimento no menor tempo possível.",
       icon: <Award size={48} />,
     },
   ];
@@ -208,15 +207,18 @@ export function HighConversionTemplate({
 
   const displayFaq = faq.length > 5 ? faq : robustFaq;
 
-  // Toggle shine effect on scroll (for mobile engagement)
+  // Shine nos CTAs durante o scroll (engajamento mobile). Togglamos uma
+  // classe em <html> via classList — SEM setState — pra não re-renderizar
+  // o template inteiro a cada evento de scroll (ganho direto de INP/CPU).
   useEffect(() => {
+    const root = document.documentElement;
     const handleScroll = () => {
-      setIsShining(true);
+      root.classList.add("shine-on-scroll");
 
       if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
 
       scrollTimeoutRef.current = setTimeout(() => {
-        setIsShining(false);
+        root.classList.remove("shine-on-scroll");
       }, 1200); // Duration matches the CSS animation
     };
 
@@ -224,6 +226,7 @@ export function HighConversionTemplate({
     return () => {
       window.removeEventListener("scroll", handleScroll);
       if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      root.classList.remove("shine-on-scroll");
     };
   }, []);
 
@@ -402,9 +405,9 @@ export function HighConversionTemplate({
               src={hero.backgroundDesktop || "/landing/Design sem nome (35).webp"}
               alt="Fundo Escritório Desktop"
               fill
-              sizes="(max-width: 768px) 100vw, 100vw"
+              sizes="(min-width: 768px) 100vw, 0px"
               className="object-cover object-top"
-              priority
+              loading="eager"
             />
           </div>
           {/* Mobile Background */}
@@ -413,7 +416,7 @@ export function HighConversionTemplate({
               src={hero.backgroundMobile || hero.backgroundDesktop || "/landing/Design sem nome (26).webp"}
               alt="Fundo Escritório Mobile"
               fill
-              sizes="(max-width: 768px) 100vw, 100vw"
+              sizes="(max-width: 767px) 100vw, 0px"
               className="object-cover object-top"
               priority
             />
@@ -506,7 +509,7 @@ export function HighConversionTemplate({
                 <Button
                   onClick={handleCtaClick}
                   size="lg"
-                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] 2xl:text-[clamp(1.25rem,1.5vw,1.5rem)] px-10 py-6 2xl:py-8 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest w-full md:w-auto transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] 2xl:text-[clamp(1.25rem,1.5vw,1.5rem)] px-10 py-6 2xl:py-8 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest w-full md:w-auto transition-all duration-300`}
                 >
                   {/* Glow overlay — masked by rotating conic-gradient */}
                   <span className="btn-premium-glow-overlay" />
@@ -814,7 +817,7 @@ export function HighConversionTemplate({
             <Button
               onClick={handleCtaClick}
               size="lg"
-              className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-lg md:text-xl px-12 py-7 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest w-full md:w-auto transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+              className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-lg md:text-xl px-12 py-7 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest w-full md:w-auto transition-all duration-300`}
             >
               {/* Glow overlay — masked by rotating conic-gradient */}
               <span className="btn-premium-glow-overlay" />
@@ -894,7 +897,7 @@ export function HighConversionTemplate({
                   </h4>
                 </div>
                 <p className="text-slate-500 text-sm md:text-xs leading-loose md:leading-relaxed font-medium">
-                  Confiança de ter sua ação conduzida pelos melhores Advogados.
+                  Confiança de ter sua ação conduzida por advogados experientes.
                 </p>
               </div>
 
@@ -997,7 +1000,7 @@ export function HighConversionTemplate({
                       Foco em Resultados
                     </h4>
                     <p className="text-slate-500 text-base sm:text-xs leading-relaxed">
-                      Solução definitiva do seu caso.
+                      Atuação dedicada na busca pela resolução do seu caso.
                     </p>
                   </div>
                 </div>
@@ -1007,7 +1010,7 @@ export function HighConversionTemplate({
               <div className="pt-6 w-full flex justify-center lg:justify-start">
                 <Button
                   onClick={handleCtaClick}
-                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[12px] md:text-lg px-4 md:px-8 py-5 md:py-7 rounded-lg shadow-[0_30px_40px_rgba(168,144,72,0.1)] uppercase tracking-widest w-[85%] mx-auto sm:w-auto transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[12px] md:text-lg px-4 md:px-8 py-5 md:py-7 rounded-lg shadow-[0_30px_40px_rgba(168,144,72,0.1)] uppercase tracking-widest w-[85%] mx-auto sm:w-auto transition-all duration-300`}
                 >
                   {/* Glow overlay — masked by rotating conic-gradient */}
                   <span className="btn-premium-glow-overlay" />
@@ -1139,7 +1142,7 @@ export function HighConversionTemplate({
 
                 <Button
                   onClick={handleCtaClick}
-                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] px-6 py-4 md:px-8 md:py-8 rounded-xl md:rounded-2xl shadow-[0_20px_50px_rgba(168,144,72,0.15)] uppercase tracking-wider transition-all duration-300 w-[90%] mx-auto md:w-auto overflow-hidden text-center justify-center flex ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+                  className={`btn-premium bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] px-6 py-4 md:px-8 md:py-8 rounded-xl md:rounded-2xl shadow-[0_20px_50px_rgba(168,144,72,0.15)] uppercase tracking-wider transition-all duration-300 w-[90%] mx-auto md:w-auto overflow-hidden text-center justify-center flex`}
                 >
                   {/* Glow overlay — masked by rotating conic-gradient */}
                   <span className="btn-premium-glow-overlay" />

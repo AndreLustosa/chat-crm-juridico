@@ -136,7 +136,6 @@ export const metadata: Metadata = {
     "advogado imobiliário Arapiraca",
     "consulta jurídica Arapiraca",
     "advogado Arapiraca WhatsApp",
-    "melhor advogado Arapiraca",
     "André Lustosa Advogados",
     "escritório advocacia Alagoas",
     "advogado Agreste alagoano",

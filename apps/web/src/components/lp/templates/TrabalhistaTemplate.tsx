@@ -70,19 +70,23 @@ export function TrabalhistaTemplate({
   const { hero, faq = [], footer, practiceAreas = [] } = content;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
-  const [isShining, setIsShining] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    const root = document.documentElement;
     const handleScroll = () => {
-      setIsShining(true);
+      root.classList.add("shine-on-scroll");
       if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-      scrollTimeoutRef.current = setTimeout(() => setIsShining(false), 1200);
+      scrollTimeoutRef.current = setTimeout(
+        () => root.classList.remove("shine-on-scroll"),
+        1200,
+      );
     };
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", handleScroll);
       if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      root.classList.remove("shine-on-scroll");
     };
   }, []);
 
@@ -96,7 +100,7 @@ export function TrabalhistaTemplate({
   };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-[#FAFAFA] font-[family-name:var(--font-ubuntu)] overflow-x-hidden">
+    <div className="min-h-screen bg-[#0A0A0A] text-[#FAFAFA] font-[family-name:var(--font-neue-montreal)] overflow-x-hidden">
       {/* ═══════════════════════════════════════════════════════════ */}
       {/* NAVBAR — idêntico ao HighConversionTemplate */}
       {/* ═══════════════════════════════════════════════════════════ */}
@@ -636,10 +640,9 @@ export function TrabalhistaTemplate({
                   {/* The Image */}
                   <div className="relative z-10 aspect-[3/4] w-full">
                     <Image
-                      src="https://framerusercontent.com/images/JPKhS2hs5A6C1FbCO8XVVvGW5s.webp"
+                      src="/landing/advogado-andre-lustosa.webp"
                       alt="Dr. André Lustosa"
                       fill
-                      unoptimized
                       className="object-cover object-top transition-transform duration-700 group-hover:scale-105"
                       sizes="(max-width: 768px) 100vw, 500px"
                     />
@@ -724,7 +727,7 @@ export function TrabalhistaTemplate({
             <Button
               onClick={handleCtaClick}
               size="lg"
-              className={`btn-premium h-auto w-full max-w-[calc(100vw-2rem)] sm:w-auto bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] px-5 sm:px-12 py-5 sm:py-7 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest text-center !whitespace-normal transition-all duration-300 ${isShining ? "is-shining scale-105 shadow-xl" : ""}`}
+              className={`btn-premium h-auto w-full max-w-[calc(100vw-2rem)] sm:w-auto bg-linear-to-r from-[#e3c788] via-[#d4b568] to-[#c8aa62] text-slate-900 font-bold text-[clamp(0.9rem,1.2vw,1.25rem)] px-5 sm:px-12 py-5 sm:py-7 rounded-lg shadow-[0_72px_80px_rgba(168,144,72,0.14),0_30px_33px_rgba(168,144,72,0.1),0_16px_18px_rgba(168,144,72,0.08)] uppercase tracking-widest text-center !whitespace-normal transition-all duration-300`}
             >
               <span className="btn-premium-glow-overlay" />
               <span className="relative z-10 flex flex-wrap items-center justify-center gap-2 leading-tight">
