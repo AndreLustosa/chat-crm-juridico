@@ -30,6 +30,7 @@ export const MUTATE_JOBS = {
   CREATE_RSA: 'trafego-mutate-create-rsa',
   CREATE_SEARCH_CAMPAIGN: 'trafego-mutate-create-search-campaign',
   UPDATE_BIDDING_STRATEGY: 'trafego-mutate-update-bidding-strategy',
+  UPDATE_AI_MAX: 'trafego-mutate-update-ai-max',
   UPDATE_AD_SCHEDULE: 'trafego-mutate-update-ad-schedule',
   REMOVE_AD_GROUP: 'trafego-mutate-remove-ad-group',
   // Sprint 1 backlog (2026-05-17) — Conversion Actions, Ad Groups, RSAs
@@ -191,6 +192,12 @@ export type UpdateBiddingStrategyPayload = BaseMutatePayload & {
   targetCpaMicros?: bigint | string | null;
   /// Target ROAS multiplier (se TARGET_ROAS) — ex: 3.5
   targetRoas?: number | null;
+};
+
+export type UpdateAiMaxPayload = BaseMutatePayload & {
+  campaignResourceName: string;
+  /// Liga (true) / desliga (false) AI Max for Search na campanha
+  enabled: boolean;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -589,6 +596,8 @@ export class TrafegoMutateProcessor extends WorkerHost {
         return await this.createSearchCampaign(job.data);
       case MUTATE_JOBS.UPDATE_BIDDING_STRATEGY:
         return await this.updateBiddingStrategy(job.data);
+      case MUTATE_JOBS.UPDATE_AI_MAX:
+        return await this.updateAiMax(job.data);
       case MUTATE_JOBS.UPDATE_AD_SCHEDULE:
         return await this.updateAdSchedule(job.data);
       case MUTATE_JOBS.REMOVE_AD_GROUP:
@@ -1346,6 +1355,54 @@ export class TrafegoMutateProcessor extends WorkerHost {
             google_campaign_id: googleId,
           },
           data: { bidding_strategy: p.biddingStrategy },
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * AI Max for Search — liga/desliga via campaign.ai_max_setting.enable_ai_max.
+   *
+   * Campo NESTED: o auto-mask do SDK nao funciona em subfield aninhado (vira
+   * no-op silencioso). Por isso passamos updateMask EXPLICITO com o path
+   * completo 'ai_max_setting.enable_ai_max' (mesmo racional do
+   * updateBiddingStrategy / issue java#344).
+   *
+   * Confirmado na doc oficial (Google Ads API v21+, ago/2025): AiMaxSetting
+   * com campo enable_ai_max (boolean). AI Max e exclusivo de campanhas SEARCH.
+   * mutate.execute aplica audit-log + guards OAB + suporta validate_only (dry-run).
+   */
+  private async updateAiMax(p: UpdateAiMaxPayload): Promise<MutateResult> {
+    const op: any = {
+      resource_name: p.campaignResourceName,
+      ai_max_setting: { enable_ai_max: !!p.enabled },
+    };
+    const result = await this.mutate.execute({
+      tenantId: p.tenantId,
+      accountId: p.accountId,
+      resourceType: 'campaign',
+      operation: 'update',
+      initiator: p.initiator,
+      confidence: p.confidence ?? null,
+      validateOnly: !!p.validateOnly,
+      updateMask: ['ai_max_setting.enable_ai_max'],
+      context: {
+        ...p.context,
+        ai_max_enabled: !!p.enabled,
+      },
+      operations: [op],
+    });
+    if (result.status === 'SUCCESS' && !p.validateOnly) {
+      const googleId = this.extractIdFromResourceName(p.campaignResourceName);
+      if (googleId) {
+        await this.prisma.trafficCampaign.updateMany({
+          where: {
+            tenant_id: p.tenantId,
+            account_id: p.accountId,
+            google_campaign_id: googleId,
+          },
+          data: { ai_max_enabled: !!p.enabled },
         });
       }
     }

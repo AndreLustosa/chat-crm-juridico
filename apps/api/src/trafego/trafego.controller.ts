@@ -56,6 +56,7 @@ import {
   RemoveCampaignDto,
   UpdateAccountDto,
   UpdateBiddingStrategyDto,
+  UpdateAiMaxDto,
   UpdateBudgetDto,
   UpdateCampaignDto,
   UpdateCredentialsDto,
@@ -774,6 +775,38 @@ export class TrafegoController {
       warnings: validation.warnings,
       preview,
     };
+  }
+
+  /**
+   * AI Max for Search — estado atual (preenchido pelo sync de campanha via
+   * campaign.ai_max_setting.enable_ai_max). `available=false` quando a campanha
+   * nao e do tipo SEARCH (AI Max so vale pra Pesquisa).
+   */
+  @Get('campaigns/:id/ai-max')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async getAiMax(@Req() req: any, @Param('id') id: string) {
+    return this.service.getAiMaxSettings(req.user.tenant_id, id);
+  }
+
+  /**
+   * Liga/desliga AI Max for Search (campaign.ai_max_setting.enable_ai_max).
+   * Usa update_mask EXPLICITO no worker (auto-mask falha em campo nested) +
+   * audit-log + guards OAB. `validate_only: true` faz dry-run no Google sem
+   * aplicar. So faz sentido pra campanhas SEARCH.
+   */
+  @Post('campaigns/:id/ai-max')
+  @Roles('ADMIN', 'ADVOGADO')
+  async updateAiMax(
+    @Req() req: any,
+    @Param('id') campaignId: string,
+    @Body() dto: UpdateAiMaxDto,
+  ) {
+    return await this.enqueueMutate(req, 'trafego-mutate-update-ai-max', {
+      campaignId,
+      enabled: dto.enabled,
+      reason: dto.reason,
+      validate_only: dto.validate_only,
+    });
   }
 
   /** Pausa uma campanha no Google. */

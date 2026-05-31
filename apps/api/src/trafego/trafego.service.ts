@@ -1752,6 +1752,19 @@ export class TrafegoService {
           context: { ...base.context, campaign_id_local: camp.id },
         };
       }
+      case 'trafego-mutate-update-ai-max': {
+        const camp = await this.requireCampaign(tenantId, raw.campaignId);
+        return {
+          ...base,
+          campaignResourceName: `customers/${customerId}/campaigns/${camp.google_campaign_id}`,
+          enabled: !!raw.enabled,
+          context: {
+            ...base.context,
+            campaign_id_local: camp.id,
+            ai_max_enabled: !!raw.enabled,
+          },
+        };
+      }
       case 'trafego-mutate-update-budget': {
         const camp = await this.requireCampaign(tenantId, raw.campaignId);
         if (!camp.daily_budget_micros) {
@@ -2914,6 +2927,30 @@ export class TrafegoService {
     });
     if (!camp) throw new NotFoundException('Campanha nao encontrada');
     return camp;
+  }
+
+  /**
+   * AI Max for Search — leitura do estado atual (preenchido pelo sync de
+   * campanha via campaign.ai_max_setting.enable_ai_max). AI Max so se aplica
+   * a campanhas de Pesquisa (SEARCH); para outros tipos `available=false` e
+   * `ai_max_enabled` tende a vir null.
+   */
+  async getAiMaxSettings(tenantId: string, campaignId: string) {
+    const camp = await this.requireCampaign(tenantId, campaignId);
+    const isSearch = String(camp.channel_type ?? '').toUpperCase() === 'SEARCH';
+    return {
+      campaign_id: camp.id,
+      google_campaign_id: camp.google_campaign_id,
+      name: camp.name,
+      channel_type: camp.channel_type,
+      status: camp.status,
+      ai_max_enabled: (camp as any).ai_max_enabled ?? null,
+      available: isSearch,
+      reason: isSearch
+        ? null
+        : 'AI Max for Search só se aplica a campanhas do tipo Pesquisa (SEARCH).',
+      last_sync_at: (camp as any).last_seen_at ?? null,
+    };
   }
 
   /**

@@ -213,6 +213,15 @@ export class MutateBaseDto {
 }
 
 /**
+ * AI Max for Search — liga/desliga na campanha (campaign.ai_max_setting).
+ * Herda validate_only (dry-run) + reason (audit) do MutateBaseDto.
+ */
+export class UpdateAiMaxDto extends MutateBaseDto {
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+/**
  * Atualizacao de orcamento. Recebe valor em REAIS (BRL) e converte
  * pra micros internamente.
  */

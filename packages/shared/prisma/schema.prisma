@@ -2465,6 +2465,9 @@ model TrafficCampaign {
   budget_resource_name String?
   /// Estrategia de lance: "MAXIMIZE_CONVERSIONS" | "TARGET_CPA" | etc.
   bidding_strategy     String?
+  /// AI Max for Search ligado? (campaign.ai_max_setting.enable_ai_max).
+  /// null = campanha não-search / campo indisponível no último sync.
+  ai_max_enabled       Boolean?
   /// Datas da campanha (vindas da API)
   start_date           DateTime?
   end_date             DateTime?

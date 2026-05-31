@@ -616,6 +616,97 @@ function registerCampaignMutateTools(server: McpServer) {
   );
 
   server.registerTool(
+    'traffic_get_ai_max_settings',
+    {
+      description:
+        'Le o estado do AI Max for Search de uma campanha (campaign.ai_max_setting.enable_ai_max). ' +
+        'Retorna ai_max_enabled (true/false/null), available (false quando a campanha nao e do tipo SEARCH) ' +
+        'e last_sync_at. AI Max so se aplica a campanhas de Pesquisa. Somente leitura.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_get_ai_max_settings', async (toolCallId) => {
+        const data = await crmTrafficService.get<AnyRecord>(
+          `/trafego/campaigns/${encodeURIComponent(input.campaign_id)}/ai-max`,
+          undefined,
+          { toolCallId },
+        );
+        const estado =
+          data?.ai_max_enabled === true
+            ? 'LIGADO'
+            : data?.ai_max_enabled === false
+              ? 'DESLIGADO'
+              : 'desconhecido (rode um sync)';
+        const md = [
+          `**AI Max for Search** — ${data?.name ?? input.campaign_id}`,
+          `- Estado: ${estado}`,
+          `- Disponivel (campanha SEARCH): ${data?.available ? 'sim' : 'nao'}`,
+          data?.reason ? `- Obs: ${data.reason}` : null,
+          data?.last_sync_at ? `- Ultimo sync: ${data.last_sync_at}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n');
+        return ok(data, md);
+      }),
+  );
+
+  server.registerTool(
+    'traffic_update_ai_max_settings',
+    {
+      description:
+        'Liga ou desliga o AI Max for Search de uma campanha SEARCH (campaign.ai_max_setting.enable_ai_max). ' +
+        'EXIGE confirm=true para aplicar (salvaguarda) — muda como o Google expande as buscas da campanha. ' +
+        'Recomendado rodar ANTES com validate_only=true (dry-run valida no Google sem aplicar; nao exige confirm). ' +
+        'Vai pra fila de mutate do CRM com auditoria + update_mask EXPLICITO. ' +
+        'Use traffic_get_ai_max_settings antes pra conferir o estado atual e a elegibilidade.',
+      inputSchema: {
+        campaign_id: campaignIdSchema,
+        enabled: z.boolean().describe('true = liga AI Max; false = desliga'),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe('OBRIGATORIO para aplicar (true). Dispensavel apenas em validate_only=true.'),
+        reason: z.string().optional().describe('Motivo da mudanca (vai pro audit log)'),
+        validate_only: z
+          .boolean()
+          .optional()
+          .describe('Dry-run: valida no Google sem aplicar. Recomendado antes de aplicar de fato.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_update_ai_max_settings', async (toolCallId) => {
+        applyMutateGuards('traffic_update_ai_max_settings');
+        // confirm e obrigatorio para aplicar de fato; validate_only (dry-run)
+        // e permitido sem confirm pra o agente previsualizar com seguranca.
+        if (input.confirm !== true && input.validate_only !== true) {
+          return ok(
+            { ok: false, needs_confirm: true },
+            'Operacao exige confirm=true para aplicar (ou rode com validate_only=true pra um dry-run). Nada foi alterado.',
+          );
+        }
+        const result = await crmTrafficService.post(
+          `/trafego/campaigns/${encodeURIComponent(input.campaign_id)}/ai-max`,
+          {
+            enabled: input.enabled,
+            reason: input.reason,
+            validate_only: input.validate_only,
+          },
+          { toolCallId },
+        );
+        const verbo = input.enabled ? 'ativacao' : 'desativacao';
+        const sufixo = input.validate_only ? ' (dry-run — nada aplicado)' : '';
+        return ok(
+          result,
+          `AI Max: ${verbo} enfileirada para a campanha ${input.campaign_id}${sufixo}.`,
+        );
+      }),
+  );
+
+  server.registerTool(
     'traffic_remove_campaign',
     {
       description:

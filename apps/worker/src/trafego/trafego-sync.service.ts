@@ -334,6 +334,28 @@ export class TrafegoSyncService extends WorkerHost {
         campaignByGoogleId.set(googleCampaignId, upserted.id);
       }
 
+      // ─── 1b. AI Max for Search (campaign.ai_max_setting.enable_ai_max) ──
+      // Query ISOLADA + try/catch: se o campo nao estiver disponivel na conta
+      // ou versao da API, NAO derruba o sync de campanhas (degrada pra null).
+      try {
+        const aiMaxRows: any[] = await customer.query(`
+          SELECT campaign.id, campaign.ai_max_setting.enable_ai_max
+          FROM campaign
+          WHERE campaign.status != 'REMOVED'
+        `);
+        for (const r of aiMaxRows) {
+          const ourId = campaignByGoogleId.get(String(r.campaign?.id));
+          if (!ourId) continue;
+          const enabled = r.campaign?.ai_max_setting?.enable_ai_max;
+          await this.prisma.trafficCampaign.update({
+            where: { id: ourId },
+            data: { ai_max_enabled: typeof enabled === 'boolean' ? enabled : null },
+          });
+        }
+      } catch (e: any) {
+        this.logger.warn(`[sync] ai_max_setting indisponivel: ${e?.message ?? e}`);
+      }
+
       // ─── 2. Metricas diarias por campanha ──────────────────────────────
       const fromStr = dateFrom.toISOString().slice(0, 10); // YYYY-MM-DD
       const toStr = dateTo.toISOString().slice(0, 10);
