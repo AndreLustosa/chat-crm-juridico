@@ -1067,6 +1067,83 @@ export class SuggestGeoTargetsDto {
 }
 
 /**
+ * Planejador de palavras-chave (read-only). GenerateKeywordIdeas.
+ */
+export class KeywordIdeasDto {
+  /** Termos-semente (ex: ["advogado criminal arapiraca"]). */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  seeds?: string[];
+
+  /** URL de pagina pra extrair ideias (junto ou no lugar de seeds). */
+  @IsString()
+  @IsOptional()
+  url?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  geo_target_ids?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  geo_target_names?: string[];
+
+  @IsString()
+  @IsOptional()
+  language_id?: string;
+
+  @IsNumber()
+  @Min(1)
+  @Max(200)
+  @IsOptional()
+  limit?: number;
+}
+
+/**
+ * Previsao de performance (read-only). GenerateKeywordForecastMetrics.
+ * keywords: [{ text, match_type }]. O worker normaliza o shape.
+ */
+export class KeywordForecastDto {
+  @IsArray()
+  keywords!: Array<{ text: string; match_type: string }>;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  geo_target_ids?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  geo_target_names?: string[];
+
+  @IsString()
+  @IsOptional()
+  language_id?: string;
+
+  /** Lance maximo de CPC em BRL (default R$2). */
+  @IsNumber()
+  @IsOptional()
+  max_cpc_brl?: number;
+
+  /** Budget diario em BRL (opcional). */
+  @IsNumber()
+  @IsOptional()
+  daily_budget_brl?: number;
+
+  @IsString()
+  @IsOptional()
+  start_date?: string;
+
+  @IsString()
+  @IsOptional()
+  end_date?: string;
+}
+
+/**
  * Atualiza language targets. language_ids sao IDs numericos de
  * language_constants (ex: "1014" = portuguese, "1000" = english).
  */

@@ -1,5 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import { GoogleAdsApi, Customer, errors } from 'google-ads-api';
+import { GoogleAdsApi, Customer, errors, enums } from 'google-ads-api';
 import { PrismaService } from '../prisma/prisma.service';
 import { TrafegoCryptoService } from './trafego-crypto.service';
 import { TrafegoConfigService } from './trafego-config.service';
@@ -73,6 +73,166 @@ export class GoogleAdsClientService {
         };
       })
       .filter((x) => x.id);
+  }
+
+  /**
+   * Planejador de palavras-chave: KeywordPlanIdeaService.GenerateKeywordIdeas.
+   * Volume de busca, concorrencia e faixa de lance por ideia. Read-only.
+   * Seed por keywords e/ou url da pagina.
+   */
+  async generateKeywordIdeas(
+    customer: Customer,
+    opts: {
+      seeds?: string[];
+      url?: string;
+      geoTargetIds: string[];
+      languageId?: string;
+      limit?: number;
+    },
+  ): Promise<
+    Array<{
+      text: string;
+      avg_monthly_searches: number | null;
+      competition: string | null;
+      competition_index: number | null;
+      low_top_of_page_bid_brl: number | null;
+      high_top_of_page_bid_brl: number | null;
+    }>
+  > {
+    const customerId = (customer as any).credentials?.customer_id ?? '';
+    const request: any = {
+      customer_id: customerId,
+      language: `languageConstants/${opts.languageId || '1014'}`,
+      geo_target_constants: (opts.geoTargetIds ?? []).map(
+        (id) => `geoTargetConstants/${id}`,
+      ),
+      keyword_plan_network: enums.KeywordPlanNetwork.GOOGLE_SEARCH,
+      include_adult_keywords: false,
+      page_size: Math.min(Math.max(opts.limit ?? 50, 1), 200),
+    };
+    // oneof seed: keywords + url / so url / so keywords
+    if (opts.url && opts.seeds?.length) {
+      request.keyword_and_url_seed = { url: opts.url, keywords: opts.seeds };
+    } else if (opts.url) {
+      request.url_seed = { url: opts.url };
+    } else {
+      request.keyword_seed = { keywords: opts.seeds ?? [] };
+    }
+    const response: any =
+      await customer.keywordPlanIdeas.generateKeywordIdeas(request);
+    const results: any[] = response?.results ?? [];
+    const compMap: Record<number, string> = {
+      2: 'LOW',
+      3: 'MEDIUM',
+      4: 'HIGH',
+    };
+    const toBrl = (x: any) => (x != null ? Number(x) / 1_000_000 : null);
+    return results.map((r) => {
+      const m = r?.keyword_idea_metrics ?? {};
+      const comp = m.competition;
+      return {
+        text: r?.text ?? '',
+        avg_monthly_searches:
+          m.avg_monthly_searches != null
+            ? Number(m.avg_monthly_searches)
+            : null,
+        competition: typeof comp === 'string' ? comp : (compMap[comp] ?? null),
+        competition_index:
+          m.competition_index != null ? Number(m.competition_index) : null,
+        low_top_of_page_bid_brl: toBrl(m.low_top_of_page_bid_micros),
+        high_top_of_page_bid_brl: toBrl(m.high_top_of_page_bid_micros),
+      };
+    });
+  }
+
+  /**
+   * Previsao de performance: KeywordPlanIdeaService.GenerateKeywordForecastMetrics
+   * (forecast inline, sem criar KeywordPlan persistente). Estima
+   * impressoes/cliques/custo/conversoes pra um conjunto de keywords. Read-only.
+   * NB: a Google API NAO expoe o Performance Planner completo — so este forecast.
+   */
+  async generateKeywordForecast(
+    customer: Customer,
+    opts: {
+      keywords: Array<{ text: string; matchType: string }>;
+      geoTargetIds: string[];
+      languageId?: string;
+      maxCpcBrl?: number;
+      dailyBudgetBrl?: number;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<{
+    impressions: number | null;
+    clicks: number | null;
+    cost_brl: number | null;
+    ctr: number | null;
+    avg_cpc_brl: number | null;
+    conversions: number | null;
+    avg_cpa_brl: number | null;
+  }> {
+    const customerId = (customer as any).credentials?.customer_id ?? '';
+    const matchMap: Record<string, number> = {
+      EXACT: enums.KeywordMatchType.EXACT,
+      PHRASE: enums.KeywordMatchType.PHRASE,
+      BROAD: enums.KeywordMatchType.BROAD,
+    };
+    const request: any = {
+      customer_id: customerId,
+      currency_code: 'BRL',
+      campaign: {
+        language_constants: [`languageConstants/${opts.languageId || '1014'}`],
+        geo_modifiers: (opts.geoTargetIds ?? []).map((id) => ({
+          geo_target_constant: `geoTargetConstants/${id}`,
+        })),
+        keyword_plan_network: enums.KeywordPlanNetwork.GOOGLE_SEARCH,
+        bidding_strategy: {
+          manual_cpc_bidding_strategy: {
+            max_cpc_bid_micros:
+              opts.maxCpcBrl != null
+                ? Math.round(opts.maxCpcBrl * 1_000_000)
+                : 2_000_000,
+            ...(opts.dailyBudgetBrl != null
+              ? {
+                  daily_budget_micros: Math.round(
+                    opts.dailyBudgetBrl * 1_000_000,
+                  ),
+                }
+              : {}),
+          },
+        },
+        ad_groups: [
+          {
+            biddable_keywords: (opts.keywords ?? []).map((kw) => ({
+              keyword: {
+                text: kw.text,
+                match_type:
+                  matchMap[kw.matchType] ?? enums.KeywordMatchType.BROAD,
+              },
+            })),
+          },
+        ],
+      },
+    };
+    if (opts.startDate && opts.endDate) {
+      request.forecast_period = {
+        start_date: opts.startDate,
+        end_date: opts.endDate,
+      };
+    }
+    const response: any =
+      await customer.keywordPlanIdeas.generateKeywordForecastMetrics(request);
+    const m: any = response?.campaign_forecast_metrics ?? {};
+    const toBrl = (x: any) => (x != null ? Number(x) / 1_000_000 : null);
+    return {
+      impressions: m.impressions != null ? Number(m.impressions) : null,
+      clicks: m.clicks != null ? Number(m.clicks) : null,
+      cost_brl: toBrl(m.cost_micros),
+      ctr: m.click_through_rate != null ? Number(m.click_through_rate) : null,
+      avg_cpc_brl: toBrl(m.average_cpc_micros),
+      conversions: m.conversions != null ? Number(m.conversions) : null,
+      avg_cpa_brl: toBrl(m.average_cpa_micros),
+    };
   }
 
   async getCustomer(tenantId: string, accountId: string): Promise<Customer> {

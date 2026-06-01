@@ -33,7 +33,10 @@ export type ReadJobInput = {
     // BUG-F treatment (2026-05-18) — diagnostico Enhanced Conv
     | 'customer_settings'
     // Geo target por nome (2026-05-31) — SuggestGeoTargetConstants
-    | 'suggest_geo_targets';
+    | 'suggest_geo_targets'
+    // Keyword Planner + Forecast (2026-06-01)
+    | 'keyword_ideas'
+    | 'keyword_forecast';
   params: Record<string, any>;
 };
 
@@ -76,9 +79,69 @@ export class TrafegoReadProcessor extends WorkerHost {
           countryCode: params.country_code || undefined,
           locale: params.locale || undefined,
         });
+      case 'keyword_ideas': {
+        const geoTargetIds = await this.resolveGeoTargetIds(customer, params);
+        return await this.clientSvc.generateKeywordIdeas(customer, {
+          seeds: Array.isArray(params.seeds) ? params.seeds.map(String) : undefined,
+          url: params.url || undefined,
+          geoTargetIds,
+          languageId: params.language_id || undefined,
+          limit: params.limit,
+        });
+      }
+      case 'keyword_forecast': {
+        const geoTargetIds = await this.resolveGeoTargetIds(customer, params);
+        const keywords = (Array.isArray(params.keywords) ? params.keywords : []).map(
+          (k: any) => ({
+            text: String(k?.text ?? ''),
+            matchType: String(k?.match_type ?? k?.matchType ?? 'BROAD').toUpperCase(),
+          }),
+        );
+        return await this.clientSvc.generateKeywordForecast(customer, {
+          keywords,
+          geoTargetIds,
+          languageId: params.language_id || undefined,
+          maxCpcBrl: params.max_cpc_brl,
+          dailyBudgetBrl: params.daily_budget_brl,
+          startDate: params.start_date || undefined,
+          endDate: params.end_date || undefined,
+        });
+      }
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
+  }
+
+  /**
+   * Resolve geo pra keyword planner/forecast: merge geo_target_ids +
+   * geo_target_names (resolvidos via Suggest). Default Arapiraca-AL (1031439)
+   * se nada vier.
+   */
+  private async resolveGeoTargetIds(
+    customer: any,
+    params: Record<string, any>,
+  ): Promise<string[]> {
+    const ids: string[] = Array.isArray(params.geo_target_ids)
+      ? params.geo_target_ids.map(String)
+      : [];
+    if (
+      Array.isArray(params.geo_target_names) &&
+      params.geo_target_names.length
+    ) {
+      for (const nm of params.geo_target_names) {
+        try {
+          const sugg = await this.clientSvc.suggestGeoTargets(customer, {
+            query: String(nm),
+            countryCode: 'BR',
+          });
+          if (sugg[0]?.id) ids.push(sugg[0].id);
+        } catch {
+          // nome que nao resolveu: ignora
+        }
+      }
+    }
+    const unique = Array.from(new Set(ids));
+    return unique.length ? unique : ['1031439'];
   }
 
   /**

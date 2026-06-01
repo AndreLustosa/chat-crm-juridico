@@ -75,6 +75,8 @@ import {
   // Sprint 3
   UpdateGeoTargetsDto,
   SuggestGeoTargetsDto,
+  KeywordIdeasDto,
+  KeywordForecastDto,
   UpdateLanguageTargetsDto,
   UpdateDeviceTargetingDto,
   BulkAddNegativesDto,
@@ -1408,6 +1410,43 @@ export class TrafegoController {
     });
   }
 
+  /**
+   * Planejador de palavras-chave (read-only): volume de busca, concorrencia e
+   * faixa de lance. Acha termos de alto volume / baixa concorrencia em Arapiraca.
+   */
+  @Post('keyword-ideas')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async keywordIdeas(@Req() req: any, @Body() dto: KeywordIdeasDto) {
+    return await this.enqueueReadJob(req, 'keyword_ideas', {
+      seeds: dto.seeds,
+      url: dto.url,
+      geo_target_ids: dto.geo_target_ids,
+      geo_target_names: dto.geo_target_names,
+      language_id: dto.language_id,
+      limit: dto.limit,
+    });
+  }
+
+  /**
+   * Previsao de performance (read-only): estima cliques/custo/conversoes pra um
+   * conjunto de keywords antes de subir. (Equivalente viavel do Performance
+   * Planner via API — que nao expoe a ferramenta completa.)
+   */
+  @Post('keyword-forecast')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async keywordForecast(@Req() req: any, @Body() dto: KeywordForecastDto) {
+    return await this.enqueueReadJob(req, 'keyword_forecast', {
+      keywords: dto.keywords,
+      geo_target_ids: dto.geo_target_ids,
+      geo_target_names: dto.geo_target_names,
+      language_id: dto.language_id,
+      max_cpc_brl: dto.max_cpc_brl,
+      daily_budget_brl: dto.daily_budget_brl,
+      start_date: dto.start_date,
+      end_date: dto.end_date,
+    });
+  }
+
   @Post('campaigns/:id/geo-targets')
   @Roles('ADMIN', 'ADVOGADO')
   async updateGeoTargets(
@@ -1798,7 +1837,9 @@ export class TrafegoController {
       | 'pmax_asset_groups'
       | 'experiment_results'
       | 'customer_settings'
-      | 'suggest_geo_targets',
+      | 'suggest_geo_targets'
+      | 'keyword_ideas'
+      | 'keyword_forecast',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

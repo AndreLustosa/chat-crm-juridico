@@ -1456,6 +1456,120 @@ function registerCreationTools(server: McpServer) {
   );
 
   server.registerTool(
+    'traffic_keyword_ideas',
+    {
+      description:
+        'Planejador de palavras-chave (Google KeywordPlanIdeaService.GenerateKeywordIdeas): ' +
+        'volume de busca, concorrencia (LOW/MEDIUM/HIGH) e faixa de lance por ideia. Use pra ' +
+        'achar termos de ALTO volume e BAIXA concorrencia e expandir campanhas com dado (nao no ' +
+        'chute). Seed por palavras (seeds) e/ou pagina (url). Geo default Arapiraca. Somente leitura.',
+      inputSchema: {
+        seeds: z.array(z.string()).optional().describe('Termos-semente (ex: ["advogado criminal arapiraca"])'),
+        url: z.string().optional().describe('URL de pagina pra extrair ideias (junto ou no lugar de seeds)'),
+        geo_target_ids: z.array(z.string()).optional().describe('Codigos de geo (default Arapiraca "1031439")'),
+        geo_target_names: z.array(z.string()).optional().describe('Nomes (ex: ["Arapiraca, AL"]) — resolvidos via Suggest'),
+        language_id: z.string().optional().describe('ID de idioma (default "1014" = pt)'),
+        limit: z.number().int().min(1).max(200).optional().describe('Max de ideias (default 50)'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_keyword_ideas', async (toolCallId) => {
+        if (!input.seeds?.length && !input.url) {
+          throw new GuardRailError({
+            rule: 'requires_confirmation',
+            message: 'Informe seeds (palavras) e/ou url pra gerar ideias.',
+            details: { tool: 'traffic_keyword_ideas' },
+          });
+        }
+        const data = await crmTrafficService.post<AnyRecord[] | { data?: AnyRecord[] }>(
+          '/trafego/keyword-ideas',
+          {
+            seeds: input.seeds,
+            url: input.url,
+            geo_target_ids: input.geo_target_ids,
+            geo_target_names: input.geo_target_names,
+            language_id: input.language_id,
+            limit: input.limit,
+          },
+          { toolCallId },
+        );
+        const rows: AnyRecord[] = Array.isArray(data) ? data : ((data as any)?.data ?? []);
+        return ok(
+          rows,
+          markdownTable(
+            ['Keyword', 'Buscas/mes', 'Concorrencia', 'Indice', 'Lance baixo', 'Lance alto'],
+            rows
+              .slice(0, 50)
+              .map((r) => [
+                r.text ?? '-',
+                r.avg_monthly_searches ?? '-',
+                r.competition ?? '-',
+                r.competition_index ?? '-',
+                r.low_top_of_page_bid_brl != null ? money(r.low_top_of_page_bid_brl) : '-',
+                r.high_top_of_page_bid_brl != null ? money(r.high_top_of_page_bid_brl) : '-',
+              ]),
+          ) || 'Nenhuma ideia retornada para essa busca.',
+        );
+      }),
+  );
+
+  server.registerTool(
+    'traffic_keyword_forecast',
+    {
+      description:
+        'Previsao de performance (Google KeywordPlanIdeaService.GenerateKeywordForecastMetrics): ' +
+        'estima impressoes, cliques, custo, CTR, CPC medio e conversoes pra um conjunto de keywords ' +
+        'ANTES de subir — pra dimensionar budget. Geo default Arapiraca. Somente leitura. NB: a API ' +
+        'do Google NAO expoe o Performance Planner completo; este e o forecast equivalente disponivel.',
+      inputSchema: {
+        keywords: z
+          .array(
+            z.object({
+              text: z.string(),
+              match_type: z.enum(['EXACT', 'PHRASE', 'BROAD']).optional(),
+            }),
+          )
+          .min(1)
+          .describe('Keywords a prever (text + match_type; default BROAD)'),
+        geo_target_ids: z.array(z.string()).optional().describe('Codigos de geo (default Arapiraca "1031439")'),
+        geo_target_names: z.array(z.string()).optional().describe('Nomes (ex: ["Arapiraca, AL"]) — resolvidos via Suggest'),
+        language_id: z.string().optional().describe('ID de idioma (default "1014" = pt)'),
+        max_cpc_brl: z.number().positive().optional().describe('Lance maximo de CPC em BRL (default R$2)'),
+        daily_budget_brl: z.number().positive().optional().describe('Budget diario em BRL (opcional)'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_keyword_forecast', async (toolCallId) => {
+        const data = await crmTrafficService.post<AnyRecord>(
+          '/trafego/keyword-forecast',
+          {
+            keywords: input.keywords,
+            geo_target_ids: input.geo_target_ids,
+            geo_target_names: input.geo_target_names,
+            language_id: input.language_id,
+            max_cpc_brl: input.max_cpc_brl,
+            daily_budget_brl: input.daily_budget_brl,
+          },
+          { toolCallId },
+        );
+        const m: AnyRecord = (data as any) ?? {};
+        const md = [
+          '**Previsao (estimativa do Google)**',
+          `- Impressoes: ${m.impressions ?? '-'}`,
+          `- Cliques: ${m.clicks ?? '-'}`,
+          `- Custo: ${m.cost_brl != null ? money(m.cost_brl) : '-'}`,
+          `- CTR: ${m.ctr != null ? (Number(m.ctr) * 100).toFixed(2) + '%' : '-'}`,
+          `- CPC medio: ${m.avg_cpc_brl != null ? money(m.avg_cpc_brl) : '-'}`,
+          `- Conversoes: ${m.conversions != null ? Number(m.conversions).toFixed(1) : '-'}`,
+          `- CPA medio: ${m.avg_cpa_brl != null ? money(m.avg_cpa_brl) : '-'}`,
+        ].join('\n');
+        return ok(m, md);
+      }),
+  );
+
+  server.registerTool(
     'traffic_create_rsa',
     {
       description:
