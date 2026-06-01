@@ -2269,6 +2269,7 @@ function registerSprint3Tools(server: McpServer) {
         campaign_id: campaignIdSchema,
         add: z.array(z.string()).optional(),
         geo_target_names: z.array(z.string()).optional().describe('Nomes (ex: ["Arapiraca, AL"]) — resolvidos via Suggest e somados ao add, sem precisar do codigo numerico.'),
+        geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional().describe('PRESENCE = presenca apenas (aplica em campanha existente). Omitido = nao mexe no tipo atual.'),
         remove: z.array(z.string()).optional(),
         negative: z.boolean().optional(),
         reason: z.string().optional(),

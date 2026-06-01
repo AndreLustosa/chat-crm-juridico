@@ -1006,6 +1006,15 @@ export class UpdateGeoTargetsDto {
   @IsOptional()
   geo_target_names?: string[];
 
+  /**
+   * 'PRESENCE' = presenca apenas (so quem ESTA na localizacao). Aplica em
+   * campanha existente (setting de campanha). Omitido = nao mexe no tipo atual.
+   */
+  @IsString()
+  @IsIn(['PRESENCE', 'PRESENCE_OR_INTEREST'])
+  @IsOptional()
+  geo_target_type?: 'PRESENCE' | 'PRESENCE_OR_INTEREST';
+
   @IsArray()
   @IsString({ each: true })
   @IsOptional()

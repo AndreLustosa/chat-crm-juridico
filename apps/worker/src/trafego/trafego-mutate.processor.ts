@@ -445,6 +445,8 @@ export type UpdateGeoTargetsPayload = BaseMutatePayload & {
   /** campaign_criterion resource_names a remover (ex: customers/X/campaignCriteria/Y~Z). */
   removeResourceNames: string[];
   negative?: boolean;
+  /** 'PRESENCE' = presenca apenas (setting de campanha); 'PRESENCE_OR_INTEREST' = default. */
+  geoTargetTypeSetting?: 'PRESENCE' | 'PRESENCE_OR_INTEREST' | null;
 };
 
 export type UpdateLanguageTargetsPayload = BaseMutatePayload & {
@@ -2803,6 +2805,41 @@ export class TrafegoMutateProcessor extends WorkerHost {
   private async updateGeoTargets(
     p: UpdateGeoTargetsPayload,
   ): Promise<MutateResult> {
+    // Presence-only / presence-or-interest: e setting de CAMPANHA (nao de
+    // criterio). Campo nested -> update_mask EXPLICITO (auto-mask falha),
+    // mesmo racional do updateAiMax/updateBiddingStrategy.
+    let typeResult: MutateResult | null = null;
+    if (p.geoTargetTypeSetting) {
+      const isPresence = p.geoTargetTypeSetting === 'PRESENCE';
+      typeResult = await this.mutate.execute({
+        tenantId: p.tenantId,
+        accountId: p.accountId,
+        resourceType: 'campaign',
+        operation: 'update',
+        initiator: p.initiator,
+        confidence: p.confidence ?? null,
+        validateOnly: !!p.validateOnly,
+        updateMask: [
+          'geo_target_type_setting.positive_geo_target_type',
+          'geo_target_type_setting.negative_geo_target_type',
+        ],
+        context: { ...p.context, geo_target_type: p.geoTargetTypeSetting },
+        operations: [
+          {
+            resource_name: p.campaignResourceName,
+            geo_target_type_setting: {
+              positive_geo_target_type: isPresence
+                ? enums.PositiveGeoTargetType.PRESENCE
+                : enums.PositiveGeoTargetType.PRESENCE_OR_INTEREST,
+              negative_geo_target_type: isPresence
+                ? enums.NegativeGeoTargetType.PRESENCE
+                : enums.NegativeGeoTargetType.PRESENCE_OR_INTEREST,
+            },
+          },
+        ],
+      });
+    }
+
     // Pra ter add+remove na MESMA chamada precisamos de svc.mutateResources
     // (batch). Pra simplicidade, fazemos 2 chamadas: add primeiro (create),
     // depois remove. Audit log ganha 2 entradas distintas.
@@ -2819,6 +2856,11 @@ export class TrafegoMutateProcessor extends WorkerHost {
     }
     if (p.removeResourceNames.length > 0) {
       ops.push({ kind: 'remove', operations: p.removeResourceNames });
+    }
+    // So mudou o tipo (presence), sem add/remove de criterio: retorna o
+    // resultado do update de campanha.
+    if (ops.length === 0 && typeResult) {
+      return typeResult;
     }
     return await this.executeMultiOps(p, ops, 'campaign_criterion');
   }

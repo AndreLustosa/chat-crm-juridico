@@ -2433,6 +2433,7 @@ export class TrafegoService {
               : `geoTargetConstants/${id}`,
           ),
           geoTargetNames: raw.geo_target_names ?? [],
+          geoTargetTypeSetting: raw.geo_target_type ?? null,
           removeResourceNames: raw.remove ?? [],
           negative: !!raw.negative,
           context: {
