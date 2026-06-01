@@ -435,9 +435,9 @@ function registerHealthReadTools(server: McpServer) {
   server.registerTool(
     'traffic_list_alerts',
     {
-      description: 'Lista alertas internos do CRM (CPL alto, CTR baixo, falhas de sync). Filtros: status (OPEN, ACKED, RESOLVED), limit.',
+      description: 'Lista alertas internos do CRM (CPL alto, CTR baixo, falhas de sync). Filtros: status (OPEN, ACKNOWLEDGED, RESOLVED, MUTED), limit.',
       inputSchema: {
-        status: z.enum(['OPEN', 'ACKED', 'RESOLVED']).optional(),
+        status: z.enum(['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'MUTED']).optional(),
         limit: z.number().int().positive().max(200).optional(),
       },
       annotations: { readOnlyHint: true },
@@ -453,6 +453,36 @@ function registerHealthReadTools(server: McpServer) {
           ['Severidade', 'Tipo', 'Campanha', 'Mensagem', 'Status'],
           (alerts ?? []).map((a) => [a.severity ?? '-', a.alert_type ?? a.kind ?? '-', a.campaign?.name ?? a.campaign_id ?? '-', String(a.message ?? a.title ?? '-').slice(0, 80), a.status ?? '-']),
         ));
+      }),
+  );
+
+  server.registerTool(
+    'traffic_resolve_alert',
+    {
+      description:
+        'Muda o status de um alerta interno do CRM. Use pra LIMPAR alertas-fantasma ' +
+        '(NO_DATA, PAUSED_BUT_SPENDING etc.) que ja nao se aplicam — pegue o alert_id ' +
+        'em traffic_list_alerts. status: RESOLVED (default; some da lista de OPEN), ' +
+        'ACKNOWLEDGED (visto, mas mantem) ou MUTED (silencia). Acao interna do CRM ' +
+        '(nao mexe no Google Ads).',
+      inputSchema: {
+        alert_id: z.string().describe('ID do alerta (campo id de traffic_list_alerts)'),
+        status: z
+          .enum(['RESOLVED', 'ACKNOWLEDGED', 'MUTED'])
+          .optional()
+          .describe('Default RESOLVED'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_resolve_alert', async (toolCallId) => {
+        const status = input.status ?? 'RESOLVED';
+        const result = await crmTrafficService.patch(
+          `/trafego/alerts/${encodeURIComponent(input.alert_id)}`,
+          { status },
+          { toolCallId },
+        );
+        return ok(result, `Alerta ${input.alert_id} marcado como ${status}.`);
       }),
   );
 
