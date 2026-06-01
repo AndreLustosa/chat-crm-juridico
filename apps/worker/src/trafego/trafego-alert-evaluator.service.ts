@@ -489,6 +489,34 @@ export class TrafegoAlertEvaluatorService {
       );
     }
 
+    // ─── Auto-resolve stale ────────────────────────────────────────────
+    // O dedupe_key inclui o date_bucket DIARIO: uma condicao que persiste gera
+    // um alerta NOVO a cada dia, e o do dia anterior fica orfao OPEN pra sempre
+    // (foi o caso dos ~13 fantasmas NO_DATA/PAUSED_BUT_SPENDING do apagao de
+    // maio). Como esta avaliacao de HOJE ja rodou (chegou aqui) e havia
+    // campanhas no cache, e seguro resolver os OPEN de dias ANTERIORES — os que
+    // ainda valem ja foram recriados como alerta de hoje acima. Os de hoje
+    // (created_at >= today) sao preservados.
+    if (campaigns.length > 0) {
+      const stale = await this.prisma.trafficAlert.updateMany({
+        where: {
+          account_id: account.id,
+          status: 'OPEN',
+          created_at: { lt: today },
+        },
+        data: {
+          status: 'RESOLVED',
+          acknowledged_by: 'system:auto-resolve',
+          acknowledged_at: new Date(),
+        },
+      });
+      if (stale.count > 0) {
+        this.logger.log(
+          `[ALERT_EVAL] Conta ${account.id}: ${stale.count} alerta(s) stale auto-resolvido(s)`,
+        );
+      }
+    }
+
     return newAlertIds;
   }
 
