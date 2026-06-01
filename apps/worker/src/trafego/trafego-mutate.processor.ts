@@ -973,7 +973,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
       }
     }
 
-    return await this.mutate.execute({
+    const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'ad_group_criterion',
@@ -984,6 +984,16 @@ export class TrafegoMutateProcessor extends WorkerHost {
       context: p.context,
       operations,
     });
+
+    // Write-through: grava as keywords locais AO criar (sem esperar o sync).
+    if (
+      result.status === 'SUCCESS' &&
+      !p.validateOnly &&
+      result.resourceNames?.length
+    ) {
+      await this.mirrorNewKeywords(p, result.resourceNames);
+    }
+    return result;
   }
 
   /**
@@ -1975,7 +1985,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
       op.target_roas = p.targetRoas;
     }
 
-    return await this.mutate.execute({
+    const result = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
       resourceType: 'ad_group',
@@ -1986,6 +1996,16 @@ export class TrafegoMutateProcessor extends WorkerHost {
       context: p.context,
       operations: [op],
     });
+
+    // Write-through: grava o ad group local AO criar (sem esperar o sync).
+    if (
+      result.status === 'SUCCESS' &&
+      !p.validateOnly &&
+      result.resourceNames?.[0]
+    ) {
+      await this.mirrorNewAdGroup(p, result.resourceNames[0]);
+    }
+    return result;
   }
 
   /**
@@ -3339,6 +3359,129 @@ export class TrafegoMutateProcessor extends WorkerHost {
   private extractIdFromResourceName(rn: string): string | null {
     const parts = rn.split('/');
     return parts[parts.length - 1] || null;
+  }
+
+  /**
+   * Mirror local do ad group recem-criado (write-through). AWAITED no
+   * createAdGroup pra garantir read-after-write: create_rsa/add_keywords/enable
+   * resolvem o ad_group_id imediatamente, sem corrida com o sync async.
+   * try/catch: se o mirror falhar, o op no Google ja teve sucesso — cai no
+   * proximo sync (nao corrompe o MutateResult).
+   */
+  private async mirrorNewAdGroup(
+    p: CreateAdGroupPayload,
+    adGroupResourceName: string,
+  ): Promise<void> {
+    try {
+      const googleAdGroupId =
+        this.extractIdFromResourceName(adGroupResourceName);
+      const googleCampaignId = this.extractIdFromResourceName(
+        p.campaignResourceName,
+      );
+      if (!googleAdGroupId || !googleCampaignId) return;
+      const campaign = await this.prisma.trafficCampaign.findFirst({
+        where: { account_id: p.accountId, google_campaign_id: googleCampaignId },
+        select: { id: true },
+      });
+      if (!campaign) {
+        this.logger.warn(
+          `[mutate] mirror ad group: campanha local ${googleCampaignId} ausente — cai no sync`,
+        );
+        return;
+      }
+      const status = p.status === 'ENABLED' ? 'ENABLED' : 'PAUSED';
+      const type = p.type ?? 'SEARCH_STANDARD';
+      await this.prisma.trafficAdGroup.upsert({
+        where: {
+          campaign_id_google_ad_group_id: {
+            campaign_id: campaign.id,
+            google_ad_group_id: googleAdGroupId,
+          },
+        },
+        update: { name: p.name, status, type, last_seen_at: new Date() },
+        create: {
+          tenant_id: p.tenantId,
+          account_id: p.accountId,
+          campaign_id: campaign.id,
+          google_ad_group_id: googleAdGroupId,
+          name: p.name,
+          status,
+          type,
+        },
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `[mutate] mirror ad group falhou (segue via sync): ${e?.message ?? e}`,
+      );
+    }
+  }
+
+  /**
+   * Mirror local das keywords recem-criadas (write-through). Correlaciona
+   * resourceNames[i] com p.keywords[i] (a API retorna na mesma ordem das
+   * operations). AWAITED no addKeywords. Mesmo racional de fallback do
+   * mirrorNewAdGroup.
+   */
+  private async mirrorNewKeywords(
+    p: AddKeywordsPayload,
+    resourceNames: string[],
+  ): Promise<void> {
+    try {
+      const googleAdGroupId = this.extractIdFromResourceName(
+        p.adGroupResourceName,
+      );
+      if (!googleAdGroupId) return;
+      const adGroup = await this.prisma.trafficAdGroup.findFirst({
+        where: {
+          account_id: p.accountId,
+          google_ad_group_id: googleAdGroupId,
+        },
+        select: { id: true },
+      });
+      if (!adGroup) {
+        this.logger.warn(
+          `[mutate] mirror keywords: ad group local ${googleAdGroupId} ausente — cai no sync`,
+        );
+        return;
+      }
+      for (let i = 0; i < resourceNames.length; i++) {
+        const kw = p.keywords[i];
+        if (!kw) continue;
+        const last = this.extractIdFromResourceName(resourceNames[i]);
+        // resource_name de criterion: customers/X/adGroupCriteria/ADGRP~CRIT
+        const criterionId = last?.includes('~') ? last.split('~')[1] : last;
+        if (!criterionId) continue;
+        await this.prisma.trafficKeyword.upsert({
+          where: {
+            ad_group_id_google_criterion_id: {
+              ad_group_id: adGroup.id,
+              google_criterion_id: criterionId,
+            },
+          },
+          update: {
+            text: kw.text,
+            match_type: kw.matchType,
+            status: 'ENABLED',
+            negative: false,
+            last_seen_at: new Date(),
+          },
+          create: {
+            tenant_id: p.tenantId,
+            account_id: p.accountId,
+            ad_group_id: adGroup.id,
+            google_criterion_id: criterionId,
+            text: kw.text,
+            match_type: kw.matchType,
+            negative: false,
+            status: 'ENABLED',
+          },
+        });
+      }
+    } catch (e: any) {
+      this.logger.warn(
+        `[mutate] mirror keywords falhou (segue via sync): ${e?.message ?? e}`,
+      );
+    }
   }
 
   /**
