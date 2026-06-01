@@ -1403,7 +1403,7 @@ function registerCreationTools(server: McpServer) {
         ad_group_id: z.string(),
         headlines: z.array(z.string().min(1).max(30)).min(3).max(15).describe('3 a 15 headlines, max 30 chars cada'),
         descriptions: z.array(z.string().min(1).max(90)).min(2).max(4).describe('2 a 4 descriptions, max 90 chars cada'),
-        final_urls: z.array(z.string().url()).min(1).max(10),
+        final_url: z.string().url().describe('URL final (landing page) do anuncio — string unica, alinhada a API (CreateRsaDto.final_url) e a traffic_update_rsa'),
         path1: z.string().max(15).optional(),
         path2: z.string().max(15).optional(),
         validate_only: z.boolean().optional(),
@@ -1418,7 +1418,7 @@ function registerCreationTools(server: McpServer) {
           {
             headlines: input.headlines,
             descriptions: input.descriptions,
-            final_urls: input.final_urls,
+            final_url: input.final_url,
             path1: input.path1,
             path2: input.path2,
             validate_only: input.validate_only,
