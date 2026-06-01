@@ -225,12 +225,16 @@ export class GoogleAdsClientService {
         ],
       },
     };
-    if (opts.startDate && opts.endDate) {
-      request.forecast_period = {
-        start_date: opts.startDate,
-        end_date: opts.endDate,
-      };
-    }
+    // forecast_period e obrigatorio na pratica: sem ele (ou com data fora do
+    // formato) a API responde "[4] The string date's format should be
+    // yyyy-mm-dd". Default: proximos 30 dias, sempre em yyyy-mm-dd.
+    const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+    const nowDate = new Date();
+    const in30 = new Date(nowDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+    request.forecast_period = {
+      start_date: opts.startDate || fmtDate(nowDate),
+      end_date: opts.endDate || fmtDate(in30),
+    };
     let response: any;
     try {
       response =
