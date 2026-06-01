@@ -1441,6 +1441,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias/aviso-previo`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias/aviso-previo',
+        title: 'Arapiraca - Aviso Previo',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'aviso previo arapiraca',
+          'aviso previo trabalhado arapiraca',
+          'aviso previo indenizado arapiraca',
+          'desconto aviso previo pedido de demissao',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',

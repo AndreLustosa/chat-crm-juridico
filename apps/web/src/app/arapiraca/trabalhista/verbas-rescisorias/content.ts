@@ -123,6 +123,7 @@ export const rightPages = [
   },
   {
     title: "Aviso-prévio",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/aviso-previo",
     description:
       "Pode ser trabalhado, indenizado ou proporcional. A lei prevê acréscimo de 3 dias por ano de serviço, além dos 30 dias iniciais, até o limite legal.",
   },
