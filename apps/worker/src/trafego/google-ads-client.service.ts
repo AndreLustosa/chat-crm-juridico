@@ -118,9 +118,20 @@ export class GoogleAdsClientService {
     } else {
       request.keyword_seed = { keywords: opts.seeds ?? [] };
     }
-    const response: any =
-      await customer.keywordPlanIdeas.generateKeywordIdeas(request);
-    const results: any[] = response?.results ?? [];
+    let response: any;
+    try {
+      response = await customer.keywordPlanIdeas.generateKeywordIdeas(request);
+    } catch (e: any) {
+      // Surfaca o erro REAL do Google (acesso ao Planner restrito, request
+      // invalido, etc.) em vez de virar lista vazia silenciosa.
+      const f = this.formatError(e);
+      throw new Error(`GenerateKeywordIdeas falhou [${f.kind}]: ${f.message}`);
+    }
+    // O SDK pagina via gax: este metodo retorna o ARRAY de resultados DIRETO
+    // (nao um objeto { results }). Trata os dois shapes pra nao zerar a lista.
+    const results: any[] = Array.isArray(response)
+      ? response
+      : (response?.results ?? []);
     const compMap: Record<number, string> = {
       2: 'LOW',
       3: 'MEDIUM',
@@ -220,8 +231,17 @@ export class GoogleAdsClientService {
         end_date: opts.endDate,
       };
     }
-    const response: any =
-      await customer.keywordPlanIdeas.generateKeywordForecastMetrics(request);
+    let response: any;
+    try {
+      response =
+        await customer.keywordPlanIdeas.generateKeywordForecastMetrics(request);
+    } catch (e: any) {
+      // Surfaca o erro REAL do Google em vez de "500 null".
+      const f = this.formatError(e);
+      throw new Error(
+        `GenerateKeywordForecastMetrics falhou [${f.kind}]: ${f.message}`,
+      );
+    }
     const m: any = response?.campaign_forecast_metrics ?? {};
     const toBrl = (x: any) => (x != null ? Number(x) / 1_000_000 : null);
     return {

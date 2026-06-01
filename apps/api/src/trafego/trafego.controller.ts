@@ -1424,7 +1424,7 @@ export class TrafegoController {
       geo_target_names: dto.geo_target_names,
       language_id: dto.language_id,
       limit: dto.limit,
-    });
+    }, 60_000);
   }
 
   /**
@@ -1444,7 +1444,7 @@ export class TrafegoController {
       daily_budget_brl: dto.daily_budget_brl,
       start_date: dto.start_date,
       end_date: dto.end_date,
-    });
+    }, 60_000);
   }
 
   @Post('campaigns/:id/geo-targets')
@@ -1841,6 +1841,7 @@ export class TrafegoController {
       | 'keyword_ideas'
       | 'keyword_forecast',
     params: Record<string, any>,
+    timeoutMs = 30_000,
   ) {
     const tenantId = req.user.tenant_id;
     const account = await this.service.getAccount(tenantId);
@@ -1866,7 +1867,7 @@ export class TrafegoController {
       },
     );
     try {
-      const result = await job.waitUntilFinished(this.readQueueEvents, 30_000);
+      const result = await job.waitUntilFinished(this.readQueueEvents, timeoutMs);
       return result;
     } catch (e: any) {
       throw new HttpException(
