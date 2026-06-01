@@ -574,6 +574,7 @@ export class TrafegoSyncExtendedService {
     campaignByGoogleId: Map<string, string>,
     adGroupByGoogleId: Map<string, string>,
   ): Promise<number> {
+    const syncStart = new Date();
     const rows: any[] = await customer.query(`
       SELECT
         search_term_view.search_term,
@@ -702,6 +703,20 @@ export class TrafegoSyncExtendedService {
         },
       });
       count++;
+    }
+    // Reconciliacao de search_terms: o status aqui e ADDED/EXCLUDED/NONE (nao
+    // lifecycle), entao a limpeza dos termos que sumiram da janela — inclui os
+    // AI_MAX de feature ja desligada — e por PURGE via last_seen. Guard: so
+    // purga se o pull NAO truncou no LIMIT (senao apagaria termos validos alem
+    // do limite). last_seen e re-populado a cada sync, entao termo que volta
+    // e recriado.
+    if (rows.length > 0 && rows.length < 5000) {
+      await this.prisma.trafficSearchTerm.deleteMany({
+        where: {
+          account_id: accountId,
+          last_seen_at: { lt: syncStart },
+        },
+      });
     }
     return count;
   }
@@ -853,6 +868,7 @@ export class TrafegoSyncExtendedService {
     accountId: string,
     campaignByGoogleId: Map<string, string>,
   ): Promise<{ count: number; mapping: Map<string, string> }> {
+    const syncStart = new Date();
     const rows: any[] = await customer.query(`
       SELECT
         ad_group.id,
@@ -909,6 +925,19 @@ export class TrafegoSyncExtendedService {
       });
       mapping.set(googleId, upserted.id);
       count++;
+    }
+    // Tombstone: ad_groups nao vistos neste sync (last_seen < syncStart) viram
+    // REMOVED — senao um grupo removido no Google fica como ENABLED no cache.
+    // So roda se o pull trouxe dados (FROM ad_group sem LIMIT = pull completo).
+    if (rows.length > 0) {
+      await this.prisma.trafficAdGroup.updateMany({
+        where: {
+          account_id: accountId,
+          status: { not: 'REMOVED' },
+          last_seen_at: { lt: syncStart },
+        },
+        data: { status: 'REMOVED' },
+      });
     }
     return { count, mapping };
   }

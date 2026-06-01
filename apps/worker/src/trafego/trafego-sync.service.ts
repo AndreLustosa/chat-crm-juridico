@@ -334,6 +334,21 @@ export class TrafegoSyncService extends WorkerHost {
         campaignByGoogleId.set(googleCampaignId, upserted.id);
       }
 
+      // Tombstone: campanhas nao vistas neste sync viram REMOVED. Uma campanha
+      // removida no Google nao volta no FROM campaign WHERE status != 'REMOVED',
+      // entao sem isso ficaria como ENABLED no cache. startedAt = inicio do
+      // syncAccount (antes de qualquer upsert). So roda com pull nao-vazio.
+      if (campaignRows.length > 0) {
+        await this.prisma.trafficCampaign.updateMany({
+          where: {
+            account_id: account.id,
+            status: { not: 'REMOVED' },
+            last_seen_at: { lt: startedAt },
+          },
+          data: { status: 'REMOVED' },
+        });
+      }
+
       // ─── 1b. AI Max for Search (campaign.ai_max_setting.enable_ai_max) ──
       // Query ISOLADA + try/catch: se o campo nao estiver disponivel na conta
       // ou versao da API, NAO derruba o sync de campanhas (degrada pra null).
