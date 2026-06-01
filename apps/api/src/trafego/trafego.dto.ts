@@ -590,6 +590,14 @@ export class CreatePmaxCampaignDto {
   @IsOptional()
   initial_status?: 'ENABLED' | 'PAUSED';
 
+  /**
+   * Declaração de propaganda política da UE — OBRIGATÓRIO no create pela Google
+   * Ads API v23+. Default false (→ DOES_NOT_CONTAIN). Advocacia: sempre false.
+   */
+  @IsBoolean()
+  @IsOptional()
+  contains_eu_political_advertising?: boolean;
+
   @IsString()
   @IsOptional()
   reason?: string;
@@ -2001,6 +2009,14 @@ export class CreateSearchCampaignDto {
   @IsIn(['ENABLED', 'PAUSED'])
   @IsOptional()
   initial_status?: 'ENABLED' | 'PAUSED';
+
+  /**
+   * Declaração de propaganda política da UE — OBRIGATÓRIO no create pela Google
+   * Ads API v23+. Default false (→ DOES_NOT_CONTAIN). Advocacia: sempre false.
+   */
+  @IsBoolean()
+  @IsOptional()
+  contains_eu_political_advertising?: boolean;
 
   @IsString()
   @IsOptional()

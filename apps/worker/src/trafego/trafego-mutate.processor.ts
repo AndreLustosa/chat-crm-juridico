@@ -182,6 +182,10 @@ export type CreateSearchCampaignPayload = BaseMutatePayload & {
   finalUrl?: string;
   /// Status inicial — default 'PAUSED' por segurança (admin ativa depois)
   initialStatus?: 'ENABLED' | 'PAUSED';
+  /// Declaração de propaganda política da UE — OBRIGATÓRIO no create de Campaign
+  /// (Google Ads API v23+). false (default) → DOES_NOT_CONTAIN; true → CONTAINS.
+  /// Escritório de advocacia: sempre false.
+  containsEuPoliticalAdvertising?: boolean;
 };
 
 export type UpdateBiddingStrategyPayload = BaseMutatePayload & {
@@ -345,6 +349,9 @@ export type CreatePmaxCampaignPayload = BaseMutatePayload & {
   geoTargetIds: string[];
   languageIds: string[];
   initialStatus?: 'ENABLED' | 'PAUSED';
+  /// Declaração de propaganda política da UE — OBRIGATÓRIO no create (v23+).
+  /// false (default) → DOES_NOT_CONTAIN; true → CONTAINS. Advocacia: false.
+  containsEuPoliticalAdvertising?: boolean;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1099,6 +1106,20 @@ export class TrafegoMutateProcessor extends WorkerHost {
   }
 
   /**
+   * Declaração de propaganda política da UE (EU TTPA). OBRIGATÓRIO no create de
+   * Campaign desde a Google Ads API v23+: o validate_only NÃO acusa a ausência,
+   * mas o mutate real recusa com "field contains_eu_political_advertising
+   * REQUIRED". Default false → DOES_NOT_CONTAIN (advocacia não é propaganda
+   * política); o param opcional permite declarar CONTAINS se um dia precisar.
+   */
+  private euPoliticalAdStatus(contains?: boolean): number {
+    return contains
+      ? enums.EuPoliticalAdvertisingStatus.CONTAINS_EU_POLITICAL_ADVERTISING
+      : enums.EuPoliticalAdvertisingStatus
+          .DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING;
+  }
+
+  /**
    * Cria campanha Search do zero. Pipeline:
    *   1. Cria campaign_budget — pega resource_name retornado
    *   2. Cria campaign apontando pro budget
@@ -1177,6 +1198,12 @@ export class TrafegoMutateProcessor extends WorkerHost {
           ? enums.CampaignStatus.ENABLED
           : enums.CampaignStatus.PAUSED,
       campaign_budget: budgetResourceName,
+      // Propaganda política UE — OBRIGATÓRIO no create (Google Ads API v23+).
+      // Sem isso o mutate real falha com "field contains_eu_political_advertising
+      // REQUIRED" (o validate_only não acusa). Advocacia → DOES_NOT_CONTAIN.
+      contains_eu_political_advertising: this.euPoliticalAdStatus(
+        p.containsEuPoliticalAdvertising,
+      ),
       // Network: search apenas (sem search_partners e display) — Maioria
       // dos juridicos perde dinheiro em search partners e display network.
       network_settings: {
@@ -3182,6 +3209,11 @@ export class TrafegoMutateProcessor extends WorkerHost {
           ? enums.CampaignStatus.ENABLED
           : enums.CampaignStatus.PAUSED,
       campaign_budget: budgetResourceName,
+      // Propaganda política UE — OBRIGATÓRIO no create (Google Ads API v23+).
+      // Mesmo motivo do create de Search. Advocacia → DOES_NOT_CONTAIN.
+      contains_eu_political_advertising: this.euPoliticalAdStatus(
+        p.containsEuPoliticalAdvertising,
+      ),
       // Bidding — PMax suporta MAXIMIZE_CONVERSIONS e MAXIMIZE_CONVERSION_VALUE
       ...(p.biddingStrategy === 'MAXIMIZE_CONVERSIONS' && {
         maximize_conversions: p.targetCpaMicros

@@ -1895,6 +1895,9 @@ export class TrafegoService {
           languageIds: raw.language_ids ?? ['1014'], // Portuguese
           finalUrl: raw.final_url ?? null,
           initialStatus: raw.initial_status ?? 'PAUSED',
+          // Propaganda política UE — obrigatório no create (API v23+). Default
+          // false → DOES_NOT_CONTAIN no worker (advocacia não é política).
+          containsEuPoliticalAdvertising: !!raw.contains_eu_political_advertising,
           context: {
             ...base.context,
             campaign_name: raw.name,
@@ -2600,6 +2603,8 @@ export class TrafegoService {
           geoTargetIds: raw.geo_target_ids ?? ['1001775'],
           languageIds: raw.language_ids ?? ['1014'],
           initialStatus: raw.initial_status ?? 'PAUSED',
+          // Propaganda política UE — obrigatório no create (API v23+).
+          containsEuPoliticalAdvertising: !!raw.contains_eu_political_advertising,
           context: { ...base.context, channel_type: 'PERFORMANCE_MAX' },
         };
       }
