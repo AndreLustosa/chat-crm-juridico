@@ -32,6 +32,49 @@ export class GoogleAdsClientService {
    * Monta um Customer pronto pra fazer queries GAQL na conta-alvo
    * de um tenant. Lanca ServiceUnavailableException se faltar config.
    */
+  /**
+   * Resolve nomes de localizacao -> geo_target_constants via
+   * GeoTargetConstantService.SuggestGeoTargetConstants (Google Ads API v23).
+   * Usado pelo read job 'suggest_geo_targets' e pela resolucao de
+   * geo_target_names no create/update de campanha (gestor passa "Arapiraca"
+   * sem precisar saber o codigo numerico).
+   */
+  async suggestGeoTargets(
+    customer: Customer,
+    opts: { query: string; countryCode?: string; locale?: string },
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      canonical_name: string;
+      target_type: string;
+      country_code: string;
+      reach: string;
+    }>
+  > {
+    const request: any = {
+      locale: opts.locale || 'pt',
+      location_names: { names: [opts.query] },
+    };
+    if (opts.countryCode) request.country_code = opts.countryCode;
+    const response: any =
+      await customer.geoTargetConstants.suggestGeoTargetConstants(request);
+    const suggestions: any[] = response?.geo_target_constant_suggestions ?? [];
+    return suggestions
+      .map((s) => {
+        const g = s?.geo_target_constant ?? {};
+        return {
+          id: g.id != null ? String(g.id) : '',
+          name: g.name ?? '',
+          canonical_name: g.canonical_name ?? '',
+          target_type: g.target_type ?? '',
+          country_code: g.country_code ?? '',
+          reach: s?.reach != null ? String(s.reach) : '',
+        };
+      })
+      .filter((x) => x.id);
+  }
+
   async getCustomer(tenantId: string, accountId: string): Promise<Customer> {
     const account = await this.prisma.trafficAccount.findFirst({
       where: { id: accountId, tenant_id: tenantId },

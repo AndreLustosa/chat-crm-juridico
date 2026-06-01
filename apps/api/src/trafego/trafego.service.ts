@@ -1885,7 +1885,13 @@ export class TrafegoService {
           targetCpaMicros: raw.target_cpa_brl
             ? BigInt(Math.round(raw.target_cpa_brl * 1_000_000)).toString()
             : null,
-          geoTargetIds: raw.geo_target_ids ?? ['1001775'], // Brasil
+          // Se vier geo_target_names, NAO injeta o default Brasil — deixa o
+          // worker resolver os nomes (senao mirava Brasil + a cidade junto).
+          geoTargetIds:
+            raw.geo_target_ids ??
+            (raw.geo_target_names?.length ? [] : ['1001775']),
+          geoTargetNames: raw.geo_target_names ?? [],
+          geoTargetTypeSetting: raw.geo_target_type ?? null,
           languageIds: raw.language_ids ?? ['1014'], // Portuguese
           finalUrl: raw.final_url ?? null,
           initialStatus: raw.initial_status ?? 'PAUSED',
@@ -2426,6 +2432,7 @@ export class TrafegoService {
               ? id
               : `geoTargetConstants/${id}`,
           ),
+          geoTargetNames: raw.geo_target_names ?? [],
           removeResourceNames: raw.remove ?? [],
           negative: !!raw.negative,
           context: {

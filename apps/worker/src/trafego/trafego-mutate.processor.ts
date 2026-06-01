@@ -172,6 +172,12 @@ export type CreateSearchCampaignPayload = BaseMutatePayload & {
   geoTargetIds: string[];
   /// IDs numéricos de language_constants (ex: "1014" = portuguese)
   languageIds: string[];
+  /// Nomes de localizacao (ex: "Arapiraca, AL") resolvidos via
+  /// SuggestGeoTargetConstants antes de aplicar — merge com geoTargetIds.
+  geoTargetNames?: string[];
+  /// 'PRESENCE' = presenca apenas (positive+negative geo target type).
+  /// null/undefined = default do Google (PRESENCE_OR_INTEREST).
+  geoTargetTypeSetting?: 'PRESENCE' | null;
   /// Final URL alvo dos anúncios da campanha (opcional)
   finalUrl?: string;
   /// Status inicial — default 'PAUSED' por segurança (admin ativa depois)
@@ -1111,6 +1117,30 @@ export class TrafegoMutateProcessor extends WorkerHost {
         ? BigInt(p.dailyBudgetMicros)
         : p.dailyBudgetMicros;
 
+    // Resolve geo_target_names -> ids via Suggest e mescla com geoTargetIds,
+    // pra criar campanha mirando cidade pelo NOME (sem saber o codigo).
+    let geoIds = [...(p.geoTargetIds ?? [])];
+    if (p.geoTargetNames?.length) {
+      try {
+        const customer = await this.clientSvc.getCustomer(
+          p.tenantId,
+          p.accountId,
+        );
+        for (const nm of p.geoTargetNames) {
+          const sugg = await this.clientSvc.suggestGeoTargets(customer, {
+            query: nm,
+            countryCode: 'BR',
+          });
+          if (sugg[0]?.id) geoIds.push(sugg[0].id);
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `[mutate] resolve geo_target_names falhou: ${e?.message ?? e}`,
+        );
+      }
+    }
+    geoIds = Array.from(new Set(geoIds));
+
     // Passo 1: Cria budget (recurso temporário com nome ligado à campanha)
     const budgetTempName = `Budget — ${p.name}`;
     const budgetResult = await this.mutate.execute({
@@ -1174,6 +1204,15 @@ export class TrafegoMutateProcessor extends WorkerHost {
         }),
     };
 
+    // Presenca apenas (presence-only): mira so quem ESTA na localizacao, nao
+    // quem tem interesse. Default do Google e PRESENCE_OR_INTEREST.
+    if (p.geoTargetTypeSetting === 'PRESENCE') {
+      campaignOp.geo_target_type_setting = {
+        positive_geo_target_type: enums.PositiveGeoTargetType.PRESENCE,
+        negative_geo_target_type: enums.NegativeGeoTargetType.PRESENCE,
+      };
+    }
+
     const campaignResult = await this.mutate.execute({
       tenantId: p.tenantId,
       accountId: p.accountId,
@@ -1199,7 +1238,7 @@ export class TrafegoMutateProcessor extends WorkerHost {
 
     // Passo 3: Aplicar geo/language targeting via campaign_criterion
     const criterionOps: any[] = [];
-    for (const geoId of p.geoTargetIds) {
+    for (const geoId of geoIds) {
       criterionOps.push({
         campaign: campaignResourceName,
         location: { geo_target_constant: `geoTargetConstants/${geoId}` },

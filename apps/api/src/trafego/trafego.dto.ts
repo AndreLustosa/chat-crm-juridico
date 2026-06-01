@@ -997,6 +997,15 @@ export class GetExperimentResultsDto {
  * negative=true: adiciona como EXCLUSAO de geo (campanha NAO veicula la).
  */
 export class UpdateGeoTargetsDto {
+  /**
+   * Nomes de localizacao (ex: "Arapiraca, AL") — resolvidos via
+   * SuggestGeoTargetConstants e somados aos `add` (sem precisar do codigo).
+   */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  geo_target_names?: string[];
+
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
@@ -1019,6 +1028,25 @@ export class UpdateGeoTargetsDto {
   @IsBoolean()
   @IsOptional()
   validate_only?: boolean;
+}
+
+/**
+ * Resolve nomes de localizacao -> geo_target_constants (read-only).
+ * Usa GeoTargetConstantService.SuggestGeoTargetConstants.
+ */
+export class SuggestGeoTargetsDto {
+  @IsString()
+  query!: string;
+
+  /** ISO-2 (ex: "BR") — restringe sugestoes ao pais. */
+  @IsString()
+  @IsOptional()
+  country_code?: string;
+
+  /** Locale das sugestoes (ex: "pt"). Default "pt". */
+  @IsString()
+  @IsOptional()
+  locale?: string;
 }
 
 /**
@@ -1927,12 +1955,33 @@ export class CreateSearchCampaignDto {
    */
   @IsArray()
   @IsString({ each: true })
-  geo_target_ids!: string[];
+  @IsOptional()
+  geo_target_ids?: string[];
+
+  /**
+   * Nomes de localizacao (ex: "Arapiraca, AL") — o backend resolve via
+   * SuggestGeoTargetConstants antes de aplicar. Use no lugar de (ou junto a)
+   * geo_target_ids pra mirar uma cidade SEM saber o codigo numerico.
+   */
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  geo_target_names?: string[];
+
+  /**
+   * 'PRESENCE' = presenca apenas (so quem ESTA na localizacao). Omitido =
+   * default do Google (PRESENCE_OR_INTEREST).
+   */
+  @IsString()
+  @IsIn(['PRESENCE', 'PRESENCE_OR_INTEREST'])
+  @IsOptional()
+  geo_target_type?: 'PRESENCE' | 'PRESENCE_OR_INTEREST';
 
   /** IDs numéricos de language_constants. Default: ["1014"] (Portuguese). */
   @IsArray()
   @IsString({ each: true })
-  language_ids!: string[];
+  @IsOptional()
+  language_ids?: string[];
 
   @IsString()
   @IsOptional()

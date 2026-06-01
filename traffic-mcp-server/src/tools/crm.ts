@@ -1349,19 +1349,24 @@ function registerCreationTools(server: McpServer) {
         daily_budget_brl: z.number().positive(),
         bidding_strategy: z.enum(['MAXIMIZE_CONVERSIONS', 'TARGET_CPA', 'MAXIMIZE_CLICKS', 'TARGET_IMPRESSION_SHARE']),
         target_cpa_brl: z.number().positive().optional().describe('Obrigatorio se bidding_strategy=TARGET_CPA'),
-        geo_targets: z.array(z.string()).optional().describe('Codigos de geo target Google (ex: 1031793 para Maceio/AL)'),
-        language_codes: z.array(z.string()).optional().describe('Codigos de lingua (ex: 1014 = portugues)'),
-        confirm: z.boolean().optional().describe('Required — criacao de campanha exige confirmacao explicita'),
+        geo_target_ids: z.array(z.string()).optional().describe('Codigos numericos de geo target do Google (ex: "1031620"=Maceio/AL). Opcional se usar geo_target_names.'),
+        geo_target_names: z.array(z.string()).optional().describe('Nomes de localizacao (ex: ["Arapiraca, AL"]) — o backend resolve o codigo via Suggest. Mira a cidade SEM saber o codigo numerico.'),
+        geo_target_type: z.enum(['PRESENCE', 'PRESENCE_OR_INTEREST']).optional().describe('PRESENCE = presenca apenas (so quem ESTA na localizacao). Default Google = PRESENCE_OR_INTEREST.'),
+        language_ids: z.array(z.string()).optional().describe('IDs numericos de lingua (ex: "1014"=portugues). Default ["1014"].'),
+        validate_only: z.boolean().optional().describe('Dry-run: valida no Google sem criar nada.'),
+        confirm: z.boolean().optional().describe('Required pra criar de fato — criacao de campanha exige confirmacao explicita (dispensavel em validate_only).'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async (input) =>
       safe('traffic_create_search_campaign', async (toolCallId) => {
         applyMutateGuards('traffic_create_search_campaign');
-        if (!input.confirm) {
+        // validate_only (dry-run) dispensa confirm — permite previsualizar a
+        // criacao sem aplicar. Criar de fato exige confirm=true.
+        if (!input.confirm && !input.validate_only) {
           throw new GuardRailError({
             rule: 'requires_confirmation',
-            message: 'Criar campanha exige confirm=true. Re-envie com confirm=true se a configuracao estiver correta.',
+            message: 'Criar campanha exige confirm=true (ou validate_only=true pra um dry-run sem aplicar).',
             details: { tool: 'traffic_create_search_campaign' },
           });
         }
@@ -1385,12 +1390,65 @@ function registerCreationTools(server: McpServer) {
             daily_budget_brl: input.daily_budget_brl,
             bidding_strategy: input.bidding_strategy,
             target_cpa_brl: input.target_cpa_brl,
-            geo_targets: input.geo_targets,
-            language_codes: input.language_codes,
+            geo_target_ids: input.geo_target_ids,
+            geo_target_names: input.geo_target_names,
+            geo_target_type: input.geo_target_type,
+            language_ids: input.language_ids,
+            validate_only: input.validate_only,
           },
           { toolCallId },
         );
-        return ok(result, `Campanha "${input.name}" enfileirada (PAUSED). Use traffic_enable_campaign apos revisar.`);
+        const sufixo = input.validate_only ? ' (dry-run — nada criado)' : ' (PAUSED). Use traffic_enable_campaign apos revisar.';
+        return ok(result, `Campanha "${input.name}" enfileirada${sufixo}`);
+      }),
+  );
+
+  server.registerTool(
+    'traffic_suggest_geo_targets',
+    {
+      description:
+        'Resolve nomes de localizacao -> codigos de geo target do Google ' +
+        '(GeoTargetConstantService.SuggestGeoTargetConstants). Use pra achar o ' +
+        'codigo de uma cidade pelo NOME e usar em traffic_create_search_campaign / ' +
+        'traffic_update_geo_targets. Ex: query "Arapiraca" -> id + canonical_name ' +
+        '"Arapiraca, Alagoas, Brazil" + target_type "City". Somente leitura. ' +
+        '(Alternativa: passar geo_target_names direto naquelas tools — o backend resolve.)',
+      inputSchema: {
+        query: z.string().min(2).describe('Nome da localizacao (ex: "Arapiraca")'),
+        country_code: z.string().optional().describe('ISO-2 pra restringir as sugestoes (ex: "BR")'),
+        locale: z.string().optional().describe('Locale das sugestoes (ex: "pt"). Default "pt".'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) =>
+      safe('traffic_suggest_geo_targets', async (toolCallId) => {
+        const data = await crmTrafficService.post<AnyRecord[] | { data?: AnyRecord[] }>(
+          '/trafego/geo-targets/suggest',
+          {
+            query: input.query,
+            country_code: input.country_code,
+            locale: input.locale,
+          },
+          { toolCallId },
+        );
+        const rows: AnyRecord[] = Array.isArray(data)
+          ? data
+          : ((data as any)?.data ?? []);
+        return ok(
+          rows,
+          markdownTable(
+            ['ID', 'Nome canonico', 'Tipo', 'Pais', 'Alcance'],
+            rows
+              .slice(0, 20)
+              .map((r) => [
+                r.id ?? '-',
+                r.canonical_name ?? r.name ?? '-',
+                r.target_type ?? '-',
+                r.country_code ?? '-',
+                r.reach ?? '-',
+              ]),
+          ) || 'Nenhuma sugestao encontrada para essa busca.',
+        );
       }),
   );
 
@@ -2210,6 +2268,7 @@ function registerSprint3Tools(server: McpServer) {
       inputSchema: {
         campaign_id: campaignIdSchema,
         add: z.array(z.string()).optional(),
+        geo_target_names: z.array(z.string()).optional().describe('Nomes (ex: ["Arapiraca, AL"]) — resolvidos via Suggest e somados ao add, sem precisar do codigo numerico.'),
         remove: z.array(z.string()).optional(),
         negative: z.boolean().optional(),
         reason: z.string().optional(),

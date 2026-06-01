@@ -74,6 +74,7 @@ import {
   RemoveExtensionDto,
   // Sprint 3
   UpdateGeoTargetsDto,
+  SuggestGeoTargetsDto,
   UpdateLanguageTargetsDto,
   UpdateDeviceTargetingDto,
   BulkAddNegativesDto,
@@ -1391,6 +1392,22 @@ export class TrafegoController {
   // Sprint 3 backlog (2026-05-17) — Targeting + Bulk
   // ═══════════════════════════════════════════════════════════════════════
 
+  /**
+   * Resolve nomes de localizacao -> geo_target_constants (read-only via
+   * SuggestGeoTargetConstants). Ex: query "Arapiraca" -> { id, canonical_name:
+   * "Arapiraca, Alagoas, Brazil", target_type: "City" }. Permite mirar cidade
+   * sem saber o codigo numerico do Google.
+   */
+  @Post('geo-targets/suggest')
+  @Roles('ADMIN', 'ADVOGADO', 'OPERADOR')
+  async suggestGeoTargets(@Req() req: any, @Body() dto: SuggestGeoTargetsDto) {
+    return await this.enqueueReadJob(req, 'suggest_geo_targets', {
+      query: dto.query,
+      country_code: dto.country_code,
+      locale: dto.locale,
+    });
+  }
+
   @Post('campaigns/:id/geo-targets')
   @Roles('ADMIN', 'ADVOGADO')
   async updateGeoTargets(
@@ -1780,7 +1797,8 @@ export class TrafegoController {
       | 'shared_negative_lists'
       | 'pmax_asset_groups'
       | 'experiment_results'
-      | 'customer_settings',
+      | 'customer_settings'
+      | 'suggest_geo_targets',
     params: Record<string, any>,
   ) {
     const tenantId = req.user.tenant_id;

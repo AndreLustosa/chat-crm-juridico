@@ -31,7 +31,9 @@ export type ReadJobInput = {
     // Sprint 4.2 — Experiment results comparativas
     | 'experiment_results'
     // BUG-F treatment (2026-05-18) — diagnostico Enhanced Conv
-    | 'customer_settings';
+    | 'customer_settings'
+    // Geo target por nome (2026-05-31) — SuggestGeoTargetConstants
+    | 'suggest_geo_targets';
   params: Record<string, any>;
 };
 
@@ -68,6 +70,12 @@ export class TrafegoReadProcessor extends WorkerHost {
         return await this.experimentResults(customer, params as any);
       case 'customer_settings':
         return await this.customerSettings(customer);
+      case 'suggest_geo_targets':
+        return await this.clientSvc.suggestGeoTargets(customer, {
+          query: String(params.query ?? ''),
+          countryCode: params.country_code || undefined,
+          locale: params.locale || undefined,
+        });
       default:
         throw new Error(`[trafego-read] kind desconhecido: ${kind}`);
     }
