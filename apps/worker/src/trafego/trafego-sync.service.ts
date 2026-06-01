@@ -499,9 +499,26 @@ export class TrafegoSyncService extends WorkerHost {
           formatted.message && formatted.message !== 'sem msg'
             ? formatted.message
             : safeStringifyError(auctionErr);
-        const msg = `auction insights indisponivel [${formatted.kind}]: ${fallback}`;
-        this.logger.warn(`[TRAFEGO_SYNC] ${msg}`);
-        extendedErrors.push(msg);
+        // Caso ESPERADO e permanente: o developer token nao tem acesso as
+        // metricas auction_insight_* (requer nivel de acesso especifico na
+        // Google Ads API). Isso NAO e falha de sync — as campanhas/ad groups/
+        // keywords sincronizam normalmente. Tratamos como skip benigno: loga
+        // mas NAO empurra pra extendedErrors (entao o sync fica SUCCESS, sem
+        // marcar PARTIAL a cada rodada). Se o acesso for concedido depois, a
+        // query passa a funcionar e popula os dados automaticamente.
+        const isMetricsAccessLimitation =
+          /access to metrics|not authorized to access|insufficient permission/i.test(
+            fallback,
+          );
+        if (isMetricsAccessLimitation) {
+          this.logger.log(
+            `[TRAFEGO_SYNC] Auction Insights indisponivel (token sem acesso as metricas auction_insight — esperado; sync segue SUCCESS)`,
+          );
+        } else {
+          const msg = `auction insights indisponivel [${formatted.kind}]: ${fallback}`;
+          this.logger.warn(`[TRAFEGO_SYNC] ${msg}`);
+          extendedErrors.push(msg);
+        }
       }
 
       try {
