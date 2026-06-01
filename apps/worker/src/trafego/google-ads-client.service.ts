@@ -229,11 +229,14 @@ export class GoogleAdsClientService {
     // formato) a API responde "[4] The string date's format should be
     // yyyy-mm-dd". Default: proximos 30 dias, sempre em yyyy-mm-dd.
     const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
-    const nowDate = new Date();
-    const in30 = new Date(nowDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const dayMs = 24 * 60 * 60 * 1000;
+    // start deve ser FUTURO (amanha) — start=hoje costuma ser rejeitado como
+    // "passado". Janela de 30 dias.
+    const startD = new Date(Date.now() + dayMs);
+    const endD = new Date(Date.now() + 31 * dayMs);
     request.forecast_period = {
-      start_date: opts.startDate || fmtDate(nowDate),
-      end_date: opts.endDate || fmtDate(in30),
+      start_date: opts.startDate || fmtDate(startD),
+      end_date: opts.endDate || fmtDate(endD),
     };
     let response: any;
     try {
@@ -832,7 +835,13 @@ export class GoogleAdsClientService {
     if (error instanceof errors.GoogleAdsFailure) {
       const all = (error.errors ?? []).map((e: any) => {
         const code = e?.error_code ? Object.values(e.error_code)[0] : '';
-        return `[${code}] ${e?.message ?? 'sem msg'}`;
+        // field_path_elements nomeia o campo EXATO que falhou — essencial pra
+        // diagnosticar "[3] invalid value" sem chutar qual campo.
+        const path = (e?.location?.field_path_elements ?? [])
+          .map((fp: any) => fp?.field_name)
+          .filter(Boolean)
+          .join('.');
+        return `[${code}] ${e?.message ?? 'sem msg'}${path ? ` @ ${path}` : ''}`;
       });
       return {
         kind: 'GoogleAdsFailure',
