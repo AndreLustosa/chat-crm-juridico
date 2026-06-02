@@ -145,6 +145,7 @@ export const rightPages = [
   },
   {
     title: "Seguro-desemprego",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/seguro-desemprego",
     description:
       "Avaliação de requisitos, prazo de solicitação, quantidade de parcelas e valores conforme faixas vigentes.",
   },

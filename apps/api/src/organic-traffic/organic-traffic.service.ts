@@ -1469,6 +1469,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias/seguro-desemprego`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias/seguro-desemprego',
+        title: 'Arapiraca - Seguro Desemprego',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'seguro desemprego arapiraca',
+          'seguro desemprego negado arapiraca',
+          'guia seguro desemprego arapiraca',
+          'advogado seguro desemprego arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',

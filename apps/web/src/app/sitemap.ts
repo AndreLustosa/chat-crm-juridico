@@ -78,6 +78,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.88,
     },
     {
+      url: `${baseUrl}/arapiraca/trabalhista/verbas-rescisorias/seguro-desemprego`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.88,
+    },
+    {
       url: `${baseUrl}/arapiraca/criminal`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
