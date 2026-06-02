@@ -154,6 +154,7 @@ export const rightPages = [
 export const forgottenRights = [
   {
     title: "Multa do art. 477 da CLT",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/multa-art-477",
     description:
       "Pode ser discutida quando a empresa não paga a rescisão ou não entrega os documentos no prazo legal.",
   },

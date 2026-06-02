@@ -84,6 +84,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.88,
     },
     {
+      url: `${baseUrl}/arapiraca/trabalhista/verbas-rescisorias/multa-art-477`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.88,
+    },
+    {
       url: `${baseUrl}/arapiraca/criminal`,
       lastModified: new Date(),
       changeFrequency: 'monthly',

@@ -1483,6 +1483,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias/multa-art-477`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias/multa-art-477',
+        title: 'Arapiraca - Multa Art 477',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'multa art 477 arapiraca',
+          'rescisao atrasada arapiraca',
+          'empresa nao pagou rescisao arapiraca',
+          'prazo pagamento rescisao 10 dias',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',

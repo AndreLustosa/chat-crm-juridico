@@ -297,6 +297,15 @@ export function VerbasRescisoriasTemplate() {
                   <p className="mt-3 text-sm leading-relaxed text-slate-300">
                     {item.description}
                   </p>
+                  {"href" in item && item.href ? (
+                    <a
+                      href={item.href}
+                      className="mt-5 inline-flex items-center gap-2 rounded-lg border border-[#b8944d]/35 px-4 py-3 text-xs font-black uppercase tracking-wide text-[#d8bd79] transition hover:border-[#d8bd79] hover:bg-[#b8944d]/10"
+                    >
+                      Ver detalhes
+                      <ArrowRight size={15} />
+                    </a>
+                  ) : null}
                 </div>
               ))}
             </div>
