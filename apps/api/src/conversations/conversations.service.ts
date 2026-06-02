@@ -551,14 +551,19 @@ export class ConversationsService {
     }));
   }
 
-  async requestTransfer(id: string, toUserId: string, fromUserId: string, reason: string | null, audioIds?: string[]) {
+  async requestTransfer(id: string, toUserId: string, fromUserId: string, reason: string | null, audioIds?: string[], isAdmin = false) {
     // Transação atômica: verificar ownership + atualizar em uma só operação
     const { fromUser, conv } = await this.prisma.$transaction(async (tx) => {
       const existing = await (tx as any).conversation.findUnique({
         where: { id },
         select: { assigned_user_id: true, pending_transfer_to_id: true, tenant_id: true },
       });
-      if (!existing || existing.assigned_user_id !== fromUserId) {
+      if (!existing) {
+        throw new NotFoundException('Conversa não encontrada.');
+      }
+      // Admin/super-admin transfere conversa de QUALQUER operador; operador
+      // comum só as atribuídas a ele (assigned_user_id === fromUserId).
+      if (!isAdmin && existing.assigned_user_id !== fromUserId) {
         throw new ForbiddenException('Você só pode transferir conversas atribuídas a você.');
       }
       if (existing.pending_transfer_to_id) {

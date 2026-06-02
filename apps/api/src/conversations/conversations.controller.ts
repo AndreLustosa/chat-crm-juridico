@@ -89,7 +89,19 @@ export class ConversationsController {
     @Body() body: TransferRequestDto,
     @Request() req: any,
   ) {
-    return this.conversationsService.requestTransfer(id, body.toUserId, req.user.id, body.reason || null, body.audioIds);
+    // ADMIN / SUPER_ADMIN podem transferir conversa de QUALQUER operador;
+    // operador comum só as atribuídas a ele.
+    const isAdmin = (req.user?.roles ?? []).some(
+      (r: string) => r === 'ADMIN' || r === 'SUPER_ADMIN',
+    );
+    return this.conversationsService.requestTransfer(
+      id,
+      body.toUserId,
+      req.user.id,
+      body.reason || null,
+      body.audioIds,
+      isAdmin,
+    );
   }
 
   @Patch(':id/transfer-accept')
