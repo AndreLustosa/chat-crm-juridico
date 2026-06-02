@@ -11,6 +11,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MessagesModule } from './messages/messages.module';
 import { GatewayModule } from './gateway/gateway.module';
+import { PresenceModule } from './presence/presence.module';
 import { TasksModule } from './tasks/tasks.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { SettingsModule } from './settings/settings.module';
@@ -111,6 +112,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     WebhooksModule,
     MessagesModule,
     GatewayModule,
+    PresenceModule,
     TasksModule,
     WhatsappModule,
     SettingsModule,

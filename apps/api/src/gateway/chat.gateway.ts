@@ -64,6 +64,7 @@ export class ChatGateway {
       // Broadcast: usuário ficou online
       this.server?.emit('user_presence', { userId, online: true });
       this.logger.log(`[PRESENCE] User ${userId} ONLINE (${this.onlineUsers.get(userId)!.size} tab(s))`);
+      void this.logConnection(userId, 'CONNECT');
       // Atribuir conversas pendentes que a IA estava atendendo (fire-and-forget)
       this.assignPendingConversations(userId).catch(e =>
         this.logger.warn(`[PRESENCE] Falha ao atribuir pendentes para ${userId}: ${e.message}`),
@@ -137,7 +138,29 @@ export class ChatGateway {
         // Broadcast: usuário ficou offline
         this.server?.emit('user_presence', { userId, online: false });
         this.logger.log(`[PRESENCE] User ${userId} OFFLINE`);
+        void this.logConnection(userId, 'DISCONNECT');
       }
+    }
+  }
+
+  /**
+   * Registra CONNECT/DISCONNECT no histórico de presença (UserConnectionLog).
+   * Fire-and-forget — uma falha aqui nunca pode quebrar a conexão do socket.
+   */
+  private async logConnection(userId: string, event: 'CONNECT' | 'DISCONNECT') {
+    try {
+      const u = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { tenant_id: true },
+      });
+      if (!u?.tenant_id) return;
+      await this.prisma.userConnectionLog.create({
+        data: { user_id: userId, tenant_id: u.tenant_id, event },
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `[PRESENCE] log ${event} falhou (${userId}): ${e?.message ?? e}`,
+      );
     }
   }
 

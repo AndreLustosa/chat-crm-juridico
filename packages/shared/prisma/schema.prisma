@@ -223,6 +223,24 @@ model User {
   conversation_mutes             ConversationMute[]
   notifications                  Notification[]
   push_subscriptions             PushSubscription[]
+  connection_logs                UserConnectionLog[]
+}
+
+/// Log de presença: cada CONNECT/DISCONNECT do socket do usuário. O socket é
+/// app-wide (montado na sidebar), então isso reflete "sistema aberto em
+/// qualquer página". Alimenta o histórico de horários de conexão no Cockpit.
+model UserConnectionLog {
+  id        String   @id @default(uuid())
+  tenant_id String
+  user_id   String
+  /// "CONNECT" | "DISCONNECT"
+  event     String
+  at        DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, at(sort: Desc)])
+  @@index([user_id, at(sort: Desc)])
 }
 
 model Lead {
