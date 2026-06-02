@@ -139,6 +139,7 @@ export const rightPages = [
   },
   {
     title: "FGTS e multa",
+    href: "/arapiraca/trabalhista/verbas-rescisorias/fgts-multa-40",
     description:
       "Verificação dos depósitos mensais, diferenças, saque, multa de 40% na dispensa sem justa causa e 20% no acordo.",
   },

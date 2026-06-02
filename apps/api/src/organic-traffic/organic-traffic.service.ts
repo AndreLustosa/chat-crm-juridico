@@ -1455,6 +1455,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/verbas-rescisorias/fgts-multa-40`,
+        path: '/arapiraca/trabalhista/verbas-rescisorias/fgts-multa-40',
+        title: 'Arapiraca - FGTS e Multa de 40',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'fgts arapiraca',
+          'multa 40 fgts arapiraca',
+          'fgts nao depositado arapiraca',
+          'advogado fgts arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/trabalhista/sem-carteira-assinada`,
         path: '/arapiraca/trabalhista/sem-carteira-assinada',
         title: 'Arapiraca - Reconhecimento de Vinculo',

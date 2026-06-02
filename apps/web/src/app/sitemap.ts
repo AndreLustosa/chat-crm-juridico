@@ -72,6 +72,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.88,
     },
     {
+      url: `${baseUrl}/arapiraca/trabalhista/verbas-rescisorias/fgts-multa-40`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.88,
+    },
+    {
       url: `${baseUrl}/arapiraca/criminal`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
