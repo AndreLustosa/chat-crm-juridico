@@ -1511,6 +1511,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/horas-extras`,
+        path: '/arapiraca/trabalhista/horas-extras',
+        title: 'Arapiraca - Horas Extras',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'horas extras arapiraca',
+          'advogado horas extras arapiraca',
+          'banco de horas irregular arapiraca',
+          'intervalo intrajornada arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/criminal`,
         path: '/arapiraca/criminal',
         title: 'Arapiraca - Criminal',

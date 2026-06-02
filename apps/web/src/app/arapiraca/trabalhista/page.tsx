@@ -35,11 +35,13 @@ const staticContent: LPTemplateContent = {
       iconName: "FileText",
       title: "Rescisão Indireta:",
       description: "Defesa do empregado em casos de falta grave do empregador, buscando a rescisão do contrato com todos os direitos garantidos",
+      href: "/arapiraca/trabalhista/verbas-rescisorias/rescisao-indireta",
     },
     {
       iconName: "Clock",
       title: "Horas Extras",
-      description: "Atuação para garantir o pagamento correto de férias, 13º, FGTS, aviso prévio e demais valores devidos na rescisão.",
+      description: "Cobrança de horas extras não pagas, banco de horas irregular, intervalo reduzido e reflexos nas verbas trabalhistas.",
+      href: "/arapiraca/trabalhista/horas-extras",
     },
     {
       iconName: "AlertTriangle",
