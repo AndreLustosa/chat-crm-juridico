@@ -268,6 +268,7 @@ export class DashboardService {
           const [
             openConversations,
             activeCases,
+            activeProcesses,
             pendingTasks,
             overdueTasks,
             memberCollected,
@@ -281,6 +282,12 @@ export class DashboardService {
             }),
             this.prisma.legalCase.count({
               where: { lawyer_id: member.id, archived: false, ...tw },
+            }),
+            // Processos PROTOCOLADOS / em acompanhamento do advogado (in_tracking:true)
+            // — consistente com o KPI "Processos ativos". Distinto de activeCases,
+            // que inclui os casos em triagem (in_tracking:false).
+            this.prisma.legalCase.count({
+              where: { lawyer_id: member.id, archived: false, in_tracking: true, ...tw },
             }),
             this.prisma.calendarEvent.count({
               where: {
@@ -319,6 +326,7 @@ export class DashboardService {
             role: member.roles?.[0] ?? 'OPERADOR',
             openConversations,
             activeCases,
+            activeProcesses,
             pendingTasks,
             overdueTasks,
             totalCollected: Number(memberCollected._sum.amount || 0),
