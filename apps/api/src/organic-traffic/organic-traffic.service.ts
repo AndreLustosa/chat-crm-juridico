@@ -1525,6 +1525,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/insalubridade-periculosidade`,
+        path: '/arapiraca/trabalhista/insalubridade-periculosidade',
+        title: 'Arapiraca - Insalubridade e Periculosidade',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'insalubridade arapiraca',
+          'periculosidade arapiraca',
+          'adicional de insalubridade arapiraca',
+          'adicional de periculosidade arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/criminal`,
         path: '/arapiraca/criminal',
         title: 'Arapiraca - Criminal',

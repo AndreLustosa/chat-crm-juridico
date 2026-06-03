@@ -47,6 +47,7 @@ const staticContent: LPTemplateContent = {
       iconName: "AlertTriangle",
       title: "Adicional de\nInsalubridade\ne Periculosidade",
       description: "Ações para assegurar o pagamento do adicional devido ao trabalho em condições nocivas ou perigosas.",
+      href: "/arapiraca/trabalhista/insalubridade-periculosidade",
     },
     {
       iconName: "Scale",
