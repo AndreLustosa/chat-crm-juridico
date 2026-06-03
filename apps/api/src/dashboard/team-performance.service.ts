@@ -63,7 +63,7 @@ export class TeamPerformanceService {
       ...tw,
     });
 
-    const [activeConvs, overdue, dueSoon, lostCur, lostPrev, wonCur, wonPrev] = await Promise.all([
+    const [activeConvs, overdue, dueSoon, lostCur, lostPrev, wonLeads] = await Promise.all([
       this.prisma.conversation.groupBy({
         by: ['assigned_user_id'],
         _count: true,
@@ -92,25 +92,50 @@ export class TeamPerformanceService {
         _count: true,
         where: { actor_id: { in: ids }, to_stage: 'PERDIDO', created_at: { gte: prevMonthStart, lt: curMonthStart } },
       }),
-      // Leads FECHADOS (viraram clientes) no mês atual, pelo operador creditado
-      // pela venda (cs_user_id). became_client_at é setado em todos os caminhos
-      // de conversão (FINALIZADO / Deal→GANHO / cadastro de processo).
-      this.prisma.lead.groupBy({
-        by: ['cs_user_id'],
-        _count: true,
-        where: { cs_user_id: { in: ids }, is_client: true, became_client_at: { gte: curMonthStart }, ...tw },
-      }),
-      // Leads FECHADOS no mês anterior (mês cheio).
-      this.prisma.lead.groupBy({
-        by: ['cs_user_id'],
-        _count: true,
-        where: { cs_user_id: { in: ids }, is_client: true, became_client_at: { gte: prevMonthStart, lt: curMonthStart }, ...tw },
+      // Leads que viraram clientes desde o 1º dia do mês anterior. NÃO dá pra
+      // agrupar só por cs_user_id: ele só é gravado na finalização via funil —
+      // conversões via cadastro de processo / ganho NÃO setam, deixando o lead
+      // "sem operador" (no escritório, 26 de 30). Então buscamos e atribuímos
+      // depois ao ATENDENTE (cs_user_id ?? operador da conversa mais recente;
+      // assigned_user_id é o atendente, separado do advogado assigned_lawyer_id).
+      this.prisma.lead.findMany({
+        where: { is_client: true, became_client_at: { gte: prevMonthStart }, ...tw },
+        select: {
+          became_client_at: true,
+          cs_user_id: true,
+          conversations: {
+            select: { assigned_user_id: true, last_message_at: true },
+            orderBy: { last_message_at: 'desc' },
+            take: 1,
+          },
+        },
       }),
     ]);
 
     // Conta linhas de um groupBy por id, dado o nome do campo agrupador.
     const pick = (rows: any[], key: string, uid: string): number =>
       rows.find((r) => r[key] === uid)?._count ?? 0;
+
+    // Fechados por ATENDENTE (conta leads, não conversas): cs_user_id quando
+    // houver; senão o operador da conversa mais recente. Quem não casa com
+    // nenhum membro vira "sem operador" (lacuna de atribuição na conversão).
+    const idSet = new Set(ids);
+    const wonCurMap = new Map<string, number>();
+    const wonPrevMap = new Map<string, number>();
+    let wonUnassignedThisMonth = 0;
+    let wonUnassignedPrevMonth = 0;
+    for (const l of wonLeads as any[]) {
+      const attendant: string | null = l.cs_user_id ?? l.conversations?.[0]?.assigned_user_id ?? null;
+      const isCur = !!l.became_client_at && l.became_client_at >= curMonthStart;
+      if (attendant && idSet.has(attendant)) {
+        const m = isCur ? wonCurMap : wonPrevMap;
+        m.set(attendant, (m.get(attendant) ?? 0) + 1);
+      } else if (isCur) {
+        wonUnassignedThisMonth++;
+      } else {
+        wonUnassignedPrevMonth++;
+      }
+    }
 
     const members = users.map((u) => ({
       userId: u.id,
@@ -121,8 +146,8 @@ export class TeamPerformanceService {
       dueSoonEvents: pick(dueSoon, 'assigned_user_id', u.id),
       lostThisMonth: pick(lostCur, 'actor_id', u.id),
       lostPrevMonth: pick(lostPrev, 'actor_id', u.id),
-      wonThisMonth: pick(wonCur, 'cs_user_id', u.id),
-      wonPrevMonth: pick(wonPrev, 'cs_user_id', u.id),
+      wonThisMonth: wonCurMap.get(u.id) ?? 0,
+      wonPrevMonth: wonPrevMap.get(u.id) ?? 0,
     }));
 
     // Ordena por risco (vencidos) → carga (conversas) → urgência (em breve) → nome.
@@ -134,7 +159,7 @@ export class TeamPerformanceService {
         (a.name || '').localeCompare(b.name || ''),
     );
 
-    return { members };
+    return { members, wonUnassignedThisMonth, wonUnassignedPrevMonth };
   }
 
   async getPerformance(
