@@ -62,11 +62,11 @@ export function HorasExtrasTemplate() {
         <div className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between gap-4 px-5 sm:px-8">
           <a href={parentPath} aria-label="André Lustosa Advogados">
             <Image
-              src="/landing/logo-lustosa.webp"
+              src="/landing/logo_andre_lustosa_transparente.webp"
               alt="André Lustosa Advogados"
-              width={210}
-              height={58}
-              className="h-11 w-auto object-contain sm:h-12"
+              width={220}
+              height={60}
+              className="h-10 w-auto object-contain sm:h-11"
             />
           </a>
           <button
