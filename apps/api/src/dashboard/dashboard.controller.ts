@@ -186,4 +186,11 @@ export class DashboardController {
       this.parseScope(scope),
     );
   }
+
+  // Carga & prazos vencidos por pessoa (Cockpit Jurisflow). Admin-only — a
+  // autorização é feita no service (ADMIN/SUPER_ADMIN → lista; senão vazio).
+  @Get('team-workload')
+  getTeamWorkload(@Request() req: any) {
+    return this.teamPerformance.getWorkload(req.user.roles, req.user.tenant_id);
+  }
 }

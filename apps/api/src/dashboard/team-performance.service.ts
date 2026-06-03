@@ -16,6 +16,88 @@ export class TeamPerformanceService {
       : {};
   }
 
+  /**
+   * Carga & risco por pessoa (painel admin do Cockpit Jurisflow).
+   * Para CADA membro da equipe do tenant retorna:
+   *  - activeConversations: leads EM ATENDIMENTO atribuídos — MESMA definição do
+   *    badge "abertas" (countOpen): lead is_client=false e fora de
+   *    PERDIDO/FINALIZADO/ENCERRADO — agrupado por Conversation.assigned_user_id.
+   *  - overdueEvents / dueSoonEvents: eventos AGENDADO/CONFIRMADO atribuídos
+   *    (CalendarEvent.assigned_user_id) vencidos / vencendo em ≤24h.
+   * Convenção de tempo: start_at é naive-BRT-gravado-como-UTC; o "agora" efetivo
+   * é now-3h (BRT = UTC-3), idêntico ao isOverdue/isDueSoon do front (cards
+   * piscando) — assim o painel bate com os cards da Central de Prazos.
+   * Admin-only (ADMIN/SUPER_ADMIN); demais papéis recebem lista vazia.
+   */
+  async getWorkload(roles: string | string[], tenantId?: string) {
+    const roleArr = Array.isArray(roles) ? roles : roles ? [roles] : [];
+    if (!roleArr.includes('ADMIN') && !roleArr.includes('SUPER_ADMIN')) {
+      return { members: [] as any[] };
+    }
+    const tw = this.tenantWhere(tenantId);
+    const BRT = 3 * 60 * 60 * 1000;
+    const ref = new Date(Date.now() - BRT); // "agora" em BRT
+    const ref24 = new Date(ref.getTime() + 24 * 60 * 60 * 1000);
+
+    const users = await this.prisma.user.findMany({
+      where: tw,
+      select: { id: true, name: true, roles: true },
+      orderBy: { name: 'asc' },
+    });
+    const ids = users.map((u) => u.id);
+    if (ids.length === 0) return { members: [] as any[] };
+
+    // Lead "em atendimento" = não-cliente, fora dos estágios encerrados (igual countOpen).
+    const openLead = { is_client: false, stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } };
+    const evWhere = (range: any) => ({
+      assigned_user_id: { in: ids },
+      status: { in: ['AGENDADO', 'CONFIRMADO'] },
+      start_at: range,
+      ...tw,
+    });
+
+    const [activeConvs, overdue, dueSoon] = await Promise.all([
+      this.prisma.conversation.groupBy({
+        by: ['assigned_user_id'],
+        _count: true,
+        where: { assigned_user_id: { in: ids }, lead: openLead, ...tw },
+      }),
+      this.prisma.calendarEvent.groupBy({
+        by: ['assigned_user_id'],
+        _count: true,
+        where: evWhere({ lt: ref }),
+      }),
+      this.prisma.calendarEvent.groupBy({
+        by: ['assigned_user_id'],
+        _count: true,
+        where: evWhere({ gte: ref, lt: ref24 }),
+      }),
+    ]);
+
+    const cnt = (rows: any[], uid: string): number =>
+      rows.find((r) => r.assigned_user_id === uid)?._count ?? 0;
+
+    const members = users.map((u) => ({
+      userId: u.id,
+      name: u.name,
+      roles: u.roles ?? [],
+      activeConversations: cnt(activeConvs, u.id),
+      overdueEvents: cnt(overdue, u.id),
+      dueSoonEvents: cnt(dueSoon, u.id),
+    }));
+
+    // Ordena por risco (vencidos) → carga (conversas) → urgência (em breve) → nome.
+    members.sort(
+      (a, b) =>
+        b.overdueEvents - a.overdueEvents ||
+        b.activeConversations - a.activeConversations ||
+        b.dueSoonEvents - a.dueSoonEvents ||
+        (a.name || '').localeCompare(b.name || ''),
+    );
+
+    return { members };
+  }
+
   async getPerformance(
     userId: string,
     roles: string | string[],
