@@ -156,6 +156,8 @@ jobs:
           push: true
           tags: andreflustosa/chat-crm-juridico-${{ matrix.suffix }}:latest
           no-cache: true
+          provenance: false
+          sbom: false
 
   # Deploy automatico por SSH desabilitado.
   # O SSH da VPS falhou por autenticacao e nao deve ser mascarado no Actions.
