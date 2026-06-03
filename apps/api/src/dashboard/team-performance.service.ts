@@ -38,6 +38,13 @@ export class TeamPerformanceService {
     const BRT = 3 * 60 * 60 * 1000;
     const ref = new Date(Date.now() - BRT); // "agora" em BRT
     const ref24 = new Date(ref.getTime() + 24 * 60 * 60 * 1000);
+    // Limites de mês em BRT (00:00 BRT = 03:00 UTC). nowBrt tem os campos UTC =
+    // relógio de parede BRT, então getUTCMonth() dá o mês corrente em BRT.
+    const nowBrt = new Date(Date.now() - BRT);
+    const yy = nowBrt.getUTCFullYear();
+    const mm = nowBrt.getUTCMonth();
+    const curMonthStart = new Date(Date.UTC(yy, mm, 1, 3, 0, 0)); // 1º dia do mês atual, 00:00 BRT
+    const prevMonthStart = new Date(Date.UTC(yy, mm - 1, 1, 3, 0, 0)); // 1º dia do mês anterior
 
     const users = await this.prisma.user.findMany({
       where: tw,
@@ -56,7 +63,7 @@ export class TeamPerformanceService {
       ...tw,
     });
 
-    const [activeConvs, overdue, dueSoon] = await Promise.all([
+    const [activeConvs, overdue, dueSoon, lostCur, lostPrev] = await Promise.all([
       this.prisma.conversation.groupBy({
         by: ['assigned_user_id'],
         _count: true,
@@ -72,18 +79,34 @@ export class TeamPerformanceService {
         _count: true,
         where: evWhere({ gte: ref, lt: ref24 }),
       }),
+      // Leads PERDIDOS no mês atual, por operador que registrou a perda.
+      // actor_id ∈ ids já isola o tenant (usuário só age em leads do próprio tenant).
+      this.prisma.leadStageHistory.groupBy({
+        by: ['actor_id'],
+        _count: true,
+        where: { actor_id: { in: ids }, to_stage: 'PERDIDO', created_at: { gte: curMonthStart } },
+      }),
+      // Leads PERDIDOS no mês anterior (mês cheio).
+      this.prisma.leadStageHistory.groupBy({
+        by: ['actor_id'],
+        _count: true,
+        where: { actor_id: { in: ids }, to_stage: 'PERDIDO', created_at: { gte: prevMonthStart, lt: curMonthStart } },
+      }),
     ]);
 
-    const cnt = (rows: any[], uid: string): number =>
-      rows.find((r) => r.assigned_user_id === uid)?._count ?? 0;
+    // Conta linhas de um groupBy por id, dado o nome do campo agrupador.
+    const pick = (rows: any[], key: string, uid: string): number =>
+      rows.find((r) => r[key] === uid)?._count ?? 0;
 
     const members = users.map((u) => ({
       userId: u.id,
       name: u.name,
       roles: u.roles ?? [],
-      activeConversations: cnt(activeConvs, u.id),
-      overdueEvents: cnt(overdue, u.id),
-      dueSoonEvents: cnt(dueSoon, u.id),
+      activeConversations: pick(activeConvs, 'assigned_user_id', u.id),
+      overdueEvents: pick(overdue, 'assigned_user_id', u.id),
+      dueSoonEvents: pick(dueSoon, 'assigned_user_id', u.id),
+      lostThisMonth: pick(lostCur, 'actor_id', u.id),
+      lostPrevMonth: pick(lostPrev, 'actor_id', u.id),
     }));
 
     // Ordena por risco (vencidos) → carga (conversas) → urgência (em breve) → nome.
