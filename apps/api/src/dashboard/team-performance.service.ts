@@ -63,7 +63,7 @@ export class TeamPerformanceService {
       ...tw,
     });
 
-    const [activeConvs, overdue, dueSoon, lostCur, lostPrev] = await Promise.all([
+    const [activeConvs, overdue, dueSoon, lostCur, lostPrev, wonCur, wonPrev] = await Promise.all([
       this.prisma.conversation.groupBy({
         by: ['assigned_user_id'],
         _count: true,
@@ -92,6 +92,20 @@ export class TeamPerformanceService {
         _count: true,
         where: { actor_id: { in: ids }, to_stage: 'PERDIDO', created_at: { gte: prevMonthStart, lt: curMonthStart } },
       }),
+      // Leads FECHADOS (viraram clientes) no mês atual, pelo operador creditado
+      // pela venda (cs_user_id). became_client_at é setado em todos os caminhos
+      // de conversão (FINALIZADO / Deal→GANHO / cadastro de processo).
+      this.prisma.lead.groupBy({
+        by: ['cs_user_id'],
+        _count: true,
+        where: { cs_user_id: { in: ids }, is_client: true, became_client_at: { gte: curMonthStart }, ...tw },
+      }),
+      // Leads FECHADOS no mês anterior (mês cheio).
+      this.prisma.lead.groupBy({
+        by: ['cs_user_id'],
+        _count: true,
+        where: { cs_user_id: { in: ids }, is_client: true, became_client_at: { gte: prevMonthStart, lt: curMonthStart }, ...tw },
+      }),
     ]);
 
     // Conta linhas de um groupBy por id, dado o nome do campo agrupador.
@@ -107,6 +121,8 @@ export class TeamPerformanceService {
       dueSoonEvents: pick(dueSoon, 'assigned_user_id', u.id),
       lostThisMonth: pick(lostCur, 'actor_id', u.id),
       lostPrevMonth: pick(lostPrev, 'actor_id', u.id),
+      wonThisMonth: pick(wonCur, 'cs_user_id', u.id),
+      wonPrevMonth: pick(wonPrev, 'cs_user_id', u.id),
     }));
 
     // Ordena por risco (vencidos) → carga (conversas) → urgência (em breve) → nome.
