@@ -15,6 +15,12 @@ export class ChatGateway {
   // ─── Presença de usuários online ─────────────────────────────────
   // Map<userId, Set<socketId>> — um usuário pode ter múltiplas abas
   private onlineUsers = new Map<string, Set<string>>();
+  // Carência antes de marcar offline. Quedas CURTAS do socket (aba em segundo
+  // plano, troca de página, oscilação de rede, upgrade de transporte) reconectam
+  // dentro desta janela e NÃO viram "Saiu/Entrou" no histórico nem piscam a
+  // presença. Só marca offline de fato se continuar sem nenhum socket após a janela.
+  private offlineTimers = new Map<string, NodeJS.Timeout>();
+  private readonly OFFLINE_GRACE_MS = 90_000; // 90s
 
   // ─── Debounce para inboxUpdate ───────────────────────────────────
   // Evita flood de emissões quando muitos contacts.update chegam em sequência
@@ -58,7 +64,14 @@ export class ChatGateway {
     if (!this.onlineUsers.has(userId)) {
       this.onlineUsers.set(userId, new Set());
     }
-    const wasOffline = this.onlineUsers.get(userId)!.size === 0;
+    // Reconexão dentro da carência: cancela a marcação de offline pendente. A
+    // pessoa nunca chegou a "sair" — então não emite presença nem loga CONNECT.
+    const pendingOffline = this.offlineTimers.get(userId);
+    if (pendingOffline) {
+      clearTimeout(pendingOffline);
+      this.offlineTimers.delete(userId);
+    }
+    const wasOffline = this.onlineUsers.get(userId)!.size === 0 && !pendingOffline;
     this.onlineUsers.get(userId)!.add(socketId);
     if (wasOffline) {
       // Broadcast: usuário ficou online
@@ -131,16 +144,25 @@ export class ChatGateway {
 
   private trackUserOffline(userId: string, socketId: string) {
     const sockets = this.onlineUsers.get(userId);
-    if (sockets) {
-      sockets.delete(socketId);
-      if (sockets.size === 0) {
+    if (!sockets) return;
+    sockets.delete(socketId);
+    if (sockets.size > 0) return; // ainda há outra aba aberta
+    // Última aba caiu: NÃO marca offline na hora. Agenda a carência — se a pessoa
+    // reconectar dentro da janela (trackUserOnline cancela o timer), nada acontece.
+    // Mantemos a entrada (Set vazio) no mapa durante a carência, então o board de
+    // presença ainda a mostra online — evita o "pisca-pisca".
+    if (this.offlineTimers.has(userId)) return;
+    const timer = setTimeout(() => {
+      this.offlineTimers.delete(userId);
+      const current = this.onlineUsers.get(userId);
+      if (current && current.size === 0) {
         this.onlineUsers.delete(userId);
-        // Broadcast: usuário ficou offline
         this.server?.emit('user_presence', { userId, online: false });
-        this.logger.log(`[PRESENCE] User ${userId} OFFLINE`);
+        this.logger.log(`[PRESENCE] User ${userId} OFFLINE (após carência de ${this.OFFLINE_GRACE_MS / 1000}s)`);
         void this.logConnection(userId, 'DISCONNECT');
       }
-    }
+    }, this.OFFLINE_GRACE_MS);
+    this.offlineTimers.set(userId, timer);
   }
 
   /**
