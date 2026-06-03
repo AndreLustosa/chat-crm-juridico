@@ -12,6 +12,7 @@ import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
 import { closeOpenDealsAsWon } from '../common/utils/close-deals';
+import { resolveCsUser } from '../common/utils/resolve-cs-user';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { getPlan } from '../subscription/plans';
 import { SAAS_LIMITS_ENABLED } from '../subscription/subscription.util';
@@ -172,6 +173,8 @@ export class LegalCasesService {
       include: { lead: true },
     });
 
+    // Operador (CS): atendente do lead; senão o advogado do caso. Nunca nulo.
+    const csUser = (await resolveCsUser(this.prisma, data.lead_id)) ?? data.lawyer_id ?? null;
     // Converter lead em cliente ao criar processo
     await this.prisma.lead.update({
       where: { id: data.lead_id },
@@ -180,6 +183,7 @@ export class LegalCasesService {
         became_client_at: new Date(),
         stage: 'FINALIZADO',
         stage_entered_at: new Date(),
+        ...(csUser ? { cs_user_id: csUser } : {}),
       },
     }).catch(() => {});
 
@@ -742,6 +746,7 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
 
     // ── Restaurar lead como cliente se teve um processo reativado ──
     if (legalCase.lead && !legalCase.lead.is_client) {
+      const csUser = await resolveCsUser(this.prisma, legalCase.lead.id);
       await this.prisma.lead.update({
         where: { id: legalCase.lead.id },
         data: {
@@ -750,6 +755,7 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
           stage: 'FINALIZADO',
           stage_entered_at: new Date(),
           loss_reason: null,
+          ...(csUser ? { cs_user_id: csUser } : {}),
         },
       });
       this.logger.log(`[UNARCHIVE] Lead ${legalCase.lead.id} restaurado como cliente`);
@@ -1413,6 +1419,9 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
 
     // ── Promover lead para cliente (is_client = true) ──────────────
     // Processo cadastrado diretamente = lead já é cliente ativo
+    // Operador (CS): atendente escolhido no cadastro → atendente da conversa →
+    // advogado que cadastrou (ator). Nunca fica "sem operador".
+    const csUser = (await resolveCsUser(this.prisma, leadId, [data.assigned_user_id])) ?? data.lawyer_id ?? null;
     await this.prisma.lead.update({
       where: { id: leadId },
       data: {
@@ -1421,6 +1430,7 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
         stage: 'FINALIZADO',
         stage_entered_at: new Date(),
         loss_reason: null,
+        ...(csUser ? { cs_user_id: csUser } : {}),
       },
     });
 
@@ -1601,15 +1611,26 @@ Gere APENAS o texto da mensagem, sem introducoes ou explicacoes.`;
     if (cases.length === 0) return { updated: 0 };
 
     const leadIds = cases.map(c => c.lead_id);
-    const result = await this.prisma.lead.updateMany({
-      where: { id: { in: leadIds } },
-      data: {
-        is_client: true,
-        became_client_at: new Date(),
-        stage: 'FINALIZADO',
-        loss_reason: null,
-      },
-    });
+    // Promove individualmente p/ resolver o operador (atendente) de cada lead —
+    // evita criar clientes "sem operador" no reparo em massa.
+    let promoted = 0;
+    for (const lid of leadIds) {
+      const csUser = await resolveCsUser(this.prisma, lid);
+      try {
+        await this.prisma.lead.update({
+          where: { id: lid },
+          data: {
+            is_client: true,
+            became_client_at: new Date(),
+            stage: 'FINALIZADO',
+            loss_reason: null,
+            ...(csUser ? { cs_user_id: csUser } : {}),
+          },
+        });
+        promoted++;
+      } catch {}
+    }
+    const result = { count: promoted };
 
     this.logger.log(`[SYNC-CLIENTS] ${result.count} leads promovidos para cliente`);
 

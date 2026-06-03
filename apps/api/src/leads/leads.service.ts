@@ -716,9 +716,11 @@ export class LeadsService {
     }
 
     // Captura o stage atual antes de alterar (para o histórico)
-    const current = await this.prisma.lead.findUnique({ where: { id }, select: { stage: true } });
+    const current = await this.prisma.lead.findUnique({ where: { id }, select: { stage: true, cs_user_id: true } });
 
-    // Ao finalizar: busca o operador que fechou a venda para registrar como CS
+    // Ao finalizar: registra o operador que fechou a venda. Preserva o já gravado;
+    // senão o atendente da conversa; senão quem está finalizando (ator). Assim
+    // nunca fica "sem operador" (regra do dono, 2026-06).
     let csUserId: string | undefined;
     if (stage === 'FINALIZADO') {
       const lastConv = await this.prisma.conversation.findFirst({
@@ -726,7 +728,7 @@ export class LeadsService {
         orderBy: { last_message_at: 'desc' },
         select: { assigned_user_id: true },
       });
-      csUserId = lastConv?.assigned_user_id ?? undefined;
+      csUserId = current?.cs_user_id ?? lastConv?.assigned_user_id ?? actorId ?? undefined;
     }
 
     // Bug fix 2026-05-12 (Leads PR2 #A6 — ALTO):

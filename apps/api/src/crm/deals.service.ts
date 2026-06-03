@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, NotFoundException, ForbiddenException,
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
+import { resolveCsUser } from '../common/utils/resolve-cs-user';
 
 /**
  * CRUD de Deals (oportunidades) e suas movimentações.
@@ -261,12 +262,15 @@ export class DealsService {
 
     // Denormalização legada: Lead.stage + Lead.is_client (telas antigas)
     if (target.type === 'GANHO') {
+      // Operador (CS): dono do deal → atendente da conversa → quem moveu (ator).
+      const csUser = (await resolveCsUser(this.prisma, deal.lead_id, [updated.owner_user_id])) ?? userId ?? null;
       await this.prisma.lead.update({
         where: { id: deal.lead_id },
         data: {
           stage: 'FINALIZADO',
           is_client: true,
           became_client_at: deal.lead.became_client_at ?? now,
+          ...(csUser ? { cs_user_id: csUser } : {}),
         },
       }).catch(() => null);
     } else if (target.type === 'PERDIDO') {
