@@ -1539,6 +1539,20 @@ export class OrganicTrafficService {
         ],
       },
       {
+        url: `${base}/arapiraca/trabalhista/assedio-moral-sexual`,
+        path: '/arapiraca/trabalhista/assedio-moral-sexual',
+        title: 'Arapiraca - Assedio Moral e Sexual',
+        city: 'Arapiraca',
+        state: 'AL',
+        practice_area: 'Trabalhista',
+        target_keywords: [
+          'assedio moral arapiraca',
+          'assedio sexual trabalho arapiraca',
+          'advogado assedio moral arapiraca',
+          'rescisao indireta assedio arapiraca',
+        ],
+      },
+      {
         url: `${base}/arapiraca/criminal`,
         path: '/arapiraca/criminal',
         title: 'Arapiraca - Criminal',

@@ -53,6 +53,7 @@ const staticContent: LPTemplateContent = {
       iconName: "Scale",
       title: "Assédio Moral\ne Sexual",
       description: "Proteção contra abusos, humilhações ou condutas inapropriadas no ambiente de trabalho, com pedido de indenização.",
+      href: "/arapiraca/trabalhista/assedio-moral-sexual",
     },
     {
       iconName: "HeartPulse",
