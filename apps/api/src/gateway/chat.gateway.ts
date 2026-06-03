@@ -20,7 +20,15 @@ export class ChatGateway {
   // dentro desta janela e NÃO viram "Saiu/Entrou" no histórico nem piscam a
   // presença. Só marca offline de fato se continuar sem nenhum socket após a janela.
   private offlineTimers = new Map<string, NodeJS.Timeout>();
-  private readonly OFFLINE_GRACE_MS = 90_000; // 90s
+  private readonly OFFLINE_GRACE_MS = 90_000; // 90s — board "online agora" (responsivo)
+  // Histórico de conexão (UserConnectionLog): agrupa reconexões numa SESSÃO só.
+  // Aparelho/aba que hiberna cai e volta a cada poucos minutos — registrar cada
+  // ciclo polui o histórico. Só gravamos "Saiu" se a pessoa ficar fora de verdade
+  // por LOG_SESSION_GAP_MS sem reconectar; reconexão dentro da janela continua a
+  // mesma sessão (sem novo "Entrou"). O board (90s acima) segue responsivo, à parte.
+  private logSessionTimers = new Map<string, NodeJS.Timeout>();
+  private loggedOnline = new Set<string>();
+  private readonly LOG_SESSION_GAP_MS = 7 * 60_000; // 7 min
 
   // ─── Debounce para inboxUpdate ───────────────────────────────────
   // Evita flood de emissões quando muitos contacts.update chegam em sequência
@@ -77,7 +85,7 @@ export class ChatGateway {
       // Broadcast: usuário ficou online
       this.server?.emit('user_presence', { userId, online: true });
       this.logger.log(`[PRESENCE] User ${userId} ONLINE (${this.onlineUsers.get(userId)!.size} tab(s))`);
-      void this.logConnection(userId, 'CONNECT');
+      this.logSessionConnect(userId);
       // Atribuir conversas pendentes que a IA estava atendendo (fire-and-forget)
       this.assignPendingConversations(userId).catch(e =>
         this.logger.warn(`[PRESENCE] Falha ao atribuir pendentes para ${userId}: ${e.message}`),
@@ -159,7 +167,7 @@ export class ChatGateway {
         this.onlineUsers.delete(userId);
         this.server?.emit('user_presence', { userId, online: false });
         this.logger.log(`[PRESENCE] User ${userId} OFFLINE (após carência de ${this.OFFLINE_GRACE_MS / 1000}s)`);
-        void this.logConnection(userId, 'DISCONNECT');
+        this.logSessionDisconnect(userId);
       }
     }, this.OFFLINE_GRACE_MS);
     this.offlineTimers.set(userId, timer);
@@ -169,6 +177,38 @@ export class ChatGateway {
    * Registra CONNECT/DISCONNECT no histórico de presença (UserConnectionLog).
    * Fire-and-forget — uma falha aqui nunca pode quebrar a conexão do socket.
    */
+  /**
+   * Abre sessão no histórico. Reconexão dentro da janela de agrupamento continua
+   * a MESMA sessão — não registra novo "Entrou".
+   */
+  private logSessionConnect(userId: string) {
+    const pendingClose = this.logSessionTimers.get(userId);
+    if (pendingClose) {
+      clearTimeout(pendingClose);
+      this.logSessionTimers.delete(userId);
+      return; // reconectou a tempo → mesma sessão
+    }
+    if (this.loggedOnline.has(userId)) return; // sessão já aberta
+    this.loggedOnline.add(userId);
+    void this.logConnection(userId, 'CONNECT');
+  }
+
+  /**
+   * Fecha sessão no histórico — adiado por LOG_SESSION_GAP_MS. Só grava "Saiu" se
+   * a pessoa continuar fora durante toda a janela (sem reconectar).
+   */
+  private logSessionDisconnect(userId: string) {
+    if (this.logSessionTimers.has(userId)) return; // já agendado
+    const timer = setTimeout(() => {
+      this.logSessionTimers.delete(userId);
+      if (!this.onlineUsers.has(userId)) {
+        this.loggedOnline.delete(userId);
+        void this.logConnection(userId, 'DISCONNECT');
+      }
+    }, this.LOG_SESSION_GAP_MS);
+    this.logSessionTimers.set(userId, timer);
+  }
+
   private async logConnection(userId: string, event: 'CONNECT' | 'DISCONNECT') {
     try {
       const u = await this.prisma.user.findUnique({
