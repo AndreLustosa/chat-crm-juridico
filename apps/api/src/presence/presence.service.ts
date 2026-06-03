@@ -16,7 +16,7 @@ export class PresenceService {
 
   /** Usuários do tenant atualmente online (escopo do tenant). */
   async getOnline(tenantId: string) {
-    const ids = this.gateway.getOnlineUserIds();
+    const ids = this.gateway.getActiveUserIds();
     if (ids.length === 0) return [];
     const users = await this.prisma.user.findMany({
       where: { id: { in: ids }, tenant_id: tenantId },

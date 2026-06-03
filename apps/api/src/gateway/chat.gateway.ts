@@ -35,6 +35,14 @@ export class ChatGateway {
   private inboxUpdateTimers = new Map<string, NodeJS.Timeout>();
   private readonly INBOX_UPDATE_DEBOUNCE_MS = 2000; // 2 segundos
 
+  // ─── Atividade real do operador (last_seen) ──────────────────────────────
+  // Presença por "ativo nos últimos X min" em vez de só "socket ligado agora".
+  // Atualizado no connect e por heartbeat da aba (~60s). Sobrevive a quedas curtas
+  // do socket (aparelho hibernando): a pessoa só vira "ausente" após inatividade
+  // REAL — usado pelo board de presença e pela proteção do SLA de 1ª resposta.
+  private lastSeen = new Map<string, number>();
+  private readonly ACTIVE_WINDOW_MS = 3 * 60_000; // 3 min — "online agora" no board
+
   constructor(
     private prisma: PrismaService,
     @Inject(forwardRef(() => InboxesService))
@@ -55,6 +63,13 @@ export class ChatGateway {
     });
     const socketUser = client.data.user;
     if (socketUser?.sub) {
+      this.lastSeen.set(socketUser.sub, Date.now());
+      // Heartbeat da aba (~60s): mantém o "sinal de vida" fresco mesmo que o socket
+      // caia depois (aba em 2º plano / aparelho dormindo) — base da presença por atividade.
+      client.on('heartbeat', () => {
+        const uid = client.data.user?.sub;
+        if (uid) this.lastSeen.set(uid, Date.now());
+      });
       this.trackUserOnline(socketUser.sub, client.id);
     }
   }
@@ -226,9 +241,26 @@ export class ChatGateway {
     }
   }
 
-  /** Retorna lista de userIds online */
+  /** Retorna lista de userIds online (socket conectado agora). */
   getOnlineUserIds(): string[] {
     return Array.from(this.onlineUsers.keys());
+  }
+
+  /** Usuários ATIVOS = com socket aberto agora OU vistos (heartbeat) dentro da
+   *  janela. Mais robusto que getOnlineUserIds p/ "quem está realmente trabalhando":
+   *  sobrevive a quedas curtas do socket (aparelho hibernando). */
+  getActiveUserIds(windowMs: number = this.ACTIVE_WINDOW_MS): string[] {
+    const cutoff = Date.now() - windowMs;
+    const ids = new Set<string>(this.onlineUsers.keys());
+    for (const [uid, ts] of this.lastSeen) if (ts >= cutoff) ids.add(uid);
+    return Array.from(ids);
+  }
+
+  /** Um usuário está ativo (socket agora OU heartbeat dentro da janela)? */
+  isRecentlyActive(userId: string, windowMs: number = this.ACTIVE_WINDOW_MS): boolean {
+    if (this.onlineUsers.has(userId)) return true;
+    const ts = this.lastSeen.get(userId);
+    return ts !== undefined && ts >= Date.now() - windowMs;
   }
 
   /** Verifica se um usuário específico está online */

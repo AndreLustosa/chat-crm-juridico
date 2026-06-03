@@ -81,7 +81,11 @@ export class SlaCronService {
     }
 
     const cutoff = new Date(Date.now() - this.slaMinutes * 60 * 1000);
-    const onlineUserIds = this.chatGateway.getOnlineUserIds();
+    // Presença por ATIVIDADE real (não só "socket ligado agora"): quem está ativo
+    // AGORA (~3 min) é o pool de reatribuição; o dono é PROTEGIDO se esteve ativo
+    // dentro do SLA — sobrevive a quedas curtas do socket (aparelho hibernando),
+    // pra não roubar o lead de quem está de fato trabalhando.
+    const activeNow = this.chatGateway.getActiveUserIds();
 
     // "Suavizar o fim do dia": nos últimos minutos antes do fim do expediente,
     // só reativamos a IA — não reatribuímos leads pra atendentes que já estão
@@ -121,16 +125,16 @@ export class SlaCronService {
       // não atropela quem pode estar no meio do atendimento (consultando processo,
       // redigindo, etc.). O cron só age quando NÃO há um dono online cuidando:
       // dono offline (sumiu) ou conversa sem dono (fila de Espera).
-      if (conv.assigned_user_id && onlineUserIds.includes(conv.assigned_user_id)) {
+      if (conv.assigned_user_id && this.chatGateway.isRecentlyActive(conv.assigned_user_id, this.slaMinutes * 60 * 1000)) {
         continue;
       }
 
       // Round-robin: próximo operador online do inbox (se houver outro diferente).
       // No fim do expediente (allowReassign=false) não reatribui — só reativa a IA.
       let nextUserId: string | null = null;
-      if (allowReassign && conv.inbox_id && onlineUserIds.length > 0) {
+      if (allowReassign && conv.inbox_id && activeNow.length > 0) {
         try {
-          nextUserId = await this.inboxes.getNextAssignee(conv.inbox_id, onlineUserIds);
+          nextUserId = await this.inboxes.getNextAssignee(conv.inbox_id, activeNow);
         } catch {
           nextUserId = null;
         }
