@@ -187,6 +187,11 @@ export class ConversationsService {
         : c.assigned_user_id               ? 'ACTIVE'      // operador assumiu (ai_mode=false)
         : 'WAITING',                                       // sem IA, sem operador
       lastMessage: c.messages[0]?.text || '',
+      // Direção + tipo da última mensagem — o front usa pra (a) prefixar a prévia
+      // ("Você: ..."), (b) marcar "aguardando resposta" (último foi o contato) e
+      // (c) prévia de mídia ("🎤 Áudio") quando text é vazio.
+      lastMessageDirection: c.messages[0]?.direction || null,
+      lastMessageType: c.messages[0]?.type || null,
       lastMessageAt: c.last_message_at?.toISOString() || '',
       assignedAgentId: c.assigned_user_id || null,
       assignedAgentName: c.assigned_user?.name || null,
