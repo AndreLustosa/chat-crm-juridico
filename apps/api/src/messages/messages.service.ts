@@ -383,18 +383,35 @@ export class MessagesService {
 
     // 2. Persist in DB (so chega aqui se Evolution confirmou o envio)
     const externalId = externalMsg?.key?.id || `out_${Date.now()}`;
-    const msg = await this.prisma.message.create({
-      data: {
-        conversation_id: convo.id,
-        direction: 'out',
-        type: 'text',
-        text,
-        external_message_id: externalId,
-        status: 'enviado',
-        reply_to_id: replyToId || null,
-        reply_to_text: replyToText,
+    let msg;
+    try {
+      msg = await this.prisma.message.create({
+        data: {
+          conversation_id: convo.id,
+          direction: 'out',
+          type: 'text',
+          text,
+          external_message_id: externalId,
+          status: 'enviado',
+          reply_to_id: replyToId || null,
+          reply_to_text: replyToText,
+        }
+      });
+    } catch (e: any) {
+      // Bug fix 2026-06-10: CORRIDA com o webhook da Evolution. O eco fromMe do
+      // nosso próprio envio pode chegar e GRAVAR a mensagem (mesmo
+      // external_message_id, que é @unique) antes deste create → P2002 → o
+      // operador recebia 500 com a mensagem JÁ ENTREGUE (e o front devolvia o
+      // texto pro campo, induzindo envio duplicado). Colidiu? A mensagem existe:
+      // reaproveita a linha do webhook e segue o fluxo normal.
+      if (e?.code === 'P2002') {
+        msg = await this.prisma.message.findUnique({ where: { external_message_id: externalId } });
+        if (msg) {
+          this.logger.warn(`[SEND] create colidiu com o webhook (echo fromMe) — reaproveitando msg ${msg.id}`);
+        }
       }
-    });
+      if (!msg) throw e;
+    }
 
     // 3. Update Convo
     await this.prisma.conversation.update({
