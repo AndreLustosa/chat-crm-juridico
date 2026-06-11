@@ -12,12 +12,21 @@ import { CronRunnerService } from '../common/cron/cron-runner.service';
  * - ai_mode_disabled_at < 24h atrás
  * - Última mensagem é do cliente (operador não respondeu)
  * - Conversa não está FECHADO ou ADIADO
+ * - SÓ CLIENTES (is_client=true). Leads ficam de fora por padrão (decisão do
+ *   André em 2026-06-11): religar a IA não faz ela responder a mensagem que
+ *   já está pendente (só reage a mensagem NOVA), então em lead o religamento
+ *   só mascarava abandono com o chip verde da IA. Ligar a IA em lead voltou
+ *   a ser decisão do atendente — o front sinaliza os parados (badge vermelho
+ *   "A responder"). Pra incluir leads de novo: SLA_REACTIVATE_AI=true (mesma
+ *   flag do SlaCronService), quando a IA passar a responder o pendente.
  *
  * Roda a cada hora, todos os dias.
  */
 @Injectable()
 export class AiReactivationCronService {
   private readonly logger = new Logger(AiReactivationCronService.name);
+
+  private readonly reactivateLeads = process.env.SLA_REACTIVATE_AI === 'true';
 
   constructor(
     private prisma: PrismaService,
@@ -33,14 +42,18 @@ export class AiReactivationCronService {
     this.logger.log('[AI-REACTIVATION] Verificando conversas com IA desligada há 24h+...');
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      // Busca conversas candidatas: ai_mode desligado há 24h+ em conversas abertas
+      // Busca conversas candidatas: ai_mode desligado há 24h+ em conversas abertas.
+      // Leads só entram com SLA_REACTIVATE_AI=true (ver doc da classe).
       const candidates = await this.prisma.conversation.findMany({
         where: {
           ai_mode: false,
           ai_mode_disabled_at: { lt: twentyFourHoursAgo },
           status: { notIn: ['FECHADO'] },
           // Apenas conversas com lead ativo (não PERDIDO/FINALIZADO)
-          lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO'] } },
+          lead: {
+            stage: { notIn: ['PERDIDO', 'FINALIZADO'] },
+            ...(this.reactivateLeads ? {} : { is_client: true }),
+          },
         },
         select: {
           id: true,

@@ -30,6 +30,7 @@ import { brazilRealNowToNaive } from '../common/utils/timezone.util';
  *
  * Parâmetros via env (defaults sensatos):
  *   SLA_FIRST_RESPONSE_MINUTES (15) · SLA_BUSINESS_START_HOUR (8) · SLA_BUSINESS_END_HOUR (18)
+ *   SLA_REACTIVATE_AI (false) — religar a IA automaticamente no estouro do SLA
  */
 @Injectable()
 export class SlaCronService {
@@ -41,6 +42,14 @@ export class SlaCronService {
   // Nos últimos N minutos do expediente, só reativa a IA (não reatribui pra
   // quem já está de saída). Suaviza a virada do dia.
   private readonly reassignCutoffMin = Number(process.env.SLA_REASSIGN_CUTOFF_MINUTES || 30);
+  // Religar a IA no estouro do SLA é OPCIONAL e nasce DESLIGADO (decisão do
+  // André em 2026-06-11): religar não faz a IA responder a mensagem que já
+  // está pendente (ela só reage a mensagem NOVA), então o religamento só
+  // "pintava" a conversa de verde mascarando lead abandonado. Ligar a IA
+  // volta a ser decisão do atendente; o cron segue REATRIBUINDO a operador
+  // online (humano→humano). Reative com SLA_REACTIVATE_AI=true quando a IA
+  // passar a responder o pendente ao ser religada.
+  private readonly reactivateAi = process.env.SLA_REACTIVATE_AI === 'true';
 
   constructor(
     private prisma: PrismaService,
@@ -141,14 +150,18 @@ export class SlaCronService {
       }
       const reassignTo = nextUserId && nextUserId !== conv.assigned_user_id ? nextUserId : null;
 
-      // Ação atômica: reativa a Athena (cobre + encerra a condição) e, se houver,
-      // reatribui ao próximo operador online.
+      // Sem IA automática e sem alvo de reatribuição → não há ação útil; os
+      // sinais do front (badge vermelho, chip "A responder") cobrem o caso.
+      if (!this.reactivateAi && !reassignTo) continue;
+
+      // Ação atômica: (opcional) reativa a IA e, se houver, reatribui ao
+      // próximo operador online.
       await this.prisma.conversation.update({
         where: { id: conv.id },
         data: {
-          ai_mode: true,
-          ai_mode_disabled_at: null,
-          ai_mode_source: 'SLA',
+          ...(this.reactivateAi
+            ? { ai_mode: true, ai_mode_disabled_at: null, ai_mode_source: 'SLA' }
+            : {}),
           ...(reassignTo ? { assigned_user_id: reassignTo } : {}),
         },
       });
@@ -160,10 +173,14 @@ export class SlaCronService {
       }
 
       // Rastro no histórico (mesmo padrão dos eventos de transferência).
+      // "IA" e não o nome próprio — white-label: o nome da assistente é
+      // configurável por escritório e este texto é fixo.
       try {
-        const text = reassignTo
-          ? `⏱ Sem resposta em ${this.slaMinutes} min — Athena reativada e atendimento reatribuído${toName ? ` a ${toName}` : ''}.`
-          : `⏱ Sem resposta em ${this.slaMinutes} min — Athena reativada para não deixar o cliente esperando.`;
+        const text = this.reactivateAi
+          ? reassignTo
+            ? `⏱ Sem resposta em ${this.slaMinutes} min — IA reativada e atendimento reatribuído${toName ? ` a ${toName}` : ''}.`
+            : `⏱ Sem resposta em ${this.slaMinutes} min — IA reativada para não deixar o cliente esperando.`
+          : `⏱ Sem resposta em ${this.slaMinutes} min — atendimento reatribuído${toName ? ` a ${toName}` : ''}.`;
         const evt = await this.prisma.message.create({
           data: {
             conversation_id: conv.id,
@@ -182,8 +199,9 @@ export class SlaCronService {
       this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
       acted++;
       this.logger.log(
-        `[SLA] Conversa ${conv.id} (lead ${conv.lead?.phone || conv.lead?.name || '?'}) — IA reativada` +
-          `${reassignTo ? ` + reatribuída a ${toName || reassignTo}` : ''} (cliente sem resposta > ${this.slaMinutes}min)`,
+        `[SLA] Conversa ${conv.id} (lead ${conv.lead?.phone || conv.lead?.name || '?'}) —` +
+          `${this.reactivateAi ? ' IA reativada' : ''}` +
+          `${reassignTo ? ` reatribuída a ${toName || reassignTo}` : ''} (cliente sem resposta > ${this.slaMinutes}min)`,
       );
     }
 
