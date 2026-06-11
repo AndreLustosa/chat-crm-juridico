@@ -101,3 +101,4 @@ dist/
 # Seaweedfs local data (infra)
 infra/seaweed_master_data/
 infra/seaweed_volume_data/
+*.tsbuildinfo
