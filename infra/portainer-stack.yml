@@ -13,6 +13,11 @@ version: '3.8'
 # login quebrar apos redeploy, checar se POSTGRES_DB/DATABASE_URL
 # estao apontando para o banco correto (lustosa, nao lexcrm).
 # Ver: memory/arquitetura_stacks_vps.md
+#
+# ATENCAO (2026-06-11): a copia do Portainer tem TAMBEM o servico
+# jurisflow-web (front novo, /sistema), que ainda NAO esta rastreado
+# neste arquivo. Ao atualizar a stack, fazer MERGE com a copia do
+# Portainer — nunca substituir por inteiro, ou o jurisflow-web some.
 # ===============================================================
 
 services:
@@ -234,7 +239,61 @@ services:
       restart_policy:
         condition: any
 
-  # ------ Next.js Frontend ------
+  # ------ Site público dedicado (LPs + formulário trabalhista) ------
+  # Dono do domínio raiz desde 2026-06-11 (migração pro Jurisflow): serve
+  # /, /geral/*, /arapiraca/*, /formulario/*, /lp/*, /passeio, robots.txt
+  # e sitemap.xml — URLs idênticas às que o crm-web servia (SEO preservado).
+  # Em produção a imagem fica PINADA POR DIGEST (deploy verificado); o
+  # :latest aqui é só o default de um redeploy full.
+  site:
+    image: andreflustosa/chat-crm-juridico-site:latest
+    networks:
+      - default
+      - OrionNet
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Sao_Paulo
+      # LPTracker/FichaTrabalhista chamam /api/* relativo; o next.config do
+      # site faz rewrite server-side direto pro crm-api pela rede interna.
+      - INTERNAL_API_URL=http://crm-api:3001
+    deploy:
+      restart_policy:
+        condition: any
+      labels:
+        - "traefik.enable=true"
+        # --- Site (domínio raiz) ---
+        # priority=50: vence o crm-web (fallback, sem priority) enquanto ele
+        # existir, e perde de /api (100), /socket.io (100), /traffic-mcp (110),
+        # /portal (90) e dos routers do jurisflow-web (/sistema).
+        - "traefik.http.routers.site.rule=Host(`andrelustosaadvogados.com.br`)"
+        - "traefik.http.routers.site.service=site"
+        - "traefik.http.routers.site.priority=50"
+        - "traefik.http.services.site.loadbalancer.server.port=3000"
+        - "traefik.http.routers.site.entrypoints=websecure"
+        - "traefik.http.routers.site.tls.certresolver=letsencryptresolver"
+        # --- /portal → Jurisflow (Portal do Cliente migrou pra lá) ---
+        # O Jurisflow roda com basePath /sistema, então /portal vira
+        # /sistema/portal via addPrefix. Links antigos enviados aos clientes
+        # (andrelustosaadvogados.com.br/portal) continuam funcionando.
+        # ATENÇÃO: "jurisflow-web" abaixo referencia o service Traefik
+        # definido nos labels do serviço jurisflow-web — que hoje vive só na
+        # cópia do Portainer desta stack (ainda não rastreado neste arquivo).
+        # Ao colar este yml no Portainer, fazer MERGE (não substituir) pra
+        # não perder o bloco do jurisflow-web; confirmar que o nome bate.
+        - "traefik.http.routers.portal.rule=Host(`andrelustosaadvogados.com.br`) && PathPrefix(`/portal`)"
+        - "traefik.http.routers.portal.priority=90"
+        - "traefik.http.middlewares.portal-prefix.addprefix.prefix=/sistema"
+        - "traefik.http.routers.portal.middlewares=portal-prefix"
+        - "traefik.http.routers.portal.service=jurisflow-web"
+        - "traefik.http.routers.portal.entrypoints=websecure"
+        - "traefik.http.routers.portal.tls.certresolver=letsencryptresolver"
+        - "traefik.docker.network=OrionNet"
+
+  # ------ Next.js Frontend ANTIGO (fallback — REMOÇÃO PLANEJADA) ------
+  # Desde 2026-06-11 o domínio raiz é do `site` (priority 50 > este) e o
+  # CRM vive no Jurisflow (/sistema). Este serviço fica de fallback até a
+  # confirmação final em produção; depois: remover este bloco + deletar
+  # apps/web do repo.
   crm-web:
     image: andreflustosa/chat-crm-juridico-web:latest
     networks:
@@ -253,7 +312,7 @@ services:
         condition: any
       labels:
         - "traefik.enable=true"
-        # --- Web (main domain — LP + CRM) ---
+        # --- Web (fallback do domínio raiz — perde pro `site` por priority) ---
         - "traefik.http.routers.crm-web.rule=Host(`andrelustosaadvogados.com.br`)"
         - "traefik.http.services.crm-web.loadbalancer.server.port=3000"
         - "traefik.http.routers.crm-web.entrypoints=websecure"
