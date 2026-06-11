@@ -38,7 +38,7 @@ jobs:
         run: |
           set +e  # nao aborta no primeiro erro — coleta status de todos
 
-          echo "Disparando 5 typechecks em paralelo..."
+          echo "Disparando 6 typechecks em paralelo..."
           npx tsc --noEmit -p packages/shared > /tmp/tc-shared.log 2>&1 &
           PID_SHARED=$!
           npx tsc --noEmit -p apps/api > /tmp/tc-api.log 2>&1 &
@@ -47,6 +47,8 @@ jobs:
           PID_WORKER=$!
           npx tsc --noEmit -p apps/web > /tmp/tc-web.log 2>&1 &
           PID_WEB=$!
+          npx tsc --noEmit -p apps/site > /tmp/tc-site.log 2>&1 &
+          PID_SITE=$!
           # MCP server tem npm install proprio (deps separadas) + tsc + vitest
           (
             cd traffic-mcp-server &&
@@ -61,6 +63,7 @@ jobs:
           wait $PID_API;     STATUS_API=$?
           wait $PID_WORKER;  STATUS_WORKER=$?
           wait $PID_WEB;     STATUS_WEB=$?
+          wait $PID_SITE;    STATUS_SITE=$?
           wait $PID_MCP;     STATUS_MCP=$?
 
           # Reporta status de cada um (visivel mesmo em sucesso)
@@ -81,6 +84,7 @@ jobs:
           report "apps/api          " "$STATUS_API"    "/tmp/tc-api.log"
           report "apps/worker       " "$STATUS_WORKER" "/tmp/tc-worker.log"
           report "apps/web          " "$STATUS_WEB"    "/tmp/tc-web.log"
+          report "apps/site         " "$STATUS_SITE"   "/tmp/tc-site.log"
           if [ "$STATUS_MCP" -ne 0 ]; then
             echo "::group::❌ traffic-mcp-server (exit=$STATUS_MCP)"
             echo "--- npm install ---"
@@ -95,7 +99,7 @@ jobs:
           fi
 
           # Falha se qualquer um quebrou
-          TOTAL=$((STATUS_SHARED + STATUS_API + STATUS_WORKER + STATUS_WEB + STATUS_MCP))
+          TOTAL=$((STATUS_SHARED + STATUS_API + STATUS_WORKER + STATUS_WEB + STATUS_SITE + STATUS_MCP))
           if [ "$TOTAL" -ne 0 ]; then
             echo ""
             echo "❌ Typecheck falhou — veja os logs acima."
@@ -127,6 +131,13 @@ jobs:
             build-args: |
               NEXT_PUBLIC_API_URL=https://andrelustosaadvogados.com.br/api
               NEXT_PUBLIC_WS_URL=wss://andrelustosaadvogados.com.br
+              NEXT_PUBLIC_GTM_ID=${{ vars.NEXT_PUBLIC_GTM_ID }}
+          - name: site
+            context: .
+            dockerfile: infra/Dockerfile.site
+            suffix: site
+            build-args: |
+              NEXT_PUBLIC_API_URL=https://andrelustosaadvogados.com.br/api
               NEXT_PUBLIC_GTM_ID=${{ vars.NEXT_PUBLIC_GTM_ID }}
           - name: traffic-mcp
             context: ./traffic-mcp-server

@@ -1,0 +1,663 @@
+@import "tailwindcss";
+
+/* ─── Schedule-X overrides ────────────────────────────
+   Center time labels in cells instead of on dividing lines.
+   Default: top: -0.75em (sits on the border line)
+   Fixed:   top: calc(50% - 0.5em) (centered in cell)
+─────────────────────────────────────────────────────── */
+.sx__week-grid__hour-text {
+  top: calc(50% - 0.5em) !important;
+}
+.sx__week-grid__hour:first-child {
+  visibility: visible !important;
+}
+
+@theme {
+  --font-sans: var(--font-ubuntu), ui-sans-serif, system-ui, sans-serif;
+  
+  /* Variáveis Semânticas do Tailwind v4 herdando os Temas */
+  --color-border: var(--border-default);
+  --color-background: var(--bg-primary);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--bg-secondary);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--bg-secondary);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent-primary);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--bg-tertiary);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--bg-tertiary);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--bg-hover);
+  --color-accent-foreground: var(--text-primary);
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-ring: var(--accent-primary);
+  --radius: 0.5rem;
+}
+
+@layer base {
+  /* ══ ESCURO — Tema principal do escritório (dourado + preto) ══ */
+  :root,
+  [data-theme="escuro"],
+  .dark {
+    --bg-primary: #000000;
+    --bg-secondary: #0c0c0c;
+    --bg-tertiary: #161616;
+    --bg-elevated: #1e1e1e;
+    --bg-hover: #2a2a2a;
+
+    --accent-primary: #a1773d;
+    --accent-secondary: #eae2a1;
+
+    --text-primary: #f5f5f5;
+    --text-secondary: #c8c8c8;
+    --text-muted: #777777;
+
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.12);
+  }
+
+  /* ══ CLARO — Fundo branco, bordas definidas, texto escuro ══ */
+  [data-theme="claro"],
+  .light {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f7f7f8;
+    --bg-tertiary: #eeeff1;
+    --bg-elevated: #ffffff;
+    --bg-hover: #e2e3e8;
+
+    --accent-primary: #8b6630;
+    --accent-secondary: #c4a254;
+
+    --text-primary: #0a0a0a;
+    --text-secondary: #3a3a3a;
+    --text-muted: #6b6b6b;
+
+    --border-subtle: rgba(0, 0, 0, 0.10);
+    --border-default: rgba(0, 0, 0, 0.18);
+  }
+
+  /* ══ ROSÉ — Elegante rosa com acentos vibrantes ══ */
+  [data-theme="rose"] {
+    --bg-primary: #fdf2f3;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #fce4e6;
+    --bg-elevated: #ffffff;
+    --bg-hover: #fbd5d9;
+
+    --accent-primary: #c4254a;
+    --accent-secondary: #e8456a;
+
+    --text-primary: #2a0a12;
+    --text-secondary: #5c1a2a;
+    --text-muted: #9a4058;
+
+    --border-subtle: rgba(196, 37, 74, 0.10);
+    --border-default: rgba(196, 37, 74, 0.20);
+  }
+
+  /* ══ AZUL — Profissional, tons de azul/índigo ══ */
+  [data-theme="azul"] {
+    --bg-primary: #f0f4fa;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #e0e8f4;
+    --bg-elevated: #ffffff;
+    --bg-hover: #cdd8eb;
+
+    --accent-primary: #2952a3;
+    --accent-secondary: #4a7ae8;
+
+    --text-primary: #0b1a33;
+    --text-secondary: #2c3e5a;
+    --text-muted: #6882a8;
+
+    --border-subtle: rgba(41, 82, 163, 0.10);
+    --border-default: rgba(41, 82, 163, 0.20);
+  }
+
+  /* ══ VERDE — Fresco, tons de esmeralda ══ */
+  [data-theme="verde"] {
+    --bg-primary: #f0faf5;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #dff0e8;
+    --bg-elevated: #ffffff;
+    --bg-hover: #c8e6d5;
+
+    --accent-primary: #1a7a4a;
+    --accent-secondary: #34b870;
+
+    --text-primary: #08261a;
+    --text-secondary: #1c4a34;
+    --text-muted: #4a8a6a;
+
+    --border-subtle: rgba(26, 122, 74, 0.10);
+    --border-default: rgba(26, 122, 74, 0.20);
+  }
+
+  *, ::before, ::after {
+    border-color: var(--color-border);
+  }
+  
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+  
+  /* Scrollbar Customization */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--bg-hover);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+  }
+}
+
+/* ─── Scrollbar utilities ─────────────────── */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ============================================
+   PREMIUM BUTTON EFFECT (LP Templates)
+   ============================================ */
+
+/* CSS Houdini: Register --shimmer as animatable angle */
+@property --shimmer {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.btn-premium {
+  --glow-hue: 40deg;
+  --spring-easing: linear(
+    0, 0.002, 0.01 0.9%, 0.038 1.8%, 0.156, 0.312 5.8%,
+    0.789 11.1%, 1.015 14.2%, 1.096, 1.157, 1.199, 1.224 20.3%,
+    1.231, 1.231, 1.226, 1.214 24.6%, 1.176 26.9%, 1.057 32.6%,
+    1.007 35.5%, 0.984, 0.968, 0.956, 0.949 42%, 0.946 44.1%,
+    0.95 46.5%, 0.998 57.2%, 1.007, 1.011 63.3%, 1.012 68.3%,
+    0.998 84%, 1
+  );
+  --spring-duration: 1.33s;
+  position: relative;
+  border-radius: 8px;
+  transition: all var(--spring-duration) var(--spring-easing);
+  background-size: 400% 200%;
+  animation: 2s ease-in-out infinite textura;
+}
+
+.btn-premium:hover:not(:active) {
+  transition-duration: calc(var(--spring-duration) * 0.5);
+  transform: scale(1.05);
+  box-shadow:
+    0 4px 8px -2px hsl(var(--glow-hue) 50% 20% / 50%),
+    inset 0 0 0 transparent;
+}
+
+.btn-premium:active {
+  transition-duration: calc(var(--spring-duration) * 0.5);
+}
+
+.btn-premium-glow-overlay {
+  position: absolute;
+  inset: -40px;
+  mask-image: conic-gradient(
+    from var(--shimmer, 0deg),
+    transparent 0%,
+    transparent 10%,
+    black 36%,
+    black 45%,
+    transparent 50%,
+    transparent 60%,
+    black 85%,
+    black 95%,
+    transparent 100%
+  );
+  mask-size: cover;
+  mix-blend-mode: plus-lighter;
+  animation: 1s linear infinite both shimmer;
+  pointer-events: none;
+  border-radius: 8px;
+}
+
+.btn-premium-glow-overlay::before {
+  transition: all 0.5s ease;
+  opacity: 0;
+  content: "";
+  border-radius: inherit;
+  position: absolute;
+  mix-blend-mode: color;
+  inset: 40px;
+  pointer-events: none;
+  box-shadow:
+    0 0 3px 2px hsl(var(--glow-hue) 20% 95%),
+    0 0 7px 4px hsl(var(--glow-hue) 20% 80%),
+    0 0 13px 4px hsl(var(--glow-hue) 50% 70%),
+    0 0 25px 5px hsl(var(--glow-hue) 100% 70%);
+  z-index: -1;
+}
+
+.btn-premium-glow-overlay::after {
+  transition: all 0.5s ease;
+  opacity: 0;
+  content: "";
+  border-radius: inherit;
+  position: absolute;
+  mix-blend-mode: color;
+  inset: 40px;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--glow-hue) 70% 95%),
+    inset 0 0 2px 1px hsl(var(--glow-hue) 100% 80%),
+    inset 0 0 5px 2px hsl(var(--glow-hue) 100% 70%);
+  z-index: 2;
+}
+
+.btn-premium:hover .btn-premium-glow-overlay::before,
+.btn-premium:hover .btn-premium-glow-overlay::after,
+.btn-premium.is-shining .btn-premium-glow-overlay::before,
+.btn-premium.is-shining .btn-premium-glow-overlay::after {
+  opacity: 1;
+  animation: 1.2s ease-in forwards shine;
+}
+
+@keyframes textura {
+  0%, 100% { background-position: 0 0; }
+  50% { background-position: 100% 0; }
+}
+
+@keyframes shimmer {
+  0% { --shimmer: 0deg; }
+  100% { --shimmer: 360deg; }
+}
+
+@keyframes shine {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  55% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Shine acionado por scroll — a classe `shine-on-scroll` é togglada em
+   <html> via classList no listener de scroll (sem setState → sem re-render
+   do template inteiro). Mantém o "brilho + leve zoom" dos CTAs durante a
+   rolagem, mas elimina o custo de INP/CPU no mobile. Gated por
+   prefers-reduced-motion (motion só para quem aceita). */
+@media (prefers-reduced-motion: no-preference) {
+  .shine-on-scroll .btn-premium {
+    transform: scale(1.05);
+    box-shadow:
+      0 20px 25px -5px rgb(0 0 0 / 0.1),
+      0 8px 10px -6px rgb(0 0 0 / 0.1);
+  }
+  .shine-on-scroll .btn-premium .btn-premium-glow-overlay::before,
+  .shine-on-scroll .btn-premium .btn-premium-glow-overlay::after {
+    opacity: 1;
+    animation: 1.2s ease-in forwards shine;
+  }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   ACCESSIBILITY OVERRIDE — Texto amarelo/âmbar/laranja
+   ────────────────────────────────────────────────────────────────
+   Pedido do Andre (2026-05-12): tem dificuldade pra ler texto em
+   amarelo/âmbar/laranja. Ao invés de mexer em 401 ocorrências
+   espalhadas em 100+ arquivos, sobrescrevemos as cores via CSS
+   global, sensível ao tema (dark/light).
+
+   Estratégia:
+   - Dark theme (fundo preto/escuro): força tons CLAROS (amber-100/
+     yellow-50/orange-100) — alto contraste em fundo escuro
+   - Light themes (claro/rose/azul/verde): força tons ESCUROS
+     (amber-800/orange-800) — alto contraste em fundo claro
+
+   NÃO tocamos em bg-amber-*, border-amber-* (backgrounds suaves
+   e bordas são OK, só o texto cansa a leitura).
+
+   Mantém a semântica visual (amber = aviso/atenção, orange = info)
+   mas dobra o contraste.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ─── DARK theme (escuro): texto bem claro pra alto contraste em fundo preto ─── */
+:root .text-amber-200,
+:root .text-amber-300,
+:root .text-amber-400,
+:root .text-amber-500,
+.dark .text-amber-200,
+.dark .text-amber-300,
+.dark .text-amber-400,
+.dark .text-amber-500,
+[data-theme="escuro"] .text-amber-200,
+[data-theme="escuro"] .text-amber-300,
+[data-theme="escuro"] .text-amber-400,
+[data-theme="escuro"] .text-amber-500 {
+  color: #fef3c7 !important; /* amber-100 — muito mais legível */
+}
+
+:root .text-amber-600,
+:root .text-amber-700,
+.dark .text-amber-600,
+.dark .text-amber-700,
+[data-theme="escuro"] .text-amber-600,
+[data-theme="escuro"] .text-amber-700 {
+  color: #fde68a !important; /* amber-200 — ainda legível em dark */
+}
+
+:root .text-yellow-200,
+:root .text-yellow-300,
+:root .text-yellow-400,
+:root .text-yellow-500,
+.dark .text-yellow-200,
+.dark .text-yellow-300,
+.dark .text-yellow-400,
+.dark .text-yellow-500,
+[data-theme="escuro"] .text-yellow-200,
+[data-theme="escuro"] .text-yellow-300,
+[data-theme="escuro"] .text-yellow-400,
+[data-theme="escuro"] .text-yellow-500 {
+  color: #fef9c3 !important; /* yellow-100 — alto contraste */
+}
+
+:root .text-yellow-600,
+:root .text-yellow-700,
+.dark .text-yellow-600,
+.dark .text-yellow-700,
+[data-theme="escuro"] .text-yellow-600,
+[data-theme="escuro"] .text-yellow-700 {
+  color: #fef08a !important; /* yellow-200 */
+}
+
+:root .text-orange-200,
+:root .text-orange-300,
+:root .text-orange-400,
+:root .text-orange-500,
+.dark .text-orange-200,
+.dark .text-orange-300,
+.dark .text-orange-400,
+.dark .text-orange-500,
+[data-theme="escuro"] .text-orange-200,
+[data-theme="escuro"] .text-orange-300,
+[data-theme="escuro"] .text-orange-400,
+[data-theme="escuro"] .text-orange-500 {
+  color: #fed7aa !important; /* orange-200 — alto contraste em dark */
+}
+
+:root .text-orange-600,
+:root .text-orange-700,
+.dark .text-orange-600,
+.dark .text-orange-700,
+[data-theme="escuro"] .text-orange-600,
+[data-theme="escuro"] .text-orange-700 {
+  color: #fdba74 !important; /* orange-300 */
+}
+
+/* ─── LIGHT themes (claro/rose/azul/verde): texto bem escuro pra alto contraste em fundo claro ─── */
+[data-theme="claro"] .text-amber-200,
+[data-theme="claro"] .text-amber-300,
+[data-theme="claro"] .text-amber-400,
+[data-theme="claro"] .text-amber-500,
+[data-theme="claro"] .text-amber-600,
+[data-theme="rose"] .text-amber-200,
+[data-theme="rose"] .text-amber-300,
+[data-theme="rose"] .text-amber-400,
+[data-theme="rose"] .text-amber-500,
+[data-theme="rose"] .text-amber-600,
+[data-theme="azul"] .text-amber-200,
+[data-theme="azul"] .text-amber-300,
+[data-theme="azul"] .text-amber-400,
+[data-theme="azul"] .text-amber-500,
+[data-theme="azul"] .text-amber-600,
+[data-theme="verde"] .text-amber-200,
+[data-theme="verde"] .text-amber-300,
+[data-theme="verde"] .text-amber-400,
+[data-theme="verde"] .text-amber-500,
+[data-theme="verde"] .text-amber-600 {
+  color: #92400e !important; /* amber-800 — bem escuro, alto contraste em fundo claro */
+}
+
+[data-theme="claro"] .text-yellow-200,
+[data-theme="claro"] .text-yellow-300,
+[data-theme="claro"] .text-yellow-400,
+[data-theme="claro"] .text-yellow-500,
+[data-theme="claro"] .text-yellow-600,
+[data-theme="rose"] .text-yellow-200,
+[data-theme="rose"] .text-yellow-300,
+[data-theme="rose"] .text-yellow-400,
+[data-theme="rose"] .text-yellow-500,
+[data-theme="rose"] .text-yellow-600,
+[data-theme="azul"] .text-yellow-200,
+[data-theme="azul"] .text-yellow-300,
+[data-theme="azul"] .text-yellow-400,
+[data-theme="azul"] .text-yellow-500,
+[data-theme="azul"] .text-yellow-600,
+[data-theme="verde"] .text-yellow-200,
+[data-theme="verde"] .text-yellow-300,
+[data-theme="verde"] .text-yellow-400,
+[data-theme="verde"] .text-yellow-500,
+[data-theme="verde"] .text-yellow-600 {
+  color: #854d0e !important; /* yellow-800 */
+}
+
+[data-theme="claro"] .text-orange-200,
+[data-theme="claro"] .text-orange-300,
+[data-theme="claro"] .text-orange-400,
+[data-theme="claro"] .text-orange-500,
+[data-theme="claro"] .text-orange-600,
+[data-theme="rose"] .text-orange-200,
+[data-theme="rose"] .text-orange-300,
+[data-theme="rose"] .text-orange-400,
+[data-theme="rose"] .text-orange-500,
+[data-theme="rose"] .text-orange-600,
+[data-theme="azul"] .text-orange-200,
+[data-theme="azul"] .text-orange-300,
+[data-theme="azul"] .text-orange-400,
+[data-theme="azul"] .text-orange-500,
+[data-theme="azul"] .text-orange-600,
+[data-theme="verde"] .text-orange-200,
+[data-theme="verde"] .text-orange-300,
+[data-theme="verde"] .text-orange-400,
+[data-theme="verde"] .text-orange-500,
+[data-theme="verde"] .text-orange-600 {
+  color: #9a3412 !important; /* orange-800 */
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AURUM — Design system "futurista" (piloto 2026-05-22, ref JurisFlow)
+   Tokens + classes self-contained usados pela tela /atendimento/cockpit.
+   Aditivo: NAO altera os 5 temas existentes. As classes .glass/.glow/etc
+   sao dark-glass por natureza (a tela cockpit roda dark independente do
+   tema ativo, como experiencia premium isolada).
+   ══════════════════════════════════════════════════════════════════ */
+
+@theme {
+  --color-aurum-deep: #a87b32;
+  --color-aurum: #e6be6a;
+  --color-aurum-bright: #f7dba0;
+  --color-jade-deep: #1f7a57;
+  --color-jade: #43e0a0;
+  --color-jade-bright: #86f5c8;
+  --color-crimson-deep: #a8324a;
+  --color-crimson: #ff5c72;
+  --color-crimson-bright: #ff9aa9;
+  --color-azure: #5b9dff;
+  --color-azure-bright: #a8c9ff;
+  --color-ink-1: #f4f2ec;
+  --color-ink-2: #a6aec0;
+  --color-ink-3: #6a748a;
+  --color-ink-4: #454e62;
+
+  --animate-aurum-drift: aurum-drift 18s ease-in-out infinite;
+  --animate-aurum-drift-slow: aurum-drift-slow 24s ease-in-out infinite;
+  --animate-aurum-pulse-ring: aurum-pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-aurum-fade-up: aurum-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes aurum-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(2%, -3%, 0) scale(1.08); }
+}
+@keyframes aurum-drift-slow {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); }
+  50% { transform: translate3d(-3%, 2%, 0) scale(1); }
+}
+@keyframes aurum-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(67, 224, 160, 0.5); }
+  70% { box-shadow: 0 0 0 7px rgba(67, 224, 160, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(67, 224, 160, 0); }
+}
+@keyframes aurum-fade-up {
+  0% { opacity: 0; transform: translateY(14px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Frosted glass panel */
+.aurum-glass {
+  background: linear-gradient(160deg, rgba(22, 29, 45, 0.72) 0%, rgba(15, 20, 33, 0.62) 100%);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Hairline gold gradient border via mask */
+.aurum-ring-gold { position: relative; }
+.aurum-ring-gold::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(247, 219, 160, 0.55), rgba(230, 190, 106, 0.08) 40%, transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.aurum-stat-mono {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.aurum-text-gradient {
+  background: linear-gradient(100deg, #f7dba0, #e6be6a 45%, #a87b32);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.aurum-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #05070d;
+  transition: all 0.3s;
+  background: linear-gradient(100deg, #f7dba0, #e6be6a 55%, #cf9f48);
+  box-shadow: 0 10px 30px -10px rgba(230, 190, 106, 0.6);
+}
+.aurum-btn:hover {
+  box-shadow: 0 14px 38px -8px rgba(230, 190, 106, 0.75);
+  transform: translateY(-1px);
+}
+
+/* Grid fade background */
+.aurum-grid-fade {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TEMA "FUTURISTA" (aurum) — 6º tema, aplica o visual JurisFlow no
+   sistema INTEIRO via CSS vars semânticas (2026-05-22, aprovacao Andre).
+   Reversivel: e so trocar de tema. Conservador em performance — usa
+   gradientes de fundo + acentos dourados, SEM backdrop-blur global
+   (blur pesado fica so no cockpit).
+   ══════════════════════════════════════════════════════════════════ */
+@layer base {
+  [data-theme="aurum"] {
+    --bg-primary: #05070d;     /* void */
+    --bg-secondary: #0f1421;   /* surface — vira o card */
+    --bg-tertiary: #161d2d;    /* elevated */
+    --bg-elevated: #1c2438;
+    --bg-hover: #1e2738;
+
+    --accent-primary: #e6be6a;   /* aurum */
+    --accent-secondary: #f7dba0;
+
+    --text-primary: #f4f2ec;   /* ink-1 */
+    --text-secondary: #a6aec0; /* ink-2 */
+    --text-muted: #6a748a;     /* ink-3 */
+
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.10);
+  }
+}
+
+/* Atmosfera de fundo — glows dourado/jade/azure fixos atras de todo o
+   conteudo. background-attachment:fixed mantem ao rolar. Sem animacao
+   (animar background-position custa caro). */
+[data-theme="aurum"] body {
+  background-color: #05070d;
+  background-image:
+    radial-gradient(60vh 60vh at 10% 6%, rgba(230, 190, 106, 0.10), transparent 60%),
+    radial-gradient(55vh 55vh at 90% 30%, rgba(67, 224, 160, 0.065), transparent 60%),
+    radial-gradient(50vh 50vh at 50% 102%, rgba(91, 157, 255, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Scrollbar dourada */
+[data-theme="aurum"] ::-webkit-scrollbar-thumb {
+  background: rgba(230, 190, 106, 0.22);
+  border-radius: 999px;
+}
+[data-theme="aurum"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(230, 190, 106, 0.4);
+}
+
+/* Selecao de texto dourada */
+[data-theme="aurum"] ::selection {
+  background: rgba(230, 190, 106, 0.28);
+  color: #fff;
+}
+
+/* Botoes primarios (acao dourada) ganham glow sutil */
+[data-theme="aurum"] .bg-primary {
+  box-shadow: 0 6px 22px -10px rgba(230, 190, 106, 0.55);
+}
+
+/* Cards/superficies (bg-card e bg-secondary) ganham leve gradiente +
+   borda hairline pra dar profundidade glass — sem blur (performance). */
+[data-theme="aurum"] .bg-card,
+[data-theme="aurum"] .bg-secondary {
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0));
+}
+
+/* Transicoes suaves em elementos interativos (sensacao "premium") */
+[data-theme="aurum"] button,
+[data-theme="aurum"] a,
+[data-theme="aurum"] [role="button"] {
+  transition: color 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}

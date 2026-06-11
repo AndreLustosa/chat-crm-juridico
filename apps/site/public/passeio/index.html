@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0A0A0A">
+  <meta name="description" content="Aventura da Família Lustosa em Santa Catarina — 6 dias entre Floripa, Balneário Camboriú e Beto Carrero">
+
+  <title>Aventura Lustosa em SC — 16 a 21/08/2026</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=Anton&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/passeio/style.css">
+</head>
+<body>
+
+  <!-- ============ HERO ============ -->
+  <header class="hero" id="hero">
+    <div class="hero__bg" aria-hidden="true">
+      <div class="hero__stars"></div>
+      <div class="hero__glow"></div>
+    </div>
+
+    <div class="hero__content">
+      <p class="hero__eyebrow" id="hero-eyebrow">Carregando…</p>
+      <h1 class="hero__title" id="hero-title">Aventura da Família Lustosa</h1>
+      <p class="hero__subtitle" id="hero-subtitle">Carregando roteiro…</p>
+
+      <!-- Contador regressivo -->
+      <div class="countdown" id="countdown" aria-label="Tempo restante até a viagem">
+        <div class="countdown__box">
+          <span class="countdown__value" id="cd-days">--</span>
+          <span class="countdown__label">dias</span>
+        </div>
+        <div class="countdown__box">
+          <span class="countdown__value" id="cd-hours">--</span>
+          <span class="countdown__label">horas</span>
+        </div>
+        <div class="countdown__box">
+          <span class="countdown__value" id="cd-min">--</span>
+          <span class="countdown__label">min</span>
+        </div>
+        <div class="countdown__box countdown__box--pulse">
+          <span class="countdown__value" id="cd-sec">--</span>
+          <span class="countdown__label">seg</span>
+        </div>
+      </div>
+
+      <div class="hero__cta">
+        <a href="#roteiro" class="btn btn--primary">Ver roteiro</a>
+        <a href="#resumo" class="btn btn--ghost">Resumo da viagem</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ RESUMO RÁPIDO ============ -->
+  <section class="resumo" id="resumo">
+    <div class="container">
+      <h2 class="section-title">Em números</h2>
+      <div class="resumo__grid" id="resumo-grid">
+        <!-- preenchido por script.js -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ROTEIRO DIA A DIA ============ -->
+  <section class="roteiro" id="roteiro">
+    <div class="container">
+      <h2 class="section-title">Roteiro dia a dia</h2>
+      <p class="section-lead">6 dias de aventura — clique em cada dia para ver os detalhes.</p>
+      <div class="dias" id="dias">
+        <!-- preenchido por script.js -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="container">
+      <p class="footer__title">Roteiro elaborado por <strong>André Lustosa</strong></p>
+      <p class="footer__meta">Última atualização: <span id="footer-data">--</span> · Versão preliminar — em refinamento</p>
+    </div>
+  </footer>
+
+  <script src="/passeio/data.js"></script>
+  <script src="/passeio/script.js"></script>
+</body>
+</html>
