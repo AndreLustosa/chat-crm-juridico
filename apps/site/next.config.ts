@@ -81,8 +81,13 @@ const nextConfig: NextConfig = {
     ];
   },
   async redirects() {
-    // Redirects 301 de URLs do site WordPress antigo ainda indexadas no Google.
     return [
+      // O CRM antigo vivia em /atendimento/* — o time tem favoritos salvos.
+      // Agora o sistema é o Jurisflow em /sistema. 302 (não-permanente) de
+      // propósito: browsers não cacheiam pra sempre caso o destino mude.
+      { source: "/atendimento", destination: "/sistema", permanent: false },
+      { source: "/atendimento/:path*", destination: "/sistema", permanent: false },
+      // Redirects 301 de URLs do site WordPress antigo ainda indexadas no Google.
       { source: "/direito-trabalhista", destination: "/", permanent: true },
       { source: "/direito-trabalhista/:path*", destination: "/", permanent: true },
       { source: "/direito-previdenciario", destination: "/", permanent: true },
