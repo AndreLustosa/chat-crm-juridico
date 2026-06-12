@@ -318,6 +318,18 @@ export class EvolutionService implements OnApplicationBootstrap {
         this.logger.log(`[REACTIVATE] Lead ${lead.id} (${phone}) voltou a falar — stage ${lead.stage} → QUALIFICANDO`);
       }
 
+      // 1c. Paridade com o CRM antigo (pedido do André 2026-06-12): lead novo
+      // que fala precisa APARECER NO KANBAN. O antigo usava Lead.stage
+      // (QUALIFICANDO, default do schema); o kanban novo usa Deal — que
+      // ninguém criava automaticamente, então o lead ficava "Sem oportunidade
+      // no funil". Garante uma oportunidade ABERTA no funil padrão, etapa
+      // 'qualificando'. Roda a cada inbound (1 findFirst indexado) — também
+      // cura o backlog de leads antigos conforme eles falam. Clientes e
+      // arquivados ficam de fora (funil é de venda).
+      if (!isFromMe && !(lead as any).is_client && !['FINALIZADO', 'ENCERRADO', 'PERDIDO'].includes((lead as any).stage)) {
+        await this.ensureOpenDeal(lead.id, inbox?.tenant_id ?? (lead as any).tenant_id ?? null);
+      }
+
       // 2. Find or Create Conversation
       // Busca em 2 etapas: primeiro com instance_name exato, depois sem — evita
       // criar duplicatas quando instance_name era null ou mudou.
@@ -872,6 +884,59 @@ export class EvolutionService implements OnApplicationBootstrap {
           this.logger.warn(`[AI] Falha ao enfileirar self-update do profile: ${e.message}`);
         }
       }
+    }
+  }
+
+  // ─── Kanban: oportunidade automática pra lead ativo ───────────────────────
+
+  /**
+   * Garante que o lead tem uma Oportunidade ABERTA no kanban (paridade com o
+   * front antigo, onde lead novo caía na coluna "Qualificando" via Lead.stage).
+   * Cria no funil PADRÃO do escritório, etapa key='qualificando' (fallback:
+   * 1ª etapa ATIVO). Idempotente (pula se já existe deal aberto) e
+   * best-effort — NUNCA quebra o processamento do webhook. O kanban atualiza
+   * ao vivo pelo inboxUpdate que a própria mensagem já emite.
+   */
+  private async ensureOpenDeal(leadId: string, tenantId: string | null): Promise<void> {
+    try {
+      if (!tenantId) return; // sem tenant resolvido não criamos linha órfã
+      const aberto = await this.prisma.deal.findFirst({
+        where: { lead_id: leadId, won_at: null, lost_at: null },
+        select: { id: true },
+      });
+      if (aberto) return;
+
+      const funnel =
+        (await this.prisma.funnel.findFirst({
+          where: { tenant_id: tenantId, active: true, is_default: true },
+          include: { stages: true },
+        })) ??
+        (await this.prisma.funnel.findFirst({
+          where: { tenant_id: tenantId, active: true },
+          orderBy: { order: 'asc' },
+          include: { stages: true },
+        }));
+      if (!funnel) return; // escritório ainda sem funil configurado
+
+      const ativos = (funnel.stages as any[])
+        .filter((s) => s.type === 'ATIVO')
+        .sort((a, b) => a.order - b.order);
+      const stage = ativos.find((s) => s.key === 'qualificando') ?? ativos[0];
+      if (!stage) return;
+
+      await this.prisma.deal.create({
+        data: {
+          lead_id: leadId,
+          tenant_id: tenantId,
+          funnel_id: funnel.id,
+          stage_id: stage.id,
+          stage_entered_at: new Date(),
+          source: 'whatsapp',
+        },
+      });
+      this.logger.log(`[DEAL] Oportunidade automática: lead ${leadId} → ${funnel.name}/${stage.name}`);
+    } catch (e: any) {
+      this.logger.warn(`[DEAL] ensureOpenDeal falhou (não bloqueia o webhook): ${e?.message}`);
     }
   }
 
