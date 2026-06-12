@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Patch, Body, Post, Query, UseGuards, Request, Req } from '@nestjs/common';
+import { Controller, Get, Param, Patch, Body, Post, Query, UseGuards, Request, Req, ForbiddenException } from '@nestjs/common';
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RequireCapability } from '../permissions/require-capability.decorator';
@@ -78,8 +78,21 @@ export class ConversationsController {
     return this.conversationsService.assign(id, req.user.id, req.user?.tenant_id);
   }
 
+  // Reatribuição DIRETA (sem aceite) — privilégio de ADMIN/SUPER_ADMIN: o
+  // admin redistribui carga tirando o lead de um atendente e passando a outro.
+  // Operador comum NÃO reatribui à força — ele usa /transfer-request (com
+  // aceite do destinatário). Sem este gate, qualquer um com a capability
+  // 'atendimento' roubaria conversa de outro sem consentimento.
   @Patch(':id/transfer')
   transfer(@Param('id') id: string, @Body('userId') userId: string, @Request() req: any) {
+    const isAdmin = (req.user?.roles ?? []).some(
+      (r: string) => r === 'ADMIN' || r === 'SUPER_ADMIN',
+    );
+    if (!isAdmin) {
+      throw new ForbiddenException(
+        'Apenas administradores reatribuem diretamente. Use a transferência com aceite.',
+      );
+    }
     return this.conversationsService.assign(id, userId, req.user?.tenant_id);
   }
 
