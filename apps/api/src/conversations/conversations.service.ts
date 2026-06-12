@@ -875,18 +875,20 @@ export class ConversationsService {
   /**
    * Retorna a contagem real de mensagens não lidas por conversa (fonte: banco de dados).
    *
-   * Regra de negócio (notificações — badges alinhados com o ding recebido via socket):
-   *  - ADMIN: badges apenas das conversas atribuídas a ele (assigned_user_id)
-   *  - ADVOGADO: badges apenas de clientes atribuídos como advogado (assigned_lawyer_id, is_client=true)
-   *  - OPERADOR: conversas atribuídas + POOL do inbox (assigned_user_id=null nos inboxes dele) —
-   *              espelha o ding que ele recebe via room inbox:{id} (FIX #6)
-   *  - ADVOGADO+OPERADOR: união (clientes como advogado + atribuídas + pool do inbox)
-   *  - Exclui leads PERDIDO/FINALIZADO
+   * REGRA ÚNICA (redesenho 2026-06-12, pedido do André): O CONTADOR SEGUE A
+   * VISIBILIDADE — o mapa cobre toda conversa que o usuário ENXERGA na lista
+   * (mesmas cláusulas do findAll, união leads+clientes):
+   *  - ADMIN: todas do escritório (ele vê tudo → conta tudo)
+   *  - ADVOGADO: atribuídas a ele + clientes onde é o responsável (3 cláusulas)
+   *  - OPERADOR: atribuídas + clientes via cs_user_id + pool dos seus inboxes
+   *  - Exclui leads PERDIDO/FINALIZADO/ENCERRADO (igual à lista)
    *
-   * Nota: findAll() controla VISIBILIDADE (o que aparece na lista).
-   *       getUnreadCounts() controla NOTIFICAÇÃO (o que mostra badge vermelho).
-   *       Admin pode ver todas as conversas mas só recebe badge das suas — evita
-   *       poluição visual com o pool inteiro do tenant.
+   * As 3 dimensões do chat são INDEPENDENTES e cada uma tem um dono:
+   *  · VER (lista)        → findAll()                — quem enxerga a conversa
+   *  · CONTAR (badges)    → getUnreadCounts/Summary  — espelho do que enxerga
+   *  · NOTIFICAR (ding)   → gateway (dono / advogado do caso / pool do inbox)
+   * "Quem precisa AGIR" é o chip 'A responder'/badges de fila (front).
+   * IMPORTANTE: se mudar as cláusulas do findAll, replicar AQUI (e vice-versa).
    */
   async getUnreadCounts(tenantId?: string, userId?: string) {
     let conversationIds: string[] | undefined;
@@ -913,41 +915,45 @@ export class ConversationsService {
         lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } },
       };
 
-      const orConditions: any[] = [];
-
-      // ADMIN: badge apenas das conversas atribuídas diretamente a ele
+      // (REDESENHO 2026-06-12, pedido do André) O CONTADOR SEGUE A VISIBILIDADE:
+      // o mapa de não-lidas cobre TODA conversa que o usuário enxerga na lista
+      // (mesmas regras do findAll, união leads+clientes — o front fatia por
+      // aba/fila). Antes contador e lista tinham regras DIFERENTES — ex.: o
+      // admin via as conversas da Sophia sem dono na aba, mas o badge contava
+      // só as atribuídas a ele (a aba mostrava 18 não-lidas e o badge dizia 9).
+      // "Quem precisa AGIR" não é papel deste contador: isso é o chip
+      // "A responder"/badges de fila do front. Notificação sonora também não:
+      // o ding tem alvo próprio no gateway (dono / advogado do caso / pool do
+      // inbox) e continua igual.
       if (isAdminUser) {
-        orConditions.push({ assigned_user_id: userId });
-        // Admin que também é advogado: clientes atribuídos como advogado
-        if (isAdvogadoUser) {
-          orConditions.push({ assigned_lawyer_id: userId, lead: { is_client: true } });
-        }
+        // Admin vê tudo do escritório → conta tudo (espelho do findAll).
       } else {
-        // ADVOGADO: badge apenas de CLIENTES onde é advogado responsável
+        const orConditions: any[] = [];
+
+        // Conversas atribuídas diretamente (qualquer papel)
+        orConditions.push({ assigned_user_id: userId });
+
+        // ADVOGADO: clientes onde é o responsável (mesmas 3 cláusulas do findAll)
         if (isAdvogadoUser) {
           orConditions.push({ assigned_lawyer_id: userId, lead: { is_client: true } });
+          orConditions.push({ lead: { is_client: true, legal_cases: { some: { lawyer_id: userId } } } });
+          orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: userId } } } });
         }
 
-        // Conversas atribuídas diretamente (qualquer role)
-        orConditions.push({ assigned_user_id: userId });
-
-        // OPERADOR: também inclui pool do inbox (conversas sem operador nos
-        // seus inboxes). Alinha o badge visual com o ding que ele recebe via
-        // room inbox:{id} (FIX #6) — antes ouvia som mas contador nao mostrava.
-        if (isOperadorUser && userInboxIds.length > 0) {
-          orConditions.push({
-            inbox_id: { in: userInboxIds },
-            assigned_user_id: null,
-          });
+        // OPERADOR: clientes via cs_user_id + pool dos seus inboxes (leads sem dono)
+        if (isOperadorUser) {
+          orConditions.push({ lead: { is_client: true, cs_user_id: userId } });
+          if (userInboxIds.length > 0) {
+            orConditions.push({
+              inbox_id: { in: userInboxIds },
+              assigned_user_id: null,
+              lead: { is_client: false },
+            });
+          }
         }
-      }
 
-      // Fallback (estagiário puro, financeiro)
-      if (orConditions.length === 0) {
-        orConditions.push({ assigned_user_id: userId });
+        convWhere.OR = orConditions;
       }
-
-      convWhere.OR = orConditions;
 
       const convs = await this.prisma.conversation.findMany({
         where: convWhere,
