@@ -123,8 +123,8 @@ export class ConversationsController {
   }
 
   @Patch(':id/transfer-decline')
-  transferDecline(@Param('id') id: string, @Body('reason') reason: string) {
-    return this.conversationsService.declineTransfer(id, reason || null);
+  transferDecline(@Param('id') id: string, @Body('reason') reason: string, @Request() req: any) {
+    return this.conversationsService.declineTransfer(id, reason || null, req.user.id);
   }
 
   @Patch(':id/transfer-cancel')

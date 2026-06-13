@@ -583,6 +583,60 @@ export class ChatGateway {
     }
   }
 
+  /**
+   * Toca o SINO do DONO quando uma conversa ADIADA volta no prazo (cron
+   * reopenSnoozed). Espelha emitIncomingMessageNotification — som (evento
+   * incoming_message_notification) + sino persistente (NotificationCenter) +
+   * web push — mas com COPY de retorno de tarefa, não "nova mensagem do
+   * cliente". Respeita mute e preferências do usuário. O sino é do tipo
+   * 'incoming_message' de propósito: markByConversation zera ao abrir a
+   * conversa, em sincronia com o badge da lista.
+   */
+  async emitSnoozeReturnNotification(
+    tenantId: string | null,
+    ownerId: string | null,
+    data: { conversationId: string; contactName?: string; taskTitle?: string },
+  ) {
+    if (!ownerId) return;
+    const isMuted = await this.notificationsService.isConversationMuted(ownerId, data.conversationId).catch(() => false);
+    const prefs = isMuted
+      ? { skipSound: true, skipDesktop: true }
+      : await this.notifSettings.getNotifFlags(ownerId, 'incoming_message').catch(() => ({ skipSound: false, skipDesktop: false }));
+    const body = data.taskTitle
+      ? `⏰ Retorno do adiamento — ${data.taskTitle}`
+      : '⏰ Conversa retornada do adiamento';
+
+    this.logger.log(`[SOCKET] snooze_return → user:${ownerId} (sound=${!prefs.skipSound}, desktop=${!prefs.skipDesktop}${isMuted ? ', MUTED' : ''})`);
+    this.server.to(`user:${ownerId}`).emit('incoming_message_notification', {
+      conversationId: data.conversationId,
+      contactName: data.contactName,
+      assignedUserId: ownerId,
+      body, // o front usa este texto no desktop (fallback "Nova mensagem no atendimento")
+      _prefs: prefs,
+    });
+
+    // Sino persistente (badge + feed do NotificationCenter)
+    this.notificationsService.create({
+      userId: ownerId,
+      tenantId,
+      type: 'incoming_message',
+      title: data.contactName || 'Conversa retornada',
+      body,
+      data: { conversationId: data.conversationId },
+    }).catch(() => {});
+
+    // Web Push (aba fechada) — só se não mutado
+    if (!isMuted) {
+      this.pushService.sendToUser(ownerId, {
+        title: data.contactName || 'Conversa retornada',
+        body,
+        tag: `snooze-${data.conversationId}`,
+        url: `/atendimento`,
+        data: { conversationId: data.conversationId },
+      }).catch(() => {});
+    }
+  }
+
   // ─── Legal Cases ────────────────────────────────────────────────
 
   emitLegalCaseUpdate(lawyerId: string, data: { caseId: string; action: string; [key: string]: any }) {

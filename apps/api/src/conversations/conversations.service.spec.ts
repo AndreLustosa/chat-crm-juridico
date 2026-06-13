@@ -350,6 +350,7 @@ describe('ConversationsService', () => {
           conversation: {
             findUnique: jest.fn().mockResolvedValue({
               pending_transfer_from_id: 'from-user',
+              pending_transfer_to_id: 'dest-user',
               lead: { name: 'Cliente', phone: '11999' },
             }),
             update: jest.fn().mockResolvedValue({}),
@@ -358,7 +359,7 @@ describe('ConversationsService', () => {
         return fn(tx);
       });
 
-      await service.declineTransfer('conv-1', 'nao tenho disponibilidade');
+      await service.declineTransfer('conv-1', 'nao tenho disponibilidade', 'dest-user');
 
       expect(chatGateway.emitTransferResponse).toHaveBeenCalledWith(
         'from-user',

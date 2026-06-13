@@ -418,8 +418,9 @@ export class ConversationsService {
    * Adia (snooze) a conversa: cria uma TAREFA de retorno (ligada à conversa,
    * atribuída a quem adiou, com prazo) e marca a conversa como ADIADO + guarda
    * `snooze_until`. Quando o prazo vencer, o cron `reopenSnoozed` traz a conversa
-   * de volta sozinha para a fila de ESPERA (status ABERTO + sem dono → WAITING),
-   * para que qualquer operador assuma e dê sequência à tarefa de retorno.
+   * de volta sozinha para a fila "Minhas" de quem adiou (MANTÉM o dono), no topo
+   * e com um aviso de retorno que conta como NÃO-LIDA — pra ele dar sequência à
+   * tarefa sem precisar caçar a conversa.
    */
   async snooze(id: string, userId: string, tenantId: string | undefined, dueAtIso: string, note?: string, title?: string) {
     if (!tenantId) throw new BadRequestException('Tenant não identificado.');
@@ -481,37 +482,58 @@ export class ConversationsService {
 
   /**
    * A cada 2 min: reabre conversas adiadas cujo prazo já venceu. Ao reabrir,
-   * LIBERA o dono (assigned_user_id=null) → a conversa cai na fila de Espera
-   * (WAITING); quem assumir a leva para "Minhas". O update é ATÔMICO
-   * (where status=ADIADO) — só uma réplica "ganha" e cria a nota, evitando
-   * mensagem duplicada sem precisar de lock distribuído.
+   * MANTÉM o dono (quem adiou) → a conversa volta direto para a fila "Minhas"
+   * dele, no TOPO (last_message_at=agora), com um aviso de retorno que CONTA
+   * COMO NÃO-LIDA (id snooze_reopen_*, ver getUnreadCounts/markAsRead) pra ele
+   * não passar batido. O update é ATÔMICO (where status=ADIADO) — só uma
+   * réplica "ganha" e cria a nota, evitando duplicata sem lock distribuído.
    */
   @Cron('*/2 * * * *')
   async reopenSnoozed() {
     const now = new Date();
     const due = await (this.prisma as any).conversation.findMany({
       where: { status: 'ADIADO', snooze_until: { not: null, lte: now } },
-      select: { id: true, tenant_id: true },
+      select: { id: true, tenant_id: true, assigned_user_id: true, lead: { select: { name: true, phone: true } } },
     });
     if (due.length === 0) return;
     for (const c of due) {
       const res = await (this.prisma as any).conversation.updateMany({
         where: { id: c.id, status: 'ADIADO' }, // atômico: só reabre se ainda ADIADO
-        data: { status: 'ABERTO', snooze_until: null, assigned_user_id: null }, // libera o dono → cai em Espera (WAITING)
+        // MANTÉM o dono (não zera assigned_user_id) → volta pra "Minhas" de quem
+        // adiou; sobe ao TOPO via last_message_at; o aviso de retorno (criado
+        // abaixo) conta como não-lida pra ele notar.
+        data: { status: 'ABERTO', snooze_until: null, last_message_at: new Date() },
       });
       if (res.count === 0) continue; // outra réplica já reabriu
-      // Recupera TÍTULO + observação da tarefa da conversa p/ exibir na mensagem.
+      // Recupera a tarefa de retorno: TÍTULO + observação (p/ a mensagem) e o
+      // dono (usado como fallback de atribuição abaixo).
       let taskTitle = '';
       let taskNote = '';
+      let taskOwnerId: string | null = null;
       try {
         const task = await (this.prisma as any).task.findFirst({
           where: { conversation_id: c.id, status: 'A_FAZER' },
           orderBy: { created_at: 'desc' },
-          select: { title: true, description: true },
+          select: { title: true, description: true, assigned_user_id: true },
         });
         taskTitle = (task?.title || '').trim();
         taskNote = (task?.description || '').trim();
+        taskOwnerId = task?.assigned_user_id ?? null;
       } catch { /* sem tarefa → usa o texto genérico */ }
+
+      // Dono efetivo do retorno: quem adiou (dono atual) ou, em conversa sem
+      // dono (legado), o dono da tarefa de retorno.
+      const ownerId: string | null = c.assigned_user_id ?? taskOwnerId;
+      // Edge/legado: conversa adiada SEM dono (não criada pelo snooze() atual,
+      // que sempre atribui). Sem isto ela voltaria órfã (sem dono → WAITING) e,
+      // como a aba Espera foi removida, só o admin a veria. Atribui ao dono da
+      // tarefa pra cair em "Minhas" de quem programou o retorno.
+      if (!c.assigned_user_id && taskOwnerId) {
+        await (this.prisma as any).conversation.update({
+          where: { id: c.id },
+          data: { assigned_user_id: taskOwnerId },
+        });
+      }
       const text = taskTitle
         ? `⏰ Conversa retornada — o prazo do adiamento venceu.\n📋 ${taskTitle}${taskNote ? `\n📝 ${taskNote}` : ''}`
         : '⏰ Conversa retornada — o prazo do adiamento venceu. Hora de dar sequência à tarefa.';
@@ -529,6 +551,15 @@ export class ConversationsService {
         this.chatGateway.emitNewMessage(c.id, msg);
       } catch (e: any) {
         this.logger.warn(`[snooze] nota de retorno falhou (${c.id}): ${e?.message ?? e}`);
+      }
+      // Toca o SINO do dono: badge no NotificationCenter + ping + web push, com
+      // copy de retorno de tarefa. Zera ao abrir a conversa (markByConversation).
+      if (ownerId) {
+        this.chatGateway.emitSnoozeReturnNotification(c.tenant_id ?? null, ownerId, {
+          conversationId: c.id,
+          contactName: c.lead?.name || c.lead?.phone || undefined,
+          taskTitle: taskTitle || undefined,
+        });
       }
       this.chatGateway.emitConversationsUpdate(c.tenant_id ?? null);
     }
@@ -674,13 +705,19 @@ export class ConversationsService {
     return conv;
   }
 
-  async declineTransfer(id: string, reason: string | null) {
-    // Transação atômica: ler estado + limpar campos de transferência
+  async declineTransfer(id: string, reason: string | null, userId: string) {
+    // Transação atômica: ler estado + validar destinatário + limpar campos
     const current = await this.prisma.$transaction(async (tx) => {
       const current = await (tx as any).conversation.findUnique({
         where: { id },
-        select: { pending_transfer_from_id: true, tenant_id: true, lead: { select: { name: true, phone: true } } },
+        select: { pending_transfer_to_id: true, pending_transfer_from_id: true, tenant_id: true, lead: { select: { name: true, phone: true } } },
       });
+
+      // Só o DESTINATÁRIO pendente pode recusar (mesma guarda do acceptTransfer) —
+      // sem isto, qualquer usuário podia recusar a transferência pendente de outro.
+      if (!current?.pending_transfer_to_id || current.pending_transfer_to_id !== userId) {
+        throw new ForbiddenException('Você não é o destinatário desta transferência.');
+      }
 
       await (tx as any).conversation.update({
         where: { id },
@@ -968,8 +1005,16 @@ export class ConversationsService {
     // status (ex: msgs sem external_message_id eram filtradas no markAsRead
     // e ficavam para sempre como 'recebido', inflando o badge).
     const where: any = {
-      direction: 'in',
       read_at: null,
+      // (a) mensagens do CONTATO ainda não lidas + (b) o aviso de RETORNO DE
+      // ADIAMENTO (id snooze_reopen_*, direction 'out') — pro DONO notar que a
+      // conversa voltou pra "Minhas". markAsRead zera os dois ao abrir. O
+      // prefixo snooze_reopen_ é interno (nenhuma msg real do WhatsApp tem),
+      // então não conta nenhum outro evento de sistema (ex: transferências).
+      OR: [
+        { direction: 'in' },
+        { external_message_id: { startsWith: 'snooze_reopen_' } },
+      ],
     };
 
     if (conversationIds !== undefined) {
@@ -1042,8 +1087,14 @@ export class ConversationsService {
     const unreadMessages = await this.prisma.message.findMany({
       where: {
         conversation_id: conversationId,
-        direction: 'in',
         read_at: null,
+        // Mesma regra do getUnreadCounts: zera as do contato E o aviso de
+        // retorno de adiamento (snooze_reopen_*), senão o badge do retorno
+        // ficaria aceso pra sempre depois que ele abrisse a conversa.
+        OR: [
+          { direction: 'in' },
+          { external_message_id: { startsWith: 'snooze_reopen_' } },
+        ],
       },
       select: { id: true, external_message_id: true },
     });
@@ -1061,7 +1112,9 @@ export class ConversationsService {
     // Read receipt (visto azul) so envia pra Evolution as msgs com ID real
     // do WhatsApp — as outras nao existem no celular do cliente.
     const evolutionPayload = unreadMessages
-      .filter((m) => m.external_message_id)
+      // exclui o aviso de retorno de adiamento: o id snooze_reopen_* é interno,
+      // não existe no WhatsApp do cliente (enviar receipt daria erro na Evolution).
+      .filter((m) => m.external_message_id && !m.external_message_id.startsWith('snooze_reopen_'))
       .map((m) => ({
         remoteJid: convo.external_id || `${convo.lead.phone}@s.whatsapp.net`,
         fromMe: false as const,

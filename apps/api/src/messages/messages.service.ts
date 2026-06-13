@@ -746,7 +746,7 @@ export class MessagesService {
     return msgWithMedia;
   }
 
-  async editMessage(messageId: string, newText: string) {
+  async editMessage(messageId: string, newText: string, tenantId?: string) {
     if (!newText?.trim()) throw new BadRequestException('Texto não pode ser vazio');
 
     const message = await this.prisma.message.findUnique({
@@ -755,6 +755,10 @@ export class MessagesService {
     });
 
     if (!message) throw new NotFoundException('Mensagem não encontrada');
+    // Isolamento de tenant: a mensagem tem que ser do escritório do usuário.
+    if (tenantId && message.conversation?.tenant_id && message.conversation.tenant_id !== tenantId) {
+      throw new ForbiddenException('Mensagem não pertence ao seu escritório.');
+    }
     if (message.direction !== 'out') throw new BadRequestException('Só é possível editar mensagens enviadas');
     if (message.type === 'deleted') throw new BadRequestException('Mensagem apagada não pode ser editada');
     if (message.type !== 'text') throw new BadRequestException('Só é possível editar mensagens de texto');
@@ -785,13 +789,17 @@ export class MessagesService {
     return updated;
   }
 
-  async deleteMessage(messageId: string) {
+  async deleteMessage(messageId: string, tenantId?: string) {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
       include: { conversation: { include: { lead: true } } },
     });
 
     if (!message) throw new NotFoundException('Mensagem não encontrada');
+    // Isolamento de tenant: a mensagem tem que ser do escritório do usuário.
+    if (tenantId && message.conversation?.tenant_id && message.conversation.tenant_id !== tenantId) {
+      throw new ForbiddenException('Mensagem não pertence ao seu escritório.');
+    }
 
     // Tentar apagar no WhatsApp (best-effort)
     if (message.external_message_id) {
@@ -823,13 +831,17 @@ export class MessagesService {
     return deleted;
   }
 
-  async transcribeAudio(messageId: string): Promise<{ transcription: string }> {
+  async transcribeAudio(messageId: string, tenantId?: string): Promise<{ transcription: string }> {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
-      include: { media: true },
+      include: { media: true, conversation: { select: { tenant_id: true } } },
     });
 
     if (!message) throw new NotFoundException('Mensagem não encontrada');
+    // Isolamento de tenant: a mensagem tem que ser do escritório do usuário.
+    if (tenantId && message.conversation?.tenant_id && message.conversation.tenant_id !== tenantId) {
+      throw new ForbiddenException('Mensagem não pertence ao seu escritório.');
+    }
     if (message.type !== 'audio') throw new BadRequestException('Mensagem não é um áudio');
     if (!message.media) {
       throw new BadRequestException({
@@ -1063,13 +1075,17 @@ export class MessagesService {
     }
   }
 
-  async reactToMessage(messageId: string, emoji: string, userId: string) {
+  async reactToMessage(messageId: string, emoji: string, userId: string, tenantId?: string) {
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
       include: { conversation: { include: { lead: true } } },
     });
 
     if (!message) throw new NotFoundException('Mensagem não encontrada');
+    // Isolamento de tenant: a mensagem tem que ser do escritório do usuário.
+    if (tenantId && message.conversation?.tenant_id && message.conversation.tenant_id !== tenantId) {
+      throw new ForbiddenException('Mensagem não pertence ao seu escritório.');
+    }
 
     // Best-effort: send reaction to WhatsApp
     if (message.external_message_id && message.conversation.lead?.phone) {

@@ -712,7 +712,17 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
     // a automacao quando o stage REALMENTE MUDA (stageActuallyChanged).
     let resolvedStage: string | null = null;
     let stageActuallyChanged = false;
-    if (updates.status && updates.status !== 'null') {
+    // GUARDA (2026-06): a IA NAO seta FINALIZADO (= "virou cliente", evento de
+    // SISTEMA: processo cadastrado / GANHO pelo operador) nem re-estagia um CLIENTE.
+    // Este e o ponto UNICO de escrita de Lead.stage do fluxo principal da IA
+    // (respond_to_client -> applyAiUpdates) — a guarda da tool update_lead sozinha
+    // NAO cobria este caminho, entao voltavam leads FINALIZADO/nao-cliente "zumbis".
+    const leadGuard = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { is_client: true } });
+    const stageBloqueado = (s?: string | null) =>
+      !!s && (String(s).toUpperCase() === 'FINALIZADO' || !!leadGuard?.is_client);
+    if (updates.status && updates.status !== 'null' && stageBloqueado(updates.status)) {
+      this.logger.log(`[AI] Stage "${updates.status}" NAO aplicado — FINALIZADO e evento de sistema, ou lead ja e cliente (lead ${leadId}).`);
+    } else if (updates.status && updates.status !== 'null') {
       const before = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { stage: true } });
       const stageData: Record<string, any> = { stage: updates.status, stage_entered_at: new Date() };
       // Se for PERDIDO, salvar loss_reason junto
@@ -735,7 +745,9 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         perdido:           'PERDIDO',
       };
       const inferred = inferMap[updates.next_step];
-      if (inferred) {
+      if (inferred && stageBloqueado(inferred)) {
+        this.logger.log(`[AI] Stage inferido "${inferred}" (de next_step "${updates.next_step}") NAO aplicado — FINALIZADO ou lead ja cliente (lead ${leadId}).`);
+      } else if (inferred) {
         const before = await this.prisma.lead.findUnique({ where: { id: leadId }, select: { stage: true } });
         const stageData: Record<string, any> = { stage: inferred, stage_entered_at: new Date() };
         // Quando lead é perdido, salvar motivo se fornecido
@@ -747,8 +759,9 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         stageActuallyChanged = before?.stage !== inferred;
         this.logger.log(`[AI] Stage inferido do next_step "${updates.next_step}": ${inferred}${stageActuallyChanged ? '' : ' (sem mudança)'}${updates.loss_reason ? ` (motivo: ${updates.loss_reason})` : ''}`);
       }
-    } else if (updates.status === 'PERDIDO' && updates.loss_reason) {
+    } else if (updates.status === 'PERDIDO' && updates.loss_reason && !leadGuard?.is_client) {
       // Se a IA enviou PERDIDO diretamente no status, salvar loss_reason também
+      // (não em cliente — cliente não vira "perdido" pela IA).
       await this.prisma.lead.update({ where: { id: leadId }, data: { loss_reason: updates.loss_reason } });
     }
 
@@ -2605,18 +2618,18 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
       if (!finalText || !finalText.trim()) {
         this.logger.log(`[AI] Reply vazio — conversa encerrada, IA não responde (conv ${conversation_id})`);
         const DESTRUCTIVE_STAGES = new Set(['PERDIDO', 'FINALIZADO', 'ARQUIVADO']);
-        if (updates?.stage && DESTRUCTIVE_STAGES.has(String(updates.stage).toUpperCase())) {
+        if (updates?.status && DESTRUCTIVE_STAGES.has(String(updates.status).toUpperCase())) {
           // Tem stage destrutivo. So aplica se respondCall foi explicito (parseado
           // de tool call), nao parseado de JSON ambiguo.
           const respondCallExplicit = toolCallLogs.find((l: any) => l.name === 'respond_to_client');
           if (!respondCallExplicit) {
             this.logger.warn(
-              `[AI] Reply vazio + stage destrutivo "${updates.stage}" sem respond_to_client explicito — ` +
+              `[AI] Reply vazio + stage destrutivo "${updates.status}" sem respond_to_client explicito — ` +
               `BLOQUEADO (provavel parse ambiguo). Stage NAO aplicado. conv=${conversation_id}`,
             );
             // Remove o stage destrutivo do updates antes de aplicar
             const cleanUpdates = { ...updates };
-            delete cleanUpdates.stage;
+            delete cleanUpdates.status;
             await this.applyAiUpdates(cleanUpdates, convo.id, convo.lead.id, convo.lead.phone, convo.instance_name || null);
             return;
           }

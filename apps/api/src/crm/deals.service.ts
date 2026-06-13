@@ -271,6 +271,9 @@ export class DealsService {
           stage: 'FINALIZADO',
           is_client: true,
           became_client_at: deal.lead.became_client_at ?? now,
+          // Limpa motivo de perda residual ao virar cliente (idem unarchive/createDirect/sync);
+          // senao um lead que foi PERDIDO antes vira cliente carregando "motivo de perda".
+          loss_reason: null,
           ...(csUser ? { cs_user_id: csUser } : {}),
         },
       }).catch(() => null);

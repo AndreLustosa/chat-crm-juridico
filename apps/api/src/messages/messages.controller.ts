@@ -175,8 +175,8 @@ export class MessagesController {
   }
 
   @Post(':id/transcribe')
-  transcribeAudio(@Param('id') messageId: string) {
-    return this.messagesService.transcribeAudio(messageId);
+  transcribeAudio(@Param('id') messageId: string, @Req() req: any) {
+    return this.messagesService.transcribeAudio(messageId, req.user?.tenant_id);
   }
 
   @Post(':id/react')
@@ -185,19 +185,20 @@ export class MessagesController {
     @Body() dto: ReactMessageDto,
     @Req() req: any,
   ) {
-    return this.messagesService.reactToMessage(id, dto.emoji, req.user.id);
+    return this.messagesService.reactToMessage(id, dto.emoji, req.user.id, req.user?.tenant_id);
   }
 
   @Patch(':id')
   editMessage(
     @Param('id') messageId: string,
     @Body('text') text: string,
+    @Req() req: any,
   ) {
-    return this.messagesService.editMessage(messageId, text);
+    return this.messagesService.editMessage(messageId, text, req.user?.tenant_id);
   }
 
   @Delete(':id')
-  deleteMessage(@Param('id') messageId: string) {
-    return this.messagesService.deleteMessage(messageId);
+  deleteMessage(@Param('id') messageId: string, @Req() req: any) {
+    return this.messagesService.deleteMessage(messageId, req.user?.tenant_id);
   }
 }
