@@ -10,7 +10,7 @@ import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { effectiveRole, normalizeRoles } from '../common/utils/permissions.util';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
-import { closeOpenDealsAsWon } from '../common/utils/close-deals';
+import { closeOpenDealsAsWon, closeOpenConversationsForLead } from '../common/utils/close-deals';
 import { isValidCPF, isValidCNPJ } from '../common/utils/cpf-cnpj.util';
 import OpenAI from 'openai';
 import { buildTokenParam } from '../common/utils/openai-token-param.util';
@@ -758,6 +758,13 @@ export class LeadsService {
       );
     }
     const lead = await this.prisma.lead.findUniqueOrThrow({ where: { id } });
+
+    // Lead PERDIDO → fecha as conversas abertas + desliga a IA (a Sophia não deve
+    // seguir conversando lead perdido; e a conversa sai das filas/contadores
+    // ativos). Reabre sozinha se o contato voltar a falar (webhook reativa).
+    if (stage === 'PERDIDO') {
+      await closeOpenConversationsForLead(this.prisma, this.chatGateway, id, tenantId);
+    }
 
     // Registra o histórico de mudança de stage
     this.prisma.leadStageHistory.create({

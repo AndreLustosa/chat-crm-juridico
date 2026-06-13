@@ -80,3 +80,39 @@ export async function closeOpenDealsAsWon(
     return 0;
   }
 }
+
+/**
+ * Fecha (status=FECHADO) todas as conversas ABERTAS de um lead e DESLIGA a IA.
+ *
+ * Gêmeo de closeOpenDealsAsWon, mas para a direção OPOSTA — quando o contato SAI
+ * do atendimento: PERDIDO (LeadsService.updateStatus / DealsService.move) ou
+ * ENCERRADO (LegalCasesService.archive). Sem isto, a conversa ficava ABERTA com
+ * ai_mode=true para sempre, acumulando no assigned_user_id e deixando a Sophia
+ * responder lead perdido/encerrado (os ~326 "zumbis" de jun/2026). A conversa
+ * REABRE sozinha se o contato voltar a falar (o webhook reativa o lead).
+ *
+ * Pura, best-effort, idempotente: NUNCA lança e é no-op se não há conversa aberta.
+ * Retorna quantas conversas foram fechadas.
+ */
+export async function closeOpenConversationsForLead(
+  prisma: PrismaService,
+  chatGateway: ChatGateway | null | undefined,
+  leadId: string,
+  tenantId: string | null | undefined,
+): Promise<number> {
+  try {
+    const res = await prisma.conversation.updateMany({
+      where: {
+        lead_id: leadId,
+        status: 'ABERTO',
+        ...(tenantId ? { tenant_id: tenantId } : {}),
+      },
+      data: { status: 'FECHADO', ai_mode: false, ai_mode_disabled_at: new Date() },
+    });
+    if (res.count > 0) chatGateway?.emitConversationsUpdate(tenantId ?? null);
+    return res.count;
+  } catch {
+    // best-effort: nunca quebra o fluxo de perder/encerrar o lead
+    return 0;
+  }
+}

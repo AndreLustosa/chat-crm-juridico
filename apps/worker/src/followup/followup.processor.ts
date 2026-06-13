@@ -140,6 +140,12 @@ export class FollowupProcessor extends WorkerHost {
           last_followup_at: new Date(),
         },
       });
+      // Lead arquivado pela IA → fecha conversas abertas + IA off (não vira zumbi
+      // ABERTO com a Sophia respondendo). Best-effort, não quebra o followup.
+      await this.prisma.conversation.updateMany({
+        where: { lead_id: lead.id, status: 'ABERTO' },
+        data: { status: 'FECHADO', ai_mode: false, ai_mode_disabled_at: new Date() },
+      }).catch(() => {});
       this.logger.log(`[FOLLOWUP-MANUAL] Lead ${lead.phone} ARQUIVADO: ${decision.reason}`);
       return;
     }
@@ -387,6 +393,11 @@ export class FollowupProcessor extends WorkerHost {
             },
           }),
         ]);
+        // Lead arquivado pela IA → fecha conversas abertas + IA off (não vira zumbi).
+        await this.prisma.conversation.updateMany({
+          where: { lead_id: enrollment.lead_id, status: 'ABERTO' },
+          data: { status: 'FECHADO', ai_mode: false, ai_mode_disabled_at: new Date() },
+        }).catch(() => {});
         this.logger.log(
           `[FOLLOWUP] Enrollment ${enrollmentId} cancelado + lead ${enrollment.lead_id} arquivado: ${decision.reason}`,
         );

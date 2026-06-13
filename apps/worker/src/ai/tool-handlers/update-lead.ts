@@ -52,8 +52,24 @@ export class UpdateLeadHandler implements ToolHandler {
           error: `Stage invalido "${params.stage}". Opcoes: ${[...ALLOWED_STAGES].join(', ')}`,
         };
       }
-      leadUpdate.stage = upperStage;
-      leadUpdate.stage_entered_at = new Date();
+      // GUARDA (2026-06): a IA NÃO seta FINALIZADO nem re-estagia CLIENTE.
+      //  · FINALIZADO = "virou cliente" — evento de SISTEMA (processo cadastrado /
+      //    GANHO pelo operador), não um stage que a IA mexe. Sem isto a IA criava
+      //    leads FINALIZADO/não-cliente: zumbis invisíveis (fora de Leads E de
+      //    Clientes) com a Sophia ainda respondendo (os 11 de jun/2026).
+      //  · Cliente (is_client=true) já está no fim do funil — a IA não o rebaixa
+      //    de volta pra etapa de lead.
+      // A IA segue podendo mover o lead no funil (QUALIFICANDO/REUNIAO/DOCS) e
+      // marcar PERDIDO; conversão/arquivamento vêm por fluxo dedicado.
+      const lead = await context.prisma.lead.findFirst({
+        where: { id: context.leadId, tenant_id: tenantId },
+        select: { is_client: true },
+      });
+      const bloqueado = upperStage === 'FINALIZADO' || !!lead?.is_client;
+      if (!bloqueado) {
+        leadUpdate.stage = upperStage;
+        leadUpdate.stage_entered_at = new Date();
+      }
     }
     if (params.notes) {
       leadUpdate.notes = String(params.notes).slice(0, MAX_NOTES_LENGTH);

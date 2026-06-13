@@ -11,7 +11,7 @@ import { TrafegoEventsService } from '../trafego/trafego-events.service';
 import { EsajTjalScraper } from '../court-scraper/scrapers/esaj-tjal.scraper';
 import { LEGAL_STAGES, TRACKING_STAGES } from './legal-stages';
 import { phoneVariants, toCanonicalBrPhone } from '../common/utils/phone';
-import { closeOpenDealsAsWon } from '../common/utils/close-deals';
+import { closeOpenDealsAsWon, closeOpenConversationsForLead } from '../common/utils/close-deals';
 import { resolveCsUser } from '../common/utils/resolve-cs-user';
 import { tenantOrDefault } from '../common/constants/tenant';
 import { getPlan } from '../subscription/plans';
@@ -625,6 +625,9 @@ export class LegalCasesService {
         },
       });
       this.logger.log(`[ARCHIVE] Lead ${legalCase.lead_id} marcado como encerrado`);
+      // Processo encerrado (lead virou não-cliente) → fecha conversas abertas + IA
+      // off, pra não acumular "zumbi" ABERTO com a Sophia respondendo.
+      await closeOpenConversationsForLead(this.prisma, this.chatGateway, legalCase.lead_id, legalCase.tenant_id);
     }
 
     // Sync da memoria IA ao arquivar caso REMOVIDO em 2026-04-20 (fase 2d-1).

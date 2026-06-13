@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatGateway } from '../gateway/chat.gateway';
 import { resolveCsUser } from '../common/utils/resolve-cs-user';
+import { closeOpenConversationsForLead } from '../common/utils/close-deals';
 
 /**
  * CRUD de Deals (oportunidades) e suas movimentações.
@@ -274,15 +275,30 @@ export class DealsService {
         },
       }).catch(() => null);
     } else if (target.type === 'PERDIDO') {
-      await this.prisma.lead.update({
-        where: { id: deal.lead_id },
-        data: {
-          stage: 'PERDIDO',
-          loss_reason: input.lostReason?.trim() ?? deal.lost_reason ?? null,
-        },
-      }).catch(() => null);
+      // GUARDA (2026-06): não rebaixar CLIENTE. Perder um DEAL (ex.: cliente
+      // recusou um NOVO caso) NÃO torna a pessoa um lead perdido — ela continua
+      // cliente (is_client=true, stage=FINALIZADO). A perda fica registrada no
+      // próprio Deal (lost_at/lost_reason), sem corromper o status do Lead.
+      if (!deal.lead?.is_client) {
+        await this.prisma.lead.update({
+          where: { id: deal.lead_id },
+          data: {
+            stage: 'PERDIDO',
+            loss_reason: input.lostReason?.trim() ?? deal.lost_reason ?? null,
+          },
+        }).catch(() => null);
+        // Lead perdido → fecha conversas abertas + IA off (idem leads.updateStatus).
+        await closeOpenConversationsForLead(this.prisma, this.chatGateway, deal.lead_id, tenantId);
+      }
     } else {
-      // Mapeia keys do funil "captacao" pra Lead.stage legado quando aplicável
+      // Mapeia keys do funil "captacao" pra Lead.stage legado quando aplicável.
+      // GUARDA (2026-06): idem PERDIDO — NUNCA rebaixar o stage de quem já é
+      // CLIENTE. Lead.stage é um campo só, compartilhado entre "posição no funil
+      // de captação" e "status de cliente" (FINALIZADO). Sem esta guarda, mover o
+      // Deal de um cliente que voltou a conversar pra "Reunião agendada"/"Docs"
+      // gravava Lead.stage=REUNIAO_AGENDADA mantendo is_client=true — criando
+      // clientes "presos" em etapa de lead (os 3 anômalos de jun/2026). O avanço
+      // do funil fica só no Deal (stage_id); o Lead segue FINALIZADO.
       const legacyMap: Record<string, string> = {
         qualificando: 'QUALIFICANDO',
         reuniao_agendada: 'REUNIAO_AGENDADA',
@@ -290,7 +306,7 @@ export class DealsService {
         aguardando_proc: 'AGUARDANDO_PROC',
       };
       const legacyStage = legacyMap[target.key];
-      if (legacyStage) {
+      if (legacyStage && !deal.lead?.is_client) {
         await this.prisma.lead.update({
           where: { id: deal.lead_id },
           data: { stage: legacyStage, stage_entered_at: now },
