@@ -49,18 +49,21 @@ export class ConversationsService {
 
     // ─── Filtro por clientMode (modo Leads vs Clientes) ──────────────────
     // Visibilidade controlada por lead.stage e lead.is_client:
-    //   - Aba Leads (clientMode=false): is_client=false, exclui ENCERRADO/FINALIZADO/PERDIDO
-    //   - Aba Clientes (clientMode=true): is_client=true (todos os clientes)
-    //   - Legado (clientMode=undefined): exclui ENCERRADO/FINALIZADO/PERDIDO
+    //   - Aba Leads (clientMode=false): is_client=false, exclui PERDIDO/FINALIZADO/ENCERRADO
+    //   - Aba Clientes (clientMode=true): is_client=true, exclui só ENCERRADO/PERDIDO.
+    //       FINALIZADO = cliente ATIVO → NÃO esconder (ver memória stage-finalizado).
+    //       Some só o que realmente saiu: caso arquivado (ENCERRADO) ou perda anômala.
+    //   - Legado (clientMode=undefined): exclui PERDIDO/FINALIZADO/ENCERRADO
     //
-    // Bug fix 2026-05-15: ENCERRADO foi adicionado a todos os notIn. Antes,
-    // leads com processo arquivado (stage='ENCERRADO' setado por
-    // legal-cases.service.ts:archive()) ficavam visiveis na aba Leads —
-    // tinham que aparecer ARQUIVADOS / OCULTOS. Andre reportou que cliente
-    // "Andreia" (processo arquivado) continuou em Leads pos-archive.
+    // Bug fix 2026-05-15: ENCERRADO foi adicionado a todos os notIn (lead com
+    // processo arquivado sumia da aba Leads).
+    // Fix 2026-06-13: a aba Clientes NÃO escondia nada (cliente encerrado ficava
+    // pra sempre) e o badge (getUnreadCounts) ignorava FINALIZADO = cliente ativo,
+    // dando número ≠ lista. Agora o oculto é POR TIPO (espelhado no getUnreadCounts).
     const HIDDEN_STAGES = ['PERDIDO', 'FINALIZADO', 'ENCERRADO'];
+    const HIDDEN_STAGES_CLIENT = ['ENCERRADO', 'PERDIDO']; // cliente: FINALIZADO fica (ativo)
     if (clientMode === true) {
-      where.lead = { is_client: true };
+      where.lead = { is_client: true, stage: { notIn: HIDDEN_STAGES_CLIENT } };
     } else if (clientMode === false) {
       where.lead = { is_client: false, stage: { notIn: HIDDEN_STAGES } };
     } else {
@@ -131,7 +134,7 @@ export class ConversationsService {
         where,
         orderBy: { last_message_at: 'desc' },
         include: {
-          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true, is_client: true, became_client_at: true } },
+          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true, is_client: true, became_client_at: true, process_decision_snoozed_until: true, legal_cases: { select: { archived: true } } } },
           messages: { orderBy: { created_at: 'desc' }, take: 1, include: { media: true } },
           assigned_user: { select: { id: true, name: true } },
           tasks: {
@@ -173,7 +176,23 @@ export class ConversationsService {
       noteCounts.map((n: any) => [n.conversation_id, true]),
     );
 
-    const data = conversations.map((c) => ({
+    const agoraMs = Date.now();
+    const SETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000; // prazo médio de ajuizamento (cliente novo)
+    const data = conversations.map((c) => {
+      // ── "Cliente sem processo" (caixa Clientes) ───────────────────────────
+      // semProcesso = cliente SEM processo ativo, fora da carência e fora do
+      // "+48h". retornou = cliente que JÁ teve processo e está sem ativo (selo).
+      const _lc = (c.lead as any)?.legal_cases ?? [];
+      const _jaTeve = _lc.length > 0;
+      const _temAtivo = _lc.some((x: any) => !x.archived);
+      const _isClient = (c.lead as any)?.is_client ?? false;
+      const _becameMs = (c.lead as any)?.became_client_at ? new Date((c.lead as any).became_client_at).getTime() : null;
+      const _snoozeMs = (c.lead as any)?.process_decision_snoozed_until ? new Date((c.lead as any).process_decision_snoozed_until).getTime() : 0;
+      // Carência: já teve processo → cobra na hora; nunca teve → 7 dias do became_client_at.
+      const _gracaOk = _jaTeve ? true : (_becameMs ? agoraMs >= _becameMs + SETE_DIAS_MS : true);
+      const semProcesso = _isClient && !_temAtivo && _gracaOk && _snoozeMs <= agoraMs;
+      const retornou = _isClient && _jaTeve && !_temAtivo;
+      return {
       id: c.id,
       leadId: c.lead_id,
       inboxId: (c as any).inbox_id || null,
@@ -210,6 +229,8 @@ export class ConversationsService {
       stageEnteredAt: (c.lead as any)?.stage_entered_at?.toISOString() || null,
       isClient: (c.lead as any)?.is_client ?? false,
       becameClientAt: (c.lead as any)?.became_client_at?.toISOString() || null,
+      semProcesso,
+      retornou,
       nextStep: (c as any).next_step || null,
       activeTask: (c as any).tasks?.[0] ? {
         id: (c as any).tasks[0].id,
@@ -222,7 +243,8 @@ export class ConversationsService {
       } : null,
       taskCount: (c as any)._count?.tasks ?? 0,
       hasNotes: !!noteCountMap[c.id],
-    }));
+      };
+    });
 
     return { data, total };
   }
@@ -907,6 +929,50 @@ export class ConversationsService {
     return { success: true };
   }
 
+  // ── Cliente sem processo (caixa Clientes) ───────────────────────────────────
+
+  /**
+   * Arquiva um CLIENTE sem processo (decisão do operador no aviso "Cliente sem
+   * processo"): stage → ENCERRADO (some da caixa Clientes — ver findAll) e
+   * desliga a IA. is_client permanece true (é um ex-cliente arquivado). Se ele
+   * voltar a mandar mensagem, o webhook desarquiva (FINALIZADO) e religa a IA.
+   */
+  async archiveClient(id: string, tenantId?: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    await this.assertConversationTenant(id, tenantId);
+    const conv = await this.prisma.conversation.findUnique({ where: { id }, select: { lead_id: true, tenant_id: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada.');
+    await this.prisma.lead.update({
+      where: { id: conv.lead_id },
+      data: { stage: 'ENCERRADO', stage_entered_at: new Date(), process_decision_snoozed_until: null } as any,
+    });
+    await this.prisma.conversation.update({
+      where: { id },
+      data: { ai_mode: false, ai_mode_disabled_at: new Date(), ai_mode_source: 'MANUAL' } as any,
+    });
+    this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
+    return { ok: true };
+  }
+
+  /**
+   * Adia por 48h a decisão do aviso "Cliente sem processo": o cliente CONTINUA
+   * na caixa (não muda status), só suprime o aviso até o prazo. Reusa o campo
+   * Lead.process_decision_snoozed_until (lido no findAll).
+   */
+  async deferClientDecision(id: string, tenantId?: string) {
+    if (!tenantId) throw new BadRequestException('Tenant não identificado.');
+    await this.assertConversationTenant(id, tenantId);
+    const conv = await this.prisma.conversation.findUnique({ where: { id }, select: { lead_id: true, tenant_id: true } });
+    if (!conv) throw new NotFoundException('Conversa não encontrada.');
+    const until = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    await this.prisma.lead.update({
+      where: { id: conv.lead_id },
+      data: { process_decision_snoozed_until: until } as any,
+    });
+    this.chatGateway.emitConversationsUpdate(conv.tenant_id ?? null);
+    return { ok: true, until: until.toISOString() };
+  }
+
   // ── Mark as Read (envia tick azul ao contato) ───────────────────────────────
 
   /**
@@ -944,12 +1010,22 @@ export class ConversationsService {
       const isAdminUser = userRoles.includes('ADMIN');
       const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
 
-      // Filtro base: tenant + exclui leads ocultos (PERDIDO/FINALIZADO/ENCERRADO).
-      // Alinhado ao HIDDEN_STAGES da lista (findAll) — sem isto, um lead ENCERRADO
-      // com não-lida inflava o badge mas sumia da lista (badge ≠ conversas visíveis).
+      // Filtro base: tenant + exclui ocultos POR TIPO, espelhando o findAll:
+      //   LEAD    esconde PERDIDO/FINALIZADO/ENCERRADO
+      //   CLIENTE esconde só ENCERRADO/PERDIDO (FINALIZADO = cliente ATIVO)
+      // Fix 2026-06-13: antes era um notIn GLOBAL com FINALIZADO — ignorava TODO
+      // cliente ativo no badge de Clientes (número ≠ lista). Agora bate com a lista.
+      // (AND separado da OR de visibilidade por papel — ambos AND-ados no topo.)
       const convWhere: any = {
         ...(tenantId ? { tenant_id: tenantId } : {}),
-        lead: { stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } },
+        AND: [
+          {
+            OR: [
+              { lead: { is_client: false, stage: { notIn: ['PERDIDO', 'FINALIZADO', 'ENCERRADO'] } } },
+              { lead: { is_client: true, stage: { notIn: ['ENCERRADO', 'PERDIDO'] } } },
+            ],
+          },
+        ],
       };
 
       // (REDESENHO 2026-06-12, pedido do André) O CONTADOR SEGUE A VISIBILIDADE:

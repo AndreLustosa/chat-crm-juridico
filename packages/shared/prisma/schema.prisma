@@ -287,6 +287,10 @@ model Lead {
   // notificacoes (movimentacoes, agendamento).
   payment_reminders_disabled Boolean @default(false)
 
+  // "+48h" do aviso de cliente-sem-processo: enquanto > agora, o aviso na caixa
+  // Clientes fica suprimido (operador adiou a decisão de arquivar). Null = sem soneca.
+  process_decision_snoozed_until DateTime?
+
   // Google Drive
   google_drive_folder_id String?
 

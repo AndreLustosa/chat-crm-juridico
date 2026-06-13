@@ -431,6 +431,31 @@ export class EvolutionService implements OnApplicationBootstrap {
         }
       }
 
+      // 1b-bis. Ex-cliente ARQUIVADO (ENCERRADO + is_client) voltou a falar →
+      // DESARQUIVA (stage FINALIZADO → reaparece na caixa Clientes), zera a
+      // soneca da decisão "sem processo" e RELIGA a IA. Par com o bloco PERDIDO
+      // acima, mas pra cliente: a decisão de re-arquivar fica por conta do
+      // operador (aviso "Cliente sem processo" na caixa, com Arquivar/+48h).
+      if (!isFromMe && lead.stage === 'ENCERRADO' && (lead as any).is_client) {
+        await this.prisma.leadStageHistory.create({
+          data: { lead_id: lead.id, from_stage: 'ENCERRADO', to_stage: 'FINALIZADO' },
+        }).catch((e: any) => {
+          this.logger.warn(`[REACTIVATE-CLIENT] Falha ao gravar LeadStageHistory: ${e.message}`);
+        });
+        await this.prisma.lead.update({
+          where: { id: lead.id },
+          data: { stage: 'FINALIZADO', stage_entered_at: new Date(), process_decision_snoozed_until: null } as any,
+        });
+        (lead as any).stage = 'FINALIZADO';
+        if (conv && !conv.ai_mode) {
+          conv = await this.prisma.conversation.update({
+            where: { id: conv.id },
+            data: { ai_mode: true, ai_mode_disabled_at: null, ai_mode_source: 'INBOUND_REACTIVATION' } as any,
+          });
+        }
+        this.logger.log(`[REACTIVATE-CLIENT] Lead ${lead.id} (${phone}) ex-cliente voltou — ENCERRADO → FINALIZADO, IA religada`);
+      }
+
       // ── Auto-merge de conversa LID ─────────────────────────────────────────
       // Se o remoteJid era um @lid e conseguimos o telefone real via remoteJidAlt,
       // verifica se existe uma conversa "gêmea" do LID e mescla todas as mensagens

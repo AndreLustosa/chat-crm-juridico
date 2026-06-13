@@ -175,6 +175,17 @@ export class ConversationsController {
     return this.conversationsService.keepInInbox(id);
   }
 
+  // Aviso "Cliente sem processo" (caixa Clientes): arquivar ou adiar a decisão.
+  @Patch(':id/archive-client')
+  archiveClient(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.archiveClient(id, req.user?.tenant_id);
+  }
+
+  @Post(':id/defer-decision')
+  deferDecision(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.deferClientDecision(id, req.user?.tenant_id);
+  }
+
   @Post(':id/mark-read')
   markAsRead(@Param('id') id: string, @Request() req: any) {
     return this.conversationsService.markAsRead(id, req.user?.id);
