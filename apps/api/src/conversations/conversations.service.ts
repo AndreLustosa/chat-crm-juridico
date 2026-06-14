@@ -138,7 +138,7 @@ export class ConversationsService {
     const user = userId
       ? await this.prisma.user.findUnique({
           where: { id: userId },
-          include: { inboxes: { select: { id: true } } },
+          include: { inboxes: { select: { id: true } }, supervisors: { select: { id: true } } },
         })
       : null;
 
@@ -173,6 +173,15 @@ export class ConversationsService {
     const isAdminUser = userRoles.includes('ADMIN');
     const isAdvogadoUser = userRoles.includes('ADVOGADO') || userRoles.includes('Advogados');
     const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL') || userRoles.includes('Atendente Comercial');
+    const isEstagiarioUser = userRoles.includes('ESTAGIARIO') || userRoles.includes('Estagiario') || userRoles.includes('Estagiário');
+    // Advogados que definem a "carteira" deste usuário: ele mesmo (se advogado/admin)
+    // + os advogados que ele supervisiona como estagiário (relação supervisors).
+    // Usado pra marcar cada cliente como "meu, como advogado" (mineAsLawyer).
+    const supervisorIds: string[] = ((user as any)?.supervisors ?? []).map((s: any) => s.id).filter(Boolean);
+    const myLawyerIds: string[] = [
+      ...((isAdvogadoUser || isAdminUser) && userId ? [userId] : []),
+      ...(isEstagiarioUser ? supervisorIds : []),
+    ];
 
     if (isAdminUser) {
       // Admin vê tudo — apenas filtra por inboxId se explicitamente pedido
@@ -204,6 +213,15 @@ export class ConversationsService {
           orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: userId } } } });
         }
 
+        // Visibilidade de ESTAGIÁRIO: vê os CLIENTES do(s) advogado(s) a que está
+        // atrelado (relação supervisors) — mesma lógica do advogado, mas pelos ids
+        // dos supervisores. Só na aba Clientes (em Leads não vê nada, igual advogado).
+        if (isEstagiarioUser && clientMode === true && supervisorIds.length > 0) {
+          orConditions.push({ assigned_lawyer_id: { in: supervisorIds }, lead: { is_client: true } });
+          orConditions.push({ lead: { is_client: true, legal_cases: { some: { lawyer_id: { in: supervisorIds } } } } });
+          orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: { in: supervisorIds } } } } });
+        }
+
         // Conversas atribuídas diretamente ao usuário (qualquer role)
         orConditions.push({ assigned_user_id: userId });
 
@@ -232,7 +250,7 @@ export class ConversationsService {
         where,
         orderBy: { last_message_at: 'desc' },
         include: {
-          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true, is_client: true, became_client_at: true, process_decision_snoozed_until: true, legal_cases: { select: { archived: true } } } },
+          lead: { select: { id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true, profile_picture_url: true, tags: true, is_client: true, became_client_at: true, process_decision_snoozed_until: true, legal_cases: { select: { archived: true, lawyer_id: true } } } },
           messages: { orderBy: { created_at: 'desc' }, take: 1, include: { media: true } },
           assigned_user: { select: { id: true, name: true } },
           tasks: {
@@ -290,6 +308,14 @@ export class ConversationsService {
       const _gracaOk = _jaTeve ? true : (_becameMs ? agoraMs >= _becameMs + SETE_DIAS_MS : true);
       const semProcesso = _isClient && !_temAtivo && _gracaOk && _snoozeMs <= agoraMs;
       const retornou = _isClient && _jaTeve && !_temAtivo;
+      // "Minha carteira" (mineAsLawyer): este cliente é meu como ADVOGADO —
+      // sou (ou meu supervisor é) o advogado de algum processo dele, OU o advogado
+      // atribuído na conversa. É a definição do "Minhas" pra advogado/admin/estagiário
+      // (espelha a tela de Processos, que conta pelo lawyer_id do processo).
+      const mineAsLawyer = myLawyerIds.length > 0 && (
+        _lc.some((x: any) => x.lawyer_id && myLawyerIds.includes(x.lawyer_id)) ||
+        (!!(c as any).assigned_lawyer_id && myLawyerIds.includes((c as any).assigned_lawyer_id))
+      );
       return {
       id: c.id,
       leadId: c.lead_id,
@@ -329,6 +355,7 @@ export class ConversationsService {
       becameClientAt: (c.lead as any)?.became_client_at?.toISOString() || null,
       semProcesso,
       retornou,
+      mineAsLawyer,
       nextStep: (c as any).next_step || null,
       activeTask: (c as any).tasks?.[0] ? {
         id: (c as any).tasks[0].id,
@@ -361,6 +388,7 @@ export class ConversationsService {
       if (!isAdminUser) {
         const leadOr: any[] = [];
         if (isAdvogadoUser) leadOr.push({ legal_cases: { some: { lawyer_id: userId } } });
+        if (isEstagiarioUser && supervisorIds.length > 0) leadOr.push({ legal_cases: { some: { lawyer_id: { in: supervisorIds } } } });
         if (isOperadorUser) leadOr.push({ cs_user_id: userId });
         semConvWhere.OR = leadOr.length > 0 ? leadOr : [{ id: '__none__' }];
       }
@@ -370,7 +398,7 @@ export class ConversationsService {
           id: true, name: true, phone: true, email: true, stage: true, stage_entered_at: true,
           tags: true, is_client: true, became_client_at: true, profile_picture_url: true,
           process_decision_snoozed_until: true,
-          legal_cases: { select: { archived: true } },
+          legal_cases: { select: { archived: true, lawyer_id: true } },
         } as any,
       });
       const agoraSem = Date.now();
@@ -381,6 +409,7 @@ export class ConversationsService {
         const becameMs = l.became_client_at ? new Date(l.became_client_at).getTime() : null;
         const snoozeMs = l.process_decision_snoozed_until ? new Date(l.process_decision_snoozed_until).getTime() : 0;
         const gracaOk = jaTeve ? true : (becameMs ? agoraSem >= becameMs + 7 * 24 * 60 * 60 * 1000 : true);
+        const pseudoMine = myLawyerIds.length > 0 && lc.some((x: any) => x.lawyer_id && myLawyerIds.includes(x.lawyer_id));
         data.push({
           id: `lead:${l.id}`,
           leadId: l.id,
@@ -1174,7 +1203,7 @@ export class ConversationsService {
     if (userId) {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        include: { inboxes: { select: { id: true } } },
+        include: { inboxes: { select: { id: true } }, supervisors: { select: { id: true } } },
       });
 
       const userRoles: string[] = Array.isArray(user?.roles)
@@ -1183,6 +1212,8 @@ export class ConversationsService {
       const isAdvogadoUser = userRoles.includes('ADVOGADO') || userRoles.includes('Advogados');
       const isOperadorUser = userRoles.includes('OPERADOR') || userRoles.includes('COMERCIAL') || userRoles.includes('Atendente Comercial');
       const isAdminUser = userRoles.includes('ADMIN');
+      const isEstagiarioUser = userRoles.includes('ESTAGIARIO') || userRoles.includes('Estagiario') || userRoles.includes('Estagiário');
+      const supervisorIds: string[] = ((user as any)?.supervisors ?? []).map((s: any) => s.id).filter(Boolean);
       const userInboxIds = (user?.inboxes ?? []).map((i: any) => i.id);
 
       // Filtro base: tenant + exclui ocultos POR TIPO, espelhando o findAll:
@@ -1226,6 +1257,13 @@ export class ConversationsService {
           orConditions.push({ assigned_lawyer_id: userId, lead: { is_client: true } });
           orConditions.push({ lead: { is_client: true, legal_cases: { some: { lawyer_id: userId } } } });
           orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: userId } } } });
+        }
+
+        // ESTAGIÁRIO: clientes do(s) advogado(s) que ele supervisiona (espelha o findAll)
+        if (isEstagiarioUser && supervisorIds.length > 0) {
+          orConditions.push({ assigned_lawyer_id: { in: supervisorIds }, lead: { is_client: true } });
+          orConditions.push({ lead: { is_client: true, legal_cases: { some: { lawyer_id: { in: supervisorIds } } } } });
+          orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: { in: supervisorIds } } } } });
         }
 
         // OPERADOR: clientes via cs_user_id + pool dos seus inboxes (leads sem dono)
