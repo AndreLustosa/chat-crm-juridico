@@ -120,6 +120,20 @@ export class ConversationsService {
     return result;
   }
 
+  /** "Não precisa responder": tira a conversa do "A responder" até o cliente
+   *  escrever de novo. Marca reply_dismissed_at=agora; a pendência ignora a
+   *  conversa enquanto reply_dismissed_at >= last_message_at (uma mensagem nova
+   *  do cliente atualiza last_message_at e a traz de volta sozinha). */
+  async dismissReply(id: string, tenantId?: string) {
+    if (tenantId) await this.assertConversationTenant(id, tenantId);
+    await this.prisma.conversation.update({
+      where: { id },
+      data: { reply_dismissed_at: new Date() } as any,
+    });
+    this.chatGateway.emitConversationsUpdate(tenantId ?? null);
+    return { ok: true };
+  }
+
   async findAll(status?: string, userId?: string, inboxId?: string, tenantId?: string, clientMode?: boolean) {
     const where: any = {};
     // Filtro por status explícito (se passado via query param)
@@ -241,7 +255,12 @@ export class ConversationsService {
           }
         }
 
-        where.OR = orConditions;
+        // Atendente (operador/comercial) na caixa LEADS vê o POOL COMPARTILHADO do
+        // escritório: TODOS os leads, pra qualquer um responder (pedido do André).
+        // Advogado/estagiário continuam restritos; admin já caiu no ramo de cima.
+        if (!(isOperadorUser && clientMode === false)) {
+          where.OR = orConditions;
+        }
       }
     }
 
@@ -360,6 +379,7 @@ export class ConversationsService {
       semProcesso,
       retornou,
       mineAsLawyer,
+      replyDismissedAt: (c as any).reply_dismissed_at?.toISOString() || null,
       nextStep: (c as any).next_step || null,
       activeTask: (c as any).tasks?.[0] ? {
         id: (c as any).tasks[0].id,
@@ -1271,16 +1291,13 @@ export class ConversationsService {
           orConditions.push({ lead: { is_client: true, conversations: { some: { assigned_lawyer_id: { in: supervisorIds } } } } });
         }
 
-        // OPERADOR: clientes via cs_user_id + pool dos seus inboxes (leads sem dono)
+        // OPERADOR: clientes via cs_user_id + LEADS = POOL COMPARTILHADO do
+        // escritório (TODOS os leads — espelha o findAll, que o operador na caixa
+        // Leads vê inteiro). Antes era só o inbox dele, o que deixava o lead do
+        // colega na lista SEM a bolinha verde de não-lida.
         if (isOperadorUser) {
           orConditions.push({ lead: { is_client: true, cs_user_id: userId } });
-          if (userInboxIds.length > 0) {
-            orConditions.push({
-              inbox_id: { in: userInboxIds },
-              assigned_user_id: null,
-              lead: { is_client: false },
-            });
-          }
+          orConditions.push({ lead: { is_client: false } });
         }
 
         convWhere.OR = orConditions;

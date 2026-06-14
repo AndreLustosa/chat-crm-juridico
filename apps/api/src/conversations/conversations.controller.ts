@@ -192,6 +192,12 @@ export class ConversationsController {
     return this.conversationsService.startConversationForLead(leadId, req.user?.id, req.user?.tenant_id);
   }
 
+  // "Não precisa responder": tira a conversa do "A responder" (volta se o cliente escrever).
+  @Patch(':id/dismiss-reply')
+  dismissReply(@Param('id') id: string, @Request() req: any) {
+    return this.conversationsService.dismissReply(id, req.user?.tenant_id);
+  }
+
   @Post(':id/mark-read')
   markAsRead(@Param('id') id: string, @Request() req: any) {
     return this.conversationsService.markAsRead(id, req.user?.id);
