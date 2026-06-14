@@ -92,7 +92,19 @@ export class MessagesService {
       this.prisma.message.count({ where }),
     ]);
 
-    return { data, total, page: safePage, limit: safeLimit, totalPages: Math.ceil(total / safeLimit) };
+    // Enriquece com o NOME de quem ENVIOU (operador) — pra mostrar "quem enviou"
+    // no chat. IA/sistema têm sent_by_user_id null (o front mostra o nome da IA).
+    const senderIds = [...new Set(data.map((m: any) => m.sent_by_user_id).filter(Boolean))] as string[];
+    const senders = senderIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: senderIds } }, select: { id: true, name: true } })
+      : [];
+    const nameMap: Record<string, string> = Object.fromEntries(senders.map((u) => [u.id, u.name]));
+    const enriched = data.map((m: any) => ({
+      ...m,
+      sent_by_name: m.sent_by_user_id ? (nameMap[m.sent_by_user_id] || null) : null,
+    }));
+
+    return { data: enriched, total, page: safePage, limit: safeLimit, totalPages: Math.ceil(total / safeLimit) };
   }
 
   /**
@@ -281,6 +293,7 @@ export class MessagesService {
           conversation_id: convo.id,
           direction: 'out',
           type: 'internal_note',
+          sent_by_user_id: senderId ?? null,
           text,
           external_message_id: `note_${Date.now()}`,
           status: 'enviado',
@@ -390,6 +403,7 @@ export class MessagesService {
           conversation_id: convo.id,
           direction: 'out',
           type: 'text',
+          sent_by_user_id: senderId ?? null,
           text,
           external_message_id: externalId,
           status: 'enviado',
@@ -464,6 +478,7 @@ export class MessagesService {
         conversation_id: convo.id,
         direction: 'out',
         type: 'audio',
+        sent_by_user_id: senderId ?? null,
         external_message_id: tempExtId,
         status: 'enviado',
       },
@@ -575,6 +590,7 @@ export class MessagesService {
         conversation_id: convo.id,
         direction: 'out',
         type: mediaType,
+        sent_by_user_id: senderId ?? null,
         text: caption || null,
         external_message_id: tempExtId,
         status: 'enviado',
@@ -678,6 +694,7 @@ export class MessagesService {
         conversation_id: convo.id,
         direction: 'out',
         type: 'sticker',
+        sent_by_user_id: senderId ?? null,
         text: null,
         external_message_id: tempExtId,
         status: 'enviado',
