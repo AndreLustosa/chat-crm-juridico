@@ -39,60 +39,85 @@ export class ConversationsService {
     if (lead.tenant_id && lead.tenant_id !== tenantId) throw new ForbiddenException('Contato de outro escritório.');
     if (!lead.phone) throw new BadRequestException('Contato sem telefone — não dá pra iniciar conversa.');
 
-    // Idempotente: reaproveita QUALQUER conversa existente do lead (reabre a mais
-    // recente se estiver fechada/adiada) — evita criar uma 2ª conversa pro mesmo
-    // contato.
-    const existing = await this.prisma.conversation.findFirst({
-      where: { lead_id: leadId },
-      orderBy: { last_message_at: 'desc' },
-      select: { id: true, status: true },
-    });
-    if (existing) {
-      if (existing.status !== 'ABERTO') {
-        await this.prisma.conversation.update({
-          where: { id: existing.id },
-          data: {
-            status: 'ABERTO',
-            ai_mode: false,
-            ai_mode_disabled_at: new Date(),
-            ai_mode_source: 'MANUAL',
-            last_message_at: new Date(),
-            ...(userId ? { assigned_user_id: userId } : {}),
-          } as any,
-        });
-        this.chatGateway.emitConversationsUpdate(tenantId);
-      }
-      return { id: existing.id, created: false };
-    }
-
     // Resolve a instância (número) do escritório — única na maioria dos casos;
-    // pega a primeira do tenant, com fallback pra env.
+    // pega a primeira do tenant, com fallback pra env. (Leitura fora da
+    // transação; só é usada se de fato formos criar uma conversa nova.)
     const inst = await (this.prisma as any).instance.findFirst({
       where: { tenant_id: tenantId, type: 'whatsapp' },
       orderBy: { created_at: 'asc' },
       select: { name: true, inbox_id: true },
     });
     const instanceName = inst?.name || process.env.EVOLUTION_INSTANCE_NAME || null;
-    if (!instanceName) throw new BadRequestException('Escritório sem número de WhatsApp conectado — conecte um número antes de iniciar conversas.');
 
-    const conv = await this.prisma.conversation.create({
-      data: {
-        lead_id: leadId,
-        channel: 'whatsapp',
-        external_id: `${lead.phone}@s.whatsapp.net`,
-        inbox_id: inst?.inbox_id ?? null,
-        instance_name: instanceName,
-        status: 'ABERTO',
-        ai_mode: false,
-        ai_mode_disabled_at: new Date(),
-        ai_mode_source: 'MANUAL',
-        assigned_user_id: userId ?? null,
-        last_message_at: new Date(),
-        tenant_id: tenantId,
-      } as any,
+    // Find-or-create ATÔMICO: trava a linha do Lead (FOR UPDATE) para serializar
+    // chamadas concorrentes ao MESMO contato — duplo-clique no card "sem conversa"
+    // OU dois operadores na supervisão "Tudo" clicando junto. Sem isto as duas
+    // requisições veem existing=null e criam 2 conversas (não há @unique em
+    // lead_id no schema). A trava é por-lead (linhas diferentes não se bloqueiam).
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Lead" WHERE id = ${leadId} FOR UPDATE`;
+
+      // Idempotente: reaproveita QUALQUER conversa existente do lead (reabre a
+      // mais recente se estiver fechada/adiada) — nunca cria uma 2ª pro contato.
+      const existing = await tx.conversation.findFirst({
+        where: { lead_id: leadId, tenant_id: tenantId },
+        orderBy: { last_message_at: 'desc' },
+        select: { id: true, status: true },
+      });
+      if (existing) {
+        if (existing.status !== 'ABERTO') {
+          await tx.conversation.update({
+            where: { id: existing.id },
+            data: {
+              status: 'ABERTO',
+              ai_mode: false,
+              ai_mode_disabled_at: new Date(),
+              ai_mode_source: 'MANUAL',
+              snooze_until: null, // reabertura manual: zera o adiamento (estado coerente: ABERTO sem snooze)
+              last_message_at: new Date(),
+              ...(userId ? { assigned_user_id: userId } : {}),
+            } as any,
+          });
+          // O operador está reengajando AGORA → conclui a tarefa de retorno
+          // pendente (se houver), pra não ficar lembrete fantasma na conversa.
+          // Status CANÔNICO 'CONCLUIDA' (+ completed_at/by), igual ao
+          // tasks.service — senão ela some do card mas vira zumbi/atrasada nos
+          // painéis de Tarefas (que filtram por 'CONCLUIDA'/'CANCELADA').
+          await tx.task.updateMany({
+            where: { conversation_id: existing.id, status: 'A_FAZER' },
+            data: {
+              status: 'CONCLUIDA',
+              completed_at: new Date(),
+              ...(userId ? { completed_by_id: userId } : {}),
+            } as any,
+          });
+        }
+        return { id: existing.id, created: false };
+      }
+
+      if (!instanceName) throw new BadRequestException('Escritório sem número de WhatsApp conectado — conecte um número antes de iniciar conversas.');
+
+      const conv = await tx.conversation.create({
+        data: {
+          lead_id: leadId,
+          channel: 'whatsapp',
+          external_id: `${lead.phone}@s.whatsapp.net`,
+          inbox_id: inst?.inbox_id ?? null,
+          instance_name: instanceName,
+          status: 'ABERTO',
+          ai_mode: false,
+          ai_mode_disabled_at: new Date(),
+          ai_mode_source: 'MANUAL',
+          assigned_user_id: userId ?? null,
+          last_message_at: new Date(),
+          tenant_id: tenantId,
+        } as any,
+      });
+      return { id: conv.id, created: true };
     });
+
     this.chatGateway.emitConversationsUpdate(tenantId);
-    return { id: conv.id, created: true };
+    return result;
   }
 
   async findAll(status?: string, userId?: string, inboxId?: string, tenantId?: string, clientMode?: boolean) {
