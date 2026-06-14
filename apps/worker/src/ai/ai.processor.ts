@@ -1336,51 +1336,24 @@ export class AiProcessor extends WorkerHost implements OnModuleInit {
         return;
       }
 
-      // 5b. Defer: se algum audio fresco nao foi transcrito (race com download
-      // ou falha transitoria do Whisper), re-enfileira o job com delay em vez
-      // de deixar a IA responder com placeholder "nao consegui ouvir". Bug
-      // reportado 2026-04-28 (Andre Freire): transcricao apareceu certa, mas
-      // IA ja tinha respondido como se tivesse falhado.
-      //
-      // Cap em 4 retries (4 x 10s = 40s totais alem dos ~26s ja gastos no
-      // polling de media). Apos isso, segue com placeholder pra nao deixar o
-      // cliente sem resposta indefinidamente.
+      // 5b. Defer: se algum áudio fresco ainda não foi transcrito (corrida com o
+      // download / falha transitória do Whisper), re-tenta o PRÓPRIO job via RETRY
+      // NATIVO do BullMQ (backoff ~10s, cap em opts.attempts do enqueue). Antes isto
+      // re-enfileirava um job manual com o MESMO jobId do debounce — que o BullMQ
+      // DESCARTAVA (id já ativo), deixando o áudio SEM resposta (e sem retry). O
+      // retry nativo reusa o mesmo job: não colide e não gera resposta dupla (o
+      // guard anti-stale acima cobre corrida com o webhook). Na última tentativa,
+      // segue com o placeholder educado pra não travar o cliente.
       if (needsDefer) {
-        const audioRetryCount = ((job.data as any)?.audioRetryCount as number) || 0;
-        const MAX_AUDIO_RETRIES = 4;
-        if (audioRetryCount < MAX_AUDIO_RETRIES) {
+        const maxAttempts = job.opts?.attempts ?? 1;
+        if (job.attemptsMade < maxAttempts - 1) {
           this.logger.warn(
-            `[AI] Audio fresco sem transcricao — deferindo IA response. Retry ${audioRetryCount + 1}/${MAX_AUDIO_RETRIES} em 10s (conv ${conversation_id})`,
+            `[AI] Áudio fresco sem transcrição — re-tentando (${job.attemptsMade + 1}/${maxAttempts}, backoff ~10s) conv ${conversation_id}`,
           );
-          // Bug fix 2026-05-11 (Skills PR1 #C3 — CRITICO):
-          // Antes: jobId era `ai-defer-${conv}-${retry}` — namespace diferente
-          // do debounce em evolution.service.ts (`ai-debounce-${conv}`). Se nova
-          // mensagem chegava durante os 10s de defer, AMBOS rodavam em paralelo
-          // → duas respostas pro cliente + dois saves disputando external_message_id.
-          // Agora ambos usam `ai-debounce-${conv}` — BullMQ deduplica.
-          // Se ja existe job em wait (webhook recente), o defer e descartado,
-          // o webhook processa quando o cooldown vencer — comportamento desejado.
-          await this.aiQueue.add(
-            'process_ai_response',
-            { ...(job.data as any), audioRetryCount: audioRetryCount + 1 },
-            {
-              delay: 10_000,
-              removeOnComplete: true,
-              removeOnFail: 20,
-              jobId: `ai-debounce-${conversation_id}`,
-            },
-          ).catch((e: any) => {
-            // Se duplicado (webhook recente ja enfileirou), eh esperado — so loga em debug
-            if (!e?.message?.includes('already exists') && !e?.message?.includes('Duplicated')) {
-              this.logger.warn(`[AI] Falha ao deferir job: ${e?.message || e}`);
-            } else {
-              this.logger.log(`[AI] Defer dedup-rejected (webhook recente cobre): conv ${conversation_id}`);
-            }
-          });
-          return;
+          throw new Error('audio-transcription-pending'); // BullMQ re-tenta o MESMO job
         }
         this.logger.warn(
-          `[AI] Audio fresco sem transcricao apos ${MAX_AUDIO_RETRIES} retries — IA vai responder com placeholder (conv ${conversation_id})`,
+          `[AI] Áudio sem transcrição após ${maxAttempts} tentativas — respondendo com placeholder (conv ${conversation_id})`,
         );
       }
 
@@ -2857,10 +2830,10 @@ scheduling_action: {"action":"confirm_slot","date":"YYYY-MM-DD","time":"HH:MM"} 
 
       if (!sendOk) {
         this.logger.error(
-          `[AI] Envio pra WhatsApp falhou (conv ${convo.id}): ${sendErrMsg} — abortando save pra evitar msg fantasma. BullMQ vai retry (defaultJobOptions.attempts=3).`,
+          `[AI] Envio pra WhatsApp falhou (conv ${convo.id}): ${sendErrMsg} — abortando save pra evitar msg fantasma. BullMQ vai retry (attempts=${job.opts?.attempts ?? 'default'}, backoff fixo 10s).`,
         );
-        // Lança pra BullMQ re-tentar com backoff exponencial (2s, 4s, 8s).
-        // Cobre rate limit transitorio, instability da Evolution, etc.
+        // Lança pra BullMQ re-tentar (mesmo job, sem reenviar: o guard anti-stale
+        // aborta se a resposta já tiver saído). Cobre rate limit/instabilidade da Evolution.
         throw new Error(`Evolution sendText failed: ${sendErrMsg}`);
       }
 

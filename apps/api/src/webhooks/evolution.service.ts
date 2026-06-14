@@ -847,15 +847,26 @@ export class EvolutionService implements OnApplicationBootstrap {
               await this.aiQueue.add(
                 'process_ai_response',
                 { conversation_id: conv.id, lead_id: lead.id },
-                { jobId, delay: debounceMs, removeOnComplete: true, removeOnFail: false },
+                {
+                  jobId,
+                  delay: debounceMs,
+                  removeOnComplete: true,
+                  removeOnFail: false,
+                  // Retry nativo p/ áudio: se a transcrição ainda não chegou, o
+                  // processor dá throw e o BullMQ re-tenta o MESMO job (backoff 10s).
+                  // 1 + 4 retries. Substitui o re-enqueue manual (que colidia com este jobId).
+                  attempts: 5,
+                  backoff: { type: 'fixed', delay: 10_000 },
+                },
               );
               this.logger.log(`[AI] Debounce: job ${jobId} criado delay=${debounceMs}ms`);
             }
           } else {
-            await this.aiQueue.add('process_ai_response', {
-              conversation_id: conv.id,
-              lead_id: lead.id,
-            });
+            await this.aiQueue.add(
+              'process_ai_response',
+              { conversation_id: conv.id, lead_id: lead.id },
+              { attempts: 5, backoff: { type: 'fixed', delay: 10_000 }, removeOnComplete: true, removeOnFail: false },
+            );
             this.logger.log(`[AI] Job enfileirado imediato para conv ${conv.id}`);
           }
         } catch (queueErr: any) {
