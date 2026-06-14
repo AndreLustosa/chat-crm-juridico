@@ -308,14 +308,18 @@ export class ConversationsService {
       const _gracaOk = _jaTeve ? true : (_becameMs ? agoraMs >= _becameMs + SETE_DIAS_MS : true);
       const semProcesso = _isClient && !_temAtivo && _gracaOk && _snoozeMs <= agoraMs;
       const retornou = _isClient && _jaTeve && !_temAtivo;
-      // "Minha carteira" (mineAsLawyer): este cliente é meu como ADVOGADO —
-      // sou (ou meu supervisor é) o advogado de algum processo dele, OU o advogado
-      // atribuído na conversa. É a definição do "Minhas" pra advogado/admin/estagiário
-      // (espelha a tela de Processos, que conta pelo lawyer_id do processo).
-      const mineAsLawyer = myLawyerIds.length > 0 && (
-        _lc.some((x: any) => x.lawyer_id && myLawyerIds.includes(x.lawyer_id)) ||
-        (!!(c as any).assigned_lawyer_id && myLawyerIds.includes((c as any).assigned_lawyer_id))
-      );
+      // "Minha carteira" (mineAsLawyer): alimenta o "Minhas" do advogado/estagiário.
+      // Regras (pedido do André):
+      //  - SÓ CLIENTE (is_client). Lead é só do atendente — o advogado nunca vê lead
+      //    na fila dele (acesso ao lead é só por transferência).
+      //  - O advogado responsável é o ATRIBUÍDO NA CONVERSA (assigned_lawyer_id, o que
+      //    aparece no painel) — NÃO "qualquer processo". Um cliente com 1 processo meu
+      //    antigo, mas cuja conversa é de outro advogado, NÃO entra no meu Minhas.
+      const mineAsLawyer =
+        _isClient &&
+        myLawyerIds.length > 0 &&
+        !!(c as any).assigned_lawyer_id &&
+        myLawyerIds.includes((c as any).assigned_lawyer_id);
       return {
       id: c.id,
       leadId: c.lead_id,
@@ -441,6 +445,7 @@ export class ConversationsService {
           becameClientAt: l.became_client_at?.toISOString() || null,
           semProcesso: !temAtivo && gracaOk && snoozeMs <= agoraSem,
           retornou: jaTeve && !temAtivo,
+          mineAsLawyer: pseudoMine, // carteira (sem conversa → pelo advogado do processo): alimenta o Minhas do admin
           nextStep: null,
           activeTask: null,
           taskCount: 0,
